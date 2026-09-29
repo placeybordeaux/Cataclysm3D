@@ -86,12 +86,20 @@ export class Pocket {
   get empty(): boolean {
     return this.contents.length === 0;
   }
+  /** Bytes of e-files stored (E_FILE_STORAGE). */
+  ememoryUsed(): number {
+    let n = 0;
+    for (const it of this.contents) n += it.ememorySize();
+    return n;
+  }
   volumeUsed(): number {
+    if (this.type === 'E_FILE_STORAGE') return 0;
     let v = 0;
     for (const it of this.contents) v += it.volume();
     return v;
   }
   weightUsed(): number {
+    if (this.type === 'E_FILE_STORAGE') return 0;
     let w = 0;
     for (const it of this.contents) w += it.weight();
     return w * (this.data.weight_multiplier ?? 1);
@@ -134,6 +142,11 @@ export class Pocket {
       }
       case 'CONTAINER':
         return this.canContainInContainer(it);
+      case 'E_FILE_STORAGE':
+        // item_pocket.cpp: only books and e-scannable files; they take no space or weight.
+        if (!it.isEstorable()) return { ok: false, reason: 'only books, e-scannable items can go into e-file pocket' };
+        if (this.data.ememory_max !== undefined && this.ememoryUsed() + it.ememorySize() > this.data.ememory_max) return { ok: false, reason: 'not enough storage' };
+        return { ok: true };
       default:
         return { ok: false, reason: `can't store items in ${this.type} pocket` };
     }
@@ -270,6 +283,21 @@ export class Item implements MapItem {
   }
   isLiquid(): boolean {
     return this.def.phase === 'liquid';
+  }
+  /** CDDA item::is_estorable: books and E_STORABLE files fit a device's e-file storage. */
+  isEstorable(): boolean {
+    return this.isBook() || this.hasFlag('E_STORABLE') || this.hasFlag('E_STORABLE_EXCLUSIVE');
+  }
+  /** CDDA item::ememory_size (bytes); books without data default to a small e-book. */
+  ememorySize(): number {
+    const e = this.def.ememory_size as unknown;
+    if (typeof e === 'number') return e;
+    if (typeof e === 'string') return parseEmemory(e);
+    return this.isBook() ? 1_000_000 : 0;
+  }
+  /** Files on this device (its E_FILE_STORAGE pockets). */
+  efiles(): Item[] {
+    return this.pockets.filter((p) => p.type === 'E_FILE_STORAGE').flatMap((p) => p.contents);
   }
   isContainer(): boolean {
     return this.pockets.some((p) => p.type === 'CONTAINER');
@@ -854,4 +882,12 @@ export function placeContents(into: Item, items: Item[]): Item[] {
     i = j;
   }
   return left;
+}
+
+/** "2 MB", "512 KB", "1 GB" -> bytes (CDDA units::ememory strings). */
+export function parseEmemory(s: string): number {
+  const m = /^\s*([\d.]+)\s*(B|KB|MB|GB|TB)?\s*$/i.exec(s);
+  if (!m) throw new Error(`bad ememory "${s}"`);
+  const mult = { B: 1, KB: 1e3, MB: 1e6, GB: 1e9, TB: 1e12 }[(m[2] ?? 'B').toUpperCase() as 'B'];
+  return Math.round(Number(m[1]) * mult);
 }

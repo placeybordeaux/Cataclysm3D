@@ -129,6 +129,12 @@ export function itemInfo(it: Item, who: Character): string {
       L.push(`Has level ${c('c_cyan', String(lvl))} ${c('c_cyan', qn)} quality.`);
     }
   }
+  // E-file storage (phones, laptops, USB drives): what's on it; books are read with R.
+  const efiles = it.efiles();
+  if (it.pockets.some((p) => p.type === 'E_FILE_STORAGE')) {
+    L.push(SEP);
+    L.push(`<b>Files</b>: ${efiles.length ? efiles.map((f) => c(f.isBook() ? 'c_light_blue' : 'c_light_gray', f.baseName())).join(', ') : c('c_dark_gray', 'none')}`);
+  }
   if (d.description) {
     L.push(SEP);
     L.push(colorize(cddaText(d.description)));

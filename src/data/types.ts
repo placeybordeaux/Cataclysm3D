@@ -163,7 +163,11 @@ export interface MeleeAccuracy {
 /** One entry of CDDA `pocket_data` (item_pocket.cpp). Volumes ml, weights g; lengths in cm like
  *  `longest_side`. */
 export interface PocketData {
-  pocket_type?: 'CONTAINER' | 'MAGAZINE' | 'MAGAZINE_WELL' | 'MOD' | 'CORPSE' | 'SOFTWARE' | 'EBOOK' | 'CABLE';
+  pocket_type?: 'CONTAINER' | 'MAGAZINE' | 'MAGAZINE_WELL' | 'MOD' | 'CORPSE' | 'SOFTWARE' | 'EBOOK' | 'CABLE' | 'E_FILE_STORAGE';
+  /** E_FILE_STORAGE: capacity in bytes (CDDA units::ememory). */
+  ememory_max?: number;
+  /** Players can't put things in (a locked phone's files); spawned contents still go in. */
+  forbidden?: boolean;
   max_contains_volume?: number;
   max_contains_weight?: number;
   max_item_volume?: number;

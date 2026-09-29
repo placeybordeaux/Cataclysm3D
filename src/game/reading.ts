@@ -63,12 +63,42 @@ export function bookMastery(c: Character, it: Item): Mastery {
   return 'learning';
 }
 
+/**
+ * The device an e-book is stored on (a phone's or laptop's E_FILE_STORAGE pocket), searched
+ * among carried items and those next to the reader; null for paper books.
+ */
+export function efileDevice(host: CraftHost, it: Item): Item | null {
+  const p = host.player;
+  const cands: Item[] = [...p.inv.allItems()];
+  for (let dy = -1; dy <= 1; dy++)
+    for (let dx = -1; dx <= 1; dx++)
+      for (const mi of host.map.itemsAt(Math.floor(p.x) + dx, Math.floor(p.y) + dy, p.z)) if (typeof (mi as Item).walk === 'function') cands.push(...(mi as Item).walk());
+  return cands.find((d) => d.pockets.some((pk) => pk.type === 'E_FILE_STORAGE' && pk.contents.includes(it))) ?? null;
+}
+
+/**
+ * Why an e-book can't be read on its device: storage-only media (USB drives, memory cards)
+ * need a reader (CDDA E_FILE_DEVICE), and a reader needs battery charge.
+ */
+export function ereaderProblem(dev: Item): string | null {
+  const reader = dev.magazinePockets().length > 0 || !!dev.magazineWell() || (dev.def.max_charges ?? 0) > 0;
+  if (!reader) return `You need a phone or a laptop to read files from the ${dev.baseName()}.`;
+  if (dev.ammoRemaining() <= 0) return `The ${dev.baseName()}'s battery is dead.`;
+  return null;
+}
+
 /** Why `c` can't read `it` right now (CDDA read_condition_result wording), or null. */
 export function cantRead(host: CraftHost, it: Item): string | null {
   const c = host.player;
   const b = bookData(it);
   if (!b) return `Your ${it.name()} is not good reading material.`;
-  if (!hasCraftingLight(host) && !it.hasFlag('CAN_USE_IN_DARK')) return "It's too dark to read!";
+  const dev = efileDevice(host, it);
+  if (dev) {
+    const why = ereaderProblem(dev);
+    if (why) return why;
+  }
+  // A lit screen needs no lamp.
+  if (!dev && !hasCraftingLight(host) && !it.hasFlag('CAN_USE_IN_DARK')) return "It's too dark to read!";
   if (c.identifiedBooks.has(it.typeId)) {
     const m = bookMastery(c, it);
     if (m === 'cant_understand') return `${c.skillName(b.skill!)} ${b.req} needed to understand.  You have ${c.getSkill(b.skill!)}.`;
@@ -177,7 +207,10 @@ export function startReading(host: CraftHost, it: Item): boolean {
       name: c.identifiedBooks.has(it.typeId) ? `reading ${title}` : `skimming ${title}`,
       duration: timeToRead(c, it),
       onComplete: () => {
-        if (!c.inv.has(it) && !nearby(host, it)) return;
+        const dev = efileDevice(host, it);
+        if (!c.inv.has(it) && !nearby(host, it) && !dev) return;
+        // Reading on a screen drains the battery: one charge per session.
+        if (dev) dev.ammoConsume(1);
         if (finishSession(host, it) && !cantRead(host, it)) session();
         else host.message('You finish reading.');
       },
@@ -197,6 +230,10 @@ export function readableBooks(host: CraftHost): Item[] {
   const out = p.inv.allItems().filter((i) => i.isBook());
   for (let dy = -1; dy <= 1; dy++)
     for (let dx = -1; dx <= 1; dx++)
-      for (const mi of host.map.itemsAt(Math.floor(p.x) + dx, Math.floor(p.y) + dy, p.z)) if ((mi as Item).isBook?.()) out.push(mi as Item);
+      for (const mi of host.map.itemsAt(Math.floor(p.x) + dx, Math.floor(p.y) + dy, p.z)) {
+        if (typeof (mi as Item).walk !== 'function') continue;
+        // Paper books on the floor, and e-books on a phone or laptop lying there.
+        for (const it of (mi as Item).walk()) if (it.isBook() && (it === mi || efileDevice(host, it))) out.push(it);
+      }
   return out;
 }
