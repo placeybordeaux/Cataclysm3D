@@ -23,6 +23,7 @@ import { MemoryBackend, type SyncStorage } from '../src/save/storage';
 import { registerSaveable } from '../src/save/registry';
 import { installChunkTracking, type ChunkTracker } from '../src/save/tracking';
 import { ChunkEvictor } from '../src/save/eviction';
+import { installNature, natureOf } from '../src/nature';
 import { loadNodeData } from '../tools/lib/node_data';
 
 const { game: data, wg } = loadNodeData();
@@ -350,6 +351,33 @@ describe('far chunk eviction', () => {
     expect(diff).toEqual([]);
     expect(living(W.sys).length).toBe(monsBefore);
     expect(ev.stats.regenerated).toBe(ev.stats.evicted);
+  }, 60_000);
+});
+
+describe('actualized chunks stay clean', () => {
+  it('mapgen food rotting over the days does not make an untouched chunk dirty or saved', () => {
+    const W = build(4242, 'world');
+    installNature(W.game, null);
+    const { game, tracker } = W;
+    const p = game.player;
+    const pcx = Math.floor(p.x / CHUNK), pcy = Math.floor(p.y / CHUNK);
+    let food: { c: Chunk; it: Item } | null = null;
+    for (let dy = -3; dy <= 3 && !food; dy++)
+      for (let dx = -3; dx <= 3 && !food; dx++) {
+        const c = game.map.chunk(pcx + dx, pcy + dy, 0)!;
+        if (tracker.isDirty(c)) continue;
+        for (const l of c.items.values()) for (const it of l as Item[]) if (!food && it.goesBad()) food = { c, it };
+      }
+    expect(food).not.toBeNull();
+    const before = food!.it.relativeRot();
+    game.clock.seconds += 20 * 86400;
+    natureOf(game)!.actualizer.sweep();
+    expect(food!.it.relativeRot()).toBeGreaterThan(before);
+    expect(tracker.isDirty(food!.c)).toBe(false);
+    const file = serializeGame(game, { slot: 's', name: 'x', gen: 'world' });
+    const at = (file.sections.map as { chunks: { at: number[] }[] }).chunks.map((j) => j.at.join(','));
+    expect(at).not.toContain(`${food!.c.cx},${food!.c.cy},0`);
+    expect(Object.keys((file.sections.nature as { stamps: object }).stamps)).not.toContain(`${food!.c.cx},${food!.c.cy},0`);
   }, 60_000);
 });
 

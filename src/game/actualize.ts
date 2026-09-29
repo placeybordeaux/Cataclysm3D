@@ -33,6 +33,12 @@ export class Actualizer {
   interval = 600;
   private acc = Infinity;
   private harvested = new Map<number, boolean>();
+  /**
+   * Save-system dirty tracking (set by nature.ts). A chunk the player never touched stays
+   * "clean" through actualizing: rot of mapgen food is recomputed from day 0 if the chunk is
+   * regenerated, so it doesn't need to be kept in memory or saved.
+   */
+  tracking: { isDirty(c: Chunk): boolean; rebaseline(c: Chunk): void } | null = null;
   private tempCache = new Map<number, number>();
 
   constructor(private game: Game) {}
@@ -64,6 +70,12 @@ export class Actualizer {
 
   /** Bring one chunk up to date. */
   actualize(c: Chunk): void {
+    const wasClean = this.tracking && c.items.size > 0 ? !this.tracking.isDirty(c) : false;
+    this.actualizeInner(c);
+    if (wasClean) this.tracking!.rebaseline(c);
+  }
+
+  private actualizeInner(c: Chunk): void {
     const game = this.game;
     const map = game.map;
     const now = game.clock.seconds;
@@ -138,9 +150,14 @@ export class Actualizer {
     this.acc = Infinity;
   }
 
-  toJSON(): Record<string, [number, number]> {
+  /**
+   * `keep`: which chunks' stamps to save. Chunks that aren't saved regenerate in their day-0
+   * state on load, so their stamp must go too, or the regenerated food would skip the rot it
+   * had already been given.
+   */
+  toJSON(keep: (key: string) => boolean = () => true): Record<string, [number, number]> {
     const o: Record<string, [number, number]> = {};
-    for (const [k, s] of this.stamps) o[k] = [s.touched, s.rot];
+    for (const [k, s] of this.stamps) if (keep(k)) o[k] = [s.touched, s.rot];
     return o;
   }
   load(j: Record<string, [number, number]>): void {
