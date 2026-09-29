@@ -3,14 +3,14 @@
 //   compiled.ts  tile_config.json + sheet PNGs (default: BN's gfx/UltimateCataclysm)
 //   source.ts    CDDA "compositing" source form (per-sprite PNGs + tile_info.json), v1's input
 //
-// Usage: npm run atlas -- [--dry-run] [--tileset-dir DIR] [--source-form] [--out DIR]
-//                         [--page-size N] [--exclude a,b] [--no-use-all]
+// Usage: npm run atlas -- [--dry-run] [--tileset-dir DIR] [--source-form] [--fill-from DIR]
+//                         [--out DIR] [--page-size N] [--exclude a,b] [--no-use-all]
 
 import { PNG } from 'pngjs';
 import { createHash } from 'node:crypto';
 import { mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import type { AtlasFrame, AtlasIndex, AtlasPage } from '../../src/render/atlasTypes';
+import type { AtlasFrame, AtlasIndex, AtlasPage, SubtileDef, SubtileKey, TileDef, VariantList } from '../../src/render/atlasTypes';
 import { compileCompiled, isCompiled } from './compiled';
 import { type Compiled, type Img, GLYPH_COLUMNS } from './frontend';
 import { compileSource } from './source';
@@ -25,6 +25,10 @@ if (argv.includes('--help') || argv.includes('-h')) {
                      otherwise DIR must hold a compiled tile_config.json
   --out DIR          output directory (default public/atlas)
   --page-size N      atlas page size, power of two (default 4096)
+  --fill-from DIR    also read DIR (a compositing *source* tileset, e.g. v1's DDA UltiCa in
+                     /home/peter/code/CDDA-3d/vendor/tilesets/gfx/UltimateCataclysm) and add
+                     the tiles whose ids the main tileset lacks (off by default: mixes UltiCa
+                     revisions, grows the atlas)
   --exclude a,b      (source form) top-level sub-directories of every sheet dir to skip
   --no-use-all       (source form) don't turn unreferenced PNGs into tiles named after the PNG
   --dry-run          compile and report, but write nothing`);
@@ -60,6 +64,48 @@ const compiled: Compiled = SOURCE_FORM
     )
   : compileCompiled(SRC, problem);
 const TILE_W = compiled.tileSize;
+
+const FILL = arg('--fill-from');
+if (FILL) {
+  // Only ids the main tileset doesn't define (subtiles live inside their TileDef). Frames are
+  // appended, so the filler's sprite indices shift by the main tileset's frame count.
+  const extra = compileSource(resolve(FILL), { exclude: new Set(), useAll: false }, (k, m) => problem(`fill: ${k}`, m));
+  if (extra.tileSize !== TILE_W) throw new Error(`--fill-from tile size ${extra.tileSize} != ${TILE_W}`);
+  const base = compiled.frames.length;
+  const used = new Map<number, number>();
+  const remap = (vl: VariantList | undefined): VariantList | undefined =>
+    vl?.map((v) => ({
+      weight: v.weight,
+      sprites: v.sprites.map((f) => {
+        let n = used.get(f);
+        if (n === undefined) {
+          n = base + used.size;
+          used.set(f, n);
+          compiled.frames.push({ ...extra.frames[f], key: `fill:${extra.frames[f].key}` });
+        }
+        return n;
+      }),
+    }));
+  let added = 0;
+  for (const [id, def] of Object.entries(extra.tiles)) {
+    if (compiled.tiles[id]) continue;
+    const out: TileDef = { ...def, fg: remap(def.fg), bg: remap(def.bg) };
+    if (!out.fg) delete out.fg;
+    if (!out.bg) delete out.bg;
+    if (def.multitile) {
+      out.multitile = {};
+      for (const [k, sub] of Object.entries(def.multitile)) {
+        const s2: SubtileDef = { ...sub, fg: remap(sub!.fg), bg: remap(sub!.bg) };
+        if (!s2.fg) delete s2.fg;
+        if (!s2.bg) delete s2.bg;
+        out.multitile[k as SubtileKey] = s2;
+      }
+    }
+    compiled.tiles[id] = out;
+    added++;
+  }
+  compiled.report.push(`fill-from   ${FILL}: +${added} tile ids, +${used.size} frames`);
+}
 
 // ---------------------------------------------------------------- load & dedupe pixels
 
