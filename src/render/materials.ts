@@ -191,7 +191,14 @@ const WORLD_MAP = /* glsl */ `
   vec2 ddx = dFdx(texel), ddy = dFdy(texel);
   float lod = clamp(0.5 * log2(max(dot(ddx, ddx), dot(ddy, ddy))) - 0.35, 0.0, 3.0);
   vec2 tileUv = clamp(fract(vMapUv), 0.0005, 0.9995);
-  vec4 sampledDiffuseColor = textureLod( map, vUvRect.xy + tileUv * vUvRect.zw, lod );
+  vec2 atlasUv = vUvRect.xy + tileUv * vUvRect.zw;
+  vec4 sampledDiffuseColor = textureLod( map, atlasUv, lod );
+  // Coverage comes from the full-resolution texel: a mip texel at a tile's edge averages in
+  // the transparent gutter around the frame, and the alpha test then punched dotted holes
+  // along every floor/ceiling seam (the sky showed through on real GPUs). Undo the darkening
+  // those transparent (black) neighbours add to the colour for the same reason.
+  sampledDiffuseColor.rgb = min(sampledDiffuseColor.rgb / max(sampledDiffuseColor.a, 0.02), vec3(1.0));
+  sampledDiffuseColor.a = textureLod( map, atlasUv, 0.0 ).a;
   diffuseColor *= sampledDiffuseColor;
 #endif
 `;

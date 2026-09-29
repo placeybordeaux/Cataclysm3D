@@ -76,6 +76,18 @@ export class CameraRig {
       const cp = Math.cos(p.pitch), sp = Math.sin(p.pitch);
       const dir = tmpDir.set(fwdX * cp, sp, fwdZ * cp);
       const right = tmpRight.set(-fwdZ, 0, fwdX);
+      // At the wheel (suppressBob is set while driving) the shoulder camera sat inside the
+      // cabin staring at the roof: pull back and up to a chase camera instead.
+      const chase = this.suppressBob;
+      if (chase) {
+        cam.position.copy(eye).addScaledVector(dir, -CHASE_DIST);
+        cam.position.y += CHASE_RISE;
+        cam.rotation.set(p.pitch - CHASE_TILT, -p.yaw, 0, 'YXZ');
+        this.focus.set(p.x, base + eyeH, p.y);
+        cam.updateProjectionMatrix();
+        cam.updateMatrixWorld();
+        return;
+      }
       // pull in toward the player if a wall is between
       let dist = this.thirdDistance;
       for (let t = 0.3; t <= this.thirdDistance; t += 0.1) {
@@ -116,5 +128,8 @@ export class CameraRig {
     return this.mode;
   }
 }
+
+/** Chase camera while driving (third-person mode): metres behind, above, and downward tilt (rad). */
+const CHASE_DIST = 7.5, CHASE_RISE = 2.6, CHASE_TILT = 0.2;
 
 const tmpEye = new THREE.Vector3(), tmpDir = new THREE.Vector3(), tmpRight = new THREE.Vector3(), tmpUp = new THREE.Vector3();

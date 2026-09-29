@@ -200,7 +200,7 @@ export function doAction(ctx: UiContext, action: ItemAction, e: InvEntry): Actio
       return finish(ctx, e, inv.reload(it), false);
     case 'unload':
       // Containers (a pot of boiled water, a bag of chips): CDDA's unload empties them.
-      if (!it.isGun() && !it.isMagazine()) {
+      if (!reloadable(it)) {
         unloadContainer(ctx.game, it);
         return null;
       }
@@ -229,6 +229,9 @@ export function showItemInfo(ctx: UiContext, it: Item): UiWindow {
   return w;
 }
 
+/** Guns and magazines, and tools that take one (a flashlight's battery) or hold ammo. */
+const reloadable = (it: Item): boolean => it.isGun() || it.isMagazine() || !!it.magazineWell() || it.magazinePockets().length > 0;
+
 /** Actions that make sense for an item, CDDA item-action-menu hotkeys. */
 function actionsFor(e: InvEntry): { action: ItemAction; key: string; label: string; ok: boolean }[] {
   const it = e.item;
@@ -242,8 +245,8 @@ function actionsFor(e: InvEntry): { action: ItemAction; key: string; label: stri
     { action: 'throw' as const, key: 't', label: 'Throw', ok: e.where !== 'worn' },
     { action: 'takeoff' as const, key: 'T', label: 'Take off', ok: worn },
     { action: 'drop' as const, key: 'd', label: 'Drop', ok: e.where !== 'ground' },
-    { action: 'unload' as const, key: 'U', label: 'Unload', ok: it.isGun() || it.isMagazine() || it.containerPockets().some((p) => p.contents.length > 0) },
-    { action: 'reload' as const, key: 'r', label: 'Reload', ok: it.isGun() || it.isMagazine() },
+    { action: 'unload' as const, key: 'U', label: 'Unload', ok: reloadable(it) || it.containerPockets().some((p) => p.contents.length > 0) },
+    { action: 'reload' as const, key: 'r', label: 'Reload', ok: reloadable(it) },
     { action: 'examine' as const, key: 'x', label: 'Examine', ok: true },
   ];
   if (it.isComestible() && it.isLiquid()) out[2].label = 'Drink';
@@ -587,8 +590,8 @@ export function installInventoryUi(ctx: UiContext): void {
   game.keys.register('reload', 'Reload wielded item', () => {
     const w = inv().wielded;
     // CDDA 'r' reloads the wielded weapon when it can take ammo, else asks.
-    if (w && (w.isGun() || w.isMagazine())) return void doAction(ctx, 'reload', { item: w, where: 'wielded', depth: 0 });
-    pick('Reload what?', 'You have nothing to reload.', (e) => e.item.isGun() || e.item.isMagazine(), 'reload', false)();
+    if (w && reloadable(w)) return void doAction(ctx, 'reload', { item: w, where: 'wielded', depth: 0 });
+    pick('Reload what?', 'You have nothing to reload.', (e) => reloadable(e.item), 'reload', false)();
   });
 }
 

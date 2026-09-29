@@ -67,6 +67,8 @@ export function installDebugApi(game: Game, renderer: Renderer): DebugApi {
       return renderer.stats();
     },
   };
+  /** Survivor takes no damage (screenshots, long scripted playtests). */
+  api.godMode = (on = true) => (game.player.debugInvulnerable = on);
   installCharacterHelpers(api, game);
   installRenderDebug(api, game, renderer);
   (window as any).cdda = api;

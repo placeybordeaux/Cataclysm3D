@@ -20,6 +20,8 @@ import { fieldStyle, furnitureShape, terrainShape, type FurnitureShape, type Ter
 
 export const SLAB = 0.12;
 const WALL_TOP = LEVEL_HEIGHT - SLAB;
+/** How far a ceiling reaches into the walls around it (hides seam cracks; see the slab code). */
+const CEIL_TUCK = 0.02;
 const DOOR_H = 2.1;
 const SILL_H = 0.9;
 const WATER_DROP = 0.22;
@@ -175,7 +177,18 @@ export function buildChunkMesh(
         if (!isWall(belowShape) && belowShape !== S.stairs_up) {
           curSky = INDOOR_SKY; // a ceiling always faces a covered room
           const f = src.terrain(def.id, 'ceiling');
-          geo(f).quad([x, base - SLAB, y], [x + 1, base - SLAB, y], [x + 1, base - SLAB, y + 1], [x, base - SLAB, y + 1], [0, -1, 0], [x, y, x + 1, y + 1], f);
+          // Tuck the ceiling's edges a little into the walls of the room below: edge-to-edge,
+          // GPUs rasterize a dotted crack along the wall tops that shows the bright sky.
+          let cx0 = x, cx1 = x + 1, cy0 = y, cy1 = y + 1;
+          for (let d = 0; d < 4; d++) {
+            if (!wallLike(shapeAt(below, x + DX[d], y + DY[d]))) continue;
+            if (DX[d] < 0) cx0 -= CEIL_TUCK;
+            if (DX[d] > 0) cx1 += CEIL_TUCK;
+            if (DY[d] < 0) cy0 -= CEIL_TUCK;
+            if (DY[d] > 0) cy1 += CEIL_TUCK;
+          }
+          const cy = base - SLAB;
+          geo(f).quad([cx0, cy, cy0], [cx1, cy, cy0], [cx1, cy, cy1], [cx0, cy, cy1], [0, -1, 0], [x, y, x + 1, y + 1], f);
         }
         curSky = 1;
         for (let d = 0; d < 4; d++) {
@@ -258,8 +271,11 @@ export function buildChunkMesh(
           const T = 0.08;
           const g = geo(slab);
           if (shape === S.door) {
-            if (alongX) g.box(x, base, y + 0.5 - T / 2, x + 1, base + DOOR_H, y + 0.5 + T / 2, 63 & ~8, slab, slab, base);
-            else g.box(x + 0.5 - T / 2, base, y, x + 0.5 + T / 2, base + DOOR_H, y + 1, 63 & ~8, slab, slab, base);
+            // The leaf reaches a little into the lintel: flush, its top edge sits mid-face on
+            // the lintel's underside and GPUs show a 1px line of daylight along it.
+            const top = base + DOOR_H + 0.02;
+            if (alongX) g.box(x, base, y + 0.5 - T / 2, x + 1, top, y + 0.5 + T / 2, 63 & ~8, slab, slab, base);
+            else g.box(x + 0.5 - T / 2, base, y, x + 0.5 + T / 2, top, y + 1, 63 & ~8, slab, slab, base);
           } else {
             // Swung open 90 degrees against the jamb: hinge at the tile's west/north edge,
             // lying toward the indoor side when we can tell which side that is.

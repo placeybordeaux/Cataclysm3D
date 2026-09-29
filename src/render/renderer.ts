@@ -140,6 +140,9 @@ export class Renderer {
 
     this.viewmodel = new Viewmodel();
     game.events.on('playerHurt', (e) => {
+      // A hit your armor stopped is a jolt, not a wound: no red flash (with a horde clawing
+      // at good armor the screen otherwise stayed red the whole fight).
+      if (e.amount <= 0) return this.shake(0.15);
       const k = Math.min(1, e.amount / 20);
       this.shake(0.25 + k * 0.6);
       this.hurtFlash(0.35 + k * 0.65);
@@ -160,6 +163,16 @@ export class Renderer {
       : Promise.resolve();
 
     game.keys.register('camera_mode', 'Cycle camera (first person / shoulder / top-down)', () => this.setCameraMode(this.rig.cycle()));
+    // Mouse wheel zooms the top-down view (CDDA's zoom), from a room to a few blocks of town.
+    canvas.addEventListener?.(
+      'wheel',
+      (e) => {
+        if (this.rig.mode !== 'top') return;
+        e.preventDefault();
+        this.rig.topDistance = Math.max(10, Math.min(60, this.rig.topDistance * (e.deltaY > 0 ? 1.15 : 1 / 1.15)));
+      },
+      { passive: false },
+    );
     game.input.onPress((e) => {
       if (o.debug && e.code === 'F6') {
         const modes: GradeMode[] = ['palette', 'smooth', 'off'];

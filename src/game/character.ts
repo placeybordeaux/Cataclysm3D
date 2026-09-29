@@ -232,6 +232,8 @@ export class Character {
   rng: Rng;
   onMessage: ((text: string, color?: string) => void) | null = null;
   onDeath: ((cause: string) => void) | null = null;
+  /** Debug only (cdda.godMode): hits land but deal no damage, for screenshots and playtests. */
+  debugInvulnerable = false;
 
   private acc = 0;
   private staminaAcc = 0;
@@ -413,7 +415,7 @@ export class Character {
 
   /** Remove HP from a part (minor parts hit their main part), no armor. Returns HP removed. */
   applyDamage(bp: BodyPartId, amount: number): number {
-    if (this.dead || amount <= 0) return 0;
+    if (this.dead || amount <= 0 || this.debugInvulnerable) return 0;
     const main = BODY_PARTS[bp].main;
     const part = this.hp[main];
     const before = part.cur;
@@ -446,7 +448,7 @@ export class Character {
     }
     const main = BODY_PARTS[bp].main;
     const wasBroken = this.isLimbBroken(main);
-    const pain = this.rollRemainder(painf);
+    const pain = this.debugInvulnerable ? 0 : this.rollRemainder(painf);
     if (pain > 0) this.modPain(pain);
     const dealt = this.applyDamage(bp, total);
     return { damage: dealt, pain, part: main, broken: !wasBroken && this.isLimbBroken(main) };
