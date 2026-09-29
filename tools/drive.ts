@@ -12,6 +12,16 @@
 //   tsx tools/drive.ts type  "some text"               # type text into the focused element
 //   tsx tools/drive.ts stop
 //
+// --headful runs a real Chromium window on a private Xvfb display and enables OS-level input
+// through xdotool (see tools/lib/realinput.ts) — the only way to test pointer lock, Esc, F11
+// and keyboard layouts the way a player hits them. Add realinput=1 to --params so the game's
+// mouse-capture policy runs under automation. Extra commands in that mode:
+//   xkey "i Escape Shift+w &"   xhold "w 1500"   xdown/xup "Shift"   xtype "text"
+//   xmove "200 0" (relative)    xclick "480 270 [1|3]"   xhere "[1|3]" (click in place)
+//   xwheel "up 3"               layout "fr"  (setxkbmap; "us" back)
+//   xtab "1500"                 switch to a new tab for N ms and back (focus loss)
+//   state                       lock/focus/fullscreen/open windows/player — a quick look
+//
 // `serve` must run inside nix-shell and via ~/claude-stuff/bin/heavy (it holds a browser).
 // --gpu launches Chromium on the real GPU (ANGLE/Vulkan) instead of SwiftShader.
 // --dist serves the production build in dist/ (run `npm run build` first) through `vite preview`,
@@ -49,6 +59,9 @@ if (!chrome) throw new Error('CHROME_PATH not set: run inside nix-shell');
 const size = opt('--size', '960x540').split('x').map(Number);
 const gpu = argv.includes('--gpu');
 const useDist = argv.includes('--dist');
+const headful = argv.includes('--headful');
+const { startXvfb, XInput } = await import('./lib/realinput');
+if (headful) console.log('Xvfb on', (await startXvfb(size[0] + 40, size[1] + 160)).display);
 const vite = useDist
   ? await (await import('vite')).preview({ preview: { port: 0, host: '127.0.0.1' }, logLevel: 'error' })
   : await createServer({ server: { port: 0, host: '127.0.0.1', hmr: false }, logLevel: 'error' });
@@ -59,17 +72,25 @@ const gl = gpu
   : ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'];
 const browser = await puppeteer.launch({
   executablePath: chrome,
-  headless: true,
-  args: ['--no-sandbox', ...gl, `--window-size=${size[0]},${size[1]}`],
+  headless: !headful,
+  // Headful: the window's viewport is the real one (defaultViewport null), placed at 0,0.
+  defaultViewport: headful ? null : undefined,
+  args: ['--no-sandbox', ...gl, ...(headful ? [`--window-size=${size[0]},${size[1] + 120}`, '--window-position=0,0', '--no-first-run', '--no-default-browser-check'] : [`--window-size=${size[0]},${size[1]}`])],
   protocolTimeout: 30 * 60_000,
 });
-const page = await browser.newPage();
-await page.setViewport({ width: size[0], height: size[1] });
+const page = headful ? (await browser.pages())[0] ?? (await browser.newPage()) : await browser.newPage();
+if (!headful) await page.setViewport({ width: size[0], height: size[1] });
+const xin = new XInput(page);
 let logBuf: string[] = [];
 page.on('console', (m) => {
   if (m.type() === 'error' || m.type() === 'warn' || m.type() === 'log') logBuf.push(`[${m.type()}] ${m.text()}`);
 });
 page.on('pageerror', (e) => logBuf.push(`[EXCEPTION] ${(e as Error).stack ?? e}`));
+// The game's "Leave site?" guard (src/core/unload.ts) would block `load`: accept it, logged.
+page.on('dialog', (d) => {
+  logBuf.push(`[dialog ${d.type()}] ${d.message()}`);
+  void d.accept();
+});
 page.on('response', (r) => {
   if (r.status() >= 400) logBuf.push(`[HTTP ${r.status()}] ${r.url()}`);
 });
@@ -90,6 +111,16 @@ async function load(params: string): Promise<string> {
   return err ? `boot failed: ${err}` : 'ok';
 }
 console.log('load:', await load(opt('--params', 'seed=1')));
+if (headful) await fitWindow(page, size[0], size[1]);
+
+/** Resize the real window so the page viewport is exactly w×h (the toolbar height varies). */
+async function fitWindow(p: typeof page, w: number, h: number): Promise<void> {
+  const cdp = await p.createCDPSession();
+  const { windowId } = (await cdp.send('Browser.getWindowForTarget')) as { windowId: number };
+  const d = await p.evaluate(() => ({ dw: window.outerWidth - window.innerWidth, dh: window.outerHeight - window.innerHeight }));
+  await cdp.send('Browser.setWindowBounds', { windowId, bounds: { left: 0, top: 0, width: w + d.dw, height: h + d.dh } });
+  await new Promise((r) => setTimeout(r, 300));
+}
 
 const http = createHttp(async (req, res) => {
   let body = '';
@@ -138,6 +169,40 @@ const http = createHttp(async (req, res) => {
     } else if (what === 'type') {
       await page.keyboard.type(body);
       out = 'ok';
+    } else if (what.startsWith('x') || what === 'layout' || what === 'state') {
+      if (!headful && what !== 'state') throw new Error(`${what} needs serve --headful`);
+      const a = body.trim().split(/\s+/);
+      if (what === 'xkey') await xin.key(body);
+      else if (what === 'xhold') await xin.hold(a[0], Number(a[1] ?? 500));
+      else if (what === 'xdown') await xin.down(a[0]);
+      else if (what === 'xup') await xin.up(a[0]);
+      else if (what === 'xtype') await xin.type(body);
+      else if (what === 'xmove') await xin.move(Number(a[0]), Number(a[1] ?? 0));
+      else if (what === 'xclick') await xin.click(Number(a[0]), Number(a[1]), Number(a[2] ?? 1));
+      else if (what === 'xhere') await xin.clickHere(Number(a[0] || 1));
+      else if (what === 'xwheel') await xin.wheel(a[0] as 'up' | 'down', Number(a[1] ?? 1));
+      else if (what === 'layout') xin.layout(a[0]);
+      else if (what === 'xtab') {
+        // Switch to another tab and back after N ms (focus + visibility loss, like alt-tab).
+        const other = await browser.newPage();
+        await other.bringToFront();
+        await new Promise((r) => setTimeout(r, Number(a[0] || 1000)));
+        await other.close();
+        await page.bringToFront();
+      }
+      else if (what !== 'state') throw new Error(`unknown command ${what}`);
+      await new Promise((r) => setTimeout(r, 150));
+      out = await page.evaluate(() => {
+        const g = (window as any).cdda?.game;
+        const wins = [...document.querySelectorAll('.cdda-window .title')].map((t) => t.textContent);
+        const hint = document.querySelector('.resume-hint') as HTMLElement | null;
+        return {
+          lock: !!document.pointerLockElement, focus: document.hasFocus(), fullscreen: !!document.fullscreenElement,
+          windows: wins, captured: g?.input.captured, held: g ? [...g.input.held] : [], lockPaused: g?.lockPaused,
+          hint: hint ? hint.style.display !== 'none' : null,
+          player: g && { x: +g.player.x.toFixed(2), y: +g.player.y.toFixed(2), yaw: +g.player.yaw.toFixed(3), running: g.player.running },
+        };
+      });
     } else if (what === 'load') {
       out = await load(body);
     } else if (what === 'log') {

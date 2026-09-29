@@ -1,4 +1,4 @@
-import { c, colorize, confirm, getUiRoot, openMenu, type UiWindow } from './framework';
+import { c, colorize, confirm, getUiRoot, hoverMoved, openMenu, type UiWindow } from './framework';
 import { sfx } from '../audio/sfx';
 import { openOptions } from './options';
 import { openHelp } from './help';
@@ -73,7 +73,7 @@ export function showMainMenu(ctx: UiContext, hud: Hud): Promise<void> {
           if (!build) return;
           applyBuild(ctx, build);
           close();
-          game.message(`${build.name}, you wake up in the evac shelter.  Press ? for help.`, 'c_light_gray');
+          game.message(`${build.name}, you wake up in the evac shelter.  Press <keybind:help> for help.`, 'c_light_gray');
           void maybeShowStartHints(ctx);
         },
       },
@@ -141,7 +141,7 @@ export function showMainMenu(ctx: UiContext, hud: Hud): Promise<void> {
         </div>`;
       el.querySelectorAll<HTMLElement>('.mm-item').forEach((it) => {
         const i = Number(it.dataset.i);
-        it.onmouseenter = () => sel !== i && ((sel = i), render());
+        it.onmousemove = (ev) => hoverMoved(ev) && sel !== i && ((sel = i), render());
         it.onclick = () => void activate(i);
       });
     }
@@ -181,7 +181,7 @@ export function openEscMenu(ctx: UiContext, onQuit: () => void): UiWindow {
           }
           onQuit();
         } else if (a === 'quit') {
-          if (await confirm('Quit to main menu?  <color_light_red>Unsaved progress will be lost.</color>')) onQuit();
+          if (await confirm('Quit to main menu?  <color_light_red>Unsaved progress will be lost.</color>', { destructive: true })) onQuit();
         }
       }, 0);
     },

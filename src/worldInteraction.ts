@@ -34,14 +34,14 @@ export function installWorldInteraction(game: Game, renderer: Renderer, api: Deb
       openMenu({ title, entries: entries.map((e) => ({ label: c('c_white', e.label), value: e.run })), onSelect: (run) => void run() });
     },
     text: (title, body) => {
-      const w = openWindow({ title, width: '60ch', footer: c('c_dark_gray', 'Esc to close') });
+      const w = openWindow({ title, width: '60ch' });
       w.body.innerHTML = colorize(body);
       w.body.style.whiteSpace = 'pre-wrap';
     },
     pickup: (title, x, y, z) => {
       const entries = () => (game.map.itemsAt(x, y, z) as unknown as Item[]).map((it) => ({ label: c('c_white', it.name()), value: it }));
       const m = openMenu({
-        title, entries: entries(), footer: c('c_dark_gray', 'letter: take item · Esc: close'),
+        title, entries: entries(), footer: `${c('c_light_green', 'letter')} take item`,
         onSelect: (it) => {
           const r = game.player.inv.pickUp(it);
           if (r.ok) game.map.removeItem(x, y, z, it);

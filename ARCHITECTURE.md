@@ -42,6 +42,11 @@ tileset, rendered in the "3D pixel art" style of *Project Shadowglass*.
   `--dist` serves the production build (`npm run build` first). Real input: `drive.ts key "i Escape
   ArrowDown*5 Shift+e"`, `hold "w 1500"`, `click "480 270"`, `type "text"`. For scripted walks,
   `cdda.findPath(x, y)` returns a door-aware A* route; `cdda.godMode(true)` for long captures.
+  Puppeteer's input skips the browser's own key handling (its Esc never releases pointer lock),
+  so **anything a player does must also be checked with OS-level input**: `drive.ts serve
+  --headful --params "...&realinput=1"` runs a windowed Chromium on Xvfb with `xkey`/`xmove`/
+  `xclick`/`state` commands (xdotool), and `tools/realinput.ts` is the scripted real-input
+  regression (pointer lock, Esc, fullscreen, stuck keys, AZERTY, rebinding…; ~160 checks).
 - Static assets are fetched relative to `ASSET_BASE` (src/core/assets.ts, Vite `base: './'`), so
   `dist/` works from any sub-path: never hard-code `/data/`, `/atlas/`, `/audio/`.
 - `window.cdda` (src/debug.ts) is the automation API. Register helpers for anything you
@@ -509,7 +514,16 @@ Keys: `V` camera mode, `F` flashlight.
   should be built from these.
 - **Key bindings** `src/ui/keys.ts`: all default keys live in `DEFAULT_BINDINGS`; systems call
   `game.keys.register(actionId, 'Description', handler)`. To add an action, add it to the
-  table (keep it conflict-free; WASD/shift/space are movement).
+  table (keep it conflict-free; WASD/shift/space are movement). Players can rebind
+  (Options > Key bindings, stored as a diff in localStorage; pure rules in `keymap.ts`), so
+  **never hard-code a key in text**: use `game.keys.label(id)` / `keyFor(id)`, or write
+  `<keybind:id>` inside `game.message()` text. Movement is physical (`e.code`), actions are
+  `e.key` (CapsLock-normalized); `keys.movementKeys()` names WASD on the player's layout.
+- **Mouse capture** `src/ui/pointer.ts` + `src/core/input.ts`: gameplay holds pointer lock;
+  menus keep it (or free the cursor, Options > Menu cursor). Every window closes on its opening
+  key, Backspace and Esc (the framework adds that legend to the footer). A browser-eaten Esc
+  arrives as a lock loss and is replayed as Esc into the top window. Windows about looking pass
+  `mouseLook: true`.
 - **Activities** `src/game/activity.ts`: `game.activities.start({name, duration, onComplete,
   onProgress?, onCancel?, warp?, interruptible?})` for any long action (craft, read, butcher,
   construct, wait, sleep). Warps the clock, cancels on movement/danger. Danger sources

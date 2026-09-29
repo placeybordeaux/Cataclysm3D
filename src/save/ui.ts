@@ -30,11 +30,12 @@ export function openLoadMenu(mgr: SaveManager): Promise<string | null> {
       title: 'Load game',
       width: 'min(110ch, 94vw)',
       detailPane: true,
-      footer: `${c('c_light_green', 'Enter')} load  ${c('c_light_green', 'D')} delete  ${c('c_light_green', 'Esc')} back`,
+      footer: `${c('c_light_green', 'Enter')} load  ${c('c_light_green', 'D')} delete`,
+      closeLabel: 'back',
       entries: entries(),
       onKey: (e, cur) => {
         if (e.key !== 'D' || !cur) return false;
-        void confirm(`Delete the save of <color_white>${cur.name}</color>?  <color_light_red>This cannot be undone.</color>`).then(async (yes) => {
+        void confirm(`Delete the save of <color_white>${cur.name}</color>?  <color_light_red>This cannot be undone.</color>`, { destructive: true }).then(async (yes) => {
           if (!yes) return;
           await mgr.delete(cur.slot);
           if (!mgr.slots.length) win.close();
@@ -69,7 +70,8 @@ export function showLoadError(mgr: SaveManager, slot: string | null, message: st
     const w = openWindow({
       title: 'Cannot load save',
       width: 'min(70ch, 90vw)',
-      footer: slot ? `${c('c_light_green', 'd')} delete this save  ${c('c_light_green', 'Esc')} back` : `${c('c_light_green', 'Esc')} back`,
+      footer: slot ? `${c('c_light_green', 'd')} delete this save` : '',
+      closeLabel: 'back',
       onKey: (e) => {
         if (e.key === 'd' && slot) {
           void mgr.delete(slot).then(() => {
@@ -95,7 +97,7 @@ export async function openMemorial(mgr: SaveManager): Promise<void> {
     title: 'Memorial',
     width: 'min(110ch, 94vw)',
     detailPane: list.length > 0,
-    footer: c('c_light_green', 'Esc') + ' back',
+    closeLabel: 'back',
     entries: list.length
       ? list.map((e) => ({
           label: `${c('c_white', e.name)} ${c('c_dark_gray', durationText(e.survived))}`,

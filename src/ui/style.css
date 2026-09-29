@@ -81,5 +81,9 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #000; }
 #ui span.icon { display: inline-block; width: 1.25em; height: 1em; margin-right: .25em; }
 #ui .om-row { height: 1.1em; white-space: nowrap; }
 #ui .om-cell { display: inline-block; width: 1.1em; height: 1.1em; line-height: 1.1em; text-align: center; vertical-align: top; }
+#ui .cdda-window.inactive { pointer-events: none; }
+#ui .confirm-buttons { margin-top: .6em; text-align: center; }
+#ui .confirm-buttons .btn { cursor: pointer; padding: 0 .5em; }
+#ui .confirm-buttons .btn:hover { background: var(--c-blue); color: var(--c-white); }
 #ui .resume-hint { position: absolute; left: 50%; top: 58%; transform: translateX(-50%); background: rgba(0,0,0,.8);
   border: 1px solid var(--c-dark_gray); padding: 2px 10px; color: var(--c-white); pointer-events: none; }

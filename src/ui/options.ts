@@ -3,6 +3,9 @@ import type { GradeMode } from '../render/post';
 import { CAMERA_MODES } from '../render/camera';
 import { c, openMenu, type MenuEntry, type UiWindow } from './framework';
 import type { UiContext } from './context';
+import type { MenuCursor } from '../core/input';
+import { isFullscreen, toggleFullscreen } from './fullscreen';
+import { openKeybindings } from './keybind_ui';
 
 // Options screen (CDDA's options menu, reduced to what this port has): mouse sensitivity,
 // render resolution (low-res target height), colour grading, camera and audio volumes.
@@ -18,6 +21,7 @@ export interface GameOptions {
   camera: (typeof CAMERA_MODES)[number];
   /** Chunks drawn around the player (fog of war sits just inside this). */
   radius: number;
+  menuCursor: MenuCursor;
 }
 
 function loadStored(): Partial<GameOptions> {
@@ -40,6 +44,7 @@ export function applyStoredOptions(ctx: UiContext): void {
   const o = loadStored();
   const params = new URLSearchParams(location.search);
   if (o.mouseSensitivity) ctx.game.mouseSensitivity = o.mouseSensitivity;
+  if (o.menuCursor === 'free' || o.menuCursor === 'captured') ctx.game.input.menuCursor = o.menuCursor;
   const pipe = ctx.renderer.pipeline;
   if (o.px && !params.get('px')) {
     pipe.options.targetHeight = o.px;
@@ -74,6 +79,27 @@ export function openOptions(ctx: UiContext): UiWindow {
   const { game, renderer } = ctx;
   const pipe = renderer.pipeline;
   const opts: Opt[] = [];
+  opts.push({
+    name: 'Key bindings…',
+    value: () => (game.keys.unreachable().length ? c('c_light_red', `${game.keys.unreachable().length} unbound`) : ''),
+    change: () => void openKeybindings(game),
+    desc: 'Rebind any action (Enter to open). Movement is WASD at those physical positions on any layout, plus Shift and Space.',
+  });
+  opts.push({
+    name: 'Fullscreen',
+    value: () => (isFullscreen() ? 'on' : 'off'),
+    change: () => void toggleFullscreen(game).then(() => win.refresh(entries())),
+    desc: `Also ${game.keys.label('fullscreen')} in game. In fullscreen Esc opens and closes menus without freeing the mouse (hold Esc to leave fullscreen).`,
+  });
+  opts.push({
+    name: 'Menu cursor',
+    value: () => game.input.menuCursor,
+    change: () => {
+      game.input.menuCursor = game.input.menuCursor === 'captured' ? 'free' : 'captured';
+      store({ menuCursor: game.input.menuCursor });
+    },
+    desc: 'captured: menus are keyboard-only and closing one drops you straight back into mouse-look. free: menus show the mouse cursor so you can point and click; closing one captures the mouse again.',
+  });
   const cycle = <T,>(list: T[], cur: T, dir: number) => list[(list.indexOf(cur) + dir + list.length) % list.length];
   opts.push({
     name: 'Mouse sensitivity',
@@ -163,7 +189,8 @@ export function openOptions(ctx: UiContext): UiWindow {
     title: 'Options',
     width: 'min(90ch, 92vw)',
     detailPane: true,
-    footer: `${c('c_light_green', '←→')} change  ${c('c_light_green', 'Esc')} done`,
+    footer: `${c('c_light_green', '←→')}/${c('c_light_green', 'Enter')} change`,
+    closeLabel: 'done',
     entries: entries(),
     onKey: (e, cur) => {
       if (!cur) return false;

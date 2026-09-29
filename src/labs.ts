@@ -40,6 +40,7 @@ export function labUi(): LabUi {
           title,
           width: '64ch',
           footer: c('c_light_gray', 'Press any key…'),
+          closeLabel: null,
           onKey: () => (w.close(), true),
           onClose: () => resolve(),
         });

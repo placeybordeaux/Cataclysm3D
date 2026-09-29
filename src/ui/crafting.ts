@@ -116,7 +116,8 @@ export function openCraftingMenu(game: CraftHost): CraftingMenu {
     height: '86vh',
     footer:
       `${c('c_light_green', 'Tab')}/${c('c_light_green', 'S-Tab')} category  ${c('c_light_green', '←→')} subcategory  ` +
-      `${c('c_light_green', '/')} search  ${c('c_light_green', 'b')} batch  ${c('c_light_green', 'Enter')} craft  ${c('c_light_green', 'Esc')} back`,
+      `${c('c_light_green', '/')} search  ${c('c_light_green', 'b')} batch  ${c('c_light_green', 'Enter')} craft`,
+    closeLabel: 'back',
     onKey: (e) => {
       const k = e.key;
       if (k === 'ArrowDown' || k === 'j') move(1);
@@ -135,7 +136,7 @@ export function openCraftingMenu(game: CraftHost): CraftingMenu {
         else return false;
         sel = 0;
         render();
-      } else return true;
+      } else return false; // unhandled: the framework closes on & / Esc / Bksp
       return true;
     },
     onClose: () => {
