@@ -3,3 +3,4 @@ dist/
 vendor/
 shots/
 *.log
+.scratch/

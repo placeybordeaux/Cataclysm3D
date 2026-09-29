@@ -9,6 +9,57 @@ import type { FurnitureDef, TerrainDef } from '../data/types';
 /** Minimal shape the map needs from an item; the full Item class lives in src/game/item.ts. */
 export interface MapItem {
   typeId: string;
+  /** Stack size / charges as rolled by mapgen item groups (absent = 1 / type default). */
+  count?: number;
+  charges?: number;
+  contents?: MapItem[];
+}
+
+/**
+ * A monster spawn requested by mapgen. Creatures are not created during generation; the
+ * monster system consumes `chunk.spawns` (e.g. from map.onChunkGenerated). Coordinates are
+ * absolute world tiles.
+ */
+export interface SpawnRequest {
+  /** 'monster' = a specific mtype id; 'group' = a monstergroup id to roll from */
+  kind: 'monster' | 'group';
+  id: string;
+  x: number;
+  y: number;
+  z: number;
+  /** For groups: CDDA spawn density multiplier (place_monsters / "monsters" mapping). */
+  density?: number;
+  /** CDDA chance semantics of the source entry (one-in-N for groups, % for monsters). */
+  chance?: number;
+  /** Pack size / number of individuals for this request (default 1). */
+  count?: number;
+  /** For groups placed over an area: the rectangle to scatter in (absolute tiles). */
+  area?: [number, number, number, number];
+  name?: string;
+  friendly?: boolean;
+}
+
+/** Vehicle placement requested by mapgen (vehicle system not built yet). Absolute tiles. */
+export interface VehicleRequest {
+  id: string;
+  x: number;
+  y: number;
+  z: number;
+  rotation?: number;
+  chance?: number;
+  status?: number;
+  fuel?: number;
+}
+
+/** Mapgen zone (e.g. ZONE_START_POINT from the evac shelter). Absolute tile rectangle. */
+export interface MapZone {
+  type: string;
+  faction?: string;
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+  z: number;
 }
 
 export interface Field {
@@ -24,6 +75,17 @@ export class Chunk {
   readonly items = new Map<number, MapItem[]>();
   readonly fields = new Map<number, Field[]>();
   readonly traps = new Map<number, string>();
+  /** Everything below is keyed by local tile index (ly * CHUNK + lx) unless noted. */
+  readonly signs = new Map<number, string>();
+  readonly graffiti = new Map<number, string>();
+  /** CDDA computer definitions (name, security, options...) kept verbatim for the UI. */
+  readonly computers = new Map<number, Record<string, unknown>>();
+  readonly radiation = new Map<number, number>();
+  spawns: SpawnRequest[] = [];
+  vehicles: VehicleRequest[] = [];
+  zones: MapZone[] = [];
+  /** Which overmap terrain / mapgen produced this chunk (debugging, stats). */
+  omt?: { id: string; source: string };
   /** Bumped on every mutation so the renderer can rebuild meshes lazily. */
   version = 0;
   /** Cached "has any tile on this chunk" hint for renderers skipping empty sky levels. */
