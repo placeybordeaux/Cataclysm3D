@@ -123,6 +123,9 @@ export function buildLut(size: number, mode: 'palette' | 'smooth', saturation = 
   return out;
 }
 
+/** Tallest low-res image the "auto" render resolution picks (see lowResSize). */
+export const AUTO_MAX_H = 720;
+
 /**
  * Low-res render size for a drawing buffer of w x h device pixels: the largest integer
  * upscale factor that keeps the low-res height >= ~targetHeight, so every low-res pixel
@@ -130,6 +133,9 @@ export function buildLut(size: number, mode: 'palette' | 'smooth', saturation = 
  * camera compensation without exposing edges.
  */
 export function lowResSize(w: number, h: number, targetHeight: number, margin = 1): { scale: number; w: number; h: number } {
-  const scale = Math.max(1, Math.round(h / targetHeight));
+  // targetHeight <= 0 is "auto": the smallest integer upscale that keeps the image at most
+  // AUTO_MAX_H tall, i.e. 540 px at 1080p, ~650 px at 1300p, 720 px at 1440p/2160p. Big
+  // screens stop being 3.6x-chunky while every low-res pixel stays an exact square block.
+  const scale = targetHeight <= 0 ? Math.max(1, Math.ceil(h / AUTO_MAX_H)) : Math.max(1, Math.round(h / targetHeight));
   return { scale, w: Math.ceil(w / scale) + margin * 2, h: Math.ceil(h / scale) + margin * 2 };
 }

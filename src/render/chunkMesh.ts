@@ -6,6 +6,13 @@ import { GeomBuilder } from './geometry';
 import type { TileFrame, TileTextureSource } from './textureSource';
 import { hasFlag } from '../world/registry';
 import { fieldStyle, furnitureShape, terrainShape, type FurnitureShape, type TerrainShape } from './tileKinds';
+import { type GroundField, vnoise } from './ground';
+import type { LookFeatures } from './look';
+import { emitProps } from './props';
+import { doorCasing, fence as fenceParts, hipRoofTile, METAL, wallBand, windowDetail, type ArchFrames } from './arch';
+import { frameAverage } from './framePixels';
+import type { VoxelProps } from './voxel';
+import type { TreeSpec } from './trees';
 
 // Builds the static geometry of one chunk at one z-level: merged quads grouped by texture
 // page (one draw call per page), plus the billboards the chunk contributes. Light sources
@@ -53,6 +60,23 @@ export interface ChunkSprite {
 export interface ChunkMeshData {
   pages: Map<THREE.Texture, GeomBuilder>;
   sprites: ChunkSprite[];
+  /** look `props`: puddle surfaces (drawn with their own sky-reflecting material) */
+  puddles?: GeomBuilder;
+  /** look `trees3d`: trees/shrubs to build as trunk + leaf clumps (trees.ts) */
+  trees?: TreeSpec[];
+}
+
+/** Optional per-look inputs (look.ts); absent = the classic mesh. */
+export interface MeshExtras {
+  f: LookFeatures;
+  ground: GroundField | null;
+  /** A white texel on the procedural page: vertex-coloured geometry (props, voxels). */
+  white: TileFrame;
+  /** look `archDetail`: frames for trim, plinths, shingles (arch.ts) */
+  arch?: ArchFrames;
+  voxels?: VoxelProps;
+  /** Chunk is near the player: expensive volumes (3D trees, voxel props) only here. */
+  near: boolean;
 }
 
 const SHAPES: TerrainShape[] = ['none', 'floor', 'liquid', 'wall', 'halfwall', 'window', 'door', 'door_open', 'fence', 'tree', 'shrub', 'stairs_up', 'stairs_down'];
@@ -101,8 +125,30 @@ const DY = [-1, 0, 1, 0];
 
 export function buildChunkMesh(
   map: GameMap, shapes: ShapeTable, src: TileTextureSource, chunk: Chunk,
-  season: 'spring' | 'summer' | 'autumn' | 'winter', items?: (id: string) => boolean,
+  season: 'spring' | 'summer' | 'autumn' | 'winter', items?: (id: string) => boolean, extras?: MeshExtras,
 ): ChunkMeshData {
+  const LF = extras?.f;
+  const G = extras?.ground && extras.ground.active ? extras.ground : null;
+  const trees: TreeSpec[] = [];
+  const pud = { g: undefined as GeomBuilder | undefined };
+  const A = LF?.archDetail ? extras?.arch : undefined;
+  // pitched roofs: shingle/thatch/tile roof regions get a hipped roof (arch.ts)
+  const pitched = (tx: number, ty: number) => PITCHED.test(terDefs[here.ter(tx, ty)].id);
+  const roofDist = new Map<number, number>();
+  const roofCornerDist = (X: number, Y: number) => {
+    const k = (X + 32768) * 65536 + (Y + 32768);
+    let d = roofDist.get(k);
+    if (d !== undefined) return d;
+    d = 6;
+    outer: for (let r = 0; r < 6; r++)
+      for (let ty = Y - 1 - r; ty <= Y + r; ty++)
+        for (let tx = X - 1 - r; tx <= X + r; tx++) {
+          if (Math.max(Math.abs(tx + 0.5 - X), Math.abs(ty + 0.5 - Y)) < r) continue;
+          if (!pitched(tx, ty)) { d = r; break outer; }
+        }
+    roofDist.set(k, d);
+    return d;
+  };
   const z = chunk.z;
   const base = z * LEVEL_HEIGHT;
   const here = new LevelSampler(map, z);
@@ -151,11 +197,44 @@ export function buildChunkMesh(
     const k = (i: number) => (r + i) & 3;
     geo(f).quad(c[k(0)], c[k(1)], c[k(2)], c[k(3)], [0, 1, 0], [0, 0, 1, 1], f, ao && [ao[k(0)], ao[k(1)], ao[k(2)], ao[k(3)]], cut);
   };
+  /** Large-scale colour variation of outdoor ground at a corner (look `macroTint`). */
+  const macro = (X: number, Y: number): [number, number, number] => {
+    const v = 0.86 + vnoise(X / 13, Y / 13, 7) * 0.24 + (vnoise(X / 4, Y / 4, 9) - 0.5) * 0.08;
+    const w = (vnoise(X / 29, Y / 29, 8) - 0.5) * 0.22;
+    return [v * (1 + w), v * (1 + w * 0.4), v * (1 - w)];
+  };
+  /**
+   * Ground quad for tile (x, y): relief heights / curb raise from the ground field and the
+   * macro tint on outdoor ground; the classic path is topQuad. `lift` stacks decals on it.
+   */
+  const groundQuad = (x: number, y: number, y0: number, f: TileFrame, ao: number[] | undefined, outdoor: boolean, lift = 0) => {
+    const relief = G ? G.isRelief(x, y, z) : false;
+    const raise = G && !relief ? G.tileRaise(x, y, z) : 0;
+    const tint = !!LF?.macroTint && outdoor;
+    if (!relief && !tint) return topQuad(x, y, y0 + raise + lift, f, ao);
+    const P: [number, number][] = [[x, y + 1], [x + 1, y + 1], [x + 1, y], [x, y]];
+    const c: [number, number, number][] = P.map(([X, Y]) => [X, y0 + raise + lift + (relief ? G!.corner(X, Y, z) : 0), Y]);
+    const nrm = P.map(([X, Y]) => (relief ? G!.cornerNormal(X, Y, z) : ([0, 1, 0] as [number, number, number])));
+    const col: number[] = [];
+    P.forEach(([X, Y], i) => {
+      const k = ao ? ao[i] : 1;
+      const t = tint ? macro(X, Y) : [1, 1, 1];
+      col.push(k * t[0], k * t[1], k * t[2]);
+    });
+    const r = (4 - (f.rotate ?? 0)) & 3;
+    const ord = [0, 1, 2, 3].map((i) => (r + i) & 3);
+    geo(f).quadEx(c[ord[0]], c[ord[1]], c[ord[2]], c[ord[3]], ord.map((i) => nrm[i]), [0, 0, 1, 1], f, ord.flatMap((i) => col.slice(i * 3, i * 3 + 3)));
+  };
   const emitFloor = (x: number, y: number, id: string, seed: number, y0 = base) => {
     const f = src.terrain(id, 'floor', { variantSeed: seed, season });
     const ao = [cornerAo(x, y, -1, 1), cornerAo(x, y, 1, 1), cornerAo(x, y, 1, -1), cornerAo(x, y, -1, -1)];
-    topQuad(x, y, y0, f, ao);
+    if (G || LF?.macroTint) groundQuad(x, y, y0, f, ao, curSky >= 1 && !terDefs[here.ter(x, y)].flags.includes('INDOORS'));
+    else topQuad(x, y, y0, f, ao);
   };
+  /** Surface height of a ground-bearing tile at one of its corners (relief or curb). */
+  const surfH = (tx: number, ty: number, X: number, Y: number) =>
+    !G ? 0 : G.isRelief(tx, ty, z) ? G.corner(X, Y, z) : G.tileRaise(tx, ty, z);
+  const groundBearing = (sh: number) => sh === S.floor || sh === S.tree || sh === S.shrub || sh === S.door || sh === S.door_open || sh === S.fence;
 
   for (let ly = 0; ly < CHUNK; ly++)
     for (let lx = 0; lx < CHUNK; lx++) {
@@ -166,6 +245,9 @@ export function buildChunkMesh(
       const seed = pointSeed(x, y) >>> 0;
       const nShape = [0, 1, 2, 3].map((d) => shapeAt(here, x + DX[d], y + DY[d]));
       const skyOf = (tx: number, ty: number) => (shapeAt(above, tx, ty) !== S.none ? INDOOR_SKY : 1);
+      /** Face toward d looks at open outdoor ground (plinths/cornices go there). */
+      const outdoorFace = (d: number) => z >= 0 && (nShape[d] === S.floor || nShape[d] === S.tree || nShape[d] === S.shrub || nShape[d] === S.fence) &&
+        skyOf(x + DX[d], y + DY[d]) >= 1;
       const ownSky = skyOf(x, y);
       curSky = ownSky;
 
@@ -210,6 +292,22 @@ export function buildChunkMesh(
             emitFloor(x, y, neighborFloor(x, y) ?? 't_dirt', seed);
             topQuad(x, y, base + DECAL_LIFT, src.terrain(def.id, 'floor', { variantSeed: seed, season }));
           } else emitFloor(x, y, def.id, seed);
+          if (A && def.flags.includes('ROOF')) {
+            if (PITCHED.test(def.id)) hipRoofTile(geo, A, x, y, base, roofCornerDist, pitched, 1000 + z);
+            else {
+              // flat roof: a parapet along edges that drop away (open air next door)
+              const wid = findWallId(below, shapes, terDefs, x, y) ?? 't_wall';
+              const side = src.terrain(wid, 'wall');
+              const cap = src.terrain(wid, 'top');
+              for (let d = 0; d < 4; d++) {
+                if (nShape[d] !== S.none) continue;
+                const t = 0.16;
+                const bx0 = d === 1 ? x + 1 - t : x, bx1 = d === 3 ? x + t : x + 1;
+                const bz0 = d === 2 ? y + 1 - t : y, bz1 = d === 0 ? y + t : y + 1;
+                geo(side).box(bx0, base, bz0, bx1, base + 0.42, bz1, 63 & ~8, side, cap, base, 1);
+              }
+            }
+          }
           break;
         case S.liquid: {
           const f = src.terrain(def.id, 'floor', { variantSeed: seed, season, connections: connMask(nShape, (n) => n === S.liquid) });
@@ -235,6 +333,11 @@ export function buildChunkMesh(
             // a wall face is lit like the space it faces (street vs. room)
             curSky = skyOf(x + DX[d], y + DY[d]);
             sideFace(geo(side), x, y, d, base, base + top, side, base, 1);
+            if (A && shape === S.wall && outdoorFace(d)) {
+              wallBand(geo(A.plinth), A.plinth, x, y, d, base, base + 0.32, 0.06, base);
+              // cornice on the top storey, just under the roof slab
+              if (!isWall(shapeAt(above, x, y))) wallBand(geo(A.trim), A.trim, x, y, d, base + WALL_TOP - 0.2, base + WALL_TOP + SLAB + 0.03, 0.08, base);
+            }
           }
           curSky = 1;
           // Cap: when something covers it (slab above, or the ground over bedrock) it only
@@ -256,6 +359,10 @@ export function buildChunkMesh(
           g.box(x, base, y, x + 1, base + SILL_H, y + 1, faces | 4, side, cap, base, 1);
           g.box(x, base + DOOR_H, y, x + 1, base + WALL_TOP, y + 1, faces | 8, side, cap, base, 1);
           paneQuads(geo(pane), x, y, alongX, base + SILL_H, base + DOOR_H, pane, base + SILL_H);
+          if (A) {
+            windowDetail(geo, A, x, y, alongX, base + SILL_H, base + DOOR_H, /wood|log|board/.test(wallId));
+            for (let d = 0; d < 4; d++) if (outdoorFace(d)) wallBand(geo(A.plinth), A.plinth, x, y, d, base, base + 0.32, 0.06, base);
+          }
           break;
         }
         case S.door:
@@ -267,6 +374,7 @@ export function buildChunkMesh(
           const side = src.terrain(wallId, 'wall');
           const cap = src.terrain(wallId, 'top');
           geo(side).box(x, base + DOOR_H, y, x + 1, base + WALL_TOP, y + 1, exposedFaces(nShape, isWall) | 8, side, cap, base, 1);
+          if (A) doorCasing(geo, A, x, y, alongX, base, base + DOOR_H);
           const slab = src.terrain(def.id, 'pane');
           const T = 0.08;
           const g = geo(slab);
@@ -297,6 +405,14 @@ export function buildChunkMesh(
           const h = /chain|wire|bars/.test(def.id) ? 2.0 : 1.1;
           const conn = (s: number) => s === S.fence || wallLike(s);
           const g = geo(pane);
+          const kind = /chain|wire/.test(def.id) ? 'chain' : /rail|bars|metal|iron|steel/.test(def.id) ? 'metal' : 'wood';
+          if (A) {
+            const cn = [0, 1, 2, 3].map((d) => conn(nShape[d]));
+            const fb = base + (G ? G.tileRaise(x, y, z) : 0);
+            const avg = frameAverage(pane);
+            fenceParts(geo, A, x, y, fb, h, kind, cn, kind === 'wood' ? [avg[0] * 1.1, avg[1] * 1.1, avg[2] * 1.1] : METAL);
+            if (kind !== 'chain') break;
+          }
           let any = false;
           for (let d = 0; d < 4; d++) {
             if (!conn(nShape[d])) continue;
@@ -318,7 +434,8 @@ export function buildChunkMesh(
           // Tall trees dissolve (dithered) when the camera is right next to them instead of
           // filling the view with a handful of giant texels. (A 3D trunk box was tried: it
           // never lines up with the billboard's drawn trunk and looked worse.)
-          sprites.push({ x: x + 0.5 + jx, y: y + 0.5 + jy, z, frame: f, height: h, kind: 'tree', fadeNear: shape === S.tree });
+          if (LF?.trees3d && extras?.near) trees.push({ x: x + 0.5 + jx, y: y + 0.5 + jy, z, frame: f, height: h, shrub: shape === S.shrub, seed: seed ^ 0x5bd1e995 });
+          else sprites.push({ x: x + 0.5 + jx, y: y + 0.5 + jy, z, frame: f, height: h, kind: 'tree', fadeNear: shape === S.tree });
           break;
         }
         case S.stairs_up: {
@@ -341,6 +458,30 @@ export function buildChunkMesh(
         }
       }
 
+      // Skirts: where this tile's surface stands above a neighbour's (curbs, relief meeting
+      // a lower tile), close the gap with a vertical face toward the neighbour.
+      if (G && groundBearing(shape)) {
+        for (let d = 0; d < 4; d++) {
+          const nx = x + DX[d], ny = y + DY[d];
+          if (!groundBearing(nShape[d])) continue;
+          const [P, Q] = SKIRT_EDGE[d];
+          const PX = x + P[0], PY = y + P[1], QX = x + Q[0], QY = y + Q[1];
+          const hiP = surfH(x, y, PX, PY), hiQ = surfH(x, y, QX, QY);
+          const loP = surfH(nx, ny, PX, PY), loQ = surfH(nx, ny, QX, QY);
+          if (hiP - loP < 0.01 && hiQ - loQ < 0.01) continue;
+          const fid = shape === S.floor ? def.id : neighborFloor(x, y) ?? 't_dirt';
+          const f = src.terrain(fid, 'floor', { variantSeed: seed, season });
+          const u0 = d === 1 || d === 3 ? PY : PX, u1 = d === 1 || d === 3 ? QY : QX;
+          geo(f).quad([PX, base + Math.min(loP, hiP), PY], [QX, base + Math.min(loQ, hiQ), QY], [QX, base + hiQ, QY], [PX, base + hiP, PY], SKIRT_N[d],
+            [u0, 0, u1, Math.max(hiP - loP, hiQ - loQ)], f, [0.7, 0.7, 1, 1]);
+        }
+      }
+      // Scattered props (rocks, twigs, litter, puddles) on this tile
+      if (LF?.props && extras) {
+        const li = ly * CHUNK + lx;
+        emitProps(geo, extras.white, x, y, z, base, def, shape === S.tree || shape === S.shrub, shape === S.floor,
+          chunk.furn[li] !== 0 || chunk.items.has(li), nShape.some((ns) => ns === S.tree), curSky >= 1, G, pud);
+      }
       // Furniture
       const fi = chunk.furn[ly * CHUNK + lx];
       // Where items on this tile sit: on the furniture's top, or hidden inside it.
@@ -355,7 +496,10 @@ export function buildChunkMesh(
       if (fi !== 0) {
         const fdef = map.furniture.defs[fi];
         const fs = shapes.furniture(fi);
-        if (fs === 'billboard') {
+        const fb = base + (G ? G.tileRaise(x, y, z) : 0);
+        if (fs === 'billboard' && LF?.voxelProps && extras?.near && extras?.voxels && extras.voxels.furniture(geo, extras.white, src, fdef.id, x, y, fb, seed, facingYaw(nShape, isWall))) {
+          // drawn as a voxel volume
+        } else if (fs === 'billboard') {
           const f = src.furniture(fdef.id, 'sprite');
           sprites.push({ x: x + 0.5, y: y + 0.5, z, frame: f, height: f.h / (f.ppm ?? 16), kind: 'furniture' });
         } else {
@@ -363,14 +507,14 @@ export function buildChunkMesh(
           const side = src.furniture(fdef.id, 'side');
           if (fs === 'table') {
             const g = geo(top);
-            g.box(x + 0.04, base + 0.74, y + 0.04, x + 0.96, base + 0.8, y + 0.96, 63, side, top, base);
+            g.box(x + 0.04, fb + 0.74, y + 0.04, x + 0.96, fb + 0.8, y + 0.96, 63, side, top, fb);
             const L = 0.07;
             for (const [lx2, lz2] of [[0.1, 0.1], [0.83, 0.1], [0.1, 0.83], [0.83, 0.83]])
-              geo(side).box(x + lx2, base, y + lz2, x + lx2 + L, base + 0.74, y + lz2 + L, 63 & ~12, side, side, base);
+              geo(side).box(x + lx2, fb, y + lz2, x + lx2 + L, fb + 0.74, y + lz2 + L, 63 & ~12, side, side, fb);
           } else {
             const h = fs === 'cabinet' ? 1.85 : 0.92;
             const ins = fs === 'cabinet' ? 0.06 : 0.02;
-            geo(side).box(x + ins, base, y + ins, x + 1 - ins, base + h, y + 1 - ins, 63 & ~8, side, top, base);
+            geo(side).box(x + ins, fb, y + ins, x + 1 - ins, fb + h, y + 1 - ins, 63 & ~8, side, top, fb);
           }
         }
       }
@@ -384,6 +528,7 @@ export function buildChunkMesh(
           const it = list[list.length - 1 - k];
           if (items && !items(it.typeId)) continue;
           const f = src.item(it.typeId);
+          if (LF?.voxelProps && extras?.near && extras?.voxels && extras.voxels.item(geo, extras.white, f, x, y, base + (G ? G.heightAt(x + 0.5, y + 0.5, z) : 0) + itemLift, seed, k)) continue;
           const h = (f.h / (f.ppm ?? 16)) * 0.5;
           // pile offsets: deterministic per tile so rebuilds don't shuffle the heap
           const a = ((seed >> (k * 3)) & 7) * 0.785 + k * 2.1;
@@ -403,15 +548,32 @@ export function buildChunkMesh(
           const f = src.sprite(`${fd.type}_int${lvl}`);
           // random quarter turn per tile breaks up repeats; rotate is honoured by topQuad
           const rf: TileFrame = { ...f, rotate: ((seed >> 5) & 3) as 0 | 1 | 2 | 3 };
-          topQuad(x, y, base + (shape === S.liquid ? -WATER_DROP : 0) + DECAL_LIFT, rf);
+          if (G && shape !== S.liquid) groundQuad(x, y, base, rf, undefined, false, DECAL_LIFT);
+          else topQuad(x, y, base + (shape === S.liquid ? -WATER_DROP : 0) + DECAL_LIFT, rf);
         } else if (st.kind === 'cloud') {
           const f = src.sprite(`${fd.type}_int${lvl}`);
           sprites.push({ x: x + 0.5, y: y + 0.5, z, frame: f, height: 1.2 + lvl * 0.35, kind: 'cloud', lift: 0.15, opacity: 0.3 + lvl * 0.15 });
         }
       }
     }
-  return { pages, sprites };
+  return { pages, sprites, puddles: pud.g, trees: trees.length ? trees : undefined };
 }
+
+/** Standing props face away from an adjacent wall (the sprite's front is south, +z). */
+function facingYaw(nShape: number[], isWall: (s: number) => boolean): number {
+  // wall to the N -> face S (0); E -> face W; S -> face N; W -> face E
+  const yaw = [0, -Math.PI / 2, Math.PI, Math.PI / 2];
+  for (let d = 0; d < 4; d++) if (isWall(nShape[d])) return yaw[d];
+  return 0;
+}
+
+/** Roof terrains that get a hipped roof (houses); other ROOF tiles stay flat with parapets. */
+const PITCHED = /^t_(shingle_flat_roof|thatch_roof|tile_flat_roof)$/;
+
+// Skirt edges per direction (N, E, S, W): corner offsets P, Q (P first, CCW seen from the
+// neighbour) and the outward normal, matching sideFace's winding.
+const SKIRT_EDGE: [[number, number], [number, number]][] = [[[1, 0], [0, 0]], [[1, 1], [1, 0]], [[0, 1], [1, 1]], [[0, 0], [0, 1]]];
+const SKIRT_N: [number, number, number][] = [[0, 0, -1], [1, 0, 0], [0, 0, 1], [-1, 0, 0]];
 
 function connMask(nShape: number[], pred: (s: number) => boolean): number {
   let m = 0;

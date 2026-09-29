@@ -13,12 +13,21 @@ import { PixelPipeline, type GradeMode } from './post';
 import { ProceduralTextureSource } from './proceduralSource';
 import { Sky } from './sky';
 import { SpriteLayer, type SpriteHandle } from './sprites';
-import type { TileTextureSource } from './textureSource';
+import type { TileFrame, TileTextureSource } from './textureSource';
 import { Weather, type WeatherKind } from './weather';
 import { Viewmodel } from './viewmodel';
 import { DecorLayer } from './decor';
 import { displayIrradiance } from './lightfield';
 import { sunPosition, sunTimes, type SunTimes } from '../game/sun';
+import { initialLook, look, setLookState, storeLook, type LookName } from './look';
+import { GroundField } from './ground';
+import { puddleUniforms } from './props';
+import { Img, paintSurface, rampAround } from './pixelArt';
+import { paintShingle, paintSolid, type ArchFrames } from './arch';
+import { GrassLayer } from './grass';
+import { buildTrees, leafGlow } from './trees';
+import { SkylineLayer } from './skyline';
+import { VoxelFactory } from './voxel';
 
 export { CDDA_COLORS, cddaColor } from './colors';
 
@@ -62,6 +71,13 @@ export class Renderer {
   readonly pipeline: PixelPipeline;
   readonly chunks: ChunkManager;
   readonly lightmap: LightMap;
+  /** Visual ground heights (look relief / curbs). */
+  readonly ground: GroundField;
+  /** Dense 3D grass cards (look `grass`). */
+  readonly grass: GrassLayer;
+  private readonly voxels = new VoxelFactory();
+  /** Distant silhouettes from the overmap (look `skyline`); lookInstall gives it the overmap. */
+  readonly skyline = new SkylineLayer();
   /** Grass tufts around the player (cosmetic ground clutter). */
   readonly decor: DecorLayer;
   /** First-person wielded-item view (typed nullable so other systems call it with `?.`). */
@@ -104,9 +120,18 @@ export class Renderer {
   private playerLookT = 0;
   private sunDay = NaN;
   private sunT: SunTimes = sunTimes(0);
+  /** `?px=` pins the render resolution regardless of the look. */
+  private pxParam = 0;
+  /** Per-look scene layers (grass, skyline...) register here; setLook toggles them. */
+  readonly lookLayers: { name: string; apply(): void }[] = [];
+  /** Smoothed visual ground height under the camera (relief, curbs), metres. */
+  private camGround = 0;
+  /** Visual ground offset at a tile position (relief/curbs); 0 when the look has none. */
+  groundAt: ((x: number, y: number, z: number) => number) | null = null;
 
   constructor(private canvas: HTMLCanvasElement, private game: Game, opts: RendererOptions = {}) {
     const params = typeof location !== 'undefined' ? new URLSearchParams(location.search) : new URLSearchParams();
+    this.pxParam = Number(params.get('px')) || opts.targetHeight || 0;
     const o: RendererOptions = {
       targetHeight: Number(params.get('px')) || opts.targetHeight || 360,
       grade: (params.get('grade') as GradeMode) || opts.grade || 'palette',
@@ -134,9 +159,16 @@ export class Renderer {
     this.chunks = new ChunkManager(game.map, this.sprites, this.source);
     if (o.radius) this.chunks.radius = o.radius;
     this.lightmap = new LightMap(game.map);
+    this.ground = new GroundField(game.map);
+    this.chunks.extraObjects = (data) => (data.trees ? buildTrees(data.trees, this.ground.active ? this.ground : null, this.procedural, this.whiteFrame()) : []);
+    this.chunks.extras = (near) => {
+      if (look.name === 'classic') return undefined;
+      return { f: look.f, ground: this.ground.active ? this.ground : null, white: this.whiteFrame(), near, voxels: this.voxels, arch: look.f.archDetail ? this.archFrames() : undefined };
+    };
     this.sprites.skyVisAt = (x, y, z) => (this.chunks.covered(Math.floor(x), Math.floor(y), Math.round(z)) ? INDOOR_SKY : 1);
     this.decor = new DecorLayer(() => this.source);
     this.decor.sprites.skyVisAt = this.sprites.skyVisAt;
+    this.grass = new GrassLayer(this.ground);
 
     this.viewmodel = new Viewmodel();
     game.events.on('playerHurt', (e) => {
@@ -148,7 +180,7 @@ export class Renderer {
       this.hurtFlash(0.35 + k * 0.65);
     });
 
-    this.scene.add(this.sky.mesh, this.lights.group, this.chunks.group, this.sprites.group, this.decor.sprites.group, this.weather.group);
+    this.scene.add(this.sky.mesh, this.lights.group, this.chunks.group, this.sprites.group, this.decor.sprites.group, this.weather.group, this.grass.group, this.skyline.group);
     this.scene.matrixWorldAutoUpdate = true;
 
     this.ready = o.texture === 'atlas'
@@ -195,8 +227,92 @@ export class Renderer {
       document.body.appendChild(this.debugEl);
     }
     this.setCameraMode(this.rig.mode);
+    this.setLook(initialLook());
     this.resize();
     window.addEventListener('resize', () => this.resize());
+  }
+
+  /** A white texel on the procedural page for vertex-coloured geometry. */
+  whiteFrame(): TileFrame {
+    return this.procedural.custom('white', () => {
+      const im = new Img(4, 4);
+      im.fill([255, 255, 255]);
+      return im;
+    });
+  }
+
+  private archFrames(): ArchFrames {
+    const P = this.procedural;
+    return {
+      white: this.whiteFrame(),
+      trim: P.custom('arch:trim', () => paintSolid([196, 188, 170])),
+      plinth: P.custom('arch:plinth', () => paintSurface('blocks', 'light_gray', 5, rampAround([92, 90, 84], 0.5))),
+      shingle: P.custom('arch:shingle', () => paintShingle([86, 72, 66])),
+    };
+  }
+
+  get lookName(): LookName {
+    return look.name;
+  }
+
+  /**
+   * Switch the visual style live (look.ts). Image features are uniforms/options; geometry
+   * features rebuild every chunk (spread over frames by the chunk budget). `persist`
+   * stores the choice for the next session (Options does; `?look=` doesn't).
+   */
+  setLook(name: LookName, persist = false): void {
+    const prevSoft = look.f.softShadows;
+    const first = look.version === 0;
+    setLookState(name);
+    this.applyLook(prevSoft, first);
+    if (persist) storeLook(name);
+  }
+
+  /** Push look.f into the pipeline/materials/layers (also after cdda.lookTweak edits it). */
+  applyLook(prevSoft = look.f.softShadows, first = false): void {
+    const f = look.f;
+    const po = this.pipeline.options;
+    if (!this.pxParam) po.targetHeight = f.autoRes ? 0 : 360;
+    po.dither = f.dither;
+    po.ssao = f.ssao;
+    po.bloom = f.bloom;
+    po.atmosphere = f.atmosphere;
+    shared.uRim.value = f.rim;
+    shared.uBump.value = f.bump;
+    shared.uSpriteRound.value = f.spriteRound;
+    this.lights.fillK = f.fill;
+    this.lights.setShadow(f.shadowSize, f.shadowExtent);
+    this.three.shadowMap.type = f.softShadows ? THREE.PCFShadowMap : THREE.BasicShadowMap;
+    if (!first && prevSoft !== f.softShadows) {
+      // the shadow sampling code is baked into programs: recompile everything once
+      this.scene.traverse((o) => {
+        const m = (o as THREE.Mesh).material as THREE.Material | THREE.Material[] | undefined;
+        if (Array.isArray(m)) m.forEach((x) => (x.needsUpdate = true));
+        else if (m) m.needsUpdate = true;
+      });
+    }
+    this.decor.enabled = !f.grass;
+    this.grass.enabled = f.grass;
+    // volumetric trees/props only for the chunks around the player (billboards beyond)
+    this.chunks.lodRadius = f.trees3d || f.voxelProps ? 2.3 : 0;
+    // roofs of two-storey buildings live two levels up
+    this.chunks.levelsAbove = f.archDetail ? 2 : 1;
+    this.grass.invalidate();
+    this.skyline.enabled = f.skyline;
+    this.skyline.invalidate();
+    this.ground.relief = f.relief;
+    this.ground.curbs = f.archDetail;
+    this.ground.reset();
+    const ga = this.ground.active ? (x: number, y: number, z: number) => this.ground.heightAt(x, y, z) : null;
+    this.groundAt = ga;
+    this.sprites.groundAt = ga;
+    this.decor.sprites.groundAt = ga;
+    for (const l of this.lookLayers) l.apply();
+    this.chunks.invalidateAll();
+    this.decor.invalidate();
+    this.snapExposure = true;
+    this.shadowT = 1;
+    if (!first) this.resize();
   }
 
   /** The active camera (its pose depends on the camera mode). */
@@ -312,6 +428,14 @@ export class Renderer {
     this.rig.update(dt, p, this.game.map, this.pipeline.aspect, this.pipeline.lowH);
     this.pipeline.subPixel.copy(this.rig.subPixel);
     const cam = this.rig.camera;
+    // Visual ground (relief, raised sidewalks): the eye rides it. Gameplay stays on the
+    // flat tile grid; this is presentation only, smoothed so curbs don't jolt the view.
+    const g = this.groundAt && this.rig.mode !== 'top' ? this.groundAt(p.x, p.y, p.z) : 0;
+    this.camGround += (g - this.camGround) * Math.min(1, dt * 10);
+    if (Math.abs(this.camGround) > 1e-4 && this.rig.mode !== 'top') {
+      cam.position.y += this.camGround;
+      cam.updateMatrixWorld();
+    }
     this.applyShake(dt, cam);
     this.pipeline.hurt = Math.max(0, this.pipeline.hurt - dt * 1.7);
 
@@ -321,6 +445,7 @@ export class Renderer {
     shared.uCutTo.value = top ? p.z * LEVEL_HEIGHT + 1.1 : 1e6;
     shared.uSpriteTilt.value = top ? 0.55 : 0;
     shared.uTime.value = this.time;
+    shared.uPlayerLevel.value = p.z;
     if (this.playerSprite) {
       this.playerSprite.set(p.x, p.y, p.z);
       this.updatePlayerLook(dt);
@@ -328,6 +453,8 @@ export class Renderer {
 
     this.sprites.update(dt);
     this.decor.update(this.game.map, p.x, p.y, p.z, clock.season, this.source);
+    this.grass.update(this.game.map, p.x, p.y, p.z, clock.season, this.source);
+    this.skyline.update(p.x, p.y, p.z, this.chunks.radius);
     if (this.sunDay !== clock.day) {
       this.sunDay = clock.day;
       this.sunT = sunTimes(clock.day);
@@ -340,6 +467,18 @@ export class Renderer {
     this.lights.setStaticLights(this.lightmap.statics);
     this.adaptExposure(dt);
     this.lights.update(dt, this.skyState, this.rig.focus, cam);
+    shared.uRimColor.value.copy(this.skyState.hemiSky).multiplyScalar(this.skyState.hemiIntensity * 0.35);
+    this.pipeline.haze.copy(this.skyState.fog);
+    puddleUniforms.uZenith.value.copy(this.skyState.zenith);
+    puddleUniforms.uHorizon.value.copy(this.skyState.horizon);
+    puddleUniforms.uSunDir.value.copy(this.skyState.sunDir);
+    puddleUniforms.uSunColor.value.copy(this.skyState.sunColor);
+    puddleUniforms.uNight.value = this.skyState.night;
+    leafGlow.value = 0.075 * this.skyState.hemiIntensity * (1 - 0.85 * this.skyState.night);
+    const su = this.skyline.uniforms;
+    su.uSunDir.value.copy(this.skyState.moonLit ? this.skyState.moonDir : this.skyState.sunDir);
+    su.uDay.value = 1 - this.skyState.night;
+    su.uSkyTint.value.copy(this.skyState.hemiSky).multiplyScalar(this.skyState.hemiIntensity * 0.6);
     // the flashlight's shadow moves with the camera, so it can't be rate limited
     this.shadowT += dt;
     if (this.shadowT >= 1 / this.shadowHz || this.lights.flashlightOn) {
@@ -365,6 +504,8 @@ export class Renderer {
     // the player may stand anywhere in theirs), so new chunks and trees always appear inside
     // solid fog and fade in as you approach instead of popping into view.
     const po = this.pipeline.options;
+    // looking down from above everything is 30-60 m away: aerial perspective would wash out
+    po.atmosphere = look.f.atmosphere * (this.rig.mode === 'top' ? 0.25 : 1);
     po.fogFar = Math.max(2, this.chunks.radius - 1) * CHUNK;
     po.fogNear = po.fogFar * 0.35;
     po.fogMax = 1;
@@ -464,11 +605,13 @@ export class Renderer {
       calls: i.render.calls,
       triangles: i.render.triangles,
       lowres: `${this.pipeline.lowW}x${this.pipeline.lowH} x${this.pipeline.scale}`,
+      look: look.name,
       chunks: this.chunks.stats.entries,
       pending: this.chunks.stats.pending,
       buildMs: +this.chunks.stats.lastBuildMs.toFixed(2),
       sprites: this.sprites.count,
       decor: this.decor.count,
+      grass: this.grass.count,
       lights: this.lights.activeCount,
       exposure: +this.pipeline.exposure.toFixed(2),
       lmSources: this.lightmap.stats.sources,

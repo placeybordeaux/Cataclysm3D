@@ -90,12 +90,12 @@ interface InstanceArrays {
 /** Write one sprite instance (translation-only matrix + per-instance attributes). */
 function writeSprite(a: InstanceArrays, i: number, x: number, y: number, z: number, frame: TileFrame,
   w: number, h: number, yOff: number, skyVis: number, opacity: number, fadeNear: boolean,
-  flash?: { r: number; g: number; b: number; k: number }): void {
+  flash?: { r: number; g: number; b: number; k: number }, ground = 0): void {
   const m = a.m;
   m.fill(0, i * 16, i * 16 + 16);
   m[i * 16] = m[i * 16 + 5] = m[i * 16 + 10] = m[i * 16 + 15] = 1;
   m[i * 16 + 12] = x;
-  m[i * 16 + 13] = z * LEVEL_HEIGHT;
+  m[i * 16 + 13] = z * LEVEL_HEIGHT + ground;
   m[i * 16 + 14] = y;
   const f = frame.uv;
   a.rect[i * 4] = f[0]; a.rect[i * 4 + 1] = f[1]; a.rect[i * 4 + 2] = f[2] - f[0]; a.rect[i * 4 + 3] = f[3] - f[1];
@@ -233,6 +233,8 @@ export class SpriteLayer {
   private depthMats = new Map<THREE.Texture, THREE.Material>();
   /** Ambient multiplier at a position (renderer wires this to "is there a roof above"). */
   skyVisAt: ((x: number, y: number, z: number) => number) | null = null;
+  /** Visual ground offset (look relief/curbs, ground.ts); sprites stand on it. */
+  groundAt: ((x: number, y: number, z: number) => number) | null = null;
 
   /** `shadows`: whether sprites cast shadow-map shadows (ground clutter doesn't). */
   constructor(private source: () => TileTextureSource, private shadows = true) {
@@ -304,7 +306,8 @@ export class SpriteLayer {
         const w = spec.width ?? h * (frame.w / frame.h);
         const yOff = (spec.lift ?? 0) - (spec.anchor === 'center' ? h / 2 : 0);
         const sky = this.skyVisAt ? this.skyVisAt(spec.x, spec.y, spec.z) : 1;
-        writeSprite(a, i, spec.x, spec.y, spec.z, frame, w, h, yOff, sky, spec.opacity ?? 1, spec.fadeNear ?? false);
+        const gr = this.groundAt ? this.groundAt(spec.x, spec.y, Math.round(spec.z)) : 0;
+        writeSprite(a, i, spec.x, spec.y, spec.z, frame, w, h, yOff, sky, spec.opacity ?? 1, spec.fadeNear ?? false, undefined, gr);
       });
       this.group.add(mesh);
       meshes.push(mesh);
@@ -368,7 +371,7 @@ export class SpriteLayer {
     // Invisible sprites collapse to zero size rather than being moved out of the batch.
     writeSprite(b.arrays(), s.index, s.x, s.y, s.z, s.frame, s.visible ? s.w : 0, s.visible ? s.h : 0, s.yOff,
       this.skyVisAt ? this.skyVisAt(s.x, s.y, s.z) : 1, s.opacity, s.fadeNear,
-      { r: s.flashColor.r, g: s.flashColor.g, b: s.flashColor.b, k });
+      { r: s.flashColor.r, g: s.flashColor.g, b: s.flashColor.b, k }, this.groundAt ? this.groundAt(s.x, s.y, Math.round(s.z)) : 0);
     b.touch();
   }
 

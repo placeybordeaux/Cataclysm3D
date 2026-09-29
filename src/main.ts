@@ -1,3 +1,4 @@
+import { installLooks } from './render/lookInstall';
 import { Input } from './core/input';
 import { loadGameData } from './data/load';
 import { Game } from './game/game';
@@ -76,6 +77,8 @@ async function main(): Promise<void> {
   const api = installDebugApi(game, renderer);
   if (worldgen) installWorldgenDebug(api, game, worldgen);
   installPerfDebug(api, game, worldgen ? () => worldgen!.overmap.citiesNear(game.player.x / 24, game.player.y / 24) : undefined);
+  // Visual styles (Options > Visual style, ?look=): per-look layers, cdda.setLook/benchView.
+  installLooks(game, renderer, worldgen, api);
   installAudio(game, api);
   installCrafting(game, api);
   installWorldInteraction(game, renderer, api);

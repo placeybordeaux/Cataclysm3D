@@ -48,6 +48,70 @@ export class GeomBuilder {
   }
 
   /**
+   * Quad with per-corner normals (`n` = 4 normals) and per-corner linear RGB colours
+   * (`col` = 12 floats, or 3 for one colour). Used for relief ground, roofs and voxel props.
+   */
+  quadEx(a: V3, b: V3, c: V3, d: V3, n: readonly V3[], uv: readonly number[], f: TileFrame, col: readonly number[], cut = 0): void {
+    const base = this.vertexCount;
+    const corners = [a, b, c, d];
+    const uvs = [uv[0], uv[1], uv[2], uv[1], uv[2], uv[3], uv[0], uv[3]];
+    const du = f.uv[2] - f.uv[0], dv = f.uv[3] - f.uv[1];
+    const one = col.length === 3;
+    for (let i = 0; i < 4; i++) {
+      const p = corners[i], nn = n[i];
+      this.pos.push(p[0], p[1], p[2]);
+      this.nrm.push(nn[0], nn[1], nn[2]);
+      this.uv.push(uvs[i * 2], uvs[i * 2 + 1]);
+      this.rect.push(f.uv[0], f.uv[1], du, dv);
+      if (one) this.col.push(col[0], col[1], col[2]);
+      else this.col.push(col[i * 3], col[i * 3 + 1], col[i * 3 + 2]);
+      this.cut.push(cut);
+      this.sky.push(this.skyVis);
+    }
+    this.idx.push(base, base + 1, base + 2, base, base + 2, base + 3);
+  }
+
+  /** One triangle; `uv` = 6 floats (tile units), one normal and one linear RGB colour. */
+  tri(a: V3, b: V3, c: V3, n: V3, uv: readonly number[], f: TileFrame, col: readonly number[], cut = 0): void {
+    const base = this.vertexCount;
+    const du = f.uv[2] - f.uv[0], dv = f.uv[3] - f.uv[1];
+    const corners = [a, b, c];
+    for (let i = 0; i < 3; i++) {
+      const p = corners[i];
+      this.pos.push(p[0], p[1], p[2]);
+      this.nrm.push(n[0], n[1], n[2]);
+      this.uv.push(uv[i * 2], uv[i * 2 + 1]);
+      this.rect.push(f.uv[0], f.uv[1], du, dv);
+      this.col.push(col[0], col[1], col[2]);
+      this.cut.push(cut);
+      this.sky.push(this.skyVis);
+    }
+    this.idx.push(base, base + 1, base + 2);
+  }
+
+  /**
+   * Raw pre-built geometry (voxel meshes): positions/normals/colours already in world space,
+   * drawn with frame `f` (a white texel). One quad = 4 vertices, quads only.
+   */
+  quads(pos: ArrayLike<number>, nrm: ArrayLike<number>, col: ArrayLike<number>, f: TileFrame, cut = 0): void {
+    const nv = pos.length / 3;
+    const du = f.uv[2] - f.uv[0], dv = f.uv[3] - f.uv[1];
+    for (let q = 0; q < nv; q += 4) {
+      const base = this.vertexCount;
+      for (let i = q; i < q + 4; i++) {
+        this.pos.push(pos[i * 3], pos[i * 3 + 1], pos[i * 3 + 2]);
+        this.nrm.push(nrm[i * 3], nrm[i * 3 + 1], nrm[i * 3 + 2]);
+        this.uv.push(0.5, 0.5);
+        this.rect.push(f.uv[0], f.uv[1], du, dv);
+        this.col.push(col[i * 3], col[i * 3 + 1], col[i * 3 + 2]);
+        this.cut.push(cut);
+        this.sky.push(this.skyVis);
+      }
+      this.idx.push(base, base + 1, base + 2, base, base + 2, base + 3);
+    }
+  }
+
+  /**
    * Axis-aligned box in three.js coordinates. `faces` bitmask: 1=+x 2=-x 4=+y 8=-y 16=+z
    * 32=-z. `side`/`top` frames texture vertical and horizontal faces. `vBase` is the world
    * Y that maps to v=0 so stacked boxes continue the texture pattern.
