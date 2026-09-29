@@ -84,6 +84,60 @@ export function nearClamp(cam: { x: number; y: number; z: number }, x: number, y
   return { scale: s, lift: (cam.y - floorH) * (1 - s) };
 }
 
+const proxyWarned = new Set<string>();
+/**
+ * Stand-in sprite ids (tried in order) for a monster the tileset has no art for: same kind
+ * first (a zombie soldier variant -> the zombie soldier), then a generic silhouette by
+ * species / CDDA symbol. Empty = keep the glyph (debug monsters). Pure, for tests.
+ */
+export function proxySprites(id: string, symbol: string, species: string[]): string[] {
+  const rules: [RegExp, string[]][] = [
+    [/soldier_camo|grenadier|military/, ['mon_zombie_soldier']],
+    [/blackops/, ['mon_zombie_soldier_blackops_1', 'mon_zombie_soldier']],
+    [/swat/, ['mon_zombie_swat', 'mon_zombie_cop']],
+    [/nurse|surgeon|vivisector|medical/, ['mon_zombie_medical', 'mon_zombie_scientist']],
+    [/foreman/, ['mon_zombie_technician', 'mon_zombie']],
+    [/conjoiner|flesh_angel|zomblimp|zomballoon/, ['mon_zombie_brute', 'mon_zombie']],
+    [/homunculus/, ['mon_zombie_child']],
+    [/^mon_spider_(jumping|trapdoor|widow|wolf)$/, [`${id}_giant`]],
+    [/^mon_(mosquito|dragonfly|slug|frog)$/, [`${id}_giant`]],
+    [/shrew|mouse/, ['mon_sewer_rat', 'mon_rabbit']],
+    [/^mon_bat_/, ['mon_bat']],
+    [/triffid/, ['mon_triffid']],
+    [/kraken/, ['mon_blob']],
+    [/shade|suspended|anomaly/, ['mon_shadow']],
+  ];
+  if (/^debug_mon/.test(id)) return [];
+  for (const [re, ids] of rules) if (re.test(id)) return ids;
+  if (species.includes('ROBOT')) return ['mon_riotbot', 'mon_secubot'];
+  if (species.includes('HUMAN') && symbol === '@') return ['mon_feral_human_pipe', 'mon_zombie'];
+  if (species.includes('INSECT')) return ['mon_fly', 'mon_bee'];
+  if (species.includes('SPIDER')) return ['mon_spider_web_s', 'mon_spider_web'];
+  if (/[ZH@MSh]/.test(symbol)) return ['mon_zombie'];
+  if (species.includes('MAMMAL') || /[Cd]/.test(symbol)) return ['mon_dog'];
+  return [];
+}
+
+/**
+ * Melee-range aim alignment: UltiCa people are drawn ~1.4-1.5 m to the top of the head while
+ * the eye is at 1.6 m, so a zombie at arm's length (clamped to NEAR_CLAMP) had its head
+ * well below the crosshair and newcomers "aimed at the head" over it (QA_V2 #24). Inside
+ * `full` metres the sprite is raised so the point `frac` of its frame height (UltiCa frames
+ * have empty rows on top: this is about the face)
+ * sits at eye level, fading out by `none` metres, where its feet come back into view.
+ * The camera raycast (game/raycast.ts CREATURE_HEIGHT slab) still covers the raised sprite.
+ */
+export const MELEE_AIM = { full: 1.3, none: 2.3, frac: 0.7 };
+
+/** Extra lift (m) of a creature's foot at horizontal distance d; eyeAboveFoot = eye - foot. */
+export function meleeAimLift(d: number, eyeAboveFoot: number, height: number): number {
+  const t = Math.min(1, Math.max(0, (d - MELEE_AIM.full) / (MELEE_AIM.none - MELEE_AIM.full)));
+  const k = 1 - t * t * (3 - 2 * t);
+  if (k <= 0) return 0;
+  // never more than 0.5 m (a crouched eye over a tall creature wants nothing: clamp at 0)
+  return Math.min(0.5, Math.max(0, eyeAboveFoot - height * MELEE_AIM.frac)) * k;
+}
+
 /**
  * Telegraph pose for wind-up progress u (0 = just started, 1 = about to land): how far the
  * sprite rears back from its target (m) and how much taller/narrower it gets. Heavy blows
@@ -201,6 +255,21 @@ export class MonsterView implements GameSystem {
       const hit = a.lookupWithLooksLike(def.id, (id) => this.game.data.monsters[id]?.looks_like as string | undefined, { variantSeed: m.uid });
       if (hit?.fg) return { frame: toFrame(hit.fg), height: hit.fg.h / MON_PPM };
     }
+    if (a) {
+      // No art (BN-only monsters UltiCa never drew): a stand-in sprite of the same kind
+      // reads as a creature; a floating CDDA letter read as a sign (QA_V2 #25).
+      for (const id of proxySprites(def.id, def.symbol, def.species ?? [])) {
+        const hit = a.lookup(id, { variantSeed: m.uid });
+        if (!hit?.fg) continue;
+        if (!proxyWarned.has(def.id)) {
+          proxyWarned.add(def.id);
+          console.warn(`monsterView: no sprite for ${def.id}, drawing ${id}`);
+        }
+        const h = hit.fg.h / MON_PPM;
+        // small creatures borrow a giant's sprite: keep them their own size
+        return { frame: toFrame(hit.fg), height: Math.min(h, h * (GLYPH_HEIGHT[m.size] / GLYPH_HEIGHT.medium)) };
+      }
+    }
     const frame = a ? toFrame(a.glyph(def.symbol, def.color)) : this.renderer.source.glyph(def.symbol, def.color);
     return { frame, height: GLYPH_HEIGHT[m.size] };
   }
@@ -312,8 +381,11 @@ export class MonsterView implements GameSystem {
         }
       }
       const x = m.x + sway * Math.cos(p.yaw) + kx, y = m.y + sway * Math.sin(p.yaw) + ky;
-      const near = nearClamp(cam, x, y, m.z * LEVEL_HEIGHT);
-      v.h.set(x, y, m.z + (bob * near.scale + near.lift) / LEVEL_HEIGHT);
+      // foot height as drawn (the sprite layer adds the look's ground relief itself)
+      const foot = m.z * LEVEL_HEIGHT + (this.renderer.groundAt?.(x, y, m.z) ?? 0);
+      const aim = v.down > 0 || this.renderer.cameraMode !== 'first' ? 0 : meleeAimLift(Math.hypot(x - cam.x, y - cam.z), cam.y - foot, v.height);
+      const near = nearClamp(cam, x, y, foot + aim);
+      v.h.set(x, y, m.z + (bob * near.scale + aim + near.lift) / LEVEL_HEIGHT);
       // Lying down: short and wide instead of the old half-height stand.
       const lie = v.down;
       const hgt = v.height * (1 - (1 - FALLEN) * lie) * squash * stretch * near.scale;

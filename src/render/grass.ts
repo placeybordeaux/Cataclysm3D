@@ -5,6 +5,7 @@ import { frameAverage } from './framePixels';
 import { hash2, type GroundField } from './ground';
 import { instancedLitMaterial } from './materials';
 import type { TileTextureSource } from './textureSource';
+import { runSteps, stepUntil } from './steps';
 
 // Dense grass (look.ts `grass`): world-fixed crossed cards of pixel-art blades around the
 // player, several per tile, swaying in the wind. Unlike the classic billboard tufts they
@@ -13,7 +14,9 @@ import type { TileTextureSource } from './textureSource';
 // and the season), are lit with an upward normal like the ground under them (t3ssel8r's
 // trick: grass shades as a surface, not as a pile of thin quads), receive shadows and
 // sample the light map at their root. Rebuilt around the player every few tiles; cards
-// shrink to nothing toward the edge of the radius so the rebuild never pops.
+// shrink to nothing toward the edge of the radius so the rebuild never pops. A rebuild is
+// ~20k cards (5-12 ms), so it is time-sliced (`budgetMs` per frame, per row of tiles) and
+// the previous field stays until the new one is complete.
 
 interface Kind {
   n: number;
@@ -114,6 +117,9 @@ export class GrassLayer {
   private geo = crossGeometry();
   private mat: THREE.MeshLambertMaterial;
   private uRadius = { value: 22 };
+  /** Max ms per frame spent rebuilding (the field lags a few frames behind, unseen). */
+  budgetMs = 1.5;
+  private job: Generator<void, void> | null = null;
 
   constructor(private ground: GroundField) {
     this.group.name = 'grass';
@@ -142,6 +148,7 @@ export class GrassLayer {
 
   invalidate(): void {
     this.cx = NaN;
+    this.job = null;
   }
 
   private chunkSig(map: GameMap, px: number, py: number, pz: number): number {
@@ -158,17 +165,26 @@ export class GrassLayer {
   update(map: GameMap, px: number, py: number, pz: number, season: string, src: TileTextureSource): void {
     if (!this.enabled) {
       this.clear();
+      this.job = null;
+      return;
+    }
+    if (this.job) {
+      if (stepUntil(this.job, performance.now() + this.budgetMs).done) this.job = null;
       return;
     }
     const moved = Number.isNaN(this.cx) || Math.hypot(px - this.cx, py - this.cy) > this.step || pz !== this.cz;
     const sig = moved ? 0 : this.chunkSig(map, this.cx, this.cy, pz);
     if (!moved && season === this.season && sig === this.sig) return;
+    // a teleport, level change or look switch: build at once rather than show the old field
+    const jump = Number.isNaN(this.cx) || pz !== this.cz || Math.hypot(px - this.cx, py - this.cy) > this.step * 3;
     this.cx = Math.floor(px) + 0.5;
     this.cy = Math.floor(py) + 0.5;
     this.cz = pz;
     this.season = season;
     this.sig = this.chunkSig(map, this.cx, this.cy, pz);
-    this.rebuild(map, src);
+    const gen = this.rebuild(map, src);
+    if (jump) runSteps(gen);
+    else this.job = gen;
   }
 
   private clear(): void {
@@ -179,8 +195,7 @@ export class GrassLayer {
     }
   }
 
-  private rebuild(map: GameMap, src: TileTextureSource): void {
-    this.clear();
+  private *rebuild(map: GameMap, src: TileTextureSource): Generator<void, void> {
     const R = this.radius + this.step, z = this.cz;
     this.uRadius.value = this.radius + this.step;
     const x0 = Math.floor(this.cx), y0 = Math.floor(this.cy);
@@ -206,7 +221,8 @@ export class GrassLayer {
     };
     const winter = this.season === 'winter';
     const colCache = new Map<string, [number, number, number]>();
-    for (let y = y0 - R; y <= y0 + R; y++)
+    for (let y = y0 - R; y <= y0 + R; y++) {
+      if (y > y0 - R) yield;
       for (let x = x0 - R; x <= x0 + R; x++) {
         const dx = x - x0, dy = y - y0;
         if (dx * dx + dy * dy > R * R) continue;
@@ -242,6 +258,8 @@ export class GrassLayer {
           add(px, gy, py, r(3) * Math.PI, kind.w * (0.8 + r(4) * 0.4), hh, kind.w, base[0] * v * (1 + hue * 0.15), base[1] * v, base[2] * v * (1 - hue * 0.15));
         }
       }
+    }
+    this.clear();
     const count = n;
     if (!count) return;
     const mesh = new THREE.InstancedMesh(this.geo, this.mat, count);

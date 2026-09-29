@@ -128,8 +128,11 @@ async function main(): Promise<void> {
   const loop = (now: number) => {
     const dt = Math.min((now - last) / 1000, 0.1);
     last = now;
+    frameStats.begin(now);
     game.frame(dt);
+    frameStats.lap('game');
     prefetch.observe(now);
+    frameStats.lap('prefetch');
     renderer.render();
     api.__onFrame?.();
     frameStats.frame(performance.now() - now, now);

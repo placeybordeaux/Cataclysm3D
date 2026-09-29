@@ -25,9 +25,10 @@ import { puddleUniforms } from './props';
 import { Img, paintSurface, rampAround } from './pixelArt';
 import { paintShingle, paintSolid, type ArchFrames } from './arch';
 import { GrassLayer } from './grass';
-import { buildTrees, leafGlow, leafSun } from './trees';
+import { buildTreesSteps, leafGlow, leafSun } from './trees';
 import { SkylineLayer } from './skyline';
 import { VoxelFactory } from './voxel';
+import { frameStats } from '../perfDebug';
 
 export { CDDA_COLORS, cddaColor } from './colors';
 
@@ -76,6 +77,7 @@ export class Renderer {
   /** Dense 3D grass cards (look `grass`). */
   readonly grass: GrassLayer;
   private readonly voxels = new VoxelFactory();
+  private readonly tmpV = new THREE.Vector3();
   /** Distant silhouettes from the overmap (look `skyline`); lookInstall gives it the overmap. */
   readonly skyline = new SkylineLayer();
   /** Grass tufts around the player (cosmetic ground clutter). */
@@ -130,6 +132,8 @@ export class Renderer {
   private camGround = 0;
   /** Visual ground offset at a tile position (relief/curbs); 0 when the look has none. */
   groundAt: ((x: number, y: number, z: number) => number) | null = null;
+  /** The vehicle renderer (vehicleMesh.ts) once installed: headlight tuning from cdda.renderer. */
+  vehicleView: { headlightIntensity: number; headlight: THREE.SpotLight } | null = null;
 
   constructor(private canvas: HTMLCanvasElement, private game: Game, opts: RendererOptions = {}) {
     const params = typeof location !== 'undefined' ? new URLSearchParams(location.search) : new URLSearchParams();
@@ -163,7 +167,8 @@ export class Renderer {
     if (o.radius) this.chunks.radius = o.radius;
     this.lightmap = new LightMap(game.map);
     this.ground = new GroundField(game.map);
-    this.chunks.extraObjects = (data) => (data.trees ? buildTrees(data.trees, this.ground.active ? this.ground : null, this.procedural, this.whiteFrame()) : []);
+    const noTrees = function* (): Generator<void, THREE.Object3D[]> { return []; };
+    this.chunks.extraObjects = (data) => (data.trees ? buildTreesSteps(data.trees, this.ground.active ? this.ground : null, this.procedural, this.whiteFrame()) : noTrees());
     this.chunks.extras = (near) => {
       if (look.name === 'classic') return undefined;
       return { f: look.f, ground: this.ground.active ? this.ground : null, white: this.whiteFrame(), near, voxels: this.voxels, arch: look.f.archDetail ? this.archFrames() : undefined };
@@ -427,7 +432,9 @@ export class Renderer {
     this.last = now;
     this.time += dt;
     this.three.info.reset();
+    frameStats.lap('pre');
     for (const f of this.beforeRender) f(dt);
+    frameStats.lap('beforeRender');
     const p = this.game.player;
     const clock = this.game.clock;
 
@@ -435,8 +442,14 @@ export class Renderer {
       this.chunks.season = clock.season;
       this.chunks.invalidateAll();
     }
+    // build priority follows the view (last frame's camera: the rig updates below)
+    const fwd = this.rig.camera.getWorldDirection(this.tmpV);
+    const fl = Math.hypot(fwd.x, fwd.z);
+    if (fl > 0.1) { this.chunks.forward.x = fwd.x / fl; this.chunks.forward.y = fwd.z / fl; }
     this.chunks.update(p.x, p.y, p.z, (z) => this.zVisible(z));
+    frameStats.lap('chunks');
     this.source.flush?.();
+    frameStats.lap('texFlush');
 
     this.rig.update(dt, p, this.game.map, this.pipeline.aspect, this.pipeline.lowH);
     this.syncPlayerSprite();
@@ -465,10 +478,15 @@ export class Renderer {
       this.updatePlayerLook(dt);
     }
 
+    frameStats.lap('misc');
     this.sprites.update(dt);
+    frameStats.lap('sprites');
     this.decor.update(this.game.map, p.x, p.y, p.z, clock.season, this.source);
+    frameStats.lap('decor');
     this.grass.update(this.game.map, p.x, p.y, p.z, clock.season, this.source);
+    frameStats.lap('grass');
     this.skyline.update(p.x, p.y, p.z, this.chunks.radius);
+    frameStats.lap('skyline');
     if (this.sunDay !== clock.day) {
       this.sunDay = clock.day;
       this.sunT = sunTimes(clock.day);
@@ -478,6 +496,7 @@ export class Renderer {
     this.lightmap.naturalLevel = naturalLightLevel(Math.asin(this.skyState.sunDir.y));
     this.lightmap.update(p.x, p.y, p.z, dt, this.time, this.lights.handles(), this.lights.handlesDirty);
     this.lights.handlesDirty = false;
+    frameStats.lap('lightmap');
     this.lights.setStaticLights(this.lightmap.statics);
     this.adaptExposure(dt);
     this.lights.update(dt, this.skyState, this.rig.focus, cam);
@@ -505,6 +524,7 @@ export class Renderer {
     this.sky.update(this.skyState, cam.position, this.time);
     this.weather.update(dt, cam.position);
     this.autoPatch();
+    frameStats.lap('scene');
 
     const vm = this.viewmodel!;
     vm.enabled = this.rig.mode === 'first' && !this.handsBusy && !this.hideViewmodel;
@@ -527,7 +547,9 @@ export class Renderer {
     po.fogNear = po.fogFar * 0.35;
     po.fogMax = 1;
     this.chunks.visibleDist = po.fogNear + (po.fogFar - po.fogNear) * 0.5;
+    frameStats.lap('vm');
     this.pipeline.render(this.scene, cam, this.skyState.fog, overlay);
+    frameStats.lap('draw');
     this.updateDebug(dt);
   }
 

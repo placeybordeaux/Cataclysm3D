@@ -12,6 +12,7 @@ import { emitProps } from './props';
 import { doorCasing, fence as fenceParts, hipRoofTile, METAL, wallBand, windowDetail, type ArchFrames } from './arch';
 import { frameAverage } from './framePixels';
 import type { VoxelProps } from './voxel';
+import { runSteps } from './steps';
 import { isBareTree, type TreeSpec } from './trees';
 
 // Builds the static geometry of one chunk at one z-level: merged quads grouped by texture
@@ -127,6 +128,19 @@ export function buildChunkMesh(
   map: GameMap, shapes: ShapeTable, src: TileTextureSource, chunk: Chunk,
   season: 'spring' | 'summer' | 'autumn' | 'winter', items?: (id: string) => boolean, extras?: MeshExtras,
 ): ChunkMeshData {
+  return runSteps(buildChunkMeshSteps(map, shapes, src, chunk, season, items, extras));
+}
+
+/**
+ * buildChunkMesh as a generator that yields after every row of tiles, so the chunk manager
+ * can spread one chunk over several frames under a strict per-frame budget (a volumetric
+ * chunk near the player costs 5-15 ms in one go). The map must not be assumed unchanged
+ * between steps: the caller compares chunk versions afterwards and rebuilds when stale.
+ */
+export function* buildChunkMeshSteps(
+  map: GameMap, shapes: ShapeTable, src: TileTextureSource, chunk: Chunk,
+  season: 'spring' | 'summer' | 'autumn' | 'winter', items?: (id: string) => boolean, extras?: MeshExtras,
+): Generator<void, ChunkMeshData> {
   const LF = extras?.f;
   const G = extras?.ground && extras.ground.active ? extras.ground : null;
   const trees: TreeSpec[] = [];
@@ -280,7 +294,8 @@ export function buildChunkMesh(
     !G ? 0 : isRel(tx, ty) ? cornerH(X, Y) : raiseOf(tx, ty);
   const groundBearing = (sh: number) => sh === S.floor || sh === S.tree || sh === S.shrub || sh === S.door || sh === S.door_open || sh === S.fence;
 
-  for (let ly = 0; ly < CHUNK; ly++)
+  for (let ly = 0; ly < CHUNK; ly++) {
+    if (ly > 0) yield;
     for (let lx = 0; lx < CHUNK; lx++) {
       const x = x0c + lx, y = y0c + ly;
       const ti = chunk.ter[ly * CHUNK + lx];
@@ -602,6 +617,7 @@ export function buildChunkMesh(
         }
       }
     }
+  }
   return { pages, sprites, puddles: pud.g, trees: trees.length ? trees : undefined };
 }
 

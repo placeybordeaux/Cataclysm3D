@@ -56,7 +56,25 @@ Streaming (ghost sprint at 7 tiles/s through town, `cdda.benchRun`, 1080p, main-
 | terrain | 3.8 | 11.1 | 16.9 | 25 | 9 ms |
 | full | 5.4 | 23.3 | 35.6 | 64 | 22 ms |
 
-Full's cost while moving fast is meshing the volumetric chunks near the player
+**Since the meshing time-slicing** (`tools/bench-stream.ts`, 1080p, 60 Hz vsync, 25 s runs from
+the street view; `loop` = our rAF callback, `work` also counts the delay before it; "40 mph"
+is the same ghost run at 17.9 tiles/s):
+
+| full, main-loop ms | work p50 | work p99 | work max | loop p99 | loop max | worst meshing in a frame |
+| --- | --- | --- | --- | --- | --- | --- |
+| sprint 7 t/s, before | 3.0 | 18.0 | 33.2 | 12.6 | 32.9 | 14 ms (one chunk) |
+| sprint 7 t/s, after | 3.9 | 11.0 | 13.2 | 10.5 | 12.2 | 5.3 ms |
+| 40 mph, before | 3.5 | 20.1 | 30.0 | 18.1 | 29.6 | 14.5 ms + grass 12 ms |
+| 40 mph, after | 4.9 | 11.8 | 17.3 | 10.6 | 16.2 | 10 ms (an edit next to the player) |
+
+Chunk builds, 3D trees, grass and skyline rebuilds are generators stepped under per-frame
+budgets (chunks 4 ms, 10 ms for edits beside the player; grass 1.5 ms; skyline 1 ms), the
+old mesh staying up until the new one is done, chunks ahead of the camera first
+(`src/render/steps.ts`, `chunkManager.ts`). At 3440x1304 the loop is the same (p99 11-12 ms);
+headless Chromium's frame interval there is set by presenting the big canvas (classic too),
+not by our code. The old table below is kept for history.
+
+Full's cost while moving fast was meshing the volumetric chunks near the player
 (`chunks.lodRadius` = 1.8 chunks): voxel furniture/items and 3D trees exist only there,
 billboards beyond. At walking speed this is spread thin; sprinting/driving through dense
 town is where the occasional 30-60 ms frame remains (see "next" below).
@@ -70,8 +88,7 @@ soft stepped shadows, smooth grading) is what makes the new geometry read; voxel
 crisp still looks chunky, crisp without voxel still looks flat. Keep `classic` for players
 who want the original pixel look.
 
-Next steps if we go on: move voxel/tree meshing off the main thread (or into idle slices) to
-remove the sprint hitches; per-building roof colours and gables; voxel monsters; a proper
+Next steps if we go on: per-building roof colours and gables; voxel monsters; a proper
 normal/height page for atlas sprites instead of luminance bump.
 
 ## Implementation map
