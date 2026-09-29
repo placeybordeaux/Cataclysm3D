@@ -283,7 +283,9 @@ export class MonsterSystem implements GameSystem {
    * messages, audio). `sfxId: ''` when the caller already played it.
    */
   emitSound(x: number, y: number, z: number, volume: number, description: string, source?: unknown, sfxId?: string, category: SoundCategory = 'combat', ambient = false): void {
-    emitSound(this.game, { x, y, z }, volume, description, { source: source === 'player' ? this.game.player : source, sfxId, category, ambient });
+    // The survivor's own attacks aren't narrated back to them ("You hear Smack!").
+    const mine = source === 'player';
+    emitSound(this.game, { x, y, z }, volume, description, { source: mine ? this.game.player : source, sfxId, category, ambient: ambient || mine });
   }
 
   addField(x: number, y: number, z: number, type: string, intensity: number): void {
