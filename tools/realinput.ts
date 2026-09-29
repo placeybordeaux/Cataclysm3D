@@ -1059,6 +1059,25 @@ const scenarios: Scenario[] = [
     await x.key('3');
     await sleep(1500);
     check('3 in gameplay wields it', (await whereIs('knife_combat')).some((l) => l.startsWith('hands')), await whereIs('knife_combat'));
+    const hb = await js<{ label: string; active: boolean; names: string[] }>(`(() => {
+      const c = document.querySelector('#ui2 .ui2-hot-slot[data-slot="2"]');
+      return { label: c?.querySelector('.ui2-hot-name')?.textContent ?? '', active: !!c?.classList.contains('active'),
+        names: [...document.querySelectorAll('#ui2 .ui2-hot-slot.bound .ui2-hot-name')].map((e) => e.textContent) };
+    })()`);
+    check('bound slots carry a name label ("knife" under slot 3), and the wielded one is highlighted', hb.label === 'knife' && hb.active && hb.names.every(Boolean), hb);
+    await x.key('3');
+    await sleep(250);
+    const flash = await js<string>(`document.querySelector('#ui2 .ui2-hot-flash.show')?.textContent ?? ''`);
+    check('a number key says what it used above the slot ("3: combat knife")', /^3: .*knife/.test(flash), flash);
+    await shot('invkeys_hotbar_flash');
+    await sleep(1300);
+    await x.key('9');
+    await sleep(200);
+    const empty = await js<string>(`document.querySelector('#ui2 .ui2-hot-flash.show')?.textContent ?? ''`);
+    check('an empty slot says how to fill it', /^9: empty/.test(empty), empty);
+    await x.key('3');
+    await sleep(1500);
+    check('3 wields it again', (await whereIs('knife_combat')).some((l) => l.startsWith('hands')), await whereIs('knife_combat'));
     await shot('invkeys_hotbar');
     await x.key('3');
     await sleep(1500);

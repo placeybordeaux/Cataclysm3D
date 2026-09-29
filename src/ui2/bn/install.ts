@@ -127,6 +127,7 @@ export function installBnInventory(game: Game, ctx: UiContext, api: DebugApi, ca
       void slot;
     },
     tooltip: (it) => itemTooltip(it, { where: model.where(carriedOf(it.typeId, it.id)?.loc ?? 'inv'), hints: ['Key or click: use', 'Drag off: unbind', 'Right-click: clear'] }),
+    active: (b) => carriedOf(b.typeId, b.ref)?.loc === 'hands',
   });
   model.onChange(() => hotbar.refresh());
   // The hotbar is part of the HUD in gameplay. Its model follows the world (eating from it,

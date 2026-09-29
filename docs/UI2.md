@@ -178,7 +178,10 @@ Promise<number | null>` (slider, field, 1 / Half / All, wheel, arrows, PgUp/PgDn
 
 **Hotbar** — `new Hotbar({storageKey, resolve(typeId) → ItemView | null, use(binding, item, slot),
 tooltip?}).mount()`; `bind(i, item)`, `handleKey(e)`, `refresh()`. Binds item *types*; shows how
-many you carry; drag between slots to swap, drag off to unbind.
+many you carry; drag between slots to swap, drag off to unbind. Bound slots show a short name
+under the icon (`hotbarLabel`: the head noun), `active?(binding)` highlights the one in use (wielded),
+and a key press says what it used ("3: combat knife", or how to fill an empty slot) above the slot:
+in gameplay the cursor is captured, so tooltips alone never showed the names.
 
 **Paper doll** — `paperDollView(model, slots: {id, label, loc, col, row, verb?}[])`; `col/row` are
 in cell units (fractions allowed).

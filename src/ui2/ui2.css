@@ -298,6 +298,21 @@ body.ui2-dragging, body.ui2-dragging * { cursor: grabbing !important; }
 #ui2 .ui2-hot-slot.none-left .ui2-cell-count { color: var(--p-bad); }
 @keyframes ui2-press { 0% { translate: 0 var(--u); } 100% { translate: 0 0; } }
 #ui2 .ui2-hot-slot.pressed { animation: ui2-press .12s steps(2); border-image: var(--skin-inset-sel); }
+/* The label under a bound slot, the wielded item's slot, and what a number key just used. */
+#ui2 .ui2-hot-name {
+  position: absolute; left: 50%; top: 100%; transform: translateX(-50%); margin-top: calc(var(--u) * 1.5); max-width: var(--cell); text-overflow: clip;
+  overflow: hidden; white-space: nowrap; font-size: var(--fs-s); line-height: 1; color: var(--p-text-dim); text-shadow: var(--u) var(--u) 0 #000; pointer-events: none;
+}
+#ui2 .ui2-hotbar:has(.ui2-hot-name) { padding-bottom: calc(var(--u) * 2 + var(--fs-s)); }
+#ui2 .ui2-hot-slot.active { border-image: var(--skin-inset-sel); }
+#ui2 .ui2-hot-slot.active .ui2-hot-name { color: var(--p-accent); }
+#ui2 .ui2-hot-flash {
+  position: absolute; bottom: calc(100% + var(--u) * 2); transform: translateX(-50%); white-space: nowrap; pointer-events: none;
+  padding: var(--u) calc(var(--u) * 3); background: rgba(9, 10, 15, .8); color: var(--p-text-bright); font-size: var(--fs-s);
+  opacity: 0; transition: opacity .25s steps(3);
+}
+#ui2 .ui2-hot-flash.show { opacity: 1; transition: none; }
+#ui2 .ui2-hot-flash.empty { color: var(--p-text-dim); }
 
 /* ---- paper doll ---- */
 #ui2 .ui2-doll { --gap: calc(var(--u) * 6); position: relative; flex: none; align-self: flex-start; margin: var(--u) calc(var(--u) * 8) calc(var(--u) * 4); }

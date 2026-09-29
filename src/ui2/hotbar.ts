@@ -30,6 +30,19 @@ export interface HotbarOpts {
   use(binding: HotbarBinding, item: ItemView | null, slot: number): void;
   /** Tooltip extras (compare with equipped…). */
   tooltip?(item: ItemView): HTMLElement;
+  /** The bound item is in use right now (wielded): its slot is highlighted. */
+  active?(binding: HotbarBinding): boolean;
+}
+
+/**
+ * The few letters under a hotbar icon (QA: pre-bound slots were "tiny unlabeled icons"). English
+ * item names end in their head noun: "long pointy stick" → stick, "bottle of water" → water,
+ * "chef knife" → knife. Parenthesised details go; long words are cut with an ellipsis.
+ */
+export function hotbarLabel(name: string, max = 7): string {
+  const words = name.replace(/\([^)]*\)/g, ' ').trim().split(/\s+/).filter(Boolean);
+  const w = words[words.length - 1] ?? name;
+  return w.length > max ? w.slice(0, max - 1) + '…' : w;
 }
 
 export const HOTBAR_KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0'];
@@ -38,10 +51,15 @@ export class Hotbar {
   readonly el: HTMLElement;
   private slots: (HotbarBinding | null)[];
   private cells: HTMLElement[] = [];
+  /** Name of what a number key just used, above its slot (the cursor is captured in gameplay: no tooltips). */
+  private flash: HTMLElement;
+  private flashTimer = 0;
 
   constructor(private o: HotbarOpts) {
     this.slots = this.load();
     this.el = h('div', { class: 'ui2-hotbar' });
+    this.flash = h('div', { class: 'ui2-hot-flash', attrs: { 'data-testid': 'hotbar-flash' } });
+    this.el.appendChild(this.flash);
     HOTBAR_KEYS.forEach((k, i) => {
       const cell = h('div', { class: 'ui2-hot-slot', data: { slot: String(i) } });
       this.cells.push(cell);
@@ -132,9 +150,22 @@ export class Hotbar {
     cell.classList.remove('pressed');
     void cell.offsetWidth;
     cell.classList.add('pressed');
-    if (!b) return;
-    this.o.use(b, this.o.resolve(b.typeId, b), i);
+    if (!b) return this.say(i, `${HOTBAR_KEYS[i]}: empty — drag an item here from the inventory`, 'empty');
+    const it = this.o.resolve(b.typeId, b);
+    this.say(i, it ? `${HOTBAR_KEYS[i]}: ${b.name}` : `${HOTBAR_KEYS[i]}: no ${b.name} left`, it ? '' : 'empty');
+    this.o.use(b, it, i);
     this.refresh();
+  }
+
+  /** Show `text` above slot i for a moment. */
+  private say(i: number, text: string, tone: string): void {
+    const cell = this.cells[i];
+    this.flash.textContent = text;
+    this.flash.className = `ui2-hot-flash show${tone ? ` ${tone}` : ''}`;
+    // Centred over the slot, kept inside the bar's width.
+    this.flash.style.left = `${cell.offsetLeft + cell.offsetWidth / 2}px`;
+    clearTimeout(this.flashTimer);
+    this.flashTimer = window.setTimeout(() => this.flash.classList.remove('show'), 1400);
   }
 
   refresh(): void {
@@ -143,9 +174,14 @@ export class Hotbar {
       const it = b ? this.o.resolve(b.typeId, b) : null;
       cell.classList.toggle('bound', !!b);
       cell.classList.toggle('none-left', !!b && !it);
+      cell.classList.toggle('active', !!b && !!it && !!this.o.active?.(b));
       cell.replaceChildren(
         h('span', { class: 'ui2-hot-key', text: HOTBAR_KEYS[i] }),
-        ...(b ? [iconEl(b.icon, 'grid'), h('span', { class: 'ui2-cell-count', text: it ? (it.count > 1 ? String(it.count) : '') : '0' })] : []),
+        ...(b ? [
+          iconEl(b.icon, 'grid'),
+          h('span', { class: 'ui2-cell-count', text: it ? (it.count > 1 ? String(it.count) : '') : '0' }),
+          h('span', { class: 'ui2-hot-name', text: hotbarLabel(b.name) }),
+        ] : []),
       );
     });
   }
