@@ -929,8 +929,11 @@ export class Character {
       // dead tired. We also count the head: we have no separate mouth/eyes/hands/feet, so a
       // bare head is the part that most often freezes, and sleeping on while it takes cold
       // damage all night would kill survivors without a hat, which CDDA doesn't do in practice.
-      if (asleep && (p === 'torso' || p === 'head') && t <= BODYTEMP.VERY_COLD && this.sleepiness <= SLEEPINESS.DEAD_TIRED && this.isAsleep()) {
-        this.msg('Your shivering prevents you from sleeping.', 'c_yellow');
+      // Dead tired sleepers shiver on, but the cold still wakes them once it starts to hurt
+      // (a fifth of the part's HP) rather than letting them freeze to death in their sleep.
+      const hurting = this.hp[p].cur < this.hp[p].max * 0.8;
+      if (asleep && (p === 'torso' || p === 'head') && t <= BODYTEMP.VERY_COLD && (this.sleepiness <= SLEEPINESS.DEAD_TIRED || hurting) && this.isAsleep()) {
+        this.msg(hurting ? 'You wake up shivering violently, aching from the cold!' : 'Your shivering prevents you from sleeping.', hurting ? 'c_red' : 'c_yellow');
         this.wakeUp();
       }
     }

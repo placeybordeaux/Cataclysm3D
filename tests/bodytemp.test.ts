@@ -63,6 +63,22 @@ describe('CDDA body temperature', () => {
     expect(hpLost(c)).toBeLessThan(5);
   });
 
+  it('even dead tired, you wake up hurting from the cold instead of freezing to death asleep', () => {
+    const { c, log } = survivor([]);
+    c.env = { temperature: -4, wind: 0, precipitation: false, bedding: -4 };
+    c.sleepiness = 400; // dead tired: CDDA would let you sleep on through the shivering
+    c.fallAsleep();
+    // The player keeps lying back down all night (rest.ts rolls to fall asleep every 30 min).
+    let awake = 0;
+    for (let t = 0; t < 8 * 3600; t += 30) {
+      c.update(30);
+      if (!c.isAsleep() && (awake += 30) >= 1800) (awake = 0), c.fallAsleep();
+    }
+    expect(c.dead).toBe(false);
+    expect(c.hp.head.cur).toBeGreaterThan(c.hp.head.max * 0.6);
+    expect(log.some((m) => /shivering violently/.test(m))).toBe(true);
+  });
+
   it('the shelter kit (emergency jacket + blanket) lets you sleep through a -4 °C night', () => {
     const { c } = survivor([...SURVIVOR_CLOTHES, 'jacket_evac', 'emer_blanket']);
     c.env = { temperature: -4, wind: 0, precipitation: false, bedding: -4 };
