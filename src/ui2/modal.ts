@@ -72,14 +72,22 @@ export function confirmModal(o: ConfirmOpts): Promise<boolean> {
     const okBtn = button(o.ok ?? 'OK', () => answer(true), { tone: o.danger ? 'bad' : 'accent', key: o.danger ? 'Y' : 'Enter' });
     const cancelBtn = button(o.cancel ?? 'Cancel', () => answer(false), { key: 'Esc' });
     const body = typeof o.body === 'string' ? h('div', { text: o.body }) : o.body ?? h('div');
+    // Destructive: Enter is not "yes" — but it must visibly say so. Playtest: the focused Quit
+    // button read as the default, Enter did nothing, and "Quit to main menu doesn't work".
+    const hint = h('div', { class: 'ui2-small tone-warn ui2-dialog-hint', text: '' });
     const d = openDialog(
       o.title,
-      [body],
+      [body, hint],
       [cancelBtn, okBtn],
       (e) => {
         if (e.repeat) return true;
         if (e.key === 'Enter' && !o.danger) answer(true);
-        else if ((e.key === 'y' || e.key === 'Y') && o.danger) answer(true);
+        else if (e.key === 'Enter' && o.danger) {
+          hint.textContent = `Press Y or click ${o.ok ?? 'OK'} to confirm (Esc cancels).`;
+          okBtn.classList.remove('shake');
+          void okBtn.offsetWidth;
+          okBtn.classList.add('shake');
+        } else if ((e.key === 'y' || e.key === 'Y') && o.danger) answer(true);
         else if (e.key === 'n' || e.key === 'N') answer(false);
         else return false;
         return true;
@@ -87,7 +95,8 @@ export function confirmModal(o: ConfirmOpts): Promise<boolean> {
       () => answer(false),
       o.icon,
     );
-    okBtn.focus();
+    // Only a safe default gets the focus ring (a focused danger button looks like Enter's target).
+    (o.danger ? cancelBtn : okBtn).focus();
   });
 }
 

@@ -271,6 +271,7 @@ body.ui2-dragging, body.ui2-dragging * { cursor: grabbing !important; }
 #ui2 .ui2-dialog { border: var(--b3) solid transparent; border-image: var(--skin-panel); min-width: calc(var(--fs) * 16); max-width: 92vw; filter: var(--shadow); }
 #ui2 .ui2-dialog-title { display: flex; align-items: center; gap: calc(var(--u) * 3); padding: var(--u) calc(var(--u) * 4); background: var(--p-bg-raised); color: var(--p-accent); font-size: var(--fs-l); border-bottom: var(--u) solid var(--p-outline); }
 #ui2 .ui2-dialog-body { padding: calc(var(--u) * 5); display: flex; flex-direction: column; gap: calc(var(--u) * 4); max-width: calc(var(--fs) * 26); }
+#ui2 .ui2-dialog-hint:empty { display: none; }
 #ui2 .ui2-dialog-buttons { display: flex; justify-content: flex-end; gap: calc(var(--u) * 3); padding: 0 calc(var(--u) * 4) calc(var(--u) * 4); }
 #ui2 .ui2-count-row { display: flex; align-items: center; gap: calc(var(--u) * 4); }
 #ui2 .ui2-count-quick { display: flex; gap: calc(var(--u) * 2); }
