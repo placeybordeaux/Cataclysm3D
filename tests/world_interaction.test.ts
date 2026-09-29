@@ -151,7 +151,7 @@ describe('vision & light', () => {
     place(game, 9, 22);
     const zed = { x: 9, y: 12 + 10, z: 0 };
     expect(creatureCanSee(game, { x: 20, y: 22, z: 0 }, game.player, 50, 3)).toBe(false);
-    game.player.inv.wield(createItem(data, 'flashlight', { ammo: 'default' }));
+    game.player.inv.wield(createItem(data, 'flashlight', { ammo: 'default' }), null);
     toggleLight(game);
     expect(playerLightState(game).on).toBe(true);
     expect(creatureCanSee(game, { x: 20, y: 22, z: 0 }, game.player, 50, 3)).toBe(true);
@@ -190,7 +190,7 @@ describe('bash', () => {
   it('smash ability: weapon bash + str, unarmed half str', () => {
     const { game } = makeGame();
     expect(smashAbility(game.player)).toEqual({ bash: 4 });
-    game.player.inv.wield(createItem(data, 'crowbar'));
+    game.player.inv.wield(createItem(data, 'crowbar'), null);
     expect(smashAbility(game.player).bash).toBe((data.items.crowbar.melee_damage?.bash ?? 0) + 8);
   });
 });
@@ -451,7 +451,7 @@ describe('traps & light items', () => {
   // TODO(BN): written for DDA data/behaviour; fails on Bright Nights core data (AssertionError: expected false to be true // Object.is equality). Port with its system.
   it.skip('flashlight: F turns it on (transform), it lights the tile and drains', () => {
     const { game } = makeGame();
-    game.player.inv.wield(createItem(data, 'flashlight', { ammo: 'default' }));
+    game.player.inv.wield(createItem(data, 'flashlight', { ammo: 'default' }), null);
     game.clock.seconds = 24 * 3600 + 3600;
     place(game, 9, 16);
     const before = lightAt(game, 9, 16, 0);
@@ -478,7 +478,7 @@ describe('traps & light items', () => {
     game.lightProvider = () => 0;
     expect(creatureCanSee(game, { x: 9, y: 20, z: 0 }, { x: 9, y: 16, z: 0 }, 40, 1)).toBe(false);
     game.lightProvider = (x, y) => (Math.abs(x - 9) <= 5 && Math.abs(y - 16) <= 5 ? 42 : null);
-    game.player.inv.wield(createItem(data, 'flashlight', { ammo: 'default' }));
+    game.player.inv.wield(createItem(data, 'flashlight', { ammo: 'default' }), null);
     toggleLight(game);
     expect(lightAt(game, 10, 16, 0)).toBeGreaterThan(42);
     game.lightProvider = null;

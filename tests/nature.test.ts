@@ -45,7 +45,7 @@ function makeGame(seed = 7): { game: Game; log: string[] } {
   installWeather(game);
   installNature(game, null);
   // pockets to put harvests and seeds in
-  game.player.inv.wear(createItem(data, 'backpack'));
+  game.player.inv.wear(createItem(data, 'backpack'), null);
   const log: string[] = [];
   game.events.on('message', (m) => log.push(m.text));
   return { game, log };
@@ -205,7 +205,7 @@ describe('farming', () => {
     game.clock.seconds = day(SUMMER + 2) + 10 * 3600;
     place(game, 30, 30);
     map.setTer(31, 30, 0, 't_dirtmound');
-    game.player.inv.stash(createItem(data, 'seed_tomato'));
+    game.player.inv.stashNew(createItem(data, 'seed_tomato'));
     expect(canPlant(game, 31, 30, 0, 'seed_tomato')).toBeNull();
     expect(interactionsAt(game, 31, 30, 0).map((i) => i.label)).toContain('Plant seeds');
     expect(startPlanting(game, 31, 30, 0, 'seed_tomato', { instant: true })).toBeNull();
@@ -244,7 +244,7 @@ describe('farming', () => {
     game.clock.seconds = day(WINTER + 20) + 12 * 3600;
     place(game, 30, 30);
     game.map.setTer(31, 30, 0, 't_dirtmound');
-    game.player.inv.stash(createItem(data, 'seed_tomato'));
+    game.player.inv.stashNew(createItem(data, 'seed_tomato'));
     expect(canPlant(game, 31, 30, 0, 'seed_tomato')).toMatch(/cold will kill/);
     // inside the house (roofed)
     game.map.setTer(8, 8, 0, 't_dirtmound');
@@ -257,12 +257,12 @@ describe('farming', () => {
     game.clock.seconds = day(SUMMER + 2);
     place(game, 30, 30);
     game.map.setTer(31, 30, 0, 't_dirtmound');
-    game.player.inv.stash(createItem(data, 'seed_tomato'));
+    game.player.inv.stashNew(createItem(data, 'seed_tomato'));
     startPlanting(game, 31, 30, 0, 'seed_tomato', { instant: true });
     const seed = seedAt(game, 31, 30, 0)!;
     const t0 = plantedAt(seed);
-    game.player.inv.stash(createItem(data, 'fertilizer_commercial'));
-    game.player.inv.stash(createItem(data, 'fertilizer_commercial'));
+    game.player.inv.stashNew(createItem(data, 'fertilizer_commercial'));
+    game.player.inv.stashNew(createItem(data, 'fertilizer_commercial'));
     expect(fertilizePlant(game, 31, 30, 0, game.player.inv.allItems().find((i) => i.typeId === 'fertilizer_commercial')!)).toBeNull();
     expect(t0 - plantedAt(seed)).toBeCloseTo(day(DAYS_PER_SEASON * 0.2));
     // 2 + 18.2 days old: past the 17-day seed stage at once; the fertilizer is used up by it
@@ -301,7 +301,7 @@ describe('water and fishing', () => {
   it('fills containers from lake water (dirty water)', () => {
     const { game } = makeGame();
     place(game, 14, 31);
-    game.player.inv.wield(createItem(data, 'jug_plastic'));
+    game.player.inv.wield(createItem(data, 'jug_plastic'), null);
     const list = fillableContainers(game, 'water');
     expect(list.length).toBe(1);
     expect(fillContainer(game, list[0][0], 'water')).toBeGreaterThan(0);
@@ -320,7 +320,7 @@ describe('water and fishing', () => {
     expect(game.player.wetness.torso).toBe(1);
     expect(st.underwater).toBe(false);
     // an anvil in hand: swim speed ≥ 500
-    game.player.inv.wielded = createItem(data, 'anvil');
+    game.player.inv.wield(createItem(data, 'anvil'), null);
     const hp0 = game.player.hp.torso.cur;
     for (let i = 0; i < 30 * 30 && !game.player.dead; i++) updateSwimming(game, 1 / 30);
     expect(log).toContain('You sink like a rock!');
@@ -402,14 +402,14 @@ describe('save', () => {
       installWeather(game);
       registerCoreSaveables(game);
       installNature(game, null);
-      game.player.inv.wear(createItem(data, 'backpack'));
+      game.player.inv.wear(createItem(data, 'backpack'), null);
       return game;
     };
     const A = mk();
     A.clock.seconds = day(SUMMER + 2) + 10 * 3600;
     place(A, 30, 30);
     A.map.setTer(31, 30, 0, 't_dirtmound');
-    A.player.inv.stash(createItem(data, 'seed_tomato'));
+    A.player.inv.stashNew(createItem(data, 'seed_tomato'));
     startPlanting(A, 31, 30, 0, 'seed_tomato', { instant: true });
     natureOf(A)!.actualizer.sweep();
     const file = serializeGame(A, { slot: 'farmer', name: A.player.name, gen: 'test' });

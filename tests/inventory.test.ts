@@ -1,270 +1,387 @@
 import { describe, expect, it } from 'vitest';
 import { Rng } from '../src/core/rng';
 import { Character } from '../src/game/character';
-import { createItem } from '../src/game/item';
+import { createItem, inNewContainer, loadAmmo } from '../src/game/item';
+import { canMove, L, moveItem, spawnItem } from '../src/game/moves';
 import { makeData } from './fixtures/gamedata';
+import { FakeGround } from './fixtures/ground';
+
+// The BN carrying model (character.cpp, docs/BN_DATA_MODEL.md §4): worn storage pools into
+// one carrying volume; the inventory is flat; containers, holsters, bandoliers and magazines
+// hold their own things. Every action is a move (src/game/moves.ts).
 
 const data = makeData();
 
-function survivor(): { c: Character; log: string[] } {
+function survivor(): { c: Character; log: string[]; ground: FakeGround } {
   const c = new Character(data, { seed: 5 });
   const log: string[] = [];
   c.onMessage = (t) => log.push(t);
-  return { c, log };
+  const ground = new FakeGround();
+  c.groundLoc = () => L.ground(ground, 0, 0, 0);
+  return { c, log, ground };
 }
+const here = (g: FakeGround) => L.ground(g, 0, 0, 0);
+const give = (c: Character, id: string, opts = {}) => {
+  const it = createItem(data, id, opts);
+  expect(c.inv.giveNew(it)).not.toBeNull();
+  return it;
+};
 
-describe('carrying', () => {
-  it('weight capacity = 13 kg + 4 kg * str (Character::weight_capacity); STRONGBACK +35%', () => {
+describe('carrying capacity (Character::weight_capacity / volume_capacity)', () => {
+  it('weight: 13 kg + 4 kg per Str; STRONGBACK +35%', () => {
     const { c } = survivor();
     expect(c.inv.weightCapacity()).toBe(45000);
     c.addTrait('STRONGBACK');
     expect(c.inv.weightCapacity()).toBeCloseTo(60750);
   });
 
-  it('wearing a backpack gives pocket capacity; pick up goes into it', () => {
-    const { c, log } = survivor();
+  it('volume: the sum of worn storage; worn and wielded items do not count as carried', () => {
+    const { c, log, ground } = survivor();
     expect(c.inv.volumeCapacity()).toBe(0);
     const beans = createItem(data, 'can_beans');
-    // no pockets: the first thing picked up goes to your hands
-    expect(c.inv.pickUp(beans).msg).toBe('You wield your canned beans.');
-    expect(c.inv.pickUp(createItem(data, 'can_beans')).msg).toBe("There's no room in your inventory for the canned beans.");
-    const r = c.inv.wear(createItem(data, 'backpack'));
-    expect(r.ok).toBe(true);
-    expect(log).toContain('You put on your backpack.');
-    expect(c.inv.volumeCapacity()).toBe(25510);
-    const r2 = c.inv.pickUp(createItem(data, 'can_beans'));
-    expect(r2.ok).toBe(true);
-    expect(r2.msg).toBe('You pick up: canned beans');
-    expect(c.inv.carried().map((i) => i.typeId)).toEqual(['can_beans']);
-    expect(c.inv.weightCarried()).toBe(633 + 256 * 2);
-  });
-
-  it('picking up something too big swaps hands when the held item fits a pocket', () => {
-    const { c } = survivor();
-    c.inv.wear(createItem(data, 'jeans'));
-    const beans = createItem(data, 'can_beans');
-    c.inv.wielded = beans;
-    const bar = createItem(data, 'crowbar');
-    expect(c.inv.canStash(beans)).toBe(true);
-    expect(c.inv.canStash(bar)).toBe(false);
-    const r = c.inv.pickUp(bar);
-    expect(r.ok).toBe(true);
-    expect(c.inv.wielded).toBe(bar);
-    expect(c.inv.carried()).toContain(beans);
-  });
-
-  it("you can't wear two backpacks, or three pairs of jeans", () => {
-    const { c } = survivor();
-    c.inv.wear(createItem(data, 'backpack'));
-    const r = c.inv.wear(createItem(data, 'backpack'));
-    expect(r.ok).toBe(false);
-    expect(r.msg).toBe('backpack conflicts with backpack!');
-    expect(c.inv.wear(createItem(data, 'jeans')).ok).toBe(true);
-    expect(c.inv.wear(createItem(data, 'jeans')).ok).toBe(true);
-    expect(c.inv.wear(createItem(data, 'jeans')).msg).toBe("Can't wear 2 or more jeans at once.");
-    expect(c.inv.wear(createItem(data, 'pipe')).msg).toBe('Putting on a pipe would be tricky.');
-  });
-
-  it('encumbrance: per-part values, fill-dependent storage, CDDA layering penalty', () => {
-    const { c } = survivor();
-    c.inv.wear(createItem(data, 'hoodie')); // OUTER, torso 6
-    c.inv.wear(createItem(data, 'backpack')); // BELTED, torso 2..25
-    expect(c.inv.encumbrance('torso')).toBe(8);
-    expect(c.inv.encumbrance('arm_l')).toBe(6);
-    // fill the main 25 L pocket halfway: 2 + 23 * ~0.5
-    for (let i = 0; i < 50; i++) c.inv.pickUp(createItem(data, 'can_beans'));
-    expect(c.inv.encumbrance('torso')).toBeGreaterThan(18);
-    const { c: d } = survivor();
-    d.inv.wear(createItem(data, 'hoodie'));
-    d.inv.wear(createItem(data, 'jacket_leather')); // both OUTER on torso: 6 + 8, + min(6,8)=6 penalty
-    expect(d.inv.encumbrance('torso')).toBe(6 + 8 + 6);
-    expect(d.inv.encumbrance('arm_r')).toBe(6 + 12 + 6);
-  });
-
-  it('take off, drop and wield', () => {
-    const { c, log } = survivor();
+    spawnItem(beans, here(ground));
+    // nothing to carry it in: BN pickup puts it in your hands
+    expect(c.inv.pickUp(beans, here(ground)).msg).toBe('You wield your canned beans (2).');
+    const more = createItem(data, 'can_beans');
+    spawnItem(more, here(ground));
+    expect(c.inv.pickUp(more, here(ground)).msg).toBe("There's no room in your inventory for the canned beans (2).");
+    expect(ground.itemsAt(0, 0, 0)).toEqual([more]);
     const bp = createItem(data, 'backpack');
-    c.inv.wear(bp);
-    c.inv.wear(createItem(data, 'jeans'));
-    const pipe = createItem(data, 'pipe');
-    // 60 cm pipe doesn't fit the 40 cm backpack pocket: picked up into your hands
-    expect(c.inv.pickUp(pipe).msg).toBe('You wield your pipe.');
-    expect(c.inv.wielded).toBe(pipe);
-    const knife = createItem(data, 'knife_combat');
-    const w = c.inv.wield(knife); // the pipe can't be stored, so it is dropped
-    expect(w.dropped).toEqual([pipe]);
-    c.inv.wield(createItem(data, 'crowbar')); // the knife goes into the backpack
-    expect(c.inv.carried()).toContain(knife);
-    c.inv.pickUp(pipe);
-    const d = c.inv.drop(knife);
-    expect(d.dropped).toEqual([knife]);
-    expect(log).toContain('You drop your National Guard bayonet.');
-    const t = c.inv.takeOff(bp);
-    expect(t.ok).toBe(true);
-    expect(log).toContain('You take off your backpack.');
-    // backpack doesn't fit in jeans pockets and hands are full: it is dropped
-    expect(t.dropped).toEqual([bp]);
+    expect(c.inv.wear(bp, null).ok).toBe(true);
+    expect(log).toContain('You put on your backpack.');
+    c.inv.wear(createItem(data, 'jeans'), null);
+    expect(c.inv.volumeCapacity()).toBe(15000 + 500);
+    const r = c.inv.pickUp(more, here(ground));
+    expect(r.ok).toBe(true);
+    expect(r.msg).toBe('You pick up: canned beans (2)');
+    expect(c.inv.carried()).toEqual([more]);
+    expect(c.inv.volumeCarried()).toBe(500);
+    expect(c.inv.weightCarried()).toBe(633 + 600 + 256 * 4);
+  });
+
+  it('stacks merge in the inventory; a partial pickup splits the stack on the ground', () => {
+    const { c, ground } = survivor();
+    c.inv.wear(createItem(data, 'backpack'), null);
+    give(c, '9mm', { count: 20 });
+    const pile = createItem(data, '9mm', { count: 30 });
+    spawnItem(pile, here(ground));
+    expect(c.inv.pickUp(pile, here(ground), 10).ok).toBe(true);
+    expect(pile.charges).toBe(20);
+    expect(c.inv.carried().map((i) => i.charges)).toEqual([30]);
+  });
+
+  it("clothing rules: two of a kind at most, one pair of shoes, one helmet; a pipe can't be worn", () => {
+    const { c } = survivor();
+    expect(c.inv.wear(createItem(data, 'backpack'), null).ok).toBe(true);
+    expect(c.inv.wear(createItem(data, 'backpack'), null).ok).toBe(true);
+    expect(c.inv.wear(createItem(data, 'backpack'), null).msg).toBe("Can't wear 3 or more backpacks at once.");
+    expect(c.inv.wear(createItem(data, 'sneakers'), null).ok).toBe(true);
+    expect(c.inv.wear(createItem(data, 'sneakers'), null).msg).toBe("You're already wearing footwear!");
+    expect(c.inv.wear(createItem(data, 'socks'), null).ok).toBe(true);
+    expect(c.inv.wear(createItem(data, 'hat_hard'), null).ok).toBe(true);
+    expect(c.inv.wear(createItem(data, 'hat_hard'), null).msg).toBe("You can't wear that with other headgear!");
+    expect(c.inv.wear(createItem(data, 'crowbar'), null).msg).toBe('Putting on a crowbar would be tricky.');
+  });
+
+  it('encumbrance: a soft backpack grows with the carried volume; BN layering penalty', () => {
+    const { c } = survivor();
+    c.inv.wear(createItem(data, 'backpack'), null); // torso 3..15, 15 L
+    expect(c.inv.encumbrance('torso')).toBe(3);
+    give(c, '9mm', { count: 50 * 30 }); // 7.5 L: half full
+    expect(c.inv.volumeCarried()).toBe(7500);
+    expect(c.inv.encumbrance('torso')).toBe(3 + 6);
+    const { c: d } = survivor();
+    d.inv.wear(createItem(data, 'hoodie'), null); // OUTER 12
+    d.inv.wear(createItem(data, 'jacket_leather'), null); // OUTER 15
+    // two items on one layer: all but the most encumbering count again (min 2, max 10 each)
+    expect(d.inv.encumbrance('torso')).toBe(12 + 15 + 10);
   });
 
   it('warmth sums covering clothes', () => {
     const { c } = survivor();
-    c.inv.wear(createItem(data, 'hoodie'));
-    c.inv.wear(createItem(data, 'jacket_leather'));
-    expect(c.inv.warmth('torso')).toBe(45);
+    c.inv.wear(createItem(data, 'hoodie'), null);
+    expect(c.inv.warmth('torso')).toBe(30);
     expect(c.inv.warmth('leg_l')).toBe(0);
   });
 });
 
-describe('eating and drinking from containers', () => {
-  it('drinking from a bottle takes one 250 ml portion and leaves the bottle', () => {
-    const { c, log } = survivor();
-    c.inv.wear(createItem(data, 'backpack'));
-    const bottle = createItem(data, 'bottle_plastic');
-    bottle.put(createItem(data, 'water_clean', { charges: 2 }));
-    c.inv.pickUp(bottle);
-    c.thirst = 120;
-    const r = c.inv.consume(bottle);
+describe('wield, take off, drop', () => {
+  it('wielding stows the old weapon, or drops it when there is no room', () => {
+    const { c, log, ground } = survivor();
+    const bar = give(c, 'crowbar');
+    expect(c.inv.wielded).toBe(bar);
+    const knife = createItem(data, 'knife_combat');
+    spawnItem(knife, here(ground));
+    const r = c.inv.wield(knife, here(ground));
     expect(r.ok).toBe(true);
+    expect(log).toContain('You drop your crowbar and wield your combat knife.');
+    expect(ground.itemsAt(0, 0, 0)).toEqual([bar]);
+    c.inv.wear(createItem(data, 'backpack'), null);
+    expect(c.inv.wield(bar, here(ground)).ok).toBe(true);
+    expect(c.inv.carried()).toEqual([knife]);
+    expect(ground.itemsAt(0, 0, 0)).toEqual([]);
+  });
+
+  it("taking off a backpack whose room you're using: into your hands, else dropped", () => {
+    const { c, ground } = survivor();
+    const bp = createItem(data, 'backpack');
+    c.inv.wear(bp, null);
+    give(c, '9mm', { count: 600 }); // 3 L
+    const t = c.inv.takeOff(bp);
+    expect(t.ok).toBe(true);
+    expect(c.inv.wielded).toBe(bp);
+    // the rounds are still carried: over capacity is allowed after the fact (BN), never created by a pick up
+    expect(c.inv.carried()[0].charges).toBe(600);
+    c.inv.wear(bp);
+    c.inv.wield(give(c, 'crowbar'), c.inv.locOf(c.inv.carried().find((i) => i.typeId === 'crowbar')!));
+    expect(c.inv.takeOff(bp).msg).toBe('You take off your backpack and drop it.');
+    expect(ground.itemsAt(0, 0, 0)).toContain(bp);
+  });
+
+  it('drop a part of a stack', () => {
+    const { c, ground } = survivor();
+    c.inv.wear(createItem(data, 'backpack'), null);
+    const r = give(c, '9mm', { count: 50 });
+    expect(c.inv.drop(r, here(ground), 20).ok).toBe(true);
+    expect(r.charges).toBe(30);
+    expect((ground.itemsAt(0, 0, 0)[0] as typeof r).charges).toBe(20);
+  });
+
+  it("integrated and bionic items can't be dropped or taken off", () => {
+    const { c } = survivor();
+    const claws = createItem(data, 'glock_19');
+    claws.flags.push('INTEGRATED');
+    spawnItem(claws, L.hands(c), { force: true });
+    expect(c.inv.drop(claws).ok).toBe(false);
+  });
+});
+
+describe('containers (one load, sealed for liquids when carried)', () => {
+  it('drinking from a bottle: one portion at a time; the empty bottle stays', () => {
+    const { c, log } = survivor();
+    c.inv.wear(createItem(data, 'backpack'), null);
+    const bottle = inNewContainer(data, createItem(data, 'water_clean', { charges: 2 }), 'bottle_plastic').container;
+    c.inv.giveNew(bottle);
+    c.thirst = 120;
+    expect(c.inv.consume(bottle).ok).toBe(true);
     expect(log).toContain('You drink your clean water.');
-    expect(bottle.allContents()[0].charges).toBe(1);
+    expect(bottle.contents[0].charges).toBe(1);
     c.inv.consume(bottle);
-    expect(bottle.allContents()).toHaveLength(0);
+    expect(bottle.contents).toHaveLength(0);
     expect(c.inv.carried()).toContain(bottle);
     expect(c.instantThirst()).toBe(20);
     expect(c.inv.consume(bottle).msg).toBe("That doesn't look edible.");
   });
 
-  it('consuming an item from the map reports usedUp so the caller removes it', () => {
+  it('a can opens (unseals_into) the moment you take something out', () => {
     const { c } = survivor();
-    const beans = createItem(data, 'can_beans');
-    expect(c.inv.consume(beans).usedUp).toBe(true);
+    c.inv.wear(createItem(data, 'backpack'), null);
+    const can = inNewContainer(data, createItem(data, 'can_beans'), 'can_medium').container;
+    c.inv.giveNew(can);
+    c.inv.consume(can);
+    expect(can.typeId).toBe('can_medium_unsealed');
+    expect(can.contents[0].charges).toBe(1);
+  });
+
+  it('liquid: sealed bottle anywhere; a bucket only on the ground or in hand; never loose in a pack', () => {
+    const { c, ground } = survivor();
+    c.inv.wear(createItem(data, 'backpack'), null);
+    const water = createItem(data, 'water_clean', { charges: 40 });
+    spawnItem(water, here(ground));
+    expect(c.inv.pickUp(water, here(ground)).code).toBe('liquid');
+    const bucket = give(c, 'bucket'); // into the inventory (the backpack's room)
+    expect(c.inv.carried()).toContain(bucket);
+    expect(canMove(water, here(ground), L.in(bucket), { actor: c }).msg).toBe('That bucket must be on the ground or held to hold contents!');
+    expect(c.inv.wield(bucket).ok).toBe(true);
+    const r = moveItem(water, here(ground), L.in(bucket), { actor: c, partial: true });
+    expect(r.ok).toBe(true);
+    expect(r.moved).toBe(20); // 5 L
+    expect(water.charges).toBe(20);
+    // with water in it, the bucket can't go back into the pack
+    expect(c.inv.unwield().code).toBe('needs_seal');
+    const bottle = give(c, 'bottle_plastic');
+    expect(moveItem(water, here(ground), L.in(bottle), { actor: c, partial: true }).moved).toBe(2);
+    expect(moveItem(createItem(data, 'water', { charges: 1 }), null, L.in(bottle), { actor: c }).msg).toBe("You can't mix loads in your plastic bottle.");
+  });
+
+  it('a soft container you carry can only grow into your free carrying volume', () => {
+    const { c, ground } = survivor();
+    c.inv.wear(createItem(data, 'jeans'), null); // 500 ml
+    const bag = give(c, 'bag_plastic'); // 10 ml
+    expect(c.inv.carried()).toEqual([bag]);
+    const rounds = createItem(data, '9mm', { count: 500 }); // 2.5 L
+    spawnItem(rounds, here(ground));
+    const r = moveItem(rounds, here(ground), L.in(bag), { actor: c });
+    expect(r.code).toBe('no_room');
+    const part = moveItem(rounds, here(ground), L.in(bag), { actor: c, count: 90 });
+    expect(part.ok).toBe(true);
+    expect(c.inv.volumeCarried()).toBe(10 + 450);
+  });
+});
+
+describe('holsters and bandoliers hold their own items', () => {
+  it("a worn holster's pistol doesn't use carrying volume; drawing costs draw_cost", () => {
+    const { c, ground } = survivor();
+    const h = createItem(data, 'holster');
+    c.inv.wear(h, null);
+    const gun = createItem(data, 'glock_19', { ammo: 'default' });
+    spawnItem(gun, here(ground));
+    const r = moveItem(gun, here(ground), L.in(h), { actor: c });
+    expect(r.ok).toBe(true);
+    expect(r.msg).toBe('You holster your Glock 19 (15/15).');
+    expect(c.inv.volumeCarried()).toBe(0);
+    expect(moveItem(createItem(data, 'glock_19'), null, L.in(h), { actor: c }).msg).toBe('Your holster is full.');
+    const draw = c.inv.wield(gun);
+    expect(draw.ok).toBe(true);
+    expect(draw.moves).toBe(100);
+  });
+
+  it('a bandolier takes rounds of its types, up to capacity', () => {
+    const { c } = survivor();
+    const b = createItem(data, 'bandolier_pistol');
+    c.inv.wear(b, null);
+    c.inv.wear(createItem(data, 'backpack'), null);
+    const rounds = give(c, '9mm', { count: 50 });
+    const r = moveItem(rounds, L.inv(c), L.in(b), { actor: c, partial: true });
+    expect(r.moved).toBe(40);
+    expect(rounds.charges).toBe(10);
+    expect(b.ammoRemaining()).toBe(40);
+    expect(c.inv.reload(b).msg).toBe('The pistol bandolier is already fully loaded!');
   });
 });
 
 describe('tools and qualities', () => {
-  it('hasQuality finds tools in pockets and hands', () => {
+  it('countOf / useAmount take from the inventory and wielded item, not worn clothes', () => {
     const { c } = survivor();
-    c.inv.wear(createItem(data, 'backpack'));
-    expect(c.inv.hasQuality('CUT', 1)).toBe(false);
-    c.inv.pickUp(createItem(data, 'knife_combat'));
-    expect(c.inv.hasQuality('CUT', 1)).toBe(true);
-    expect(c.inv.hasQuality('CUT', 3)).toBe(false);
-    c.inv.wield(createItem(data, 'crowbar'));
-    expect(c.inv.maxQuality('PRY')).toBe(3);
-    expect(c.inv.findByQuality('HAMMER', 1).map((i) => i.typeId)).toEqual(['crowbar']);
-  });
-
-  it('countOf/useAmount split stacks', () => {
-    const { c } = survivor();
-    c.inv.wear(createItem(data, 'backpack'));
-    c.inv.pickUp(createItem(data, '9mm', { count: 50 }));
+    c.inv.wear(createItem(data, 'backpack'), null);
+    give(c, '9mm', { count: 50 });
     expect(c.inv.countOf('9mm')).toBe(50);
     const used = c.inv.useAmount('9mm', 20);
     expect(used[0].charges).toBe(20);
     expect(c.inv.countOf('9mm')).toBe(30);
+    expect(c.inv.countOf('backpack')).toBe(0);
     expect(() => c.inv.useAmount('9mm', 31)).toThrow();
   });
 
-  it('flashlight: transform on with batteries, drains 1 kJ per 1000/1.56 s, reverts when empty', () => {
+  it('flashlight: needs a charged battery; drains power_draw, reverts when empty', () => {
     const { c, log } = survivor();
-    c.inv.wear(createItem(data, 'backpack'));
-    const fl = createItem(data, 'flashlight');
-    c.inv.pickUp(fl);
-    expect(c.inv.use(fl).msg).toBe('The batteries are dead.');
-    const cell = createItem(data, 'medium_battery_cell', { ammo: 'battery', ammoCount: 2 });
-    fl.magazineWell()!.insert(cell);
+    c.inv.wear(createItem(data, 'backpack'), null);
+    const fl = give(c, 'flashlight');
+    expect(c.inv.use(fl).msg).toBe("The flashlight's batteries are dead.");
+    const cell = createItem(data, 'light_battery_cell', { ammo: 'battery', ammoCount: 2 });
+    expect(spawnItem(cell, L.mag(fl)).ok).toBe(true);
     const r = c.inv.use(fl);
     expect(r.msg).toBe('You turn the flashlight on.');
     expect(fl.typeId).toBe('flashlight_on');
     expect(fl.active).toBe(true);
     expect(fl.ammoRemaining()).toBe(2);
-    c.update(700);
+    c.update(0.1); // 10 kW power_draw: 1 kJ per 0.1 s
     expect(fl.ammoRemaining()).toBe(1);
-    c.update(700);
+    c.update(0.1);
     expect(fl.typeId).toBe('flashlight');
     expect(fl.active).toBe(false);
-    expect(log).toContain('Your flashlight (on) runs out of power.');
+    expect(log.at(-1)).toMatch(/runs out of power/);
   });
 });
 
-describe('reloading (9mm handgun)', () => {
-  it('swaps in a loaded magazine: 150 reload + 3 handling moves at skill 0', () => {
+describe('reloading and unloading', () => {
+  it('swaps in a loaded magazine; the old one goes to the inventory', () => {
     const { c, log } = survivor();
-    c.inv.wear(createItem(data, 'backpack'));
+    c.inv.wear(createItem(data, 'backpack'), null);
     const gun = createItem(data, 'glock_19');
-    c.inv.wield(gun);
-    expect(c.inv.reload().msg).toBe("You don't have a magazine to reload your Glock 19 pistol!");
-    c.inv.pickUp(createItem(data, 'glockmag', { ammo: '9mm' }));
+    c.inv.wield(gun, null);
+    expect(c.inv.reload().msg).toBe("You don't have a magazine to reload your Glock 19!");
+    const mag = give(c, 'glockmag', { ammo: '9mm' });
     const r = c.inv.reload();
     expect(r.ok).toBe(true);
-    expect(r.moves).toBe(153); // item_reload_cost: min(200, 76ml/20) + 150 / (1 + 0)
-    expect(log).toContain('You reload the Glock 19 pistol.');
+    expect(log).toContain('You reload the Glock 19.');
+    expect(gun.magazine).toBe(mag);
     expect(gun.ammoRemaining()).toBe(15);
-    expect(c.inv.reload().msg).toBe('The Glock 19 pistol is already fully loaded!');
-    c.setSkill('pistol', 5);
+    expect(c.inv.reload().msg).toBe('The Glock 19 is already fully loaded!');
     gun.ammoConsume(15);
-    // empty magazine in the gun + loose rounds -> reload the inserted magazine
-    c.inv.pickUp(createItem(data, '9mm', { count: 20 }));
+    give(c, '9mm', { count: 20 });
     const r2 = c.inv.reload();
-    expect(r2.ok).toBe(true);
-    expect(r2.msg).toBe('You reload the Glock 9x19mm 15-round magazine with 9x19mm JHPs.');
+    expect(r2.msg).toBe('You reload the Glock magazine with 9x19mm JHPs.');
     expect(gun.ammoRemaining()).toBe(15);
-    expect(c.inv.countOf('9mm')).toBe(15 + 5);
+    expect(c.inv.countOf('9mm')).toBe(5); // the rounds in the gun's magazine are not loose ammo
   });
 
   it('empty gun + empty magazine + loose rounds: one reload fills and inserts the magazine', () => {
     const { c } = survivor();
-    c.inv.wear(createItem(data, 'backpack'));
+    c.inv.wear(createItem(data, 'backpack'), null);
     const gun = createItem(data, 'glock_19');
-    c.inv.wield(gun);
-    c.inv.pickUp(createItem(data, 'glockmag'));
-    c.inv.pickUp(createItem(data, '9mm', { count: 20 }));
-    const r = c.inv.reload();
-    expect(r.ok).toBe(true);
+    c.inv.wield(gun, null);
+    give(c, 'glockmag');
+    give(c, '9mm', { count: 20 });
+    expect(c.inv.reload().ok).toBe(true);
     expect(gun.ammoRemaining()).toBe(15);
-    expect(c.inv.countOf('9mm')).toBe(15 + 5);
-    expect(r.moves).toBeGreaterThan(153);
   });
 
-  it('prefers the fullest spare magazine and stashes the old one', () => {
+  it('prefers the fullest spare magazine and stows the old one', () => {
     const { c } = survivor();
-    c.inv.wear(createItem(data, 'backpack'));
-    const gun = createItem(data, 'glock_19');
-    const m1 = createItem(data, 'glockmag', { ammo: '9mm', ammoCount: 3 });
-    gun.magazineWell()!.insert(m1);
-    c.inv.wield(gun);
-    const m2 = createItem(data, 'glockmag', { ammo: '9mm', ammoCount: 10 });
-    const m3 = createItem(data, 'glockmag', { ammo: '9mm', ammoCount: 15 });
-    c.inv.pickUp(m2);
-    c.inv.pickUp(m3);
+    c.inv.wear(createItem(data, 'backpack'), null);
+    const gun = createItem(data, 'glock_19', { ammo: '9mm', ammoCount: 3 });
+    const m1 = gun.magazine!;
+    c.inv.wield(gun, null);
+    give(c, 'glockmag', { ammo: '9mm', ammoCount: 10 });
+    const m3 = give(c, 'glockmag', { ammo: '9mm', ammoCount: 15 });
     c.inv.reload();
-    expect(gun.magazineCurrent()).toBe(m3);
+    expect(gun.magazine).toBe(m3);
     expect(c.inv.carried()).toContain(m1);
+  });
+
+  it('unload: magazine out of the gun, rounds out of the magazine, rounds out of a revolver', () => {
+    const { c } = survivor();
+    c.inv.wear(createItem(data, 'backpack'), null);
+    const gun = give(c, 'glock_19', { ammo: '9mm', ammoCount: 12 });
+    const mag = gun.magazine!;
     expect(c.inv.unload(gun).ok).toBe(true);
-    expect(gun.magazineCurrent()).toBeUndefined();
+    expect(gun.magazine).toBeNull();
+    expect(c.inv.carried()).toContain(mag);
+    expect(c.inv.unload(mag).ok).toBe(true);
+    expect(mag.ammoRemaining()).toBe(0);
+    expect(c.inv.countOf('9mm')).toBe(12);
+    const rev = give(c, 'sw_619');
+    loadAmmo(rev, '38_special', 6);
+    expect(c.inv.unload(rev).ok).toBe(true);
+    expect(rev.charges).toBe(0);
+    expect(c.inv.countOf('38_special')).toBe(6);
+    expect(c.inv.unload(rev).msg).toBe("Your S&W 619 isn't loaded.");
+  });
+
+  it('a revolver loads loose rounds into its cylinder', () => {
+    const { c } = survivor();
+    c.inv.wear(createItem(data, 'backpack'), null);
+    const rev = createItem(data, 'sw_619');
+    c.inv.wield(rev, null);
+    give(c, '38_special', { count: 10 });
+    expect(c.inv.reload().ok).toBe(true);
+    expect(rev.ammoRemaining()).toBe(7);
+    expect(c.inv.countOf('38_special')).toBe(3);
   });
 });
 
 describe('armor', () => {
-  it('leather jacket absorbs a zombie claw on the arm (resist cut 3 * thickness 1)', () => {
+  it('leather jacket absorbs a zombie claw on the arm (fixture leather cut 3 x thickness 3)', () => {
     const { c } = survivor();
-    c.inv.wear(createItem(data, 'jacket_leather'));
-    const out = c.inv.absorbHit('arm_l', [{ type: 'cut', amount: 8 }, { type: 'bash', amount: 4 }], new Rng(1));
-    expect(out).toEqual([{ type: 'cut', amount: 5 }, { type: 'bash', amount: 3 }]);
-    // uncovered part: full damage
+    c.inv.wear(createItem(data, 'jacket_leather'), null);
+    const out = c.inv.absorbHit('arm_l', [{ type: 'cut', amount: 12 }, { type: 'bash', amount: 4 }], new Rng(1));
+    expect(out).toEqual([{ type: 'cut', amount: 3 }, { type: 'bash', amount: 1 }]);
     expect(c.inv.absorbHit('leg_l', [{ type: 'cut', amount: 8 }], new Rng(1))).toEqual([{ type: 'cut', amount: 8 }]);
   });
 
-  it('portion materials: hard hat plastic x4 thickness', () => {
+  it('armor penetration and crit armor multipliers (hard hat: plastic 2 x thickness 4)', () => {
     const { c } = survivor();
-    c.inv.wear(createItem(data, 'hat_hard'));
-    expect(c.inv.absorbHit('head', [{ type: 'bash', amount: 10 }], new Rng(2))).toEqual([{ type: 'bash', amount: 2 }]);
-  });
-
-  it('armor penetration and crit armor multipliers', () => {
-    const { c } = survivor();
-    c.inv.wear(createItem(data, 'hat_hard'));
-    expect(c.inv.absorbHit('head', [{ type: 'bash', amount: 10, armor_penetration: 4 }], new Rng(2))).toEqual([{ type: 'bash', amount: 6 }]);
-    expect(c.inv.absorbHit('head', [{ type: 'bash', amount: 10, armor_multiplier: 0.5 }], new Rng(2))).toEqual([{ type: 'bash', amount: 6 }]);
+    c.inv.wear(createItem(data, 'hat_hard'), null);
+    const hit = (u: object) => {
+      for (let seed = 1; seed < 50; seed++) {
+        const r = c.inv.absorbHit('head', [{ type: 'bash', amount: 10, ...u }], new Rng(seed));
+        if (r[0].amount < 10) return r[0].amount; // the hat's 80% coverage caught it
+      }
+      return 10;
+    };
+    expect(hit({})).toBe(2);
+    expect(hit({ armor_penetration: 4 })).toBe(6);
+    expect(hit({ armor_multiplier: 0.5 })).toBe(6);
   });
 });

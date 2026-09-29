@@ -3,6 +3,7 @@ import type { Renderer } from '../render/renderer';
 import type { WorldGenerator } from '../world/worldgen';
 import type { DebugApi } from '../debug';
 import { createItem } from '../game/item';
+import { spawnOnGround } from '../game/moves';
 import { startReading } from '../game/reading';
 import { confirm, getUiRoot, prompt } from './framework';
 import { Hud, hud } from './hud';
@@ -173,7 +174,7 @@ export async function installUi(game: Game, renderer: Renderer, worldgen: WorldG
   api.spawnItem = (id: string, dx = 0, dy = 0, opts: { count?: number; ammo?: string } = {}) => {
     const p = game.player;
     const it = createItem(game.data, id, opts);
-    game.map.addItem(p.tileX + dx, p.tileY + dy, p.z, it);
+    spawnOnGround(game.map, p.tileX + dx, p.tileY + dy, p.z, it);
     return it.name();
   };
   /** Simulate a key press through the normal input path (keys.ts / open windows). */

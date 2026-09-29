@@ -4,6 +4,7 @@ import { warnOnce } from '../data/warn';
 import { bresenham } from './vision';
 import { normalRoll } from './combat';
 import { createItem, type Item } from './item';
+import { consumeItem, L, spawnOnGround } from './moves';
 import { emitSound } from './sound';
 import { getConstruction, siteOk, startConstruction } from './construction';
 
@@ -52,7 +53,7 @@ function drop(game: Game, x: number, y: number, z: number, id: string, n: number
   }
   for (let i = 0; i < n; i++) {
     const it = createItem(game.data, id);
-    game.map.addItem(x, y, z, it);
+    spawnOnGround(game.map, x, y, z, it);
     out.push(it);
   }
   return out;
@@ -173,8 +174,9 @@ export function startLumber(game: Game, opts: { instant?: boolean } = {}): boole
     return false;
   }
   const p = game.player;
-  if (log.onMap) game.map.removeItem(p.tileX, p.tileY, p.z, log.item);
-  else p.inv.remove(log.item);
+  // the log is used up (the planks are made when the work is done)
+  const at = log.onMap ? L.ground(game.map, p.tileX, p.tileY, p.z) : p.inv.locOf(log.item);
+  if (at) consumeItem(log.item, at, log.item.countByCharges ? 1 : undefined);
   game.message('You cut the log into planks.', 'c_light_gray');
   const done = () => void cutPlanks(game);
   if (opts.instant) return done(), true;
@@ -183,7 +185,7 @@ export function startLumber(game: Game, opts: { instant?: boolean } = {}): boole
     duration: 20 * 60,
     onComplete: done,
     // CDDA consumed the log up front; give it back if you stop
-    onCancel: () => game.map.addItem(p.tileX, p.tileY, p.z, log.item),
+    onCancel: () => spawnOnGround(game.map, p.tileX, p.tileY, p.z, log.item),
   });
 }
 

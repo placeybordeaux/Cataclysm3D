@@ -2,9 +2,9 @@ import * as THREE from 'three';
 import type { DebugApi } from '../debug';
 import type { Game } from '../game/game';
 import type { Item } from '../game/item';
-import { cargoVolume, has, MPH_PER_MS, type Vehicle, type VehiclePart } from '../game/vehicle';
+import { has, MPH_PER_MS, type Vehicle, type VehiclePart } from '../game/vehicle';
 import { loadVehicleData } from '../game/vehicle_data';
-import { monsterCreatureHooks, registerVehicleSave, VehicleSystem, type DriveMode } from '../game/vehicles';
+import { composeCreatureHooks, monsterCreatureHooks, npcCreatureHooks, registerVehicleSave, VehicleSystem, type DriveMode } from '../game/vehicles';
 import { registerOption } from './options';
 import type { MonsterSystem } from '../game/monai';
 import { interactOverrides } from '../game/interact';
@@ -15,13 +15,15 @@ import type { UiContext } from './context';
 import { c, cssColor, getUiRoot, openMenu, openWindow, type MenuEntry } from './framework';
 import { hud } from './hud';
 import { carriedEntries, openMultiSelect, stackEntries, type InvEntry, type MultiRow } from './inventory_ui';
+import { isAt, L, moveItem } from '../game/moves';
 
 // Vehicle UI: examining parts (doors, cargo, controls, hotwiring), the '^' controls menu,
 // driving keys, a CDDA-style dashboard line while driving, and window.cdda helpers.
 //
 // Keys (src/ui/keys.ts): '^' take controls / controls menu, 'k' engine, 'h' headlights,
-// 'n' horn; WASD drive (cruise control: W/S step the target speed; direct throttle option:
-// W accelerate, S brake/reverse), A/D steer, Space handbrake.
+// 'n' horn; WASD drive (direct throttle, the default: W accelerate, release to coast, S
+// brake/reverse, 'c' cruise control locks the speed; CDDA cruise option: W/S step the target
+// speed), A/D steer, Space handbrake.
 // 'e' on a vehicle part: examineVehicle() — the world-interaction handler for 'e' should
 // call it first (it returns false when the crosshair isn't on a vehicle).
 
@@ -226,52 +228,50 @@ function showVehicleInfo(game: Game, v: Vehicle): void {
 
 function getItemsMenu(game: Game, v: Vehicle, cargo: VehiclePart): void {
   const ctx = ctxOf(game);
-  const entries: InvEntry[] = cargo.items.map((item) => ({ item, where: 'ground', depth: 0, dir: cargo.def.name }));
+  const loc = L.cargo(cargo, v);
+  const entries: InvEntry[] = cargo.items.map((item) => ({ item, where: 'ground', loc, depth: 0, dir: cargo.def.name }));
   const rows: MultiRow[] = stackEntries(entries).map((entry) => ({ entry, max: entry.stack ? entry.stack.length : entry.item.countByCharges ? entry.item.charges : 1, count: 0 }));
   openMultiSelect(ctx, `Get items from the ${v.name}'s ${cargo.def.name}`, rows, 'get', (chosen) => {
     const inv = game.player.inv;
     for (const r of chosen) {
       const items: Item[] = r.entry.stack ? r.entry.stack.slice(0, r.count) : [r.entry.item];
       for (const it of items) {
-        let piece = it;
-        if (!r.entry.stack && it.countByCharges && r.count < it.charges) piece = it.split(r.count);
-        const res = inv.pickUp(piece);
-        if (!res.ok) {
-          if (piece !== it) it.charges += piece.charges;
-          game.message(res.msg, 'c_light_red');
-          return;
-        }
-        if (piece === it) cargo.items.splice(cargo.items.indexOf(it), 1);
-        game.message(res.msg);
+        if (!isAt(it, loc)) continue;
+        const count = !r.entry.stack && it.countByCharges ? Math.min(r.count, it.charges) : undefined;
+        const res = inv.pickUp(it, loc, count);
+        if (!res.ok) return;
       }
     }
-    v.version++;
   });
 }
 
 function putItemsMenu(game: Game, v: Vehicle, cargo: VehiclePart): void {
   const ctx = ctxOf(game);
   const rows: MultiRow[] = stackEntries(carriedEntries(ctx).filter((e) => e.where === 'carried' && e.depth === 0))
-    .map((entry) => ({ entry, max: entry.stack ? entry.stack.length : 1, count: 0 }));
+    .map((entry) => ({ entry, max: entry.stack ? entry.stack.length : entry.item.countByCharges ? entry.item.charges : 1, count: 0 }));
   if (!rows.length) {
     game.message('You have nothing to put there.', 'c_light_gray');
     return;
   }
   openMultiSelect(ctx, `Put items into the ${v.name}'s ${cargo.def.name}`, rows, 'store', (chosen) => {
-    const inv = game.player.inv;
+    const p = game.player;
+    const to = L.cargo(cargo, v);
+    let any = false;
     for (const r of chosen) {
-      for (const it of (r.entry.stack ?? [r.entry.item]).slice(0, r.count)) {
-        const [used, cap] = cargoVolume(cargo);
-        if (used + it.volume() > cap) {
-          game.message(`The ${cargo.def.name} is full.`, 'c_light_red');
+      const items = r.entry.stack ? r.entry.stack.slice(0, r.count) : [r.entry.item];
+      for (const it of items) {
+        if (!isAt(it, r.entry.loc)) continue;
+        const count = !r.entry.stack && it.countByCharges ? Math.min(r.count, it.charges) : undefined;
+        const res = moveItem(it, r.entry.loc, to, { count, actor: p, quiet: true });
+        if (!res.ok) {
+          game.message(res.msg, 'c_light_red');
+          if (any) game.message(`You put items into the ${v.name}'s ${cargo.def.name}.`);
           return;
         }
-        const res = inv.drop(it);
-        for (const d of res.dropped ?? [it]) cargo.items.push(d as Item);
+        any = true;
       }
     }
-    game.message(`You put items into the ${v.name}'s ${cargo.def.name}.`);
-    v.version++;
+    if (any) game.message(`You put items into the ${v.name}'s ${cargo.def.name}.`);
   });
 }
 
@@ -323,10 +323,14 @@ function dashboard(game: Game): HTMLElement {
     `font-family:var(--ui-font);font-size:var(--ui-size);color:${cssColor('c_light_gray')};pointer-events:none;text-align:right;z-index:5;display:none`;
   getUiRoot().appendChild(el);
   let last = '';
-  const update = () => {
+  // The needle: speed eased over ~0.1 s so the number doesn't flicker between two values.
+  let shown = 0;
+  const update = (dt = 1 / 60) => {
     // Not over the death screen (dying at the wheel left the dashboard on the tombstone).
     const v = game.player.dead ? null : game.vehicles?.driving;
-    const html = v ? dashHtml(game, v) : '';
+    if (v) shown += (v.velocity * MPH_PER_MS - shown) * Math.min(1, dt * 10);
+    else shown = 0;
+    const html = v ? dashHtml(game, v, shown) : '';
     if (html !== last) {
       el.innerHTML = html;
       el.style.display = html ? '' : 'none';
@@ -336,14 +340,14 @@ function dashboard(game: Game): HTMLElement {
   return Object.assign(el, { update });
 }
 
-function dashHtml(game: Game, v: Vehicle): string {
-  const mph = Math.round(Math.abs(v.velocity) * MPH_PER_MS);
+function dashHtml(game: Game, v: Vehicle, shownMph = v.velocity * MPH_PER_MS): string {
+  const mph = Math.round(Math.abs(shownMph));
   const safe = v.engineOn ? Math.round(v.maxVelocity(true) * MPH_PER_MS) : 0;
   // CDDA vehicle::strain colouring: blue under the safe speed, then yellow / light red / red.
   const safeMs = v.maxVelocity(true), maxMs = Math.max(safeMs + 0.01, v.maxVelocity());
   const strain = Math.abs(v.velocity) < safeMs ? 0 : (Math.abs(v.velocity) - safeMs) / (maxMs - safeMs);
   const speedCol = !v.engineOn ? 'c_light_blue' : strain <= 0 ? 'c_light_blue' : strain <= 0.2 ? 'c_yellow' : strain <= 0.4 ? 'c_light_red' : 'c_red';
-  const cruising = game.vehicles?.driveMode === 'cruise';
+  const cruising = game.vehicles?.driveMode === 'cruise' || !!game.vehicles?.cruiseOn;
   const target = Math.round(v.cruiseVelocity / 100);
   // CDDA's dashboard: "Target: 20 mph Current: 12 mph"; direct throttle has no target.
   const speed = cruising
@@ -365,7 +369,7 @@ function dashHtml(game: Game, v: Vehicle): string {
     v.fuelCapacity('battery') ? gauge('battery') : '',
     v.lightsOn ? c('c_yellow', 'lights') : '',
     v.validWheelConfig() ? '' : c('c_red', 'WHEELS'),
-    c('c_dark_gray', `${cruising ? `[${game.keys.movementKeys()[0]}/${game.keys.movementKeys()[2]}]±4 mph [Space]stop ` : ''}[${game.keys.keyFor('vehicle_engine')}]engine [${game.keys.keyFor('vehicle_headlights')}]lights [${game.keys.keyFor('vehicle_horn')}]horn [${game.keys.keyFor('control_vehicle')}]menu`),
+    c('c_dark_gray', `${game.vehicles?.driveMode === 'cruise' ? `[${game.keys.movementKeys()[0]}/${game.keys.movementKeys()[2]}]±4 mph [Space]stop ` : `[${game.keys.keyFor('crouch')}]cruise `}[${game.keys.keyFor('vehicle_engine')}]engine [${game.keys.keyFor('vehicle_headlights')}]lights [${game.keys.keyFor('vehicle_horn')}]horn [${game.keys.keyFor('control_vehicle')}]menu`),
   ].filter(Boolean);
   return parts.join('  ');
 }
@@ -373,9 +377,9 @@ function dashHtml(game: Game, v: Vehicle): string {
 const DRIVE_MODE_KEY = 'cdda3d.driveMode';
 function storedDriveMode(): DriveMode {
   try {
-    return localStorage.getItem(DRIVE_MODE_KEY) === 'direct' ? 'direct' : 'cruise';
+    return localStorage.getItem(DRIVE_MODE_KEY) === 'cruise' ? 'cruise' : 'direct';
   } catch {
-    return 'cruise';
+    return 'direct';
   }
 }
 
@@ -390,9 +394,10 @@ export async function installVehicles(game: Game, renderer: Renderer, api?: Debu
   game.vehicles = vs;
   game.systems.push(vs);
   registerVehicleSave(game, vs);
-  // Run-overs hit real monsters when the monster system is installed (main.ts: before us).
+  // Run-overs hit real monsters (the monster system is installed before us in main.ts) and
+  // NPCs (installed after us: the NPC hooks look game.npcs up on each call).
   const ms = (game as unknown as { monsters?: MonsterSystem }).monsters;
-  if (ms) vs.creatureHooks = monsterCreatureHooks(ms);
+  vs.creatureHooks = composeCreatureHooks([...(ms ? [monsterCreatureHooks(ms)] : []), npcCreatureHooks(game, vs)]);
   new VehicleRenderer(renderer, game, vs);
 
   const needDriving = (fn: (v: Vehicle) => void) => () => {
@@ -418,6 +423,12 @@ export async function installVehicles(game: Game, renderer: Renderer, api?: Debu
   }));
   game.keys.register('vehicle_headlights', 'Toggle headlights (driving)', needDriving((v) => game.message(vs.toggleHeadlights(v))));
   game.keys.register('vehicle_horn', 'Sound horn (driving)', needDriving((v) => game.message(vs.honk(v))));
+  // C: crouch on foot, cruise control at the wheel (crouching in a driver's seat means nothing).
+  const crouch = game.keys.action('crouch');
+  game.keys.register('crouch', crouch ? `${crouch.name} / cruise control (driving)` : 'Cruise control (driving)', () => {
+    if (vs.driving) game.message(vs.toggleCruise(), 'c_light_gray');
+    else crouch?.handler();
+  });
   // 'e' belongs to world interaction (src/game/interact.ts); vehicles get the first go at
   // it. Without that system (tests, stripped builds) 'e' examines vehicles directly.
   interactOverrides.push({
@@ -451,10 +462,10 @@ export async function installVehicles(game: Game, renderer: Renderer, api?: Debu
         // not persisted
       }
     },
-    desc: "Cruise control (CDDA): W/S raise or lower the target speed 4 mph per press and the engine holds it; Space zeroes it. Direct throttle: W accelerates while held, S brakes then reverses.",
+    desc: "Direct throttle (default): W accelerates while held, releasing it coasts, S brakes then reverses, Space is the handbrake, C locks the current speed (cruise control). Cruise control (CDDA): W/S raise or lower the target speed 4 mph per press and the engine holds it; Space zeroes it.",
   });
-  const dash = dashboard(game) as HTMLElement & { update: () => void };
-  renderer.beforeRender.push(() => dash.update());
+  const dash = dashboard(game) as HTMLElement & { update: (dt?: number) => void };
+  renderer.beforeRender.push((dt) => dash.update(dt));
 
   if (api) installVehicleDebug(api, game, vs);
   return vs;

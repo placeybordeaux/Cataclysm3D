@@ -100,7 +100,14 @@ tests/               vitest unit tests (pure logic, no DOM/WebGL)
 
 ### Survivor simulation (src/game, UI-free)
 
-- `item.ts` Item/Pocket (charges, damage, rot, pockets, magazines), `createItem`, `fromSpawned`.
+- `item.ts` BN Item (charges / integral-magazine `ammoId`, one-load container `contents`, `magazine`
+  slot, gunmods, damage, rot), `createItem`, `fromSpawned`, `inNewContainer`. See docs/INVENTORY_MODEL.md.
+- `moves.ts` **the only place items change location**: `Loc` (`L.hands/worn/inv/in/mag/mod/ground/
+  cargo/stock`), `moveItem(item, from, to, opts)`, `spawnItem`/`spawnOnGround` (creation),
+  `consumeItem` (use-up), `unloadItem`, `transaction`, `census`. Never edit item lists directly
+  (tests/moves_lint.test.ts); conservation is property-tested (tests/conservation.test.ts).
+- `inventory_view.ts` UI-free data for inventory screens: `inventoryView`, loc/item keys, `verdict`
+  (drop checks with reasons), `itemActions`.
 - `character.ts` Character: stats, skills, body-part HP, pain, stamina, needs, sleep,
   morale/focus, body temperature, traits. `update(gameDt)` in game seconds. BN rules (file
   header lists the DDA differences): `storedKcal` capped at `maxStoredKcal()` (17500), a
@@ -110,8 +117,10 @@ tests/               vitest unit tests (pure logic, no DOM/WebGL)
   `enchantProviders`). `sleepComfort` (set by rest.ts) feeds `rollCanSleep`.
 - `healing.ts` BN heal_actor (`applyHealActor`), used by Inventory.use for `heal` actions.
 - `effects.ts` data-driven effect_type (misc.effect_type, with built-in fallbacks).
-- `inventory.ts` `character.inv`: wield/wear/pick up/drop/consume/use/reload, qualities,
-  encumbrance, armor absorption. Actions return `{ok, msg, moves, dropped?}`.
+- `inventory.ts` `character.inv`: BN carrying (flat `items` inventory vs worn `storage`, weight
+  capacity), wield/wear/take off/pick up/drop/consume/use/reload/unload built on moves (they take
+  the item's `from` location; `null` = a new item), qualities, encumbrance, armor absorption.
+  Actions return `{ok, msg, moves, code?}`. `Character.groundLoc` says where drops land.
 - `combat.ts` pure CDDA melee/ranged/monster-attack math taking an Rng.
 - `player.ts` PlayerAvatar = Character + position/view. Game wires `onMessage`/`onDeath`.
 - Terrain `move_cost` is in units of 50 moves (2 = flat ground = 100 moves): multiply by 50
@@ -234,7 +243,14 @@ tests/               vitest unit tests (pure logic, no DOM/WebGL)
   Audio: `src/audio/vehicleAudio.ts` `EngineSounds` (running-engine loop per nearby vehicle,
   internal while driving, rate by CDDA gear, gear-shift clunks) and CDDA variant pickers.
 - Keys: `^` take controls / controls menu, `k` engine, `h` headlights, `n` horn; at the
-  controls WASD drive (S brakes then reverses), Space handbrake. `e` on a vehicle part goes
+  controls WASD drive (direct by default: W throttle with a short ramp, release coasts, S
+  brakes then reverses after a beat, `c` cruise control locks the speed; CDDA's 4-mph-step
+  cruise model is the "Driving controls" option), Space handbrake. Launch acceleration is
+  CDDA power/mass compressed toward a car (`feltAcceleration`, 0-30 mph in ~4 s); steering
+  lock narrows with speed (`maxSteerAt`, lateral accel <= 5.5 m/s^2).
+- Run-overs: `vs.creatureHooks = composeCreatureHooks([monsterCreatureHooks(ms),
+  npcCreatureHooks(game, vs)])` — NPCs take CDDA impact damage on the torso, get stunned,
+  flung and downed, and npcai `afterHit` handles death drops and anger. `e` on a vehicle part goes
   through `interactOverrides` in interact.ts (doors toggle, else a part menu: cargo get/put,
   controls, hotwire with a SCREW tool, parts list).
 - Seams: `vehicles.creatureHooks` (run-over damage/placement), `vehicles.onBash`,
@@ -243,6 +259,10 @@ tests/               vitest unit tests (pure logic, no DOM/WebGL)
   {fuel,status})`, `cdda.vehicles()`, `cdda.enterVehicle()`, `cdda.drive(throttle, steer,
   s, brake?)`, `cdda.roadTrip(proto)`, `cdda.gotoVehicle(regex, {angle, dist})`,
   `cdda.vehicleLights(on)`, `cdda.vehicleAt(dx, dy)`.
+- Mesh (vehicleMesh.ts): bonnet rows ahead of the windscreen slope from 0.9 m to 0.7 m at the
+  nose, low dark cowl/dash, thin A-pillars, faint glass (0.14), painted panels mid-tone with
+  darker tops (`panelTop`) so sunlit cars don't read as white slabs; BN wheel sizes are cm.
+  Headlights: a spot aimed ~30 m out plus four light-map beam lights out to ~30 m.
 ### NPCs, dialogue, trade, missions (src/game, wired by src/npcs.ts `installNpcs`)
 - Data: `public/data/npcs.json` (`npm run extract:npcs`, tools/extract/npcs.ts): npc templates,
   npc_class, talk_topic (merged like CDDA: responses append across definitions), mission_definition,
@@ -404,7 +424,7 @@ tests/               vitest unit tests (pure logic, no DOM/WebGL)
   (radius 6, z±2, biased along the velocity) in `requestIdleCallback` slack; `stats.sync` counts chunks
   someone generated synchronously (hitch candidates), `stats.slowest`. `?prefetch=0` disables.
   `cdda.benchRun({seconds, speed, yawDeg})` ghost-sprints and returns frame-time percentiles
-  (`src/perfDebug.ts`). Keep item spawning linear: `placeContents` batches pocket totals.
+  (`src/perfDebug.ts`). Keep item spawning linear.
 - `playerAttack` event (events.ts) per attack: outcome hit/crit/kill/block/miss/whiff, impact point,
   `heavy`, blood field id. `src/render/hitFx.ts` (pixel blood/sparks/dust, crit flash, stagger via
   `MonsterView.kick`), HUD hit marker. `nearClamp` (monsterView.ts) draws creatures closer than
@@ -415,10 +435,9 @@ tests/               vitest unit tests (pure logic, no DOM/WebGL)
   key `zombieDensity`). Spawner: `CITY_HORDE_REALTIME` 0.2, `SPAWN_REALTIME` 0.75; spawns are held
   (`spawner.hold/release`) while the title screen runs. Outside the bubble only `Monster.horde`
   members hear (`hordeSignal`, CDDA get_signal_for_hordes).
-- Liquids: `src/game/liquid.ts` (targets, auto-store, pour, drink) + `src/ui/liquid_ui.ts` menu, wired
-  through `liquidHooks` (crafting.ts) and Unload on containers.
-- E-files: `E_FILE_STORAGE` pockets take books/E_STORABLE items (`Item.efiles()`); `efileDevice`,
-  `ereaderProblem` (reading.ts) require a charged phone/laptop.
+- Liquids: `src/game/liquid.ts` (targets, auto-store, pour, drink; all moves with an explicit `from`)
+  + `src/ui/liquid_ui.ts` menu (the liquid stays in its container until a choice moves it), wired
+  through `liquidHooks` (crafting.ts) and Unload on containers. (DDA e-file storage is gone: BN has none.)
 
 ### Progression & onboarding (src/progression, docs/DESIGN_V2.md decision 6)
 - Title: **Start** = quick start (named Evacuee, BN `unemployed` kit, one name field, difficulty
@@ -574,8 +593,15 @@ Keys: `V` camera mode, `F` flashlight.
 - **Seams**: world textures take alpha (cut-out coverage) from mip 0 while colour uses the chosen
   mip (materials.ts WORLD_MAP), ceilings tuck `CEIL_TUCK` into the walls below and door leaves
   overlap their lintel: edge-to-edge geometry showed sky-coloured dotted cracks on real GPUs.
-- **Cameras**: third person becomes a chase camera while driving (`rig.suppressBob`); the mouse
-  wheel zooms top-down (`rig.topDistance` 10–60).
+- **Cameras**: the mouse wheel zooms top-down (`rig.topDistance` 10–60). While driving,
+  VehicleRenderer fills `rig.drive` (a `DriveView`: centre, heading, driver eye, length, speed,
+  roughness) every frame and V cycles the driving cameras (`rig.driveCam`, persisted in
+  localStorage `cdda3d.driveCam`, separate from the on-foot `rig.footMode`): chase (default;
+  trails the heading, pulled in by walls, looks further ahead and widens FOV with speed) ->
+  cockpit (driver eye ~1.2 m in cars, 1.3–1.45 m in vans/buses; mouse look is relative to the
+  car because `p.yaw` turns with it) -> top-down. `rig.mode` reads as the on-foot equivalent
+  (chase = third, cockpit = first). Pure math in src/render/driveCamera.ts
+  (tests/driveCamera.test.ts).
 - **Other**: `renderer.setWeather('clear'|'rain'|'storm'|'snow')`,
   `renderer.setCameraMode('first'|'third'|'top')`, `renderer.flushChunks()` (tests).
   Plain three.js objects added to `renderer.scene` are auto-patched for the MRT output.
@@ -650,7 +676,8 @@ Keys: `V` camera mode, `F` flashlight.
   The survivor's own state (freezing, dehydrated) goes in `activities.distractionChecks`: it
   interrupts only when it newly arises, never blocks starting (CDDA's "ignore" semantics).
 - **Items on the map** are real `Item` instances (`src/game/item.ts`). Mapgen emits
-  `ItemSpawn`s which `GameMap.itemFactory` (set in Game) converts via `fromSpawned`.
+  `ItemSpawn`s which `GameMap.itemFactory` (set in Game) converts via `fromSpawned`. Game code puts
+  items on tiles with `spawnOnGround` / `moveItem` (src/game/moves.ts), never `map.addItem`.
 - **Tile raycasts** `src/game/raycast.ts`: `raycastTiles(map, {x,y,h}, dir, {maxDist,
   creatureAt, throughTransparent})` → first creature / furniture / terrain / floor / ceiling
   hit (h = metres, x/y tiles; same as three.js X/Z). `dirFromYawPitch(yaw, pitch)`.

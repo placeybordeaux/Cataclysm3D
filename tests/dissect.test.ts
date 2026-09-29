@@ -24,7 +24,7 @@ describe('dissection (BN butcher_type::DISSECT)', () => {
     expect(dissectToolQuality(p)).toBe(0);
     const res = dissectYield(data, p, data.monsters.mon_zombie_bio_op, 0, new Rng(1));
     expect(res.ok).toBe(false);
-    p.inv.pickUp(createItem(data, 'scalpel'));
+    p.inv.giveNew(createItem(data, 'scalpel'));
     expect(dissectToolQuality(p)).toBe(3);
   });
 

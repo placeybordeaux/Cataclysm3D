@@ -164,9 +164,8 @@ export interface MeleeAccuracy {
 }
 
 /**
- * @deprecated DDA `pocket_data`. BN has no pockets; the extractor no longer emits this.
- * src/data/bncompat.ts derives an approximation from the BN model so the DDA-era inventory
- * keeps running until it is rewritten (TODO(BN inventory)). New code must not use it.
+ * @deprecated DDA `pocket_data`. BN has no pockets; the extractor no longer emits this and the
+ * runtime ignores it (docs/INVENTORY_MODEL.md). Kept only so old fixture shapes type-check.
  */
 export interface PocketData {
   pocket_type?: 'CONTAINER' | 'MAGAZINE' | 'MAGAZINE_WELL' | 'MOD' | 'CORPSE' | 'SOFTWARE' | 'EBOOK' | 'CABLE' | 'E_FILE_STORAGE';
@@ -542,7 +541,7 @@ export interface ItemDef extends Glyph {
   bionic_id?: string;
   difficulty?: number;
 
-  /** @deprecated DDA; never emitted for BN. See src/data/bncompat.ts. */
+  /** @deprecated DDA; never emitted for BN, ignored at runtime. */
   pocket_data?: PocketData[];
   /** @deprecated DDA; never emitted for BN (no length in BN) */
   longest_side?: number;

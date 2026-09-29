@@ -78,18 +78,22 @@ export function itemInfo(it: Item, who: Character): string {
     const first = covered[0];
     if (first) {
       const portion = armorPortion(it, first);
-      const enc = asArray(portion?.encumbrance);
+      const enc = portion?.encumbrance ?? 0, full = portion?.max_encumbrance ?? enc;
       L.push(`Coverage: ${num(portion?.coverage ?? 0)}%   Warmth: ${num(d.warmth ?? 0)}`);
-      L.push(`Encumbrance: ${num(enc[0] ?? 0)}${enc[1] !== undefined && enc[1] !== enc[0] ? ` (${num(enc[1])} when full)` : ''}`);
+      L.push(`Encumbrance: ${num(enc)}${full !== enc ? ` (${full === 0 ? '+1 per 500 ml carried' : `${num(full)} when full`})` : ''}`);
+      if (d.storage) L.push(`Storage: +${num(+liters(d.storage))} L carrying capacity when worn`);
       const r = (t: string) => who.inv.armorResist(it, first, t);
       L.push(`<b>Protection</b>: Bash: ${num(+r('bash').toFixed(2))}  Cut: ${num(+r('cut').toFixed(2))}  Ballistic: ${num(+r('bullet').toFixed(2))}`);
       L.push(`  Acid: ${num(+r('acid').toFixed(2))}  Fire: ${num(+r('heat').toFixed(2))}  Environmental: ${num(d.environmental_protection ?? 0)}`);
     }
   }
   if (it.isContainer()) {
-    const cap = it.containerVolumeCapacity();
-    if (Number.isFinite(cap) && cap > 0) L.push(`Storage: ${num(+liters(it.containerVolumeUsed()))}/${num(+liters(cap))} L`);
+    const cd = d.container_data!;
+    const used = it.contents.reduce((s, x) => s + x.volume(), 0);
+    L.push(`Holds: ${num(+liters(used))}/${num(+liters(cd.contains))} L of one thing${cd.watertight ? (cd.seals ? ', liquids (sealed)' : ', liquids (open: only on the ground or in hand)') : ''}${cd.preserves ? ', preserves food' : ''}`);
   }
+  if (d.holster) L.push(`Holster: ${num(d.holster.multi)} item${d.holster.multi === 1 ? '' : 's'} of ${num(+liters(d.holster.min_volume))}-${num(+liters(d.holster.max_volume))} L`);
+  if (d.bandolier) L.push(`Holds up to ${num(d.bandolier.capacity)} rounds of ${c('c_yellow', d.bandolier.ammo.join(', '))}`);
 
   // --- food
   if (it.isComestible()) {
@@ -134,12 +138,6 @@ export function itemInfo(it: Item, who: Character): string {
       const qn = cddaText(it.data.misc?.tool_quality?.[q]?.name) || q;
       L.push(`Has level ${c('c_cyan', String(lvl))} ${c('c_cyan', qn)} quality.`);
     }
-  }
-  // E-file storage (phones, laptops, USB drives): what's on it; books are read with R.
-  const efiles = it.efiles();
-  if (it.pockets.some((p) => p.type === 'E_FILE_STORAGE')) {
-    L.push(SEP);
-    L.push(`<b>Files</b>: ${efiles.length ? efiles.map((f) => c(f.isBook() ? 'c_light_blue' : 'c_light_gray', f.baseName())).join(', ') : c('c_dark_gray', 'none')}`);
   }
   if (d.description) {
     L.push(SEP);

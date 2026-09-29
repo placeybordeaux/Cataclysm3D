@@ -11,7 +11,7 @@ import { forceWeather } from '../game/weather';
 import { knownTraps } from '../game/traps';
 import { registerSaveable, type LoadContext } from './registry';
 import { decodeChunk, encodeChunk, Palette, paletteResolver, type ChunkJSON } from './chunks';
-import { sanitizeItemJSON, type Warn } from './items';
+import { sanitizeInventoryJSON, type Warn } from './items';
 import { chunkTracker, installChunkTracking, type ChunkTracker } from './tracking';
 import type { StashColumnJSON, StashedCorpse } from '../game/monstash';
 
@@ -131,12 +131,7 @@ interface PlayerSection {
 }
 
 function sanitizeCharacter(game: Game, j: CharacterJSON, warn: Warn): CharacterJSON {
-  const inv = j.inventory;
-  const clean = (it: ItemJSON | null) => (it ? sanitizeItemJSON(game.data, it, warn) : null);
-  return {
-    ...j,
-    inventory: { wielded: clean(inv.wielded), worn: inv.worn.map(clean).filter((w): w is ItemJSON => !!w) },
-  };
+  return { ...j, inventory: sanitizeInventoryJSON(game.data, j.inventory, warn) };
 }
 
 function registerPlayer(game: Game): void {

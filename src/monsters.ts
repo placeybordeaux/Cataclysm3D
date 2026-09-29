@@ -11,6 +11,7 @@ import { HitFx } from './render/hitFx';
 import { butcherPracticeCap, butcherSeconds, butcherToolQuality, butcherYield, type ButcherKind, canDissect, dissectPracticeCap, dissectSeconds, dissectToolMessage, dissectToolQuality, dissectYield, readDissectables } from './game/butchery';
 import { monsterSize, type Monster } from './game/monster';
 import { createItem, loadAmmo, type Item } from './game/item';
+import { L, spawnItem, spawnOnGround } from './game/moves';
 import { snippet } from './data/index';
 import { openMenu } from './ui/framework';
 import { registerOption } from './ui/options';
@@ -207,7 +208,7 @@ export function startButcher(game: Game, sys: MonsterSystem, c: CorpseAt, kind: 
       for (const msg of res.messages) game.message(msg);
       if (!res.ok) return;
       sys.removeCorpseItem(c.item, c.x, c.y, c.z);
-      for (const it of res.items) game.map.addItem(c.x, c.y, c.z, it);
+      for (const it of res.items) spawnOnGround(game.map, c.x, c.y, c.z, it);
       p.practice('survival', res.practice, butcherPracticeCap(def));
       game.message(`You finish butchering the ${def.name}.`);
     },
@@ -243,7 +244,7 @@ export function startDissect(game: Game, sys: MonsterSystem, c: CorpseAt): boole
       for (const msg of res.messages) game.message(msg, /^You discover/.test(msg) ? 'c_light_green' : undefined);
       if (!res.ok) return;
       sys.removeCorpseItem(c.item, c.x, c.y, c.z);
-      for (const it of res.items) game.map.addItem(c.x, c.y, c.z, it);
+      for (const it of res.items) spawnOnGround(game.map, c.x, c.y, c.z, it);
       p.practice('firstaid', res.practice, dissectPracticeCap(def, hidden.length));
       game.message(`You finish dissecting the ${def.name}.`);
     },
@@ -334,10 +335,9 @@ function installDebug(api: DebugApi, game: Game, sys: MonsterSystem, spawner: Sp
   /** Wield a gun with a loaded magazine (scripted gunfire tests). */
   api.giveLoadedGun = (gunId = 'glock_19', magId = 'glockmag', ammo = '9mm') => {
     const gun = createItem(game.data, gunId);
-    const well = gun.magazineWell();
-    if (well) well.insert(createItem(game.data, magId, { ammo }));
+    if (gun.takesMagazines() && game.data.items[magId]) spawnItem(createItem(game.data, magId, { ammo }), L.mag(gun), { force: true, quiet: true });
     else loadAmmo(gun, ammo);
-    return p().inv.wield(gun).msg;
+    return p().inv.wield(gun, null).msg;
   };
   /** Face the nearest active monster (for scripted fights). */
   api.faceMonster = (uid?: number) => {

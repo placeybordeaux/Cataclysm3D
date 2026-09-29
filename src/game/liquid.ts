@@ -1,11 +1,15 @@
 import type { GameMap } from '../world/map';
 import type { Item } from './item';
+import { canMove, L, moveItem, spawnSome, type Loc } from './moves';
 import type { PlayerAvatar } from './player';
 
-// Where a loose liquid can go (CDDA liquid_handler.cpp, simplified): into a watertight
-// container that is empty or already holds the same liquid, down the survivor's throat, or
-// onto the ground. UI-free: crafting uses it to auto-store results, and the liquid menu
-// (src/ui/liquid_ui.ts) builds its choices from `liquidTargets`.
+// Where a liquid can go (BN liquid_handler.cpp, simplified): into a container that takes it
+// (watertight; sealed if you carry it, a bucket only on the ground or in hand), down the
+// survivor's throat, or onto the ground. UI-free: crafting uses it to auto-store results, and
+// the liquid menu (src/ui/liquid_ui.ts) builds its choices from `liquidTargets`.
+//
+// A liquid is either new (a crafting result: `from` = null) or sitting somewhere (in the
+// container being unloaded: `from` = its location). Every transfer is a moves.ts move.
 
 export interface LiquidHost {
   map: GameMap;
@@ -18,86 +22,89 @@ export interface LiquidTarget {
   where: 'inventory' | 'ground';
   /** Charges of the liquid that fit. */
   room: number;
-  /** Open containers (pots, buckets) spill when carried; CDDA prefers closed ones. */
+  /** Buckets and pots (not sealable) spill when carried; BN prefers closed ones. */
   open: boolean;
 }
 
-/** Whether `c` can take (some of) `liquid`, and how many charges. */
-export function roomFor(c: Item, liquid: Item): number {
-  if (c === liquid) return 0;
-  let room = 0;
-  for (const p of c.containerPockets()) {
-    if (!p.data.watertight) continue;
-    const r = p.canContain(liquid);
-    if (r.ok) room += r.charges ?? liquid.charges;
-  }
-  return Math.min(room, liquid.charges);
+/** How many charges of `liquid` (at `from`) `c` would take for this survivor. */
+export function roomFor(host: LiquidHost, c: Item, liquid: Item, from: Loc | null): number {
+  if (c === liquid || !c.isContainer()) return 0;
+  const r = canMove(liquid, from, L.in(c), { partial: true, actor: host.player });
+  return r.ok ? r.moved : 0;
 }
 
 /**
  * Containers that can take `liquid`: everything carried (nested too) and items lying on
- * the survivor's tile and the 8 around it (CDDA PICKUP_RANGE is 6; adjacent reads better in
- * real time). Closed containers first, then fullest fit.
+ * the survivor's tile and the 8 around it. Closed containers first, then fullest fit.
  */
-export function liquidTargets(host: LiquidHost, liquid: Item, exclude?: Item): LiquidTarget[] {
+export function liquidTargets(host: LiquidHost, liquid: Item, exclude?: Item, from: Loc | null = null): LiquidTarget[] {
   const p = host.player;
   const out: LiquidTarget[] = [];
   const seen = new Set<Item>();
   const consider = (it: Item, where: LiquidTarget['where']) => {
     if (seen.has(it) || it === exclude) return;
     seen.add(it);
-    const room = roomFor(it, liquid);
-    if (room > 0) out.push({ item: it, where, room, open: it.containerPockets().some((pk) => !!pk.data.open_container) });
+    const room = roomFor(host, it, liquid, from);
+    if (room > 0) out.push({ item: it, where, room, open: !it.isWatertight() });
   };
   for (const it of p.inv.allItems()) consider(it, 'inventory');
   for (let dy = -1; dy <= 1; dy++)
     for (let dx = -1; dx <= 1; dx++)
-      for (const it of host.map.itemsAt(p.tileX + dx, p.tileY + dy, p.z) as Item[]) {
-        if (typeof (it as Item).containerPockets !== 'function') continue;
-        consider(it, 'ground');
-        for (const inner of it.allContents()) consider(inner, 'ground');
+      for (const mi of host.map.itemsAt(p.tileX + dx, p.tileY + dy, p.z) as Item[]) {
+        if (typeof mi.walk !== 'function') continue;
+        for (const it of mi.walk()) consider(it, 'ground');
       }
   out.sort((a, b) => Number(a.open) - Number(b.open) || Number(a.where === 'ground') - Number(b.where === 'ground') || b.room - a.room);
   return out;
 }
 
 /**
- * Put as much of `liquid` as possible into carried closed containers (no questions: that's
- * what CDDA's auto-pickup of crafted liquids amounts to). Returns what's left, or null.
+ * Put as much of a *new* `liquid` as possible into carried closed containers (no questions:
+ * that's what BN's auto-handling of crafted liquids amounts to). Returns what's left, or null.
  */
 export function autoStoreLiquid(host: LiquidHost, liquid: Item): Item | null {
   let left: Item | null = liquid;
   for (const t of liquidTargets(host, liquid)) {
     if (!left) break;
     if (t.open || t.where !== 'inventory') continue;
-    left = t.item.put(left);
+    left = spawnSome(left, L.in(t.item), { actor: host.player, quiet: true });
   }
   return left;
 }
 
-/** Pour into `container`; returns the rest (null = all of it went in). */
-export function pourInto(host: LiquidHost, liquid: Item, container: Item): Item | null {
+/**
+ * Pour `liquid` (at `from`, or new when null) into `container`, as much as fits. Returns what
+ * is left where it was (the same item), or null when all of it went.
+ */
+export function pourInto(host: LiquidHost, liquid: Item, container: Item, from: Loc | null = null): Item | null {
   const name = liquid.baseName();
   const before = liquid.charges;
-  const left = container.put(liquid);
-  const moved = before - (left?.charges ?? 0);
-  if (moved > 0) host.message(`You pour the ${name} into the ${container.baseName()}.`);
-  return left && left.charges > 0 ? left : null;
+  const r = moveItem(liquid, from, L.in(container), { partial: true, actor: host.player, quiet: true });
+  if (!r.ok) {
+    host.message(r.msg, 'c_light_red');
+    return liquid;
+  }
+  host.message(`You pour the ${name} into the ${container.baseName()}.`);
+  return r.moved >= before ? null : liquid;
 }
 
-/** Drink from your hands until full or it's gone; returns the rest. */
-export function drinkLiquid(host: LiquidHost, liquid: Item): Item | null {
+/** Drink from your hands until full or it's gone; returns the rest (still at `from`). */
+export function drinkLiquid(host: LiquidHost, liquid: Item, from: Loc | null = null): Item | null {
   const inv = host.player.inv;
   for (let n = 0; n < 50 && liquid.charges > 0; n++) {
-    if (!inv.consume(liquid).ok) break;
+    // the last sip consumes the item object itself: stop touching it
+    const last = liquid.charges <= 1;
+    if (!inv.consume(liquid, from).ok) break;
+    if (last) return null;
   }
   return liquid.charges > 0 ? liquid : null;
 }
 
-export function pourOnGround(host: LiquidHost, liquid: Item): void {
+/** Pour it out on the survivor's tile. */
+export function pourOnGround(host: LiquidHost, liquid: Item, from: Loc | null = null): void {
   const p = host.player;
-  host.map.addItem(p.tileX, p.tileY, p.z, liquid);
-  host.message(`You pour the ${liquid.name()} onto the ground.`);
+  const r = moveItem(liquid, from, L.ground(host.map, p.tileX, p.tileY, p.z), { force: true, quiet: true });
+  if (r.ok) host.message(`You pour the ${liquid.name()} onto the ground.`);
 }
 
 /** Can the survivor drink it at all (comestible drink, not medicine-only)? */

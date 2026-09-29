@@ -121,20 +121,15 @@ export function applyBuild(ctx: UiContext, b: Build): void {
       items.push(...made);
     }
     const inv = p.inv;
-    if (autoWield && inv.canWield(autoWield).ok) inv.wielded = autoWield;
+    if (autoWield && inv.canWield(autoWield).ok) inv.wield(autoWield, null);
     const rest: Item[] = [];
     for (const it of items) {
       if (it === inv.wielded) continue;
-      if (it.isArmor() && inv.canWear(it).ok && !it.hasFlag('NO_AUTO_EQUIP')) inv.wear(it);
-      else rest.push(it);
+      if (it.isArmor() && inv.canWear(it).ok && !it.hasFlag('NO_AUTO_EQUIP') && inv.wear(it, null).ok) continue;
+      rest.push(it);
     }
-    const floor: Item[] = [];
-    for (const it of rest) {
-      if (inv.canStash(it)) inv.stash(it);
-      else if (!inv.wielded && inv.canWield(it).ok) inv.wielded = it;
-      else floor.push(it);
-    }
-    for (const it of floor) game.map.addItem(p.tileX, p.tileY, p.z, it);
+    // add_profession_items: the rest into the inventory, hands, else at the survivor's feet
+    for (const it of rest) inv.giveNew(it);
     startBodyMods(game, b);
   } finally {
     p.onMessage = sink;

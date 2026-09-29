@@ -4,6 +4,7 @@ import { CHUNK, chunkOf, localOf } from '../world/coords';
 import { hasFlag } from '../world/registry';
 import { Rng } from '../core/rng';
 import type { Item } from './item';
+import { consumeItem, L } from './moves';
 import type { BodyPartId } from './bodyparts';
 import { bash } from './bash';
 import { isOutside } from './vision';
@@ -233,7 +234,7 @@ function processFire(game: Game, x: number, y: number, z: number, f: Field, st: 
       const it = mi as unknown as Item;
       if (!it.def) continue;
       if (burnItem(game, it, f.intensity, rng, out)) {
-        map.removeItem(x, y, z, mi);
+        consumeItem(it, L.ground(map, x, y, z));
         consumed++;
       }
     }

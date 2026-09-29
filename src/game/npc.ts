@@ -521,7 +521,7 @@ function equipNpc(data: GameData, n: Npc, cls: NpcClassDef | undefined, classId:
   const quiet = n.onMessage;
   n.onMessage = null;
   try {
-    for (const it of worn) if (n.inv.canWear(it).ok) n.inv.wear(it);
+    for (const it of worn) if (n.inv.canWear(it).ok) n.inv.wear(it, null);
     // Weapon: override group, else the group for the NPC's best weapon skill.
     let weaponRoll: Item[] = [];
     if (cls?.weapon_override && data.itemGroups[cls.weapon_override]) weaponRoll = itemsFromGroup(data, cls.weapon_override, rng);
@@ -535,7 +535,7 @@ function equipNpc(data: GameData, n: Npc, cls: NpcClassDef | undefined, classId:
     const weapon: Item | undefined = weaponRoll.find((it) => it.isGun()) ?? weaponRoll[0];
     if (weapon) {
       loadGun(data, weapon);
-      n.inv.wield(weapon);
+      n.inv.wield(weapon, null);
     }
     const carried: Item[] = weaponRoll.filter((it) => it !== weapon);
     if (cls?.carry_override && data.itemGroups[cls.carry_override]) carried.push(...itemsFromGroup(data, cls.carry_override, rng));
@@ -547,7 +547,8 @@ function equipNpc(data: GameData, n: Npc, cls: NpcClassDef | undefined, classId:
         if (ammo && data.items[ammo]) carried.push(createItem(data, ammo, { count: Math.max(1, Math.min(30, ((data.items[ammo] as { count?: number }).count ?? 10))) }));
       }
     }
-    for (const it of carried) if (!it.hasFlag('TRADER_AVOID')) n.inv.stash(it);
+    // what doesn't fit in their pack isn't generated at all (a new NPC has nothing on the ground)
+    for (const it of carried) if (!it.hasFlag('TRADER_AVOID')) n.inv.stashNew(it);
   } finally {
     n.onMessage = quiet;
   }

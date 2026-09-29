@@ -163,11 +163,11 @@ describe('needs (BN calorie store, instant thirst)', () => {
   it('drinking water: quench 50 lowers thirst by 50 at once', () => {
     const { c } = survivor();
     c.thirst = 100;
-    c.inv.consume(createItem(data, 'water_clean'));
+    c.inv.consume(createItem(data, 'water_clean'), null);
     expect(c.thirst).toBe(50);
     expect(c.hasEffect('bloated')).toBe(false);
-    c.inv.consume(createItem(data, 'water_clean'));
-    c.inv.consume(createItem(data, 'water_clean'));
+    c.inv.consume(createItem(data, 'water_clean'), null);
+    c.inv.consume(createItem(data, 'water_clean'), null);
     // past hydrated: bloated for a while
     expect(c.thirst).toBe(-50);
     expect(c.hasEffect('bloated')).toBe(true);
@@ -178,7 +178,7 @@ describe('needs (BN calorie store, instant thirst)', () => {
     passTime(c, 86400, 300);
     expect(c.hungerState()).toBe('Very Hungry');
     const kcal = c.storedKcal;
-    const r = c.inv.consume(createItem(data, 'can_beans'));
+    const r = c.inv.consume(createItem(data, 'can_beans'), null);
     expect(r.ok).toBe(true);
     expect(log).toContain('You eat your canned beans.');
     expect(c.stomach.kcal).toBe(203);
@@ -255,7 +255,7 @@ describe('effects', () => {
     expect(log).toContain('You lose some blood.');
     expect(c.hp.torso.cur).toBe(84);
     c.addEffect('bleed', 600, { bp: 'arm_l' });
-    const r = c.inv.use(createItem(data, 'bandages'));
+    const r = c.inv.use(createItem(data, 'bandages'), undefined, 0, null);
     expect(r.ok).toBe(true);
     expect(r.msg).toContain('You stop the bleeding.');
     expect(r.moves).toBe(300);
@@ -290,7 +290,7 @@ describe('effects', () => {
   it('painkillers: aspirin -> pkill1_nsaid adds painkiller over time', () => {
     const { c, log } = survivor();
     c.pain = 20;
-    const r = c.inv.consume(createItem(data, 'aspirin'));
+    const r = c.inv.consume(createItem(data, 'aspirin'), null);
     expect(log).toContain('You take some aspirin.');
     expect(r.ok).toBe(true);
     passTime(c, 240, 1);
@@ -316,7 +316,7 @@ describe('effects', () => {
     expect(c.hasEffect('infected', 'arm_r')).toBe(true);
     const { c: c2 } = survivor(3);
     c2.addEffect('bite', 1, { bp: 'arm_r' });
-    const r = c2.inv.use(createItem(data, 'disinfectant'));
+    const r = c2.inv.use(createItem(data, 'disinfectant'), undefined, 0, null);
     expect(r.ok).toBe(true);
     expect(c2.hasEffect('bite')).toBe(false);
   });
@@ -338,8 +338,8 @@ describe('skills, morale, focus', () => {
 
   it('tasty food adds morale (fun), which raises focus equilibrium', () => {
     const { c } = survivor();
-    c.inv.consume(createItem(data, 'chocolate'));
-    expect(c.morale.level()).toBe(20);
+    c.inv.consume(createItem(data, 'chocolate'), null);
+    expect(c.morale.level()).toBe(10); // BN chocolate: fun 10
     passTime(c, 3600);
     expect(c.focus).toBeGreaterThan(100);
     passTime(c, 3 * 3600);
@@ -351,8 +351,8 @@ describe('skills, morale, focus', () => {
     c.addTrait('OPTIMISTIC');
     c.update(1);
     expect(c.morale.level()).toBe(10); // trunc(9 x 1.2)
-    c.inv.consume(createItem(data, 'chocolate'));
-    expect(c.morale.level()).toBe(Math.trunc(Math.sqrt(10 * 10 + 24 * 24)));
+    c.inv.consume(createItem(data, 'chocolate'), null);
+    expect(c.morale.level()).toBe(Math.trunc(Math.sqrt(10 * 10 + 12 * 12)));
     c.removeTrait('OPTIMISTIC');
     c.update(1);
     expect(c.morale.has('morale_perm_optimist')).toBe(false);
@@ -367,7 +367,7 @@ describe('temperature', () => {
     expect(c.bodyTempDescription()).toMatch(/cold|Freezing/i);
     expect(c.effects.intensity('cold')).toBeGreaterThanOrEqual(2);
     const { c: d } = survivor();
-    for (const id of ['hoodie', 'jacket_leather', 'jeans', 'sneakers', 'hat_hard']) d.inv.wear(createItem(data, id));
+    for (const id of ['hoodie', 'jacket_leather', 'jeans', 'sneakers', 'hat_hard']) d.inv.wear(createItem(data, id), null);
     d.env = { temperature: 10, wind: 0, precipitation: false };
     passTime(d, 3600);
     expect(d.effects.has('cold', 'torso')).toBe(false);
@@ -385,8 +385,8 @@ describe('temperature', () => {
 describe('serialization', () => {
   it('toJSON/load round-trip', () => {
     const { c } = survivor();
-    c.inv.wear(createItem(data, 'backpack'));
-    c.inv.pickUp(createItem(data, 'can_beans'));
+    c.inv.wear(createItem(data, 'backpack'), null);
+    c.inv.giveNew(createItem(data, 'can_beans'));
     c.addEffect('bleed', 300, { bp: 'leg_l' });
     c.addTrait('TOUGH');
     c.setSkill('melee', 3);
@@ -395,6 +395,6 @@ describe('serialization', () => {
     const d = new Character(data);
     d.load(j);
     expect(d.toJSON()).toEqual(c.toJSON());
-    expect(d.inv.countOf('can_beans')).toBe(1);
+    expect(d.inv.countOf('can_beans')).toBe(2); // BN: a can of beans is 2 portions
   });
 });

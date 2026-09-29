@@ -2,7 +2,7 @@ import type { Game } from './game/game';
 import type { Renderer } from './render/renderer';
 import type { BodyPartId } from './game/bodyparts';
 import { MAIN_PARTS } from './game/bodyparts';
-import { createItem } from './game/item';
+import { createItem, inNewContainer } from './game/item';
 import { installRenderDebug } from './render/renderDebug';
 
 // window.cdda is the automation surface used by tools/shot.ts and by agents testing
@@ -104,13 +104,11 @@ function installCharacterHelpers(api: DebugApi, game: Game): void {
   api.giveItem = (id: string, opts: { count?: number; wear?: boolean; wield?: boolean; ammo?: string } = {}) => {
     let it = createItem(game.data, id, { count: opts.count, ammo: opts.ammo });
     // Liquids come in their default container (a loose puddle can't be carried).
-    if (it.isLiquid() && it.def.container && game.data.items[it.def.container]) {
-      const bottle = createItem(game.data, it.def.container);
-      if (!bottle.put(it)) it = bottle;
-    }
-    if (opts.wear) return p().inv.wear(it).msg;
-    if (opts.wield) return p().inv.wield(it).msg;
-    return p().inv.pickUp(it).msg;
+    if (it.isLiquid() && it.def.container && game.data.items[it.def.container]) it = inNewContainer(game.data, it, it.def.container).container;
+    if (opts.wear) return p().inv.wear(it, null).msg;
+    if (opts.wield) return p().inv.wield(it, null).msg;
+    const to = p().inv.giveNew(it);
+    return to ? `${it.name()} -> ${to.kind}` : `no room for ${it.name()}`;
   };
   api.hurt = (bp: BodyPartId, amount: number, type = 'bash') => p().takeHit(bp, [{ type, amount }]);
   api.addEffect = (id: string, seconds: number, bp?: BodyPartId) => p().addEffect(id, seconds, { bp }).name();

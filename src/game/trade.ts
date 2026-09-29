@@ -2,6 +2,7 @@ import type { GameData } from '../data/types';
 import { possibleItems } from '../data/index';
 import type { Character } from './character';
 import type { Item } from './item';
+import { isAt, L, moveItem, transaction, type Loc } from './moves';
 import type { Npc, NpcData, PriceRule } from './npc';
 
 // Bartering (npctrade.cpp + trade_ui.cpp), UI-free. Prices are cents from the item's
@@ -118,6 +119,8 @@ export interface TradeEntry {
   item: Item;
   items: Item[];
   source: TradeSource;
+  /** Where the row's items are (moves.ts). */
+  loc: Loc;
   /** Units available (charges for a stack, else the number of identical items). */
   max: number;
   /** Units selected for the exchange. */
@@ -137,10 +140,10 @@ export class TradeSession {
   constructor(readonly data: GameData, readonly nd: NpcData, readonly player: Character, readonly npc: Npc, readonly cost = 0) {
     const p = player;
     const rows = new Map<string, TradeEntry>();
-    const add = (list: TradeEntry[], it: Item, source: TradeSource, npcSells: boolean) => {
+    const add = (list: TradeEntry[], it: Item, source: TradeSource, loc: Loc, npcSells: boolean) => {
       if (it.isLiquid() && !it.isContainer()) return;
       if (it.countByCharges) {
-        list.push({ item: it, items: [it], source, max: it.charges, count: 0, price: adjustedPrice(data, nd, npc, p, it, it.charges, npcSells) });
+        list.push({ item: it, items: [it], source, loc, max: it.charges, count: 0, price: adjustedPrice(data, nd, npc, p, it, it.charges, npcSells) });
         return;
       }
       // Identical items (same type and state) stack into one row like CDDA's trade screen.
@@ -153,18 +156,19 @@ export class TradeSession {
         row.price += unit;
         return;
       }
-      const e: TradeEntry = { item: it, items: [it], source, max: 1, count: 0, price: unit };
+      const e: TradeEntry = { item: it, items: [it], source, loc, max: 1, count: 0, price: unit };
       rows.set(key, e);
       list.push(e);
     };
-    for (const it of p.inv.carried()) add(this.yours, it, 'carried', false);
-    // Worn containers with things inside stay on (selling the backpack would hand over its contents).
-    for (const it of p.inv.worn) if (!it.containerPockets().some((pk) => pk.contents.length)) add(this.yours, it, 'worn', false);
-    if (p.inv.wielded) add(this.yours, p.inv.wielded, 'wielded', false);
+    for (const it of p.inv.carried()) add(this.yours, it, 'carried', L.inv(p), false);
+    // Worn holsters/containers with something in them stay on (selling one would hand over
+    // what it holds without pricing it); integrated items can't come off at all.
+    for (const it of p.inv.worn) if (!it.hasContents() && !it.hasFlag('INTEGRATED') && !it.hasFlag('NO_TAKEOFF')) add(this.yours, it, 'worn', L.worn(p), false);
+    if (p.inv.wielded && !p.inv.wielded.hasFlag('NO_UNWIELD') && !p.inv.wielded.hasFlag('BIONIC_WEAPON')) add(this.yours, p.inv.wielded, 'wielded', L.hands(p), false);
     const sellsBelongings = nd.classes[npc.classId]?.sells_belongings !== false;
-    for (const it of npc.stock) add(this.theirs, it, 'stock', true);
-    if (sellsBelongings || !npc.isShopkeeper()) for (const it of npc.inv.carried()) add(this.theirs, it, 'npc', true);
-    if (npc.isAlly() && npc.inv.wielded) add(this.theirs, npc.inv.wielded, 'npc', true);
+    for (const it of npc.stock) add(this.theirs, it, 'stock', L.stock(npc), true);
+    if (sellsBelongings || !npc.isShopkeeper()) for (const it of npc.inv.carried()) add(this.theirs, it, 'npc', L.inv(npc), true);
+    if (npc.isAlly() && npc.inv.wielded) add(this.theirs, npc.inv.wielded, 'npc', L.hands(npc), true);
     // Goods first (by category, then name), the faction's currency last.
     const cur = nd.factions[npc.faction]?.currency;
     this.theirs.sort((a, b) => Number(a.item.typeId === cur) - Number(b.item.typeId === cur) || String(a.item.def.category).localeCompare(String(b.item.def.category)) || a.item.name().localeCompare(b.item.name()));
@@ -202,46 +206,42 @@ export class TradeSession {
   }
 
   /**
-   * Move the items and settle the balance. Returns false (nothing moved) when the NPC refuses.
-   * `drop` puts items the survivor can't carry at their feet.
+   * Move the items and settle the balance. Returns false (nothing moved) when the NPC refuses
+   * or a selected item is no longer where the session saw it. What the survivor gets but can't
+   * carry is set down at their feet and reported to `onDropped`.
    */
-  commit(drop: (it: Item) => void): boolean {
+  commit(onDropped: (it: Item) => void = () => {}): boolean {
     if (!this.canAccept().ok) return false;
     const p = this.player, n = this.npc;
-    const detach = (it: Item, e: TradeEntry, owner: 'player' | 'npc'): Item => {
-      if (owner === 'player') {
-        if (e.source === 'wielded') p.inv.wielded = null;
-        else p.inv.remove(it);
-      } else if (e.source === 'stock') n.stock.splice(n.stock.indexOf(it), 1);
-      else if (n.inv.wielded === it) n.inv.wielded = null;
-      else n.inv.remove(it);
-      return it;
-    };
-    const take = (e: TradeEntry, owner: 'player' | 'npc'): Item[] => {
-      if (e.count <= 0) return [];
-      const it = e.item;
-      if (it.countByCharges) return [e.count < it.charges ? it.split(e.count) : detach(it, e, owner)];
-      return e.items.slice(0, e.count).map((x) => detach(x, e, owner));
-    };
-    const quiet = <T>(c: Character, fn: () => T): T => {
-      const s = c.onMessage;
-      c.onMessage = null;
-      try {
-        return fn();
-      } finally {
-        c.onMessage = s;
-      }
-    };
-    const toNpc = this.yours.flatMap((e) => take(e, 'player'));
-    const toPlayer = this.theirs.flatMap((e) => take(e, 'npc'));
-    for (const it of toPlayer) if (!quiet(p, () => p.inv.pickUp(it)).ok) drop(it);
-    for (const it of toNpc) {
-      if (n.isShopkeeper()) n.stock.push(it);
-      else {
-        const left = quiet(n, () => n.inv.stash(it));
-        if (left) n.stock.push(left);
-      }
-    }
+    const dropped: Item[] = [];
+    const ok = transaction(() => {
+      const give = (e: TradeEntry, to: () => Loc[]): boolean => {
+        if (e.count <= 0) return true;
+        const units: [Item, number | undefined][] = e.item.countByCharges ? [[e.item, e.count]] : e.items.slice(0, e.count).map((x) => [x, undefined]);
+        for (const [it, count] of units) {
+          if (!isAt(it, e.loc)) return false;
+          let moved = false;
+          for (const dest of to()) {
+            const r = moveItem(it, e.loc, dest, { count, quiet: true, actor: dest.kind === 'inv' ? dest.who : undefined });
+            if (!r.ok) continue;
+            if (dest.kind === 'ground') dropped.push(r.item ?? it);
+            moved = true;
+            break;
+          }
+          if (!moved) return false;
+        }
+        return true;
+      };
+      const ground = p.inv.groundHere();
+      const toPlayer = () => [L.inv(p), ...(ground ? [ground] : [])];
+      // A shopkeeper puts what they buy on the shelf; anyone else carries it if they can.
+      const toNpc = () => (n.isShopkeeper() ? [L.stock(n)] : [L.inv(n), L.stock(n)]);
+      for (const e of this.theirs) if (!give(e, toPlayer)) return false;
+      for (const e of this.yours) if (!give(e, toNpc)) return false;
+      return true;
+    });
+    if (!ok) return false;
+    for (const it of dropped) onDropped(it);
     const bal = this.balance();
     n.op.owed = calcNpcOwesYou(n, bal);
     p.practice('speech', Math.floor(this.yourValue() / 10000));

@@ -47,7 +47,7 @@ export function installCombatFeel(game: Game, renderer: Renderer | null, monster
       if (loaded <= 0 && (w.magazineCurrent() ?? null) === mag) return;
       // CDDA reload cost in moves (item reload_time, per round without a magazine), as real time.
       const per = typeof w.def.reload === 'number' ? w.def.reload : 100;
-      const moves = w.magazineWell() ? per + 100 : per * Math.max(1, loaded);
+      const moves = w.takesMagazines() ? per + 100 : per * Math.max(1, loaded);
       const secs = Math.max(0.7, Math.min(2.5, moves / 100 / ACTION_SCALE * 2));
       renderer?.viewmodel?.reload(secs);
       combat.cooldown = Math.max(combat.cooldown, secs);

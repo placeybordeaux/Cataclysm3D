@@ -5,6 +5,7 @@ import { getConstruction, startConstruction } from '../game/construction';
 import { startDisassembly } from '../game/disassembly';
 import { fireTarget, useFirestarter } from '../game/fire';
 import { createItem, Item } from '../game/item';
+import { spawnOnGround } from '../game/moves';
 import { startReading } from '../game/reading';
 import { openConstructionMenu } from './construction';
 import { openCraftingMenu } from './crafting';
@@ -51,7 +52,7 @@ function installCraftingDebug(game: Game, api: DebugApi): void {
   api.placeItem = (id: string, dx = 0, dy = 0, count?: number) => {
     const pl = p();
     const it = createItem(game.data, id, count !== undefined ? { count } : {});
-    game.map.addItem(Math.floor(pl.x) + dx, Math.floor(pl.y) + dy, pl.z, it);
+    spawnOnGround(game.map, Math.floor(pl.x) + dx, Math.floor(pl.y) + dy, pl.z, it);
     return it.name();
   };
   api.addFire = (dx = 1, dy = 0) => {
@@ -75,7 +76,7 @@ function installCraftingDebug(game: Game, api: DebugApi): void {
     let b = p().inv.allItems().find((i) => i.typeId === id);
     if (!b) {
       b = createItem(game.data, id);
-      p().inv.pickUp(b);
+      p().inv.giveNew(b);
     }
     return startReading(game, b);
   };

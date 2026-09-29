@@ -13,6 +13,7 @@ import { MonsterSystem } from '../src/game/monai';
 import { PlayerCombat, applyTechniqueToMonster, monsterTargetInfo } from '../src/game/playercombat';
 import { aimState, fireGun, gunDispersion, meleeAttack, monsterMeleeAttack, onDodged, tryDodgeRoll } from '../src/game/combat';
 import { createItem, Item } from '../src/game/item';
+import { L, spawnItem } from '../src/game/moves';
 import {
   applyTechnique, availableTechniques, blockHit, blockingAbility, glassShatter, handleMeleeWear, logarithmicRange, pickTechnique,
   techniqueDef, techniqueMessage, type TargetInfo,
@@ -168,7 +169,7 @@ describe('weapon techniques (BN get_valid_techniques / pick_technique)', () => {
   it('in the world: a sledgehammer wide arc hits the zombies beside the target too', () => {
     const { game, sys, combat, msgs } = world();
     const p = game.player;
-    p.inv.wield(createItem(data, 'hammer_sledge'));
+    p.inv.wield(createItem(data, 'hammer_sledge'), null);
     p.str_base = 14;
     p.dex_base = 20;
     p.per_base = 20;
@@ -198,7 +199,7 @@ describe('weapon techniques (BN get_valid_techniques / pick_technique)', () => {
 describe('blocking and dodging (block_hit, dodges_left)', () => {
   it('melee 0 never blocks; melee 5 always tries once per turn with the weapon', () => {
     const { c, log } = survivor();
-    c.inv.wield(createItem(data, 'bat'));
+    c.inv.wield(createItem(data, 'bat'), null);
     const rng = new Rng(7);
     for (let i = 0; i < 50; i++) {
       refreshDefenses(c);
@@ -265,7 +266,7 @@ describe('blocking and dodging (block_hit, dodges_left)', () => {
 
   it('monster attacks are blocked by a skilled survivor with a weapon', () => {
     const { c, log } = survivor();
-    c.inv.wield(createItem(data, 'bat'));
+    c.inv.wield(createItem(data, 'bat'), null);
     c.setSkill('melee', 6);
     const rng = new Rng(9);
     let blocked = 0;
@@ -294,7 +295,7 @@ describe('martial arts', () => {
     expect(availableTechniques(c, null).map((t) => t.id)).toContain('tec_karate_rapid');
     expect(pickTechnique(c, zombieInfo(), null, { crit: false }, new Rng(1))?.id).toMatch(/^tec_karate_/);
     // Karate doesn't allow a katana: its static buff drops out of the requirements.
-    c.inv.wield(createItem(data, 'katana'));
+    c.inv.wield(createItem(data, 'katana'), null);
     triggerBuffs(c, 'static');
     maOf(c).buffs.clear();
     triggerBuffs(c, 'static');
@@ -351,7 +352,7 @@ describe('weapon durability', () => {
   it('a glass bottle shatters on the blow, cutting the wielder and leaving their hands', () => {
     const { c, log } = survivor();
     const bottle = createItem(data, 'bottle_glass');
-    c.inv.wield(bottle);
+    c.inv.wield(bottle, null);
     const hp = c.hp.arm_r.cur;
     const r = glassShatter(c, bottle, new Rng(3));
     expect(r.shattered).toBe(true);
@@ -363,7 +364,7 @@ describe('weapon durability', () => {
   it('chip-resistance 0 items wear on every blow until destroyed; DURABLE_MELEE steel rarely does', () => {
     const { c, log } = survivor();
     const bottle = createItem(data, 'bottle_glass');
-    c.inv.wield(bottle);
+    c.inv.wield(bottle, null);
     const rng = new Rng(4);
     expect(handleMeleeWear(c, bottle, 1, rng).damaged).toBe(true);
     expect(log).toContain('Your glass bottle is damaged by the force of the blow!');
@@ -371,7 +372,7 @@ describe('weapon durability', () => {
     expect(c.inv.wielded).toBeNull();
     expect(log.some((m) => /is destroyed by the blow!$/.test(m))).toBe(true);
     const katana = createItem(data, 'katana');
-    c.inv.wield(katana);
+    c.inv.wield(katana, null);
     let hits = 0;
     for (let i = 0; i < 500; i++) if (handleMeleeWear(c, katana, 1, rng).damaged) hits++;
     expect(hits).toBeLessThan(5);
@@ -381,7 +382,7 @@ describe('weapon durability', () => {
 describe('ranged depth', () => {
   function loadedScar(): Item {
     const gun = createItem(data, 'scar_l');
-    gun.magazineWell()!.insert(createItem(data, 'stanag30', { ammo: '223' }));
+    spawnItem(createItem(data, 'stanag30', { ammo: '223' }), L.mag(gun));
     return gun;
   }
 
@@ -398,7 +399,7 @@ describe('ranged depth', () => {
     const p = game.player;
     const gun = loadedScar();
     cycleMode(gun);
-    p.inv.wield(gun);
+    p.inv.wield(gun, null);
     p.recoil = 0;
     const before = gun.ammoRemaining();
     const recoils: number[] = [];
@@ -423,13 +424,14 @@ describe('ranged depth', () => {
     const gun = loadedScar();
     const loud = gun.gunNoise().volume;
     const sup = createItem(data, 'suppressor');
-    expect(installGunmod(c, gun, sup).ok).toBe(true);
+    expect(installGunmod(c, gun, sup, null).ok).toBe(true);
     expect(gun.gunNoise().volume).toBe(Math.trunc(loud * 0.7));
     expect(gunmodCompatible(gun, createItem(data, 'suppressor')).reason).toMatch(/already has/);
     // A Glock has no muzzle slot.
     const glock = createItem(data, 'glock_19');
     expect(gunmodCompatible(glock, createItem(data, 'suppressor')).ok).toBe(false);
-    expect(removeGunmod(c, gun, sup).ok).toBe(true);
+    // onto a workbench (any place that takes it)
+    expect(removeGunmod(c, gun, sup, [L.stock({ stock: [], name: 'bench' })]).ok).toBe(true);
     expect(gun.gunNoise().volume).toBe(loud);
   });
 
@@ -440,13 +442,13 @@ describe('ranged depth', () => {
     c.setSkill('rifle', 5);
     const gun = loadedScar();
     expect(sightDispersion(gun)).toBe(Number(gun.def.sight_dispersion));
-    expect(installGunmod(c, gun, createItem(data, 'red_dot_sight')).ok).toBe(true);
+    expect(installGunmod(c, gun, createItem(data, 'red_dot_sight'), null).ok).toBe(true);
     expect(sightDispersion(gun)).toBe(27);
     const again = Item.fromJSON(data, JSON.parse(JSON.stringify(gun.toJSON())));
     expect(again.gunmods.map((m) => m.typeId)).toEqual(['red_dot_sight']);
     // Mods with a dispersion_modifier widen the gun's dispersion.
     const base = gunDispersion(gun);
-    installGunmod(c, gun, createItem(data, 'muzzle_brake'));
+    installGunmod(c, gun, createItem(data, 'muzzle_brake'), null);
     expect(gunDispersion(gun)).toBeGreaterThanOrEqual(base);
   });
 
@@ -470,7 +472,7 @@ describe('ranged depth', () => {
     expect(shot.shotDamage).toEqual([{ type: 'bullet', amount: 16, armor_penetration: 0 }]);
     expect(shot.shotSpreadMoa).toBe(300);
     const { game, sys, combat, msgs } = world();
-    game.player.inv.wield(createItem(data, 'mossberg_500', { ammo: 'shot_00' }));
+    game.player.inv.wield(createItem(data, 'mossberg_500', { ammo: 'shot_00' }), null);
     game.player.recoil = 0;
     for (let dx = -1; dx <= 1; dx++) sys.spawnById('mon_zombie', 12.5 + dx * 0.7, 7.5, 0);
     let hitMsgs = 0;

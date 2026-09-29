@@ -6,6 +6,7 @@ import {
   boundModToVals, Effect, effectActivated, effectAmount, EffectRegistry, EffectSet, effectRollMod, type EffectJSON,
 } from './effects';
 import { Inventory, type InventoryJSON } from './inventory';
+import type { Loc } from './moves';
 import { focusEquilibrium, Morale, type MoralePoint } from './morale';
 import { cddaText } from './units';
 import { buffFlat } from './martialarts';
@@ -295,6 +296,11 @@ export class Character {
   onDeath: ((cause: string) => void) | null = null;
   /** Debug only (cdda.godMode): hits land but deal no damage, for screenshots and playtests. */
   debugInvulnerable = false;
+  /**
+   * Where things this character drops land (the tile under them). Set by the game for the player
+   * and NPCs; null (tests, no map) means actions that would have to drop something refuse.
+   */
+  groundLoc: (() => Loc | null) | null = null;
 
   private acc = 0;
   private staminaAcc = 0;

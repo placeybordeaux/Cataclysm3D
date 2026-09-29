@@ -4,6 +4,7 @@ import { isBodyPart, type BodyPartId } from './bodyparts';
 import { SLEEPINESS, THIRST, type Character } from './character';
 import { covers } from './inventory';
 import { asArray, type Item } from './item';
+import { L, moveItem } from './moves';
 import { cddaText } from './units';
 
 // Cataclysm: Bright Nights mutations (mutation.cpp, mutation_data.cpp, iuse_actor.cpp
@@ -266,6 +267,7 @@ export class MutationState {
   /** Game seconds processed (active mutation upkeep). */
   time = 0;
   /** Items pushed off by a new mutation go here (the installer drops them on the map). */
+  /** Told about gear that fell off (already on the ground: informational). */
   onDropItem: ((it: Item) => void) | null = null;
   /** Called after any gain/loss so views (sprite overlays) can refresh. */
   onChanged: (() => void) | null = null;
@@ -424,9 +426,10 @@ export class MutationState {
     // Clothing the new body part can't take is pushed off (mutation_effect).
     for (const it of [...inv.worn]) {
       if (!conflictsWithItem(this.c.data, d, it)) continue;
-      inv.worn.splice(inv.worn.indexOf(it), 1);
+      // it falls to the ground (or, with no ground to fall on, stays with you)
+      const away = inv.groundHere() ?? L.inv(this.c);
       this.msg(`Your ${it.name()} is pushed off!`, 'c_red');
-      this.onDropItem?.(it);
+      if (moveItem(it, L.worn(this.c), away, { force: true, quiet: true }).ok) this.onDropItem?.(it);
     }
     this.onChanged?.();
   }
