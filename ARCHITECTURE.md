@@ -235,6 +235,27 @@ tests/               vitest unit tests (pure logic, no DOM/WebGL)
   `cdda.fish(seconds, {run})`, `cdda.chopTree(instant)`, `cdda.findOpenGround(n)`, `cdda.dive(x, y)`,
   `cdda.swim()`, `cdda.actualize()`, `cdda.natureInteractions(x, y)`, `cdda.fillable()`.
 
+### Frame pacing, hit feedback, onboarding, spawn density, liquids, e-files
+- `src/world/prefetch.ts` `ChunkPrefetcher` (`cdda.prefetch`): generates chunks ahead of the player
+  (radius 6, z±2, biased along the velocity) in `requestIdleCallback` slack; `stats.sync` counts chunks
+  someone generated synchronously (hitch candidates), `stats.slowest`. `?prefetch=0` disables.
+  `cdda.benchRun({seconds, speed, yawDeg})` ghost-sprints and returns frame-time percentiles
+  (`src/perfDebug.ts`). Keep item spawning linear: `placeContents` batches pocket totals.
+- `playerAttack` event (events.ts) per attack: outcome hit/crit/kill/block/miss/whiff, impact point,
+  `heavy`, blood field id. `src/render/hitFx.ts` (pixel blood/sparks/dust, crit flash, stagger via
+  `MonsterView.kick`), HUD hit marker. `nearClamp` (monsterView.ts) draws creatures closer than
+  `NEAR_CLAMP.dist` (1.2 m) as if at that distance.
+- Hints popup at new game (`src/ui/tips.ts`, Options "Show hints at start"), CDDA tips of the day
+  (`ui.json` `tips`). Weapon speed: `swingSpeedRating`/`unwieldyWarning` (combat.ts), sidebar swing time.
+- Zombie density = CDDA SPAWN_DENSITY (`src/game/density.ts`; chargen DESCRIPTION `z`, Options, save
+  key `zombieDensity`). Spawner: `CITY_HORDE_REALTIME` 0.2, `SPAWN_REALTIME` 0.75; spawns are held
+  (`spawner.hold/release`) while the title screen runs. Outside the bubble only `Monster.horde`
+  members hear (`hordeSignal`, CDDA get_signal_for_hordes).
+- Liquids: `src/game/liquid.ts` (targets, auto-store, pour, drink) + `src/ui/liquid_ui.ts` menu, wired
+  through `liquidHooks` (crafting.ts) and Unload on containers.
+- E-files: `E_FILE_STORAGE` pockets take books/E_STORABLE items (`Item.efiles()`); `efileDevice`,
+  `ereaderProblem` (reading.ts) require a charged phone/laptop.
+
 ### Extension points (prefer these over editing someone else's code)
 
 - `game.systems.push({ name, update(game, realDt, gameDt) })` for per-tick simulation.
