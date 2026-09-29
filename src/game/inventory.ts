@@ -239,6 +239,9 @@ export class Inventory {
       this.wielded = it;
       return this.say(true, `You wield your ${it.name()}.`, moves);
     }
+    // Like CDDA's pickup "wield it instead" choice: swap hands when what we hold fits a pocket.
+    // Never silently drops the current weapon; that's left to an explicit wield (z).
+    if (this.canWield(it).ok && this.canStash(this.wielded)) return this.wield(it);
     return this.say(false, `There's no room in your inventory for the ${it.name()}.`);
   }
 
@@ -273,7 +276,12 @@ export class Inventory {
     this.wielded = it;
     // item::on_wield_cost, simplified: base 100 + volume penalty.
     const moves = 100 + Math.min(200, Math.floor(it.volume() / 20));
-    const res = this.say(true, `You wield your ${it.name()}.`, moves, dropped.length ? { dropped } : {});
+    const res = this.say(
+      true,
+      dropped.length ? `You drop your ${dropped[0].name()} and wield your ${it.name()}.` : `You wield your ${it.name()}.`,
+      moves,
+      dropped.length ? { dropped } : {},
+    );
     // Real time leaves no turn to reconsider a bad weapon, so say so up front.
     const warn = unwieldyWarning(this.owner, it);
     if (warn) this.owner.msg(warn, 'c_yellow');

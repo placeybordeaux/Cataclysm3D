@@ -39,6 +39,20 @@ describe('carrying', () => {
     expect(c.inv.weightCarried()).toBe(633 + 256 * 2);
   });
 
+  it('picking up something too big swaps hands when the held item fits a pocket', () => {
+    const { c } = survivor();
+    c.inv.wear(createItem(data, 'jeans'));
+    const beans = createItem(data, 'can_beans');
+    c.inv.wielded = beans;
+    const bar = createItem(data, 'crowbar');
+    expect(c.inv.canStash(beans)).toBe(true);
+    expect(c.inv.canStash(bar)).toBe(false);
+    const r = c.inv.pickUp(bar);
+    expect(r.ok).toBe(true);
+    expect(c.inv.wielded).toBe(bar);
+    expect(c.inv.carried()).toContain(beans);
+  });
+
   it("you can't wear two backpacks, or three pairs of jeans", () => {
     const { c } = survivor();
     c.inv.wear(createItem(data, 'backpack'));

@@ -11,6 +11,7 @@ import { atlasOf } from './context';
 import { c, colorize, openMenu, openWindow, confirm, prompt, type UiWindow } from './framework';
 import { sfx } from '../audio/sfx';
 import { CHUNK } from '../world/coords';
+import { emitSound } from '../game/sound';
 
 // NPC screens in CDDA's curses style: the dialogue window (portrait, what was said,
 // lettered responses; greyed responses are unavailable), the trade screen (two columns
@@ -425,7 +426,7 @@ export function openChatMenu(ctx: NpcUiCtx, talk: (n: Npc) => void): void {
         game.message('You tell your allies to follow you.');
       } else {
         game.message('You yell!');
-        import('../game/sound').then(({ emitSound }) => emitSound(game, { x: p.tileX, y: p.tileY, z: p.z }, 30, 'yelling', { category: 'speech', source: p, ambient: true }));
+        emitSound(game, { x: p.tileX, y: p.tileY, z: p.z }, 30, 'yelling', { category: 'speech', source: p, ambient: true });
       }
     },
   });

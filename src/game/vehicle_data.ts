@@ -1,5 +1,6 @@
 import type { Rng } from '../core/rng';
 import { warnOnce } from '../data/warn';
+import { DATA_BASE } from '../core/assets';
 
 // Shape of public/data/vehicles.json (tools/extract/vehicles.ts). Units: g, ml, W, kJ.
 
@@ -79,7 +80,7 @@ export interface VehicleDataFile {
   fuels: Record<string, { name: string; kjPerCharge: number; chargesPerL?: number }>;
 }
 
-export async function loadVehicleData(base = '/data/'): Promise<VehicleDataFile> {
+export async function loadVehicleData(base = DATA_BASE): Promise<VehicleDataFile> {
   const res = await fetch(base + 'vehicles.json');
   if (!res.ok) throw new Error(`Failed to load ${base}vehicles.json: HTTP ${res.status} (run \`npm run extract:vehicles\`)`);
   return res.json();

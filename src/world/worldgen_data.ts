@@ -4,6 +4,7 @@
 //   overmap.json  - overmap terrains, specials/city buildings, region settings, names
 // Mapgen objects are kept verbatim (minus "//" comments) because the interpreter in
 // src/world/mapgen/ reads them the same way CDDA's mapgen.cpp does.
+import { DATA_BASE } from '../core/assets';
 
 export type Json = any;
 
@@ -129,7 +130,7 @@ export interface WorldgenData {
   overmap: OvermapData;
 }
 
-export async function loadWorldgenData(base = '/data/'): Promise<WorldgenData> {
+export async function loadWorldgenData(base = DATA_BASE): Promise<WorldgenData> {
   const get = async (file: string) => {
     const res = await fetch(base + file);
     if (!res.ok) throw new Error(`Failed to load ${base + file}: HTTP ${res.status} (run \`npm run extract:mapgen\`)`);

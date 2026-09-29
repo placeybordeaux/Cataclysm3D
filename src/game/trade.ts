@@ -80,6 +80,16 @@ export function adjustedPrice(data: GameData, nd: NpcData, npc: Npc, player: Cha
   return Math.ceil(price);
 }
 
+/**
+ * npc_trading::trading_price: an item is worth itself plus everything inside it, so a box of
+ * ammo sells for its rounds (the cardboard alone is worth nothing).
+ */
+export function tradingPrice(data: GameData, nd: NpcData, npc: Npc, player: Character, it: Item, npcSells: boolean): number {
+  let sum = 0;
+  for (const e of it.walk()) sum += adjustedPrice(data, nd, npc, player, e, e.count(), npcSells);
+  return sum;
+}
+
 /** npc::max_credit_extended */
 export function maxCreditExtended(npc: Npc): number {
   if (npc.isAlly()) return Infinity;
@@ -136,7 +146,7 @@ export class TradeSession {
       // Identical items (same type and state) stack into one row like CDDA's trade screen.
       const key = `${npcSells ? 'n' : 'u'}:${source}:${JSON.stringify(it.toJSON())}`;
       const row = rows.get(key);
-      const unit = adjustedPrice(data, nd, npc, p, it, 1, npcSells);
+      const unit = tradingPrice(data, nd, npc, p, it, npcSells);
       if (row) {
         row.items.push(it);
         row.max++;

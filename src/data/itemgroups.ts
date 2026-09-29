@@ -26,6 +26,21 @@ export interface SpawnedItem {
   ammo?: string;
   variant?: string;
   contents?: SpawnedItem[];
+  /** the entry's "custom-flags" (e.g. profession gear's auto_wield) */
+  flags?: string[];
+}
+
+/**
+ * "container-item" is an id or CDDA's object form { "item": id, "variant": v }; a separate
+ * "container-variant" names the variant too (the 7.7mm Arisaka rounds come in a .45 ACP box
+ * whose variant is the "7.7x58mm Arisaka ammo box").
+ */
+function containerRef(ci: unknown, variant: string | undefined): [string | undefined, string | undefined] {
+  if (ci && typeof ci === 'object') {
+    const o = ci as { item?: string; variant?: string };
+    return [o.item, o.variant ?? variant];
+  }
+  return [ci as string | undefined, variant];
 }
 
 function roll(rng: Rng, v: number | [number, number] | undefined, dflt: number): number {
@@ -57,7 +72,7 @@ function rollCharges(rng: Rng, v: number | [number, number] | undefined, def: It
 }
 
 function sameStack(a: SpawnedItem, b: SpawnedItem): boolean {
-  return a.id === b.id && a.charges === b.charges && a.ammo === b.ammo && a.variant === b.variant && !a.contents && !b.contents;
+  return a.id === b.id && a.charges === b.charges && a.ammo === b.ammo && a.variant === b.variant && !a.contents && !b.contents && !a.flags && !b.flags;
 }
 
 /** Merge identical adjacent content-less items into one stack with a count. */
@@ -89,9 +104,9 @@ class Expander {
       stackIds = [...stackIds, ref];
     } else def = ref;
     const items = this.entries(def.subtype, def.entries, stackIds);
-    const ci = def['container-item'];
+    const [ci, cv] = containerRef(def['container-item'], def['container-variant']);
     // CDDA: "container-item": "null" means "spawn loose", not "wrap in the null item".
-    if (ci && ci !== 'null' && items.length) return [{ id: ci, count: 1, contents: items }];
+    if (ci && ci !== 'null' && items.length) return [{ id: ci, count: 1, contents: items, ...(cv ? { variant: cv } : {}) }];
     return items;
   }
 
@@ -149,13 +164,15 @@ class Expander {
     if (charges !== undefined) it.charges = charges;
     if (e['ammo-item']) it.ammo = e['ammo-item'];
     if (e.variant) it.variant = e.variant;
+    if (e['custom-flags']?.length) it.flags = [...e['custom-flags']];
     const contents: SpawnedItem[] = [];
     for (const c of e['contents-item'] ?? []) contents.push({ id: c, count: 1 });
     for (const g of e['contents-group'] ?? []) contents.push(...this.group(g, stackIds));
     if (contents.length) it.contents = [...(it.contents ?? []), ...stack(contents)];
-    const container = e['container-item'] ?? (e['container-group'] ? this.group(e['container-group'], stackIds)[0]?.id : undefined);
+    const [ci, cv] = containerRef(e['container-item'], e['container-variant']);
+    const container = ci ?? (e['container-group'] ? this.group(e['container-group'], stackIds)[0]?.id : undefined);
     // "container-item": "null" is CDDA's explicit "no container" (loose items).
-    if (container && container !== 'null') return { id: container, count: 1, contents: [it] };
+    if (container && container !== 'null') return { id: container, count: 1, contents: [it], ...(cv ? { variant: cv } : {}) };
     return it;
   }
 }

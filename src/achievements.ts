@@ -12,6 +12,7 @@ import {
   type TrackerJSON, type WorldQueries,
 } from './game/achievements';
 import { installAchievementsUi } from './ui/achievements_ui';
+import { DATA_BASE } from './core/assets';
 
 // Wiring for scores & achievements (src/game/achievements.ts): loads public/data/
 // achievements.json, feeds CDDA events from the running game, persists per-character
@@ -46,7 +47,7 @@ export function achievementsOf(game: Game): AchievementsHandle | undefined {
   return handles.get(game);
 }
 
-export async function loadAchievementsData(base = '/data/'): Promise<AchievementsData> {
+export async function loadAchievementsData(base = DATA_BASE): Promise<AchievementsData> {
   const res = await fetch(base + 'achievements.json');
   if (!res.ok) throw new Error(`Failed to load ${base}achievements.json: HTTP ${res.status} (run \`npm run extract:achievements\`)`);
   return (await res.json()) as AchievementsData;

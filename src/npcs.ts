@@ -19,6 +19,7 @@ import { registerSaveable } from './save/registry';
 import { sanitizeItemJSON } from './save/items';
 import { confirmAttackNpc, factionName, openChatMenu, openDialogue, openMissionLog, openTrade, pickItemMenu, type NpcUiCtx } from './ui/npc_ui';
 import type { UiWindow } from './ui/framework';
+import { DATA_BASE } from './core/assets';
 
 // Wiring for NPCs: data (public/data/npcs.json), the simulation system, mapgen placements
 // (the refugee center's Free Merchants) and random survivors in towns, player combat hooks,
@@ -36,7 +37,7 @@ const RANDOM_CLASSES = ['NC_SCAVENGER', 'NC_HUNTER', 'NC_FARMER', 'NC_DOCTOR', '
 /** One random NPC per this many city OMTs (CDDA's overmap NPC density is low too). */
 const CITY_NPC_ONE_IN = 45;
 
-export async function loadNpcData(base = '/data/'): Promise<NpcData> {
+export async function loadNpcData(base = DATA_BASE): Promise<NpcData> {
   const res = await fetch(base + 'npcs.json');
   if (!res.ok) throw new Error(`Failed to load ${base}npcs.json: HTTP ${res.status} (run \`npm run extract:npcs\`)`);
   return res.json();

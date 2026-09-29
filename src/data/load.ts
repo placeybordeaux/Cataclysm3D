@@ -1,4 +1,5 @@
 import type { GameData } from './types';
+import { DATA_BASE } from '../core/assets';
 
 // Files produced by `npm run extract`. Loading fails loudly if any is missing: running
 // with partial content would produce confusing downstream errors (unknown ids in mapgen).
@@ -13,7 +14,7 @@ const FILES = {
   misc: 'misc.json',
 } as const;
 
-export async function loadGameData(base = '/data/'): Promise<GameData> {
+export async function loadGameData(base = DATA_BASE): Promise<GameData> {
   const entries = await Promise.all(
     Object.entries(FILES).map(async ([key, file]) => {
       const res = await fetch(base + file);

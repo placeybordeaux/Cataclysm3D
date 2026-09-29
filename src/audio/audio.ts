@@ -4,6 +4,7 @@ import { countOccluders, distanceGain, effectGain, listenerSpace, muffle, type L
 import { ambientLayers, WEATHER_TYPES, type AmbientChannel, type AmbientState, type WeatherInfo } from './ambience';
 import { registerSynth, renderSynth, SYNTH_PREFIX } from './procedural';
 import { warnOnce } from '../data/warn';
+import { ASSET_BASE } from '../core/assets';
 
 // WebAudio engine. Graph:
 //   voice: source -> lowpass -> gain -> [panner] -> bus(sfx|ui|ambient) -> master -> out
@@ -150,7 +151,7 @@ export class AudioEngine {
   private unlocked = false;
 
   constructor(opts: { baseUrl?: string; ctx?: AudioContext } = {}) {
-    this.baseUrl = opts.baseUrl ?? `${import.meta.env?.BASE_URL ?? '/'}audio/`;
+    this.baseUrl = opts.baseUrl ?? `${ASSET_BASE}audio/`;
     this.ctx = opts.ctx ?? new AudioContext({ latencyHint: 'interactive' });
     this.master = this.ctx.createGain();
     this.master.connect(this.ctx.destination);

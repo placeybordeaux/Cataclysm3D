@@ -5,6 +5,7 @@ import type { WorldGenerator } from '../world/worldgen';
 import type { OterDef } from '../world/worldgen_data';
 import { CHUNK } from '../world/coords';
 import type { MoodFace, NameLists } from './format';
+import { DATA_BASE } from '../core/assets';
 
 // Everything the screens need, gathered once in installUi (src/ui/index.ts).
 
@@ -28,7 +29,7 @@ export interface UiContext {
   build?: { scenario: string; profession: string };
 }
 
-export async function loadUiData(base = '/data/'): Promise<UiData> {
+export async function loadUiData(base = DATA_BASE): Promise<UiData> {
   const res = await fetch(base + 'ui.json');
   if (!res.ok) throw new Error(`Failed to load ${base}ui.json: HTTP ${res.status} (run \`npm run extract:ui\`)`);
   return res.json();

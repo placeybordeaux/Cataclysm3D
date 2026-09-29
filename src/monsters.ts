@@ -3,6 +3,7 @@ import type { Renderer } from './render/renderer';
 import type { DebugApi } from './debug';
 import type { WorldGenerator } from './world/worldgen';
 import { MonsterSystem } from './game/monai';
+import { findPath } from './game/pathfind';
 import { Spawner, type OvermapView } from './game/spawner';
 import { PlayerCombat, type ViewModelHook } from './game/playercombat';
 import { MonsterView, NEAR_CLAMP } from './render/monsterView';
@@ -290,6 +291,9 @@ function installDebug(api: DebugApi, game: Game, sys: MonsterSystem, spawner: Sp
   const p = () => game.player;
   api.monsterSystem = sys;
   api.combat = combat;
+  /** A* route (door-opening, like a survivor) from the player to (x, y) on their z-level, for playtest scripts. */
+  api.findPath = (x: number, y: number, maxNodes = 40000) =>
+    findPath(sys.grid, p().tileX, p().tileY, x, y, p().z, { doors: true, maxNodes, margin: 40 });
   /** Spawn a monster at (dx, dy) tiles from the player (x east, y south). Returns its uid. */
   api.spawnMonster = (id: string, dx = 0, dy = -5, opts: { friendly?: boolean } = {}) => {
     const m = sys.spawnById(id, p().x + dx, p().y + dy, p().z, opts);

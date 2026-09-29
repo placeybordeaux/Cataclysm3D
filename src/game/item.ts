@@ -691,6 +691,12 @@ export class Item implements MapItem {
 
   // --- display (item_tname.cpp, simplified) ---
   baseName(quantity = 1): string {
+    // CDDA item variants (a .45 ACP box holding Arisaka rounds is the "7.7x58mm Arisaka ammo box").
+    const v = this.vars.variant;
+    if (v !== undefined) {
+      const vd = (this.def.variants as { id: string; name?: unknown }[] | undefined)?.find((x) => x.id === v);
+      if (vd?.name) return cddaText(vd.name as never, quantity !== 1);
+    }
     if (quantity !== 1 && this.def.name_plural) return this.def.name_plural;
     return cddaText(this.def.name, quantity !== 1);
   }
@@ -863,8 +869,10 @@ export function fromSpawned(data: GameData, s: SpawnedItem): Item[] {
     return [];
   }
   const out: Item[] = [];
+  const variant = s.variant && (def.variants as { id: string }[] | undefined)?.some((v) => v.id === s.variant) ? s.variant : undefined;
   if (countByCharges(def)) {
     const it = new Item(data, def);
+    if (variant) it.vars.variant = variant;
     it.charges = (s.charges ?? defaultCharges(def)) * Math.max(1, s.count);
     if (it.isLiquid() && def.container && data.items[def.container]) {
       // Like item::in_its_container with overflow: more liquid than one container holds
@@ -883,6 +891,7 @@ export function fromSpawned(data: GameData, s: SpawnedItem): Item[] {
   }
   for (let i = 0; i < Math.max(1, s.count); i++) {
     const it = new Item(data, def);
+    if (variant) it.vars.variant = variant;
     if (it.hasFlag('SPAWN_ACTIVE')) it.active = true;
     // One placement pass for all contents (a garbage bag rolls ~150 separate entries).
     const contents = (s.contents ?? []).flatMap((cs) => fromSpawned(data, cs));

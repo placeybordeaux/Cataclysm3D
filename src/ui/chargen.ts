@@ -109,14 +109,23 @@ export function applyBuild(ctx: UiContext, b: Build): void {
   try {
     const rng = new Rng(game.seed ^ 0x5eed);
     const items: Item[] = [];
+    // CDDA "custom-flags": ["auto_wield"] (the baseball player's bat): wielded before anything
+    // else can end up in the hands.
+    let autoWield: Item | null = null;
     for (const key of ['both', b.male ? 'male' : 'female'] as const) {
       const g = b.profession.items?.[key] as ItemGroupDef | undefined;
       if (!g) continue;
-      for (const s of expandItemGroup(data, g, rng)) items.push(...fromSpawned(data, s));
+      for (const s of expandItemGroup(data, g, rng)) {
+        const made = fromSpawned(data, s);
+        if (!autoWield && s.flags?.includes('auto_wield')) autoWield = made[0] ?? null;
+        items.push(...made);
+      }
     }
     const inv = p.inv;
+    if (autoWield && inv.canWield(autoWield).ok) inv.wielded = autoWield;
     const rest: Item[] = [];
     for (const it of items) {
+      if (it === inv.wielded) continue;
       if (it.isArmor() && inv.canWear(it).ok && !it.hasFlag('NO_AUTO_EQUIP')) inv.wear(it);
       else rest.push(it);
     }

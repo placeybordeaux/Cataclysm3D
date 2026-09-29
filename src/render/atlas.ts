@@ -14,6 +14,7 @@
 import * as THREE from 'three';
 import type { AtlasFrame, AtlasIndex } from './atlasTypes';
 import { AtlasLookup, cddaColor, glyphIndex, type FrameSel, type LookupOpts, type LookupResult } from './atlasIndex';
+import { ASSET_BASE } from '../core/assets';
 
 export { CONN, pointSeed, type LookupOpts, type Season } from './atlasIndex';
 
@@ -258,7 +259,7 @@ async function loadImage(url: string): Promise<HTMLImageElement> {
 let cached: Promise<Atlas> | null = null;
 
 /** Loads public/atlas once (memoised). */
-export function loadAtlas(baseUrl = `${import.meta.env.BASE_URL ?? '/'}atlas/`): Promise<Atlas> {
+export function loadAtlas(baseUrl = `${ASSET_BASE}atlas/`): Promise<Atlas> {
   cached ??= (async () => {
     const res = await fetch(`${baseUrl}atlas.json`);
     if (!res.ok) throw new Error(`atlas.json: HTTP ${res.status} (run npm run atlas)`);

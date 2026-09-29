@@ -6,10 +6,16 @@
 //   tsx tools/drive.ts shot  shots/x.png               # screenshot of the current frame
 //   tsx tools/drive.ts load  "seed=2&menu=1"           # (re)load the page with new params
 //   tsx tools/drive.ts log                             # page console/errors since last `log`
+//   tsx tools/drive.ts key   "i Escape Shift+e"        # real key presses (puppeteer), space-separated
+//   tsx tools/drive.ts hold  "w 1500"                  # hold a key for N ms (real keydown/keyup)
+//   tsx tools/drive.ts click "480 270"                 # real mouse click at page coords
+//   tsx tools/drive.ts type  "some text"               # type text into the focused element
 //   tsx tools/drive.ts stop
 //
 // `serve` must run inside nix-shell and via ~/claude-stuff/bin/heavy (it holds a browser).
 // --gpu launches Chromium on the real GPU (ANGLE/Vulkan) instead of SwiftShader.
+// --dist serves the production build in dist/ (run `npm run build` first) through `vite preview`,
+// so asset paths are checked exactly as shipped.
 
 import { createServer as createHttp } from 'node:http';
 import { mkdirSync } from 'node:fs';
@@ -42,8 +48,11 @@ const chrome = process.env.CHROME_PATH;
 if (!chrome) throw new Error('CHROME_PATH not set: run inside nix-shell');
 const size = opt('--size', '960x540').split('x').map(Number);
 const gpu = argv.includes('--gpu');
-const vite = await createServer({ server: { port: 0, host: '127.0.0.1', hmr: false }, logLevel: 'error' });
-await vite.listen();
+const useDist = argv.includes('--dist');
+const vite = useDist
+  ? await (await import('vite')).preview({ preview: { port: 0, host: '127.0.0.1' }, logLevel: 'error' })
+  : await createServer({ server: { port: 0, host: '127.0.0.1', hmr: false }, logLevel: 'error' });
+if (!useDist) await (vite as Awaited<ReturnType<typeof createServer>>).listen();
 const vport = (vite.httpServer!.address() as { port: number }).port;
 const gl = gpu
   ? ['--use-angle=vulkan', '--enable-features=Vulkan', '--ignore-gpu-blocklist', '--enable-gpu']
@@ -100,6 +109,30 @@ const http = createHttp(async (req, res) => {
       mkdirSync(dirname(p), { recursive: true });
       await page.screenshot({ path: p as `${string}.png` });
       out = p;
+    } else if (what === 'key') {
+      // "Shift+e" presses with a modifier; plain tokens are key names ("i", "Escape", "Enter").
+      for (const tok of body.trim().split(/\s+/).filter(Boolean)) {
+        const parts = tok.split('+');
+        const key = parts.pop()!;
+        for (const m of parts) await page.keyboard.down(m as never);
+        await page.keyboard.press(key as never);
+        for (const m of parts.reverse()) await page.keyboard.up(m as never);
+        await new Promise((r) => setTimeout(r, 60));
+      }
+      out = 'ok';
+    } else if (what === 'hold') {
+      const [key, ms] = body.trim().split(/\s+/);
+      await page.keyboard.down(key as never);
+      await new Promise((r) => setTimeout(r, Number(ms ?? 500)));
+      await page.keyboard.up(key as never);
+      out = 'ok';
+    } else if (what === 'click') {
+      const [x, y, button] = body.trim().split(/\s+/);
+      await page.mouse.click(Number(x), Number(y), { button: (button as 'left' | 'right') ?? 'left' });
+      out = 'ok';
+    } else if (what === 'type') {
+      await page.keyboard.type(body);
+      out = 'ok';
     } else if (what === 'load') {
       out = await load(body);
     } else if (what === 'log') {

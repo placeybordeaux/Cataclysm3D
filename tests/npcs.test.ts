@@ -14,8 +14,9 @@ import { generateNpc, rollClassSkills, rollDistribution, type NpcData } from '..
 import { Rng } from '../src/core/rng';
 import { Dialogue, parseDuration } from '../src/game/talk';
 import { evalMath, type MathHost } from '../src/game/talkmath';
-import { createItem } from '../src/game/item';
-import { TradeSession, adjustedPrice, priceAdjustment } from '../src/game/trade';
+import { createItem, fromSpawned } from '../src/game/item';
+import { expandItemGroup } from '../src/data/itemgroups';
+import { TradeSession, adjustedPrice, priceAdjustment, tradingPrice } from '../src/game/trade';
 
 const dir = path.join(__dirname, '../public/data');
 const load = (f: string) => JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8'));
@@ -358,6 +359,24 @@ describe('trade', () => {
     expect(priceAdjustment(2)).toBeCloseTo(1.13, 5);
     expect(priceAdjustment(-2)).toBeCloseTo(1 / 1.13, 5);
     expect(priceAdjustment(9)).toBeCloseTo(priceAdjustment(5), 5);
+  });
+
+  it('prices a box of ammo by its rounds and names its variant', () => {
+    const { npcs, game } = world();
+    const n = npcs.spawn({ template: 'free_merchants_merchant' }, 14, 12, 0)!;
+    const p = game.player;
+    const [box] = expandItemGroup(data, 'boxed_77x58', new Rng(1)).flatMap((sp) => fromSpawned(data, sp));
+    expect(box.typeId).toBe('45_ammo_box_50');
+    expect(box.name()).toMatch(/^7\.7x58mm Arisaka ammo box/);
+    const rounds = box.allContents()[0];
+    expect(rounds.charges).toBe(20);
+    const boxOnly = adjustedPrice(data, nd, n, p, box, 1, true);
+    const price = tradingPrice(data, nd, n, p, box, true);
+    expect(price).toBe(boxOnly + adjustedPrice(data, nd, n, p, rounds, rounds.charges, true));
+    expect(price).toBeGreaterThan(0);
+    n.stock.push(box);
+    const row = new TradeSession(data, nd, p, n).theirs.find((e) => e.item === box)!;
+    expect(row.price).toBe(price);
   });
 
   it('values goods with the int/speech markup, currency at face value, and settles the balance', () => {
