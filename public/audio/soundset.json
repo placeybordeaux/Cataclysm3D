@@ -101,6 +101,96 @@
    ]
   },
   {
+   "id": "engine_start",
+   "variants": [
+    "combustion"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/engine_start/combustion/engine_start_combustion.ogg"
+   ]
+  },
+  {
+   "id": "engine_start",
+   "variants": [
+    "electric"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/engine_start/electric/motor_start_ping.ogg"
+   ]
+  },
+  {
+   "id": "engine_start",
+   "variants": [
+    "engine_v8"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/engine_start/v8/engine_start_v8.ogg"
+   ]
+  },
+  {
+   "id": "engine_stop",
+   "variants": [
+    "combustion"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/engine_stop/combustion/engine_stop_combustion.ogg"
+   ]
+  },
+  {
+   "id": "engine_stop",
+   "variants": [
+    "engine_v8"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/engine_stop/v8/engine_stop_v8.ogg"
+   ]
+  },
+  {
+   "id": "engine_working_external",
+   "variants": [
+    "combustion"
+   ],
+   "volume": 85,
+   "files": [
+    "sfx/engine_working_external/combustion/engine_working_external_combustion.ogg"
+   ]
+  },
+  {
+   "id": "engine_working_external",
+   "variants": [
+    "engine_v8"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/engine_working_external/v8/engine_working_external_v8.ogg"
+   ]
+  },
+  {
+   "id": "engine_working_internal",
+   "variants": [
+    "combustion"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/engine_working_internal/combustion/engine_working_internal_combustion.ogg"
+   ]
+  },
+  {
+   "id": "engine_working_internal",
+   "variants": [
+    "engine_v8"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/engine_working_internal/v8/engine_working_internal_v8.ogg"
+   ]
+  },
+  {
    "id": "environment",
    "variants": [
     "alarm"
@@ -3484,6 +3574,134 @@
    "files": [
     "sfx/tool/geiger_high.ogg"
    ]
+  },
+  {
+   "id": "vehicle",
+   "variants": [
+    "car_alarm"
+   ],
+   "volume": 60,
+   "files": [
+    "sfx/vehicle/car_alarm/car_alarm.ogg"
+   ]
+  },
+  {
+   "id": "vehicle",
+   "variants": [
+    "gear_shift"
+   ],
+   "volume": 60,
+   "files": [
+    "sfx/vehicle/gear_shift/gear_shift1.ogg",
+    "sfx/vehicle/gear_shift/gear_shift2.ogg",
+    "sfx/vehicle/gear_shift/gear_shift3.ogg"
+   ]
+  },
+  {
+   "id": "vehicle",
+   "variants": [
+    "horn_medium"
+   ],
+   "volume": 50,
+   "files": [
+    "sfx/vehicle/horn_medium/horn_medium.ogg"
+   ]
+  },
+  {
+   "id": "vehicle",
+   "variants": [
+    "rear_beeper"
+   ],
+   "volume": 50,
+   "files": [
+    "sfx/vehicle/rear_beeper/rear_beeper.ogg"
+   ]
+  },
+  {
+   "id": "vehicle_close",
+   "variants": [
+    "door",
+    "door_opaque",
+    "hddoor",
+    "hddoor_opaque"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/vehicle_close/door/close_car_door.ogg"
+   ]
+  },
+  {
+   "id": "vehicle_close",
+   "variants": [
+    "door_internal",
+    "door_full",
+    "door_opaque_full",
+    "hddoor_full",
+    "hddoor_opaque_full"
+   ],
+   "volume": 60,
+   "files": [
+    "sfx/vehicle_close/door_internal/close_car_door_internal.ogg"
+   ]
+  },
+  {
+   "id": "vehicle_close",
+   "variants": [
+    "door_shutter",
+    "hatch",
+    "hatch_opaque",
+    "hdhatch",
+    "hdhatch_opaque",
+    "door_trunk",
+    "hddoor_trunk"
+   ],
+   "volume": 80,
+   "files": [
+    "sfx/vehicle_close/trunk/close_car_trunk.ogg"
+   ]
+  },
+  {
+   "id": "vehicle_open",
+   "variants": [
+    "door",
+    "door_opaque",
+    "hddoor",
+    "hddoor_opaque"
+   ],
+   "volume": 80,
+   "files": [
+    "sfx/vehicle_open/door/open_car_door.ogg"
+   ]
+  },
+  {
+   "id": "vehicle_open",
+   "variants": [
+    "door_internal",
+    "door_full",
+    "door_opaque_full",
+    "hddoor_full",
+    "hddoor_opaque_full"
+   ],
+   "volume": 50,
+   "files": [
+    "sfx/vehicle_open/door_internal/open_car_door_internal.ogg"
+   ]
+  },
+  {
+   "id": "vehicle_open",
+   "variants": [
+    "door_shutter",
+    "hatch",
+    "hatch_opaque",
+    "hdhatch",
+    "hdhatch_opaque",
+    "door_trunk",
+    "hddoor_trunk"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/vehicle_open/trunk/open_car_trunk.ogg"
+   ]
   }
  ],
  "playlists": [
@@ -3598,6 +3816,42 @@
   "sfx/deal_damage/hurt_m/hurt_m_4.ogg": {
    "bytes": 2034,
    "duration": 0.352
+  },
+  "sfx/engine_start/combustion/engine_start_combustion.ogg": {
+   "bytes": 11282,
+   "duration": 2.454
+  },
+  "sfx/engine_start/electric/motor_start_ping.ogg": {
+   "bytes": 9517,
+   "duration": 1.71
+  },
+  "sfx/engine_start/v8/engine_start_v8.ogg": {
+   "bytes": 11418,
+   "duration": 2.454
+  },
+  "sfx/engine_stop/combustion/engine_stop_combustion.ogg": {
+   "bytes": 9267,
+   "duration": 2.013
+  },
+  "sfx/engine_stop/v8/engine_stop_v8.ogg": {
+   "bytes": 9258,
+   "duration": 2.013
+  },
+  "sfx/engine_working_external/combustion/engine_working_external_combustion.ogg": {
+   "bytes": 7284,
+   "duration": 1.522
+  },
+  "sfx/engine_working_external/v8/engine_working_external_v8.ogg": {
+   "bytes": 7356,
+   "duration": 1.522
+  },
+  "sfx/engine_working_internal/combustion/engine_working_internal_combustion.ogg": {
+   "bytes": 25101,
+   "duration": 5.301
+  },
+  "sfx/engine_working_internal/v8/engine_working_internal_v8.ogg": {
+   "bytes": 25050,
+   "duration": 5.301
   },
   "sfx/environment/ambient/alarm.ogg": {
    "bytes": 9173,
@@ -5034,6 +5288,54 @@
   "sfx/tool/shovel_1.ogg": {
    "bytes": 6429,
    "duration": 1.302
+  },
+  "sfx/vehicle_close/door_internal/close_car_door_internal.ogg": {
+   "bytes": 3581,
+   "duration": 0.703
+  },
+  "sfx/vehicle_close/door/close_car_door.ogg": {
+   "bytes": 2854,
+   "duration": 0.543
+  },
+  "sfx/vehicle_close/trunk/close_car_trunk.ogg": {
+   "bytes": 2133,
+   "duration": 0.411
+  },
+  "sfx/vehicle_open/door_internal/open_car_door_internal.ogg": {
+   "bytes": 2219,
+   "duration": 0.434
+  },
+  "sfx/vehicle_open/door/open_car_door.ogg": {
+   "bytes": 1945,
+   "duration": 0.355
+  },
+  "sfx/vehicle_open/trunk/open_car_trunk.ogg": {
+   "bytes": 4522,
+   "duration": 0.832
+  },
+  "sfx/vehicle/car_alarm/car_alarm.ogg": {
+   "bytes": 11927,
+   "duration": 2.229
+  },
+  "sfx/vehicle/gear_shift/gear_shift1.ogg": {
+   "bytes": 4705,
+   "duration": 0.966
+  },
+  "sfx/vehicle/gear_shift/gear_shift2.ogg": {
+   "bytes": 5683,
+   "duration": 1.146
+  },
+  "sfx/vehicle/gear_shift/gear_shift3.ogg": {
+   "bytes": 4729,
+   "duration": 0.977
+  },
+  "sfx/vehicle/horn_medium/horn_medium.ogg": {
+   "bytes": 2026,
+   "duration": 0.366
+  },
+  "sfx/vehicle/rear_beeper/rear_beeper.ogg": {
+   "bytes": 3284,
+   "duration": 0.542
   }
  }
 }

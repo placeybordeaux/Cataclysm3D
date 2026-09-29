@@ -70,6 +70,13 @@ export class Game {
   vehicles: VehicleSystem | null = null;
   /** When it returns true, WASD doesn't walk the player (e.g. driving: src/game/vehicles.ts). */
   movementOverride: (() => boolean) | null = null;
+  /**
+   * Exact world light at a tile in CDDA units (natural + placed sources, shadowcast), or
+   * null where the provider has no exact value. main.ts backs it with the renderer's light
+   * map (player's z-level, 64 tiles); vision.ts lightAt uses it first and falls back to its
+   * own estimate (and headless tests have no provider). Keeps three.js out of src/game.
+   */
+  lightProvider: ((x: number, y: number, z: number) => number | null) | null = null;
   /** Current weather (src/game/weather.ts); null until installWeather runs. Read by HUD/sound/vision. */
   weather: WeatherState | null = null;
   private acc = 0;

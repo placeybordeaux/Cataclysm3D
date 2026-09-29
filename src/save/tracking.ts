@@ -56,6 +56,17 @@ export class ChunkTracker {
     return this.restored.has(c);
   }
 
+  /**
+   * Accept the chunk's current content as its generated state. Only for changes the world
+   * re-derives on its own when the chunk is regenerated (the actualizer rotting mapgen food
+   * from day 0): otherwise every chunk you walked past would count as modified, be kept in
+   * memory forever and be written to every save.
+   */
+  rebaseline(c: Chunk): void {
+    if (this.restored.has(c) || !this.base.has(c)) return;
+    this.base.set(c, { version: c.version, hash: chunkFingerprint(c) });
+  }
+
   isDirty(c: Chunk): boolean {
     if (this.restored.has(c)) return true;
     const b = this.base.get(c);

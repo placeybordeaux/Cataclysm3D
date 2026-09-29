@@ -5,12 +5,12 @@ import type { Item } from '../game/item';
 import { bookData, bookMastery, cantRead, efileDevice, readableBooks, startReading, timeToRead } from '../game/reading';
 import { itemDisplayName, requirementLines } from '../game/requirements';
 import { cddaText } from '../game/units';
-import { c, colorize, openMenu, getUiRoot } from './framework';
+import { c, colorize, openMenu } from './framework';
 import type { Game } from '../game/game';
 import './crafting.css';
 
-// Smaller CDDA menus: `R` read (pick a book), `(` disassemble (pick an item), and the
-// progress bar shown while a long activity (crafting, reading, building…) runs.
+// Smaller CDDA menus: `R` read (pick a book) and `(` disassemble (pick an item). The
+// activity progress bar is the HUD's (src/ui/hud.ts).
 
 export function openReadMenu(game: CraftHost): void {
   const books = readableBooks(game);
@@ -91,28 +91,3 @@ export function openDisassembleMenu(game: CraftHost): void {
   });
 }
 
-/** A CDDA-ish progress line ("crafting wooden spear [#####-----] 50%") during activities. */
-export function installActivityBar(game: Game): void {
-  const el = document.createElement('div');
-  el.className = 'activity-bar';
-  el.style.display = 'none';
-  getUiRoot().appendChild(el);
-  let last = '';
-  game.systems.push({
-    name: 'activity-bar',
-    update() {
-      const a = game.activities.current;
-      let html = '';
-      if (a) {
-        const W = 30;
-        const n = Math.round(a.fraction * W);
-        const left = Math.max(0, a.spec.duration - a.elapsed);
-        html = `${c('c_white', a.spec.name)}\n<span class="bar">${'#'.repeat(n)}</span><span class="rest">${'-'.repeat(W - n)}</span> ${Math.floor(a.fraction * 100)}%\n${c('c_light_gray', `${formatDuration(left)} left`)}`;
-      }
-      if (html === last) return;
-      last = html;
-      el.innerHTML = html;
-      el.style.display = html ? '' : 'none';
-    },
-  });
-}

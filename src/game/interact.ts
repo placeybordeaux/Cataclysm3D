@@ -48,6 +48,13 @@ export const interactOverrides: { interact(game: Game): boolean; prompt(game: Ga
  */
 export const interactionProviders: ((game: Game, x: number, y: number, z: number) => Interaction[])[] = [];
 
+/**
+ * Handlers for CDDA examine_action names (string, or the object form's `type`) owned by
+ * other systems (src/labs.ts: cardreader, elevator, controls_gate, chainfence). A registered
+ * handler replaces the built-in placeholder for that action.
+ */
+export const examineHandlers = new Map<string, (game: Game, x: number, y: number, z: number, def: TerrainDef | FurnitureDef) => Interaction[]>();
+
 let ui: InteractUi = {};
 export function setInteractUi(u: InteractUi): void {
   ui = u;
@@ -254,7 +261,9 @@ export function interactionsAt(game: Game, x: number, y: number, z: number): Int
   const later: Interaction[] = [];
   const act = fAct ?? tAct;
   const def = fAct ? f : t;
-  switch (act) {
+  const custom = act ? examineHandlers.get(act) : undefined;
+  if (custom) out.push(...custom(game, x, y, z, def));
+  else switch (act) {
     case 'sign': {
       const text = signText(game, x, y, z);
       add('read_sign', `Read the ${def.name}`, () => {

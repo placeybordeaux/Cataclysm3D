@@ -1,8 +1,11 @@
 import { ACTION_SCALE } from '../core/time';
 import type { Game, GameSystem } from './game';
-import { aim, applyFlatArmor, attackCooldownSeconds, fireGun, meleeAttack, normalRoll, type ShotResult } from './combat';
+import { aim, applyDelayedRecoil, applyFlatArmor, attackCooldownSeconds, fireGun, hitMessage, meleeAttack, normalRoll, pelletAngle, sizeRank, type ShotResult } from './combat';
+import { currentMode } from './gunmods';
 import type { Item } from './item';
-import type { Monster } from './monster';
+import { turnsToSeconds, type MonEffect, type Monster } from './monster';
+import { COMBAT_TURN, maOf, tickMartialArts, triggerBuffs } from './martialarts';
+import { techniqueMessage, type TargetInfo, type TechniqueOutcome } from './techniques';
 import type { MonsterSystem } from './monai';
 import { Grid, hasLOS } from './los';
 import { sfx, type MeleeSkill } from '../audio/sfx';
@@ -15,6 +18,8 @@ import { sfx, type MeleeSkill } from '../audio/sfx';
 
 /** Half-angle of the melee target cone (radians). */
 const MELEE_CONE = (32 * Math.PI) / 180;
+/** Real seconds between the rounds of a burst (CDDA fires a burst within one action). */
+const BURST_INTERVAL = 0.075;
 /** Player reach in tiles (centre to monster edge), CDDA adjacency incl. diagonals. */
 const MELEE_REACH = 1.2;
 
@@ -29,7 +34,9 @@ export interface Tracer {
 
 /** Optional first-person viewmodel from the render agent. */
 export interface ViewModelHook {
-  attack(kind: 'melee' | 'fire' | 'throw'): void;
+  attack(kind: 'melee' | 'fire' | 'throw' | 'sweep'): void;
+  /** Raise the weapon/arms briefly (a block). */
+  block?(): void;
 }
 
 /** CDDA melee_message verbs by dominant damage type and total damage. */
@@ -48,11 +55,48 @@ export function meleeVerb(dominant: string, total: number, rngInt: (a: number, b
   return bash[Math.min(idx, 5)];
 }
 
-function angleDiff(a: number, b: number): number {
+function signedAngle(a: number, b: number): number {
   let d = a - b;
   while (d > Math.PI) d -= 2 * Math.PI;
   while (d < -Math.PI) d += 2 * Math.PI;
-  return Math.abs(d);
+  return d;
+}
+
+function angleDiff(a: number, b: number): number {
+  return Math.abs(signedAngle(a, b));
+}
+
+/** What technique conditions know about a monster (TargetInfo). */
+export function monsterTargetInfo(m: Monster): TargetInfo {
+  return {
+    size: sizeRank(m.size),
+    bodytype: typeof m.type.bodytype === 'string' ? m.type.bodytype : undefined,
+    species: m.type.species,
+    flags: m.type.flags,
+    hasEffect: (id) => m.hasEffect(id as MonEffect),
+    isMonster: true,
+    hasWeapon: false,
+    volumeMl: m.type.volume,
+    grabStrength: typeof m.type.grab_strength === 'number' ? m.type.grab_strength : undefined,
+  };
+}
+
+/**
+ * perform_technique's effects on a monster: stunned/downed for rng(1, dur) combat turns and a
+ * knockback shove (monster dash) of 1..knockback_dist tiles straight away from the attacker.
+ */
+export function applyTechniqueToMonster(m: Monster, o: TechniqueOutcome, fromX: number, fromY: number, rng: { int(a: number, b: number): number }): void {
+  if (o.downTurns > 0) m.addEffect('downed', o.downTurns * COMBAT_TURN);
+  if (o.stunTurns > 0) m.addEffect('stunned', o.stunTurns * COMBAT_TURN);
+  if (o.knockback > 0 && !m.has('IMMOBILE')) {
+    const spread = o.knockbackSpread;
+    const ax = fromX + (spread ? rng.int(-spread, spread) : 0), ay = fromY + (spread ? rng.int(-spread, spread) : 0);
+    const d = Math.max(0.01, Math.hypot(m.x - ax, m.y - ay));
+    const t = 0.18;
+    m.dashVx = ((m.x - ax) / d) * (o.knockback / t);
+    m.dashVy = ((m.y - ay) / d) * (o.knockback / t);
+    m.dashTime = t;
+  }
 }
 
 export class PlayerCombat implements GameSystem {
@@ -71,6 +115,8 @@ export class PlayerCombat implements GameSystem {
   npcMelee: ((reach: number, m: Monster | null) => boolean) | null = null;
   npcShot: ((yaw: number, maxDist: number, shot: ShotResult) => { x: number; y: number } | null) | null = null;
   private grid: Grid;
+  private lastX = NaN;
+  private lastY = NaN;
 
   constructor(readonly game: Game, readonly sys: MonsterSystem) {
     this.grid = sys.grid;
@@ -81,6 +127,11 @@ export class PlayerCombat implements GameSystem {
     for (let i = this.tracers.length - 1; i >= 0; i--) if ((this.tracers[i].t -= dt) <= 0) this.tracers.splice(i, 1);
     const input = game.input;
     const p = game.player;
+    // Martial-arts turn clock: buffs expire, dodges/blocks refresh, onmove/onpause buffs.
+    if (Math.hypot(p.x - this.lastX, p.y - this.lastY) > 0.02) maOf(p).moved = true;
+    this.lastX = p.x;
+    this.lastY = p.y;
+    tickMartialArts(p, dt);
     if (p.dead || input.captured) return;
     // LMB: consume our clicks but leave other buttons' clicks for whoever else reads them.
     const clicks = input.consumeClicks();
@@ -89,7 +140,8 @@ export class PlayerCombat implements GameSystem {
     const gun = p.inv.wielded?.isGun() ? p.inv.wielded : null;
     // Holding LMB keeps swinging a melee weapon, but a gun only keeps firing when it has an
     // automatic mode; a pistol fires once per click like CDDA's one shot per `f`.
-    const held = (input.mouseButtons & 1) !== 0 && (!gun || isAutomatic(gun));
+    const held = (input.mouseButtons & 1) !== 0 && (!gun || currentMode(gun).qty > 1);
+    this.updateBurst(dt);
     const lmb = clicks.includes(0) || held;
     if (gun && (input.mouseButtons & 4) !== 0) aim(p, gun, dt * ACTION_SCALE * 100);
     if (lmb && this.cooldown <= 0) this.attack();
@@ -138,33 +190,65 @@ export class PlayerCombat implements GameSystem {
     const reach = w?.hasFlag('REACH_ATTACK') ? 2.2 : MELEE_REACH;
     const m = target ?? this.meleeTarget(reach);
     if (!target && this.npcMelee?.(reach, m)) return true;
-    this.viewmodel()?.attack('melee');
     const ws = weaponSound(w);
     sfx.meleeSwing(undefined, ws);
     if (!m) {
+      this.viewmodel()?.attack('melee');
       // Swinging at nothing still costs the swing (and a little stamina).
       this.cooldown = attackCooldownSeconds(p, w);
       p.modStamina(-20);
       this.feedback('melee', 'whiff', null, p.x + Math.sin(p.yaw) * reach, p.y - Math.cos(p.yaw) * reach, 0);
       return false;
     }
-    const res = meleeAttack(p, { dodge: m.dodge(), armor: m.type.armor, sizeMeleePenalty: m.sizeMeleePenalty() }, this.sys.rng, m.theName());
-    this.cooldown = res.cooldownSeconds;
+    const hit = this.swingAt(m, { reach, primary: true });
+    return hit;
+  }
+
+  /**
+   * One swing at monster `m` (Character::melee_attack_abstract): picks a technique, applies its
+   * effects (stun, downed, knockback, AoE follow-ups), prints CDDA's technique message.
+   * Follow-up AoE swings (`primary: false`) cost no time or stamina, like CDDA.
+   */
+  swingAt(m: Monster, o: { reach?: number; primary: boolean }): boolean {
+    const game = this.game;
+    const p = game.player;
+    const rng = this.sys.rng;
+    const ws = weaponSound(p.inv.wielded);
+    const reach = o.reach ?? MELEE_REACH;
+    const stamina = p.stamina;
+    const res = meleeAttack(p, { dodge: m.dodge(), armor: m.type.armor, sizeMeleePenalty: m.sizeMeleePenalty(), info: monsterTargetInfo(m) }, rng, m.theName(), {
+      allowSpecial: o.primary,
+      aoeTargets: (kind) => this.aoeVictims(kind, m, reach).length,
+      downable: !m.has('IMMOBILE'),
+    });
+    if (o.primary) {
+      this.cooldown = res.cooldownSeconds;
+      this.viewmodel()?.attack(res.outcome?.aoe ? 'sweep' : 'melee');
+    } else p.stamina = stamina;
     // Hostility: animals remember who hit them even on a miss.
     m.aggroCharacter = true;
+    if (res.shatter) this.sys.emitSound(p.x, p.y, p.z, 16, 'Crack!', 'player', '');
     if (!res.hit) {
       this.feedback('melee', 'miss', m, m.x, m.y, 0);
       return false;
     }
     let dominant = 'bash', best = 0;
     for (const d of res.damage) if (d.amount > best) (best = d.amount), (dominant = d.type);
-    const verb = meleeVerb(dominant, res.total, (a, b) => this.sys.rng.int(a, b));
-    const msg = res.total <= 0 ? `You ${verb} ${m.theName()} but do no damage.` : res.crit ? `You ${verb} ${m.theName()} for ${res.total} damage.  Critical!` : `You ${verb} ${m.theName()} for ${res.total} damage.`;
-    game.message(msg, res.total > 0 ? undefined : 'c_light_gray');
+    const phrase = (res.technique && techniqueMessage(res.technique, m.theName())) || `You ${meleeVerb(dominant, res.total, (a, b) => rng.int(a, b))} ${m.theName()}`;
+    game.message(hitMessage(phrase, res.total, res.crit), res.total > 0 ? undefined : 'c_light_gray');
     sfx.meleeHit(m.type.material[0] ?? 'flesh', m, ws);
     this.sys.emitSound(m.x, m.y, m.z, 8, 'Smack!', 'player', '');
+    // Victims of a sweep are chosen before the blow can push the target out of the arc.
+    const victims = res.outcome?.aoe ? this.aoeVictims(res.outcome.aoe, m, reach) : [];
     this.sys.hurt(m, res.total, 'player');
+    // Before the technique can knock it away: the impact is where it stood when struck.
     this.feedback('melee', res.crit ? 'crit' : 'hit', m, m.x, m.y, res.total);
+    if (m.dead) triggerBuffs(p, 'onkill');
+    else if (res.outcome) applyTechniqueToMonster(m, res.outcome, p.x, p.y, rng);
+    if (victims.length) {
+      for (const v of victims) if (!v.dead) this.swingAt(v, { reach, primary: false });
+      game.message(`${victims.length} ${victims.length === 1 ? 'enemy' : 'enemies'} hit!`, 'c_light_green');
+    }
     return true;
   }
 
@@ -186,6 +270,34 @@ export class PlayerCombat implements GameSystem {
       heavy: !!m && damage > 0 && (damage >= m.hpMax * 0.3 || outcome === 'crit' || damage >= 20),
       blood: m ? this.sys.bloodType(m.type) : undefined,
     });
+  }
+
+  /**
+   * Character::valid_aoe_technique for a real-time arena: "wide" hits the enemies beside the
+   * target (one each side, 20°–110° off the swing), "spin" everything in reach (needs 2+),
+   * "impale" one enemy right behind the target.
+   */
+  aoeVictims(kind: string, target: Monster, reach = MELEE_REACH): Monster[] {
+    const p = this.game.player;
+    const dir = Math.atan2(target.x - p.x, -(target.y - p.y));
+    const near = this.sys.monstersNear(p.x, p.y, p.z, reach + 0.6).filter((o) => o !== target && !o.dead && !o.friendly && Math.hypot(o.x - p.x, o.y - p.y) - o.radius <= reach);
+    if (kind === 'wide') {
+      const side = (sgn: number) => near
+        .filter((o) => {
+          const a = signedAngle(Math.atan2(o.x - p.x, -(o.y - p.y)), dir) * sgn;
+          return a >= (20 * Math.PI) / 180 && a <= (110 * Math.PI) / 180;
+        })
+        .sort((a, b) => Math.hypot(a.x - p.x, a.y - p.y) - Math.hypot(b.x - p.x, b.y - p.y))[0];
+      return [side(1), side(-1)].filter((o): o is Monster => !!o);
+    }
+    if (kind === 'spin') return near.length >= 2 ? near : [];
+    if (kind === 'impale') {
+      const dT = Math.hypot(target.x - p.x, target.y - p.y);
+      const behind = this.sys.monstersNear(target.x, target.y, p.z, 1.3).filter((o) => o !== target && !o.dead && !o.friendly
+        && Math.hypot(o.x - p.x, o.y - p.y) > dT && angleDiff(Math.atan2(o.x - p.x, -(o.y - p.y)), dir) < (35 * Math.PI) / 180);
+      return behind.length ? [this.sys.rng.pick(behind)] : [];
+    }
+    return [];
   }
 
   // ------------------------------------------------------------------ guns
@@ -221,6 +333,11 @@ export class PlayerCombat implements GameSystem {
     return { x: p.x + dx * bestT, y: p.y + dy * bestT, hit: best, missedBy };
   }
 
+  /**
+   * Pull the trigger (Character::fire_gun): fires the current fire mode's shot count. The
+   * first round goes now; the rest of a burst follow BURST_INTERVAL apart (update()), each
+   * with the recoil of the ones before it; recoil absorbed by skill lands when the burst ends.
+   */
   fire(): boolean {
     const game = this.game;
     const p = game.player;
@@ -229,16 +346,32 @@ export class PlayerCombat implements GameSystem {
       game.message("You're not wielding a gun.");
       return false;
     }
-    const shot = fireGun(p, gun, this.sys.rng);
+    if (this.burst) return false;
+    const mode = currentMode(gun);
+    const n = Math.max(1, Math.min(mode.qty, gun.ammoRemaining() || 1));
+    const shot = this.fireOne(gun, n > 1);
+    if (!shot) return false;
+    if (n > 1) this.burst = { gun, left: n - 1, timer: BURST_INTERVAL, delay: shot.delayedRecoil ?? 0, cooldown: shot.cooldownSeconds };
+    else applyDelayedRecoil(p, shot.delayedRecoil ?? 0);
+    // The trigger can't be pulled again until the whole burst is out.
+    this.cooldown = shot.cooldownSeconds + (n - 1) * BURST_INTERVAL;
+    return true;
+  }
+
+  /** One round of a trigger pull; null when the gun didn't fire (empty, jammed…). */
+  fireOne(gun: Item, burst: boolean): ShotResult | null {
+    const game = this.game;
+    const p = game.player;
+    const rng = this.sys.rng;
+    const shot = fireGun(p, gun, rng, { burst });
     if (!shot.ok) {
       sfx.gunEmpty();
       this.cooldown = 0.25;
-      return false;
+      return null;
     }
-    this.cooldown = shot.cooldownSeconds;
     this.shots++;
     this.viewmodel()?.attack('fire');
-    const ammo = gun.ammoData();
+    const ammo = gun.ammoData() ?? null;
     sfx.gunshot(gun.typeId, undefined, { ammoType: typeof ammo?.ammo_type === 'string' ? ammo.ammo_type : undefined, loudness: shot.noise.volume });
     this.sys.emitSound(p.x, p.y, p.z, shot.noise.volume, shot.noise.sound || 'Bang!', 'player', '');
     // Dispersion becomes a sideways offset (the vertical part of the cone can't miss a sprite
@@ -249,23 +382,69 @@ export class PlayerCombat implements GameSystem {
     const npcHit = this.npcShot?.(yaw, Math.hypot(hit.x - p.x, hit.y - p.y), shot);
     if (npcHit) {
       this.tracers.push({ x0: p.x, y0: p.y, x1: npcHit.x, y1: npcHit.y, z: p.z, t: 0.08 });
-      return true;
+      return shot;
     }
-    this.tracers.push({ x0: p.x, y0: p.y, x1: hit.x, y1: hit.y, z: p.z, t: 0.08 });
+    const pellets = shot.pellets ?? 1;
+    // Shotguns: point-blank the whole load hits as one; farther out each pellet flies on its
+    // own line off the aim (ballistics.cpp shot_spread) for shot_damage each.
+    const pointBlank = hit.hit && Math.hypot(hit.hit.x - p.x, hit.hit.y - p.y) <= 1.6;
+    if (pellets <= 1 || pointBlank || !shot.shotDamage) {
+      this.tracers.push({ x0: p.x, y0: p.y, x1: hit.x, y1: hit.y, z: p.z, t: 0.08 });
+      this.impact(hit, shot, shot.damage, true);
+      return shot;
+    }
+    const perMonster = new Map<Monster, { n: number; total: number }>();
+    for (let i = 0; i < pellets; i++) {
+      const py = yaw + pelletAngle(shot.shotSpreadMoa ?? 0, rng);
+      const h = this.castRay(py, range);
+      if (i < 12) this.tracers.push({ x0: p.x, y0: p.y, x1: h.x, y1: h.y, z: p.z, t: 0.06 });
+      if (!h.hit) continue;
+      const units = shot.shotDamage.map((d) => ({ type: d.type, amount: d.amount, armor_penetration: d.armor_penetration, armor_multiplier: 1 }));
+      const dmg = applyFlatArmor(units, h.hit.type.armor).reduce((s, d) => s + d.amount, 0);
+      const e = perMonster.get(h.hit) ?? { n: 0, total: 0 };
+      e.n++;
+      e.total += dmg;
+      perMonster.set(h.hit, e);
+    }
+    if (!perMonster.size) {
+      sfx.bulletHit('wall', { x: hit.x, y: hit.y, z: p.z });
+      game.events.emit('playerAttack', { kind: 'gun', outcome: 'whiff', x: hit.x, y: hit.y, z: p.z, damage: 0, heavy: false, blood: null });
+    }
+    for (const [m, e] of perMonster) {
+      if (m.dead) continue;
+      m.aggroCharacter = true;
+      const total = Math.floor(e.total);
+      // projectile.cpp multi_projectile_hit_message.
+      const count = e.n === 1 ? 'a' : e.n <= 2 ? 'several' : e.n <= 5 ? 'many' : e.n <= 20 ? 'a large number of' : 'a huge number of';
+      game.message(`${m.TheName()} is hit by ${count} ${e.n === 1 ? 'projectile' : 'projectiles'}, ${total > 0 ? `dealing ${total} damage` : 'but they deal no damage'}.`);
+      sfx.bulletHit('flesh', m);
+      this.sys.hurt(m, total, 'player');
+      this.feedback('gun', 'hit', m, m.x, m.y, total);
+      this.ammoEffectsAt(shot, m.x, m.y, m, total);
+    }
+    return shot;
+  }
+
+  /** A single projectile's impact: CDDA damage bands on a monster, or a wall. */
+  private impact(hit: { x: number; y: number; hit: Monster | null; missedBy: number }, shot: ShotResult, damage: ShotResult['damage'], primary: boolean): void {
+    const game = this.game;
+    const p = game.player;
+    const rng = this.sys.rng;
     if (!hit.hit) {
       sfx.bulletHit('wall', { x: hit.x, y: hit.y, z: p.z });
       this.game.events.emit('playerAttack', { kind: 'gun', outcome: 'whiff', x: hit.x, y: hit.y, z: p.z, damage: 0, heavy: false, blood: null });
-      return true;
+      if (primary) this.ammoEffectsAt(shot, hit.x, hit.y, null, 0);
+      return;
     }
     const m = hit.hit;
     m.aggroCharacter = true;
     // Creature::deal_projectile_attack: goodhit = missed_by + partial dodge; damage bands.
-    const dodge = Math.min(1, (m.dodge() * 5 * this.sys.rng.next()) / Math.max(1, this.sys.rng.dice(10, 50)));
+    const dodge = Math.min(1, (m.dodge() * 5 * rng.next()) / Math.max(1, rng.dice(10, 50)));
     const goodhit = hit.missedBy * 0.9 + dodge;
-    const hitRoll = goodhit + this.sys.rng.next() * (1 - Math.min(1, goodhit));
+    const hitRoll = goodhit + rng.next() * (1 - Math.min(1, goodhit));
     let mult = 1, tag = '';
-    if (goodhit < 0.1 && this.sys.rng.oneIn(3) && !m.has('NOHEAD')) {
-      mult = (0.95 + 0.1 * this.sys.rng.next()) * 2;
+    if (goodhit < 0.1 && rng.oneIn(3) && !m.has('NOHEAD')) {
+      mult = (0.95 + 0.1 * rng.next()) * 2;
       tag = '  Critical!!';
     } else if (goodhit < 0.2 && hitRoll * 0.5 < 0.2) {
       mult = (1 - 0.25 * hitRoll) * 2;
@@ -278,13 +457,73 @@ export class PlayerCombat implements GameSystem {
       mult = Math.max(0.05, 1.05 - hitRoll);
       tag = '  Grazing hit.';
     }
-    const units = shot.damage.map((d) => ({ type: d.type, amount: d.amount * mult, armor_penetration: d.armor_penetration, armor_multiplier: 1 }));
+    const units = damage.map((d) => ({ type: d.type, amount: d.amount * mult, armor_penetration: d.armor_penetration, armor_multiplier: 1 }));
     const total = Math.floor(applyFlatArmor(units, m.type.armor).reduce((s, d) => s + d.amount, 0));
     game.message(total > 0 ? `You shoot ${m.theName()} for ${total} damage.${tag}` : `You shoot ${m.theName()} but do no damage.`);
     sfx.bulletHit('flesh', m);
     this.sys.hurt(m, total, 'player');
     this.feedback('gun', tag.startsWith('  Critical') ? 'crit' : 'hit', m, m.x, m.y, total);
-    return true;
+    if (primary) this.ammoEffectsAt(shot, m.x, m.y, m, total);
+  }
+
+  /**
+   * Ammo effects where a round lands: INCENDIARY sets the target alight (x_in_y(dmg/2, 50),
+   * creature.cpp) or the tile on a miss; ammo effects with an `explosion` go off
+   * (EXPLOSIVE, EXPLOSIVE_SMALL, NAPALM…); `aoe` fields (FLARE, NAPALM) spread fire.
+   */
+  ammoEffectsAt(shot: ShotResult, x: number, y: number, m: Monster | null, dealt: number): void {
+    const game = this.game;
+    const z = game.player.z;
+    const rng = this.sys.rng;
+    const table = (game.data.misc?.ammo_effect ?? {}) as Record<string, { explosion?: { power?: number; distance_factor?: number; fire?: boolean }; aoe?: { field_type: string; intensity_min?: number; intensity_max?: number; size?: number }[] }>;
+    for (const id of shot.ammoEffects ?? []) {
+      if (id === 'INCENDIARY') {
+        const amount = dealt > 2 ? dealt / 2 : rng.oneIn(2) ? 1 : 0;
+        if (m && rng.next() * 50 < amount) {
+          const flesh = m.type.material.includes('flesh') || m.type.material.includes('hflesh');
+          if (!flesh || rng.oneIn(4)) m.addEffect('onfire', turnsToSeconds(rng.int(1, 2) * Math.max(1, amount)));
+        } else if (!m && rng.oneIn(4)) this.hooks.ignite?.(Math.floor(x), Math.floor(y), z);
+      }
+      const eff = table[id];
+      for (const a of eff?.aoe ?? []) {
+        const r = Math.max(0, Math.floor((a.size ?? 1) / 2));
+        for (let dy = -r; dy <= r; dy++)
+          for (let dx = -r; dx <= r; dx++) this.hooks.addField?.(Math.floor(x) + dx, Math.floor(y) + dy, z, a.field_type, rng.int(a.intensity_min ?? 1, a.intensity_max ?? a.intensity_min ?? 1));
+      }
+      if (eff?.explosion?.power) this.hooks.explode?.(x, y, z, eff.explosion.power, eff.explosion.distance_factor ?? 0.75, !!eff.explosion.fire);
+    }
+  }
+
+  /** World hooks for ammo effects (set by the combat-depth installer; no-ops in tests). */
+  hooks: {
+    ignite?: (x: number, y: number, z: number) => void;
+    addField?: (x: number, y: number, z: number, type: string, intensity: number) => void;
+    explode?: (x: number, y: number, z: number, power: number, factor: number, fire: boolean) => void;
+  } = {};
+
+  /** Burst in progress: rounds left, time to the next one, recoil held back until the end. */
+  burst: { gun: Item; left: number; timer: number; delay: number; cooldown: number } | null = null;
+
+  private updateBurst(dt: number): void {
+    const b = this.burst;
+    if (!b) return;
+    const p = this.game.player;
+    if (p.inv.wielded !== b.gun || p.dead) {
+      applyDelayedRecoil(p, b.delay);
+      this.burst = null;
+      return;
+    }
+    b.timer -= dt;
+    while (this.burst && b.timer <= 0) {
+      const shot = this.fireOne(b.gun, true);
+      b.left--;
+      b.timer += BURST_INTERVAL;
+      if (shot) b.delay += shot.delayedRecoil ?? 0;
+      if (!shot || b.left <= 0) {
+        applyDelayedRecoil(p, b.delay);
+        this.burst = null;
+      }
+    }
   }
 
   // ------------------------------------------------------------------ throwing

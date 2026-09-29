@@ -9,6 +9,7 @@ import { ambientLayers, isNight, WEATHER_TYPES } from '../src/audio/ambience';
 import { soundForEvent } from '../src/audio/soundEvents';
 import { registerSynth, renderSynth, SYNTH_EFFECTS } from '../src/audio/procedural';
 import { meleeSkillVariant } from '../src/audio/sfx';
+import { engineRate, engineVariant, gearFor, hornVariant } from '../src/audio/vehicleAudio';
 import { decide, isRedistributable, parseCreditsMd, parseCreditsTxt } from '../tools/audio/credits';
 import { LEVEL_HEIGHT } from '../src/world/coords';
 
@@ -167,6 +168,27 @@ describe('world sound events -> sfx', () => {
   });
 });
 
+describe('vehicle engine sound (CDDA do_vehicle_engine_sfx)', () => {
+  it('gears follow CDDA speed thresholds and the loop revs up within a gear', () => {
+    const safe = 30;
+    expect(gearFor(0, safe)).toBe(0);
+    expect(gearFor(-3, safe)).toBe(-1);
+    expect(gearFor(2, safe)).toBe(1); // <= safe/12
+    expect(gearFor(5, safe)).toBe(2); // <= safe/5
+    expect(gearFor(14, safe)).toBe(5); // <= safe/2
+    expect(gearFor(29, safe)).toBe(6);
+    expect(engineRate(0, safe)).toBeCloseTo(0.85);
+    expect(engineRate(4.9, safe)).toBeGreaterThan(engineRate(2.6, safe)); // same gear, faster
+    expect(engineRate(2.49, safe)).toBeGreaterThan(engineRate(2.51, safe)); // shifting up drops the revs
+  });
+  it('picks CDDA fallback variants (none loaded = last of the chain)', () => {
+    const v = { uid: 1, x: 0, y: 0, z: 0, velocity: 0, engineOn: true, engines: [{ enabled: true, hp: 10, def: { id: 'engine_v8', fuel_type: 'gasoline' } }], maxVelocity: () => 30 };
+    expect(engineVariant('engine_start', v)).toBe('combustion');
+    expect(engineVariant('engine_start', { ...v, engines: [{ enabled: true, hp: 10, def: { id: 'motor', fuel_type: 'battery' } }] })).toBe('electric');
+    expect(hornVariant(120)).toBe('horn_medium');
+  });
+});
+
 describe('melee variant (CDDA sound_thread)', () => {
   it('buckets by skill and weapon volume', () => {
     expect(meleeSkillVariant({ skill: 'bashing', volumeMl: 1000 })).toBe('small_bash');
@@ -251,6 +273,10 @@ describe('committed public/audio', () => {
       ['open_door', 't_door_c'], ['close_door', 't_door_o'], ['smash', 'glass'], ['smash_success', 'default'],
       ['mon_death', 'zombie_death'], ['speech', 'mon_zombie'], ['menu_move', 'default'], ['menu_error', 'default'],
       ['bullet_hit', 'hit_flesh'], ['explosion', 'default'],
+      // vehicles (src/audio/vehicleAudio.ts)
+      ['engine_start', 'combustion'], ['engine_stop', 'combustion'], ['engine_working_internal', 'combustion'],
+      ['engine_working_external', 'combustion'], ['vehicle', 'horn_medium'], ['vehicle', 'gear_shift'], ['vehicle', 'car_alarm'],
+      ['vehicle_open', 'door'], ['vehicle_close', 'door'], ['smash_success', 'hit_vehicle'],
     ];
     for (const [id, v] of need) expect(s.resolve(id, v), `${id}/${v}`).not.toBeNull();
     for (const season of ['spring', 'summer', 'autumn', 'winter'] as const)

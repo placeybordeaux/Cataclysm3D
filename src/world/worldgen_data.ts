@@ -22,6 +22,8 @@ export interface MapgenData {
   omt: Record<string, OmtMapgenRef[]>;
   /** nested_mapgen_id -> weighted nested chunks */
   nested: Record<string, { w: number; o: number }[]>;
+  /** update_mapgen_id -> object index (only ids dialogue/missions reference; see extract:mapgen) */
+  update?: Record<string, number>;
   objects: Json[];
 }
 

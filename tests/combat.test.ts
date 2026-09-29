@@ -8,6 +8,7 @@ import {
 } from '../src/game/combat';
 import { heldItemExtent } from '../src/render/viewmodel';
 import { createItem } from '../src/game/item';
+import { refreshDefenses } from '../src/game/martialarts';
 import { makeData } from './fixtures/gamedata';
 
 const data = makeData();
@@ -206,6 +207,9 @@ describe('monsters vs the survivor', () => {
       c.hp.torso.cur = c.hp.torso.max;
       c.hp.head.cur = c.hp.head.max;
       c.skills = {}; // dodging trains the dodge skill; keep the survivor fresh
+      // One dodge per turn (dodges_left): each attack here is a fresh turn.
+      refreshDefenses(c);
+      c.stamina = c.staminaMax();
       if (monsterMeleeAttack(zombie, c, rng).hit) hits++;
     }
     expect(hits / N).toBeGreaterThan(0.45);

@@ -176,6 +176,9 @@ export function learnBookRecipes(c: Character, it: Item, host?: CraftHost): stri
   return learned;
 }
 
+/** Called after each full read session of a book (martial-arts manuals teach their style). */
+export const readHooks: ((c: Character, it: Item, host: CraftHost) => void)[] = [];
+
 /** One read session; returns whether to keep reading. */
 function finishSession(host: CraftHost, it: Item): boolean {
   const c = host.player;
@@ -186,6 +189,7 @@ function finishSession(host: CraftHost, it: Item): boolean {
     return false;
   }
   if (b.fun !== 0) c.morale.add('morale_book', b.fun * 5, b.fun * 15, 3600, 1800, true, it.typeId);
+  for (const h of readHooks) h(c, it, host);
   const mastery = bookMastery(c, it);
   let keepGoing = false;
   if (mastery === 'learning') keepGoing = !trainFromBook(c, it, host) && bookMastery(c, it) === 'learning';

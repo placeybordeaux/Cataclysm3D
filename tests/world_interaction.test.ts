@@ -364,6 +364,24 @@ describe('wait & sleep', () => {
     expect(game.clock.seconds - t0).toBeGreaterThanOrEqual(1800);
   });
 
+  it('waiting stops when you start freezing, but can be started while already freezing', () => {
+    const { game, log } = makeGame();
+    installRest(game);
+    place(game, 8, 8);
+    // Force the body-temperature target far below freezing (a bitter night, no clothes).
+    const target = () => (game.player.env = { ...game.player.env, temperature: -40, wind: 0, precipitation: false });
+    game.systems.push({ name: 'test-cold', update: target });
+    expect(waitFor(game, 6 * 3600)).toBe(true);
+    for (let i = 0; i < 30 * 120 && game.activities.current; i++) game.tick(1 / 30);
+    expect(game.activities.current).toBeNull();
+    expect(log).toContain('You are freezing!');
+    expect(game.player.dead).toBe(false);
+    // Already freezing: the wait starts (CDDA lets you ignore it) and isn't cancelled for it again.
+    expect(waitFor(game, 600)).toBe(true);
+    game.tick(1 / 30);
+    expect(game.activities.current).not.toBeNull();
+  });
+
   it('a tired survivor falls asleep in bed and wakes rested', () => {
     const { game, log } = makeGame();
     installRest(game);
@@ -405,5 +423,25 @@ describe('traps & light items', () => {
     expect(lightAt(game, 9, 16, 0)).toBeGreaterThan(before + 100);
     expect(toggleLight(game)).toBe(true);
     expect(game.player.inv.wielded!.typeId).toBe('flashlight');
+  });
+
+  it("lightAt prefers the renderer's exact light map, adding only the survivor's beam", () => {
+    const { game } = makeGame();
+    game.clock.seconds = 24 * 3600 + 3600;
+    place(game, 9, 16);
+    // exact inside a small window around the player, like the renderer's light map
+    game.lightProvider = (x, y) => (Math.abs(x - 9) <= 5 && Math.abs(y - 16) <= 5 ? 42 : null);
+    expect(lightAt(game, 10, 16, 0)).toBe(42);
+    expect(lightAt(game, 30, 16, 0)).toBeLessThan(42); // estimate outside the window
+    // monster vision uses it too: at 01:00 a 40/1 vision zombie 4 tiles away only sees a lit target
+    expect(lineOfSight(game.map, 9, 20, 9, 16, 0)).toBe(true);
+    expect(creatureCanSee(game, { x: 9, y: 20, z: 0 }, { x: 9, y: 16, z: 0 }, 40, 1)).toBe(true);
+    game.lightProvider = () => 0;
+    expect(creatureCanSee(game, { x: 9, y: 20, z: 0 }, { x: 9, y: 16, z: 0 }, 40, 1)).toBe(false);
+    game.lightProvider = (x, y) => (Math.abs(x - 9) <= 5 && Math.abs(y - 16) <= 5 ? 42 : null);
+    game.player.inv.wield(createItem(data, 'flashlight', { ammo: 'default' }));
+    toggleLight(game);
+    expect(lightAt(game, 10, 16, 0)).toBeGreaterThan(42);
+    game.lightProvider = null;
   });
 });

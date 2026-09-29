@@ -123,6 +123,18 @@ export class Spawner {
     const map = this.sys.game.map;
     for (const c of map.loadedChunks()) this.onChunk(c);
     map.onChunkGenerated.push((c) => this.onChunk(c));
+    map.onChunkUpdated.push((c) => this.onChunkUpdated(c));
+  }
+
+  /** update_mapgen placed monsters in a live chunk: spawn just those (no city horde, no skip). */
+  onChunkUpdated(c: Chunk): void {
+    const requests = c.spawns;
+    c.spawns = [];
+    const rng = new Rng(hashSeed(this.sys.game.seed, c.cx, c.cy, c.z, c.version, 0x0bda));
+    for (const r of requests) {
+      this.stats.requests++;
+      this.request(c, r, rng);
+    }
   }
 
   private groupCtx(): MonsterGroupContext {

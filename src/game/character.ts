@@ -8,6 +8,7 @@ import {
 import { Inventory, type InventoryJSON } from './inventory';
 import { focusEquilibrium, Morale, type MoralePoint } from './morale';
 import { cddaText } from './units';
+import { buffFlat } from './martialarts';
 
 // The survivor model (CDDA Character/avatar, simplified). Everything is driven by
 // update(gameDt) in game-clock seconds; CDDA rates are per game second ("turn"), so they are
@@ -817,7 +818,7 @@ export class Character {
       this.dex_bonus -= d;
       this.int_bonus -= d;
     }
-    let speed = m.SPEED - pp.speed;
+    let speed = m.SPEED - pp.speed + Math.trunc(buffFlat(this, 'speed'));
     if (pp.speed) this.speedModifiers.push(['Pain', -pp.speed]);
     const cap = this.inv.weightCapacity();
     const carried = this.inv.weightCarried();
@@ -857,7 +858,8 @@ export class Character {
   /** Character::get_dodge (simplified: downed/grab, speed<100, stamina logistic, encumbrance). */
   dodge(): number {
     if (this.effects.has('downed') || this.isAsleep() || this.effects.has('stunned')) return 0;
-    let ret = this.dodgeBase() + this.dodge_bonus;
+    // Martial-arts buffs add dodge (Character::get_dodge_bonus + mabuff_dodge_bonus).
+    let ret = this.dodgeBase() + this.dodge_bonus + buffFlat(this, 'dodge');
     if (this.speed < 100) ret *= this.speed / 100;
     // get_stamina_dodge_modifier: logistic falloff below ~ half stamina.
     const ratio = this.stamina / this.staminaMax();

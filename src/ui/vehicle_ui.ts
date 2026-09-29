@@ -83,6 +83,36 @@ function partLine(p: VehiclePart): string {
   return `${c(hpColor(p), name)}${extra.length ? c('c_light_gray', ` (${extra.join(', ')})`) : ''}`;
 }
 
+/**
+ * Height of the vehicle column in a tile for crosshair raycasts: bodywork (OBSTACLE / ROOF
+ * parts) is car height, open frames, seats and wheels are waist height. 0 = no vehicle.
+ */
+export function vehicleSolidHeight(game: Game, x: number, y: number, z: number): number {
+  const o = game.vehicles?.at(x, y, z);
+  if (!o) return 0;
+  const parts = o.v.partsAt(o.mx, o.my);
+  if (!parts.length) return 0;
+  return parts.some((p) => p.hp > 0 && (has(p, 'OBSTACLE') || has(p, 'ROOF'))) ? 1.6 : 1.0;
+}
+
+/**
+ * Look-mode lines for the vehicle in a tile (CDDA look around: vehicle name, the parts at
+ * that spot with their condition, overall damage), or null when there is none.
+ */
+export function describeVehicleAt(game: Game, x: number, y: number, z: number): string | null {
+  const o = game.vehicles?.at(x, y, z);
+  if (!o) return null;
+  const v = o.v;
+  const broken = v.parts.filter((p) => p.hp <= 0).length;
+  const hp = v.parts.reduce((s, p) => s + Math.max(0, p.hp), 0), max = v.parts.reduce((s, p) => s + p.def.durability, 0);
+  const pct = max > 0 ? Math.round((100 * hp) / max) : 100;
+  const cond = pct >= 95 ? c('c_green', 'undamaged') : pct >= 70 ? c('c_light_green', 'lightly damaged') : pct >= 40 ? c('c_yellow', 'damaged') : c('c_light_red', 'badly damaged');
+  const L = [`${c('c_light_gray', 'Vehicle:')} ${c('c_white', v.name)}  ${cond}${broken ? c('c_dark_gray', `  (${broken} broken part${broken === 1 ? '' : 's'})`) : ''}`];
+  if (v.engineOn) L.push(c('c_light_green', 'The engine is running.'));
+  for (const p of v.partsAt(o.mx, o.my)) L.push(`  ${partLine(p)}`);
+  return L.join('\n');
+}
+
 function fuelSummary(v: Vehicle): string {
   const lines: string[] = [];
   const types = new Set(v.parts.filter((p) => p.fuelType && p.def.capacity).map((p) => p.fuelType!));
@@ -310,7 +340,7 @@ function dashHtml(game: Game, v: Vehicle): string {
     const pct = cap ? Math.round((100 * v.fuelLeft(t)) / cap) : 0;
     const bars = Math.round(pct / 20);
     const col = pct > 50 ? 'c_light_green' : pct > 15 ? 'c_yellow' : 'c_red';
-    return `${c('c_light_gray', t === 'battery' ? 'Bat' : (v.vdata.fuels[t]?.name ?? t).slice(0, 4))} ${c(col, '|'.repeat(bars) + '.'.repeat(5 - bars))}`;
+    return `${c('c_light_gray', t === 'battery' ? 'Bat' : capitalize(v.vdata.fuels[t]?.name ?? t))} ${c(col, '|'.repeat(bars) + '.'.repeat(5 - bars))}`;
   };
   const parts = [
     c('c_white', v.name),
@@ -528,4 +558,9 @@ function installVehicleDebug(api: DebugApi, game: Game, vs: VehicleSystem): void
   api.examineVehicle = (dx: number, dy: number) => examineVehicle(game, p().tileX + dx, p().tileY + dy, p().z);
   api.vehicleSystem = vs;
   api.vehiclesJSON = () => vs.toJSON();
+}
+
+/** 'gasoline' -> 'Gasoline' (a clipped 'gaso' read like a typo on the dashboard). */
+function capitalize(s: string): string {
+  return s.charAt(0).toUpperCase() + s.slice(1);
 }

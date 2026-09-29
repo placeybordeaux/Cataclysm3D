@@ -294,6 +294,14 @@ export class LightMap {
     this.stats.rebuilds++;
   }
 
+  /** lightAt restricted to the mapped window on the mapped level; null elsewhere. */
+  exactLightAt(x: number, y: number, z: number): number | null {
+    if (!this.valid || z !== this.z) return null;
+    const tx = Math.floor(x), ty = Math.floor(y);
+    const i = this.field.index(tx, ty);
+    return i >= 0 ? this.field.natural[i] * this.naturalLevel + this.field.artificialAt(tx, ty) : null;
+  }
+
   /**
    * CDDA-style light level at a tile, in CDDA luminance units (compare with lightmap.h:
    * LIGHT_AMBIENT_LOW 3.5, LIGHT_AMBIENT_DIM 5, LIGHT_AMBIENT_LIT 10; daylight ~100).
@@ -301,11 +309,9 @@ export class LightMap {
    * overhead". Gameplay can use it for vision/stealth.
    */
   lightAt(x: number, y: number, z: number): number {
+    const exact = this.exactLightAt(x, y, z);
+    if (exact !== null) return exact;
     const tx = Math.floor(x), ty = Math.floor(y);
-    if (this.valid && z === this.z) {
-      const i = this.field.index(tx, ty);
-      if (i >= 0) return this.field.natural[i] * this.naturalLevel + this.field.artificialAt(tx, ty);
-    }
     const covered = terrainShape(this.map.terAt(tx, ty, z + 1)) !== 'none';
     return (covered ? this.field.indoorAmbient : 1) * this.naturalLevel;
   }

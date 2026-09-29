@@ -41,7 +41,7 @@ tileset, rendered in the "3D pixel art" style of *Project Shadowglass*.
   `127.0.0.1:9555/eval`); page scripts can `await shot(path)`. `--gpu` renders on the real GPU.
 - `window.cdda` (src/debug.ts) is the automation API. Register helpers for anything you
   add (`cdda.spawnMonster(id, dx, dy)`, `cdda.giveItem(id)`, …) so others can test.
-- Generated data lives in `public/data/` (by `npm run extract`) and `public/atlas/`
+- Generated data lives in `public/data/` (by `npm run data:all`, which runs every extractor) and `public/atlas/`
   (by `npm run atlas`). Both are **committed** so worktrees run without regenerating.
 
 ## Coordinates & units (see src/world/coords.ts, src/data/types.ts)
@@ -118,6 +118,44 @@ tests/               vitest unit tests (pure logic, no DOM/WebGL)
   Other systems' use_actions: `inv.useHandlers.set(type, fn)` (crafting registers `firestarter`).
   UI + keys (`& * ( R`) + `cdda.*` helpers: `installCrafting(game, api)` in src/ui/crafting_install.ts.
 
+### Combat depth (src/game/{techniques,martialarts,gunmods,monguns,explosion}.ts, wired by src/combatdepth.ts)
+- `meleeAttack(c, {dodge, armor, info?: TargetInfo}, rng, name, {allowSpecial, aoeTargets, forceTechnique})`
+  picks a weapon/style technique (melee.cpp pick_technique: dummy/defensive skipped, crit_tec,
+  `condition` via a small dialogue-condition evaluator, skill/weapon requirements, weighting, AoE
+  needing victims) and returns `technique` + `outcome` (stun/down turns, knockback, aoe, disarm);
+  the world layer applies it (`applyTechniqueToMonster` in playercombat.ts: monster effects +
+  dash knockback; `PlayerCombat.swingAt`/`aoeVictims` for wide/spin/impale follow-ups). Messages
+  use the technique text (`techniqueMessage`, `hitMessage`: "You sweep the zombie for 12 damage.").
+  No `info` = no techniques (legacy callers). Glass shattering + `handleMeleeWear` happen inside.
+- Defense: `monsterMeleeAttack` uses `tryDodgeRoll` (one dodge per combat turn, stamina cost) and
+  `blockHit` (WBLOCK_1/2/3 weapons, style arm/leg blocks, logarithmic_range(0,40,score) of physical
+  damage gets through, "You block most of the damage with your baseball bat!"); NPC-vs-character
+  melee uses `characterDefend`. A combat turn is `COMBAT_TURN` = 1/MELEE_SCALE real s; dodges/blocks
+  refresh and buffs tick in `tickMartialArts` (PlayerCombat.update for the player, NpcSystem for NPCs).
+- Martial arts: `maOf(c)` (WeakMap state: known styles, style, buffs with stacks, dodges/blocks
+  left); `learnStyle`, `selectStyle`, `triggerBuffs(c, 'onhit'|…)`, `buffFlat/buffMult` feed hit,
+  dodge (Character.dodge), speed (resetStats), damage, arpen, armor, move cost, crit. Manuals teach
+  their `martial_art` when read (`readHooks` in reading.ts) or activated (MA_MANUAL); Brawling
+  autolearns at melee 1; profession traits' `initial_ma_styles` show as choices in the `_` menu.
+  Save section `martialarts` (order 12).
+- Guns: `Item.gunmods` (saved in ItemJSON), `gunmodCompatible/installGunmod/removeGunmod`
+  (valid_mod_locations + add_mod mounts, mod_targets, blacklists, IRREMOVABLE), `sightDispersion`,
+  mods in `gunDispersion/gunRecoil/gunNoise/aim`; `gunModes/currentMode/cycleMode` (`gun.vars.gun_mode`);
+  `fireGun` rolls malfunctions/jams (`gun.vars.jammed`, cleared by `r`), adds 5×recoil×(1−skill/20)
+  per round and returns `delayedRecoil`, `pellets/shotSpreadMoa/shotDamage`, `ammoEffects`.
+  PlayerCombat fires bursts BURST_INTERVAL apart (`combat.burst`), pellets per ray, INCENDIARY/
+  EXPLOSIVE/aoe ammo effects through `combat.hooks` (explosion.ts is an approximation). Aim levels:
+  `aimState(c, gun)` → Immediate/Regular/Careful/Precise (CDDA get_aim_types thresholds).
+- Monster guns (`monguns.ts gunActor`): special attack type "gun" — ranges pick the fire mode,
+  starting_ammo pool, targeting lock + `targeting_sound` announcement, fake shooter stats, hitscan vs
+  the survivor, "throw" skill actors lob a projectile. Survivor only (no NPC targets yet).
+- Hooks: `combatHooks.onBlock/onWeaponBroken`, `monsterGunHooks.tracer`, `inventory_ui.extraItemActions`
+  (item-menu entries), `renderer.viewmodel.block()` + attack kind `'sweep'`.
+- Keys `_` martial arts, `b` fire mode (CDDA `F` is our flashlight). Debug: `cdda.learnStyle(id)`,
+  `cdda.setStyle(id)`, `cdda.martialArts()`, `cdda.openMartialArts()`, `cdda.techniques(crit?)`,
+  `cdda.fireMode()`, `cdda.cycleFireMode()`, `cdda.installGunmod(gunId?, modId)`, `cdda.openGunmods()`,
+  `cdda.aimState()`.
+
 ### World interaction (src/game, installed by src/worldInteraction.ts)
 
 - `sound.ts` `emitSound(game, {x,y,z}, volume, desc, {category?, source?, sfxId?})` — use it
@@ -138,7 +176,8 @@ tests/               vitest unit tests (pure logic, no DOM/WebGL)
 
 - Data: `public/data/vehicles.json` from `npm run extract:vehicles` (prototypes with CDDA's
   copy-from "parts append" rule, slimmed vehicle parts, vehicle groups, fuel kJ/charge).
-  `misc.vehicle` predates the append fix; use vehicles.json.
+  `npm run data:all` regenerates every public/data file in order (core, npcs, mapgen, vehicles,
+  ui). Vehicle types are no longer in misc.json.
 - `vehicle.ts` `Vehicle`: parts on CDDA mount points (+x forward, +y right), world pose
   `x,y` (centre of mount 0,0) + `facing` deg (0 east, clockwise). `occupiedTiles()`,
   `mountAtTile`, `moveCostAt/opaqueAt` (CDDA obstacle/aisle rules, open doors), mass,
@@ -149,7 +188,9 @@ tests/               vitest unit tests (pure logic, no DOM/WebGL)
   index registered as a `GameMap.overlays` entry (so `map.moveCost/passable/opaque`,
   physics and monster `Grid` see vehicles), driving physics per tick, collisions (terrain via
   bash.ts, monsters via `monsterCreatureHooks`, the player, other vehicles), engine/horn/
-  alarm noise via `emitSound`, save section `vehicles` (order 30).
+  alarm noise via `emitSound` (with CDDA sfx id/variant), save section `vehicles` (order 30).
+  Audio: `src/audio/vehicleAudio.ts` `EngineSounds` (running-engine loop per nearby vehicle,
+  internal while driving, rate by CDDA gear, gear-shift clunks) and CDDA variant pickers.
 - Keys: `^` take controls / controls menu, `k` engine, `h` headlights, `n` horn; at the
   controls WASD drive (S brakes then reverses), Space handbrake. `e` on a vehicle part goes
   through `interactOverrides` in interact.ts (doors toggle, else a part menu: cargo get/put,
@@ -179,6 +220,12 @@ tests/               vitest unit tests (pure logic, no DOM/WebGL)
   warn once, false/no-op); `talkmath.ts` evaluates `math` expressions. `missions.ts`
   `MissionSystem` (FIND_ITEM, KILL_MONSTER_TYPE/SPEC, KILL_MONSTER target, GO_TO(_TYPE),
   ASSASSINATE, CONDITION). `trade.ts` `TradeSession` (npctrade.cpp prices, balance, credit).
+- **update_mapgen**: `worldgen.applyUpdate(map, idOrObject, omx, omy, z)` runs an update_mapgen
+  on the live chunk (rotated like CDDA, existing items kept, `chunk.version` bumped, new
+  spawns/vehicles/NPCs via `map.onChunkUpdated`). mapgen.json `update` holds the ids npcs.json
+  references (so `extract:npcs` runs before `extract:mapgen`). Dialogue `mapgen_update` and
+  mission start/end/fail `update_mapgen` go through `NpcSystem.mapgenUpdate`;
+  `cdda.mapgenUpdate(id, omx?, omy?, z?)`.
 - Mapgen `npcs`/`place_npcs` fill `chunk.npcSpawns` (consumed + cleared by installNpcs, skipped
   for chunks generated before a loaded save); the `evac_center` refugee center special is placed
   near the start town (overmap.ts). Towns get a few random survivors / bandits.
@@ -206,6 +253,52 @@ tests/               vitest unit tests (pure logic, no DOM/WebGL)
   self-install; `e` on an Autodoc. Save section `bodymods` (order 15). Debug: `cdda.mutate(id|cat)`,
   `cdda.mutations()`, `cdda.addVitamin(id,n)`, `cdda.installBionic(id,{surgery})`, `cdda.bionics()`,
   `cdda.givePower(kj)`, `cdda.toggleBionic(id)`, `cdda.spawnAutodoc(dx,dy)`, `cdda.giveCbm(id)`.
+### Scores & achievements (src/game/achievements.ts, src/achievements.ts, src/ui/achievements_ui.ts)
+- Data: `public/data/achievements.json` (`npm run extract:achievements`, part of `data:all`): CDDA
+  achievements + conducts, event_statistics, event_transformations, scores; loaded by the install.
+- `AchievementTracker` (UI-free, tests/achievements.test.ts) = CDDA stats_tracker + achievements_tracker:
+  `emit(type, fields, count?)` with CDDA event names/fields, `flush()` re-checks watching achievements,
+  `value(statId)`, `completion(id)`, `isHidden(a)`, `requirementLines(a)`, `achievementSupported(a)`
+  (depends only on `SUPPORTED_EVENTS`; others show as "not tracked", never unlock), `toJSON/load`.
+- `installAchievements(game, worldgen, api)` feeds it: creatureDied (kills), playerHurt, playerDied,
+  Inventory.onConsume, wrapped PlayerCombat.melee/fire, per-tile `avatar_moves` / per-OMT
+  `avatar_enters_omt`, and a 2 Hz poll of the survivor (wake-ups, skill levels, mutations/thresholds,
+  CBMs, broken limbs, healing, books, wield/wear). `begin(loaded)` (main.ts) starts tracking.
+  New game systems can report more with `achievementsOf(game)?.tracker.emit(...)`.
+- Persistence: per character in the save (section `achievements`, order 60); completed achievements
+  globally in localStorage `cdda3d.achievements` (`globalAchievements()`), which unlocks chargen's
+  scenario/profession `requirement`s. Death screen + memorial entry list the run's achievements.
+- UI: `)` scores window (ACHIEVEMENTS / CONDUCTS / SCORES / KILLS tabs), unlock toast + log message.
+  Debug: `cdda.achievements(filter?)`, `cdda.unlockAchievement(id)`, `cdda.achievementStat(id)`,
+  `cdda.achievementEvent(type, fields)`, `cdda.openAchievements()`.
+
+### Underground labs & dissection (src/game/labs.ts, src/labs.ts `installLabs`, src/game/butchery.ts)
+- Labs are CDDA 0.J+ **modular JSON labs** (upstream removed the hardcoded lab/lab_stairs/lab_finale
+  generator): overmap special `lab_mutagen_6_level` (`LAB_SPECIAL`: fenced parking + security building on
+  the surface, residential z-2/-3, cargo z-4, mutagen research z-5/-6, a -7 hallway) and the 4x4 surface
+  microlab (`MICROLAB_SPECIAL`, elevator z0 → z-2). Both are in `WILD_SPECIALS` (tools/extract/mapgen.ts)
+  and overmap.ts always places one of each in the start region (after all other specials, so older
+  placement is unchanged). `MIN_Z` is -7. Stairs line up via the JSON (zlevels' 24-tile stair search
+  covers the few offset ones); tests/labs.test.ts walks from the parking lot to z-6.
+- Machinery (UI-free, prompts via `LabUi`; `autoUi(game, picks?)` for tests): ID card readers
+  (`cardreader` examine actor: card flags, terrain_changes radius, ID_CARD_DESPAWN turrets, consume;
+  electrohack hacking = CDDA hack_level/normal_roll → alarm / nothing / unlock + broken reader), computer
+  consoles (CONSOLE furniture + `chunk.computers`: login hack Nd6 vs security+2·alerts, unlock(_disarm),
+  release(_bionics), research (lab_notes), maps, lists, shutters, elevator_on, …; failures shutdown /
+  alarm / manhacks / secubots / damage), elevators (`iexamine::elevator`: stand in the cab, powered
+  control floors, OMT rotation between floors, items/monsters ride along), gate controls (misc.gate),
+  climbing CLIMBABLE barriers (boom barriers, chain fences). IMMOBILE monsters (turrets) never move.
+- `interact.ts` `examineHandlers` (examine_action → interactions) is the hook they use; consoles come
+  through `interactionProviders`.
+- Dissection (`B` menu → Dissect): CUT_FINE tool, 6× cutting time, the monster's `dissect` harvest —
+  item-group entries (zomborg CBMs, mutagen glands) recovered per check_butcher_dissect roll (failed CBMs
+  burn out), per-drop-type harvest_skills, first-aid practice. `dissectYield`/`dissectSeconds` in
+  butchery.ts, `startDissect` in src/monsters.ts.
+- Debug: `cdda.labs()`, `cdda.labMap(special?)`, `cdda.teleportLab(z, special?)`, `cdda.faceLabLoot(z)`,
+  `cdda.labLoot(r)`, `cdda.rideElevator(z?)`, `cdda.useComputer(picks?)`, `cdda.swipeCard()`,
+  `cdda.dissect()`. Probes: `tsx tools/dev/probe_lab.ts <seed> [special] [z]` (OMTs, stairs, loot),
+  `tools/dev/probe_reach.ts <seed> [special] [keys]` (walk-in reachability).
+
 ### Seasons, foraging, farming, water (src/game/{sun,harvest,farming,water,woodcut,actualize}.ts, src/nature.ts)
 - `sun.ts` is the one sun: `sunPosition(seconds)` (CDDA calendar.cpp altitude/azimuth, Boston),
   `sunTimes(day)` → sunrise/sunset/dawn/dusk hours (≈06–18 equinox, 04:20–19:40 midsummer,
@@ -270,6 +363,10 @@ tests/               vitest unit tests (pure logic, no DOM/WebGL)
   (like bash.ts map damage) must be saved by its owner. Saves are gzip JSON in IndexedDB,
   one slot per character; death deletes the save and adds a memorial entry.
   `cdda.save.{save,list,load,queueLoad,stats,memorial}`; `npm run shot -- … --reload`.
+  **Chunk eviction** (src/save/eviction.ts): clean (non-dirty) chunk columns farther than render
+  radius + 4 are dropped and regenerate on return; their keys join `tracker.priorGenerated`, so
+  spawner/NPC/vehicle placement skip them. Per-chunk state kept outside the chunk that must reset
+  with it: `map.onChunkEvicted.push(c => …)`. Stats: `cdda.eviction.stats`.
 - `input.onPress(e => …)` for global keys, `input.capture(handler)` for modal menus.
 - Audio: call `sfx.meleeHit(...)`, `sfx.gunshot(...)`, `sfx.door(...)`… from `src/audio/sfx.ts`
   (no-ops without audio), or put `sfxId`/`sfxVariant` (CDDA sound_effect id/variant) on
@@ -328,7 +425,10 @@ Keys: `V` camera mode, `F` flashlight.
 - **Light queries**: `renderer.lightAt(x, y, z)` → CDDA light level in luminance units
   (daylight ~100, lit room ≥10, `LIGHT_AMBIENT_LOW` 3.5 = too dark to see) — use it for
   vision/stealth. Exact on the player's level within 64 tiles, an indoor/outdoor estimate
-  elsewhere.
+  elsewhere. **Gameplay code calls `vision.ts lightAt(game, x, y, z)`**, which reads this
+  light map through `game.lightProvider` (`renderer.exactLightAt`, set in main.ts) where it is
+  exact, adds the survivor's flashlight beam (a spotlight, not in the map), and falls back to
+  vision's own estimate elsewhere and in headless tests.
 - **Viewmodel** (first person only): `renderer.viewmodel?.attack('melee'|'fire'|'throw')`
   animates the wielded item (`player.inv.wielded`, atlas sprite composited with a pixel
   fist; bare fists when unarmed): swing/punch, recoil + muzzle flash + light, throw.
@@ -349,9 +449,10 @@ Keys: `V` camera mode, `F` flashlight.
 - Map edits need no renderer calls: chunk meshes rebuild when `chunk.version` changes.
 - Debug API: `cdda.setCameraMode`, `cdda.flashlight`, `cdda.setWeather`, `cdda.settle()`
   (build all chunks + render; call before screenshots), `cdda.renderStats()`,
-  `cdda.lightAt(dx,dy)`, `cdda.lightmapAscii(r)`, `cdda.addLight(dx,dy,{…})`,
-  `cdda.addField(type,dx,dy,n)`, `cdda.placeItem(id,dx,dy)`, `cdda.lookAt(x,y)`,
-  `cdda.findFurniture(re)`, `cdda.attack(kind)`, `cdda.viewmodelPose(kind,t)` (freeze an
+  `cdda.lightAt(x?,y?,z?)` (absolute tile, gameplay light = this light map where exact),
+  `cdda.lightmapAscii(r)`, `cdda.addLight(dx,dy,{…})`, `cdda.addField(x,y,z,type,n)`,
+  `cdda.placeItem(id,dx,dy,count?)`, `cdda.lookAt(x,y)`, `cdda.findFurniture(re)`,
+  `cdda.viewmodelAttack(kind)` (animation only; `cdda.attack()` really attacks), `cdda.viewmodelPose(kind,t)` (freeze an
   attack pose), `cdda.shake(a)`, `cdda.hurtFlash(a)`, `cdda.benchRender(n)` (ms/frame),
   `cdda.shimmerTest(frames, px/frame)` (pixel-stability metric for a slow pan).
   `tools/render-shots.sh <prefix>` renders the regression screenshot set.
@@ -399,6 +500,8 @@ Keys: `V` camera mode, `F` flashlight.
   onProgress?, onCancel?, warp?, interruptible?})` for any long action (craft, read, butcher,
   construct, wait, sleep). Warps the clock, cancels on movement/danger. Danger sources
   register `game.activities.dangerChecks.push(() => reason | null)`.
+  The survivor's own state (freezing, dehydrated) goes in `activities.distractionChecks`: it
+  interrupts only when it newly arises, never blocks starting (CDDA's "ignore" semantics).
 - **Items on the map** are real `Item` instances (`src/game/item.ts`). Mapgen emits
   `ItemSpawn`s which `GameMap.itemFactory` (set in Game) converts via `fromSpawned`.
 - **Tile raycasts** `src/game/raycast.ts`: `raycastTiles(map, {x,y,h}, dir, {maxDist,
@@ -406,6 +509,9 @@ Keys: `V` camera mode, `F` flashlight.
   hit (h = metres, x/y tiles; same as three.js X/Z). `dirFromYawPitch(yaw, pitch)`.
   `game.lookAt(maxDist?)` = ray through the crosshair of the active camera (any mode).
   Monsters: set `game.creatureAt = (x, y, z) => LookCreature | null` so look mode and rays see them.
+  `game.creatureAt` is a chain: installNpcs wraps the monsters' version (NPC first, else
+  monster). Vehicles block rays via `vehicleAt` (kind `'vehicle'`); look mode lists the vehicle
+  name, condition and the parts at that spot (`describeVehicleAt` in src/ui/vehicle_ui.ts).
 - **HUD** `src/ui/hud.ts`: `hud.setPrompt('[e] Open door' | null)` (sticky) or
   `hud.addPromptProvider(game => text | null)` (per frame, first non-null wins; returns an
   unregister fn). `hud.safeMode = {text, color}`. The HUD also draws the activity bar.

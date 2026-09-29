@@ -4,6 +4,7 @@ import { ACTION_SCALE } from '../core/time';
 import type { MonsterSystem } from './monai';
 import type { Monster } from './monster';
 import { emitSound, type SoundCategory } from './sound';
+import { EngineSounds, engineVariant, hornVariant, pickVariant } from '../audio/vehicleAudio';
 import { MAIN_PARTS, type BodyPartId } from './bodyparts';
 import type { GameData, TerrainDef, FurnitureDef } from '../data/types';
 import type { Chunk, GameMap, MapOverlay, VehicleRequest } from '../world/map';
@@ -85,6 +86,8 @@ export class VehicleSystem implements GameSystem, MapOverlay {
   readonly onAdded: ((v: Vehicle) => void)[] = [];
   readonly onRemoved: ((v: Vehicle) => void)[] = [];
   private soundAcc = new Map<Vehicle, number>();
+  /** Running-engine loops that follow the vehicles (no-op without audio). */
+  readonly engineSounds = new EngineSounds();
   /** Last engine load per vehicle (0..1), for sound/fuel/HUD. */
   readonly load = new Map<Vehicle, number>();
 
@@ -115,8 +118,14 @@ export class VehicleSystem implements GameSystem, MapOverlay {
       name: (c) => (c as { name?: string }).name ?? 'something',
     };
     // CDDA part_collision -> map::bash with the object's share of the impact damage.
-    this.onBash = (x, y, z, strength) => bash(game, x, y, z, Math.round(strength), { source: this }).success;
+    // The driver's own crash isn't narrated back as "You hear whump!" (the impact message says it).
+    this.onBash = (x, y, z, strength) => bash(game, x, y, z, Math.round(strength), { source: this.driving ? game.player : this }).success;
     map.onChunkGenerated.push((c) => this.queueChunk(c));
+    // update_mapgen on a live chunk: its new vehicles are new even if the chunk is from a save.
+    map.onChunkUpdated.push((c) => {
+      this.pending.push(...c.vehicles);
+      c.vehicles = [];
+    });
     for (const c of map.loadedChunks()) this.queueChunk(c);
   }
 
@@ -325,7 +334,7 @@ export class VehicleSystem implements GameSystem, MapOverlay {
     }
     v.engineOn = true;
     v.version++;
-    this.emitSound(v, Math.max(20, v.engineNoise(0.3)), 'the engine starting', 'engine_start');
+    this.emitSound(v, Math.max(20, v.engineNoise(0.3)), 'the engine starting', ['engine_start', engineVariant('engine_start', v)]);
     return { ok: true, msg: `The ${v.name}'s engine starts up.` };
   }
 
@@ -361,7 +370,7 @@ export class VehicleSystem implements GameSystem, MapOverlay {
     if (!v.engineOn) return `The ${v.name}'s engine isn't running.`;
     v.engineOn = false;
     v.version++;
-    this.emitSound(v, 10, 'the engine stopping', 'engine_stop');
+    this.emitSound(v, 10, 'the engine stopping', ['engine_stop', engineVariant('engine_stop', v)]);
     return `You turn the ${v.name}'s engine off.`;
   }
 
@@ -382,7 +391,7 @@ export class VehicleSystem implements GameSystem, MapOverlay {
     if (!horns.length) return `The ${v.name} has no horn.`;
     if (v.fuelLeft('battery') <= 0) return `The ${v.name}'s horn is silent: the battery is dead.`;
     const vol = Math.max(...horns.map((h) => h.def.bonus ?? 40));
-    this.emitSound(v, vol, 'honking!', 'horn_car', 'alert');
+    this.emitSound(v, vol, 'honking!', ['vehicle', hornVariant(vol)], 'alert');
     return 'You honk the horn!';
   }
 
@@ -403,21 +412,21 @@ export class VehicleSystem implements GameSystem, MapOverlay {
     }
     for (const p of group) p.open = opening;
     v.version++;
-    this.emitSound(v, 3, opening ? 'a door opening' : 'a door closing', opening ? 'vehicle_open' : 'vehicle_close');
+    const doorSfx = opening ? 'vehicle_open' : 'vehicle_close';
+    this.emitSound(v, 3, opening ? 'a door opening' : 'a door closing', [doorSfx, pickVariant(doorSfx, door.def.id, 'door')]);
     return `You ${opening ? 'open' : 'close'} the ${v.name}'s ${door.def.name}.`;
   }
 
   /**
-   * Noise for monsters/audio. `cddaSfx` names the CDDA sound_effect this corresponds to;
-   * the soundpack build excludes engine/vehicle effects for now, so events carry sfxId ''
-   * (audio stays quiet, monsters still hear it). Wire cddaSfx through once they exist.
+   * Noise for monsters and audio. `cddaSfx` is the CDDA sound_effect [id, variant] the audio
+   * plays at the vehicle; without one the event is silent (sfxId '') but monsters still hear
+   * it. The running-engine sound is a loop (src/audio/vehicleAudio.ts), not these events.
    */
-  emitSound(v: Vehicle, volume: number, description: string, cddaSfx?: string, category: SoundCategory = 'movement'): void {
+  emitSound(v: Vehicle, volume: number, description: string, cddaSfx?: [string, string], category: SoundCategory = 'movement'): void {
     if (volume <= 0) return;
-    void cddaSfx;
     // The driver doesn't need "You hear vroom!" every second: engine/door noises are ambient.
     const ambient = category === 'movement' || this.driving === v;
-    emitSound(this.game, { x: v.x, y: v.y, z: v.z }, volume, description, { source: v, category, sfxId: '', ambient });
+    emitSound(this.game, { x: v.x, y: v.y, z: v.z }, volume, description, { source: v, category, sfxId: cddaSfx?.[0] ?? '', sfxVariant: cddaSfx?.[1], ambient });
   }
 
   // --- simulation ---------------------------------------------------------------------
@@ -431,6 +440,8 @@ export class VehicleSystem implements GameSystem, MapOverlay {
     if (this.pending.length) this.flushPending();
     if (this.driving && !this.scriptedInput) this.readKeys();
     for (const v of this.list) this.simulate(v, realDt);
+    const p = game.player;
+    this.engineSounds.update(this.list, { x: p.x, y: p.y, z: p.z }, this.driving, realDt);
   }
 
   private readKeys(): void {
@@ -471,7 +482,7 @@ export class VehicleSystem implements GameSystem, MapOverlay {
       const acc = (this.soundAcc.get(v) ?? 0) + dt;
       if (acc >= 1 && !v.engineOn) {
         const alarm = v.withFlag('SECURITY', true)[0];
-        if (alarm && v.fuelLeft('battery') > 0) this.emitSound(v, alarm.def.bonus ?? 60, 'WHOOP WHOOP', 'alarm', 'alarm');
+        if (alarm && v.fuelLeft('battery') > 0) this.emitSound(v, alarm.def.bonus ?? 60, 'WHOOP WHOOP', ['vehicle', 'car_alarm'], 'alarm');
         else v.alarmOn = false;
         this.soundAcc.set(v, 0);
       } else if (!v.engineOn) this.soundAcc.set(v, acc);
@@ -544,7 +555,7 @@ export class VehicleSystem implements GameSystem, MapOverlay {
       const acc = (this.soundAcc.get(v) ?? 0) + dt;
       if (acc >= 1) {
         const noise = v.engineNoise(load);
-        this.emitSound(v, noise, engineSoundMsg(noise), 'engine_working_external');
+        this.emitSound(v, noise, engineSoundMsg(noise));
         this.soundAcc.set(v, 0);
       } else this.soundAcc.set(v, acc);
     }
@@ -613,7 +624,7 @@ export class VehicleSystem implements GameSystem, MapOverlay {
         const op = collisionPart(other.v, other.mx, other.my);
         this.damagePart(other.v, op, r.objDmg);
         this.impactMessage(v, part, `the ${other.v.name}`, 'smash!');
-        this.emitSound(v, 50, 'smash!', 'smash_success', 'combat');
+        this.emitSound(v, 50, 'smash!', ['smash_success', 'hit_vehicle'], 'combat');
         v.velocity = Math.abs(r.velocity) < 0.3 ? 0 : r.velocity;
         stopped = true;
         break;
@@ -672,7 +683,7 @@ export class VehicleSystem implements GameSystem, MapOverlay {
       });
       this.damagePart(v, part, r.partDmg);
       this.impactMessage(v, part, name, 'smash!');
-      this.emitSound(v, r.smashed ? 80 : 50, 'smash!', 'smash_success', 'combat');
+      this.emitSound(v, r.smashed ? 80 : 50, 'smash!', ['smash_success', 'hit_vehicle'], 'combat');
       v.velocity = r.velocity;
       if (!r.smashed) {
         if (Math.abs(v.velocity) < 0.5 || Math.sign(v.velocity) !== Math.sign(velBefore)) v.velocity = 0;
@@ -722,7 +733,7 @@ export class VehicleSystem implements GameSystem, MapOverlay {
     this.damagePart(v, part, r.partDmg);
     if (r.objDmg > 20) part.blood = Math.min(600, part.blood + 50 + r.objDmg * 2.5);
     if (this.driving === v) this.say(`Your ${v.name}'s ${part.def.name} rams into ${target.name}!`, 'c_yellow');
-    this.emitSound(v, 20, 'smash!', 'hit_vehicle', 'combat');
+    this.emitSound(v, 20, 'smash!', ['smash_success', 'hit_vehicle'], 'combat');
     v.velocity = r.velocity;
     if (!(dead || flung)) {
       v.velocity = 0;
@@ -803,6 +814,7 @@ export class VehicleSystem implements GameSystem, MapOverlay {
     this.driving = null;
     this.input = { throttle: 0, steer: 0, brake: false };
     this.soundAcc.clear();
+    this.engineSounds.stopAll();
     this.load.clear();
   }
 }
@@ -899,11 +911,10 @@ export function obstacleAt(map: GameMap, x: number, y: number, z: number, wheel:
 }
 
 /**
- * CDDA is_bashable_ter_furn(p, allow_floor = false): floor-only bashes (grass, pavement,
- * "bash_below") don't count. The extractor currently drops bash_below, so FLAT terrain
- * (walkable ground) stands in for it.
+ * CDDA is_bashable_ter_furn(p, allow_floor = false): floor-only bashes ("bash_below", e.g.
+ * grass) don't count. Plain floors without bash_below (t_floor, pavement) are excluded by
+ * the caller's move cost 2 check, exactly like vehicle_move.cpp.
  */
 function wallBash(d: TerrainDef | FurnitureDef): boolean {
-  if (!d.bash || d.bash.bash_below) return false;
-  return !('move_cost' in d && hasFlag(d, 'FLAT'));
+  return !!d.bash && !d.bash.bash_below;
 }

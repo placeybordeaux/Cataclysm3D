@@ -6,6 +6,7 @@ import { cddaText } from '../game/units';
 import { c, colorize, openWindow, type UiWindow } from './framework';
 import { spriteImg, omtLabel, type UiContext } from './context';
 import { CHUNK } from '../world/coords';
+import { describeVehicleAt, vehicleSolidHeight } from './vehicle_ui';
 
 // Look mode ('x', CDDA "look around"): the simulation freezes (the window captures input,
 // which pauses the game) and a panel describes whatever is under the crosshair — creature,
@@ -24,7 +25,10 @@ export function cameraLookAt(ctx: UiContext, maxDist = 60): RayHit<LookCreature>
     ctx.game.map,
     { x: o.x, y: o.z, h: o.y },
     { x: tmpDir.x, y: tmpDir.z, h: tmpDir.y },
-    { maxDist, creatureAt: (x, y, z) => ctx.game.creatureAt(x, y, z), skipOrigin: ctx.renderer.cameraMode === 'first' },
+    {
+      maxDist, creatureAt: (x, y, z) => ctx.game.creatureAt(x, y, z), skipOrigin: ctx.renderer.cameraMode === 'first',
+      vehicleAt: (x, y, z) => vehicleSolidHeight(ctx.game, x, y, z),
+    },
   );
 }
 
@@ -39,6 +43,9 @@ export function describeHit(ctx: UiContext, hit: RayHit<LookCreature> | null): s
     if (cr.describe) L.push(colorize(cr.describe()));
     L.push('');
   }
+  // Vehicle parts (a hit on the vehicle, or the floor/roof of a tile a vehicle stands on)
+  const veh = describeVehicleAt(ctx.game, hit.x, hit.y, hit.z);
+  if (veh) L.push(veh, '');
   const tx = hit.x, tz = hit.z;
   const ter = hit.terrain, furn = hit.furniture;
   const fName = furn.id !== 'f_null' ? furn.name : '';

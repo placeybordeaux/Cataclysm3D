@@ -6,6 +6,7 @@ import type { MonstersHandle } from './monsters';
 import type { Chunk } from './world/map';
 import { Rng, hashSeed } from './core/rng';
 import { CHUNK, chunkKey } from './world/coords';
+import { oterRotation } from './world/overmap/oter';
 import { NpcSystem, type NpcSystemJSON } from './game/npcai';
 import type { Npc, NpcData } from './game/npc';
 import type { Dialogue } from './game/talk';
@@ -56,7 +57,8 @@ export async function installNpcs(game: Game, renderer: Renderer | null, worldge
   if (worldgen) {
     const om = worldgen.overmap;
     sys.omtAt = (x, y, z) => om.omtAt(x, y, z).id;
-    sys.omtRotation = (x, y, z) => om.omtAt(x, y, z).rot;
+    sys.omtRotation = (x, y, z) => oterRotation(om.omtAt(x, y, z), worldgen.wg.overmap.terrains);
+    sys.mapgenUpdate = (src, at, opts) => worldgen.applyUpdate(game.map, src, at.x, at.y, at.z, opts);
     sys.cityName = () => om.closestCity(Math.floor(game.player.x / CHUNK), Math.floor(game.player.y / CHUNK))?.name ?? 'town';
     sys.findOmt = (pred, from, opts) => {
       const min = opts.minDist ?? 0, max = Math.min(opts.maxDist ?? 80, 160);
@@ -142,7 +144,7 @@ export async function installNpcs(game: Game, renderer: Renderer | null, worldge
   hud.addPromptProvider(() => {
     const n = npcUnderCrosshair();
     if (!n || n.isEnemy()) return null;
-    return `[e] Talk to ${n.displayName()}`;
+    return `[${game.keys.keyFor('interact')}] Talk to ${n.displayName()}`;
   });
 
   // ---------------------------------------------------------------- keys
@@ -164,6 +166,10 @@ export async function installNpcs(game: Game, renderer: Renderer | null, worldge
 
   // ---------------------------------------------------------------- spawning
   const startOmt = { x: Math.floor(game.player.x / CHUNK), y: Math.floor(game.player.y / CHUNK) };
+  // The refugee center is the NPC hub the evacuee is meant to find, but nothing in the world
+  // pointed at it (it can sit 20+ OMTs away in a forest). Mark it on the map from the start, as
+  // CDDA's evacuation broadcasts do; a loaded save replaces overmapSeen with its own.
+  if (worldgen) revealRefugeeCenter(game, worldgen, startOmt);
   const onChunk = (c: Chunk) => {
     // Chunks generated before a loaded save already made their NPCs (they're in the save).
     const prior = chunkTracker(game)?.priorGenerated.has(chunkKey(c.cx, c.cy, c.z)) ?? false;
@@ -174,6 +180,10 @@ export async function installNpcs(game: Game, renderer: Renderer | null, worldge
     if (!prior && worldgen && c.z === 0) randomSurvivor(sys, worldgen, c, startOmt);
   };
   game.map.onChunkGenerated.push(onChunk);
+  game.map.onChunkUpdated.push((c) => {
+    for (const s of c.npcSpawns) spawnMapgenNpc(sys, s.template, s.x, s.y, s.z, s.addTrait);
+    c.npcSpawns = [];
+  });
   // Chunks generated before this install (the start area) get their placements too.
   for (const c of game.map.loadedChunks()) if (c.npcSpawns.length) onChunk(c);
 
@@ -210,6 +220,20 @@ function spawnMapgenNpc(sys: NpcSystem, template: string, x: number, y: number, 
  * classes, some of whom walk up to talk or carry a job, and the odd bandit gang member
  * who attacks on sight (never right next to the evac shelter).
  */
+/** Add the refugee center's OMTs (evac_center special) to the overmap memory. */
+export function revealRefugeeCenter(game: Game, wg: WorldGenerator, from: { x: number; y: number }): { x: number; y: number } | null {
+  const sp = wg.overmap.findSpecial('evac_center', from, 3);
+  if (!sp) return null;
+  let n = 0, sx = 0, sy = 0;
+  for (let dy = -18; dy <= 18; dy++)
+    for (let dx = -18; dx <= 18; dx++) {
+      if (!/^(refctr|evac_center)/.test(wg.overmap.omtAt(sp.x + dx, sp.y + dy, 0).id)) continue;
+      game.overmapSeen.add(`${sp.x + dx},${sp.y + dy},0`);
+      (n++, (sx += sp.x + dx), (sy += sp.y + dy));
+    }
+  return n ? { x: Math.round(sx / n), y: Math.round(sy / n) } : null;
+}
+
 function randomSurvivor(sys: NpcSystem, wg: WorldGenerator, c: Chunk, start: { x: number; y: number }): void {
   const o = wg.overmap.omtAt(c.cx, c.cy, 0);
   const inCity = !!o.special?.city || (o.type === 'road' && !!wg.overmap.closestCity(c.cx, c.cy, 0));
@@ -308,13 +332,24 @@ function installDebug(api: DebugApi, game: Game, sys: NpcSystem, wg: WorldGenera
     if (m) sys.missions.assign(m, n ? sys.dialogueFor(n) : null);
     return m?.uid ?? null;
   };
+  /** Run an update_mapgen id on an OMT (default: the one the survivor stands in). */
+  api.mapgenUpdate = (id: string, omx = Math.floor(p().x / CHUNK), omy = Math.floor(p().y / CHUNK), z = p().z) =>
+    sys.mapgenUpdate?.(id, { x: omx, y: omy, z }) ?? false;
   /** Teleport next to the refugee center's front door (the evac_center special). */
   api.teleportRefugeeCenter = (where: 'outside' | 'merchant' | 'lobby' = 'lobby') => {
     if (!wg) return null;
     const sp = wg.overmap.findSpecial('evac_center', { x: Math.floor(p().x / CHUNK), y: Math.floor(p().y / CHUNK) }, 3);
     if (!sp) return null;
-    // Generate the whole center so its NPCs exist, then stand next to one of them.
-    for (let dy = -1; dy < 18; dy++) for (let dx = -1; dx < 18; dx++) game.map.chunk(sp.x + dx, sp.y + dy, 0);
+    // Generate the whole center so its NPCs exist, then stand next to one of them. The special
+    // is rotated, so its OMTs can lie on any side of the origin: find them by id.
+    let bx0 = Infinity, by0 = Infinity, bx1 = -Infinity, by1 = -Infinity;
+    for (let dy = -18; dy <= 18; dy++)
+      for (let dx = -18; dx <= 18; dx++) {
+        if (!/^(refctr|evac_center)/.test(wg.overmap.omtAt(sp.x + dx, sp.y + dy, 0).id)) continue;
+        game.map.chunk(sp.x + dx, sp.y + dy, 0);
+        bx0 = Math.min(bx0, sp.x + dx), by0 = Math.min(by0, sp.y + dy), bx1 = Math.max(bx1, sp.x + dx), by1 = Math.max(by1, sp.y + dy);
+      }
+    if (bx0 === Infinity) (bx0 = bx1 = sp.x), (by0 = by1 = sp.y);
     const merchant = sys.npcs.find((n) => n.templateId === 'free_merchants_merchant');
     const anchor = where === 'merchant' ? merchant : where === 'lobby' ? sys.npcs.find((n) => n.templateId === 'refugee_beggar1') ?? merchant : null;
     let x: number, y: number;
@@ -324,8 +359,9 @@ function installDebug(api: DebugApi, game: Game, sys: NpcSystem, wg: WorldGenera
       y = anchor.tileY + (spot?.[1] ?? 1) + 0.5;
       p().yaw = Math.atan2(anchor.x - x, -(anchor.y - y));
     } else {
-      x = (sp.x + 7) * CHUNK + 12;
-      y = (sp.y + 16) * CHUNK + 4;
+      // just outside the south fence, midway along it
+      x = Math.floor((bx0 + bx1) / 2) * CHUNK + 12;
+      y = (by1 + 1) * CHUNK + 4;
     }
     p().x = x;
     p().y = y;

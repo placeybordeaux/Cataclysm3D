@@ -10,6 +10,7 @@ import { targetTile, frontTile } from './game/targeting';
 import { hasFlag } from './world/registry';
 import { DAYS_PER_SEASON, SECONDS_PER_DAY } from './core/time';
 import { registerSaveable } from './save/registry';
+import { chunkTracker } from './save/tracking';
 import { refreshWeather } from './game/weather';
 import { Actualizer } from './game/actualize';
 import { SEASONS, seasonAt, sunTimes, type Season } from './game/sun';
@@ -205,8 +206,19 @@ export function installNature(game: Game, renderer: Renderer | null, api?: Debug
     },
   });
 
+  // An evicted chunk regenerates in its day-0 state, so its rot/regrowth clock restarts too.
+  game.map.onChunkEvicted.push((c) => actualizer.stamps.delete(`${c.cx},${c.cy},${c.z}`));
+
+  const tracker = chunkTracker(game);
+  if (tracker) actualizer.tracking = tracker;
   registerSaveable(game, 'nature', {
-    save: () => ({ stamps: actualizer.toJSON() }),
+    save: () => ({
+      stamps: actualizer.toJSON((k) => {
+        if (!tracker) return true;
+        const [cx, cy, z] = k.split(',').map(Number);
+        return game.map.hasChunk(cx, cy, z) && tracker.isDirty(game.map.chunk(cx, cy, z)!);
+      }),
+    }),
     load: (d: { stamps?: Record<string, [number, number]> }) => actualizer.load(d.stamps ?? {}),
     missing: () => actualizer.load({}),
   });

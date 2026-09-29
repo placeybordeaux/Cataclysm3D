@@ -28,6 +28,8 @@ export interface ItemJSON {
   vars?: Record<string, string | number>;
   /** One array per pocket, in pocket_data order. */
   pockets?: ItemJSON[][];
+  /** Installed gunmods (CDDA's MOD pocket). */
+  gunmods?: ItemJSON[];
 }
 
 export interface FitResult {
@@ -93,38 +95,45 @@ export class Pocket {
     return n;
   }
   /**
-   * Running content totals while placeContents fills this pocket, so each insert doesn't
-   * re-sum everything already in it (a garbage bag of 150 things). Null = sum on demand;
-   * only valid while nothing but insert() touches the contents.
+   * Running totals while a batch of inserts is in progress (see beginBatch). Summing the
+   * contents on every canContain made filling one container quadratic: a shop's 500
+   * welding rods took seconds, a garbage bag of 150 things added up. Only valid between
+   * beginBatch/endBatch, when nothing but insert()/batchAdded touches the contents.
    */
-  private sums: { vol: number; wt: number } | null = null;
-  beginBatch(): void {
-    this.sums = null;
-    this.sums = { vol: this.volumeUsed(), wt: this.rawWeight() };
-  }
-  endBatch(): void {
-    this.sums = null;
-  }
-  /** Account for items pushed straight into `contents` during a batch. */
-  batchAdded(vol: number, wt: number): void {
-    if (this.sums) (this.sums.vol += vol), (this.sums.wt += wt);
-  }
+  private batch: { v: number; w: number; liquid: boolean } | null = null;
   volumeUsed(): number {
+    // E-files take no space (item_pocket.cpp E_FILE_STORAGE).
     if (this.type === 'E_FILE_STORAGE') return 0;
-    if (this.sums) return this.sums.vol;
+    if (this.batch) return this.batch.v;
     let v = 0;
     for (const it of this.contents) v += it.volume();
     return v;
   }
-  private rawWeight(): number {
-    if (this.sums) return this.sums.wt;
+  private rawWeightUsed(): number {
+    if (this.batch) return this.batch.w;
     let w = 0;
     for (const it of this.contents) w += it.weight();
     return w;
   }
   weightUsed(): number {
     if (this.type === 'E_FILE_STORAGE') return 0;
-    return this.rawWeight() * (this.data.weight_multiplier ?? 1);
+    return this.rawWeightUsed() * (this.data.weight_multiplier ?? 1);
+  }
+  hasLiquid(): boolean {
+    return this.batch ? this.batch.liquid : this.contents.some((c) => c.isLiquid());
+  }
+  /** Start caching volume/weight totals for a run of insert() calls (fromSpawned). */
+  beginBatch(): void {
+    this.batch = null;
+    this.batch = { v: this.volumeUsed(), w: this.rawWeightUsed(), liquid: this.hasLiquid() };
+  }
+  endBatch(): void {
+    this.batch = null;
+  }
+  /** Account for items pushed straight into `contents` during a batch (placeContents bulk). */
+  batchAdded(vol: number, wt: number, liquid = false): void {
+    const b = this.batch;
+    if (b) (b.v += vol), (b.w += wt), (b.liquid ||= liquid);
   }
   volumeRemaining(): number {
     return this.maxVolume - this.volumeUsed();
@@ -187,7 +196,7 @@ export class Pocket {
     const liquid = it.isLiquid();
     if (liquid && !d.watertight) return { ok: false, reason: "can't contain liquid" };
     // A liquid pocket holds one liquid and nothing else, as in CDDA.
-    if (this.contents.some((c) => c.isLiquid()) && (!liquid || this.contents.some((c) => c.typeId !== it.typeId)))
+    if (this.hasLiquid() && (!liquid || this.contents.some((c) => c.typeId !== it.typeId)))
       return { ok: false, reason: "can't mix liquid with contained item" };
     if (liquid && this.contents.some((c) => !c.isLiquid())) return { ok: false, reason: "can't put liquid into container with items" };
     if (d.item_restriction && !d.item_restriction.includes(it.typeId)) return { ok: false, reason: 'item restricted' };
@@ -230,14 +239,11 @@ export class Pocket {
       const n = fit.charges;
       const target = this.contents.find((c) => c.stacksWith(it));
       if (target) {
-        const [v0, w0] = this.sums ? [target.volume(), target.weight()] : [0, 0];
+        const b = this.batch;
+        const v0 = b ? target.volume() : 0, w0 = b ? target.weight() : 0;
         target.charges += n;
-        if (this.sums) this.batchAdded(target.volume() - v0, target.weight() - w0);
-      } else {
-        const moved = n === it.charges ? it : it.split(n);
-        this.contents.push(moved);
-        if (this.sums) this.batchAdded(moved.volume(), moved.weight());
-      }
+        if (b) (b.v += target.volume() - v0), (b.w += target.weight() - w0);
+      } else this.push(n === it.charges ? it : it.split(n));
       if (n === it.charges) {
         if (target) it.charges = 0;
         return null;
@@ -245,9 +251,18 @@ export class Pocket {
       if (target) it.charges -= n;
       return it;
     }
-    this.contents.push(it);
-    if (this.sums) this.batchAdded(it.volume(), it.weight());
+    this.push(it);
     return null;
+  }
+
+  private push(it: Item): void {
+    this.contents.push(it);
+    const b = this.batch;
+    if (b) {
+      b.v += it.volume();
+      b.w += it.weight();
+      if (it.isLiquid()) b.liquid = true;
+    }
   }
 
   remove(it: Item): boolean {
@@ -274,6 +289,8 @@ export class Item implements MapItem {
   sealed = false;
   vars: Record<string, string | number> = {};
   pockets: Pocket[];
+  /** Installed gunmods (CDDA keeps them in a MOD pocket); see src/game/gunmods.ts. */
+  gunmods: Item[] = [];
 
   constructor(readonly data: GameData, def: ItemDef) {
     this.typeId = def.id;
@@ -352,6 +369,7 @@ export class Item implements MapItem {
     if (this.countByCharges) return this.unitWeight() * this.charges;
     let w = this.def.weight;
     for (const p of this.pockets) w += p.weightUsed();
+    for (const m of this.gunmods) w += m.weight();
     return w;
   }
   /** ml including non-rigid pocket contents (item::volume). */
@@ -430,6 +448,7 @@ export class Item implements MapItem {
   stacksWith(o: Item): boolean {
     if (o.typeId !== this.typeId || o.damage !== this.damage || o.active !== this.active) return false;
     if (this.allContents().length || o.allContents().length) return false;
+    if (this.gunmods.length || o.gunmods.length) return false;
     // CDDA compares rot at hour granularity so fresh food from one batch stacks.
     if (Math.floor(this.rot / 3600) !== Math.floor(o.rot / 3600)) return false;
     return JSON.stringify(this.vars) === JSON.stringify(o.vars);
@@ -599,7 +618,12 @@ export class Item implements MapItem {
     let noise = this.def.loudness ?? 0;
     const ammo = this.ammoData();
     if (ammo) noise += ammoLoudness(ammo);
-    noise = Math.max(0, noise);
+    // Suppressors and the like (ranged.cpp gun_noise: += loudness_modifier, *= multiplier).
+    for (const m of this.gunmods) {
+      noise += (m.def.loudness_modifier as number | undefined) ?? 0;
+      noise *= (m.def.loudness_multiplier as number | undefined) ?? 1;
+    }
+    noise = Math.max(0, Math.trunc(noise));
     if (noise <= 0) return { volume: 0, sound: '' };
     if (noise < 10) return { volume: noise, sound: burst ? 'Brrrip!' : 'plink!' };
     if (noise < 150) return { volume: noise, sound: burst ? 'Brrrap!' : 'bang!' };
@@ -702,6 +726,7 @@ export class Item implements MapItem {
     if (this.sealed) j.sealed = true;
     if (Object.keys(this.vars).length) j.vars = { ...this.vars };
     if (this.pockets.some((p) => !p.empty)) j.pockets = this.pockets.map((p) => p.contents.map((c) => c.toJSON()));
+    if (this.gunmods.length) j.gunmods = this.gunmods.map((m) => m.toJSON());
     return j;
   }
   static fromJSON(data: GameData, j: ItemJSON): Item {
@@ -719,6 +744,7 @@ export class Item implements MapItem {
       if (!p) throw new Error(`Item.fromJSON: ${j.typeId} has no pocket #${i}`);
       p.contents = list.map((c) => Item.fromJSON(data, c));
     });
+    it.gunmods = (j.gunmods ?? []).map((m) => Item.fromJSON(data, m));
     return it;
   }
 }
@@ -768,7 +794,9 @@ export function loadAmmo(it: Item, ammoId: string, n = Infinity): number {
   }
   const well = it.magazineWell();
   if (well && well.empty && it.magazinePockets().length === 0) {
-    const dm = well.data.default_magazine;
+    // CDDA pocket_data::load: without an explicit default_magazine the first item_restriction
+    // entry is the default (most guns only list item_restriction).
+    const dm = well.data.default_magazine ?? (well.data.item_restriction as string[] | undefined)?.[0];
     if (dm && data.items[dm]) well.insert(new Item(data, data.items[dm]));
   }
   const cap = it.ammoCapacity() - it.ammoRemaining();
@@ -911,7 +939,7 @@ function placeContentsBatched(into: Item, items: Item[]): Item[] {
       if (v > 0) n = Math.min(n, Math.floor(volLeft / v + 1e-9));
       if (w > 0) n = Math.min(n, Math.floor(wtLeft / w + 1e-9));
       for (let m = 0; m < n; m++) p.contents.push(items[k++]);
-      p.batchAdded(n * v, n * w);
+      p.batchAdded(n * v, n * w, it.isLiquid());
     }
     // Identical items: if the next one doesn't fit anywhere, none of the rest will either.
     for (; k < j; k++) {

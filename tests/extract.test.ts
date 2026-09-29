@@ -241,7 +241,7 @@ describe('misc', () => {
   it('has the expected misc types', () => {
     for (const t of ['material', 'requirement', 'tool_quality', 'ammunition_type', 'profession', 'scenario', 'start_location', 'mutation',
       'effect_type', 'martial_art', 'technique', 'harvest', 'field_type', 'trap', 'construction', 'construction_group', 'body_part',
-      'sub_body_part', 'skill', 'item_category', 'monster_faction', 'species', 'snippet', 'vehicle', 'vehicle_part', 'bionic',
+      'sub_body_part', 'skill', 'item_category', 'monster_faction', 'species', 'snippet', 'bionic',
       'proficiency', 'fault', 'morale_type', 'addiction_type', 'practice', 'item_action', 'emit', 'speech', 'dream', 'uncraft']) {
       expect(Object.keys(data.misc[t] ?? {}).length, t).toBeGreaterThan(0);
     }

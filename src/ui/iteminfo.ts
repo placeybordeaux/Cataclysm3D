@@ -62,7 +62,13 @@ export function itemInfo(it: Item, who: Character): string {
     const th = Math.round(it.toHit());
     L.push(`To-hit bonus: ${c('c_yellow', (th >= 0 ? '+' : '') + th)}`);
     L.push(`Base moves per attack: ${num(it.attackTime())}`);
+    // CDDA "Techniques when wielded" (combat depth: src/game/techniques.ts).
+    const tecs = ((d.techniques as string[] | undefined) ?? [])
+      .map((id) => (it.data.misc?.technique as Record<string, { name: string; description?: string }> | undefined)?.[id])
+      .filter((t): t is { name: string; description?: string } => !!t);
+    if (tecs.length) L.push(`<b>Techniques when wielded</b>: ${tecs.map((t) => `${c('c_light_blue', t.name)}${t.description ? `: ${c('c_light_gray', t.description)}` : ''}`).join(', ')}`);
   }
+  if (it.gunmods.length) L.push(`<b>Mods</b>: ${c('c_light_green', it.gunmods.map((m) => m.baseName()).join(', '))}`);
 
   // --- armor
   if (it.isArmor()) {

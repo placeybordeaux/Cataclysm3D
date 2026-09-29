@@ -15,7 +15,7 @@ import type { TileFrame } from './textureSource';
 //
 //   renderer.viewmodel.attack('melee' | 'fire' | 'throw')
 
-export type AttackKind = 'melee' | 'fire' | 'throw';
+export type AttackKind = 'melee' | 'fire' | 'throw' | 'sweep';
 
 export interface ViewmodelItem {
   typeId: string;
@@ -210,8 +210,13 @@ function pose(keys: Key[], t: number): { dx: number; dy: number; rot: number; vi
 const ANIMS: Record<AttackKind, { dur: number; keys: Key[] }> = {
   melee: { dur: 0.42, keys: [[0, 0, 0, 0, 1], [0.22, 0.05, 0.03, -0.35, 1], [0.48, -0.32, 0.05, 0.4, 1], [0.62, -0.3, 0.04, 0.38, 1], [1, 0, 0, 0, 1]] },
   fire: { dur: 0.22, keys: [[0, 0, 0, 0, 1], [0.12, 0.03, 0.05, 0.14, 1], [1, 0, 0, 0, 1]] },
+  // Wide arc (AoE techniques): wind up far right, carry the swing across the whole view.
+  sweep: { dur: 0.55, keys: [[0, 0, 0, 0, 1], [0.2, 0.14, 0.02, -0.55, 1], [0.55, -0.5, 0.06, 0.75, 1], [0.7, -0.52, 0.05, 0.72, 1], [1, 0, 0, 0, 1]] },
   throw: { dur: 0.55, keys: [[0, 0, 0, 0, 1], [0.3, 0.05, -0.06, -0.35, 1], [0.5, -0.2, 0.22, 0.6, 1], [0.52, -0.2, 0.22, 0.6, 0], [0.62, 0, -0.45, 0, 0], [0.63, 0, -0.45, 0, 1], [1, 0, 0, 0, 1]] },
 };
+// Block: raise the weapon across the body and hold it briefly.
+const BLOCK: Key[] = [[0, 0, 0, 0, 1], [0.25, -0.12, 0.2, 0.5, 1], [0.7, -0.12, 0.2, 0.5, 1], [1, 0, 0, 0, 1]];
+const BLOCK_FISTS: Key[] = [[0, 0, 0, 0, 1], [0.25, -0.1, 0.18, 0, 1], [0.7, -0.1, 0.18, 0, 1], [1, 0, 0, 0, 1]];
 const PUNCH: Key[] = [[0, 0, 0, 0, 1], [0.35, -0.13, 0.16, 0, 1], [0.55, -0.12, 0.15, 0, 1], [1, 0, 0, 0, 1]];
 
 export class Viewmodel {
@@ -225,7 +230,7 @@ export class Viewmodel {
   private flash: Part | null = null;
   private itemKey = '';
   private handKey = -1;
-  private anim: { kind: AttackKind; t: number; dur: number; keys: Key[]; hand: 0 | 1 } | null = null;
+  private anim: { kind: AttackKind; t: number; dur: number; keys: Key[]; hand: 0 | 1 | 2 } | null = null;
   /** Hold the current animation at its t (tests/screenshots). */
   private frozen = false;
   private punchHand: 0 | 1 = 1;
@@ -284,6 +289,15 @@ export class Viewmodel {
       this.flashT = 0.06;
       this.onMuzzleFlash?.(0.08);
     }
+  }
+
+  /** Raise the weapon (or both fists) to block; never cuts a swing short. */
+  block(): void {
+    if (this.frozen || (this.anim && this.anim.t < 0.9)) return;
+    // Bare hands: both fists come up (hand 2 = both).
+    this.anim = this.itemKey
+      ? { kind: 'melee', t: 0, dur: 0.4, keys: BLOCK, hand: 1 }
+      : { kind: 'melee', t: 0, dur: 0.4, keys: BLOCK_FISTS, hand: 2 };
   }
 
   /** Debug/screenshots: show an attack pose frozen at t (0..1); `null` releases it. */
@@ -420,7 +434,7 @@ export class Viewmodel {
       place(this.flash!, gx + m.x, gy + m.y, 0, this.flashT > 0);
     } else {
       for (let hand = 0; hand < 2; hand++) {
-        const a = this.anim && this.anim.hand === hand ? pose(this.anim.keys, this.anim.t) : { dx: 0, dy: 0, rot: 0, vis: true };
+        const a = this.anim && (this.anim.hand === hand || this.anim.hand === 2) ? pose(this.anim.keys, this.anim.t) : { dx: 0, dy: 0, rot: 0, vis: true };
         const side = hand === 1 ? 1 : -1;
         const x = lowW * 0.5 + lowH * (side * (0.36 + bobX + a.dx) + this.sway);
         const y = lowH * (0.14 + bobY * (hand ? 1 : 0.8) + a.dy);

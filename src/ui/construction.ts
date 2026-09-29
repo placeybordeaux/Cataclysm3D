@@ -103,7 +103,7 @@ export function openConstructionMenu(game: CraftHost): ConstructionMenu {
     const options = candidates.flatMap((con) => validSites(game, con).map((s) => ({ con, s })));
     if (!options.length) {
       const any = row.g.constructions.find((con) => validSites(game, con).length);
-      game.message(any ? `You can't build ${row.g.name}: ${canBuild(game, any, inv).missing.join('; ')}.` : `There is nowhere nearby to build ${row.g.name}.`, 'c_light_red');
+      game.message(any ? `You can't ${row.g.name.toLowerCase()}: ${canBuild(game, any, inv).missing.join('; ')}.` : `There is nowhere nearby to ${row.g.name.toLowerCase()}.`, 'c_light_red');
       return;
     }
     if (options.length === 1) {

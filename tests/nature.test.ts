@@ -410,7 +410,10 @@ describe('save', () => {
     expect(r.warnings).toEqual([]);
     expect(B.map.furnAt(31, 30, 0).id).toBe('f_plant_seed');
     expect(plantedAt(seedAt(B, 31, 30, 0)!)).toBe(plantedAt(seedAt(A, 31, 30, 0)!));
-    expect(natureOf(B)!.actualizer.stamps.size).toBe(natureOf(A)!.actualizer.stamps.size);
+    // The farmed chunk's stamp survives; untouched chunks regenerate from day 0, so theirs aren't saved.
+    const key = '1,1,0';
+    expect(natureOf(B)!.actualizer.stamps.get(key)).toEqual(natureOf(A)!.actualizer.stamps.get(key));
+    expect(natureOf(B)!.actualizer.stamps.size).toBeLessThanOrEqual(natureOf(A)!.actualizer.stamps.size);
     B.clock.seconds += day(20);
     natureOf(B)!.actualizer.sweep();
     expect(B.map.furnAt(31, 30, 0).id).toBe('f_plant_seedling');

@@ -2,6 +2,7 @@ import type { Game } from '../game/game';
 import { SECONDS_PER_DAY } from '../core/time';
 import { applySave, decodeSave, encodeJson, encodeSave, SaveError, serializeGame, storedSize, type ApplyResult, type SaveFile, type SaveMeta, type StoredSave } from './format';
 import type { KVBackend, SyncStorage } from './storage';
+import { runAchievementNames } from '../game/achievements';
 
 // Slots, saving, loading, permadeath and the memorial. Platform-agnostic: storage is a
 // KVBackend (IndexedDB in the browser, in-memory in tests) plus an optional synchronous
@@ -32,6 +33,8 @@ export interface MemorialEntry {
   /** Date.now() at death. */
   diedAt: number;
   seed: number;
+  /** Achievements completed during this life (names). */
+  achievements?: string[];
 }
 
 export interface SaveManagerOptions {
@@ -191,6 +194,8 @@ export class SaveManager {
       killNames: Object.fromEntries(top.map(([id]) => [id, g.data.monsters[id]?.name ?? id])),
       distance: stats.distanceWalked, gameTime: g.clock.format(), diedAt: Date.now(), seed: g.seed,
     };
+    const ach = runAchievementNames.get(g)?.();
+    if (ach?.length) entry.achievements = ach;
     await this.queue(async () => {
       const list = await this.memorial();
       list.push(entry);

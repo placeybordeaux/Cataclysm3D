@@ -18,10 +18,14 @@ import { lightAt } from './game/vision';
 import { installMonsters } from './monsters';
 import { installNpcs } from './npcs';
 import { installMutBio } from './mutbio';
+import { installCombatDepth } from './combatdepth';
+import { installLabs } from './labs';
 import { installChunkTracking } from './save/tracking';
 import { installSave, takePendingLoad } from './save/install';
 import { frameStats, installPerfDebug } from './perfDebug';
 import { ChunkPrefetcher } from './world/prefetch';
+import { installAchievements } from './achievements';
+import { installChunkEviction } from './save/eviction';
 
 // URL params (all optional): seed=<int>, gen=world|test (default world), debug=1 (render stats overlay),
 // renderer params px/grade/tex/cam/walls (see src/render/renderer.ts), debug=atlas (sprite sheet view
@@ -68,16 +72,26 @@ async function main(): Promise<void> {
   installCrafting(game, api);
   installWorldInteraction(game, renderer, api);
   installNature(game, renderer, api);
+  // One light model: vision.ts lightAt (monster vision, "too dark", playerCanSee) reads the
+  // renderer's shadowcast light map where it's exact and estimates elsewhere.
+  game.lightProvider = (x, y, z) => renderer.exactLightAt(x, y, z);
   // Crafting/reading probe `game.lightAt` for "too dark" checks; back it with real vision light.
   (game as unknown as { lightAt: (x: number, y: number, z: number) => number }).lightAt = (x, y, z) => lightAt(game, x, y, z);
   const monsters = installMonsters(game, renderer, worldgen, api);
   await installVehicles(game, renderer, api);
   await installNpcs(game, renderer, worldgen, monsters, api);
   installMutBio(game, renderer, api);
+  installLabs(game, worldgen, api);
   // Before installUi: the UI registers the save key only when game.save exists.
   const save = await installSave(game, { api, genKind, worldgen, monsters });
   game.events.on('gameLoaded', () => renderer.chunks.invalidateAll());
+  // Far clean chunks are dropped (they regenerate); keep well outside the rendered radius.
+  api.eviction = installChunkEviction(game, { keepRadius: () => renderer.chunks.radius + 4 });
   const ui = await installUi(game, renderer, worldgen, api);
+  // After the UI: wraps the reload key (clears gun jams) and adds item-menu gunmod actions.
+  installCombatDepth(game, renderer, monsters, api);
+  // After installMonsters (wraps PlayerCombat for attack events) and installSave (its saveable).
+  const achievements = await installAchievements(game, worldgen, api);
 
   // Mapgen ahead of the player in idle time (see src/world/prefetch.ts); ?prefetch=0 disables.
   const prefetch = new ChunkPrefetcher(game.map, () => game.player);
@@ -103,6 +117,7 @@ async function main(): Promise<void> {
   // Spawns were held while the title screen / character creation ran (density choice).
   monsters.spawner.release();
   save.startSession();
+  achievements.begin(loaded);
 }
 
 main().catch((e) => {

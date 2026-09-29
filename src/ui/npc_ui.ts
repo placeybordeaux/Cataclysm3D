@@ -251,9 +251,15 @@ export function openTrade(ctx: NpcUiCtx, n: Npc, cost = 0, onDone?: (traded: boo
       win.close();
       return;
     }
-    s.commit((it) => game.map.addItem(p.tileX, p.tileY, p.z, it));
+    const dropped: string[] = [];
+    s.commit((it) => {
+      game.map.addItem(p.tileX, p.tileY, p.z, it);
+      dropped.push(it.name());
+    });
     traded = true;
     game.message(`You trade with ${n.name}.`, 'c_light_green');
+    // Otherwise a bought backpack silently lands at your feet and looks like it vanished.
+    if (dropped.length) game.message(`You have no room for ${dropped.length === 1 ? `the ${dropped[0]}` : `${dropped.length} items`}; you set ${dropped.length === 1 ? 'it' : 'them'} down at your feet.`, 'c_yellow');
     win.close();
   }
 
