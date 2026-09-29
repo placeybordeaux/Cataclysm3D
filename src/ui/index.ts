@@ -15,12 +15,16 @@ import { INITIAL_VISIBILITY, openOvermap, overmapSeenTracker, revealAround } fro
 import { showDeathScreen } from './death';
 import { openEscMenu, openMessageLog, showMainMenu } from './menus';
 import { applyStoredOptions, openOptions } from './options';
+import { DEFAULT_BINDINGS } from './keys';
 import { installTipsOption, openHints } from './tips';
 import { installLiquidUi } from './liquid_ui';
 import { applyBuild, defaultBuild, openCharGen } from './chargen';
 import { registerSaveable } from '../save/registry';
 import { quitToTitle } from '../save/install';
 import type { LogEntry } from './format';
+import { installFullscreen } from './fullscreen';
+import { armUnloadGuard, disarmUnloadGuard } from '../core/unload';
+import { closeAllWindows } from './framework';
 
 // Wires the whole UI into the game: HUD, key bindings for every screen, the trackers the
 // screens need (distance walked, overmap exploration, kills), the death screen, and the
@@ -65,6 +69,20 @@ export async function installUi(game: Game, renderer: Renderer, worldgen: WorldG
     missing: () => void (h.log.entries.length = 0),
   });
   game.keys.register('menu', 'Main menu', () => void openEscMenu(ctx, () => quitToTitle(game)));
+  installFullscreen(game);
+  let gameStarted = false;
+  let dead = false;
+  // Layouts that put an action's key on a movement key (AZERTY, Dvorak…): tell the player
+  // once, with the way out. keys.ts already adds stand-ins where it can.
+  let warnedLayout = false;
+  game.keys.onChange = () => {
+    const bad = game.keys.unreachable();
+    if (!bad.length || warnedLayout || !gameStarted) return;
+    warnedLayout = true;
+    game.message(`Your keyboard layout puts ${bad.map((id) => DEFAULT_BINDINGS[id][0]).join(' ')} on movement keys (${game.keys.movementKeys()}); rebind those actions in Options > Key bindings.`, 'c_yellow');
+  };
+  void game.keys.detectLayout();
+
   if (game.save)
     game.keys.register('save', 'Save game', () =>
       void Promise.resolve(game.save!()).then(
@@ -92,10 +110,12 @@ export async function installUi(game: Game, renderer: Renderer, worldgen: WorldG
     const cr = e.creature as { type?: { id?: string }; typeId?: string; id?: string } | null;
     game.stats.addKill(cr?.type?.id ?? cr?.typeId ?? cr?.id ?? 'unknown');
   });
-  let dead = false;
   game.events.on('playerDied', (e) => {
     if (dead) return;
     dead = true;
+    disarmUnloadGuard();
+    // Menus open at the moment of death would sit on top of the tombstone.
+    setTimeout(closeAllWindows, 1150);
     // A beat so the killing blow and "You die…" register before the screen fades in.
     // The world keeps ticking during that beat; report the moment of death (the memorial
     // entry, written right away, uses it too).
@@ -168,8 +188,10 @@ export async function installUi(game: Game, renderer: Renderer, worldgen: WorldG
       const params = new URLSearchParams(location.search);
       const automated = typeof navigator !== 'undefined' && navigator.webdriver;
       const skip = params.get('skipmenu') === '1' || (automated && params.get('menu') !== '1');
-      if (skip) return;
-      await showMainMenu(ctx, h);
+      if (!skip) await showMainMenu(ctx, h);
+      gameStarted = true;
+      armUnloadGuard();
+      game.keys.onChange?.();
     },
   };
 }

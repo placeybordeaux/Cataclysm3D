@@ -1,6 +1,7 @@
 import type { Input } from '../core/input';
 import { sfx } from '../audio/sfx';
 import { Keys } from './keys';
+import { keyLabel } from './keymap';
 
 // Shared building blocks for CDDA-style curses screens. Every modal screen (inventory,
 // crafting, construction, character sheet, …) should be made from these so the whole UI
@@ -71,6 +72,16 @@ export interface WindowOpts {
   /** Screen anchor; default centered. */
   anchor?: 'center' | 'left' | 'right';
   footer?: string;
+  /**
+   * What closing does, for the footer legend the framework appends ("i/Esc/Bksp close"):
+   * 'close' by default; e.g. 'back', 'cancel', 'leave'. null leaves the legend out (the
+   * window explains its own keys, e.g. a yes/no prompt).
+   */
+  closeLabel?: string | null;
+  /** Mouse motion keeps turning the view while this window is on top (look mode). */
+  mouseLook?: boolean;
+  /** The key that opened the window closes it (default). False where it means something inside (dialogue letters). */
+  closeOnOpenKey?: boolean;
   /** Called for key presses; return true if handled. Esc closes by default. */
   onKey?: (e: KeyboardEvent) => boolean | void;
   onClose?: () => void;
@@ -87,14 +98,53 @@ export interface UiWindow {
   readonly closed: boolean;
 }
 
-/** Close callbacks of open windows, oldest first. */
-const openWindows: (() => void)[] = [];
+/**
+ * Open windows, oldest first: `close` shuts one outright, `escape` presses Esc in it (which may
+ * mean "back" rather than close: chargen steps back a tab, crafting leaves a group).
+ */
+const openWindows: { close: () => void; escape: () => void; el: HTMLElement; mouseLook: boolean }[] = [];
 
-/** Close the topmost window (what Esc would have done). Returns false if none is open. */
+/** Only the top window takes clicks (a click on the inventory behind an item menu opened a second one). */
+function markTopWindow(): void {
+  openWindows.forEach((w, i) => w.el.classList.toggle('inactive', i < openWindows.length - 1));
+  if (input) input.menuMouseLook = openWindows[openWindows.length - 1]?.mouseLook ?? false;
+}
+
+/** Footer legend for closing: "i/Esc/Bksp close" (the opening key first, when there is one). */
+export function closeLegend(openKey: string | null, label = 'close'): string {
+  const keys = [...(openKey && openKey !== 'Escape' ? [keyLabel(openKey)] : []), 'Esc', 'Bksp'];
+  return `${keys.map((k) => c('c_light_green', k)).join('/')} ${label}`;
+}
+
+/**
+ * Hover only counts when the mouse really moved: when a menu opens under a resting cursor (the
+ * cursor reappears mid-screen as pointer lock ends), the browser sends a motionless mousemove,
+ * and the entry under it would steal the highlight — Enter on the Esc menu then opened Help
+ * instead of Resume.
+ */
+export const hoverMoved = (ev: MouseEvent) => ev.movementX !== 0 || ev.movementY !== 0;
+
+/** Legend fragment for a key: key('Enter', 'select') → green "Enter" + " select". */
+export const legendKey = (k: string, what: string) => `${c('c_light_green', k)} ${what}`;
+
+/** Number of open framework windows (tests / the death screen). */
+export function openWindowCount(): number {
+  return openWindows.length;
+}
+
+/** Close every open window, topmost first (death, quitting). */
+export function closeAllWindows(): void {
+  for (let i = 0; i < 50 && openWindows.length; i++) openWindows[openWindows.length - 1].close();
+}
+
+/**
+ * Do what Esc does in the topmost window (the browser ate the key to release pointer lock,
+ * src/ui/pointer.ts). Returns false if no window is open.
+ */
 export function closeTopWindow(): boolean {
   const top = openWindows[openWindows.length - 1];
   if (!top) return false;
-  top();
+  top.escape();
   return true;
 }
 
@@ -114,37 +164,52 @@ export function openWindow(opts: WindowOpts): UiWindow {
   const body = el.querySelector('.body') as HTMLElement;
   const footer = el.querySelector('.footer') as HTMLElement;
   title.textContent = opts.title;
-  footer.innerHTML = opts.footer ?? '';
-  footer.style.display = opts.footer ? '' : 'none';
+  // The key that opened this window (e.g. "i", "&") closes it again, as does Backspace, so
+  // players never need Esc — which in a browser also releases the captured mouse.
+  const openKey = opts.closeOnOpenKey === false ? null : Keys.openingKey();
+  const legend = opts.closeLabel === null ? '' : closeLegend(openKey, opts.closeLabel ?? 'close');
+  const setFooter = (h: string) => {
+    const html = [h, legend].filter(Boolean).join('  ');
+    footer.innerHTML = html;
+    footer.style.display = html ? '' : 'none';
+  };
+  setFooter(opts.footer ?? '');
   root.appendChild(el);
   if (!opts.silent) sfx.ui('menu_open');
   let closed = false;
-  const closeSelf = () => win.close();
-  openWindows.push(closeSelf);
-  // The key that opened this window (e.g. "i", "&") closes it again, as does Backspace, so
-  // players never need Esc — which in a browser also releases the captured mouse.
-  const openKey = Keys.openingKey();
-  const release = input!.capture((e) => {
+  const handler = (e: KeyboardEvent): boolean => {
     if (opts.onKey && opts.onKey(e) === true) return true;
+    // Held keys repeat: without this, holding i (or Esc) would flicker the window shut and open.
+    if (e.repeat) return true;
     if (e.key === 'Escape' || e.key === 'Backspace' || (openKey !== null && e.key === openKey)) {
       win.close();
       return true;
     }
     return true;
-  });
+  };
+  const entry = {
+    close: () => win.close(),
+    escape: () => void handler(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape' })),
+    el,
+    mouseLook: !!opts.mouseLook,
+  };
+  openWindows.push(entry);
+  markTopWindow();
+  // Free-cursor menus (Options > Menu cursor): the first window frees the mouse to point and
+  // click; closing the last one re-captures it (see close()).
+  if (input!.menuCursor === 'free' && !input!.captured && !opts.mouseLook) input!.releaseForMenu();
+  const release = input!.capture(handler);
   const win: UiWindow = {
     el,
     body,
     setTitle: (t) => (title.textContent = t),
-    setFooter: (h) => {
-      footer.innerHTML = h;
-      footer.style.display = h ? '' : 'none';
-    },
+    setFooter,
     close() {
       if (closed) return;
       closed = true;
-      const wi = openWindows.lastIndexOf(closeSelf);
+      const wi = openWindows.lastIndexOf(entry);
       if (wi >= 0) openWindows.splice(wi, 1);
+      markTopWindow();
       release();
       el.remove();
       if (!opts.silent) sfx.ui('menu_close');
@@ -198,6 +263,9 @@ export function openMenu<T>(opts: MenuOpts<T>): UiWindow & { refresh(entries?: M
     onKey: (e) => {
       const cur = entries[sel];
       if (opts.onKey && opts.onKey(e, cur?.value) === true) return true;
+      // Auto-repeat scrolls, but never picks: a letter held a moment too long would otherwise
+      // also choose in the menu it opened (inventory `a` → item menu `a`ctivate).
+      if (e.repeat && !['ArrowDown', 'ArrowUp', 'PageDown', 'PageUp', 'j', 'k'].includes(e.key)) return true;
       if (e.key === 'ArrowDown' || (e.key === 'j' && !keys.includes('j'))) move(1);
       else if (e.key === 'ArrowUp' || (e.key === 'k' && !keys.includes('k'))) move(-1);
       else if (e.key === 'PageDown') move(10);
@@ -276,8 +344,8 @@ export function openMenu<T>(opts: MenuOpts<T>): UiWindow & { refresh(entries?: M
     listEl.innerHTML = html;
     listEl.querySelectorAll<HTMLElement>('.menu-entry[data-i]').forEach((row) => {
       const i = Number(row.dataset.i);
-      row.onmouseenter = () => {
-        if (sel !== i) (sel = i), render();
+      row.onmousemove = (ev) => {
+        if (hoverMoved(ev) && sel !== i) (sel = i), render();
       };
       row.onclick = () => choose(i);
     });
@@ -294,22 +362,34 @@ export function openMenu<T>(opts: MenuOpts<T>): UiWindow & { refresh(entries?: M
   });
 }
 
-/** Yes/no prompt (CDDA query_yn). */
-export function confirm(question: string): Promise<boolean> {
+/**
+ * Yes/no prompt (CDDA query_yn). `destructive` questions (delete a save, quit without saving)
+ * don't take Enter as yes, so a player hammering Enter through dialogs can't lose anything.
+ */
+export function confirm(question: string, opts: { destructive?: boolean } = {}): Promise<boolean> {
   return new Promise((resolve) => {
     let answered = false;
+    const answer = (yes: boolean) => {
+      if (answered) return;
+      answered = true;
+      w.close();
+      resolve(yes);
+    };
     const w = openWindow({
       title: 'Confirm',
-      footer: `${c('c_light_green', 'y')}es / ${c('c_light_green', 'n')}o`,
+      closeLabel: null,
+      footer: `${legendKey('y', 'yes')}  ${legendKey('n/Esc', 'no')}${opts.destructive ? '' : `  ${legendKey('Enter', 'yes')}`}`,
       onKey: (e) => {
-        if (e.key === 'y' || e.key === 'Y' || e.key === 'Enter') (answered = true), w.close(), resolve(true);
+        if (e.repeat) return true;
+        if (e.key === 'y' || e.key === 'Y' || (e.key === 'Enter' && !opts.destructive)) answer(true);
         // query_yn: Esc answers no (and must close, or cdda.ui.closeAll() leaves it open)
-        else if (e.key === 'n' || e.key === 'N' || e.key === 'Escape') (answered = true), w.close(), resolve(false);
+        else if (e.key === 'n' || e.key === 'N' || e.key === 'Escape' || e.key === 'Backspace') answer(false);
         return true;
       },
       onClose: () => !answered && resolve(false),
     });
-    w.body.innerHTML = colorize(question);
+    w.body.innerHTML = `${colorize(question)}<div class="confirm-buttons"><span class="btn" data-a="y">[${c('c_light_green', 'Y')}es]</span> <span class="btn" data-a="n">[${c('c_light_green', 'N')}o]</span></div>`;
+    w.body.querySelectorAll<HTMLElement>('.btn').forEach((b) => (b.onclick = () => answer(b.dataset.a === 'y')));
   });
 }
 
@@ -319,6 +399,8 @@ export function prompt(question: string, initial = ''): Promise<string | null> {
     let done = false;
     const w = openWindow({
       title: question,
+      closeLabel: null,
+      footer: `${legendKey('Enter', 'ok')}  ${legendKey('Esc', 'cancel')}`,
       // Keys typed into the <input> never reach the capture stack (Input ignores input
       // targets); Esc sent to the window (closeAll, focus lost) closes via openWindow.
       onClose: () => !done && resolve(null),

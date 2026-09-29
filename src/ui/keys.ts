@@ -1,4 +1,8 @@
 import type { Input } from '../core/input';
+import {
+  diffBindings, keyIndex, keyLabel, mergeBindings, movementChars, movementLabel, MOVEMENT_CODES, QWERTY_MOVEMENT_CHARS,
+  unreachableActions, withLayoutFallbacks, type Bindings,
+} from './keymap';
 
 // Single source of truth for key bindings. Systems register *actions* by id; the default
 // key for each action lives in DEFAULT_BINDINGS below so conflicts are visible in one place
@@ -8,6 +12,13 @@ import type { Input } from '../core/input';
 // First-person movement owns the physical W/A/S/D keys *with or without Shift* (Shift = run,
 // so Shift+W is "run forward", never "W"), plus Space. CDDA actions on those letters move:
 // wield w→"z", wear W→"O", activate a/A→"u"… see comments on each entry.
+//
+// Players can rebind any action but `menu` (Options > Key bindings, src/ui/keybind_ui.ts);
+// their changes are stored in localStorage as a diff over these defaults. On layouts where a
+// default key sits on a movement key (AZERTY's z and q) a stand-in is added (keymap.ts
+// LAYOUT_ALTERNATES). Everything that shows a key to the player must ask keyFor()/label().
+
+export { MOVEMENT_CODES } from './keymap';
 
 export interface Action {
   id: string;
@@ -52,6 +63,7 @@ export const DEFAULT_BINDINGS: Record<string, string[]> = {
   help: ['?'],
   menu: ['Escape'],
   save: ['F5'], // quicksave (Shift+S is run-backward)
+  fullscreen: ['F11'], // fullscreen with keyboard lock, so Esc no longer drops mouse capture
   // --- vehicles (src/ui/vehicle_ui.ts); WASD/Space drive while at the controls ---
   control_vehicle: ['^'], // CDDA '^': take the controls / vehicle controls menu
   vehicle_engine: ['k'], // ignition (CDDA controls menu 's')
@@ -69,12 +81,30 @@ export const DEFAULT_BINDINGS: Record<string, string[]> = {
   achievements: [')'], // CDDA ')' diary / achievements / scores
 };
 
-/** Physical keys reserved for movement; they never trigger actions, whatever the modifiers. */
-export const MOVEMENT_CODES = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'Space', 'ShiftLeft', 'ShiftRight']);
+/** localStorage key for the player's rebinds (a diff over DEFAULT_BINDINGS). */
+export const KEYS_STORAGE = 'cdda3d.keys';
+
+function loadOverrides(): Record<string, unknown> {
+  try {
+    const raw = localStorage.getItem(KEYS_STORAGE);
+    return raw ? (JSON.parse(raw) as Record<string, unknown>) : {};
+  } catch {
+    return {};
+  }
+}
 
 export class Keys {
   private actions = new Map<string, Action>();
+  /** The player's bindings (defaults + rebinds), before layout stand-ins. */
+  private user: Bindings;
+  /** What actually dispatches: user bindings plus layout stand-ins. */
+  private effective: Bindings = {};
   private byKey = new Map<string, string>();
+  /** Characters the current layout puts on movement keys (never actions). */
+  private blocked: Set<string> = new Set(QWERTY_MOVEMENT_CHARS);
+  private layout: Map<string, string> | null = null;
+  /** Called after bindings or the detected layout change (HUD prompts re-read keyFor()). */
+  onChange: (() => void) | null = null;
   /**
    * The key of the last triggered action and the input.keySeq it happened at. A window opened
    * before any other key is pressed (screens may open a frame later, after loading icons)
@@ -91,10 +121,24 @@ export class Keys {
 
   constructor(input: Input) {
     Keys.input = input;
-    for (const [id, keys] of Object.entries(DEFAULT_BINDINGS)) for (const k of keys) this.byKey.set(k, id);
+    let over: Record<string, unknown> = {};
+    try {
+      over = loadOverrides();
+      this.user = mergeBindings(DEFAULT_BINDINGS, over);
+      keyIndex(this.user);
+    } catch (e) {
+      // Stored rebinds that don't parse or conflict: say so and use the defaults rather than
+      // guessing which half of a conflict the player meant.
+      console.warn(`ignoring stored key bindings: ${(e as Error).message}`);
+      this.user = mergeBindings(DEFAULT_BINDINGS, {});
+    }
+    this.rebuild();
     input.onPress((e) => {
-      if (e.ctrlKey || e.metaKey || e.altKey) return false;
+      // AltGr (Ctrl+Alt on Windows) types @ [ | on many layouts: that's a character, not a shortcut.
+      if ((e.ctrlKey || e.metaKey || e.altKey) && !e.getModifierState?.('AltGraph')) return false;
       if (MOVEMENT_CODES.has(e.code)) return false;
+      // Holding a key must not re-fire it: a held `i` would flicker the inventory open/shut.
+      if (e.repeat) return this.byKey.has(e.key);
       const id = this.byKey.get(e.key);
       const a = id && this.actions.get(id);
       if (!a) return false;
@@ -102,6 +146,38 @@ export class Keys {
       a.handler();
       return true;
     });
+    // Learn the layout from movement presses too (Firefox has no getLayoutMap): an AZERTY
+    // player's first step forward tells us "z" is a movement key.
+    input.onMovementKey = (code, key) => {
+      if (key.length !== 1 || this.layout?.get(code) === key.toLowerCase()) return;
+      this.setLayout(new Map([...(this.layout ?? QWERTY_LAYOUT), [code, key.toLowerCase()]]));
+    };
+  }
+
+  /** Ask the browser for the keyboard layout (Chrome/Edge); harmless no-op elsewhere. */
+  async detectLayout(): Promise<void> {
+    const kb = (navigator as unknown as { keyboard?: { getLayoutMap?: () => Promise<Map<string, string>> } }).keyboard;
+    if (!kb?.getLayoutMap) return;
+    try {
+      const m = await kb.getLayoutMap();
+      this.setLayout(new Map(m));
+    } catch {
+      // not allowed in this frame / browser: keep the QWERTY assumption
+    }
+  }
+
+  /** Use this layout (code → unshifted character) for movement labels and blocked keys. */
+  setLayout(layout: Map<string, string>): void {
+    this.layout = layout;
+    this.blocked = movementChars(layout);
+    this.rebuild();
+  }
+
+  private rebuild(): void {
+    this.effective = withLayoutFallbacks(this.user, this.blocked);
+    this.byKey = keyIndex(this.effective);
+    for (const k of this.blocked) this.byKey.delete(k);
+    this.onChange?.();
   }
 
   /** Register the handler for an action id listed in DEFAULT_BINDINGS (throws if unlisted). */
@@ -110,9 +186,14 @@ export class Keys {
     this.actions.set(id, { id, name, handler });
   }
 
-  /** For the help screen: [keys, name] for every registered action. */
+  /** For the help screen: [reachable keys, name] for every registered action. */
   list(): [string[], string][] {
-    return [...this.actions.values()].map((a) => [DEFAULT_BINDINGS[a.id], a.name]);
+    return [...this.actions.values()].map((a) => [this.keysFor(a.id), a.name]);
+  }
+
+  /** [id, name] of every registered action, in DEFAULT_BINDINGS order (the rebinding screen). */
+  actionList(): { id: string; name: string }[] {
+    return Object.keys(DEFAULT_BINDINGS).filter((id) => this.actions.has(id)).map((id) => ({ id, name: this.actions.get(id)!.name }));
   }
 
   /** Whether some system registered a handler for the action. */
@@ -125,7 +206,60 @@ export class Keys {
     return this.actions.get(id)?.handler;
   }
 
+  /** Keys that trigger the action on this keyboard (unreachable ones left out). */
+  keysFor(id: string): string[] {
+    return (this.effective[id] ?? []).filter((k) => !this.blocked.has(k));
+  }
+
+  /** The key to show for an action, e.g. in "[e] Open door"; '?' when it has none. */
   keyFor(id: string): string {
-    return DEFAULT_BINDINGS[id]?.[0] ?? '?';
+    return this.keysFor(id)[0] ?? '?';
+  }
+
+  /** keyFor() as a display label ("Esc", "Space"…); "unbound" when nothing triggers it. */
+  label(id: string): string {
+    const k = this.keysFor(id)[0];
+    return k === undefined ? 'unbound' : keyLabel(k);
+  }
+
+  /** "WASD", or the letters at those positions on this layout ("ZQSD" on AZERTY). */
+  movementKeys(): string {
+    return movementLabel(this.layout);
+  }
+
+  /** Characters on movement keys for the current layout. */
+  blockedChars(): ReadonlySet<string> {
+    return this.blocked;
+  }
+
+  /** Current bindings as the player set them (for the editor). */
+  bindings(): Bindings {
+    return Object.fromEntries(Object.entries(this.user).map(([id, k]) => [id, [...k]]));
+  }
+
+  /** Registered actions with no key the player can press. */
+  unreachable(): string[] {
+    return unreachableActions(this.effective, this.blocked).filter((id) => this.actions.has(id));
+  }
+
+  /** Replace all bindings (validated: throws on conflicts) and persist the diff. */
+  setBindings(b: Bindings): void {
+    keyIndex(b);
+    this.user = mergeBindings(DEFAULT_BINDINGS, b);
+    try {
+      const diff = diffBindings(DEFAULT_BINDINGS, this.user);
+      if (Object.keys(diff).length) localStorage.setItem(KEYS_STORAGE, JSON.stringify(diff));
+      else localStorage.removeItem(KEYS_STORAGE);
+    } catch {
+      // storage blocked: bindings last for this session only
+    }
+    this.rebuild();
+  }
+
+  resetBindings(): void {
+    this.setBindings(mergeBindings(DEFAULT_BINDINGS, {}));
   }
 }
+
+/** US QWERTY letters at the movement positions (the starting guess for the layout map). */
+const QWERTY_LAYOUT: ReadonlyMap<string, string> = new Map([['KeyW', 'w'], ['KeyA', 'a'], ['KeyS', 's'], ['KeyD', 'd']]);

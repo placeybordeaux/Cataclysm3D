@@ -97,7 +97,9 @@ export class Game {
     this.map.itemFactory = (sp) => fromSpawned(data, (sp.spawned as SpawnedItem | undefined) ?? toSpawned(sp));
   }
 
+  /** Log a message. `<keybind:action>` in the text shows that action's current key. */
   message(text: string, color?: string): void {
+    text = text.replace(/<keybind:([a-z_]+)>/g, (_, id: string) => this.keys.label(id));
     this.events.emit('message', { text, color });
   }
 
@@ -105,8 +107,9 @@ export class Game {
     // Mouse look is applied per frame (not per tick) so it stays perfectly smooth.
     const [mx, my] = this.input.consumeMouse();
     const p = this.player;
-    // Menus keep pointer lock, so ignore mouse motion while one is open (it would spin the view).
-    if (!this.input.captured) {
+    // Menus keep pointer lock, so ignore mouse motion while one is open (it would spin the view),
+    // except in windows that are about looking (look mode).
+    if (!this.input.captured || this.input.menuMouseLook) {
       p.yaw += mx * this.mouseSensitivity;
       p.pitch = Math.max(-1.5, Math.min(1.5, p.pitch - my * this.mouseSensitivity));
     }
