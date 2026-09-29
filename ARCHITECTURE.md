@@ -73,6 +73,17 @@ tools/
 tests/               vitest unit tests (pure logic, no DOM/WebGL)
 ```
 
+### Survivor simulation (src/game, UI-free)
+
+- `item.ts` Item/Pocket (charges, damage, rot, pockets, magazines), `createItem`, `fromSpawned`.
+- `character.ts` Character: stats, skills, body-part HP, pain, stamina, needs, sleep, blood,
+  morale/focus, body temperature, traits. `update(gameDt)` in game seconds.
+- `effects.ts` data-driven effect_type (misc.effect_type, with built-in fallbacks).
+- `inventory.ts` `character.inv`: wield/wear/pick up/drop/consume/use/reload, qualities,
+  encumbrance, armor absorption. Actions return `{ok, msg, moves, dropped?}`.
+- `combat.ts` pure CDDA melee/ranged/monster-attack math taking an Rng.
+- `player.ts` PlayerAvatar = Character + position/view. Game wires `onMessage`/`onDeath`.
+
 ### Extension points (prefer these over editing someone else's code)
 
 - `game.systems.push({ name, update(game, realDt, gameDt) })` for per-tick simulation.

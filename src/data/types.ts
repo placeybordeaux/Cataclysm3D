@@ -152,6 +152,119 @@ export interface DamageUnit {
   [extra: string]: unknown;
 }
 
+/** CDDA melee_accuracy object; summed to an integer to_hit (item_factory.cpp melee_accuracy). */
+export interface MeleeAccuracy {
+  grip?: 'bad' | 'none' | 'solid' | 'weapon';
+  length?: 'hand' | 'short' | 'long';
+  surface?: 'point' | 'line' | 'any' | 'every';
+  balance?: 'clumsy' | 'uneven' | 'neutral' | 'good';
+}
+
+/** One entry of CDDA `pocket_data` (item_pocket.cpp). Volumes ml, weights g; lengths in cm like
+ *  `longest_side`. */
+export interface PocketData {
+  pocket_type?: 'CONTAINER' | 'MAGAZINE' | 'MAGAZINE_WELL' | 'MOD' | 'CORPSE' | 'SOFTWARE' | 'EBOOK' | 'CABLE';
+  max_contains_volume?: number;
+  max_contains_weight?: number;
+  max_item_volume?: number;
+  min_item_volume?: number;
+  max_item_length?: number;
+  min_item_length?: number;
+  /** ammo_type -> max rounds, e.g. { "9mm": 15 } */
+  ammo_restriction?: Record<string, number>;
+  item_restriction?: string[];
+  flag_restriction?: string[];
+  /** MAGAZINE_WELL: how much of the magazine's volume disappears into the gun. */
+  magazine_well?: number;
+  default_magazine?: string;
+  watertight?: boolean;
+  airtight?: boolean;
+  rigid?: boolean;
+  holster?: boolean;
+  open_container?: boolean;
+  transparent?: boolean;
+  /** Moves to take an item out of this pocket. */
+  moves?: number;
+  sealed_data?: { spoil_multiplier?: number };
+  spoil_multiplier?: number;
+  weight_multiplier?: number;
+  volume_multiplier?: number;
+  extra_encumbrance?: number;
+  ripoff?: number;
+  description?: string;
+}
+
+/** One entry of CDDA `armor` (islot_armor portion data). */
+export interface ArmorPortion {
+  covers?: string[];
+  specifically_covers?: string[];
+  coverage?: number;
+  /** [base, when pockets full] or a single number. */
+  encumbrance?: number | [number, number];
+  cover_melee?: number;
+  cover_ranged?: number;
+  cover_vitals?: number;
+  material?: { type: string; covered_by_mat?: number; thickness?: number }[];
+  layers?: string[];
+}
+
+/** CDDA effect_type (doc/JSON/EFFECTS_JSON.md). Durations may arrive as seconds or "30 m". */
+export interface EffectTypeDef {
+  id: string;
+  name?: (string | { str: string })[];
+  desc?: string[];
+  max_intensity?: number;
+  max_effective_intensity?: number;
+  max_duration?: number | string;
+  int_dur_factor?: number | string;
+  int_add_val?: number;
+  int_decay_step?: number;
+  int_decay_tick?: number;
+  int_decay_remove?: boolean;
+  apply_message?: string;
+  remove_message?: string;
+  rating?: 'good' | 'bad' | 'neutral' | 'mixed';
+  base_mods?: Record<string, number[]>;
+  scaling_mods?: Record<string, number[]>;
+  resist_traits?: string[];
+  resist_effects?: string[];
+  removes_effects?: string[];
+  blocks_effects?: string[];
+  main_parts_only?: boolean;
+  show_in_info?: boolean;
+  flags?: string[];
+  miss_messages?: [string, number][];
+  [extra: string]: unknown;
+}
+
+export interface EnchantmentValue {
+  value: string;
+  add?: number;
+  multiply?: number;
+}
+
+/** CDDA mutation/trait. Only a few fields are interpreted (see character.ts traitMod). */
+export interface MutationDef {
+  id: string;
+  name?: string | { str: string };
+  description?: string;
+  points?: number;
+  starting_trait?: boolean;
+  enchantments?: ({ values?: EnchantmentValue[]; condition?: unknown } | string)[];
+  flags?: string[];
+  [extra: string]: unknown;
+}
+
+export interface MaterialDef {
+  id: string;
+  name?: string;
+  resist?: Record<string, number>;
+  density?: number;
+  /** Adjectives for damage levels 1..4, e.g. ["lightly damaged", "damaged", ...]. */
+  dmg_adj?: (string | { str: string })[];
+  [extra: string]: unknown;
+}
+
 export interface ItemDef extends Glyph {
   id: string;
   /** primary subtype (see header): GENERIC, TOOL, COMESTIBLE, ARMOR, GUN, AMMO, MAGAZINE, BOOK, GUNMOD, ... */
@@ -200,7 +313,8 @@ export interface ItemDef extends Glyph {
   charges_per_use?: number;
   ammo?: string[];
   // armor
-  armor?: unknown[];
+  armor?: ArmorPortion[];
+  material_thickness?: number;
   warmth?: number;
   encumbrance?: number;
   environmental_protection?: number;
@@ -214,7 +328,8 @@ export interface ItemDef extends Glyph {
   reload?: number;
   modes?: unknown[][];
   // ammo
-  ammo_type?: string;
+  /** AMMO: its type; MAGAZINE: list of accepted types. */
+  ammo_type?: string | string[];
   /** stack size of one "charge" unit for ammo */
   count?: number;
   damage?: DamageUnit[];
@@ -225,7 +340,31 @@ export interface ItemDef extends Glyph {
   intelligence?: number;
   chapters?: number;
   // containers
-  pocket_data?: unknown[];
+  pocket_data?: PocketData[];
+  // --- misc fields read by src/game (all optional, CDDA key names) ---
+  /** Units per `volume` for count-by-charges items (ammo, liquids). Defaults to charges/count. */
+  stack_size?: number;
+  phase?: 'solid' | 'liquid' | 'gas' | 'plasma';
+  stackable?: boolean;
+  /** Default container item id (e.g. water -> bottle_plastic). */
+  container?: string;
+  sealed?: boolean;
+  /** Gun/ammo noise; ammo defaults to range*2 + damage*2 like item_factory.cpp. */
+  loudness?: number;
+  handling?: number;
+  sight_dispersion?: number;
+  barrel_length?: number;
+  /** Magazines: moves per round loaded (CDDA default 100). */
+  reload_time?: number;
+  display_type?: string;
+  /** Tools: seconds per charge while active; revert_to when out of charges. */
+  turns_per_charge?: number;
+  /** Active tools: W (see header; older data may carry "1560 mW" strings). */
+  power_draw?: number | string;
+  revert_to?: string;
+  stim?: number;
+  sleepiness_mod?: number;
+  max_worn?: number;
   [extra: string]: unknown;
 }
 
