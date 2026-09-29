@@ -52,11 +52,14 @@ interface State {
   lockPaused: boolean; hint: boolean; x: number; y: number; yaw: number; running: boolean; deathScreen: boolean;
   /** ui2 window titles (progression's Start / New Game / Journal) and visible toast titles. */
   panels: string[]; toasts: string[];
+  /** Everything a player would call a menu: v1 windows and ui2 windows (inventory, pickers). */
+  menus: string[];
   /** ui2 window ids (scr.character, scr.map, …) and whether the look card (x) is up. */
   panelIds: string[]; look: boolean;
 }
 const state = (): Promise<State> =>
   page.evaluate(() => {
+    const panelTitles = [...document.querySelectorAll('#ui2 .ui2-win .ui2-title-text')].map((t) => t.textContent ?? '');
     const g = (window as any).cdda?.game;
     const hint = document.querySelector('.resume-hint') as HTMLElement | null;
     return {
@@ -68,6 +71,7 @@ const state = (): Promise<State> =>
       deathScreen: !!document.querySelector('.death-screen'),
       panels: [...document.querySelectorAll('#ui2 .ui2-win .ui2-title-text')].map((t) => t.textContent ?? ''),
       toasts: [...document.querySelectorAll('#ui2 .ui2-toast:not(.leaving) .ui2-toast-title')].map((t) => t.textContent ?? ''),
+      menus: [...[...document.querySelectorAll('.cdda-window > .title')].map((t) => t.textContent ?? ''), ...panelTitles],
       panelIds: [...document.querySelectorAll('#ui2 .ui2-win')].map((w) => (w as HTMLElement).dataset.id ?? ''),
       look: !!document.querySelector('#ui2 .lk-card.mode-look'),
     };
@@ -133,6 +137,30 @@ const center = async (sel: string): Promise<[number, number] | null> =>
     const r = el.getBoundingClientRect();
     return [Math.round(r.x + Math.min(40, r.width / 2)), Math.round(r.y + r.height / 2)] as [number, number];
   }, sel);
+
+// --- inventory helpers (src/ui2/bn: cdda.inv2)
+const EQUIP = '#ui2 [data-id="inv.equip"]', CARRIED = '#ui2 [data-id="inv.carried"]', NEARBY = '#ui2 [data-id="inv.nearby"]';
+type Census = { counts: Record<string, number>; aliased: number };
+const censusNow = () => js<Census>('cdda.inv2.census()');
+const whereIs = (typeId: string) => js<string[]>(`cdda.inv2.where(${JSON.stringify(typeId)})`);
+const rectOf = (typeId: string, sel = '#ui2') => js<{ x: number; y: number; id: string; loc: string } | null>(`cdda.inv2.rectOf(${JSON.stringify(typeId)}, ${JSON.stringify(sel)})`);
+/** A real drag: press, move in steps (so the drag starts and targets see hover), release. */
+async function drag(from: [number, number], to: [number, number]): Promise<void> {
+  await x.moveTo(from[0], from[1], 2);
+  await x.buttonDown(1);
+  await x.moveTo(to[0], to[1], 14);
+  await sleep(120);
+  await x.buttonUp(1);
+  await sleep(300);
+}
+/** Census equality (item conservation); `quietOk` records only failures. */
+function sameCensus(name: string, a: Census, b: Census, quietOk = false): boolean {
+  const keys = new Set([...Object.keys(a.counts), ...Object.keys(b.counts)]);
+  const diff = [...keys].filter((k) => (a.counts[k] ?? 0) !== (b.counts[k] ?? 0)).map((k) => `${k} ${a.counts[k] ?? 0}→${b.counts[k] ?? 0}`);
+  const ok = !diff.length && !b.aliased;
+  if (!ok || !quietOk) check(name, ok, diff.join(', ') || (b.aliased ? `${b.aliased} aliased` : ''));
+  return ok;
+}
 
 /** Title → Start → Enter: the quick start (named Evacuee). Returns the state in gameplay. */
 async function quickStart(): Promise<State> {
@@ -296,7 +324,7 @@ const scenarios: Scenario[] = [
     s0 = await state();
     await x.move(250, 0);
     s = await state();
-    check('mouse motion is ignored while a menu is open', Math.abs(s.yaw - s0.yaw) < 1e-6 && s.windows.length > 0);
+    check('mouse motion is ignored while a menu is open', Math.abs(s.yaw - s0.yaw) < 1e-6 && s.menus.length > 0);
     await x.key('i');
   }],
   ['menus', 'every menu key opens its screen and the same key closes it, keeping the lock', async () => {
@@ -304,9 +332,9 @@ const scenarios: Scenario[] = [
     // Setup only: one of everything the pickers need.
     await js(`(() => { for (const id of ['granola', 'bandages', 'crowbar', 'manual_mechanics', 'rock']) cdda.giveItem(id); cdda.learnAll?.(); })()`);
     const keys: [string, string][] = [
-      ['i', 'Inventory'], ['z', 'Wield what?'], ['O', 'Wear what?'], ['T', 'Take off what?'], ['E', 'Consume item'], ['u', 'Use item'],
+      ['i', 'ui2:inv.equip'], ['z', 'ui2:Wield what?'], ['O', 'ui2:Wear what?'], ['T', 'ui2:Take off what?'], ['E', 'ui2:Eat or drink what?'], ['u', 'ui2:Use what?'],
       ['R', 'Read what?'], ['(', 'Disassemble item:'], ['@', 'ui2:scr.character'], ['m', 'ui2:scr.map'],
-      ['P', 'ui2:scr.log'], ['?', 'ui2:scr.help'], [')', ''], ['p', ''], ['[', ''], ['_', ''], ['M', ''], ['x', 'look'], ['q', 'Drop which items?'],
+      ['P', 'ui2:scr.log'], ['?', 'ui2:scr.help'], [')', ''], ['p', ''], ['[', ''], ['_', ''], ['M', ''], ['x', 'look'], ['q', 'ui2:Drop what?'],
       ['|', ''], ['$', ''], ['C', ''], ['B', ''],
     ];
     // Legacy curses windows (.cdda-window), ui2 screens (title 'ui2:<window id>') and the look card.
@@ -330,16 +358,21 @@ const scenarios: Scenario[] = [
         continue;
       }
       const ui2 = !s.windows.length;
-      const top = s.look ? 'look' : ui2 ? `ui2:${s.panelIds[s.panelIds.length - 1]}` : s.windows[s.windows.length - 1];
-      check(`${k} opens ${title || top}`, !title || top === title, [s.windows, s.panelIds, s.look]);
+      // ui2 titles name a window by id (scr.character, inv.equip) or by its title text (the pickers).
+      const want = title.startsWith('ui2:') ? title.slice(4) : null;
+      const hit = ui2 && want && (s.panelIds.includes(want) || s.panels.includes(want)) ? want : null;
+      const top = s.look ? 'look' : ui2 ? `ui2:${hit ?? s.panelIds[s.panelIds.length - 1]}` : s.windows[s.windows.length - 1];
+      check(`${k} opens ${title || top}`, !title || top === title, [s.windows, s.panelIds, s.panels, s.look]);
       if (ui2) check(`${k}: the cursor is free for pointing`, !s.lock, s);
       await shot(`menu_${top || k}`);
-      // Footer legend + fit: legacy windows and the status screens (other ui2 screens keep their own footers).
-      if (!s.look && (!ui2 || title)) {
-        const sel = ui2 ? '#ui2 .ui2-win' : '.cdda-window';
-        const legend = await js<string>(`[...document.querySelectorAll('${ui2 ? '#ui2 .ui2-win .ui2-footer' : '.cdda-window .footer'}')].pop()?.textContent ?? ''`);
+      // Footer legend (legacy windows and the named ui2 window) + every window fits the screen.
+      if (!s.look && (!ui2 || hit)) {
+        const win = hit ? `#ui2 .ui2-win[data-id="${s.panelIds[s.panels.indexOf(hit)] ?? hit}"]` : '';
+        const legend = await js<string>(`(() => { const w = ${hit ? `document.querySelector('${win}')` : 'null'}; return (w ? w.querySelector('.ui2-footer') : [...document.querySelectorAll('.cdda-window .footer')].pop())?.textContent ?? ''; })()`);
         check(`${k}: footer names the close keys`, /Esc/.test(legend), legend);
-        const overflowX = await js<boolean>(`(() => { const w = [...document.querySelectorAll('${sel}')].pop(); const r = w.getBoundingClientRect(); return r.right > innerWidth + 1 || r.bottom > innerHeight + 1 || r.left < -1 || r.top < -1; })()`);
+      }
+      if (!s.look) {
+        const overflowX = await js<boolean>(`(() => { for (const w of document.querySelectorAll('.cdda-window, #ui2 .ui2-win')) { const r = w.getBoundingClientRect(); if (r.right > innerWidth + 1 || r.bottom > innerHeight + 1 || r.left < -1 || r.top < -1) return true; } return false; })()`);
         check(`${k}: window fits the ${W}x${H} screen`, !overflowX);
       }
       await x.key(k);
@@ -368,13 +401,15 @@ const scenarios: Scenario[] = [
     s = await until((t) => t.lock);
     check('r (Resume) closes it and recaptures the mouse', !s.panels.length && s.lock, { s, refusals: await js('cdda.game.input.lockRefusals'), now: await js('performance.now()') });
     await x.key('i');
+    await sleep(300); // a person's i-then-Esc; within ~50 ms the Esc lands while the lock is still being released
     await x.key('Escape');
-    s = await until((t) => !t.windows.length && t.hint);
-    check('Esc inside a menu closes that menu (not the game)', !s.windows.length, s.windows);
+    s = await until((t) => !t.menus.length && t.hint);
+    check('Esc inside a menu closes that menu (not the game)', !s.menus.length, s.menus);
     check('…and gameplay pauses behind the resume hint', s.hint && s.lockPaused, s);
     await sleep(1400);
     await x.key('w');
-    s = await until((t) => t.lock);
+    // The hint follows the lock a frame later (it's drawn from requestAnimationFrame).
+    s = await until((t) => t.lock && !t.hint);
     check('any key resumes mouse-look', s.lock && !s.hint, { s, refusals: await js('cdda.game.input.lockRefusals'), now: await js('performance.now()') });
     await x.key('Escape');
     await sleep(1400);
@@ -400,8 +435,9 @@ const scenarios: Scenario[] = [
     // Chrome refuses a re-lock for 1.25 s after an Esc unlock; a key pressed sooner must still
     // resume once that's over (Input retries within the key's activation window).
     await x.key('i');
+    await sleep(300);
     await x.key('Escape');
-    await until((t) => !t.windows.length);
+    await until((t) => !t.menus.length);
     await x.key('w');
     s = await until((t) => t.lock, 2500);
     check('a key pressed right after Esc resumes once Chrome allows it', s.lock, { s, refusals: await js('cdda.game.input.lockRefusals') });
@@ -419,16 +455,16 @@ const scenarios: Scenario[] = [
     check('W released inside a menu does not keep walking', Math.hypot(s.x - s0.x, s.y - s0.y) < 0.05 && !s.held.includes('KeyW'), { held: s.held, moved: Math.hypot(s.x - s0.x, s.y - s0.y) });
     await x.hold('i', 1200);
     s = await state();
-    check('holding i keeps the inventory open (repeats ignored)', s.windows.includes('Inventory'), s.windows);
+    check('holding i keeps the inventory open (repeats ignored)', s.menus.includes('Inventory'), s.windows);
     await x.key('i');
     await x.key('Caps_Lock');
     await x.key('i');
-    s = await until((t) => t.windows.length > 0, 800);
-    check('CapsLock on: i still opens the inventory', s.windows.includes('Inventory'), s.windows);
+    s = await until((t) => t.menus.length > 0, 800);
+    check('CapsLock on: i still opens the inventory', s.menus.includes('Inventory'), s.windows);
     await x.key('i');
     await x.key('Caps_Lock');
     s = await state();
-    check('back to gameplay', !s.windows.length, s.windows);
+    check('back to gameplay', !s.menus.length, s.menus);
   }],
   ['focus', 'focus loss (tab switch) pauses without closing menus', async () => {
     await toGameplay();
@@ -440,7 +476,7 @@ const scenarios: Scenario[] = [
     await other.close();
     await page.bringToFront();
     let s = await state();
-    check('menu still open after a tab switch', s.windows.includes('Inventory'), s.windows);
+    check('menu still open after a tab switch', s.menus.includes('Inventory'), s.menus);
     await x.key('i');
     s = await state();
     check('closing it recaptures (or shows the resume hint)', s.lock || s.hint, s);
@@ -466,9 +502,10 @@ const scenarios: Scenario[] = [
     s = await until((t) => !t.panels.length && t.lock);
     check('Esc closes it and the mouse is captured again', !s.panels.length && s.lock, s);
     await x.key('i');
+    await until((t) => t.menus.length > 0, 1500);
     await x.key('Escape');
-    s = await state();
-    check('Esc closes the inventory, still captured', !s.windows.length && s.lock, s);
+    s = await until((t) => !t.menus.length && t.lock, 1500);
+    check('Esc closes the inventory, still captured', !s.menus.length && s.lock, s);
     await x.hold('Escape', 2700);
     s = await until((t) => !t.fullscreen, 1500);
     check('holding Esc leaves fullscreen (menu opened once, no flicker)', !s.fullscreen && s.panelIds.join() === 'scr.esc', s);
@@ -477,6 +514,8 @@ const scenarios: Scenario[] = [
   ['freecursor', 'Options > Menu cursor = free: menus show the cursor and take clicks', async () => {
     await toGameplay();
     await js(`cdda.game.input.menuCursor = 'free'`);
+    // The menu-cursor option is about v1 windows: use the Classic (v1) inventory lists here.
+    await js('cdda.ui2.settings.classicInventory = true; cdda.ui2.saveSettings()');
     await x.key('i');
     let s = await until((t) => !t.lock);
     check('opening a menu frees the cursor', !s.lock && s.windows.includes('Inventory'), s);
@@ -490,6 +529,7 @@ const scenarios: Scenario[] = [
     s = await until((t) => t.lock);
     check('closing the last menu recaptures the mouse', !s.windows.length && s.lock, s);
     await js(`cdda.game.input.menuCursor = 'captured'`);
+    await js('cdda.ui2.settings.classicInventory = false; cdda.ui2.saveSettings()');
   }],
   ['azerty', 'AZERTY: ZQSD moves; stand-ins for wield/drop; hints say ZQSD', async () => {
     await toGameplay();
@@ -501,14 +541,14 @@ const scenarios: Scenario[] = [
       check('z (physical W) walks forward, opens nothing', Math.hypot(s.x - s0.x, s.y - s0.y) > 0.2 && !s.windows.length, s);
       await x.key('q');
       s = await state();
-      check('q (physical A) strafes, does not open Drop', !s.windows.length, s.windows);
+      check('q (physical A) strafes, does not open Drop', !s.menus.length, s.menus);
       await x.key('w'); // physical Z: wield stand-in
-      s = await until((t) => t.windows.length > 0, 800);
-      check('w (stand-in) opens Wield', s.windows.includes('Wield what?'), s.windows);
+      s = await until((t) => t.menus.length > 0, 800);
+      check('w (stand-in) opens Wield', s.menus.includes('Wield what?'), s.menus);
       await x.key('Backspace');
       await x.key('a'); // physical Q: drop stand-in
-      s = await until((t) => t.windows.length > 0, 800);
-      check('a (stand-in) opens Drop', s.windows.includes('Drop which items?'), s.windows);
+      s = await until((t) => t.menus.length > 0, 800);
+      check('a (stand-in) opens Drop', s.menus.includes('Drop what?'), s.menus);
       await x.key('Backspace');
       const label = await js<string>('cdda.game.keys.movementKeys()');
       check('movement is labelled ZQSD', label === 'ZQSD', label);
@@ -602,11 +642,11 @@ const scenarios: Scenario[] = [
     await x.key('Backspace');
     s = await toGameplay();
     await x.key('y');
-    s = await until((t) => t.windows.length > 0, 800);
-    check('y opens the Wear menu in game', s.windows.includes('Wear what?'), s.windows);
+    s = await until((t) => t.menus.length > 0, 800);
+    check('y opens the Wear menu in game', s.menus.includes('Wear what?'), s.menus);
     await x.key('y');
-    s = await state();
-    check('…and y closes it', !s.windows.length, s.windows);
+    s = await until((t) => !t.menus.length, 800);
+    check('…and y closes it', !s.menus.length, s.menus);
     const stored = await js<string>(`localStorage.getItem('cdda3d.keys')`);
     check('the rebind is stored', /"wear":\["y"\]/.test(stored ?? ''), stored);
     await js(`cdda.game.keys.resetBindings()`);
@@ -657,21 +697,34 @@ const scenarios: Scenario[] = [
     check('wheel zooms in top-down view', mode !== 'top' || d1 !== d0, { mode, d0, d1 });
     await x.key('v');
   }],
-  // Drag & drop and the item context menu are checked on the ?debug=ui2 showcase ('ui2kit'):
-  // the in-game Tab inventory is being replaced by the real-item inventory (src/ui2/bn), whose
-  // own scenarios test drags on it.
-  ['ui2', 'ui2 in game: Tab frees the cursor (no resume hint), pauses (Accessible), Tab re-captures', async () => {
+  ['ui2', 'ui2 inventory: Tab frees the cursor (no resume hint), drag & drop, context menu, pause, Tab re-captures', async () => {
     await toGameplay();
     type U = { surfaces: number; tacticalPause: boolean; locked: boolean; panels: string[]; menu: string[][] };
     const u = () => js<U>('cdda.ui2.state()');
+    await js(`cdda.inv2.spawn('pipe', 0, 0)`);
     await x.key('Tab');
     await sleep(500);
     let s = await state();
     let v = await u();
-    check('Tab opens the ui2 inventory with a free cursor', v.panels.includes('inv.equip') && !s.lock, { v, lock: s.lock });
+    check('Tab opens the inventory (Equipment, Inventory, Nearby) with a free cursor', ['inv.equip', 'inv.carried', 'inv.nearby'].every((p) => v.panels.includes(p)) && !s.lock, { v, lock: s.lock });
     check('…without the "click to resume" hint', !s.hint && !s.lockPaused, s);
     check('…and the tactical pause on (Accessible default)', v.tacticalPause, v);
     await shot('ui2_inventory');
+    const c0 = await censusNow();
+    const from = await rectOf('pipe', NEARBY);
+    const to = await center(`${CARRIED} .bn-list`);
+    await drag([from!.x, from!.y], to!);
+    check('dragging the pipe from the ground into the Inventory list picks it up', (await whereIs('pipe')).some((l) => l.startsWith('inv')), await whereIs('pipe'));
+    const cell = await rectOf('pipe', CARRIED);
+    await x.click(cell!.x, cell!.y, 3);
+    await sleep(250);
+    v = await u();
+    check('right-click opens the item context menu with action times', v.menu.length === 1 && v.menu[0].length > 2 && v.menu[0].some((r) => /\d+(\.\d)? s/.test(r ?? '')), v.menu);
+    await shot('ui2_item_menu');
+    await x.key('Escape');
+    v = await u();
+    check('Esc closes the menu, the windows stay', !v.menu.length && v.panels.includes('inv.equip'), v);
+    sameCensus('census unchanged after the drag', c0, await censusNow());
     await x.key('Tab');
     s = await until((t) => t.lock, 3000);
     v = await u();
@@ -684,10 +737,23 @@ const scenarios: Scenario[] = [
     const t1 = await js<number>('cdda.game.clock.seconds');
     v = await u();
     check('with Pause in inventory off, game time runs while it is open', v.surfaces > 0 && !v.tacticalPause && t1 > t0, { t0, t1, v });
+    // …and moves take their time: a progress bar, then the move.
+    const pipe = await rectOf('pipe', CARRIED);
+    await x.moveTo(pipe!.x, pipe!.y, 2);
+    await x.down('Shift');
+    await x.clickHere(1);
+    await x.up('Shift');
+    await sleep(120);
+    const bar = await js<boolean>(`!!document.querySelector('#ui2 .ui2-prog')`);
+    const still = (await whereIs('pipe')).some((l) => l.startsWith('inv'));
+    await sleep(1400);
+    check('Classic: Shift-click drop shows a progress bar and happens when it fills', bar && still && (await whereIs('pipe')).some((l) => l.startsWith('ground')), { bar, still, now: await whereIs('pipe') });
     await x.key('Tab');
+    await until((t) => !t.panels.length, 3000);
     await js('cdda.ui2.settings.pauseInInventory = true; cdda.ui2.saveSettings()');
-    const p0 = await js<number>('cdda.game.clock.seconds');
     await x.key('Tab');
+    await until((t) => t.panels.includes('Equipment'), 3000);
+    const p0 = await js<number>('cdda.game.clock.seconds');
     await sleep(1200);
     const p1 = await js<number>('cdda.game.clock.seconds');
     check('with it on (default), game time stops', p1 === p0, { p0, p1 });
@@ -743,6 +809,200 @@ const scenarios: Scenario[] = [
     await page.goto(gameUrl);
     await page.waitForFunction('window.cdda?.ready', { timeout: 240_000 });
     await quickStart();
+  }],
+  ['inv', 'inventory flows: wear by dropping on the doll, take off by dragging a layer off, shift-click, double-click eat, i closes', async () => {
+    await toGameplay();
+    await js(`cdda.inv2.spawn('hat_hard', 0, 0); cdda.inv2.spawn('crowbar', 0, 0); cdda.inv2.spawn('chocolate', 0, 0, { charges: 3 })`);
+    await x.key('i');
+    await until((t) => t.panels.includes('Equipment'), 3000);
+    const c0 = await censusNow();
+    let r = await rectOf('hat_hard', NEARBY);
+    await drag([r!.x, r!.y], (await center(`${EQUIP} [data-part="head"]`))!);
+    check('dropping the hard hat on the head slot wears it', (await whereIs('hat_hard')).some((l) => l.startsWith('worn')), await whereIs('hat_hard'));
+    await shot('inv_worn_hat');
+    await drag((await center(`${EQUIP} [data-part="head"] .bn-stack`))!, (await center(`${NEARBY} .bn-list`))!);
+    check('dragging it off the doll onto Nearby takes it off and puts it down', (await whereIs('hat_hard')).some((l) => l.startsWith('ground')), await whereIs('hat_hard'));
+    r = await rectOf('crowbar', NEARBY);
+    await drag([r!.x, r!.y], (await center(`${EQUIP} [data-part="hands"]`))!);
+    check('dropping the crowbar on the hands wields it', (await whereIs('crowbar')).some((l) => l === 'hands×1'), await whereIs('crowbar'));
+    r = await rectOf('chocolate', NEARBY);
+    await x.moveTo(r!.x, r!.y, 2);
+    await x.down('Shift');
+    await x.clickHere(1);
+    await x.up('Shift');
+    await sleep(300);
+    check('Shift-click on Nearby takes it (quick move)', (await whereIs('chocolate')).some((l) => l.startsWith('inv')), await whereIs('chocolate'));
+    sameCensus('census unchanged after wear / take off / wield / quick move', c0, await censusNow());
+    const before = (await censusNow()).counts.chocolate ?? 0;
+    r = await rectOf('chocolate', CARRIED);
+    await x.moveTo(r!.x, r!.y, 2);
+    await x.clickHere(1);
+    await sleep(60);
+    await x.clickHere(1);
+    await sleep(400);
+    const after = (await censusNow()).counts.chocolate ?? 0;
+    check('double-click eats one (the primary action)', after === before - 1, { before, after });
+    await shot('inv_after_eat');
+    await x.key('i');
+    const s = await until((t) => t.lock && !t.panels.length, 3000);
+    check('i closes it again and re-captures the mouse', s.lock && !s.panels.length, s);
+  }],
+  ['invbag', 'v1 duplication scenario: wield a bag, open it, unload it by hand to ground and inventory, refill, Empty: nothing duplicated or lost', async () => {
+    await toGameplay();
+    const bagKey = await js<string>(`cdda.giveItem('backpack', { wear: true }); cdda.inv2.spawn('bag_canvas', 0, 0, { contents: [['pipe', 6]] })`);
+    await x.key('Tab');
+    await until((t) => t.panels.includes('Nearby'), 3000);
+    const c0 = await censusNow();
+    const bag = await rectOf('bag_canvas', NEARBY);
+    await drag([bag!.x, bag!.y], (await center(`${EQUIP} [data-part="hands"]`))!);
+    check('the bag goes to your hands', (await whereIs('bag_canvas')).some((l) => l.startsWith('hands')), await whereIs('bag_canvas'));
+    const tw = await center(`${EQUIP} [data-hands] .bn-twisty`);
+    if (tw) await x.click(tw[0], tw[1]);
+    await sleep(300);
+    await shot('invbag_open');
+    const inBag = () => whereIs('pipe').then((l) => l.filter((w) => w.startsWith(`in:${bagKey}`)));
+    // Ctrl-click the pipes inside: "how many?" (Enter = half) → to the loot target (the ground).
+    let p = await rectOf('pipe', `${EQUIP} [data-hands]`);
+    await x.moveTo(p!.x, p!.y, 2);
+    await x.down('Control');
+    await x.clickHere(1);
+    await x.up('Control');
+    await sleep(300);
+    await shot('invbag_count_prompt');
+    await x.key('Return');
+    await sleep(400);
+    check('Ctrl-click → Enter moves half of the stack out of the bag', (await inBag()).join() === `in:${bagKey}×3`, await whereIs('pipe'));
+    sameCensus('…census unchanged', c0, await censusNow());
+    p = await rectOf('pipe', `${EQUIP} [data-hands]`);
+    await drag([p!.x, p!.y], (await center(`${CARRIED} .bn-list`))!);
+    check('dragging the rest into the Inventory list empties the bag', !(await inBag()).length, await whereIs('pipe'));
+    sameCensus('…census unchanged', c0, await censusNow());
+    await shot('invbag_emptied');
+    // Refill it by dropping the carried pipes on the bag's row, then Empty it from its menu.
+    p = await rectOf('pipe', CARRIED);
+    const bagRow = await center(`${EQUIP} [data-hands] .bn-row`);
+    await drag([p!.x, p!.y], bagRow!);
+    check('dropping pipes on the bag row puts them in', (await inBag()).length === 1, await whereIs('pipe'));
+    const bagRow2 = await center(`${EQUIP} [data-hands] .bn-row .ui2-row-name`);
+    await x.click(bagRow2![0], bagRow2![1], 3);
+    await sleep(300);
+    const menu = await js<string[][]>('cdda.ui2.state().menu');
+    await shot('invbag_menu');
+    const empty = await js<{ x: number; y: number } | null>(`(() => { const e = [...document.querySelectorAll('#ui2 .ui2-menu-row')].find((r) => /^Empty/.test(r.textContent.trim())); if (!e) return null; const r = e.getBoundingClientRect(); return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) }; })()`);
+    if (empty) await x.click(empty.x, empty.y);
+    await sleep(500);
+    check('the Empty action (right-click menu) unloads it', !(await inBag()).length, { at: await whereIs('pipe'), menu });
+    sameCensus('census unchanged after refill + Empty (the v1 bug duplicated here)', c0, await censusNow());
+    await x.key('Tab');
+    await until((t) => t.lock, 3000);
+  }],
+  ['invloot', 'looting: g opens the Nearby tab, Take all takes what fits and says what stayed and why', async () => {
+    await toGameplay();
+    await js(`cdda.inv2.spawn('pipe', 1, 0); cdda.inv2.spawn('rock', 1, 0); cdda.inv2.spawn('stepladder', 1, 0); cdda.inv2.spawn('bag_canvas', 1, 0)`);
+    await x.key('g');
+    await until((t) => t.panels.includes('Nearby'), 3000);
+    const c0 = await censusNow();
+    const tabs = await js<string[]>(`[...document.querySelectorAll('#ui2 [data-id="inv.nearby"] .ui2-tab')].map((t) => t.textContent)`);
+    check('g opens the inventory on the Nearby places', tabs.length > 0, tabs);
+    const east = await js<{ x: number; y: number } | null>(`(() => { const t = [...document.querySelectorAll('#ui2 [data-id="inv.nearby"] .ui2-tab')].find((e) => /^east/i.test(e.textContent.trim())); if (!t) return null; const r = t.getBoundingClientRect(); return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) }; })()`);
+    if (east) await x.click(east.x, east.y);
+    await sleep(250);
+    const take = await js<{ x: number; y: number } | null>('cdda.ui2.textRect("Take all")');
+    await x.click(take!.x, take!.y);
+    await sleep(400);
+    const result = await js<string>(`document.querySelector('#ui2 .bn-result')?.textContent ?? ''`);
+    check('Take all reports what it took and what stayed and why (the stepladder: no room)', /Took .*pipe/.test(result) && /stepladder.*room/i.test(result), result);
+    await shot('invloot_takeall');
+    sameCensus('census unchanged by Take all', c0, await censusNow());
+    await x.key('Tab');
+    await until((t) => t.lock, 3000);
+  }],
+  ['inve', 'e on a pile of loot a step away opens the inventory on that place', async () => {
+    await toGameplay();
+    await js(`cdda.inv2.spawn('pipe', 1, 0); cdda.inv2.spawn('rock', 1, 0)`);
+    // Setup: look down at the tile east of you (yaw east, pitch toward the floor a step away).
+    await js('cdda.game.player.yaw = Math.PI / 2; cdda.game.player.pitch = -0.95');
+    await sleep(200);
+    await x.key('e');
+    const s = await until((t) => t.panels.includes('Nearby'), 3000);
+    const on = await js<string>(`document.querySelector('#ui2 [data-id="inv.nearby"] .ui2-tab.on')?.textContent ?? ''`);
+    check('e on the pile opens the inventory with that place in front', s.panels.includes('Nearby') && /east/i.test(on), { panels: s.panels, on });
+    await shot('inve_focus');
+    await x.key('Tab');
+    await until((t) => t.lock, 3000);
+  }],
+  ['invliquid', 'liquids: drag a bottle of water onto a jar pours it; dropping water on the world asks before spilling', async () => {
+    await toGameplay();
+    await js(`cdda.giveItem('backpack', { wear: true }); cdda.inv2.spawn('bottle_plastic', 0, 0, { contents: [['water_clean', 2]] }); cdda.inv2.spawn('jar_glass', 0, 0)`);
+    await x.key('Tab');
+    await until((t) => t.panels.includes('Nearby'), 3000);
+    const c0 = await censusNow();
+    const b = await rectOf('bottle_plastic', NEARBY);
+    const j = await rectOf('jar_glass', NEARBY);
+    await drag([b!.x, b!.y], [j!.x, j!.y]);
+    const jarKey = (await rectOf('jar_glass', NEARBY))?.id ?? '';
+    const inJar = () => whereIs('water_clean').then((l) => l.filter((w) => w.startsWith(`in:${jarKey}`)));
+    check('dragging the bottle onto the jar pours the water in', (await inJar()).join() === `in:${jarKey}×2`, { at: await whereIs('water_clean'), jarKey });
+    sameCensus('pouring conserves', c0, await censusNow());
+    const tw = await js<{ x: number; y: number } | null>(`(() => { const row = document.querySelector('#ui2 [data-id="inv.nearby"] [data-item="${jarKey}"]'); const t = row?.querySelector('.bn-twisty'); if (!t) return null; const r = t.getBoundingClientRect(); return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) }; })()`);
+    if (tw) await x.click(tw.x, tw.y);
+    await sleep(300);
+    await shot('invliquid_jar_open');
+    let w = await rectOf('water_clean', NEARBY);
+    await drag([w!.x, w!.y], (await center(`${CARRIED} .bn-list`))!);
+    check('loose water is refused by the inventory (needs a container)', (await inJar()).length === 1, await whereIs('water_clean'));
+    w = await rectOf('water_clean', NEARBY);
+    await drag([w!.x, w!.y], (await center('canvas'))!);
+    await sleep(300);
+    const modal = await js<string>(`document.querySelector('#ui2 .ui2-layer-modal')?.textContent ?? ''`);
+    check('dropping water on the world asks before spilling it', /Spill|Pour/i.test(modal), modal);
+    await shot('invliquid_confirm');
+    const ok = await js<{ x: number; y: number } | null>(`(() => { const e = [...document.querySelectorAll('#ui2 .ui2-layer-modal button')].find((b) => /Pour it out/.test(b.textContent)); if (!e) return null; const r = e.getBoundingClientRect(); return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) }; })()`);
+    if (ok) await x.click(ok.x, ok.y);
+    await sleep(400);
+    const c1 = await censusNow();
+    check('confirmed: the water left the jar for the ground', !(await inJar()).length, await whereIs('water_clean'));
+    sameCensus('spilling conserves (it is on the ground now)', c0, c1);
+    await x.key('Tab');
+    await until((t) => t.lock, 3000);
+  }],
+  ['invkeys', 'accelerators: z / E open quick pickers; the hotbar binds by drag and 1…0 work in gameplay', async () => {
+    await toGameplay();
+    await js(`cdda.giveItem('backpack', { wear: true }); cdda.giveItem('knife_combat'); cdda.giveItem('chocolate')`);
+    await x.key('z');
+    let s = await until((t) => t.panels.includes('Wield what?'), 2000);
+    check('z opens the "Wield what?" picker', s.panels.includes('Wield what?'), s.panels);
+    await shot('invkeys_wield_picker');
+    await x.key('Escape');
+    s = await until((t) => !t.panels.length, 2000);
+    check('Esc closes it', !s.panels.length, s.panels);
+    // Hungry again (earlier scenarios fed the survivor until "Your stomach is full").
+    await js('cdda.game.player.stomach.kcal = 0; cdda.game.player.storedKcal = 5000');
+    await x.key('E');
+    s = await until((t) => t.panels.includes('Eat or drink what?'), 2000);
+    check('E opens the eat picker', s.panels.includes('Eat or drink what?'), s.panels);
+    const c0 = (await censusNow()).counts.chocolate ?? 0;
+    const row = await js<{ x: number; y: number } | null>(`(() => { const r = [...document.querySelectorAll('#ui2 .bn-pick-row')].find((e) => /chocolate/i.test(e.textContent)); if (!r) return null; const b = r.getBoundingClientRect(); return { x: Math.round(b.left + 80), y: Math.round(b.top + b.height / 2) }; })()`);
+    if (row) await x.click(row.x, row.y);
+    // Time runs again once the picker closes: eating takes its moves.
+    await sleep(2500);
+    check('clicking chocolate in it eats one', ((await censusNow()).counts.chocolate ?? 0) === c0 - 1, { c0 });
+    await toGameplay();
+    await x.key('Tab');
+    await until((t) => t.panels.includes('Inventory'), 2000);
+    const k = await rectOf('knife_combat', CARRIED);
+    await drag([k!.x, k!.y], (await center('#ui2 .ui2-hot-slot[data-slot="2"]'))!);
+    const bound = await js<string | null>(`cdda.inv2.hotbar.binding(2)?.typeId ?? null`);
+    check('dragging the knife onto hotbar slot 3 binds it', bound === 'knife_combat', bound);
+    await x.key('Tab');
+    await until((t) => t.lock, 3000);
+    await x.key('3');
+    await sleep(1500);
+    check('3 in gameplay wields it', (await whereIs('knife_combat')).some((l) => l.startsWith('hands')), await whereIs('knife_combat'));
+    await shot('invkeys_hotbar');
+    await x.key('3');
+    await sleep(1500);
+    check('3 again puts it away', (await whereIs('knife_combat')).some((l) => l.startsWith('inv')), await whereIs('knife_combat'));
   }],
   ['pause', 'tactical pause: ` freezes time but not the view, works inside menus; Classic menus run, the Esc menu pauses', async () => {
     await toGameplay();

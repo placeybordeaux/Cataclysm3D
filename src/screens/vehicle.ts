@@ -325,7 +325,7 @@ export function driveHud(game: Game): { el: HTMLElement; update(): void } {
       ...gauges.map((g) => meter(g.label, g.frac, `${Math.round(g.frac * 100)}%`, g.tone, { cls: 'ix-dh-gauge' })),
       h('div', { class: 'ix-dh-keys' },
         r.cruiseMph !== null ? `${mv[0]}/${mv[2]} ±4 mph · Space stop` : `${mv[0]} gas · ${mv[2]} brake`,
-        ` · ${k('vehicle_engine')} engine · ${k('vehicle_headlights')} lights · ${k('vehicle_horn')} horn · ${k('control_vehicle')} vehicle`),
+        ` · ${k('interact')} get out · ${k('vehicle_engine')} engine · ${k('vehicle_headlights')} lights · ${k('vehicle_horn')} horn · ${k('control_vehicle')} vehicle`),
     );
   };
   return { el, update };

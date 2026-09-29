@@ -176,7 +176,8 @@ contents nested once, trade moves inside a transaction from explicit places.
 
 ## For the UI (`src/game/inventory_view.ts`)
 
-The v2 inventory screens (ui2 `InventoryModel`, docs/UI2.md) sit on these calls:
+The v2 inventory screens (`src/ui2/bn/model.ts` is the ui2 `InventoryModel` adapter; docs/UI2.md
+"The inventory screens") sit on these calls:
 
 - **Data**: `inventoryView(scope)` with `scope = { who, map, at?, reach?, cargo?, stock? }`
   returns `hands`, `worn` (layer, storage capacity and its share of what's carried), `bodyParts`

@@ -240,7 +240,11 @@ function showVehicleInfo(game: Game, v: Vehicle): void {
   w.body.innerHTML = lines.join('<br>');
 }
 
+/** The ui2 inventory takes over "Get/Put items" when it can (src/ui2/bn/install.ts); false = use the v1 list. */
+export const cargoUi: { open?: (v: Vehicle, cargo: VehiclePart) => boolean } = {};
+
 function getItemsMenu(game: Game, v: Vehicle, cargo: VehiclePart): void {
+  if (cargoUi.open?.(v, cargo)) return;
   const ctx = ctxOf(game);
   const loc = L.cargo(cargo, v);
   const entries: InvEntry[] = cargo.items.map((item) => ({ item, where: 'ground', loc, depth: 0, dir: cargo.def.name }));
@@ -260,6 +264,7 @@ function getItemsMenu(game: Game, v: Vehicle, cargo: VehiclePart): void {
 }
 
 function putItemsMenu(game: Game, v: Vehicle, cargo: VehiclePart): void {
+  if (cargoUi.open?.(v, cargo)) return;
   const ctx = ctxOf(game);
   const rows: MultiRow[] = stackEntries(carriedEntries(ctx).filter((e) => e.where === 'carried' && e.depth === 0))
     .map((entry) => ({ entry, max: entry.stack ? entry.stack.length : entry.item.countByCharges ? entry.item.charges : 1, count: 0 }));
@@ -447,9 +452,11 @@ export async function installVehicles(game: Game, renderer: Renderer, api?: Debu
   // it. Without that system (tests, stripped builds) 'e' examines vehicles directly.
   interactOverrides.push({
     interact: (g) => {
-      // At the wheel, 'e' examines the vehicle you're driving (CDDA EXAMINE_VEHICLE).
+      // At the wheel, 'e' lets go of the controls — the one obvious way out of driving mode
+      // (the vehicle panel on '^' still has info and every control). Letting go while moving
+      // is allowed, as in CDDA; releaseControls() warns about it.
       if (vs.driving) {
-        vehicleScreens.info(g, vs.driving);
+        g.message(vs.releaseControls());
         return true;
       }
       const t = targetVehicle(g, renderer);

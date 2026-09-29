@@ -16,6 +16,8 @@ export interface Ui2Host {
 export interface Ui2Settings {
   /** Tactical pause while inventory-type windows are open (the Accessible preset's default). */
   pauseInInventory: boolean;
+  /** The v1 letter-list inventory screens instead of the ui2 ones (Options > "Inventory screens"). */
+  classicInventory?: boolean;
 }
 
 const SETTINGS_KEY = 'cdda3d.ui2.settings';

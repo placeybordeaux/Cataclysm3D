@@ -55,6 +55,11 @@ export interface InventoryScope {
   at?: { x: number; y: number; z: number };
   /** Tiles around `at` that count as within reach (BN pickup range 1 = the 8 neighbours). */
   reach?: number;
+  /**
+   * Tiles beyond `reach` that count as within reach too: the locker you pressed `e` on from
+   * a step away (the interaction reach is a little longer than BN's pickup ring).
+   */
+  extraTiles?: { x: number; y: number; z: number }[];
   /** Vehicle cargo parts within reach, with a label ("trunk", "Pickup truck's box"). */
   cargo?: { part: Cargo; vehicle?: { version: number; name?: string }; label: string }[];
   /** A trading partner's shelf. */
@@ -68,10 +73,23 @@ export function scopeLocs(s: InventoryScope): Loc[] {
   if (s.map && at) {
     const r = s.reach ?? 1;
     for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) out.push(L.ground(s.map, at.x + dx, at.y + dy, at.z));
+    for (const t of extraTilesOf(s, at)) out.push(L.ground(s.map, t.x, t.y, t.z));
   }
   for (const c of s.cargo ?? []) out.push(L.cargo(c.part, c.vehicle));
   if (s.stock) out.push(L.stock(s.stock.owner));
   return out;
+}
+
+/** extraTiles that aren't already inside the reach ring (each once). */
+function extraTilesOf(s: InventoryScope, at: { x: number; y: number; z: number }): { x: number; y: number; z: number }[] {
+  const r = s.reach ?? 1;
+  const seen = new Set<string>();
+  return (s.extraTiles ?? []).filter((t) => {
+    const k = `${t.x},${t.y},${t.z}`;
+    if (seen.has(k) || (t.z === at.z && Math.abs(t.x - at.x) <= r && Math.abs(t.y - at.y) <= r)) return false;
+    seen.add(k);
+    return true;
+  });
 }
 
 function originOf(s: InventoryScope): { x: number; y: number; z: number } | null {
@@ -282,14 +300,16 @@ export function inventoryView(s: InventoryScope): InventoryView {
   const at = originOf(s);
   if (s.map && at) {
     const r = s.reach ?? 1;
-    for (let dy = -r; dy <= r; dy++)
-      for (let dx = -r; dx <= r; dx++) {
+    const offsets: [number, number][] = [];
+    for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) offsets.push([dx, dy]);
+    for (const t of extraTilesOf(s, at)) if (t.z === at.z) offsets.push([t.x - at.x, t.y - at.y]);
+    for (const [dx, dy] of offsets) {
         const loc = L.ground(s.map, at.x + dx, at.y + dy, at.z);
         const items = itemsAt(loc);
         const f = s.map.furnAt?.(at.x + dx, at.y + dy, at.z);
         const storage = f && typeof f.max_volume === 'number' && f.max_volume > 0 ? f.max_volume : null;
         if (!items.length && !storage) continue;
-        const dir = DIRS[`${dx},${dy}`] ?? `${dx},${dy}`;
+        const dir = DIRS[`${Math.sign(dx)},${Math.sign(dy)}`] ?? `${dx},${dy}`;
         const label = f && f.id !== 'f_null' ? `${locName(loc).replace(/^the /, '')} (${dir})` : dir;
         nearby.push({ key: locKey(loc, s), loc, label, fill: storage ? { used: items.reduce((a, i) => a + i.volume(), 0), max: storage, unit: 'ml' } : null, items: items.map((i) => itemNode(i, loc, s)) });
       }

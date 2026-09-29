@@ -14,13 +14,18 @@ export interface HotbarBinding {
   typeId: string;
   name: string;
   icon?: IconRef;
+  /** The exact item it was bound to (ItemView.id), when the owner resolves references. */
+  ref?: string;
 }
 
 export interface HotbarOpts {
   /** Where the bindings persist (localStorage key). */
   storageKey: string;
-  /** Current stock of a bound type (aggregated count), or null when none is left. */
-  resolve(typeId: string): ItemView | null;
+  /**
+   * Current stock of a bound type (aggregated count), or null when none is left. `b` is the
+   * whole binding, for owners that follow the exact item (`ref`) rather than the type.
+   */
+  resolve(typeId: string, b?: HotbarBinding): ItemView | null;
   /** Use the bound item (null when you have none: the owner explains). */
   use(binding: HotbarBinding, item: ItemView | null, slot: number): void;
   /** Tooltip extras (compare with equipped…). */
@@ -47,7 +52,7 @@ export class Hotbar {
         check: (p) => (p.from === `hotbar:${i}` ? { kind: 'noop' } : { kind: 'ok', count: p.count }),
         drop: (p) => {
           const from = p.from.startsWith('hotbar:') ? Number(p.from.slice(7)) : -1;
-          const b: HotbarBinding = { typeId: p.item.typeId, name: p.item.name, icon: p.item.icon };
+          const b: HotbarBinding = { typeId: p.item.typeId, name: p.item.name, icon: p.item.icon, ref: p.item.id };
           if (from >= 0) [this.slots[i], this.slots[from]] = [this.slots[from], this.slots[i]];
           else {
             // One binding per type: binding it again moves it here.
@@ -63,7 +68,7 @@ export class Hotbar {
         payload: () => {
           const b = this.slots[i];
           if (!b) return null;
-          const it = this.o.resolve(b.typeId) ?? { id: `hotbar-${i}`, typeId: b.typeId, name: b.name, count: 1, stackable: false, weight: 0, volume: 0, icon: b.icon };
+          const it = this.o.resolve(b.typeId, b) ?? { id: `hotbar-${i}`, typeId: b.typeId, name: b.name, count: 1, stackable: false, weight: 0, volume: 0, icon: b.icon };
           return { item: it, count: 1, from: `hotbar:${i}` };
         },
         onClick: () => this.use(i),
@@ -77,7 +82,7 @@ export class Hotbar {
           const b = this.slots[i];
           if (!b) return;
           openContextMenu({ x: e.clientX, y: e.clientY }, [
-            { label: 'Use', key: k, primary: true, action: () => this.use(i), disabled: this.o.resolve(b.typeId) ? false : `You have no ${b.name}` },
+            { label: 'Use', key: k, primary: true, action: () => this.use(i), disabled: this.o.resolve(b.typeId, b) ? false : `You have no ${b.name}` },
             { separator: true },
             { label: 'Clear slot', action: () => ((this.slots[i] = null), this.save(), this.refresh()) },
           ], { title: b.name });
@@ -86,7 +91,7 @@ export class Hotbar {
       attachTooltip(cell, () => {
         const b = this.slots[i];
         if (!b) return `Empty — drag an item here to bind it to ${k}`;
-        const it = this.o.resolve(b.typeId);
+        const it = this.o.resolve(b.typeId, b);
         return it ? (this.o.tooltip?.(it) ?? itemTooltip(it, { hints: [`${k} or click: use`, 'Drag off: unbind'] })) : `${b.name}: none left`;
       });
     });
@@ -108,7 +113,7 @@ export class Hotbar {
   }
 
   bind(i: number, item: ItemView): void {
-    this.slots[i] = { typeId: item.typeId, name: item.name, icon: item.icon };
+    this.slots[i] = { typeId: item.typeId, name: item.name, icon: item.icon, ref: item.id };
     this.save();
     this.refresh();
   }
@@ -128,14 +133,14 @@ export class Hotbar {
     void cell.offsetWidth;
     cell.classList.add('pressed');
     if (!b) return;
-    this.o.use(b, this.o.resolve(b.typeId), i);
+    this.o.use(b, this.o.resolve(b.typeId, b), i);
     this.refresh();
   }
 
   refresh(): void {
     this.slots.forEach((b, i) => {
       const cell = this.cells[i];
-      const it = b ? this.o.resolve(b.typeId) : null;
+      const it = b ? this.o.resolve(b.typeId, b) : null;
       cell.classList.toggle('bound', !!b);
       cell.classList.toggle('none-left', !!b && !it);
       cell.replaceChildren(

@@ -5,8 +5,8 @@ drop, context menus, tooltips, toasts, hotbar, paper doll — plain TypeScript +
 (screens are small, the bundle stays lean, Vite hot reload stays instant). The legacy curses UI in
 `src/ui/` still runs everything else; screens move over one at a time.
 
-- **Try it:** `npm run dev`, open `/?debug=ui2` (showcase with mock items), or press **Tab** in the
-  game (the same placeholder inventory, labelled "UI2 PREVIEW: mock items").
+- **Try it:** `npm run dev`, open `/?debug=ui2` (showcase with mock items), or press **i** / **Tab**
+  in the game (the real inventory: "The inventory screens" below).
 - **Import from `src/ui2/index.ts`** only.
 - **Tests:** `tests/ui2.test.ts` (layout math, scale, palette contrast, drop validation, stack
   splitting, toast rate limiting, item conservation over 4000 random moves).
@@ -26,14 +26,14 @@ Screenshots: `docs/screenshots/ui2/`.
 | Mouse wheel while dragging | Change the amount (Ctrl: by 1) |
 | Shift + drag (at start or drop) | Ask for the exact amount |
 | Shift-click | Quick move (ground → your bag, carried → ground) |
-| Ctrl-click | Split the stack (amount prompt) |
+| Ctrl-click | Split the stack (amount prompt); the BN inventory moves that many to the quick-move target (BN stacks re-merge where they land, so an in-place split means nothing) |
 | Right-click | Context menu: every action with its time cost; impossible ones stay visible, greyed, with the reason ("Need: a screwdriver") |
 | Hover | Tooltip after 350 ms; neighbours show instantly while scanning |
 | Esc | Closes the topmost thing: menu → dialog → drag → window group |
 | Right-click while dragging / Esc | Cancel the drag |
 | Menu key / Shift+F10 | Context menu for the keyboard-selected item |
 | Tab | Toggle the inventory (game action `inventory2`) |
-| 1…0 | Hotbar slots (while the inventory is open; game binding TBD) |
+| 1…0 | Hotbar slots, in gameplay and in the inventory (actions `hotbar_1`…`hotbar_0`) |
 | `o` (game action `world_menu`) | Context menu for what the crosshair points at, while the mouse is captured |
 
 Keyboard is an accelerator, never the only way: every action is reachable by mouse. Menus take
@@ -198,10 +198,40 @@ windows side by side, wrapping), `cascade`, `gridColumns`, `paperDollLayout`.
   button / menu row, for `xclick`), `cdda.ui2.mock()`.
 - Showcase: `cdda.ui2.{state, rect, textRect, itemRect(typeId), model, hotbar}`.
 
+## The inventory screens (`src/ui2/bn/`)
+
+The real inventory on the BN item model (docs/INVENTORY_MODEL.md), replacing the v1 letter lists
+(Options > "Inventory screens: Classic" brings those back for i z O T E u q g U and `e` on piles).
+
+| file | what |
+|---|---|
+| `model.ts` | `BnInventoryModel implements InventoryModel` over `inventoryView` / `verdict` / `itemActions` / `moveItem`. No DOM. Identical separate items show as one stack (moving n = n moves); `worn:<bodypart>` doll places; pour-by-drag (bottle onto jar); `confirmFor` (spilling); `takeAll(source)` with a what-stayed-and-why summary; `lootTarget` (Shift-click destination) |
+| `lists.ts` | item rows (category headers, containers expand in place with a fill bar), `wireItem` (drag / dbl-click / right-click / Shift / Ctrl / tooltip), `bnTarget` drop targets, `doMove` (spill confirm + timed action) |
+| `doll.ts` | paper doll: 12 body parts, worn layers stacked (outermost in front), encumbrance per part (tone by BN band), the Wielded well |
+| `screen.ts` | the screen: Equipment (doll, hands, worn list, weight/volume bars, overburden line), Inventory (by category, volume/weight bars), Nearby (a tab per place in reach: ground tiles, furniture, vehicle cargo; fill bar, Take all) |
+| `popups.ts` | quick pickers for the action keys, the liquid menu (on src/game/liquid.ts), the examine card |
+| `install.ts` | keys, `e`/vehicle-cargo/world-menu loot hooks, the gameplay hotbar, timed actions, `cdda.inv2` |
+
+- **Opening**: i / Tab toggle (opening key, Esc or Backspace close). `g` picks up a lone item or opens
+  Nearby; `e` on a pile / locker / corpse / open trunk (vehicle "Get items") opens with that place in
+  front. The Nearby tab defaults to what's under you, else where you looted last.
+- **Action keys** z O T E u q U open a picker (a focused list with times, greyed rows say why);
+  the picked item gets the same action as in the context menu.
+- **Time**: actions run through `perform(label, moves, fn)`: instant under the tactical pause
+  (Accessible), else a progress bar for `moves / 100 / ACTION_SCALE` s, then the move (a stale
+  item fails safely). One timed action at a time.
+- **Hotbar**: bindings keep the exact item (`HotbarBinding.ref` = ItemView id) and fall back to
+  another of the same type you carry; greyed with 0 when none is left. Use = the item's primary
+  action (eat, wield, …); a wielded one is put away. Mounted as soon as gameplay starts.
+- **Screenshots**: `docs/screenshots/ui2/inventory/` (1920×1080 and 3440×1304, from the real-input run).
+- **Automation**: `cdda.inv2.{model, hotbar, open(focus?), census(), rectOf(typeId, sel), where(typeId), spawn(id, dx, dy, {charges, contents})}`.
+- **Tests**: `tests/inventory_ui2.test.ts` (views, drops, liquids, the v1 bag scenario, take all, a
+  conservation fuzz over the model's operations); real input: `tools/realinput.ts --only
+  ui2,inv,invbag,invloot,inve,invliquid,invkeys` (every drag checks `census`).
+
 ## Not done yet / for the next agents
 
-- Real inventory (BN item model) — replace `MockInventoryModel`; the Tab key and hotbar are
-  ready for it. Game-wide hotbar keys (1…0 outside the inventory) aren't bound yet.
+- Inventory: wheel-to-cycle weapons; favourites / sorting options; a search box in pickers.
 - A hold-to-free-cursor mode (e.g. hold Alt) for pointing at the world without opening a window.
 - Pixel outline in the post pass instead of the line box (the box is cheap and reads well).
 - Terminus is the only font; no bold (synthetic bold smears pixel fonts) — use colour.
