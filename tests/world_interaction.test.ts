@@ -19,6 +19,7 @@ import { fallIfUnsupported, goStairs, stairDestination } from '../src/game/zleve
 import { addField, fieldDamageAt, ignite, installFields, processFields } from '../src/game/fields';
 import { evalWeatherCondition, forceWeather, installWeather, weatherConditions, weatherPoint } from '../src/game/weather';
 import { comfortAt, goToSleep, installRest, waitFor } from '../src/game/rest';
+import { BODYTEMP } from '../src/game/character';
 import { installTraps, setTrap, triggerTrap } from '../src/game/traps';
 import { playerLightState, toggleLight } from '../src/game/lightitems';
 import { targetTile } from '../src/game/targeting';
@@ -369,6 +370,37 @@ describe('wait & sleep', () => {
     expect(waitFor(game, 600)).toBe(true);
     game.tick(1 / 30);
     expect(game.activities.current).not.toBeNull();
+  });
+
+  it('first cold nights: lying down on the hard ground while chilly gives bed and warmth hints, a few times only', () => {
+    const { game, log } = makeGame();
+    installRest(game);
+    place(game, 8, 8);
+    expect(comfortAt(game, 8, 8, 0).comfort).toBeLessThan(3);
+    for (const bp of Object.keys(game.player.bodyTemp) as (keyof typeof game.player.bodyTemp)[]) game.player.bodyTemp[bp] = BODYTEMP.COLD - 100;
+    const bed = "You'd sleep better in a bed, or with a blanket or sleeping bag.";
+    const cold = "It's cold.  Find warmer clothes, or build a fire.";
+    for (let i = 0; i < 5; i++) {
+      game.activities.cancel('test');
+      game.player.removeEffect('lying_down');
+      goToSleep(game);
+    }
+    expect(log.filter((l) => l === bed).length).toBe(3);
+    expect(log.filter((l) => l === cold).length).toBe(3);
+  });
+
+  it('being woken by shivering points at warmth', () => {
+    const { game, log } = makeGame();
+    installRest(game);
+    place(game, 10, 10);
+    game.player.sleepiness = 300;
+    game.player.fallAsleep();
+    // A bitter night with no clothes: the torso gets very cold and shivering wakes them.
+    game.systems.push({ name: 'test-cold', update: () => (game.player.env = { ...game.player.env, temperature: -30, wind: 0, precipitation: false }) });
+    for (let i = 0; i < 30 * 60 && !log.includes('Your shivering prevents you from sleeping.'); i++) game.tick(1 / 30);
+    game.tick(1 / 30);
+    expect(log, JSON.stringify(log)).toContain('Your shivering prevents you from sleeping.');
+    expect(log.indexOf("It's cold.  Find warmer clothes, or build a fire.")).toBeGreaterThan(log.indexOf('Your shivering prevents you from sleeping.'));
   });
 
   it('a tired survivor falls asleep in bed and wakes rested', () => {
