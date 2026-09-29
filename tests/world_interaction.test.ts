@@ -353,6 +353,24 @@ describe('wait & sleep', () => {
     expect(game.clock.seconds - t0).toBeGreaterThanOrEqual(1800);
   });
 
+  it('waiting stops when you start freezing, but can be started while already freezing', () => {
+    const { game, log } = makeGame();
+    installRest(game);
+    place(game, 8, 8);
+    // Force the body-temperature target far below freezing (a bitter night, no clothes).
+    const target = () => (game.player.env = { ...game.player.env, temperature: -40, wind: 0, precipitation: false });
+    game.systems.push({ name: 'test-cold', update: target });
+    expect(waitFor(game, 6 * 3600)).toBe(true);
+    for (let i = 0; i < 30 * 120 && game.activities.current; i++) game.tick(1 / 30);
+    expect(game.activities.current).toBeNull();
+    expect(log).toContain('You are freezing!');
+    expect(game.player.dead).toBe(false);
+    // Already freezing: the wait starts (CDDA lets you ignore it) and isn't cancelled for it again.
+    expect(waitFor(game, 600)).toBe(true);
+    game.tick(1 / 30);
+    expect(game.activities.current).not.toBeNull();
+  });
+
   it('a tired survivor falls asleep in bed and wakes rested', () => {
     const { game, log } = makeGame();
     installRest(game);

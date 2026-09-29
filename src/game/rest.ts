@@ -2,6 +2,7 @@ import type { Game } from './game';
 import { hasFlag } from '../world/registry';
 import { SECONDS_PER_DAY, SECONDS_PER_HOUR, CLOCK_SCALE } from '../core/time';
 import { sunAltitudeAt } from './vision';
+import { BODYTEMP } from './character';
 
 // Waiting and sleeping, after CDDA's wait menu (game.cpp wait()) and sleep flow
 // (Character::can_sleep, comfort_data in sleep.cpp). Both are game.activities with a clock
@@ -194,8 +195,26 @@ function startSleepActivity(game: Game): boolean {
   return ok;
 }
 
+/**
+ * player_activity::get_distractions for the survivor's own body: freezing / overheating
+ * (any part past VERY_COLD / VERY_HOT) and dangerous dehydration (thirst > 520). CDDA's
+ * starvation distraction needs its starvation counter, which we don't model.
+ */
+export function survivalDistraction(game: Game): string | null {
+  const p = game.player;
+  if (p.dead) return null;
+  for (const bp of Object.keys(p.bodyTemp) as (keyof typeof p.bodyTemp)[]) {
+    const t = p.bodyTemp[bp];
+    if (t > BODYTEMP.VERY_HOT) return 'You are overheating!';
+    if (t < BODYTEMP.VERY_COLD) return 'You are freezing!';
+  }
+  if (p.thirst > 520) return 'You are dangerously dehydrated!';
+  return null;
+}
+
 /** Keeps the clock warped while asleep even if the activity was cancelled (collapsing from exhaustion, WASD). */
 export function installRest(game: Game): void {
+  game.activities.distractionChecks.push(() => survivalDistraction(game));
   game.systems.push({
     name: 'sleepwatch',
     update(g) {
