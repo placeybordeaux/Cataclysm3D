@@ -42,8 +42,12 @@ export class Input {
   /** Movement key pressed with the character it typed (lets Keys learn the keyboard layout). */
   onMovementKey: ((code: string, key: string) => void) | null = null;
 
+  /** The key whose keydown handlers are running right now (see tryLock), else null. */
+  private dispatching: string | null = null;
+
   constructor(private canvas: HTMLCanvasElement) {
     window.addEventListener('keydown', (e) => {
+      this.dispatching = e.key;
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
       // Everyone downstream (bindings, menu hotkeys) sees the CapsLock-/layout-normalized key.
       const key = normalizeKey({ key: e.key, code: e.code, shiftKey: e.shiftKey, capsLock: !!e.getModifierState?.('CapsLock') });
@@ -65,6 +69,8 @@ export class Input {
       for (const h of this.pressHandlers) if (h(e) === true) { e.preventDefault(); break; }
       if (e.code === 'Tab' || e.code === 'Space') e.preventDefault();
     });
+    // Runs right after the listener above for the same event (whatever it returned early from).
+    window.addEventListener('keydown', () => (this.dispatching = null));
     window.addEventListener('keyup', (e) => this.held.delete(e.code));
     // Focus loss eats the keyups and mouseups of whatever was held: forget it all.
     const release = () => {
@@ -137,13 +143,17 @@ export class Input {
    */
   tryLock(force = false): void {
     if ((!this.wantLock && !force) || this.locked) return;
+    // Esc is how a browser player takes the mouse back, yet closing a menu with it asks for the
+    // lock inside the Esc key (framework close()). Chrome refuses that (cooldown); retrying
+    // would grab the mouse 1.3 s later by itself, and the click meant to resume would attack.
+    const fromEscape = this.dispatching === 'Escape';
     const req = this.canvas.requestPointerLock?.() as unknown as Promise<void> | undefined;
     // Chrome returns a promise that rejects when the lock is refused; that's routine, not an
     // uncaught error. Recent refusals are kept for tools/realinput.ts.
     req?.catch?.((e: unknown) => {
       this.lockRefusals.push(`${performance.now().toFixed(0)} ${String(e)}`);
       if (this.lockRefusals.length > 20) this.lockRefusals.shift();
-      if (!/immediately after/.test(String(e)) || this.retryTimer) return;
+      if (fromEscape || !/immediately after/.test(String(e)) || this.retryTimer) return;
       this.retryTimer = setTimeout(() => {
         this.retryTimer = 0;
         // Still wanted: nothing opened meanwhile (a menu keeps its own lock state).
