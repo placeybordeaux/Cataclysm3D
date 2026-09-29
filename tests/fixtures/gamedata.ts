@@ -47,7 +47,7 @@ const items: ItemDef[] = ([
     ],
     armor: [{ encumbrance: [2, 25], coverage: 60, covers: ['torso'] }] },
   // armor/legs_clothes.json
-  { ...base, id: 'jeans', type: 'ITEM', subtypes: ['ARMOR'], name: 'jeans', weight: 600, volume: 2000, material: ['denim'], flags: ['VARSIZE', 'POCKETS'], warmth: 10, material_thickness: 0.65,
+  { ...base, id: 'jeans', type: 'ITEM', subtypes: ['ARMOR'], name: 'jeans', name_plural: 'jeans', weight: 600, volume: 2000, material: ['denim'], flags: ['VARSIZE', 'POCKETS'], warmth: 10, material_thickness: 0.65,
     pocket_data: [
       { pocket_type: 'CONTAINER', max_contains_volume: 1250, max_contains_weight: 4000, max_item_length: 19, moves: 80 },
       { pocket_type: 'CONTAINER', max_contains_volume: 1250, max_contains_weight: 4000, max_item_length: 19, moves: 80 },

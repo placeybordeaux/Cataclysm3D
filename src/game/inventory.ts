@@ -57,7 +57,8 @@ export function itemLayer(it: Item, portion?: ArmorPortion): Layer {
 
 /** Parts an armor portion covers (hands/feet listed separately, like CDDA). */
 function portionCovers(p: ArmorPortion): BodyPartId[] {
-  return (p.covers ?? []).filter(isBodyPart);
+  // Some CDDA items give a single string instead of a list.
+  return asArray(p.covers as string | string[] | undefined).filter(isBodyPart);
 }
 
 /**
@@ -729,7 +730,8 @@ export class Inventory {
       let acc = (this.activeAcc.get(it) ?? 0) + dt;
       while (acc >= perCharge) {
         acc -= perCharge;
-        if (it.ammoConsume(1) === 0) {
+        // Turns off as soon as the last charge is spent (or if it had none to begin with).
+        if (it.ammoConsume(1) === 0 || it.ammoRemaining() === 0) {
           const revert = it.def.revert_to;
           const name = it.name();
           if (revert && this.owner.data.items[revert]) it.convert(revert);

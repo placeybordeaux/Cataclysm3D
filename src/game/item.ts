@@ -1,5 +1,7 @@
 import type { GameData, ItemDef, MeleeAccuracy, PocketData } from '../data/types';
 import type { MapItem } from '../world/map';
+import type { SpawnedItem } from '../data/itemgroups';
+import { warnOnce } from '../data/warn';
 import { cddaText, toGrams, toMl, toSeconds } from './units';
 
 // Item instances (CDDA item.cpp / item_pocket.cpp, simplified). An Item is one ItemDef plus
@@ -14,14 +16,7 @@ export const MIN_ITEM_DAMAGE = -1000;
 
 export type PocketType = NonNullable<PocketData['pocket_type']>;
 
-/** Output shape of item-group expansion. */
-export interface SpawnedItem {
-  id: string;
-  count: number;
-  charges?: number;
-  damage?: number;
-  contents?: SpawnedItem[];
-}
+export type { SpawnedItem };
 
 export interface ItemJSON {
   typeId: string;
@@ -685,8 +680,42 @@ export interface CreateItemOpts {
   count?: number;
   charges?: number;
   damage?: number;
-  /** Fill magazines/guns with their default ammo (first ammo type's "default" is not known here, pass id). */
+  /** Fill magazines/guns/tools with this ammo id ('default' = the ammo type's default). */
   ammo?: string;
+  /** How many rounds to load with `ammo` (default: full). */
+  ammoCount?: number;
+}
+
+/** misc.ammunition_type[type].default, e.g. "9mm" -> "9mm", "battery" -> "battery". */
+export function defaultAmmoId(data: GameData, ammoType: string): string | undefined {
+  return (data.misc?.ammunition_type?.[ammoType]?.default as string | undefined) ?? (data.items[ammoType] ? ammoType : undefined);
+}
+
+/**
+ * Load up to `n` rounds of `ammoId` into an item: its own MAGAZINE pockets, else the
+ * inserted magazine, else its pocket's default_magazine (created). Returns rounds loaded.
+ */
+export function loadAmmo(it: Item, ammoId: string, n = Infinity): number {
+  const data = it.data;
+  if (!data.items[ammoId]) {
+    warnOnce('item', ammoId);
+    return 0;
+  }
+  const well = it.magazineWell();
+  if (well && well.empty && it.magazinePockets().length === 0) {
+    const dm = well.data.default_magazine;
+    if (dm && data.items[dm]) well.insert(new Item(data, data.items[dm]));
+  }
+  const cap = it.ammoCapacity() - it.ammoRemaining();
+  const want = Math.min(n, cap);
+  if (want <= 0) return 0;
+  const ammo = new Item(data, data.items[ammoId]);
+  ammo.charges = want;
+  let left: Item | null = ammo;
+  for (const p of it.magazinePockets()) if (left) left = p.insert(left);
+  const mag = it.magazineCurrent();
+  if (left && mag) for (const p of mag.magazinePockets()) if (left) left = p.insert(left);
+  return want - (left?.charges ?? 0);
 }
 
 /**
@@ -704,38 +733,32 @@ export function createItem(data: GameData, id: string, opts: CreateItemOpts = {}
     if (it.countByCharges || (def.max_charges ?? 0) > 0) it.charges = n;
   }
   if (opts.damage) it.damage = opts.damage;
+  if (it.hasFlag('SPAWN_ACTIVE')) it.active = true;
   if (opts.ammo) {
-    const ammo = createItem(data, opts.ammo, { charges: 100000 });
-    for (const p of it.magazinePockets()) p.insert(ammo);
-    const mag = it.magazineCurrent();
-    if (mag) for (const p of mag.magazinePockets()) p.insert(ammo);
+    const ammoId = opts.ammo === 'default' ? defaultAmmoId(data, it.ammoTypes()[0] ?? '') : opts.ammo;
+    if (!ammoId) throw new Error(`createItem: no default ammo for ${id}`);
+    loadAmmo(it, ammoId, opts.ammoCount);
   }
   return it;
 }
 
-const warnedIds = new Set<string>();
-function warnOnce(id: string): void {
-  if (warnedIds.has(id)) return;
-  warnedIds.add(id);
-  console.warn(`fromSpawned: unknown item id "${id}" (skipped)`);
-}
-
 /**
- * Turn item-group output into Items. Non-stackable items with count > 1 become several
- * Items; stackable ones become one stack. Loose liquids are put into their default
- * container like CDDA does when spawning on the map.
+ * Turn item-group output (src/data/itemgroups.ts) into Items. Non-stackable items with
+ * count > 1 become several Items; stackable ones become one stack. Guns/magazines/tools
+ * with `charges` get that much ammo (`ammo` or the type's default), using the pocket's
+ * default_magazine when nothing was placed in the well. Loose liquids are put into their
+ * default container like CDDA does when spawning on the map.
  */
 export function fromSpawned(data: GameData, s: SpawnedItem): Item[] {
   const def = data.items[s.id];
   if (!def) {
-    warnOnce(s.id);
+    warnOnce('item', s.id);
     return [];
   }
   const out: Item[] = [];
   if (countByCharges(def)) {
     const it = new Item(data, def);
     it.charges = (s.charges ?? defaultCharges(def)) * Math.max(1, s.count);
-    if (s.damage) it.damage = s.damage;
     if (it.isLiquid() && def.container && data.items[def.container]) {
       const c = new Item(data, data.items[def.container]);
       const left = c.put(it);
@@ -746,12 +769,18 @@ export function fromSpawned(data: GameData, s: SpawnedItem): Item[] {
   }
   for (let i = 0; i < Math.max(1, s.count); i++) {
     const it = new Item(data, def);
-    if (s.charges !== undefined && (def.max_charges ?? 0) > 0) it.charges = s.charges;
-    if (s.damage) it.damage = s.damage;
+    if (it.hasFlag('SPAWN_ACTIVE')) it.active = true;
     for (const cs of s.contents ?? []) {
       for (const c of fromSpawned(data, cs)) {
         const left = placeContent(it, c);
-        if (left) console.warn(`fromSpawned: ${c.typeId} does not fit in ${it.typeId}`);
+        if (left) warnOnce('fit', `${c.typeId}>${it.typeId}`, `fromSpawned: ${c.typeId} does not fit in ${it.typeId}`);
+      }
+    }
+    if (s.charges !== undefined && s.charges > 0) {
+      if ((def.max_charges ?? 0) > 0 && !it.magazineWell() && it.magazinePockets().length === 0) it.charges = Math.min(s.charges, def.max_charges!);
+      else {
+        const ammoId = s.ammo ?? (it.ammoData()?.id || defaultAmmoId(data, it.ammoTypes()[0] ?? ''));
+        if (ammoId) loadAmmo(it, ammoId, s.charges);
       }
     }
     out.push(it);

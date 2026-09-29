@@ -215,7 +215,8 @@ export function effectActivated(e: Effect, type: string, val: number, reduced: b
   else if (tick < 0) return false;
   if (turn % tick !== 0) return false;
   const bot = Math.trunc(t.modValue(type, 'chance_bot', reduced, e.intensity));
-  if (!bot) return top > 0 ? rng.next() * top < mod : false;
+  // x_in_y(mod, top): a zero chance with a nonzero value means "every tick"; negative never.
+  if (!bot) return top === 0 ? true : top > 0 ? rng.next() * top < mod : false;
   return rng.next() * bot < top * mod;
 }
 

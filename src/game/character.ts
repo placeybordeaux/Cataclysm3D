@@ -139,7 +139,8 @@ export class Character {
   stamina = 0;
   /** kcal in fat stores (CDDA stored_calories / 1000). */
   storedKcal = 0;
-  stomach = { volume: 0, kcal: 0, water: 0, lastAte: -1e9 };
+  /** lastAte starts at 0 so a new survivor counts as having just had breakfast. */
+  stomach = { volume: 0, kcal: 0, water: 0, lastAte: 0 };
   /** CDDA thirst scale: 0 normal, >40 Thirsty, >240 Dehydrated, >520 Parched, 1200 death. */
   thirst = 0;
   /** CDDA's legacy hunger counter (kept for effects that modify it); display uses hungerState(). */
@@ -684,9 +685,10 @@ export class Character {
         break;
       }
       case 'sleep': {
-        // Deeper sleep over time: intensity +1 per hour up to 24 (accelerated recovery).
+        // Deeper sleep over time: +1 intensity per 5 minutes, so the accelerated recovery in
+        // calc_sleep_recovery_rate reaches its 2x cap after 2 hours as CDDA's comment says.
         const slept = this.turn - e.startTurn;
-        e.setIntensity(Math.min(24, 1 + Math.floor(slept / 3600)));
+        e.setIntensity(Math.min(24, 1 + Math.floor(slept / 300)));
         break;
       }
       case 'lying_down': {
@@ -971,7 +973,7 @@ export class Character {
         this.wakeUp();
       } else {
         this.sleepiness -= rec;
-        const restMod = this.sleepiness < SLEEPINESS.DEAD_TIRED ? 3 : this.sleepiness >= SLEEPINESS.EXHAUSTED ? 1 : 1;
+        const restMod = this.sleepiness < SLEEPINESS.DEAD_TIRED ? 3 : 1;
         this.sleepDeprivation = Math.max(0, this.sleepDeprivation - restMod * rec * 2);
       }
     }
