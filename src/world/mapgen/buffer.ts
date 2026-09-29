@@ -1,4 +1,4 @@
-import type { Field, MapItem } from '../map';
+import type { Field, ItemSpawn } from '../map';
 
 // Working grid for one OMT while mapgen runs. Uses string ids (not registry indices) so
 // region pseudo-terrain (t_region_*) and unknown ids can be resolved/reported at the end.
@@ -46,7 +46,7 @@ export class MapBuffer {
   readonly ter: string[];
   readonly furn: string[];
   readonly traps = new Map<number, string>();
-  items = new Map<number, MapItem[]>();
+  items = new Map<number, ItemSpawn[]>();
   fields = new Map<number, Field[]>();
   signs = new Map<number, string>();
   graffiti = new Map<number, string>();
@@ -68,7 +68,7 @@ export class MapBuffer {
     return x >= 0 && y >= 0 && x < OMT && y < OMT;
   }
 
-  addItem(i: number, it: MapItem): void {
+  addItem(i: number, it: ItemSpawn): void {
     let l = this.items.get(i);
     if (!l) this.items.set(i, (l = []));
     l.push(it);

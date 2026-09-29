@@ -2,7 +2,7 @@ import { Rng, hashSeed } from '../core/rng';
 import type { GameData } from '../data/types';
 import { expandItemGroup } from '../data/itemgroups';
 import { CHUNK } from './coords';
-import type { Chunk, ChunkGenerator, GameMap } from './map';
+import type { Chunk, ChunkGenerator, GameMap, MapItem } from './map';
 import { hasFlag } from './registry';
 import type { WorldgenData } from './worldgen_data';
 import { MapBuffer, OMT } from './mapgen/buffer';
@@ -274,7 +274,16 @@ export class WorldGenerator implements ChunkGenerator {
       c.furn[i] = f ?? 0;
     }
     c.items.clear();
-    for (const [k, v] of b.items) c.items.set(k, v);
+    for (const [k, v] of b.items) {
+      const out: MapItem[] = [];
+      for (const sp of v) {
+        // Items already committed to the chunk (see readChunk) pass through untouched.
+        if (sp.existing) out.push(sp.existing as MapItem);
+        else if (map.itemFactory) out.push(...map.itemFactory(sp));
+        else out.push(sp);
+      }
+      if (out.length) c.items.set(k, out);
+    }
     c.fields.clear();
     for (const [k, v] of b.fields) c.fields.set(k, v);
     c.traps.clear();
@@ -306,7 +315,7 @@ export class WorldGenerator implements ChunkGenerator {
       b.ter[i] = map.terrain.get(c.ter[i]).id;
       b.furn[i] = c.furn[i] ? map.furniture.get(c.furn[i]).id : '';
     }
-    for (const [k, v] of c.items) b.items.set(k, v);
+    for (const [k, v] of c.items) b.items.set(k, v.map((it) => ({ typeId: it.typeId, existing: it })));
     for (const [k, v] of c.fields) b.fields.set(k, v);
     for (const [k, v] of c.traps) b.traps.set(k, v);
     for (const [k, v] of c.signs) b.signs.set(k, v);

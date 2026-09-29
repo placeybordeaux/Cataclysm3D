@@ -1,5 +1,5 @@
 import { Rng, hashString } from '../../core/rng';
-import type { MapItem } from '../map';
+import type { ItemSpawn } from '../map';
 import type { OterDef, WorldgenData } from '../worldgen_data';
 import { MapBuffer, OMT } from './buffer';
 import type { GenStats } from './stats';
@@ -488,10 +488,12 @@ export class MapgenRunner {
 
   private addItems(buf: MapBuffer, i: number, list: SpawnedItem[]): void {
     for (const e of list) {
-      const it: MapItem = { typeId: e.id };
+      const it: ItemSpawn = { typeId: e.id };
       if (e.count !== 1) it.count = e.count;
       if (e.charges !== undefined) it.charges = e.charges;
       if (e.contents?.length) it.contents = e.contents.map((c) => ({ typeId: c.id, count: c.count, charges: c.charges }));
+      // Keep the full roll (ammo, variant, nested contents) for the item factory.
+      it.spawned = e;
       buf.addItem(i, it);
     }
   }
@@ -625,7 +627,7 @@ export class MapgenRunner {
         const i = at();
         if (i < 0) return;
         if (d.group) this.addItems(buf, i, env.expandItems(d.group, rng));
-        else if (d.item) buf.addItem(i, d.variant ? ({ typeId: d.item, variant: d.variant } as MapItem) : { typeId: d.item });
+        else if (d.item) buf.addItem(i, d.variant ? ({ typeId: d.item, variant: d.variant } as ItemSpawn) : { typeId: d.item });
         return;
       }
       case 'item': {
@@ -655,7 +657,7 @@ export class MapgenRunner {
       case 'corpses': {
         const i = at();
         if (i < 0) return;
-        buf.addItem(i, { typeId: 'corpse', corpseGroup: d.group, corpseAgeDays: d.age ?? 0 } as MapItem);
+        buf.addItem(i, { typeId: 'corpse', corpseGroup: d.group, corpseAgeDays: d.age ?? 0 } as ItemSpawn);
         return;
       }
       case 'monsters': {

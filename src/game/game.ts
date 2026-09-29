@@ -5,6 +5,13 @@ import type { GameData } from '../data/types';
 import { GameMap } from '../world/map';
 import { PlayerAvatar } from './player';
 import { moveWithCollision } from './physics';
+import { fromSpawned } from './item';
+import type { SpawnedItem } from '../data/itemgroups';
+import type { ItemSpawn } from '../world/map';
+
+function toSpawned(sp: ItemSpawn): SpawnedItem {
+  return { id: sp.typeId, count: sp.count ?? 1, charges: sp.charges, contents: sp.contents?.map(toSpawned) } as SpawnedItem;
+}
 
 // Game owns all simulation state and advances it with a fixed timestep; rendering and UI
 // only read from it. Subsystems register via `systems` so features can be added without
@@ -35,6 +42,7 @@ export class Game {
     this.player.onDeath = (cause) => this.events.emit('playerDied', { cause });
     for (const t of Object.values(data.terrain)) this.map.terrain.add(t);
     for (const f of Object.values(data.furniture)) this.map.furniture.add(f);
+    this.map.itemFactory = (sp) => fromSpawned(data, (sp.spawned as SpawnedItem | undefined) ?? toSpawned(sp));
   }
 
   message(text: string, color?: string): void {

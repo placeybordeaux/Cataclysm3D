@@ -9,10 +9,20 @@ import type { FurnitureDef, TerrainDef } from '../data/types';
 /** Minimal shape the map needs from an item; the full Item class lives in src/game/item.ts. */
 export interface MapItem {
   typeId: string;
+}
+
+/**
+ * Raw item placement produced by mapgen (item-group rolls, liquids, corpses). The chunk
+ * never stores these: GameMap.itemFactory turns them into real items (src/game/item.ts)
+ * when a generated chunk is committed, keeping src/world free of game-layer imports.
+ */
+export interface ItemSpawn {
+  typeId: string;
   /** Stack size / charges as rolled by mapgen item groups (absent = 1 / type default). */
   count?: number;
   charges?: number;
-  contents?: MapItem[];
+  contents?: ItemSpawn[];
+  [extra: string]: unknown;
 }
 
 /**
@@ -103,6 +113,8 @@ export class GameMap {
   readonly furniture = new IdRegistry<FurnitureDef>(NULL_FURN);
   private chunks = new Map<string, Chunk>();
   generator: ChunkGenerator | null = null;
+  /** Converts mapgen item placements into real items; set by Game. */
+  itemFactory: ((spawn: ItemSpawn) => MapItem[]) | null = null;
   /** Hooks for systems that must react to spawns during generation (monsters, vehicles). */
   onChunkGenerated: ((chunk: Chunk) => void)[] = [];
 
