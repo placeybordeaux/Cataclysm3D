@@ -574,9 +574,17 @@ distance-dependent asset detail for readability. Our implementation:
 - Camera modes (switch with `V`): first-person (default), over-the-shoulder, top-down
   (classic CDDA view). Keep all three working.
 
+- **Visual styles** (docs/LOOKS.md): `look=classic|crisp|voxel|terrain|full` (default full;
+  Options > Visual style, persisted; `renderer.setLook(name)`, `cdda.setLook`,
+  `cdda.lookTweak({feature: v})`). Features live in `src/render/look.ts`; the mesher reads
+  `look.f` through `chunks.extras`. Volumes (voxel props, 3D trees) only within
+  `chunks.lodRadius` chunks of the player. Visual ground height (relief, curbs) is
+  `renderer.groundAt(x, y, z)`: sprites and the eye ride it, gameplay stays on the flat grid.
+  `tools/look-shots.ts` renders the comparison set / GPU bench.
+
 ### Renderer APIs (src/render)
 
-Pipeline: scene → low-res MRT target (~360 px tall, exact integer upscale; colour + view
+Pipeline: scene → low-res MRT target (~360 px tall, or 540-720 px with `px` 0 = auto; exact integer upscale; colour + view
 normals + depth) → post pass (depth/normal outlines, fog, Bayer dither, palette/LUT grade)
 → nearest blit. URL params: `px=`, `grade=palette|smooth|off`, `tex=atlas|procedural`,
 `cam=first|third|top`, `walls=tinted|sprite`, `radius=<chunks, default 4>`,

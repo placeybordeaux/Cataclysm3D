@@ -29,6 +29,16 @@ export const shared = {
   uCutTo: { value: 1e6 }, // clamp height
   uSpriteTilt: { value: 0.0 }, // 0 = upright cylindrical billboards, 1 = face camera fully
   uTime: { value: 0 },
+  // look.ts features (0 = off): sky rim light, luminance bump on world faces, rounded
+  // sprite normals. Uniforms rather than defines so switching looks never recompiles.
+  uRim: { value: 0 },
+  uRimColor: { value: new THREE.Color(0, 0, 0) },
+  uBump: { value: 0 },
+  uSpriteRound: { value: 0 },
+  /** Interior bounce light colour (look `bounce`); black = off. */
+  uBounce: { value: new THREE.Color(0, 0, 0) },
+  /** Pitched roofs (cut >= 1000 + level) vanish while the player is on/above that level. */
+  uPlayerLevel: { value: 0 },
 };
 
 const NORMAL_OUT_DECL = 'layout(location = 1) out highp vec4 gNormal;\n';
@@ -110,6 +120,9 @@ const INDIRECT = /* glsl */ `
 #define SKYVIS 1.0
 #endif
 vec4 gLm = vec4(0.0, 0.0, 0.0, -1.0);
+uniform float uRim;
+uniform vec3 uRimColor;
+uniform vec3 uBounce;
 float lmNatural() { return gLm.w >= 0.0 ? gLm.w : SKYVIS; }
 // Sun/moon only reaches where the light map says sky light gets in (beyond the shadow
 // map's range this is what keeps roofs from being see-through to sunlight).
@@ -118,6 +131,20 @@ float lmSunGate() { return gLm.w >= 0.0 ? smoothstep(0.02, 0.2, gLm.w) : 1.0; }
 float lmPointGate() { return gLm.w >= 0.0 ? smoothstep(0.0, 0.25, max(gLm.r, max(gLm.g, gLm.b))) : 1.0; }
 void RE_IndirectDiffuse_Lambert( const in vec3 irradiance, const in vec3 geometryPosition, const in vec3 geometryNormal, const in vec3 geometryViewDir, const in vec3 geometryClearcoatNormal, const in LambertMaterial material, inout ReflectedLight reflectedLight ) {
   reflectedLight.indirectDiffuse += irradiance * lmNatural() * BRDF_Lambert( material.diffuseColor );
+  if (uRim > 0.0) {
+    // sky rim on silhouettes of walls/props/creatures (not on ground seen at a grazing
+    // angle): separates forms from what's behind them, like a painted edge highlight
+    float upN = inverseTransformDirection( geometryNormal, viewMatrix ).y;
+    float f = 1.0 - saturate( dot( geometryNormal, geometryViewDir ) );
+    reflectedLight.indirectDiffuse += uRimColor * (uRim * f * f * f * (1.0 - max(upN, 0.0)) * lmNatural()) * material.diffuseColor;
+  }
+  if (gLm.w >= 0.0 && uBounce.r + uBounce.g + uBounce.b > 0.0) {
+    // Daylight that came in through windows bounces around a room: ceilings and walls away
+    // from the window get some of it instead of going black (interiors only).
+    float nat = gLm.w;
+    float upB = inverseTransformDirection( geometryNormal, viewMatrix ).y;
+    reflectedLight.indirectDiffuse += uBounce * (smoothstep(0.0, 0.12, nat) * (1.0 - nat) * (0.75 - 0.35 * upB)) * BRDF_Lambert( material.diffuseColor );
+  }
   if (gLm.w >= 0.0) {
     // The flat light-map term is strongest on floors: on walls a tile's light may have
     // come from either side (the point lights add the directional part).
@@ -140,6 +167,9 @@ type LmMode = 'world' | 'sprite' | 'none';
 
 function patchBandedLambert(shader: Shader, lm: LmMode = 'none'): void {
   shader.uniforms.uBands = shared.uBands;
+  shader.uniforms.uRim = shared.uRim;
+  shader.uniforms.uBounce = shared.uBounce;
+  shader.uniforms.uRimColor = shared.uRimColor;
   const assign = lm === 'world' ? 'gLm = lmSample(vLmPos);\n' : lm === 'sprite' ? 'gLm = vLmS;\n' : '';
   if (lm !== 'none') Object.assign(shader.uniforms, lmUniforms);
   shader.fragmentShader = shader.fragmentShader
@@ -163,6 +193,7 @@ varying vec4 vUvRect;
 varying float vSkyVis;
 uniform float uCutFloor;
 uniform float uCutTo;
+uniform float uPlayerLevel;
 #ifdef LM_WORLD
 varying vec3 vLmPos;
 #endif
@@ -174,14 +205,15 @@ vSkyVis = skyVis;
 // cut: 0 = static, 1 = lowered in cut mode, 2 = lowered in cut mode and otherwise hidden
 // (wall caps under a floor slab: only needed when top-down cuts the walls open)
 bool inCut = transformed.y > uCutFloor + 0.01 && transformed.y < uCutFloor + 3.0;
-if (cut > 1.5 && !inCut) transformed = vec3(0.0);
+if (cut > 999.0) { if (uPlayerLevel >= cut - 1000.0) transformed = vec3(0.0); }
+else if (cut > 1.5 && !inCut) transformed = vec3(0.0);
 else if (cut > 0.5 && inCut) transformed.y = min(transformed.y, uCutTo);
 #ifdef LM_WORLD
 // half a tile along the normal: a face reads the light of the space it faces
 vLmPos = (modelMatrix * vec4(transformed, 1.0)).xyz + normalize(objectNormal) * 0.45;
 #endif
 `;
-const WORLD_FRAG_PARS = 'varying vec4 vUvRect;\nvarying float vSkyVis;\n#define SKYVIS vSkyVis\n';
+const WORLD_FRAG_PARS = 'varying vec4 vUvRect;\nvarying float vSkyVis;\n#define SKYVIS vSkyVis\nuniform float uBump;\nvec2 gBump = vec2(0.0);\n';
 // Mip level is chosen from the *unwrapped* UV derivatives: fract() makes hardware LOD
 // selection spike at every tile seam (1px lines), and without mips distant floors turn
 // into moire. Clamped to a few levels so atlas neighbours (1px extrusion) barely bleed.
@@ -200,7 +232,35 @@ const WORLD_MAP = /* glsl */ `
   sampledDiffuseColor.rgb = min(sampledDiffuseColor.rgb / max(sampledDiffuseColor.a, 0.02), vec3(1.0));
   sampledDiffuseColor.a = textureLod( map, atlasUv, 0.0 ).a;
   diffuseColor *= sampledDiffuseColor;
+  if (uBump > 0.0 && lod < 1.5) {
+    // Pixel bump: treat each texel's luminance as height (mortar and board gaps are dark,
+    // so they recess). One texel steps in tile space, wrapped like the colour lookup.
+    vec2 ts = 1.0 / (vUvRect.zw * vec2(textureSize(map, 0)));
+    vec3 LW = vec3(0.3, 0.59, 0.11);
+    float lL = dot(textureLod(map, vUvRect.xy + clamp(fract(tileUv - vec2(ts.x, 0.0)), 0.0005, 0.9995) * vUvRect.zw, 0.0).rgb, LW);
+    float lR = dot(textureLod(map, vUvRect.xy + clamp(fract(tileUv + vec2(ts.x, 0.0)), 0.0005, 0.9995) * vUvRect.zw, 0.0).rgb, LW);
+    float lD = dot(textureLod(map, vUvRect.xy + clamp(fract(tileUv - vec2(0.0, ts.y)), 0.0005, 0.9995) * vUvRect.zw, 0.0).rgb, LW);
+    float lU = dot(textureLod(map, vUvRect.xy + clamp(fract(tileUv + vec2(0.0, ts.y)), 0.0005, 0.9995) * vUvRect.zw, 0.0).rgb, LW);
+    // relative to the local brightness so dark and light materials bump alike
+    float lc = max(dot(sampledDiffuseColor.rgb, LW), 0.04);
+    gBump = vec2(lR - lL, lU - lD) / (lc + 0.15) * uBump * (1.0 - smoothstep(0.5, 1.5, lod)) * 0.35;
+  }
 #endif
+`;
+// Applied after three's normal setup: tilt the face normal along the bump gradient using a
+// cotangent frame from screen derivatives (works for every face orientation and rotated
+// floor frames without tangent attributes). Derivatives are taken unconditionally.
+const WORLD_BUMP = /* glsl */ `
+#include <normal_fragment_maps>
+{
+  vec3 dpx = dFdx(-vViewPosition), dpy = dFdy(-vViewPosition);
+  vec2 dux = dFdx(vMapUv), duy = dFdy(vMapUv);
+  vec3 dp2perp = cross(dpy, normal), dp1perp = cross(normal, dpx);
+  vec3 bT = dp2perp * dux.x + dp1perp * duy.x;
+  vec3 bB = dp2perp * dux.y + dp1perp * duy.y;
+  float bim = inversesqrt(max(max(dot(bT, bT), dot(bB, bB)), 1e-12));
+  if (dot(gBump, gBump) > 0.0) normal = normalize(normal - (bT * gBump.x + bB * gBump.y) * bim);
+}
 `;
 
 /** World pages get nearest-mipmap filtering (see WORLD_MAP). Idempotent. */
@@ -215,7 +275,10 @@ function patchWorldVertex(shader: Shader, lm = false): void {
   shader.uniforms.uCutFloor = shared.uCutFloor;
   shader.uniforms.uCutTo = shared.uCutTo;
   shader.vertexShader = (lm ? '#define LM_WORLD\n' : '') + WORLD_VERT_PARS + shader.vertexShader.replace('#include <begin_vertex>', WORLD_VERT_CUT);
+  shader.uniforms.uBump = shared.uBump;
+  shader.uniforms.uPlayerLevel = shared.uPlayerLevel;
   shader.fragmentShader = WORLD_FRAG_PARS + shader.fragmentShader.replace('#include <map_fragment>', WORLD_MAP);
+  if (shader.fragmentShader.includes('#include <normal_fragment_maps>')) shader.fragmentShader = shader.fragmentShader.replace('#include <normal_fragment_maps>', WORLD_BUMP);
 }
 
 const worldCache = new Map<THREE.Texture, { mat: THREE.MeshLambertMaterial; depth: THREE.MeshDepthMaterial }>();
@@ -290,6 +353,8 @@ varying vec4 vFlash;
 varying float vSkyVis;
 varying float vOpacity;
 #define SKYVIS vSkyVis
+uniform float uSpriteRound;
+vec2 gSprN = vec2(0.0);
 float spriteBayer(vec2 p) {
   ivec2 i = ivec2(mod(p, 4.0));
   int m[16] = int[16](0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5);
@@ -300,6 +365,17 @@ const SPRITE_MAP = /* glsl */ `
 #ifdef USE_MAP
   vec4 sampledDiffuseColor = texture2D( map, vInstRect.xy + clamp(vMapUv, 0.001, 0.999) * vInstRect.zw );
   diffuseColor *= sampledDiffuseColor;
+  if (uSpriteRound > 0.0) {
+    // Inflate the silhouette: alpha differences at 2 and 5 texels tilt the normal outward
+    // near the edges, so a flat billboard shades like a rounded volume (sun side, rim).
+    vec2 d = 1.0 / (vInstRect.zw * vec2(textureSize(map, 0)));
+    vec2 u0 = clamp(vMapUv, 0.001, 0.999);
+    #define SA(o) texture2D(map, vInstRect.xy + clamp(u0 + (o) * d, 0.001, 0.999) * vInstRect.zw).a
+    vec2 g = vec2(SA(vec2(-2.0, 0.0)) - SA(vec2(2.0, 0.0)), SA(vec2(0.0, -2.0)) - SA(vec2(0.0, 2.0)))
+           + vec2(SA(vec2(-5.0, 0.0)) - SA(vec2(5.0, 0.0)), SA(vec2(0.0, -5.0)) - SA(vec2(0.0, 5.0))) * 0.6;
+    #undef SA
+    gSprN = g * uSpriteRound * 0.8;
+  }
 #endif
 diffuseColor.rgb = mix(diffuseColor.rgb, vFlash.rgb, vFlash.a);
 // screen-door transparency on the low-res pixel grid (stays crisp; no sorting needed)
@@ -317,8 +393,10 @@ export function spriteMaterial(page: THREE.Texture): THREE.MeshLambertMaterial {
     shader.vertexShader = LM_FUNCS + SPRITE_VERT_PARS + shader.vertexShader
       .replace('#include <beginnormal_vertex>', SPRITE_BEGIN_NORMAL)
       .replace('#include <begin_vertex>', SPRITE_BEGIN);
+    shader.uniforms.uSpriteRound = shared.uSpriteRound;
     shader.fragmentShader = SPRITE_FRAG_PARS + shader.fragmentShader
       .replace('#include <map_fragment>', SPRITE_MAP)
+      .replace('#include <normal_fragment_maps>', '#include <normal_fragment_maps>\nif (dot(gSprN, gSprN) > 0.0) normal = normalize(normal + vec3(gSprN.x, 0.0, 0.0) + (viewMatrix * vec4(0.0, gSprN.y, 0.0, 0.0)).xyz);')
       .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance += vFlash.rgb * vFlash.a * 0.8;');
     patchBandedLambert(shader, 'sprite');
     addNormalOutput(shader, true, 1);
@@ -359,4 +437,58 @@ export function patchNormalOutput(mat: THREE.Material, outline = true): void {
   const prevKey = mat.customProgramCacheKey.bind(mat);
   mat.customProgramCacheKey = () => prevKey() + '|mrt';
   mat.needsUpdate = true;
+}
+
+// --- instanced lit geometry (look.ts grass cards, tree leaf clumps) --------------------
+
+export interface InstancedLitOptions {
+  /** program cache key */
+  key: string;
+  /** GLSL declarations for the vertex shader (attributes, uniforms) */
+  pars?: string;
+  /** replaces three's beginnormal_vertex (must declare `vec3 objectNormal`) */
+  normal?: string;
+  /** GLSL run after begin_vertex: may change `transformed` (object space, pre-instance) */
+  vertex?: string;
+  /** light-map sample height above the instance origin (m) */
+  lmLift?: number;
+  uniforms?: Record<string, THREE.IUniform>;
+  /** outline flag written to the normal target (1 = outlined, 0 = not) */
+  outline?: number;
+  /** GLSL declarations / code for the fragment shader (after map_fragment) */
+  fragPars?: string;
+  frag?: string;
+}
+
+/**
+ * Banded-Lambert material for instanced world geometry: lit by the light map at the
+ * instance origin (+ lmLift) like a sprite, sun/moon/hemisphere like the world, MRT normal
+ * output. Also returns a matching depth material for shadow casting.
+ */
+export function instancedLitMaterial(params: THREE.MeshLambertMaterialParameters, o: InstancedLitOptions): { mat: THREE.MeshLambertMaterial; depth: THREE.MeshDepthMaterial } {
+  const vert = (shader: Shader, lm: boolean) => {
+    Object.assign(shader.uniforms, o.uniforms ?? {});
+    shader.uniforms.uTime = shared.uTime;
+    let v = (lm ? '#define LM_WORLD\nvarying vec3 vLmPos;\n' : '') + 'uniform float uTime;\n' + (o.pars ?? '') + shader.vertexShader;
+    if (o.normal && v.includes('#include <beginnormal_vertex>')) v = v.replace('#include <beginnormal_vertex>', o.normal);
+    const lmCode = lm ? `\nvLmPos = (modelMatrix * instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz + vec3(0.0, ${(o.lmLift ?? 0.4).toFixed(2)}, 0.0);` : '';
+    v = v.replace('#include <begin_vertex>', '#include <begin_vertex>\n' + (o.vertex ?? '') + lmCode);
+    shader.vertexShader = v;
+    if (o.fragPars || o.frag) {
+      // after emissivemap_fragment: diffuseColor and totalEmissiveRadiance both exist there
+      shader.fragmentShader = (o.fragPars ?? '') + shader.fragmentShader.replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n' + (o.frag ?? ''));
+    }
+  };
+  const mat = new THREE.MeshLambertMaterial(params);
+  mat.onBeforeCompile = (shader) => {
+    vert(shader, true);
+    patchBandedLambert(shader, 'world');
+    addNormalOutput(shader, true, o.outline ?? 1);
+  };
+  mat.customProgramCacheKey = () => `cdda-inst-${o.key}`;
+  (mat.userData as { mrt?: boolean }).mrt = true;
+  const depth = new THREE.MeshDepthMaterial({ map: params.map ?? null, alphaTest: params.alphaTest ?? 0, depthPacking: THREE.RGBADepthPacking, side: params.side ?? THREE.FrontSide });
+  depth.onBeforeCompile = (shader) => vert(shader, false);
+  depth.customProgramCacheKey = () => `cdda-inst-depth-${o.key}`;
+  return { mat, depth };
 }

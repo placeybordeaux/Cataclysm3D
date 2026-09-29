@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import type { Chunk, GameMap } from '../world/map';
 import { CHUNK } from '../world/coords';
-import { buildChunkMesh, ShapeTable } from './chunkMesh';
+import { buildChunkMesh, ShapeTable, type ChunkMeshData, type MeshExtras } from './chunkMesh';
+import { puddleMaterial } from './props';
 import { worldMaterials } from './materials';
 import type { SpriteLayer, StaticSpriteGroup } from './sprites';
 import { LEVEL_HEIGHT } from '../world/coords';
@@ -29,6 +30,8 @@ interface Entry {
   sprites: StaticSpriteGroup | null;
   visible: boolean;
   d2: number;
+  /** inside lodRadius (volumetric trees/props) at the last signature */
+  near: boolean;
 }
 
 export interface ChunkStats {
@@ -40,6 +43,12 @@ export interface ChunkStats {
   skippedEmpty: number;
   /** first builds of chunks already inside the clearly visible (not fogged) range: pop-in, cumulative */
   lateBuilds: number;
+  /** slowest single build (ms) and builds over 8 ms, cumulative (look perf) */
+  maxBuildMs: number;
+  slowBuilds: number;
+  /** of which: mesh data, 3D trees (ms, cumulative) */
+  meshMs: number;
+  treeMs: number;
 }
 
 const key = (cx: number, cy: number, z: number) => ((z + 16) * 4096 + (cx + 2048)) * 4096 + (cy + 2048);
@@ -54,11 +63,17 @@ export class ChunkManager {
   budgetMs = 4;
   /** Distance (tiles) inside which a chunk appearing counts as visible pop-in (set by the renderer from the fog). */
   visibleDist = 1e9;
-  readonly stats: ChunkStats = { entries: 0, pending: 0, builtThisFrame: 0, lastBuildMs: 0, skippedEmpty: 0, lateBuilds: 0 };
+  readonly stats: ChunkStats = { entries: 0, pending: 0, builtThisFrame: 0, lastBuildMs: 0, skippedEmpty: 0, lateBuilds: 0, maxBuildMs: 0, slowBuilds: 0, meshMs: 0, treeMs: 0 };
   private entries = new Map<number, Entry>();
   private dirty: Entry[] = [];
   private shapes: ShapeTable;
   season: 'spring' | 'summer' | 'autumn' | 'winter' = 'spring';
+  /** Per-look mesher inputs (look.ts), read at every build; null = classic. */
+  extras: ((near: boolean) => MeshExtras | undefined) | null = null;
+  /** Chunks within this many chunk widths get the near-only volumes (0 = none). */
+  lodRadius = 0;
+  /** Builds extra per-chunk objects from mesh data (3D trees); added to the chunk group. */
+  extraObjects: ((data: ChunkMeshData, cx: number, cy: number, z: number) => THREE.Object3D[]) | null = null;
 
   constructor(private map: GameMap, private sprites: SpriteLayer, public source: TileTextureSource) {
     this.group.name = 'chunks';
@@ -98,7 +113,7 @@ export class ChunkManager {
         created++;
         this.entries.set(k, {
           cx, cy, z, chunk: deps[0], deps, sig: 0, builtSig: -1, group: null, sprites: null,
-          visible: true, d2: 0,
+          visible: true, d2: 0, near: false,
         });
       }
     // 2. signatures, visibility, eviction
@@ -116,6 +131,10 @@ export class ChunkManager {
       if (vis !== e.visible) this.setVisible(e, vis);
       let sig = 0;
       for (const d of e.deps) sig = (sig * 31 + (d ? d.version + 1 : 0)) | 0;
+      if (this.lodRadius > 0) {
+        e.near = ddx * ddx + ddy * ddy <= this.lodRadius * this.lodRadius;
+        sig = (sig * 31 + (e.near ? 7 : 3)) | 0;
+      }
       e.sig = sig;
       if (sig !== e.builtSig && inLevels) {
         e.d2 = ddx * ddx + ddy * ddy + (e.z === pz ? 0 : 0.5);
@@ -135,6 +154,8 @@ export class ChunkManager {
       const b0 = performance.now();
       this.build(e);
       this.stats.lastBuildMs = performance.now() - b0;
+      this.stats.maxBuildMs = Math.max(this.stats.maxBuildMs, this.stats.lastBuildMs);
+      if (this.stats.lastBuildMs > 8) this.stats.slowBuilds++;
       built++;
     }
     this.stats.builtThisFrame = built;
@@ -167,7 +188,9 @@ export class ChunkManager {
       this.stats.skippedEmpty++;
       return;
     }
-    const data = buildChunkMesh(this.map, this.shapes, this.source, e.chunk, this.season);
+    const t0 = performance.now();
+    const data = buildChunkMesh(this.map, this.shapes, this.source, e.chunk, this.season, undefined, this.extras?.(e.near));
+    this.stats.meshMs += performance.now() - t0;
     const g = new THREE.Group();
     g.name = `chunk ${e.cx},${e.cy},${e.z}`;
     for (const [page, gb] of data.pages) {
@@ -179,6 +202,16 @@ export class ChunkManager {
       mesh.receiveShadow = true;
       mesh.matrixAutoUpdate = false;
       g.add(mesh);
+    }
+    if (data.puddles && data.puddles.vertexCount) {
+      const pm = new THREE.Mesh(data.puddles.build(), puddleMaterial());
+      pm.matrixAutoUpdate = false;
+      g.add(pm);
+    }
+    if (this.extraObjects) {
+      const t1 = performance.now();
+      for (const o of this.extraObjects(data, e.cx, e.cy, e.z)) g.add(o);
+      this.stats.treeMs += performance.now() - t1;
     }
     g.matrixAutoUpdate = false;
     g.visible = e.visible;
@@ -206,7 +239,10 @@ export class ChunkManager {
 
   private dispose(e: Entry): void {
     if (e.group) {
-      for (const c of e.group.children) (c as THREE.Mesh).geometry.dispose();
+      for (const c of e.group.children) {
+        (c as THREE.Mesh).geometry?.dispose();
+        (c.userData as { dispose?: () => void }).dispose?.();
+      }
       this.group.remove(e.group);
       e.group = null;
     }

@@ -210,6 +210,11 @@ export class LightManager {
   readonly group = new THREE.Group();
   readonly sun = new THREE.DirectionalLight(0xffffff, 1);
   readonly hemi = new THREE.HemisphereLight(0xffffff, 0x444444, 1);
+  /** Shadowless fill from the side opposite the sun (look.ts `fill`): a light pointing at
+   *  the camera flattens forms unless a second light keeps their shape. Always present
+   *  (intensity 0 when off) so shader programs never change. */
+  readonly fill = new THREE.DirectionalLight(0xffffff, 0);
+  fillK = 0;
   readonly flashlight = new THREE.SpotLight(0xfff2d8, 0, 22, 0.42, 0.35, 1.2);
   flashlightOn = false;
   /** Global multiplier for point/spot intensities (tuning). */
@@ -236,7 +241,7 @@ export class LightManager {
     c.near = 1; c.far = 160;
     this.sun.shadow.bias = -0.0008;
     this.sun.shadow.normalBias = 0.03;
-    this.group.add(this.sun, this.sun.target, this.hemi);
+    this.group.add(this.sun, this.sun.target, this.hemi, this.fill, this.fill.target);
     for (let i = 0; i < POOL_SIZE; i++) {
       const p = new THREE.PointLight(0xffffff, 0, 8, 1.6);
       this.pool.push(p);
@@ -274,6 +279,20 @@ export class LightManager {
       set radius(v: number) { if (v !== s.radius) self.handlesDirty = true; s.radius = v; s.lum = handleLuminance(s); },
       remove() { self.dynamic.delete(s); self.handlesDirty = true; },
     };
+  }
+
+  /** Resize the sun shadow map / frustum (look.ts); the map reallocates on the next frame. */
+  setShadow(size: number, extent: number): void {
+    const sh = this.sun.shadow;
+    if (sh.mapSize.x !== size) {
+      sh.mapSize.set(size, size);
+      sh.map?.dispose();
+      (sh as { map: THREE.WebGLRenderTarget | null }).map = null;
+    }
+    this.shadowExtent = extent;
+    const c = sh.camera;
+    c.left = -extent; c.right = extent; c.top = extent; c.bottom = -extent;
+    c.updateProjectionMatrix();
   }
 
   /** Handles for the light map (lightmap.ts reads x/y/z/lum/color/flicker/phase). */
@@ -315,6 +334,12 @@ export class LightManager {
     this.hemi.color.copy(sky.hemiSky);
     this.hemi.groundColor.copy(sky.hemiGround);
     this.hemi.intensity = sky.hemiIntensity;
+    // fill: from the opposite azimuth, fairly high, sky-coloured
+    this.fill.color.copy(sky.hemiSky);
+    this.fill.intensity = this.fillK * sky.hemiIntensity * 0.9;
+    this.fill.target.position.copy(snapped);
+    this.fill.position.set(snapped.x - dir.x * 40, snapped.y + 60, snapped.z - dir.z * 40);
+    this.fill.target.updateMatrixWorld();
 
     // Pick nearest point sources.
     const act = this.active;

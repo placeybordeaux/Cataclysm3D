@@ -34,6 +34,14 @@ export interface PipelineOptions {
    * distorts the Bayer cells toward the screen edges.)
    */
   ditherAnchor: 'screen' | 'view';
+  /** Screen-space ambient occlusion strength (0 = off, skips the pass). */
+  ssao: number;
+  /** Bloom strength (0 = off, skips the passes). */
+  bloom: number;
+  /** Aerial-perspective strength (0 = off). */
+  atmosphere: number;
+  /** How much the distant skyline fades into the fog colour. */
+  skylineFog: number;
 }
 
 const FULLSCREEN_VERT = /* glsl */ `
@@ -64,6 +72,14 @@ uniform float uExposure;
 uniform float uHurt;
 uniform float uNightVision;
 uniform vec2 uDitherOffset;
+uniform vec2 uTan;        // tan(fov/2) * (aspect, 1): view-space position from depth
+uniform float uSsao;
+uniform float uAtmos;
+uniform vec3 uHaze;
+uniform float uSkylineFog;
+uniform float uBloom;
+uniform sampler2D tBloom;
+uniform int uDebugView;
 varying vec2 vUv;
 
 float linDepth(vec2 uv) {
@@ -85,13 +101,49 @@ float bayer4(vec2 p) {
   return (float(m[idx]) + 0.5) / 16.0;
 }
 
+vec3 viewPos(vec2 uv, float d) {
+  return vec3((uv * 2.0 - 1.0) * uTan * d, -d);
+}
+
+// Normal-oriented hemisphere SSAO at low resolution. The kernel is rotated per pixel by a
+// 4x4 Bayer angle, so the residual noise is an ordered pattern like the colour dither
+// (reads as pixel-art shading and needs no blur pass).
+float ssao(vec2 uv, float d, vec3 n) {
+  vec3 p = viewPos(uv, d);
+  float a = bayer4(gl_FragCoord.xy + uDitherOffset) * 6.2831853;
+  vec3 rnd = vec3(cos(a), sin(a), 0.0);
+  vec3 t = rnd - n * dot(rnd, n);
+  t = dot(t, t) < 1e-4 ? vec3(0.0, 1.0, 0.0) : normalize(t);
+  vec3 b = cross(n, t);
+  const float R = 0.6;
+  float occ = 0.0;
+  for (int i = 0; i < 8; i++) {
+    float fi = float(i);
+    float r = (fi + 1.0) / 8.0;
+    r = mix(0.15, 1.0, r * r);
+    float ang = fi * 2.39996;
+    vec3 k = vec3(cos(ang) * 0.8, sin(ang) * 0.8, 0.3 + 0.6 * fract(fi * 0.618));
+    vec3 s = p + (t * k.x + b * k.y + n * k.z) * (R * r);
+    vec2 su = (s.xy / (-s.z)) / uTan * 0.5 + 0.5;
+    if (su.x < 0.0 || su.y < 0.0 || su.x > 1.0 || su.y > 1.0) continue;
+    float diff = -s.z - linDepth(su);
+    if (diff > 0.02 * d / 10.0 + 0.02) occ += smoothstep(0.0, 1.0, R / diff);
+  }
+  return 1.0 - occ / 8.0;
+}
+
 void main() {
   vec2 px = 1.0 / uRes;
   vec3 col = texture2D(tColor, vUv).rgb * uExposure;
+  if (uBloom > 0.0) col += texture2D(tBloom, vUv).rgb * uBloom * uExposure;
   float dC = linDepth(vUv);
   bool sky = dC > 1e5;
+  // alpha 0.5 in the normal target marks the distant skyline: no outlines, its own haze
+  bool skyline = abs(texture2D(tNormal, vUv).a - 0.5) < 0.2;
 
-  if (!sky) {
+  if (skyline) {
+    col = mix(col, uFogColor, uSkylineFog);
+  } else if (!sky) {
     // --- outlines -------------------------------------------------------------------
     // For planar surfaces 1/depth is affine in screen space, so comparing each neighbour
     // with the planar continuation from the opposite side rejects grazing floors (which
@@ -120,13 +172,27 @@ void main() {
         }
       }
     }
+    if (uDebugView == 2) { gl_FragColor = vec4(nC4.rgb, 1.0); return; }
+    if (uSsao > 0.0 && nC4.a > 0.75) {
+      float ao = ssao(vUv, dC, normalize(nC));
+      if (uDebugView == 1) { gl_FragColor = vec4(vec3(ao), 1.0); return; }
+      col *= mix(1.0, ao, uSsao * (1.0 - smoothstep(uFogNear, uFogFar, dC)));
+    }
     float fog = uFogMax * smoothstep(uFogNear, uFogFar, dC);
     float near = 1.0 - smoothstep(uFogNear * 0.8, uFogFar, dC);
     if (sil > 0.5) col *= mix(1.0, 1.0 - uOutline, near);
     else if (convex > 0.5) col = col * (1.0 + uCrease * near) + uCrease * 0.02 * near;
     else if (concave > 0.5) col *= 1.0 - uCrease * 0.5 * near;
 
-    // --- fog -------------------------------------------------------------------------
+    // --- aerial perspective + fog -----------------------------------------------------
+    if (uAtmos > 0.0) {
+      // distance desaturates and shifts toward the haze colour well before the fog wall,
+      // which is what separates planes of depth (full-spectrum, graded afterwards)
+      float a = uAtmos * (1.0 - exp(-dC / 60.0));
+      float l = dot(col, vec3(0.3, 0.59, 0.11));
+      col = mix(col, vec3(l), a * 0.4);
+      col = mix(col, uHaze, a * 0.45);
+    }
     col = mix(col, uFogColor, fog);
   }
 
@@ -159,6 +225,34 @@ void main() {
 }`;
 
 const _euler = new THREE.Euler();
+const _proj = new THREE.Matrix4(), _projInv = new THREE.Matrix4();
+/** clip z' = 0.001 z - 0.999 w: NDC depth [-1, 1] -> [-1, -0.998] (see render). */
+const _squeeze = new THREE.Matrix4().set(1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0.001, -0.999, 0, 0, 0, 1);
+
+// Bloom: bright-pass at half the low resolution, then a separable blur, added back in the
+// post pass before grading (so the glow is dithered and palette-snapped like the rest).
+const BRIGHT_FRAG = /* glsl */ `
+precision highp float;
+uniform sampler2D tSrc;
+uniform float uExposure;
+uniform float uThreshold;
+varying vec2 vUv;
+void main() {
+  vec3 c = texture2D(tSrc, vUv).rgb * uExposure;
+  float l = max(c.r, max(c.g, c.b));
+  gl_FragColor = vec4(c * max(l - uThreshold, 0.0) / max(l, 1e-4), 1.0);
+}`;
+const BLUR_FRAG = /* glsl */ `
+precision highp float;
+uniform sampler2D tSrc;
+uniform vec2 uDir;
+varying vec2 vUv;
+void main() {
+  vec3 c = texture2D(tSrc, vUv).rgb * 0.227;
+  c += (texture2D(tSrc, vUv + uDir * 1.385).rgb + texture2D(tSrc, vUv - uDir * 1.385).rgb) * 0.316;
+  c += (texture2D(tSrc, vUv + uDir * 3.23).rgb + texture2D(tSrc, vUv - uDir * 3.23).rgb) * 0.070;
+  gl_FragColor = vec4(c, 1.0);
+}`;
 
 const BLIT_FRAG = /* glsl */ `
 precision highp float;
@@ -191,6 +285,14 @@ export class PixelPipeline {
   postTarget!: THREE.WebGLRenderTarget;
   private postMat: THREE.ShaderMaterial;
   private blitMat: THREE.ShaderMaterial;
+  private brightMat: THREE.ShaderMaterial;
+  private blurMat: THREE.ShaderMaterial;
+  private bloomA: THREE.WebGLRenderTarget | null = null;
+  private bloomB: THREE.WebGLRenderTarget | null = null;
+  /** Debug output of the post pass: 0 normal, 1 SSAO term, 2 view normals. */
+  debugView = 0;
+  /** Haze colour for aerial perspective (renderer sets it from the sky each frame). */
+  readonly haze = new THREE.Color();
   private quad: THREE.Mesh;
   private quadScene = new THREE.Scene();
   private quadCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
@@ -212,7 +314,7 @@ export class PixelPipeline {
   constructor(private three: THREE.WebGLRenderer, opts: Partial<PipelineOptions> = {}) {
     this.options = {
       targetHeight: 360, grade: 'palette', dither: 0.035, outline: 0.55, crease: 0.22,
-      fogNear: 28, fogFar: 96, fogMax: 0.92, ditherAnchor: 'view', ...opts,
+      fogNear: 28, fogFar: 96, fogMax: 0.92, ditherAnchor: 'view', ssao: 0, bloom: 0, atmosphere: 0, skylineFog: 0.7, ...opts,
     };
     const LUT = 32;
     const pal = lut3d(buildLut(LUT, 'palette'), LUT, THREE.NearestFilter);
@@ -228,6 +330,8 @@ export class PixelPipeline {
         uMode: { value: 0 }, uDither: { value: 0.05 }, uOutline: { value: 0.5 }, uCrease: { value: 0.2 },
         uExposure: { value: 1 }, uHurt: { value: 0 }, uNightVision: { value: 0 },
         uDitherOffset: { value: new THREE.Vector2() },
+        uTan: { value: new THREE.Vector2(1, 1) }, uSsao: { value: 0 }, uAtmos: { value: 0 },
+        uHaze: { value: new THREE.Color() }, uSkylineFog: { value: 0.7 }, uBloom: { value: 0 }, tBloom: { value: null }, uDebugView: { value: 0 },
       },
       depthTest: false,
       depthWrite: false,
@@ -241,6 +345,16 @@ export class PixelPipeline {
       },
       depthTest: false,
       depthWrite: false,
+    });
+    this.brightMat = new THREE.ShaderMaterial({
+      vertexShader: FULLSCREEN_VERT, fragmentShader: BRIGHT_FRAG,
+      uniforms: { tSrc: { value: null }, uExposure: { value: 1 }, uThreshold: { value: 1.4 } },
+      depthTest: false, depthWrite: false,
+    });
+    this.blurMat = new THREE.ShaderMaterial({
+      vertexShader: FULLSCREEN_VERT, fragmentShader: BLUR_FRAG,
+      uniforms: { tSrc: { value: null }, uDir: { value: new THREE.Vector2() } },
+      depthTest: false, depthWrite: false,
     });
     this.quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.postMat);
     this.quad.frustumCulled = false;
@@ -256,6 +370,11 @@ export class PixelPipeline {
     this.lowH = s.h;
     this.scene?.dispose();
     this.postTarget?.dispose();
+    this.bloomA?.dispose();
+    this.bloomB?.dispose();
+    const bo = { type: THREE.HalfFloatType, minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, depthBuffer: false };
+    this.bloomA = new THREE.WebGLRenderTarget(Math.max(1, s.w >> 1), Math.max(1, s.h >> 1), bo);
+    this.bloomB = new THREE.WebGLRenderTarget(Math.max(1, s.w >> 1), Math.max(1, s.h >> 1), bo);
     const depth = new THREE.DepthTexture(s.w, s.h);
     depth.type = THREE.UnsignedIntType;
     this.scene = new THREE.WebGLRenderTarget(s.w, s.h, {
@@ -290,11 +409,43 @@ export class PixelPipeline {
     r.clear();
     r.render(scene, camera);
     if (overlay) {
+      // The overlay keeps its own depth order but must not erase the world's depth (the
+      // post pass reads it for fog, outlines and SSAO; clearing it made the whole first-
+      // person world "sky" there). Squeeze the overlay camera's depth into the first
+      // 0.1% of the range instead: always in front of the world, still self-occluding.
       const auto = r.autoClear;
       r.autoClear = false;
-      r.clearDepth();
-      r.render(overlay.scene, overlay.camera);
+      const cam = overlay.camera;
+      _proj.copy(cam.projectionMatrix);
+      _projInv.copy(cam.projectionMatrixInverse);
+      cam.projectionMatrix.premultiply(_squeeze);
+      cam.projectionMatrixInverse.copy(cam.projectionMatrix).invert();
+      r.render(overlay.scene, cam);
+      cam.projectionMatrix.copy(_proj);
+      cam.projectionMatrixInverse.copy(_projInv);
       r.autoClear = auto;
+    }
+
+    if (o.bloom > 0 && this.bloomA && this.bloomB) {
+      const A = this.bloomA, B = this.bloomB;
+      this.brightMat.uniforms.tSrc.value = this.scene.textures[0];
+      this.brightMat.uniforms.uExposure.value = this.exposure;
+      this.quad.material = this.brightMat;
+      r.setRenderTarget(A);
+      r.render(this.quadScene, this.quadCam);
+      this.quad.material = this.blurMat;
+      const bu = this.blurMat.uniforms;
+      // two blur iterations with growing step: a wide soft halo from a half-res target
+      for (const step of [1, 2.2]) {
+        bu.tSrc.value = A.texture;
+        bu.uDir.value.set(step / A.width, 0);
+        r.setRenderTarget(B);
+        r.render(this.quadScene, this.quadCam);
+        bu.tSrc.value = B.texture;
+        bu.uDir.value.set(0, step / A.height);
+        r.setRenderTarget(A);
+        r.render(this.quadScene, this.quadCam);
+      }
     }
 
     const u = this.postMat.uniforms;
@@ -315,6 +466,15 @@ export class PixelPipeline {
     u.uExposure.value = this.exposure;
     u.uHurt.value = this.hurt;
     u.uNightVision.value = this.nightVision;
+    const ty = Math.tan((camera.fov * Math.PI) / 360);
+    u.uTan.value.set(ty * camera.aspect, ty);
+    u.uSsao.value = o.ssao;
+    u.uDebugView.value = this.debugView;
+    u.uAtmos.value = o.atmosphere;
+    u.uHaze.value.copy(this.haze);
+    u.uSkylineFog.value = o.skylineFog;
+    u.uBloom.value = o.bloom > 0 && this.bloomA ? o.bloom : 0;
+    u.tBloom.value = this.bloomA?.texture ?? null;
     if (o.ditherAnchor === 'view') {
       // camera yaw/pitch in pixel-angles (rotation order YXZ: y = -yaw, x = pitch)
       const q = (2 * Math.tan((camera.fov * Math.PI) / 360)) / this.lowH;

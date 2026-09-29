@@ -48,7 +48,7 @@ export function applyStoredOptions(ctx: UiContext): void {
   if (o.mouseSensitivity) ctx.game.mouseSensitivity = o.mouseSensitivity;
   if (o.menuCursor === 'free' || o.menuCursor === 'captured') ctx.game.input.menuCursor = o.menuCursor;
   const pipe = ctx.renderer.pipeline;
-  if (o.px && !params.get('px')) {
+  if (o.px !== undefined && !params.get('px')) {
     pipe.options.targetHeight = o.px;
     ctx.renderer.resize();
   }
@@ -112,10 +112,11 @@ export function openOptions(ctx: UiContext): Panel {
     },
     desc: 'How far the view turns per pixel of mouse movement.',
   });
-  const PX = [240, 270, 300, 360, 432, 480, 540, 720];
+  // 0 = auto: the integer upscale giving a 540-720 px image (grading.ts lowResSize)
+  const PX = [0, 240, 270, 300, 360, 432, 480, 540, 720];
   opts.push({
     name: 'Render resolution',
-    value: () => `${pipe.options.targetHeight} px`,
+    value: () => (pipe.options.targetHeight > 0 ? `${pipe.options.targetHeight} px` : `auto (${pipe.lowH - 2})`),
     change: (d) => {
       const cur = pipe.options.targetHeight;
       const i = PX.findIndex((v) => v >= cur);
