@@ -21,6 +21,9 @@ import { MissionSystem, type MissionHost, type MissionInstance } from './mission
 import type { BodyPartId } from './bodyparts';
 import { BODY_PARTS } from './bodyparts';
 
+/** Tiles within which fights between NPCs and monsters are narrated blow by blow. */
+export const NARRATE_RANGE = 20;
+
 // The NPC simulation (CDDA npcmove.cpp, real-time and much simplified). Like MonsterSystem,
 // NPCs live forever once spawned and only those in the reality bubble are simulated.
 // Each NPC re-plans at ~4 Hz and picks one goal:
@@ -689,6 +692,16 @@ export class NpcSystem implements GameSystem, TalkWorld, MissionHost {
     return playerCanSee(this.game, n.tileX, n.tileY, n.z);
   }
 
+  /**
+   * Blow-by-blow narration of fights the survivor isn't in: only when close. In real time a
+   * distant brawl seen across a parking lot produced dozens of lines a second and buried
+   * everything else in the log (CDDA's turn-based pace never had that problem).
+   */
+  private narrates(n: Npc): boolean {
+    const p = this.game.player;
+    return Math.hypot(n.x - p.x, n.y - p.y) <= NARRATE_RANGE && this.visible(n);
+  }
+
   private melee(n: Npc, foe: Foe): void {
     const w = n.inv.wielded;
     if (foe.kind === 'monster') {
@@ -697,12 +710,12 @@ export class NpcSystem implements GameSystem, TalkWorld, MissionHost {
       n.attackCooldown = res.cooldownSeconds;
       m.aggroCharacter = true;
       if (!res.hit) {
-        if (this.visible(n)) this.message(`${n.name} misses ${m.theName()}.`, 'c_light_gray');
+        if (this.narrates(n)) this.message(`${n.name} misses ${m.theName()}.`, 'c_light_gray');
         return;
       }
       let dom = 'bash', best = 0;
       for (const d of res.damage) if (d.amount > best) (best = d.amount), (dom = d.type);
-      if (this.visible(n)) this.message(`${n.name} ${verb3(meleeVerb(dom, res.total, (a, b) => this.rng.int(a, b)))} ${m.theName()}${res.total > 0 ? '' : ' but does no damage'}.`);
+      if (this.narrates(n)) this.message(`${n.name} ${verb3(meleeVerb(dom, res.total, (a, b) => this.rng.int(a, b)))} ${m.theName()}${res.total > 0 ? '' : ' but does no damage'}.`);
       sfx.meleeHit(m.type.material[0] ?? 'flesh', m, { id: w?.typeId, skill: w ? w.meleeSkill() : 'unarmed' });
       emitSound(this.game, { x: m.tileX, y: m.tileY, z: m.z }, 8, 'Smack!', { category: 'combat', source: n, ambient: true });
       this.monsters?.hurt(m, res.total, null);
@@ -713,7 +726,7 @@ export class NpcSystem implements GameSystem, TalkWorld, MissionHost {
     n.attackCooldown = res.cooldownSeconds;
     if (!res.hit) {
       if (foe.kind === 'player') this.message(`${n.name} misses you.`);
-      else if (this.visible(n)) this.message(`${n.name} misses ${target.name}.`, 'c_light_gray');
+      else if (this.narrates(n)) this.message(`${n.name} misses ${target.name}.`, 'c_light_gray');
       return;
     }
     const bp: BodyPartId = selectBodyPart(this.rng, { hitRoll: res.hitSpread });
@@ -726,7 +739,7 @@ export class NpcSystem implements GameSystem, TalkWorld, MissionHost {
       this.game.events.emit('playerHurt', { amount: r.damage, bp, source: n });
       if (r.damage > 0) sfx.playerHurt(!this.player.male);
     } else {
-      if (this.visible(n)) this.message(`${n.name} hits ${foe.n.name}.`);
+      if (this.narrates(n)) this.message(`${n.name} hits ${foe.n.name}.`);
       this.afterHit(foe.n, r.damage, { kind: 'npc', n });
     }
   }
@@ -741,7 +754,7 @@ export class NpcSystem implements GameSystem, TalkWorld, MissionHost {
     }
     n.attackCooldown = Math.max(0.5, (r.moves || 100) / 100 / ACTION_SCALE);
     sfx.reload(gun.typeId, n);
-    if (this.visible(n)) this.message(`${n.name} reloads ${n.male ? 'his' : 'her'} ${gun.baseName()}.`, 'c_light_gray');
+    if (this.narrates(n)) this.message(`${n.name} reloads ${n.male ? 'his' : 'her'} ${gun.baseName()}.`, 'c_light_gray');
   }
 
   private shoot(n: Npc, gun: Item, foe: Foe, pos: { x: number; y: number }): void {
@@ -766,7 +779,7 @@ export class NpcSystem implements GameSystem, TalkWorld, MissionHost {
     if (foe.kind === 'monster') {
       const m = foe.m;
       const total = Math.floor(applyFlatArmor(units, m.type.armor).reduce((s, x) => s + x.amount, 0));
-      if (this.visible(n)) this.message(`${n.name} shoots ${m.theName()}.`);
+      if (this.narrates(n)) this.message(`${n.name} shoots ${m.theName()}.`);
       sfx.bulletHit('flesh', m);
       m.aggroCharacter = true;
       this.monsters?.hurt(m, total, null);
@@ -781,7 +794,7 @@ export class NpcSystem implements GameSystem, TalkWorld, MissionHost {
       this.game.events.emit('playerHurt', { amount: res.damage, bp, source: n });
       if (res.damage > 0) sfx.playerHurt(!this.player.male);
     } else {
-      if (this.visible(n)) this.message(`${n.name} shoots ${foe.n.name}.`);
+      if (this.narrates(n)) this.message(`${n.name} shoots ${foe.n.name}.`);
       this.afterHit(foe.n, res.damage, { kind: 'npc', n });
     }
   }

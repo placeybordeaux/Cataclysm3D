@@ -115,7 +115,8 @@ export class VehicleSystem implements GameSystem, MapOverlay {
       name: (c) => (c as { name?: string }).name ?? 'something',
     };
     // CDDA part_collision -> map::bash with the object's share of the impact damage.
-    this.onBash = (x, y, z, strength) => bash(game, x, y, z, Math.round(strength), { source: this }).success;
+    // The driver's own crash isn't narrated back as "You hear whump!" (the impact message says it).
+    this.onBash = (x, y, z, strength) => bash(game, x, y, z, Math.round(strength), { source: this.driving ? game.player : this }).success;
     map.onChunkGenerated.push((c) => this.queueChunk(c));
     for (const c of map.loadedChunks()) this.queueChunk(c);
   }
