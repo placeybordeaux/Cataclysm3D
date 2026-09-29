@@ -17,8 +17,9 @@ import { createItem, type Item } from '../src/game/item';
 import { findPath } from '../src/game/pathfind';
 import { Grid, hasLOS } from '../src/game/los';
 import { nextUpgradeDay, turnsToEffectSeconds } from '../src/game/monster';
-import { evalCondition, fmt } from '../src/game/monattack';
+import { biteInfection, dodgeCheck, fmt, isMeleeSpecial, trySpecial } from '../src/game/monattack';
 import { FEEL, setFeelDifficulty, telegraphSeconds } from '../src/game/combatfeel';
+import { monsterFactionAttitude } from '../src/game/monfaction';
 
 const dir = path.join(__dirname, '../public/data');
 const load = (f: string) => JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8'));
@@ -88,7 +89,7 @@ describe('monster AI', () => {
       const z = sys.spawnById('mon_zombie', 12.5, 11.4, 0)!;
       for (const k of Object.keys(game.player.hp)) game.player.hp[k as keyof typeof game.player.hp].max = game.player.hp[k as keyof typeof game.player.hp].cur = 100000;
       step(game, 20);
-      const attacks = msgs.filter((m) => /^The zombie (hits|bites|claws|grabs|misses|lunges|tries)/.test(m)).length;
+      const attacks = msgs.filter((m) => /^The zombie (hits|bites|claws|grabs|gropes|misses|lunges|tries)/.test(m)).length;
       const expected = (z.type.speed / 100) * MELEE_SCALE * 20;
       expect(telegraphSeconds(z.speed, 'melee') + FEEL.monsterRecovery).toBeLessThan(1 / ((z.type.speed / 100) * MELEE_SCALE));
       expect(attacks).toBeGreaterThan(expected * 0.7);
@@ -103,7 +104,7 @@ describe('monster AI', () => {
     const z = sys.spawnById('mon_zombie', 12.5, 11.4, 0)!;
     for (const k of Object.keys(game.player.hp)) game.player.hp[k as keyof typeof game.player.hp].max = game.player.hp[k as keyof typeof game.player.hp].cur = 100000;
     step(game, 20);
-    const attacks = msgs.filter((m) => /^The zombie (hits|bites|claws|grabs|misses|lunges|tries)/.test(m)).length;
+    const attacks = msgs.filter((m) => /^The zombie (hits|bites|claws|grabs|gropes|misses|lunges|tries)/.test(m)).length;
     const cycle = Math.max(1 / ((z.type.speed / 100) * MELEE_SCALE), telegraphSeconds(z.speed, 'melee') + FEEL.monsterRecovery);
     expect(attacks).toBeGreaterThan((20 / cycle) * 0.7);
     expect(attacks).toBeLessThan((20 / cycle) * 1.15);
@@ -203,6 +204,14 @@ describe('monster AI', () => {
     const rng = new Rng(3);
     const d = nextUpgradeDay(data.monsters.mon_zombie, rng);
     expect(d).toBeGreaterThanOrEqual(1);
+    // BN: half_life 14 x MONSTER_UPGRADE_FACTOR 2, EVOLVE_MAX_ITERS 5 -> within 1 + 5 x 28 days, 1/32 never
+    let never = 0;
+    for (let i = 0; i < 3200; i++) {
+      const u = nextUpgradeDay(data.monsters.mon_zombie, rng);
+      if (u < 0) never++;
+      else expect(u).toBeLessThanOrEqual(1 + 5 * 28);
+    }
+    expect(never / 3200).toBeCloseTo(1 / 32, 1);
     const { game, sys } = world();
     const z = sys.spawnById('mon_zombie', 20.5, 20.5, 0)!;
     z.upgradeDay = 0;
@@ -277,13 +286,9 @@ describe('spawning', () => {
     expect(sys.all.length).toBe(0);
   });
 
-  // TODO(BN): written for DDA data/behaviour; fails on Bright Nights core data (AssertionError: expected +0 to be 1 // Object.is equality). Port with its system.
-  it.skip('dormant zombies lie as corpses and rise when approached', () => {
+  it('dormant zombie corpses rise when approached (no BN data uses GEN_DORMANT; mechanism kept)', () => {
     const { game, sys } = world(5);
-    const sp = new Spawner(sys, null, { safeRadius: 0 });
-    const c = game.map.chunk(1, 0, 0)!;
-    c.spawns = [{ kind: 'monster', id: 'pseudo_dormant_mon_zombie_fat', x: 30, y: 12, z: 0 }];
-    sp.onChunk(c);
+    sys.placeCorpse(data.monsters.mon_zombie_fat, 30.5, 12.5, 0, { dormant: true });
     expect(sys.all.length).toBe(0);
     expect(sys.corpses.length).toBe(1);
     game.player.x = 28.5;
@@ -319,17 +324,45 @@ describe('damage & death', () => {
     expect((game.map.itemsAt(14, 12, 0) as Item[]).some((i) => i.typeId === 'corpse')).toBe(false);
   });
 
-  // TODO(BN): written for DDA data/behaviour; fails on Bright Nights core data (AssertionError: expected false to be true // Object.is equality). Port with its system.
-  it.skip('boomers burst into bile', () => {
+  it('boomers burst into bile (BN death_function ["BOOMER"]: no corpse)', () => {
     const { game, sys } = world();
     const b = sys.spawnById('mon_boomer', 13.5, 12.5, 0)!;
     sys.hurt(b, 45, 'player');
     expect(game.map.fieldsAt(13, 12, 0).some((f) => f.type === 'fd_bile')).toBe(true);
+    // propagate_field(fd_bile, 15): the bile spreads beyond the boomer's own tile
+    let tiles = 0;
+    for (let y = 8; y <= 16; y++) for (let x = 9; x <= 17; x++) if (game.map.fieldsAt(x, y, 0).some((f) => f.type === 'fd_bile')) tiles++;
+    expect(tiles).toBeGreaterThanOrEqual(9);
     expect(game.player.hasEffect('boomered')).toBe(true);
+    expect((game.map.itemsAt(13, 12, 0) as Item[]).some((i) => i.typeId === 'corpse')).toBe(false);
+    expect(sys.kills.get('mon_boomer')).toBe(1);
+  });
+
+  it('robots leave their broken item (BROKEN), acid zombies leak acid (ACID + NORMAL)', () => {
+    const { game, sys } = world();
+    game.player.x = 40.5;
+    const bot = Object.values(data.monsters).find((d) => d.death_function?.includes('BROKEN') && data.items['broken_' + d.id.replace(/^mon_/, '')])!;
+    const r = sys.spawnById(bot.id, 13.5, 12.5, 0)!;
+    sys.hurt(r, r.hp + 1, 'player');
+    expect((game.map.itemsAt(13, 12, 0) as Item[]).some((i) => i.typeId === 'broken_' + bot.id.replace(/^mon_/, ''))).toBe(true);
+    const acidic = sys.spawnById('mon_zombie_acidic', 20.5, 12.5, 0)!;
+    expect(acidic.type.death_function).toEqual(expect.arrayContaining(['ACID', 'NORMAL']));
+    sys.hurt(acidic, acidic.hp + 1, 'player');
+    expect(game.map.fieldsAt(20, 12, 0).some((f) => f.type === 'fd_acid')).toBe(true);
+    expect((game.map.itemsAt(20, 12, 0) as Item[]).some((i) => i.typeId === 'corpse')).toBe(true);
+  });
+
+  it('corpses carry the implants their harvest hides (make_mon_corpse)', () => {
+    const { game, sys } = world();
+    game.player.x = 40.5;
+    const z = sys.spawnById('mon_zombie', 13.5, 12.5, 0)!;
+    sys.hurt(z, 81, 'player');
+    const corpse = (game.map.itemsAt(13, 12, 0) as Item[]).find((i) => i.typeId === 'corpse')!;
+    expect(JSON.parse(String(corpse.vars.dissectables))).toEqual([expect.objectContaining({ id: 'pheromone' })]);
   });
 
   it('a necromancer raises a nearby zombie corpse', () => {
-    const { game, sys } = world();
+    const { game, sys, msgs } = world();
     game.player.x = 60.5;
     const z = sys.spawnById('mon_zombie', 20.5, 20.5, 0)!;
     sys.die(z, null);
@@ -339,23 +372,85 @@ describe('damage & death', () => {
     // It only raises while hunting; give it a target in view.
     game.player.x = 30.5;
     game.player.y = 20.5;
-    step(game, 2);
+    // BN resurrect: a turn of charging ("throws its arms wide") before the corpse rises.
+    step(game, 4);
+    expect(msgs).toContain('The zombie necromancer throws its arms wide.');
     expect(sys.all.some((m) => m.type.id === 'mon_zombie' && !m.dead)).toBe(true);
   });
 });
 
+describe('monster factions (BN monfaction.cpp)', () => {
+  it('resolves explicit, self, inherited and base-chain relations', () => {
+    expect(monsterFactionAttitude(data, 'zombie', 'zombie')).toBe('FRIENDLY');
+    expect(monsterFactionAttitude(data, 'zombie', 'blob')).toBe('FRIENDLY');
+    expect(monsterFactionAttitude(data, 'zombie', 'nether')).toBe('NEUTRAL');
+    // player -> human -> the root "" faction, which everyone is by_mood toward
+    expect(monsterFactionAttitude(data, 'zombie', 'player')).toBe('BY_MOOD');
+    // science inherits zombie's relations (base_faction)
+    expect(monsterFactionAttitude(data, 'science', 'zombie')).toBe('FRIENDLY');
+    expect(monsterFactionAttitude(data, 'science', 'bot')).toBe('NEUTRAL');
+    expect(monsterFactionAttitude(data, 'herbivore', 'small_animal')).toBe('NEUTRAL');
+  });
+});
+
 describe('special attacks', () => {
-  // TODO(BN): written for DDA data/behaviour; fails on Bright Nights core data (TypeError: Cannot read properties of undefined (reading 'def')). Port with its system.
-  it.skip('formats CDDA attack messages and evaluates grab conditions', () => {
-    expect(fmt('%1$s grabs your %2$s!', 'The zombie', 'left arm')).toBe('The zombie grabs your left arm!');
-    expect(fmt('%s lunges at you, but you dodge!', 'The zombie')).toBe('The zombie lunges at you, but you dodge!');
+  it('formats BN attack messages; zombies carry BN bite / GRAB / scratch attacks', () => {
+    expect(fmt('The %1$s grabs your %2$s!', 'zombie', 'left arm')).toBe('The zombie grabs your left arm!');
+    expect(fmt('The %1$s lunges at your %2$s, battering it for %3$d damage!', 'zombie', 'head', '4')).toBe('The zombie lunges at your head, battering it for 4 damage!');
     const { sys } = world();
     const z = sys.spawnById('mon_zombie', 13.5, 12.5, 0)!;
-    const bite = z.specials.find((s) => s.def.id === 'bite_humanoid')!;
-    expect(evalCondition(sys, z, bite.def.condition)).toBe(false);
-    z.addEffect('grabbing', 10);
-    sys.game.player.addEffect('grabbed', 100);
-    expect(evalCondition(sys, z, bite.def.condition)).toBe(true);
+    expect(z.specials.map((s) => s.def.id).sort()).toEqual(['GRAB', 'bite', 'scratch']);
+    // "scratch" is the JSON monster_attack melee actor, merged into the monster's entry.
+    const scratch = z.specials.find((s) => s.def.id === 'scratch')!;
+    expect(scratch.def.attack_type).toBe('melee');
+    expect(scratch.def.hit_dmg_u).toBe('The %1$s claws at you!');
+    expect(isMeleeSpecial(scratch.def)).toBe(true);
+    expect(isMeleeSpecial(z.specials.find((s) => s.def.id === 'GRAB')!.def)).toBe(true);
+  });
+
+  it('a bite infects only a grabbed survivor (bite_actor: one_in(14 - damage))', () => {
+    const { game, sys } = world();
+    let infected = 0;
+    for (let i = 0; i < 200; i++) if (biteInfection(sys, 'arm_l', 4)) infected++;
+    expect(infected).toBe(0);
+    game.player.addEffect('grabbed', 100);
+    for (let i = 0; i < 400; i++) if (biteInfection(sys, 'arm_l', 4)) infected++;
+    // 1 in 10
+    expect(infected).toBeGreaterThan(20);
+    expect(infected).toBeLessThan(70);
+    expect(game.player.hasEffect('bite', 'arm_l')).toBe(true);
+  });
+
+  it('mattack::dodge_check: 1 / (1 + 99 e^(-0.6 dodge)) after the attacker skill', () => {
+    const { game, sys } = world();
+    const z = sys.spawnById('mon_zombie', 13.5, 12.5, 0)!;
+    const rate = () => {
+      let n = 0;
+      for (let i = 0; i < 2000; i++) if (dodgeCheck(sys, z)) n++;
+      return n / 2000;
+    };
+    const base = rate();
+    game.player.setSkill('dodge', 10);
+    game.player.resetStats();
+    expect(rate()).toBeGreaterThan(base + 0.1);
+  });
+
+  it('GRAB holds the survivor (grabbed intensity = grab_strength) or is batted away by dexterity', () => {
+    const { game, sys, msgs } = world();
+    const z = sys.spawnById('mon_zombie', 13.4, 12.5, 0)!;
+    z.type = { ...z.type, melee_skill: 30 };
+    const grab = z.specials.find((s) => s.def.id === 'GRAB')!;
+    game.player.dex_base = 1;
+    game.player.resetStats();
+    let held = false;
+    for (let i = 0; i < 30 && !held; i++) {
+      trySpecial(sys, z, grab);
+      held = game.player.hasEffect('grabbed');
+    }
+    expect(held).toBe(true);
+    expect(sys.grabbedBy).toBe(z);
+    expect(game.player.effects.intensity('grabbed')).toBeGreaterThanOrEqual(1);
+    expect(msgs).toContain('The zombie grabs you!');
   });
 
   it('a shrieker shrieks (loud sound event) when the survivor is close', () => {
@@ -364,29 +459,31 @@ describe('special attacks', () => {
     game.events.on('sound', (s) => sounds.push(s.volume));
     sys.spawnById('mon_zombie_shrieker', 15.5, 12.5, 0);
     step(game, 6);
-    expect(sounds).toContain(50);
+    // BN mattack::shriek: volume 120
+    expect(sounds).toContain(120);
   });
 
-  // TODO(BN): written for DDA data/behaviour; fails on Bright Nights core data (TypeError: Cannot set properties of undefined (setting 'cooldown')). Port with its system.
-  it.skip('a hulk smash knocks the survivor back', () => {
+  it('a hulk SMASH flings the survivor (velocity dice x sides x 3)', () => {
     const { game, sys, msgs } = world();
     const h = sys.spawnById('mon_zombie_hulk', 13.6, 12.5, 0)!;
-    for (const s of h.specials) s.cooldown = s.def.id === 'smash' ? 0 : 999;
+    const smash = () => h.specials.find((s) => s.def.id === 'SMASH')!;
+    for (const s of h.specials) s.cooldown = s.def.id === 'SMASH' ? 0 : 999;
+    const flung = () => msgs.some((m) => m.includes('sends you flying'));
     // Keep swinging until one lands (a dodge is possible), then check the survivor flew.
     let x0 = game.player.x;
     // Each smash is telegraphed first (combatfeel.ts): let the wind-up run, re-arm between tries.
-    for (let i = 0; i < 300 && !msgs.some((m) => m.includes('hurls you')); i++) {
+    for (let i = 0; i < 300 && !flung(); i++) {
       x0 = game.player.x;
       if (!h.windup) {
-        h.specials.find((s) => s.def.id === 'smash')!.cooldown = 0;
+        smash().cooldown = 0;
         h.attackCooldown = 0;
         h.busy = 0;
       }
       game.tick(1 / 30);
     }
-    expect(msgs.some((m) => m.includes('hurls you'))).toBe(true);
+    expect(flung()).toBe(true);
+    expect(msgs).toContain('A blow from the zombie hulk sends you flying!');
     expect(Math.abs(game.player.x - x0)).toBeGreaterThan(0.5);
-    expect(game.player.hasEffect('downed')).toBe(true);
   });
 
   it('grabbed survivors are held in place until they break free', () => {
@@ -534,7 +631,11 @@ describe('player attacks', () => {
 describe('butchery', () => {
   it('time follows butcher_time_to_cut (size x tool quality, quick vs full)', () => {
     const z = data.monsters.mon_zombie;
-    expect(butcherSeconds(z, 30, 'quick')).toBe(Math.round((2700 * 70 * 2.4) / 100));
+    // BN: medium 45000 moves; ACT_BUTCHER tool factor 1 + min(10 q, 100)% (2x at BUTCHER 10+)
+    expect(butcherSeconds(z, 30, 'quick')).toBe(225);
+    expect(butcherSeconds(z, 5, 'quick')).toBe(300);
+    expect(butcherSeconds(z, 0, 'quick')).toBe(450);
+    expect(butcherSeconds(z, 30, 'full')).toBe(225 * 6);
     expect(butcherSeconds(z, 30, 'full')).toBeGreaterThan(butcherSeconds(z, 30, 'quick'));
     expect(butcherSeconds(data.monsters.mon_rabbit, 30, 'quick')).toBeLessThan(butcherSeconds(z, 30, 'quick'));
   });
@@ -555,11 +656,13 @@ describe('butchery', () => {
     expect(yieldMult(8, 8, 30)).toBeGreaterThan(yieldMult(0, 8, 30));
   });
 
-  // TODO(BN): written for DDA data/behaviour; fails on Bright Nights core data (AssertionError: expected false to be true // Object.is equality). Port with its system.
-  it.skip('zombies give tainted meat; harvest-exempt monsters give nothing', () => {
+  it('zombies give tainted meat (BN "zombie" harvest); harvest-exempt monsters give nothing', () => {
     const { game } = world();
     const z = butcherYield(data, game.player, data.monsters.mon_zombie, 30, 'full', new Rng(2));
-    expect(z.items.some((i) => i.typeId === 'meat_tainted_human')).toBe(true);
+    expect(z.items.some((i) => i.typeId === 'meat_tainted')).toBe(true);
+    expect(z.items.some((i) => i.typeId === 'bone_tainted')).toBe(true);
+    // Blood only comes from bleeding a corpse, never from butchering it.
+    expect(z.items.some((i) => i.typeId === 'blood_tainted')).toBe(false);
     const b = butcherYield(data, game.player, data.monsters.mon_boomer, 30, 'full', new Rng(2));
     expect(b.ok).toBe(false);
   });

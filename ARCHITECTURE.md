@@ -125,8 +125,18 @@ tests/               vitest unit tests (pure logic, no DOM/WebGL)
   and leave `sys.all` (back within 6 OMTs); unnamed/non-friendly only, so don't hold references to
   far monsters. Spawner dormant corpses are chunk baseline (rebaselined), stashed on eviction and
   re-laid on regeneration; saved in the `monsters` section's `stash`. `cdda.monsterStash()`.
-- `monattack.ts` special attacks: data melee/bite actors (misc.monster_attack), leap, boomer
-  bile, and hardcoded SHRIEK, ACID, RESURRECT, SHOCKSTORM, PARROT, SMASH...
+- `monattack.ts` special attacks, BN rules: melee/bite actors (named JSON `monster_attack`s like
+  `scratch` merge under the monster's entry; min_mul 0, `body_parts`, effects only on damage; a bite
+  infects only a grabbed target), leap/gun actors, and the hardcoded monattack.cpp ids GRAB (dodge_check,
+  martial-art grab break, `grabbed` intensity += grab_strength; a parried grab never takes hold),
+  GRAB_DRAG, SMASH (fling dice×sides×3), LUNGE, LONGSWIPE, SHRIEK(_ALERT/_STUN), ACID(_BARF), BOOMER(_GLOW),
+  RESURRECT (charge-up), SHOCKSTORM, PARROT. `isMeleeSpecial(def)` = spends a swing. No dialogue conditions.
+- `mondeath.ts` BN `death_function` lists: NORMAL (corpse; pulverized when 2.5×overkill/max hp > 5),
+  SPLATTER, BOOMER (no corpse, 15 bile tiles, boomered if adjacent), ACID, BROKEN (`broken_<id>` item),
+  MELT, DISINTEGRATE, EXPLODE/SMOKEBURST/GAS, WORM/BLOBSPLIT. Corpses get overkill damage and
+  `vars.dissectables` (the harvest's bionic / bionic_group entries, rolled at death). `monfaction.ts`
+  `monsterFactionAttitude(data, a, b)` (BN monfaction.cpp, base_faction inheritance) for future
+  monster-vs-monster fights. Upgrades: half_life × MONSTER_UPGRADE_FACTOR 2, EVOLVE_MAX_ITERS 5.
 - `spawner.ts` consumes `chunk.spawns` (then clears them) + CDDA city hordes; tuning knob
   `cityHordeScale` (0.3 of CDDA's 80 zombies × city size).
 - `playercombat.ts` LMB melee (crosshair cone) / hitscan guns / `G` throw; `butchery.ts`.
@@ -316,10 +326,11 @@ tests/               vitest unit tests (pure logic, no DOM/WebGL)
   climbing CLIMBABLE barriers (boom barriers, chain fences). IMMOBILE monsters (turrets) never move.
 - `interact.ts` `examineHandlers` (examine_action → interactions) is the hook they use; consoles come
   through `interactionProviders`.
-- Dissection (`B` menu → Dissect): CUT_FINE tool, 6× cutting time, the monster's `dissect` harvest —
-  item-group entries (zomborg CBMs, mutagen glands) recovered per check_butcher_dissect roll (failed CBMs
-  burn out), per-drop-type harvest_skills, first-aid practice. `dissectYield`/`dissectSeconds` in
-  butchery.ts, `startDissect` in src/monsters.ts.
+- Dissection (`B` menu → Dissect, BN): CUT_FINE tool, 4× the size cutting time / the CUT_FINE tool
+  factor, yields like full butchery plus the corpse's `vars.dissectables` (implants), each recovered on
+  x_in_y(roll, 10) with roll = firstaid/2 + electronics/2 + CUT_FINE + dex shift − corpse damage (failed
+  CBMs burn out). Butchery (quick/full) follows BN butchery_drops_harvest; blood only from bleeding.
+  `dissectYield`/`dissectSeconds`/`corpseDissectables` in butchery.ts, `startDissect` in src/monsters.ts.
 - Debug: `cdda.labs()`, `cdda.labMap(special?)`, `cdda.teleportLab(z, special?)`, `cdda.faceLabLoot(z)`,
   `cdda.labLoot(r)`, `cdda.rideElevator(z?)`, `cdda.useComputer(picks?)`, `cdda.swipeCard()`,
   `cdda.dissect()`. Probes: `tsx tools/dev/probe_lab.ts <seed> [special] [z]` (OMTs, stairs, loot),

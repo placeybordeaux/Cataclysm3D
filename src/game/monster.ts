@@ -53,19 +53,24 @@ export function monsterRadius(def: MonsterDef): number {
 /** Integer size for data conditions like "u_val('size') > n_val('size')" (CDDA creature_size). */
 export const SIZE_RANK: Record<CreatureSize, number> = { tiny: 1, small: 2, medium: 3, large: 4, huge: 5 };
 
+/** BN world options (options.cpp defaults): MONSTER_UPGRADE_FACTOR, EVOLVE_MAX_ITERS. */
+export const MONSTER_UPGRADE_FACTOR = 2;
+export const EVOLVE_MAX_ITERS = 5;
+
 /**
- * monster::next_upgrade_time: one guaranteed day, then each half_life period has a 50% chance
- * to be the one the upgrade lands in (EVOLUTION_INVERSE_MULTIPLIER = 1). Returns absolute
- * game day, or -1 if it never upgrades.
+ * BN monster::next_upgrade_time: one guaranteed day, then each (half_life ×
+ * MONSTER_UPGRADE_FACTOR) period has a 50% chance to be the one the upgrade lands in, for at
+ * most EVOLVE_MAX_ITERS periods (ALWAYS_EVOLVE off). Returns days from now, or -1 if it never
+ * upgrades.
  */
 export function nextUpgradeDay(def: MonsterDef, rng: Rng): number {
   const up = def.upgrades;
   if (!up || (!up.into && !up.into_group)) return -1;
   if (up.age_grow && up.age_grow > 0) return up.age_grow;
-  const halfLife = up.half_life ?? 0;
+  const halfLife = Math.trunc((up.half_life ?? 0) * MONSTER_UPGRADE_FACTOR);
   if (halfLife <= 0) return -1;
   let day = 1;
-  for (let i = 0; i < 10; i++) {
+  for (let i = 0; i < EVOLVE_MAX_ITERS; i++) {
     if (rng.oneIn(2)) return day + rng.int(0, halfLife);
     day += halfLife;
   }
@@ -157,6 +162,10 @@ export class Monster {
   flinch = 0;
   /** Stumble wobble state (STUMBLES). */
   wobble: number;
+  /** MonsterSystem.time until which SHRIEK_ALERT's "shrieking" lasts (enables SHRIEK_STUN). */
+  shriekingUntil = 0;
+  /** RESURRECT charge-up ("raising"): > 0 once the necromancer has thrown its arms wide. */
+  raising = 0;
   /** Speech/sound bookkeeping. */
   name?: string;
   readonly rng: Rng;
