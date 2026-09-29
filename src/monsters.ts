@@ -341,6 +341,8 @@ function installDebug(api: DebugApi, game: Game, sys: MonsterSystem, spawner: Sp
   };
   api.corpses = () => corpsesNear(game).map((c) => ({ id: c.item.vars.corpse, x: c.x, y: c.y }));
   api.allCorpses = () => sys.corpses.map((c) => ({ id: c.monId, x: Math.floor(c.x), y: Math.floor(c.y), valid: sys.corpseValid(c) }));
+  /** Far-monster retention: live list size vs monsters/dormant corpses folded into OMT columns. */
+  api.monsterStash = () => ({ live: sys.all.length, active: sys.active.length, ...sys.stash.count(), columns: sys.stash.columns.size, ...sys.stash.stats });
   /** Butcher the nearest corpse (no menu); completes after the activity runs (use cdda.step). */
   api.butcher = (kind: ButcherKind = 'quick') => {
     const c = corpsesNear(game)[0];

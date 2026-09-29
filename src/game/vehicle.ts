@@ -26,6 +26,29 @@ import type { VehicleDataFile, VPartDef } from './vehicle_data';
 export const AIR_DENSITY = 1.29;
 export const ACCEL_G = 9.8;
 export const MPH_PER_MS = 2.23694;
+/** CDDA keeps vehicle speeds in integer 1/100 mph ("vmiph"). */
+export const VMIPH_PER_MS = 100 * MPH_PER_MS;
+/** CDDA pldrive: one accelerate/brake keypress moves the cruise target by 4 mph. */
+export const CRUISE_STEP_VMIPH = 400;
+
+/**
+ * CDDA vehicle::cruise_thrust, in vmiph. The target snaps to the safe velocity when a step
+ * would cross it, otherwise moves by `amount` rounded toward zero to a multiple of it, and is
+ * clamped to [maxRev, max]. All arguments are integers like CDDA's.
+ */
+export function cruiseThrust(cruise: number, amount: number, safe: number, max: number, maxRev: number): number {
+  if (amount === 0) return cruise;
+  if ((cruise < safe && safe < cruise + amount) || (cruise > safe && safe > cruise + amount)) {
+    cruise = safe;
+  } else {
+    if (amount < 0 && (cruise === safe || cruise === max)) cruise -= 1;
+    else if (amount > 0 && cruise === maxRev) cruise += 1;
+    else cruise += amount;
+    // C++ integer division truncates toward zero.
+    cruise = Math.trunc(cruise / Math.abs(amount)) * Math.abs(amount);
+  }
+  return Math.max(maxRev, Math.min(max, cruise));
+}
 
 export interface VehiclePart {
   def: VPartDef;
@@ -78,6 +101,8 @@ export interface VehicleJSON {
   lightsOn: boolean;
   locked: boolean;
   alarmOn?: boolean;
+  /** CDDA cruise_velocity, vmiph (absent in older saves = 0). */
+  cruise?: number;
   paint: number;
   parts: VehiclePartJSON[];
 }
@@ -98,6 +123,8 @@ export class Vehicle {
   velocity = 0;
   /** Current front-wheel angle, radians (+ = turning right). */
   steer = 0;
+  /** CDDA cruise_velocity: the speed the engine drives toward, integer vmiph (1/100 mph). */
+  cruiseVelocity = 0;
   engineOn = false;
   lightsOn = false;
   /** CDDA is_locked: no keys, security system present. Controls need hotwiring. */
@@ -325,6 +352,18 @@ export class Vehicle {
     return simpleCubicSolution(this.coeffAirDrag(), cr, cr * 33.3, -p);
   }
 
+  /** Top reverse speed in m/s, negative (CDDA max_reverse_velocity: electric motors reverse at full speed). */
+  maxReverseVelocity(offroad = 1): number {
+    const electric = this.engines.some((e) => e.enabled && e.hp > 0 && e.def.fuel_type === 'battery');
+    return -this.maxVelocity(false, offroad) * (electric ? 1 : 0.25);
+  }
+
+  /** Press accelerate (+) / brake (-) once: CDDA cruise_thrust by `amount` vmiph. */
+  cruiseThrust(amount: number, offroad = 1): void {
+    const vm = (ms: number) => Math.trunc(ms * VMIPH_PER_MS);
+    this.cruiseVelocity = cruiseThrust(this.cruiseVelocity, amount, vm(this.maxVelocity(true, offroad)), vm(this.maxVelocity(false, offroad)), vm(this.maxReverseVelocity(offroad)));
+  }
+
   /** Engine acceleration at speed v (m/s^2), CDDA ground_acceleration. */
   acceleration(v: number, offroad = 1): number {
     const p = this.totalPower();
@@ -462,6 +501,7 @@ export class Vehicle {
     return {
       uid: this.uid, proto: this.protoId, name: this.name, x: this.x, y: this.y, z: this.z, facing: this.facing,
       velocity: this.velocity, engineOn: this.engineOn, lightsOn: this.lightsOn, locked: this.locked, alarmOn: this.alarmOn, paint: this.paint,
+      ...(this.cruiseVelocity ? { cruise: this.cruiseVelocity } : {}),
       parts: this.parts.map((p) => {
         const j: VehiclePartJSON = { id: p.def.id, mx: p.mx, my: p.my, hp: p.hp };
         if (p.variant) j.variant = p.variant;
@@ -485,7 +525,7 @@ export class Vehicle {
     const v = new Vehicle(vdata, j.proto);
     v.uid = j.uid;
     nextUid = Math.max(nextUid, j.uid + 1);
-    Object.assign(v, { name: j.name, x: j.x, y: j.y, z: j.z, facing: j.facing, velocity: j.velocity, engineOn: j.engineOn, lightsOn: j.lightsOn, locked: j.locked, alarmOn: !!j.alarmOn, paint: j.paint });
+    Object.assign(v, { name: j.name, x: j.x, y: j.y, z: j.z, facing: j.facing, velocity: j.velocity, engineOn: j.engineOn, lightsOn: j.lightsOn, locked: j.locked, alarmOn: !!j.alarmOn, paint: j.paint, cruiseVelocity: j.cruise ?? 0 });
     for (const pj of j.parts) {
       const def = vdata.parts[pj.id];
       if (!def) {

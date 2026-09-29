@@ -177,6 +177,8 @@ export function openMenu<T>(opts: MenuOpts<T>): UiWindow & { refresh(entries?: M
       else if (e.key === 'ArrowUp' || (e.key === 'k' && !keys.includes('k'))) move(-1);
       else if (e.key === 'PageDown') move(10);
       else if (e.key === 'PageUp') move(-10);
+      else if (e.key === '>' && !keys.includes('>') && entries.length > AUTO_KEYS.length) move(AUTO_KEYS.length);
+      else if (e.key === '<' && !keys.includes('<') && entries.length > AUTO_KEYS.length) move(-AUTO_KEYS.length);
       else if (e.key === 'Enter') choose(sel);
       else {
         const i = keys.indexOf(e.key);
@@ -216,8 +218,22 @@ export function openMenu<T>(opts: MenuOpts<T>): UiWindow & { refresh(entries?: M
     else render();
   }
   function render() {
+    // More auto-keyed entries than letters: the letters cover the page of AUTO_KEYS.length
+    // entries around the selection (CDDA uilist pages), so every entry is reachable by key.
     let auto = 0;
-    keys = entries.map((e) => e.hotkey ?? (AUTO_KEYS[auto++] ?? ''));
+    let selAuto = 0;
+    entries.forEach((e, i) => {
+      if (e.hotkey !== undefined) return;
+      if (i <= sel) selAuto = auto;
+      auto++;
+    });
+    const page = Math.floor(selAuto / AUTO_KEYS.length) * AUTO_KEYS.length;
+    auto = 0;
+    keys = entries.map((e) => {
+      if (e.hotkey !== undefined) return e.hotkey;
+      const k = auto++ - page;
+      return k >= 0 ? AUTO_KEYS[k] ?? '' : '';
+    });
     let html = '';
     let lastHeader: string | undefined;
     entries.forEach((e, i) => {

@@ -8,7 +8,7 @@ import { TradeSession, type TradeEntry } from '../game/trade';
 import type { Item } from '../game/item';
 import { npcLayers } from '../render/npcView';
 import { atlasOf } from './context';
-import { c, colorize, openMenu, openWindow, confirm, type UiWindow } from './framework';
+import { c, colorize, openMenu, openWindow, confirm, prompt, type UiWindow } from './framework';
 import { sfx } from '../audio/sfx';
 import { CHUNK } from '../world/coords';
 
@@ -191,17 +191,42 @@ export function openTrade(ctx: NpcUiCtx, n: Npc, cost = 0, onDone?: (traded: boo
   const cursor = [0, 0];
   let traded = false;
   let note = '';
+  // CDDA trade: letters address one page of LETTERS.length entries; '<'/'>' (or PageUp/Down)
+  // turn pages, Space marks the entry under the cursor, '/' filters by name.
+  const filter = ['', ''];
+  const view = (w: 0 | 1): TradeEntry[] => {
+    const list = w === 0 ? s.yours : s.theirs;
+    const f = filter[w].toLowerCase();
+    return f ? list.filter((e) => e.item.name().toLowerCase().includes(f)) : list;
+  };
+  const PAGE = LETTERS.length;
+  const pageStart = (w: 0 | 1) => Math.floor(cursor[w] / PAGE) * PAGE;
   const win = openWindow({
     title: `Trade with ${n.displayName()}`,
     width: 'min(98vw, 130ch)',
     height: '84vh',
-    footer: `${c('c_light_green', 'Tab/←→')} switch side  ${c('c_light_green', 'a-z')} mark  ${c('c_light_green', '+ -')} amount  ${c('c_light_green', 'Enter')} trade  ${c('c_light_green', 'Esc')} cancel`,
+    footer: `${c('c_light_green', 'Tab/←→')} switch side  ${c('c_light_green', 'a-Z')} mark  ${c('c_light_green', 'Space')} mark selected  ${c('c_light_green', '+ -')} amount  ${c('c_light_green', '< >')} page  ${c('c_light_green', '/')} filter  ${c('c_light_green', 'Enter')} trade  ${c('c_light_green', 'Esc')} cancel`,
     onKey: (e) => {
-      const list = side === 0 ? s.yours : s.theirs;
+      const list = view(side);
+      const at = (k: number) => Math.max(0, Math.min(list.length - 1, k));
       if (e.key === 'Tab' || e.key === 'ArrowLeft' || e.key === 'ArrowRight') side = side === 0 ? 1 : 0;
-      else if (e.key === 'ArrowDown') cursor[side] = Math.min(list.length - 1, cursor[side] + 1);
-      else if (e.key === 'ArrowUp') cursor[side] = Math.max(0, cursor[side] - 1);
-      else if (e.key === '+' || e.key === '=') {
+      else if (e.key === 'ArrowDown') cursor[side] = at(cursor[side] + 1);
+      else if (e.key === 'ArrowUp') cursor[side] = at(cursor[side] - 1);
+      else if (e.key === '>' || e.key === 'PageDown') cursor[side] = at(pageStart(side) + PAGE);
+      else if (e.key === '<' || e.key === 'PageUp') cursor[side] = at(pageStart(side) - PAGE);
+      else if (e.key === ' ') {
+        const en = list[cursor[side]];
+        if (en) s.toggle(en), sfx.ui('menu_select');
+      } else if (e.key === '/') {
+        const w = side;
+        void prompt('Filter by name:', filter[w]).then((f) => {
+          if (f === null) return;
+          filter[w] = f.trim();
+          cursor[w] = 0;
+          render();
+        });
+        return true;
+      } else if (e.key === '+' || e.key === '=') {
         const en = list[cursor[side]];
         if (en) s.setCount(en, en.count + 1);
       } else if (e.key === '-') {
@@ -214,8 +239,8 @@ export function openTrade(ctx: NpcUiCtx, n: Npc, cost = 0, onDone?: (traded: boo
         win.close();
         return true;
       } else {
-        const i = LETTERS.indexOf(e.key);
-        if (i >= 0 && i < list.length) {
+        const i = pageStart(side) + LETTERS.indexOf(e.key);
+        if (LETTERS.includes(e.key) && i < list.length) {
           cursor[side] = i;
           s.toggle(list[i]);
           sfx.ui('menu_select');
@@ -266,6 +291,9 @@ export function openTrade(ctx: NpcUiCtx, n: Npc, cost = 0, onDone?: (traded: boo
   function rows(list: TradeEntry[], active: boolean, which: 0 | 1): string {
     let html = '';
     let lastHeader = '';
+    const p0 = pageStart(which);
+    if (filter[which]) html += `<div>${c('c_dark_gray', `filter: "${esc(filter[which])}" (/ to change)`)}</div>`;
+    if (list.length > PAGE) html += `<div>${c('c_dark_gray', `page ${p0 / PAGE + 1}/${Math.ceil(list.length / PAGE)} (< >)`)}</div>`;
     list.forEach((e, i) => {
       const header = e.source === 'worn' ? 'WORN' : e.source === 'wielded' ? 'WIELDED' : e.source === 'stock' ? 'SHOP STOCK' : e.source === 'npc' ? 'CARRIED' : 'INVENTORY';
       if (header !== lastHeader) {
@@ -276,21 +304,21 @@ export function openTrade(ctx: NpcUiCtx, n: Npc, cost = 0, onDone?: (traded: boo
       const cnt = e.max > 1 ? c('c_light_gray', ` ${e.count}/${e.max}`) : '';
       const sel = active && i === cursor[which];
       const each = !e.item.countByCharges && e.max > 1;
-      html += `<div class="menu-entry${sel ? ' sel' : ''}" data-s="${which}" data-i="${i}"><span class="hotkey">${LETTERS[i] ?? ' '}</span> ${mark} ${esc(e.item.name())}${cnt}<span style="float:right">${c('c_yellow', money(each ? e.price / e.max : e.price))}${each ? c('c_dark_gray', ' ea') : ''}</span></div>`;
+      html += `<div class="menu-entry${sel ? ' sel' : ''}" data-s="${which}" data-i="${i}"><span class="hotkey">${(i >= p0 && LETTERS[i - p0]) || ' '}</span> ${mark} ${esc(e.item.name())}${cnt}<span style="float:right">${c('c_yellow', money(each ? e.price / e.max : e.price))}${each ? c('c_dark_gray', ' ea') : ''}</span></div>`;
     });
     return html || c('c_dark_gray', '(nothing to trade)');
   }
 
   function render() {
-    left.innerHTML = `<div style="color:var(--c-${side === 0 ? 'white' : 'light_gray'})">${c('c_light_cyan', 'You')}  ${c('c_dark_gray', `offering ${money(s.yourValue())}`)}</div>` + rows(s.yours, side === 0, 0);
-    right.innerHTML = `<div>${c('c_light_cyan', n.displayName())}  ${c('c_dark_gray', `taking ${money(s.theirValue())}`)}</div>` + rows(s.theirs, side === 1, 1);
+    left.innerHTML = `<div style="color:var(--c-${side === 0 ? 'white' : 'light_gray'})">${c('c_light_cyan', 'You')}  ${c('c_dark_gray', `offering ${money(s.yourValue())}`)}</div>` + rows(view(0), side === 0, 0);
+    right.innerHTML = `<div>${c('c_light_cyan', n.displayName())}  ${c('c_dark_gray', `taking ${money(s.theirValue())}`)}</div>` + rows(view(1), side === 1, 1);
     for (const el of [left, right])
       el.querySelectorAll<HTMLElement>('.menu-entry').forEach((row) => {
         row.onclick = () => {
           const w = Number(row.dataset.s) as 0 | 1, i = Number(row.dataset.i);
           side = w;
           cursor[w] = i;
-          s.toggle((w === 0 ? s.yours : s.theirs)[i]);
+          s.toggle(view(w)[i]);
           render();
         };
       });

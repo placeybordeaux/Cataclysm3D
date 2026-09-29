@@ -4,7 +4,8 @@ import type { Game } from '../game/game';
 import type { Item } from '../game/item';
 import { cargoVolume, has, MPH_PER_MS, type Vehicle, type VehiclePart } from '../game/vehicle';
 import { loadVehicleData } from '../game/vehicle_data';
-import { monsterCreatureHooks, registerVehicleSave, VehicleSystem } from '../game/vehicles';
+import { monsterCreatureHooks, registerVehicleSave, VehicleSystem, type DriveMode } from '../game/vehicles';
+import { registerOption } from './options';
 import type { MonsterSystem } from '../game/monai';
 import { interactOverrides } from '../game/interact';
 import type { Renderer } from '../render/renderer';
@@ -19,7 +20,8 @@ import { carriedEntries, openMultiSelect, stackEntries, type InvEntry, type Mult
 // driving keys, a CDDA-style dashboard line while driving, and window.cdda helpers.
 //
 // Keys (src/ui/keys.ts): '^' take controls / controls menu, 'k' engine, 'h' headlights,
-// 'n' horn; WASD drive (W throttle, S brake/reverse, A/D steer), Space handbrake.
+// 'n' horn; WASD drive (cruise control: W/S step the target speed; direct throttle option:
+// W accelerate, S brake/reverse), A/D steer, Space handbrake.
 // 'e' on a vehicle part: examineVehicle() — the world-interaction handler for 'e' should
 // call it first (it returns false when the crosshair isn't on a vehicle).
 
@@ -314,8 +316,8 @@ function controlsMenu(game: Game): void {
 /** Dashboard line under the crosshair while driving. */
 function dashboard(game: Game): HTMLElement {
   const el = document.createElement('div');
-  el.style.cssText = 'position:fixed;left:50%;bottom:26vh;transform:translateX(-50%);background:rgba(0,0,0,.72);padding:3px 10px;' +
-    `font:16px Terminus,monospace;color:${cssColor('c_light_gray')};pointer-events:none;white-space:nowrap;z-index:5;display:none`;
+  el.style.cssText = 'position:fixed;left:3vw;right:3vw;margin:0 auto;width:fit-content;bottom:26vh;background:rgba(0,0,0,.72);padding:3px 10px;' +
+    `font:16px Terminus,monospace;color:${cssColor('c_light_gray')};pointer-events:none;text-align:center;z-index:5;display:none`;
   getUiRoot().appendChild(el);
   let last = '';
   const update = () => {
@@ -333,7 +335,16 @@ function dashboard(game: Game): HTMLElement {
 function dashHtml(game: Game, v: Vehicle): string {
   const mph = Math.round(Math.abs(v.velocity) * MPH_PER_MS);
   const safe = v.engineOn ? Math.round(v.maxVelocity(true) * MPH_PER_MS) : 0;
-  const speedCol = v.engineOn && mph > safe ? 'c_light_red' : 'c_light_blue';
+  // CDDA vehicle::strain colouring: blue under the safe speed, then yellow / light red / red.
+  const safeMs = v.maxVelocity(true), maxMs = Math.max(safeMs + 0.01, v.maxVelocity());
+  const strain = Math.abs(v.velocity) < safeMs ? 0 : (Math.abs(v.velocity) - safeMs) / (maxMs - safeMs);
+  const speedCol = !v.engineOn ? 'c_light_blue' : strain <= 0 ? 'c_light_blue' : strain <= 0.2 ? 'c_yellow' : strain <= 0.4 ? 'c_light_red' : 'c_red';
+  const cruising = game.vehicles?.driveMode === 'cruise';
+  const target = Math.round(v.cruiseVelocity / 100);
+  // CDDA's dashboard: "Target: 20 mph Current: 12 mph"; direct throttle has no target.
+  const speed = cruising
+    ? `${c('c_light_gray', 'Target:')} ${c('c_light_green', String(target))} ${c('c_light_gray', 'Current:')} ${c(speedCol, `${v.velocity < -0.05 ? '-' : ''}${mph}`)} ${c('c_light_gray', `mph (safe ${safe})`)}`
+    : `${c(speedCol, `${v.velocity < -0.05 ? 'R ' : ''}${mph}`)}${c('c_light_gray', `/${safe} mph`)}`;
   const fuels = v.engineFuels().filter((f) => f !== 'muscle' && f !== 'battery');
   const gauge = (t: string) => {
     const cap = v.fuelCapacity(t);
@@ -344,15 +355,24 @@ function dashHtml(game: Game, v: Vehicle): string {
   };
   const parts = [
     c('c_white', v.name),
-    `${c(speedCol, `${v.velocity < -0.05 ? 'R ' : ''}${mph}`)}${c('c_light_gray', `/${safe} mph`)}`,
+    speed,
     v.engineOn ? c('c_light_green', 'engine') : v.locked ? c('c_red', 'LOCKED') : c('c_dark_gray', 'engine off'),
     ...fuels.map(gauge),
     v.fuelCapacity('battery') ? gauge('battery') : '',
     v.lightsOn ? c('c_yellow', 'lights') : '',
     v.validWheelConfig() ? '' : c('c_red', 'WHEELS'),
-    c('c_dark_gray', `[${game.keys.keyFor('vehicle_engine')}]engine [${game.keys.keyFor('vehicle_headlights')}]lights [${game.keys.keyFor('vehicle_horn')}]horn [${game.keys.keyFor('control_vehicle')}]menu`),
+    c('c_dark_gray', `${cruising ? '[W/S]±4 mph [Space]stop ' : ''}[${game.keys.keyFor('vehicle_engine')}]engine [${game.keys.keyFor('vehicle_headlights')}]lights [${game.keys.keyFor('vehicle_horn')}]horn [${game.keys.keyFor('control_vehicle')}]menu`),
   ].filter(Boolean);
   return parts.join('  ');
+}
+
+const DRIVE_MODE_KEY = 'cdda3d.driveMode';
+function storedDriveMode(): DriveMode {
+  try {
+    return localStorage.getItem(DRIVE_MODE_KEY) === 'direct' ? 'direct' : 'cruise';
+  } catch {
+    return 'cruise';
+  }
 }
 
 /**
@@ -415,6 +435,20 @@ export async function installVehicles(game: Game, renderer: Renderer, api?: Debu
     });
     hud.addPromptProvider(vehicleInteractPrompt);
   }
+  vs.driveMode = storedDriveMode();
+  registerOption({
+    name: 'Driving controls',
+    value: () => (vs.driveMode === 'cruise' ? 'cruise control' : 'direct throttle'),
+    change: () => {
+      vs.driveMode = vs.driveMode === 'cruise' ? 'direct' : 'cruise';
+      try {
+        localStorage.setItem(DRIVE_MODE_KEY, vs.driveMode);
+      } catch {
+        // not persisted
+      }
+    },
+    desc: "Cruise control (CDDA): W/S raise or lower the target speed 4 mph per press and the engine holds it; Space zeroes it. Direct throttle: W accelerates while held, S brakes then reverses.",
+  });
   const dash = dashboard(game) as HTMLElement & { update: () => void };
   renderer.beforeRender.push(() => dash.update());
 
@@ -427,7 +461,7 @@ function summary(game: Game, v: Vehicle) {
   const gas = v.engineFuels().filter((f) => f !== 'battery' && f !== 'muscle')[0];
   return {
     uid: v.uid, proto: v.protoId, name: v.name, x: +v.x.toFixed(2), y: +v.y.toFixed(2), z: v.z, facing: +v.facing.toFixed(1),
-    mph: +(v.velocity * MPH_PER_MS).toFixed(1), engineOn: v.engineOn, lightsOn: v.lightsOn, locked: v.locked,
+    mph: +(v.velocity * MPH_PER_MS).toFixed(1), cruiseMph: v.cruiseVelocity / 100, engineOn: v.engineOn, lightsOn: v.lightsOn, locked: v.locked,
     fuel: gas ? Math.round((100 * v.fuelLeft(gas)) / Math.max(1, v.fuelCapacity(gas))) : null,
     battery: v.fuelCapacity('battery') ? Math.round((100 * v.fuelLeft('battery')) / v.fuelCapacity('battery')) : null,
     brokenParts: v.parts.filter((q) => q.hp <= 0).length, dist: +Math.hypot(v.x - p.x, v.y - p.y).toFixed(1),
@@ -489,6 +523,18 @@ function installVehicleDebug(api: DebugApi, game: Game, vs: VehicleSystem): void
       vs.scriptedInput = false;
     }
     return summary(game, v);
+  };
+  /** Driving model: 'cruise' (CDDA default) or 'direct' throttle; no argument = current. */
+  api.driveMode = (mode?: DriveMode) => {
+    if (mode) vs.driveMode = mode;
+    return vs.driveMode;
+  };
+  /** Set the cruise target in mph (like pressing W/S until it reads that), then drive `seconds`. */
+  api.cruise = (mph: number, seconds = 0, steer = 0) => {
+    const v = vs.driving;
+    if (!v) throw new Error('not driving: call cdda.enterVehicle() first');
+    v.cruiseVelocity = Math.round(mph * 100);
+    return seconds > 0 ? api.drive(0, steer, seconds) : summary(game, v);
   };
   api.exitVehicle = () => vs.releaseControls();
   /**

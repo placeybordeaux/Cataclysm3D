@@ -564,3 +564,93 @@ describe('SaveManager', () => {
     expect(B.game.player.name).toBe('Dee');
   });
 });
+
+describe('far monster retention (monster stash)', () => {
+  /** TestGenerator that asks for a few dormant zombies in OMT (12, 0, 0). */
+  class DormantGen extends TestGenerator {
+    override generate(map: Game['map'], c: Chunk): void {
+      super.generate(map, c);
+      if (c.cx !== 12 || c.cy !== 0 || c.z !== 0) return;
+      for (let i = 0; i < 6; i++) c.spawns.push({ kind: 'monster', id: 'pseudo_dormant_mon_zombie_fat', x: 12 * CHUNK + 3 + i * 3, y: 5 + i * 2, z: 0 });
+    }
+  }
+  const setup = () => {
+    const w = build(11, 'test');
+    w.game.map.generator = new DormantGen();
+    return w;
+  };
+  const dormantItems = (w: World) =>
+    [...w.game.map.chunk(12, 0, 0)!.items.values()].flat().filter((i) => (i as Item).typeId === 'corpse').length;
+
+  it('spawner-laid dormant corpses keep the chunk clean; eviction stashes them and regeneration lays them again', () => {
+    const W = setup();
+    const c = W.game.map.chunk(12, 0, 0)!;
+    const n = W.sys.corpses.length;
+    expect(n).toBeGreaterThan(0);
+    expect(dormantItems(W)).toBe(n);
+    expect(W.tracker.isDirty(c)).toBe(false);
+
+    const ev = new ChunkEvictor(W.game, W.tracker, { keepRadius: () => 1 });
+    ev.scan();
+    expect(W.game.map.hasChunk(12, 0, 0)).toBe(false);
+    expect(W.sys.corpses.length).toBe(0);
+    expect(W.sys.stash.count().corpses).toBe(n);
+
+    const again = W.game.map.chunk(12, 0, 0)!;
+    expect(W.sys.corpses.length).toBe(n);
+    expect(dormantItems(W)).toBe(n);
+    expect(W.sys.stash.count().corpses).toBe(0);
+    expect(W.tracker.isDirty(again)).toBe(false);
+    // They still rise when approached.
+    W.game.player.x = W.sys.corpses[0].x - 1;
+    W.game.player.y = W.sys.corpses[0].y;
+    W.game.tick(0.6);
+    expect(living(W.sys).some((m) => m.type.id === 'mon_zombie_fat')).toBe(true);
+  });
+
+  it('dormant corpses on a clean chunk survive save/load without saving the chunk', async () => {
+    const A = setup();
+    A.game.map.chunk(12, 0, 0);
+    const n = A.sys.corpses.length;
+    const file = await roundTrip(serializeGame(A.game, { slot: 'w', name: 'x', gen: 'test' }));
+    const at = (file.sections.map as { chunks: { at: number[] }[] }).chunks.map((j) => j.at.join(','));
+    expect(at).not.toContain('12,0,0');
+    const B = setup();
+    applySave(B.game, file);
+    expect(B.sys.corpses.length).toBe(0);
+    B.game.map.chunk(12, 0, 0);
+    expect(B.sys.corpses.length).toBe(n);
+    expect(dormantItems(B)).toBe(n);
+    // A second save/load still has them (no loss, no duplicates).
+    const file2 = await roundTrip(serializeGame(B.game, { slot: 'w', name: 'x', gen: 'test' }));
+    const C = setup();
+    applySave(C.game, file2);
+    C.game.map.chunk(12, 0, 0);
+    expect(C.sys.corpses.length).toBe(n);
+    expect(dormantItems(C)).toBe(n);
+  });
+
+  it('far idle dormant monsters fold into the stash, survive save/load and come back near the survivor', async () => {
+    const A = setup();
+    const p = A.game.player;
+    const far = 20 * CHUNK;
+    for (let i = 0; i < 30; i++) A.sys.spawnById('mon_zombie', p.x + far + (i % 6), p.y + Math.floor(i / 6), 0)!.hp = 40 + i;
+    const hunter = A.sys.spawnById('mon_zombie', p.x + far, p.y + 10, 0)!;
+    hunter.hp = 1;
+    hunter.wanderTime = 30; // drifting toward a noise: keeps simulating
+    A.sys.stash.sweep();
+    A.game.tick(0.1);
+    expect(living(A.sys).length).toBe(1);
+    expect(A.sys.stash.count().monsters).toBe(30);
+
+    const file = await roundTrip(serializeGame(A.game, { slot: 'w', name: 'x', gen: 'test' }));
+    const B = setup();
+    applySave(B.game, file);
+    expect(B.sys.stash.count().monsters).toBe(30);
+    B.game.player.x += far;
+    B.sys.stash.sweep();
+    expect(B.sys.stash.count().monsters).toBe(0);
+    const hps = living(B.sys).map((m) => m.hp).filter((hp) => hp !== 1).sort((a, b) => a - b);
+    expect(hps).toEqual(Array.from({ length: 30 }, (_, i) => 40 + i));
+  });
+});

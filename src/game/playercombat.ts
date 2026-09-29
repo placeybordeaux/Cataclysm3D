@@ -373,7 +373,8 @@ export class PlayerCombat implements GameSystem {
     this.viewmodel()?.attack('fire');
     const ammo = gun.ammoData() ?? null;
     sfx.gunshot(gun.typeId, undefined, { ammoType: typeof ammo?.ammo_type === 'string' ? ammo.ammo_type : undefined, loudness: shot.noise.volume });
-    this.sys.emitSound(p.x, p.y, p.z, shot.noise.volume, shot.noise.sound || 'Bang!', 'player', '');
+    // CDDA make_gun_sound_effect: silent weapons make no sound at all.
+    if (shot.noise.volume > 0) this.sys.emitSound(p.x, p.y, p.z, shot.noise.volume, shot.noise.sound || 'Bang!', 'player', '');
     // Dispersion becomes a sideways offset (the vertical part of the cone can't miss a sprite
     // that already fills the crosshair's column, so only the horizontal component matters).
     const yaw = p.yaw + shot.spread * Math.cos(shot.azimuth);

@@ -1,4 +1,5 @@
 import { Rng, hashSeed } from '../core/rng';
+import { MonsterStash } from './monstash';
 import { ACTION_SCALE, MELEE_SCALE } from '../core/time';
 import { pickFromMonsterGroup, expandItemGroup, getMonster, monsterName } from '../data/index';
 import { warnOnce } from '../data/warn';
@@ -149,9 +150,12 @@ export class MonsterSystem implements GameSystem {
   private grabRollTimer = 0;
   private lightCache = 100;
   private dirty = false;
+  /** Far idle monsters and evicted dormant corpses, per OMT column (monstash.ts). */
+  readonly stash: MonsterStash;
 
   constructor(readonly game: Game) {
     this.grid = new Grid(game.map);
+    this.stash = new MonsterStash(this);
     this.rng = new Rng(hashSeed(game.seed, 0x6d6f6e));
     game.events.on('sound', (s) => this.hear(s.x, s.y, s.z, s.volume, s.source));
   }
@@ -667,6 +671,7 @@ export class MonsterSystem implements GameSystem {
       this.dormantTimer = 1;
       this.driftDormant(1);
     }
+    this.stash.update(dt);
     this.fieldTimer -= dt;
     if (this.fieldTimer <= 0) {
       this.fieldTimer = 1 / ACTION_SCALE;

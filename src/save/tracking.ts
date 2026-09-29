@@ -7,8 +7,9 @@ import { chunkMapDamage } from '../game/bash';
 // chunks that differ from what the generator would produce again are stored ("dirty").
 //
 // A chunk's baseline is captured right after the generator filled it, before the other
-// onChunkGenerated hooks run (the spawner laying dormant-zombie corpses is already a change
-// the generator won't redo). It is dirty when any of these hold:
+// onChunkGenerated hooks run. Hooks whose edits are re-derived on regeneration accept them
+// with `rebaseline` (the spawner's dormant-zombie corpses, which the monster stash re-lays;
+// the actualizer's rot). It is dirty when any of these hold:
 //   - its `version` moved (every map API mutation and every renderer-visible direct write
 //     bumps it: setTer/setFurn/addItem/removeItem/addField, fields.ts, traps.ts, late
 //     z-level overlays from worldgen),

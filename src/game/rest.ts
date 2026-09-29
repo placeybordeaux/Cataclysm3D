@@ -146,7 +146,43 @@ export function goToSleep(game: Game): boolean {
   p.tryToSleep();
   const m = comfortMessage(ci);
   game.message(m.text, m.good ? 'c_green' : 'c_light_red');
+  sleepHints(game, ci);
   return startSleepActivity(game);
+}
+
+// ------------------------------------------------------------------ first-nights guidance
+
+/** Each hint is shown this many times per session, then the survivor is assumed to know. */
+const HINT_TIMES = 3;
+const hintCounts = new WeakMap<Game, Record<'bed' | 'cold', number>>();
+
+/** Log a survival hint the first few times (messages only: never a popup over the onboarding tips). */
+export function survivalHint(game: Game, kind: 'bed' | 'cold'): boolean {
+  let n = hintCounts.get(game);
+  if (!n) hintCounts.set(game, (n = { bed: 0, cold: 0 }));
+  if (n[kind] >= HINT_TIMES) return false;
+  n[kind]++;
+  game.message(kind === 'bed' ? "You'd sleep better in a bed, or with a blanket or sleeping bag." : "It's cold.  Find warmer clothes, or build a fire.", 'c_light_cyan');
+  return true;
+}
+
+const SHIVER_WAKE = ['Your shivering prevents you from sleeping.', 'You wake up shivering violently, aching from the cold!'];
+
+/** Chilly or colder anywhere (the sidebar's "Chilly" / "Very cold!" / "Freezing!"). */
+function feelsCold(game: Game): boolean {
+  const p = game.player;
+  return Object.values(p.bodyTemp).some((t) => t < BODYTEMP.COLD);
+}
+
+/**
+ * Lying down somewhere hard or cold: point at what CDDA's sleep comfort rewards (beds,
+ * bedding, blankets) and at warmth, the two things that keep a first night from going wrong.
+ */
+function sleepHints(game: Game, ci: ComfortInfo): void {
+  const p = game.player;
+  const bedding = (p.env.floorItemWarmth ?? 0) > 0 || p.inv.worn.some((it) => /sleeping_bag|blanket|quilt|duvet|bedroll/.test(it.typeId));
+  if (ci.comfort < COMFORT.slightly_comfortable && !bedding) survivalHint(game, 'bed');
+  if (feelsCold(game)) survivalHint(game, 'cold');
 }
 
 function startSleepActivity(game: Game): boolean {
@@ -215,11 +251,22 @@ export function survivalDistraction(game: Game): string | null {
 /** Keeps the clock warped while asleep even if the activity was cancelled (collapsing from exhaustion, WASD). */
 export function installRest(game: Game): void {
   game.activities.distractionChecks.push(() => survivalDistraction(game));
+  // Woken by the cold (Character.update's shivering wake-ups): say what would help, right
+  // after that message. Keyed on the message because the sleep activity may roll the survivor
+  // back to sleep within the same tick, so there's no clean awake/asleep edge to watch.
+  let shivered = false;
+  game.events.on('message', (m) => {
+    if (SHIVER_WAKE.includes(m.text)) shivered = true;
+  });
   game.systems.push({
     name: 'sleepwatch',
     update(g) {
       const p = g.player;
       if (p.isAsleep() && !p.dead && !g.activities.current) startSleepActivity(g);
+      if (shivered) {
+        shivered = false;
+        survivalHint(g, 'cold');
+      }
     },
   });
 }

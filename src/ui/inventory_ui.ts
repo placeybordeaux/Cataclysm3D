@@ -26,19 +26,21 @@ export interface InvEntry {
   dir?: string;
   /** Identical items shown as one line ("2 canned beans"); item is stack[0]. */
   stack?: Item[];
+  /** Container item this entry sits in (nested entries only). */
+  parent?: Item;
 }
 
 /**
- * Collapse identical top-level items into one entry like CDDA's inventory ("2 cans of
- * beans"). Only depth-0 carried items and ground items on the same tile merge; charge
- * stacks (ammo, liquids) are already one item.
+ * Collapse identical items into one entry like CDDA's inventory ("2 cans of beans", "4
+ * quarters" in a wallet). Depth-0 carried items, ground items on the same tile, and items
+ * inside the same container merge; charge stacks (ammo, liquids) are already one item.
  */
 export function stackEntries(list: InvEntry[]): InvEntry[] {
   const out: InvEntry[] = [];
   for (const e of list) {
-    const mergeable = e.depth === 0 && (e.where === 'carried' || e.where === 'ground') && !e.item.countByCharges;
+    const mergeable = (e.depth === 0 ? e.where === 'carried' || e.where === 'ground' : !!e.parent) && !e.item.countByCharges;
     const into = mergeable
-      ? out.find((o) => o.depth === 0 && o.where === e.where && o.dir === e.dir && !o.item.countByCharges && o.item.stacksWith(e.item))
+      ? out.find((o) => o.depth === e.depth && o.parent === e.parent && o.where === e.where && o.dir === e.dir && !o.item.countByCharges && o.item.stacksWith(e.item))
       : undefined;
     if (into) (into.stack ??= [into.item]).push(e.item);
     else out.push({ ...e });
@@ -80,7 +82,7 @@ export function carriedEntries(ctx: UiContext): InvEntry[] {
 
 function pushContents(out: InvEntry[], it: Item, depth: number): void {
   for (const p of it.containerPockets()) for (const inner of p.contents) {
-    out.push({ item: inner, where: 'carried', depth });
+    out.push({ item: inner, where: 'carried', depth, parent: it });
     pushContents(out, inner, depth + 1);
   }
 }

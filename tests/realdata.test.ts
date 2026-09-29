@@ -9,6 +9,7 @@ import { Character } from '../src/game/character';
 import { fireGun, monsterMeleeAttack } from '../src/game/combat';
 import { createItem, fromSpawned, Item } from '../src/game/item';
 import { BODY_PARTS, ALL_PARTS } from '../src/game/bodyparts';
+import { itemsOf, stackEntries, type InvEntry } from '../src/ui/inventory_ui';
 
 const dir = path.join(__dirname, '../public/data');
 const load = (f: string) => JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8'));
@@ -31,6 +32,25 @@ function survivor(): { c: Character; log: string[] } {
 }
 
 describe('real data: items', () => {
+  it('bows, crossbows and flamethrowers make their own shot sounds (ranged.cpp gun_noise)', () => {
+    expect(createItem(data, 'crossbow').gunNoise().sound).toBe('thonk!');
+    expect(createItem(data, 'compbow').gunNoise().sound).toBe('whizz!');
+    expect(createItem(data, 'flamethrower').gunNoise()).toEqual({ volume: 4, sound: 'Fwoosh!' });
+  });
+
+  it('identical coins inside a wallet show as one inventory line', () => {
+    const wallet = createItem(data, 'wallet');
+    const pocket = wallet.containerPockets().find((p) => p.canContain(createItem(data, 'coin_quarter')).ok)!;
+    for (let i = 0; i < 4; i++) expect(pocket.insert(createItem(data, 'coin_quarter'))).toBeNull();
+    pocket.insert(createItem(data, 'coin_dime'));
+    const entries: InvEntry[] = [
+      { item: wallet, where: 'carried', depth: 0 },
+      ...pocket.contents.map((item) => ({ item, where: 'carried' as const, depth: 1, parent: wallet })),
+    ];
+    const stacked = stackEntries(entries);
+    expect(stacked.map((e) => [e.item.typeId, itemsOf(e).length])).toEqual([['wallet', 1], ['coin_quarter', 4], ['coin_dime', 1]]);
+  });
+
   it('backpack, jeans, hoodie give storage and encumbrance', () => {
     const { c } = survivor();
     c.inv.wear(createItem(data, 'backpack'));
