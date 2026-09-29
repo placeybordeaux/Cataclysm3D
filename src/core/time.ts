@@ -8,6 +8,12 @@
 
 /** CDDA turns per real second for movement/combat. Speed 100 walker => 3 tiles/s. */
 export const ACTION_SCALE = 3;
+/**
+ * CDDA turns per real second for melee swings (player and monsters). Slower than movement on
+ * purpose: at 3 turns/s a plain zombie swung 2+ times a second and a pack shredded you before
+ * you could react; at 2 you still out-walk it but a fight reads blow by blow.
+ */
+export const MELEE_SCALE = 2;
 /** Game seconds per real second while playing normally. */
 export const CLOCK_SCALE = 24;
 

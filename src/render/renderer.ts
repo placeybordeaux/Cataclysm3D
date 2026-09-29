@@ -231,6 +231,9 @@ export class Renderer {
     if (this.playerSprite) this.playerSprite.setFrame(src.sprite('player'), 1.75);
   }
 
+  /** Menus drawn over the live world (title screen) hide the hands. */
+  hideViewmodel = false;
+
   get flashlightOn(): boolean {
     return this.lights.flashlightOn;
   }
@@ -336,7 +339,7 @@ export class Renderer {
     this.autoPatch();
 
     const vm = this.viewmodel!;
-    vm.enabled = this.rig.mode === 'first' && !this.handsBusy;
+    vm.enabled = this.rig.mode === 'first' && !this.handsBusy && !this.hideViewmodel;
     this.muzzleT = Math.max(0, this.muzzleT - dt);
     this.muzzleLight.set(p.x, p.y, p.z);
     this.muzzleLight.intensity = this.muzzleT > 0 ? 2.5 : 0;

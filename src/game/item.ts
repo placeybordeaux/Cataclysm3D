@@ -622,6 +622,8 @@ export class Item implements MapItem {
     if (this.isContainer()) {
       const inner = this.containerPockets().flatMap((p) => p.contents);
       if (inner.length === 1) s += ` > ${inner[0].name()}`;
+      // One stack of identical things reads like CDDA: "small cardboard box > borax powder (399)".
+      else if (inner.length > 1 && inner.every((i) => i.stacksWith(inner[0]))) s += ` > ${inner[0].name(inner.length)} (${inner.length})`;
       else if (inner.length > 1) s += ` > ${inner.length} items`;
     }
     return s;
@@ -760,9 +762,16 @@ export function fromSpawned(data: GameData, s: SpawnedItem): Item[] {
     const it = new Item(data, def);
     it.charges = (s.charges ?? defaultCharges(def)) * Math.max(1, s.count);
     if (it.isLiquid() && def.container && data.items[def.container]) {
-      const c = new Item(data, data.items[def.container]);
-      const left = c.put(it);
-      out.push(c);
+      // Like item::in_its_container with overflow: more liquid than one container holds
+      // fills more containers instead of leaving a loose puddle in a cupboard.
+      let left: Item | null = it;
+      for (let n = 0; left && n < 20; n++) {
+        const c = new Item(data, data.items[def.container]);
+        const before = left.charges;
+        left = c.put(left);
+        if (left && left.charges === before) break; // container can't hold it at all
+        out.push(c);
+      }
       if (left) out.push(left); // overflow spills as loose liquid; caller decides
     } else out.push(it);
     return out;

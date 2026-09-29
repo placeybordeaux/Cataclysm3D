@@ -2,7 +2,8 @@ import type { Game } from './game';
 import type { GameData } from '../data/types';
 import { DAYS_PER_SEASON, SECONDS_PER_DAY } from '../core/time';
 import { hashSeed, Rng } from '../core/rng';
-import { isDay, isOutside } from './vision';
+import { isDay, isOutside, lineOfSight, sunAltitude } from './vision';
+import type { Item } from './item';
 import { emitSound } from './sound';
 
 // CDDA weather, after weather_gen.cpp: temperature / humidity / pressure / wind come from
@@ -254,6 +255,10 @@ interface WState {
   thunderAcc: number;
   rng: Rng;
   hooks: WeatherHooks;
+  /** real seconds until the next fire/bedding scan around the player */
+  envAcc: number;
+  /** cached heat radiation at the player, °C */
+  radiant: number;
 }
 const wstates = new WeakMap<Game, WState>();
 
@@ -290,23 +295,67 @@ export function forceWeather(game: Game, id: string | null): WeatherState {
   return refreshWeather(game);
 }
 
-/** Air temperature at the player (°C): outdoors = weather; indoors a bit warmer; underground stable. */
+/**
+ * Air temperature at a tile (°C), weather_manager::get_temperature: the weather's temperature
+ * (underground: the region's average) plus radiant heat from fires within 6 tiles. CDDA gives
+ * buildings no warmth of their own; shelter only blocks wind and sun (see installWeather).
+ */
 export function temperatureAt(game: Game, x: number, y: number, z: number): number {
   const w = game.weather;
-  const T = w?.temperature ?? 15;
-  if (z < 0) return DEFAULT_WEATHER_GEN.base_temperature;
-  if (!isOutside(game.map, x, y, z)) return T + 3;
-  return T;
+  const T = z < 0 ? DEFAULT_WEATHER_GEN.base_temperature : (w?.temperature ?? 15);
+  return T + heatRadiation(game, x, y, z);
+}
+
+/** get_heat_radiation: 6 °F × intensity² / distance for every visible fire within 6 tiles, in °C. */
+export function heatRadiation(game: Game, x: number, y: number, z: number): number {
+  let f = 0;
+  for (let dy = -6; dy <= 6; dy++)
+    for (let dx = -6; dx <= 6; dx++) {
+      const fire = game.map.fieldsAt(x + dx, y + dy, z).find((fd) => fd.type === 'fd_fire');
+      if (!fire || fire.intensity <= 0) continue;
+      if ((dx || dy) && !lineOfSight(game.map, x, y, x + dx, y + dy, z)) continue;
+      f += (6 * fire.intensity * fire.intensity) / Math.max(1, Math.abs(dx), Math.abs(dy));
+    }
+  return (f * 5) / 9;
+}
+
+/** get_best_fire: the strongest fire you can lean over (adjacent). */
+export function bestFireAt(game: Game, x: number, y: number, z: number): number {
+  let best = 0;
+  for (let dy = -1; dy <= 1; dy++)
+    for (let dx = -1; dx <= 1; dx++) {
+      const fire = game.map.fieldsAt(x + dx, y + dy, z).find((fd) => fd.type === 'fd_fire');
+      if (fire) best = Math.max(best, fire.intensity);
+    }
+  return best;
+}
+
+/**
+ * Character::floor_bedding_warmth + floor_item_warmth for lying at (x, y, z), in °C: furniture
+ * bedding (JSON legacy units, 500 = 1 °C), else the terrain's minus 4 °C for bare ground; plus
+ * big blankets/clothes covering torso or legs lying on the tile (0.12 °C × warmth × volume/2.5 L).
+ */
+export function beddingAt(game: Game, x: number, y: number, z: number): { bedding: number; items: number } {
+  const f = game.map.furnAt(x, y, z), t = game.map.terAt(x, y, z);
+  const legacy = (d: { id: string; floor_bedding_warmth?: unknown }) => (typeof d.floor_bedding_warmth === 'number' ? d.floor_bedding_warmth : 0) / 500;
+  const bedding = f.id !== 'f_null' ? legacy(f) : legacy(t) - 4;
+  let items = 0;
+  for (const it of game.map.itemsAt(x, y, z) as Item[]) {
+    const vol = it.def.volume ?? 0;
+    const covers = (it.def.armor ?? []).some((a) => (a.covers ?? []).some((c: string) => c === 'torso' || c === 'leg_l' || c === 'leg_r'));
+    if (vol > 250 && covers) items += 0.12 * (it.def.warmth ?? 0) * (vol / 2500);
+  }
+  return { bedding, items };
 }
 
 export function installWeather(game: Game, hooks: WeatherHooks = {}): void {
-  const st: WState = { forced: null, lastSlot: -1, thunderAcc: 0, rng: new Rng(game.seed ^ 0x7ea7), hooks };
+  const st: WState = { forced: null, lastSlot: -1, thunderAcc: 0, rng: new Rng(game.seed ^ 0x7ea7), hooks, envAcc: 0, radiant: 0 };
   wstates.set(game, st);
   refreshWeather(game);
   hooks.setRenderWeather?.(renderWeatherKind(game.weather!.id));
   game.systems.push({
     name: 'weather',
-    update(g, _realDt, gameDt) {
+    update(g, realDt, gameDt) {
       const slot = Math.floor(g.clock.seconds / 300);
       if (slot !== st.lastSlot) {
         st.lastSlot = slot;
@@ -315,8 +364,22 @@ export function installWeather(game: Game, hooks: WeatherHooks = {}): void {
       const w = g.weather!;
       const p = g.player;
       const outside = isOutside(g.map, p.tileX, p.tileY, p.z);
-      p.env.temperature = temperatureAt(g, p.tileX, p.tileY, p.z);
+      // Fires/bedding need map scans; twice a real second is plenty for a 6-minute half-life.
+      st.envAcc -= realDt;
+      if (st.envAcc <= 0) {
+        st.envAcc = 0.5;
+        st.radiant = heatRadiation(g, p.tileX, p.tileY, p.z);
+        const b = beddingAt(g, p.tileX, p.tileY, p.z);
+        p.env.bedding = b.bedding;
+        p.env.floorItemWarmth = b.items;
+        p.env.bestFire = bestFireAt(g, p.tileX, p.tileY, p.z);
+      }
+      p.env.temperature = (p.z < 0 ? DEFAULT_WEATHER_GEN.base_temperature : w.temperature) + st.radiant;
       p.env.wind = outside ? w.windpower * 1.609 : 0;
+      p.env.humidity = w.humidity;
+      // incident_sun_irradiance, roughly: sin(altitude), dimmed by overcast weather.
+      const alt = sunAltitude(g.clock);
+      p.env.sun = outside && alt > 0 ? Math.sin((alt * Math.PI) / 180) * Math.max(0.1, Math.min(1, 1 + w.lightModifier / 40)) : 0;
       p.env.precipitation = outside && w.rains && w.precip !== 'none';
       // Thunder: a rumble roughly every few game minutes in thunderstorms.
       if (w.id === 'thunder' || w.id === 'lightning') {

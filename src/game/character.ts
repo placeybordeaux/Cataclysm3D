@@ -42,6 +42,46 @@ export const MAX_RECOIL = 3000;
 /** Game seconds between CDDA's 5-minute needs updates. */
 const FIVE_MINUTES = 300;
 
+/** "torso", "torso and arms", "head, torso and legs": pairs of limbs collapse to the plural. */
+export function partList(parts: MainPartId[]): string {
+  const names: string[] = [];
+  for (const p of parts) {
+    const pair = p.endsWith('_l') || p.endsWith('_r');
+    const other = pair ? (p.slice(0, -1) + (p.endsWith('_l') ? 'r' : 'l')) as MainPartId : null;
+    if (other && parts.includes(other)) {
+      const plural = p.startsWith('arm') ? 'arms' : 'legs';
+      if (!names.includes(plural)) names.push(plural);
+    } else names.push(BODY_PARTS[p].name);
+  }
+  return names.length <= 1 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+}
+
+/** body_parts.json fire_warmth_bonus per main part (hands/feet folded into arms/legs), °C. */
+const FIRE_WARMTH_BONUS: Record<MainPartId, number> = { head: 0.3, torso: 0.3, arm_l: 1.2, arm_r: 1.2, leg_l: 0.6, leg_r: 0.6 };
+
+/** cata_utility logarithmic_range: 1 at min, 0 at max, logistic in between. */
+export function logarithmicRange(min: number, max: number, pos: number): number {
+  const CUT = 4;
+  const logi = (t: number) => 1 / (1 + Math.exp(-t));
+  const lo = logi(-CUT), hi = logi(CUT);
+  if (pos <= min) return 1;
+  if (pos >= max) return 0;
+  const unit = (pos - min) / (max - min);
+  return 1 - (logi(CUT * (2 * unit - 1)) - lo) / (hi - lo);
+}
+
+/** weather.cpp get_local_windchill: apparent-temperature delta (K) for air °C, humidity %, wind mph. */
+export function localWindchill(tempC: number, humidity: number, windMph: number): number {
+  if (tempC < 10) {
+    if (windMph < 3) return 0;
+    const kmh = windMph * 0.44704 * 3.6;
+    const w = Math.pow(kmh, 0.16);
+    return 13.12 + 0.6215 * tempC - 11.37 * w + 0.3965 * tempC * w - tempC;
+  }
+  const ms = windMph * 0.44704;
+  return 0.33 * Math.min(150, (humidity / 100) * 6.105 * Math.exp((17.27 * tempC) / (237.7 + tempC))) - 0.7 * ms - 4;
+}
+
 export type MoveMode = 'walk' | 'run' | 'crouch';
 
 export interface SkillLevel {
@@ -51,12 +91,22 @@ export interface SkillLevel {
 }
 
 export interface CharacterEnvironment {
-  /** Ambient air temperature at the character, °C. */
+  /** Ambient air temperature at the character, °C (weather + radiant heat from nearby fires). */
   temperature: number;
   /** Wind speed, km/h (already reduced by shelter). */
   wind: number;
   /** Rain/snow falling on the character. */
   precipitation: boolean;
+  /** Relative humidity, % (CDDA's warm-weather wind chill uses it). */
+  humidity?: number;
+  /** Sun irradiance on the character, 0..1 of the maximum (0 indoors / at night). */
+  sun?: number;
+  /** floor_bedding_warmth of the spot you'd lie on, °C (furniture, or terrain − 4 °C). */
+  bedding?: number;
+  /** Warmth of blankets/clothes lying on your tile (Character::floor_item_warmth), °C. */
+  floorItemWarmth?: number;
+  /** Intensity of the best fire adjacent to you (get_best_fire), 0 = none. */
+  bestFire?: number;
 }
 
 export interface HpPart {
@@ -819,23 +869,52 @@ export class Character {
   }
 
   // ---------------------------------------------------------------- body temperature
-  /** Total clothing warmth on a part (wet clothes insulate half as well). */
+  /** Total clothing warmth on a part (outfit::warmth: soaked clothes lose up to 66%). */
   warmth(p: MainPartId): number {
-    return this.inv.warmth(p) * (1 - 0.5 * this.wetness[p]);
+    return this.inv.warmth(p) * (1 - 0.66 * this.wetness[p]);
   }
   /**
-   * Simplified Character::update_bodytemp: each main part converges toward a target set by
-   * ambient temperature, wind chill, clothing warmth and wetness. Tuned so ~20°C with light
-   * clothes is comfortable and near-freezing without clothes gets "Cold" within minutes.
+   * Character::update_bodytemp's convergent temperature for a main part (character_body.cpp),
+   * in °C. A naked person is comfortable at 19 °C awake / 31 °C asleep; every 5 °C of air
+   * below that costs 1 °C of body temperature; each point of clothing warmth gives back
+   * 0.06–0.12 °C (more the colder you are: homeostasis); wind chill uses CDDA's (bugged, kept
+   * for balance) °F-as-legacy-units scaling. Bedding, blankets on the floor and an adjacent
+   * fire are "comfortable warmth": they help up to BODYTEMP_HOT but never push you past it.
    */
   bodyTempTarget(p: MainPartId): number {
     const env = this.env;
-    const windChill = env.wind > 5 ? Math.min(10, (env.wind - 5) * 0.25) : 0;
-    const wet = this.wetness[p] * 4;
-    const effective = env.temperature - windChill - wet + this.warmth(p) * 0.3;
-    // Exercise heats you a bit.
-    const exercise = this.running ? 1.5 : 0;
-    return BODYTEMP.NORM + (effective - 21) * 0.3 + exercise;
+    const asleep = this.isAsleep();
+    const ambientNorm = asleep ? 31 : 19;
+    const cur = this.bodyTemp[p];
+    // logarithmic_range(VERY_COLD, VERY_HOT, cur): 1 when cold, 0 when hot.
+    const scaled = logarithmicRange(BODYTEMP.VERY_COLD, BODYTEMP.VERY_HOT, cur);
+    const homeostasis = 0.06 * (1 + scaled);
+    const windMph = env.wind / 1.609;
+    const windchill = localWindchill(env.temperature, env.humidity ?? 70, windMph) * 1.8 * 0.2;
+    let conv = BODYTEMP.NORM + (env.temperature - ambientNorm) / 5 + homeostasis * this.warmth(p) + windchill;
+    // Sleepiness chills you while awake (−1.725 °C when exhausted), sunlight warms you outdoors.
+    if (!asleep) conv -= (1.725 * Math.min(Math.max(this.sleepiness, 0), 900)) / SLEEPINESS.EXHAUSTED;
+    conv += 3 * (env.sun ?? 0);
+    let heatLow = 0, heatHigh = 0;
+    for (const t of this.traits) {
+      const m = this.traitDefs.get(t)?.bodytemp_modifiers as number[] | undefined;
+      if (Array.isArray(m)) (heatLow += m[0] / 500), (heatHigh += m[1] / 500);
+    }
+    conv += heatLow;
+    const lying = asleep || this.effects.has('lying_down');
+    const fire = !lying && env.bestFire ? env.bestFire * FIRE_WARMTH_BONUS[p] : 0;
+    const comfortable = fire + (lying ? (env.bedding ?? 0) + (env.floorItemWarmth ?? 0) : 0);
+    const bonus = comfortable + (heatHigh - heatLow);
+    if (bonus > 0 && conv < BODYTEMP.HOT) conv = Math.min(BODYTEMP.HOT, conv + bonus);
+    // bonus_item_warmth: an unencumbered head can pull up a worn hood (outfit::hood_warmth),
+    // used only while it doesn't overheat you.
+    if (p === 'head' && this.inv.encumbrance('head') < 10) {
+      let hood = 0;
+      for (const it of this.inv.worn) if (it.hasFlag('HOOD')) hood = Math.max(hood, it.def.warmth ?? 0);
+      const extra = homeostasis * hood * (1 - 0.66 * this.wetness.head);
+      if (extra > 0 && (conv + extra < BODYTEMP.HOT || cur < BODYTEMP.COLD)) conv += extra;
+    }
+    return conv;
   }
   bodyTempDescription(): string {
     let worst: number = BODYTEMP.NORM;
@@ -849,10 +928,15 @@ export class Character {
     return 'Comfortable';
   }
   private updateBodyTemp(dt: number): void {
-    const k = 1 - Math.exp(-dt / 600);
+    // CDDA converges 1 − e^(−0.002) per turn (half-life ≈ 6 minutes).
+    const k = 1 - Math.exp(-0.002 * dt);
     const waterproof = (p: MainPartId) => this.inv.wornCovering(p).some((it) => it.hasFlag('WATERPROOF') || it.hasFlag('RAINPROOF'));
+    const asleep = this.isAsleep();
+    // Parts crossing the same threshold together get one message ("your torso and arms").
+    const warn = { numb: [] as MainPartId[], veryCold: [] as MainPartId[], chilly: [] as MainPartId[] };
     for (const p of MAIN_PARTS) {
-      this.bodyTemp[p] += (this.bodyTempTarget(p) - this.bodyTemp[p]) * k;
+      const before = this.bodyTemp[p];
+      this.bodyTemp[p] += (this.bodyTempTarget(p) - before) * k;
       if (this.env.precipitation && !waterproof(p)) this.wetness[p] = Math.min(1, this.wetness[p] + dt / 300);
       else this.wetness[p] = Math.max(0, this.wetness[p] - dt / (this.bodyTemp[p] > BODYTEMP.NORM ? 900 : 1800));
       const t = this.bodyTemp[p];
@@ -860,7 +944,26 @@ export class Character {
       const hot = t > BODYTEMP.SCORCHING ? 3 : t > BODYTEMP.VERY_HOT ? 2 : t > BODYTEMP.HOT ? 1 : 0;
       this.setTempEffect('cold', p, cold);
       this.setTempEffect('hot', p, hot);
+      if (!asleep) {
+        if (before > BODYTEMP.FREEZING && t <= BODYTEMP.FREEZING) warn.numb.push(p);
+        else if (before > BODYTEMP.VERY_COLD && t <= BODYTEMP.VERY_COLD) warn.veryCold.push(p);
+        else if (before > BODYTEMP.COLD && t <= BODYTEMP.COLD) warn.chilly.push(p);
+      }
+      // CDDA: shivering keeps you from sleeping once your torso is very cold, unless you're
+      // dead tired. We also count the head: we have no separate mouth/eyes/hands/feet, so a
+      // bare head is the part that most often freezes, and sleeping on while it takes cold
+      // damage all night would kill survivors without a hat, which CDDA doesn't do in practice.
+      // Dead tired sleepers shiver on, but the cold still wakes them once it starts to hurt
+      // (a fifth of the part's HP) rather than letting them freeze to death in their sleep.
+      const hurting = this.hp[p].cur < this.hp[p].max * 0.8;
+      if (asleep && (p === 'torso' || p === 'head') && t <= BODYTEMP.VERY_COLD && (this.sleepiness <= SLEEPINESS.DEAD_TIRED || hurting) && this.isAsleep()) {
+        this.msg(hurting ? 'You wake up shivering violently, aching from the cold!' : 'Your shivering prevents you from sleeping.', hurting ? 'c_red' : 'c_yellow');
+        this.wakeUp();
+      }
     }
+    if (warn.numb.length) this.msg(`You feel your ${partList(warn.numb)} beginning to go numb from the cold!`, 'c_red');
+    if (warn.veryCold.length) this.msg(`You feel your ${partList(warn.veryCold)} getting very cold.`, 'c_yellow');
+    if (warn.chilly.length) this.msg(`You feel your ${partList(warn.chilly)} getting chilly.`, 'c_yellow');
   }
   private setTempEffect(id: 'cold' | 'hot', p: MainPartId, intensity: number): void {
     const e = this.effects.get(id, p);

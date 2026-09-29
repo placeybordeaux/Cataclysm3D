@@ -54,6 +54,13 @@ export function installWorldInteraction(game: Game, renderer: Renderer, api: Deb
 
   game.keys.register('interact', 'Examine / open / close / use', () => void interact(game));
   game.keys.register('smash', 'Smash', () => void playerSmash(game));
+  // Every system already honours p.crouching (eye height, footstep noise, being seen/heard);
+  // this is the switch. CDDA's move-mode messages.
+  game.keys.register('crouch', 'Crouch (toggle)', () => {
+    const pl = game.player;
+    pl.crouching = !pl.crouching;
+    game.message(pl.crouching ? 'You start crouching.' : 'You stop crouching.', 'c_light_gray');
+  });
   game.keys.register('flashlight', 'Toggle light (flashlight, lantern)', () => void toggleLight(game));
   game.keys.register('sleep', 'Sleep', () => {
     const p = game.player;

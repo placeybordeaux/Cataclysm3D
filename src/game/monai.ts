@@ -1,5 +1,5 @@
 import { Rng, hashSeed } from '../core/rng';
-import { ACTION_SCALE } from '../core/time';
+import { ACTION_SCALE, MELEE_SCALE } from '../core/time';
 import { pickFromMonsterGroup, expandItemGroup, getMonster, monsterName } from '../data/index';
 import { warnOnce } from '../data/warn';
 import type { MonsterDef } from '../data/types';
@@ -832,12 +832,15 @@ export class MonsterSystem implements GameSystem {
       // Special attacks first (they check their own range/conditions), then plain melee.
       for (const sa of m.specials) {
         if (sa.cooldown > 0 || p.dead) continue;
+        const isMelee = sa.def.attack_type === 'melee' || sa.def.attack_type === 'bite';
+        // Melee specials (grab, bite) spend the same moves as a plain swing in CDDA, so they
+        // wait for the swing cooldown instead of landing on top of it.
+        if (isMelee && m.attackCooldown > 0) continue;
         if (trySpecial(this, m, sa)) {
           const cd = typeof sa.def.cooldown === 'number' ? sa.def.cooldown : 0;
           sa.cooldown = Math.max(sa.cooldown, turnsToSeconds(cd));
           const cost = typeof sa.def.move_cost === 'number' ? sa.def.move_cost : 100;
-          const isMelee = sa.def.attack_type === 'melee' || sa.def.attack_type === 'bite';
-          if (isMelee) m.attackCooldown = Math.max(m.attackCooldown, cost / m.speed / ACTION_SCALE);
+          if (isMelee) m.attackCooldown = Math.max(m.attackCooldown, cost / m.speed / MELEE_SCALE);
           m.busy = Math.max(m.busy, isMelee ? 0.15 : 0);
           this.face(m, p.x, p.y);
           if (p.dead) return;
@@ -847,7 +850,7 @@ export class MonsterSystem implements GameSystem {
       if (m.attackCooldown <= 0 && m.busy <= 0 && !p.dead && this.inMeleeRange(m)) {
         this.face(m, p.x, p.y);
         defaultMelee(this, m);
-        m.attackCooldown = (m.type.attack_cost || 100) / m.speed / ACTION_SCALE;
+        m.attackCooldown = (m.type.attack_cost || 100) / m.speed / MELEE_SCALE;
         m.busy = 0.15;
       }
     }
@@ -970,7 +973,7 @@ export class MonsterSystem implements GameSystem {
       for (const o of this.monstersNear(x + 0.5, y + 0.5, m.z, 2.5)) if (o !== m && o.has('GROUP_BASH')) str += (o.type.melee_dice * o.type.melee_dice_sides) / 2;
     }
     bash(this.game, x, y, m.z, Math.round(str), { source: m });
-    m.attackCooldown = 100 / m.speed / ACTION_SCALE;
+    m.attackCooldown = 100 / m.speed / MELEE_SCALE;
     m.path = [];
     m.pathAge = 99;
   }

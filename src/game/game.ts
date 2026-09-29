@@ -123,7 +123,7 @@ export class Game {
     if (k.has('KeyS')) fy -= 1;
     if (k.has('KeyD')) fx += 1;
     if (k.has('KeyA')) fx -= 1;
-    p.running = k.has('ShiftLeft');
+    p.running = k.has('ShiftLeft') || k.has('ShiftRight');
     if (fx === 0 && fy === 0) return;
     const len = Math.hypot(fx, fy);
     fx /= len; fy /= len;

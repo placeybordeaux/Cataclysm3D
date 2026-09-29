@@ -86,8 +86,11 @@ export class PlayerCombat implements GameSystem {
     const clicks = input.consumeClicks();
     const others = clicks.filter((b) => b !== 0);
     if (others.length) (input as unknown as { clicks: number[] }).clicks.push(...others);
-    const lmb = clicks.includes(0) || (input.mouseButtons & 1) !== 0;
     const gun = p.inv.wielded?.isGun() ? p.inv.wielded : null;
+    // Holding LMB keeps swinging a melee weapon, but a gun only keeps firing when it has an
+    // automatic mode; a pistol fires once per click like CDDA's one shot per `f`.
+    const held = (input.mouseButtons & 1) !== 0 && (!gun || isAutomatic(gun));
+    const lmb = clicks.includes(0) || held;
     if (gun && (input.mouseButtons & 4) !== 0) aim(p, gun, dt * ACTION_SCALE * 100);
     if (lmb && this.cooldown <= 0) this.attack();
   }
@@ -314,6 +317,12 @@ export class PlayerCombat implements GameSystem {
     this.sys.emitSound(land.x + 0.5, land.y + 0.5, p.z, 4, 'a thud.', 'player', '');
     return true;
   }
+}
+
+/** Does the gun have a burst/auto fire mode (CDDA `modes` entry firing more than one shot)? */
+export function isAutomatic(gun: Item): boolean {
+  const modes = gun.def.modes as unknown;
+  return Array.isArray(modes) && modes.some((m) => Array.isArray(m) && typeof m[2] === 'number' && m[2] > 1);
 }
 
 function weaponSound(w: Item | null): { id?: string; skill: MeleeSkill; volumeMl?: number } {

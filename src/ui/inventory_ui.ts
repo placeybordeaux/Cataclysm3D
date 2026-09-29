@@ -1,6 +1,7 @@
 import type { Item } from '../game/item';
 import type { ActionResult } from '../game/inventory';
 import { useActions } from '../game/inventory';
+import { patchInteractUi } from '../game/interact';
 import { c, openMenu, openWindow, type MenuEntry, type UiWindow } from './framework';
 import { fit, kg, liters } from './format';
 import { categoryName, escapeHtml, itemInfo } from './iteminfo';
@@ -139,6 +140,13 @@ export function placeDropped(ctx: UiContext, items: Item[] | undefined): void {
   for (const it of items) ctx.game.map.addItem(p.tileX, p.tileY, p.z, it);
 }
 
+/** Menu text for a use_action: its menu_text, else a readable name for the action type. */
+function useActionLabel(ua: { type: string; menu_text?: unknown }): string {
+  if (typeof ua.menu_text === 'string' && ua.menu_text) return ua.menu_text;
+  const names: Record<string, string> = { firestarter: 'Start a fire', transform: 'Turn on', heal: 'Heal', consume_drug: 'Take' };
+  return names[ua.type] ?? ua.type.replace(/_/g, ' ');
+}
+
 /** Apply the bookkeeping every inventory action needs (map removal, dropped items). */
 function finish(ctx: UiContext, e: InvEntry, r: ActionResult, tookItem: boolean): ActionResult {
   if (r.ok && e.where === 'ground' && e.pos && (tookItem || r.usedUp)) ctx.game.map.removeItem(e.pos.x, e.pos.y, e.pos.z, e.item);
@@ -164,8 +172,19 @@ export function doAction(ctx: UiContext, action: ItemAction, e: InvEntry): Actio
       return finish(ctx, e, inv.takeOff(it), false);
     case 'eat':
       return finish(ctx, e, inv.consume(it), false);
-    case 'apply':
+    case 'apply': {
+      const acts = useActions(it.def);
+      if (acts.length > 1) {
+        // CDDA's activate submenu: "Light up" / "Start a fire" for a refillable lighter.
+        openMenu({
+          title: it.name(),
+          entries: acts.map((ua, i) => ({ label: c('c_white', useActionLabel(ua)), value: i })),
+          onSelect: (i) => void finish(ctx, e, inv.use(it, undefined, i), false),
+        });
+        return null;
+      }
       return finish(ctx, e, inv.use(it), false);
+    }
     case 'reload':
       return finish(ctx, e, inv.reload(it), false);
     case 'unload':
@@ -464,6 +483,22 @@ export function openPickupMenu(ctx: UiContext): UiWindow | null {
   return openMultiSelect(ctx, 'Pick up which items?', rows, 'pick up', (chosen) => pickUpRows(ctx, chosen));
 }
 
+/**
+ * `e` on a locker/dresser/pile: the multi-select pickup for that one tile, so emptying a
+ * locker is `,` Enter rather than one item per keypress.
+ */
+export function openTilePickup(ctx: UiContext, title: string, x: number, y: number, z: number): UiWindow | null {
+  const items = ctx.game.map.itemsAt(x, y, z) as Item[];
+  if (!items.length) return null;
+  const rows = stackEntries(items.map((item) => ({ item, where: 'ground' as const, pos: { x, y, z }, depth: 0, dir: title })))
+    .map((entry) => ({ entry, max: maxOf(entry), count: 0 }));
+  if (rows.length === 1 && rows[0].max === 1) {
+    pickUpRows(ctx, [{ ...rows[0], count: 1 }]);
+    return null;
+  }
+  return openMultiSelect(ctx, title, rows, 'take', (chosen) => pickUpRows(ctx, chosen));
+}
+
 export function pickUpRows(ctx: UiContext, chosen: MultiRow[]): void {
   const inv = ctx.game.player.inv;
   const map = ctx.game.map;
@@ -487,6 +522,7 @@ export function pickUpRows(ctx: UiContext, chosen: MultiRow[]): void {
 
 export function installInventoryUi(ctx: UiContext): void {
   const { game } = ctx;
+  patchInteractUi({ pickup: (title, x, y, z) => void openTilePickup(ctx, title, x, y, z) });
   const inv = () => game.player.inv;
   const pick = (title: string, none: string, filter: (e: InvEntry) => boolean, act: ItemAction, nearby = true) => () =>
     openItemPicker(ctx, { title, none, filter, includeNearby: nearby, onPick: (e) => doAction(ctx, act, e) });

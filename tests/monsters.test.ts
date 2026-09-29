@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { Rng } from '../src/core/rng';
+import { MELEE_SCALE } from '../src/core/time';
 import type { GameData } from '../src/data/types';
 import { Game } from '../src/game/game';
 import type { Input } from '../src/core/input';
@@ -76,6 +77,17 @@ describe('monster AI', () => {
     expect(z.seesPlayer).toBe(true);
     expect(sys.distToPlayer(z)).toBeLessThan(1.5);
     expect(hpTotal(game)).toBeLessThan(hp0);
+  });
+
+  it('an adjacent zombie attacks at its speed on the melee clock; grabs/bites share that budget', () => {
+    const { game, sys, msgs } = world();
+    const z = sys.spawnById('mon_zombie', 12.5, 11.4, 0)!;
+    for (const k of Object.keys(game.player.hp)) game.player.hp[k as keyof typeof game.player.hp].max = game.player.hp[k as keyof typeof game.player.hp].cur = 100000;
+    step(game, 20);
+    const attacks = msgs.filter((m) => /^The zombie (hits|bites|claws|grabs|misses|lunges|tries)/.test(m)).length;
+    const expected = (z.type.speed / 100) * MELEE_SCALE * 20;
+    expect(attacks).toBeGreaterThan(expected * 0.7);
+    expect(attacks).toBeLessThan(expected * 1.15);
   });
 
   it('zombies move at CDDA speed: speed 70 on flat ground ~ 2.1 tiles/s', () => {

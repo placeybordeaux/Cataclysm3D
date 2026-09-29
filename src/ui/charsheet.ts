@@ -43,7 +43,8 @@ export function openCharacterSheet(ctx: UiContext): UiWindow {
   const speedLines = [
     `${'Base Move Cost:'.padEnd(20)}${c('c_white', String(100).padStart(4))}`,
     `${'Current Speed:'.padEnd(20)}${c(p.speed < 100 ? 'c_red' : p.speed > 100 ? 'c_green' : 'c_white', String(p.speed).padStart(4))}`,
-    ...p.speedModifiers.map(([n, v]) => `${n.padEnd(20)}${c(v < 0 ? 'c_red' : 'c_green', ((v > 0 ? '+' : '') + v).padStart(4))}`),
+    // Per-body-part effects (Chilly on head and both arms) add up to one line, like CDDA.
+    ...[...p.speedModifiers.reduce((m, [n, v]) => m.set(n, (m.get(n) ?? 0) + v), new Map<string, number>())].map(([n, v]) => `${n.padEnd(20)}${c(v < 0 ? 'c_red' : 'c_green', ((v > 0 ? '+' : '') + v).padStart(4))}`),
   ];
   if (!p.speedModifiers.length && pp.speed) speedLines.push(`${'Pain'.padEnd(20)}${c('c_red', String(-pp.speed).padStart(4))}`);
   speedLines.push('', `Mood: ${colorize(moraleFace(p.morale.level(), ctx.data.moodFaces))}  ${c('c_light_gray', `(${p.morale.level()})`)}`, `Focus: ${c('c_light_gray', String(Math.round(p.focus)))}`);

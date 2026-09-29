@@ -90,7 +90,8 @@ class Expander {
     } else def = ref;
     const items = this.entries(def.subtype, def.entries, stackIds);
     const ci = def['container-item'];
-    if (ci && items.length) return [{ id: ci, count: 1, contents: items }];
+    // CDDA: "container-item": "null" means "spawn loose", not "wrap in the null item".
+    if (ci && ci !== 'null' && items.length) return [{ id: ci, count: 1, contents: items }];
     return items;
   }
 

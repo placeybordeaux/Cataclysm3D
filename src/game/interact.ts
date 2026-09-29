@@ -8,7 +8,7 @@ import { cddaText } from './units';
 import { emitSound } from './sound';
 import { sfx } from '../audio/sfx';
 import { isOutside } from './vision';
-import { targetTile, type TargetTile } from './targeting';
+import { interesting, targetTile, type TargetTile } from './targeting';
 import { goStairs } from './zlevels';
 import { goToSleep, comfortAt } from './rest';
 import { ignite, fieldName } from './fields';
@@ -51,6 +51,10 @@ export const interactionProviders: ((game: Game, x: number, y: number, z: number
 let ui: InteractUi = {};
 export function setInteractUi(u: InteractUi): void {
   ui = u;
+}
+/** Override some hooks (the UI layer installs after world interaction). */
+export function patchInteractUi(u: Partial<InteractUi>): void {
+  ui = { ...ui, ...u };
 }
 
 const insideOf = (game: Game) => {
@@ -247,6 +251,7 @@ export function interactionsAt(game: Game, x: number, y: number, z: number): Int
   }
 
   // --- furniture examine actions
+  const later: Interaction[] = [];
   const act = fAct ?? tAct;
   const def = fAct ? f : t;
   switch (act) {
@@ -289,12 +294,13 @@ export function interactionsAt(game: Game, x: number, y: number, z: number): Int
       break;
     case 'deployed_furniture': {
       const di = typeof f.deployed_item === 'string' ? f.deployed_item : null;
+      // Looking inside a cardboard box/tent is what you usually want; taking it down comes after.
       if (di && game.data.items[di])
-        add('take_down', `Take down the ${f.name}`, () => {
+        later.push({ id: 'take_down', label: `Take down the ${f.name}`, run: () => {
           map.setFurn(x, y, z, 'f_null');
           map.addItem(x, y, z, createItem(game.data, di));
           say(game, `You take down the ${f.name}.`);
-        });
+        } });
       break;
     }
     case 'ledge':
@@ -324,16 +330,24 @@ export function interactionsAt(game: Game, x: number, y: number, z: number): Int
   if (!hasFlag(f, 'PLANT') && (items.length || (f.id !== 'f_null' && hasFlag(f, 'CONTAINER')))) {
     const where = f.id !== 'f_null' ? f.name : t.name;
     const n = items.length;
-    add('pickup', n ? `Look in the ${where} (${n} item${n === 1 ? '' : 's'})` : `Look in the ${where}`, () => {
+    // Loose items on the ground read as items, not as "the floor".
+    const label = f.id === 'f_null'
+      ? (n === 1 ? `Pick up ${(items[0] as Item).name()}` : `Look at the ${n} items here`)
+      : !hasFlag(f, 'CONTAINER') ? `Look at the items on the ${where} (${n})`
+      : n ? `Look in the ${where} (${n} item${n === 1 ? '' : 's'})` : `Look in the ${where}`;
+    add('pickup', label, () => {
       if (!n) return say(game, `The ${where} is empty.`);
       if (ui.pickup) ui.pickup(`${where[0].toUpperCase()}${where.slice(1)}`, x, y, z);
       else say(game, `There ${n === 1 ? 'is' : 'are'} ${n} item${n === 1 ? '' : 's'} in the ${where}.`);
     });
   }
 
+  out.push(...later);
+
   // --- fallback: describe it
   if (!out.length && (f.id !== 'f_null' || !map.passable(x, y, z) || tAct)) {
-    add('examine', `Examine ${def.name}`, () => describe(game, x, y, z));
+    const main = f.id !== 'f_null' ? f : t;
+    add('describe', `Examine ${main.name}`, () => describe(game, x, y, z));
   }
   return out;
 }
@@ -393,7 +407,8 @@ export function interact(game: Game, target: TargetTile | null = targetTile(game
   const tt = target ?? { x: p.tileX, y: p.tileY, z: p.z, dist: 0 };
   const list = interactionsAt(game, tt.x, tt.y, tt.z);
   if (!list.length) {
-    if (!target) game.message('There is nothing to examine there.', 'c_light_gray');
+    // Plain floor under the crosshair isn't worth a pop-up window.
+    if (!target || !interesting(game, tt.x, tt.y, tt.z)) game.message('There is nothing to examine there.', 'c_light_gray');
     else describe(game, tt.x, tt.y, tt.z);
     return false;
   }
@@ -420,7 +435,8 @@ export function interactionPrompt(game: Game): string | null {
   const key = game.keys.keyFor('interact');
   if (t) {
     const list = interactionsAt(game, t.x, t.y, t.z);
-    if (list.length) return `[${key}] ${list[0].label}${list.length > 1 ? ' …' : ''}`;
+    // A bare description (walls, stools, bushes) isn't worth a prompt; `e` still shows it.
+    if (list.length && !(list.length === 1 && list[0].id === 'describe')) return `[${key}] ${list[0].label}${list.length > 1 ? ' …' : ''}`;
   }
   // Standing on stairs: suggest the stair keys.
   const here = game.map.terAt(p.tileX, p.tileY, p.z);
