@@ -1,6 +1,7 @@
 import type { Game } from './game';
 import type { TerrainDef } from '../data/types';
 import type { Item } from './item';
+import { consumeItem, L, moveItem } from './moves';
 import type { Monster } from './monster';
 import { CHUNK, chunkOf, localOf } from '../world/coords';
 import { hasFlag } from '../world/registry';
@@ -155,8 +156,10 @@ export async function useCardreader(game: Game, x: number, y: number, z: number,
 
 const stripTags = (s: string) => s.replace(/<\/?[a-z_]+>/g, '');
 
+/** A keycard is used up (consume_card). */
 function removeItem(game: Game, it: Item): void {
-  game.player.inv.remove(it);
+  const loc = game.player.inv.locOf(it);
+  if (loc) consumeItem(it, loc, it.countByCharges ? 1 : undefined);
 }
 
 // ------------------------------------------------------------------------------------------
@@ -520,10 +523,7 @@ export function rideElevator(game: Game, x: number, y: number, z: number, toZ: n
   const map = game.map;
   for (const [tx, ty] of cab) {
     const [dx, dy] = dest(tx, ty);
-    for (const it of [...map.itemsAt(tx, ty, z)]) {
-      map.removeItem(tx, ty, z, it);
-      map.addItem(dx, dy, toZ, it);
-    }
+    for (const it of [...map.itemsAt(tx, ty, z)] as Item[]) moveItem(it, L.ground(map, tx, ty, z), L.ground(map, dx, dy, toZ), { force: true, quiet: true });
   }
   const sys = monstersOf(game);
   for (const m of sys?.all ?? []) {

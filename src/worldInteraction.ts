@@ -2,6 +2,7 @@ import type { Game } from './game/game';
 import type { Renderer } from './render/renderer';
 import type { DebugApi } from './debug';
 import type { Item } from './game/item';
+import { L } from './game/moves';
 import { installSound, emitSound, recentSounds, soundsHeardAt, type SoundOpts } from './game/sound';
 import { installWeather, forceWeather, refreshWeather } from './game/weather';
 import { installFields, ignite, addField, fieldDamageAt } from './game/fields';
@@ -43,8 +44,7 @@ export function installWorldInteraction(game: Game, renderer: Renderer, api: Deb
       const m = openMenu({
         title, entries: entries(), footer: `${c('c_light_green', 'letter')} take item`,
         onSelect: (it) => {
-          const r = game.player.inv.pickUp(it);
-          if (r.ok) game.map.removeItem(x, y, z, it);
+          game.player.inv.pickUp(it, L.ground(game.map, x, y, z));
           m.refresh(entries());
           return false;
         },

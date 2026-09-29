@@ -1,6 +1,7 @@
 import type { Game } from './game';
 import { CHUNK, chunkOf, localOf, tileKey } from '../world/coords';
 import { createItem } from './item';
+import { spawnOnGround } from './moves';
 import type { BodyPartId } from './bodyparts';
 import { emitSound } from './sound';
 
@@ -90,7 +91,7 @@ export function triggerTrap(game: Game, x: number, y: number, z: number): boolea
   const pos = { x, y, z };
   st.known.add(tileKey(x, y, z));
   const drop = (itemId: string) => {
-    if (game.data.items[itemId]) game.map.addItem(x, y, z, createItem(game.data, itemId));
+    if (game.data.items[itemId]) spawnOnGround(game.map, x, y, z, createItem(game.data, itemId));
   };
   switch (def.action) {
     case 'bubble':
@@ -191,7 +192,7 @@ export function installTraps(game: Game): void {
           if (p.rng.chance(p.str)) {
             p.removeEffect('beartrap');
             game.message('You free yourself from the bear trap!', 'c_green');
-            if (g.data.items.beartrap) g.map.addItem(ax, ay, p.z, createItem(g.data, 'beartrap'));
+            if (g.data.items.beartrap) spawnOnGround(g.map, ax, ay, p.z, createItem(g.data, 'beartrap'));
           } else game.message('You are stuck in the bear trap!', 'c_light_red');
         }
         p.x = Math.min(Math.max(p.x, ax + 0.2), ax + 0.8);

@@ -6,6 +6,7 @@ import { warnOnce } from '../data/warn';
 import { hasFlag } from '../world/registry';
 import { DAYS_PER_SEASON, SECONDS_PER_DAY } from '../core/time';
 import { createItem, fromSpawned, type Item } from './item';
+import { L, spawnItem, spawnOnGround } from './moves';
 import { seasonAt, type Season } from './sun';
 
 // Foraging and seasonal harvests, after CDDA iexamine.cpp (harvest_ter / harvest_furn /
@@ -95,12 +96,12 @@ export function harvestKind(game: Game, x: number, y: number, z: number): { kind
 /** iexamine_helper::handle_harvest: into your pockets if it fits, else at your feet. */
 export function giveHarvest(game: Game, it: Item): void {
   const p = game.player;
-  if (p.inv.canStash(it) && p.inv.weightCarried() + it.weight() <= p.inv.weightCapacity()) {
-    p.inv.stash(it);
-    game.message(`You harvest: ${it.name()}.`, 'c_light_gray');
+  const name = it.name();
+  if (p.inv.weightCarried() + it.weight() <= p.inv.weightCapacity() && p.inv.stashNew(it) === null) {
+    game.message(`You harvest: ${name}.`, 'c_light_gray');
   } else {
-    game.map.addItem(p.tileX, p.tileY, p.z, it);
-    game.message(`You harvest and drop: ${it.name()}.`, 'c_light_gray');
+    spawnItem(it, L.ground(game.map, p.tileX, p.tileY, p.z), { force: true, quiet: true });
+    game.message(`You harvest and drop: ${name}.`, 'c_light_gray');
   }
 }
 
@@ -202,7 +203,7 @@ export function forageFinish(game: Game, x: number, y: number, z: number): Item[
         // FORAGE_POISON / FORAGE_HALLU: 1 in 10 is secretly bad (CDDA HIDDEN_POISON/HALLU)
         if (it.hasFlag('FORAGE_POISON') && p.rng.oneIn(10)) it.vars.hidden_poison = p.rng.int(2, 7);
         else if (it.hasFlag('FORAGE_HALLU') && p.rng.oneIn(10)) it.vars.hidden_hallu = 1;
-        game.map.addItem(p.tileX, p.tileY, p.z, it);
+        spawnOnGround(game.map, p.tileX, p.tileY, p.z, it);
         game.message(`You found: ${it.name()}!`, 'c_green');
         found.push(it);
       }

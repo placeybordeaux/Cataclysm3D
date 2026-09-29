@@ -8,7 +8,8 @@ import { TestGenerator } from '../src/world/testgen';
 import { WorldGenerator } from '../src/world/worldgen';
 import { MonsterSystem } from '../src/game/monai';
 import { Spawner, type OvermapView } from '../src/game/spawner';
-import { createItem, loadAmmo, type Item } from '../src/game/item';
+import { createItem, inNewContainer, loadAmmo, type Item } from '../src/game/item';
+import { L, spawnItem } from '../src/game/moves';
 import { bash, getMapDamage } from '../src/game/bash';
 import { installFields, ignite, removeField, addField } from '../src/game/fields';
 import { installWeather, forceWeather } from '../src/game/weather';
@@ -123,15 +124,14 @@ describe('save round trip', () => {
     p.identifiedBooks.add('mag_guns');
     p.proficiencies.add('prof_knapping');
     const pack = createItem(data, 'backpack');
-    const bottle = createItem(data, 'bottle_plastic');
-    expect(bottle.containerPockets()[0].insert(createItem(data, 'water_clean', { count: 2 }))).toBeNull();
-    expect(pack.containerPockets()[0].insert(bottle)).toBeNull();
-    expect(p.inv.wear(pack).ok).toBe(true);
+    expect(p.inv.wear(pack, null).ok).toBe(true);
+    const bottle = inNewContainer(data, createItem(data, 'water_clean', { count: 2 }), 'bottle_plastic').container;
+    expect(p.inv.giveNew(bottle)?.kind).toBe('inv');
     const gun = createItem(data, 'glock_19');
     const mag = createItem(data, 'glockmag');
     loadAmmo(mag, '9mm', 12);
-    gun.magazineWell()!.insert(mag);
-    expect(p.inv.wield(gun).ok).toBe(true);
+    expect(spawnItem(mag, L.mag(gun)).ok).toBe(true);
+    expect(p.inv.wield(gun, null).ok).toBe(true);
     p.yaw = 1.25;
     p.pitch = -0.2;
 
@@ -176,7 +176,7 @@ describe('save round trip', () => {
     expect([q.x, q.y, q.z, q.yaw, q.pitch]).toEqual([p.x, p.y, p.z, p.yaw, p.pitch]);
     expect(q.inv.wielded!.name()).toBe(gun.name());
     expect(q.inv.wielded!.ammoRemaining()).toBe(12);
-    expect(q.inv.worn.find((w) => w.typeId === 'backpack')!.containerPockets()[0].contents[0].name()).toBe(bottle.name());
+    expect(q.inv.carried().find((w) => w.typeId === 'bottle_plastic')!.name()).toBe(bottle.name());
     expect(q.effects.get('bleed', 'arm_l')?.intensity).toBe(p.effects.get('bleed', 'arm_l')!.intensity);
     expect(q.hasTrait('QUICK')).toBe(true);
 
@@ -448,14 +448,15 @@ describe('robustness', () => {
 
   it('drops unknown ids with warnings instead of failing', () => {
     const A = build(7, 'test');
-    A.game.player.inv.wield(createItem(data, '2x4'));
-    const pack = createItem(data, 'backpack');
-    pack.containerPockets()[0].insert(createItem(data, 'rock'));
-    A.game.player.inv.wear(pack);
+    A.game.player.inv.wield(createItem(data, '2x4'), null);
+    const bag = createItem(data, 'bag_plastic');
+    spawnItem(createItem(data, 'crowbar'), L.in(bag));
+    A.game.player.inv.wear(createItem(data, 'backpack'), null);
+    A.game.player.inv.giveNew(bag);
     A.game.map.addItem(5, 5, 0, createItem(data, 'rock'));
     A.sys.spawnById('mon_zombie', 20.5, 20.5, 0);
     const file = structuredClone(serializeGame(A.game, { slot: 'u', name: 'x', gen: 'test' })) as any;
-    file.sections.player.character.inventory.worn.find((w: any) => w.typeId === 'backpack').pockets[0][0].typeId = 'no_such_item';
+    file.sections.player.character.inventory.items.find((w: any) => w.typeId === 'bag_plastic').contents[0].typeId = 'no_such_item';
     file.sections.player.character.inventory.wielded.typeId = 'no_such_weapon';
     file.sections.map.terrain[0] = 't_no_such_terrain';
     file.sections.map.chunks[0].items[0][1][0].typeId = 'no_such_item';
@@ -469,7 +470,7 @@ describe('robustness', () => {
     expect(r.warnings.join('\n')).toMatch(/mon_no_such/);
     expect(r.warnings.join('\n')).toMatch(/frobnicator/);
     expect(B.game.player.inv.wielded).toBeNull();
-    expect(B.game.player.inv.worn.find((w) => w.typeId === 'backpack')!.containerPockets()[0].contents).toEqual([]);
+    expect(B.game.player.inv.carried().find((w) => w.typeId === 'bag_plastic')!.contents).toEqual([]);
     expect(living(B.sys)).toHaveLength(0);
   });
 

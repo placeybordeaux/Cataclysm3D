@@ -2,22 +2,27 @@ import type { Item } from '../game/item';
 import { unloadContainer } from './liquid_ui';
 import type { ActionResult } from '../game/inventory';
 import { qualityUsages, useActions } from '../game/inventory';
+import { isAt, L, moveItem, type Loc } from '../game/moves';
 import { patchInteractUi } from '../game/interact';
 import { c, openMenu, openWindow, type MenuEntry, type UiWindow } from './framework';
 import { fit, kg, liters } from './format';
 import { categoryName, escapeHtml, itemInfo } from './iteminfo';
 import { spriteImg, type UiContext } from './context';
 
-// CDDA inventory screens (inventory_ui.cpp): the `i` overview, the single-purpose pickers
-// (wield, wear, take off, eat, apply, reload, unload), and the multi-select drop and pickup
-// menus with CDDA's "type a number, then the letter" counts. Items near the player (the
-// tile you stand on and the 8 around it) are offered too, like CDDA's "NEARBY" section.
+// The v1 inventory screens (inventory_ui.cpp look): the `i` overview, the single-purpose
+// pickers (wield, wear, take off, eat, apply, reload, unload), and the multi-select drop and
+// pickup menus with "type a number, then the letter" counts. Items near the player (the tile
+// you stand on and the 8 around it) are offered too, like the "NEARBY" section. Every entry
+// carries the exact location of its item (src/game/moves.ts) and every action is a move from
+// there, so a stale entry fails instead of duplicating anything. The v2 screens replace these.
 
 export type Where = 'wielded' | 'worn' | 'carried' | 'ground';
 
 export interface InvEntry {
   item: Item;
   where: Where;
+  /** Exactly where the item sits (hands, worn, inventory, inside a container, a tile). */
+  loc: Loc;
   /** Map tile for ground items. */
   pos?: { x: number; y: number; z: number };
   /** Nesting depth inside containers (for indentation). */
@@ -31,21 +36,29 @@ export interface InvEntry {
 }
 
 /**
- * Collapse identical items into one entry like CDDA's inventory ("2 cans of beans", "4
- * quarters" in a wallet). Depth-0 carried items, ground items on the same tile, and items
- * inside the same container merge; charge stacks (ammo, liquids) are already one item.
+ * Collapse identical items into one entry ("2 cans of beans"). Depth-0 carried items, ground
+ * items on the same tile, and items inside the same container merge; charge stacks (ammo,
+ * liquids) are already one item. Only entries at the same location merge.
  */
 export function stackEntries(list: InvEntry[]): InvEntry[] {
   const out: InvEntry[] = [];
   for (const e of list) {
     const mergeable = (e.depth === 0 ? e.where === 'carried' || e.where === 'ground' : !!e.parent) && !e.item.countByCharges;
     const into = mergeable
-      ? out.find((o) => o.depth === e.depth && o.parent === e.parent && o.where === e.where && o.dir === e.dir && !o.item.countByCharges && o.item.stacksWith(e.item))
+      ? out.find((o) => o.depth === e.depth && o.parent === e.parent && o.where === e.where && o.dir === e.dir && sameLoc(o.loc, e.loc) && !o.item.countByCharges && o.item.stacksWith(e.item))
       : undefined;
     if (into) (into.stack ??= [into.item]).push(e.item);
     else out.push({ ...e });
   }
   return out;
+}
+
+function sameLoc(a: Loc, b: Loc): boolean {
+  if (a.kind !== b.kind) return false;
+  if (a.kind === 'ground' && b.kind === 'ground') return a.x === b.x && a.y === b.y && a.z === b.z;
+  if ((a.kind === 'in' || a.kind === 'mag' || a.kind === 'mod') && (b.kind === 'in' || b.kind === 'mag' || b.kind === 'mod')) return a.host === b.host;
+  if (a.kind === 'cargo' && b.kind === 'cargo') return a.part === b.part;
+  return true;
 }
 
 /** Items an entry stands for (the whole stack, or just the item). */
@@ -63,28 +76,32 @@ const DIRS: Record<string, string> = {
   '0,1': 'south', '-1,1': 'southwest', '-1,0': 'west', '-1,-1': 'northwest',
 };
 
-/** Everything the player has, in CDDA's order: wielded, worn, then pocket contents. */
+/** Everything the player has, in BN's order: wielded, worn, then the inventory; contents nested. */
 export function carriedEntries(ctx: UiContext): InvEntry[] {
-  const inv = ctx.game.player.inv;
+  const p = ctx.game.player;
+  const inv = p.inv;
   const out: InvEntry[] = [];
   if (inv.wielded) {
-    out.push({ item: inv.wielded, where: 'wielded', depth: 0 });
+    out.push({ item: inv.wielded, where: 'wielded', loc: L.hands(p), depth: 0 });
     pushContents(out, inv.wielded, 1);
   }
-  for (const w of inv.worn) out.push({ item: w, where: 'worn', depth: 0 });
-  const carried: InvEntry[] = [];
-  for (const w of inv.topLevel()) for (const p of w.containerPockets()) for (const it of p.contents) {
-    carried.push({ item: it, where: 'carried', depth: 0 });
-    pushContents(carried, it, 1);
+  for (const w of inv.worn) {
+    out.push({ item: w, where: 'worn', loc: L.worn(p), depth: 0 });
+    pushContents(out, w, 1);
   }
-  return [...out, ...carried];
+  for (const it of inv.items) {
+    out.push({ item: it, where: 'carried', loc: L.inv(p), depth: 0 });
+    pushContents(out, it, 1);
+  }
+  return out;
 }
 
 function pushContents(out: InvEntry[], it: Item, depth: number): void {
-  for (const p of it.containerPockets()) for (const inner of p.contents) {
-    out.push({ item: inner, where: 'carried', depth, parent: it });
+  for (const inner of it.contents) {
+    out.push({ item: inner, where: 'carried', loc: L.in(it), depth, parent: it });
     pushContents(out, inner, depth + 1);
   }
+  if (it.magazine) out.push({ item: it.magazine, where: 'carried', loc: L.mag(it), depth, parent: it });
 }
 
 /** Items on the player's tile and the 8 around it. */
@@ -94,8 +111,9 @@ export function nearbyEntries(ctx: UiContext): InvEntry[] {
   const order = [[0, 0], [0, -1], [1, -1], [1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1]];
   for (const [dx, dy] of order) {
     const x = p.tileX + dx, y = p.tileY + dy;
+    const loc = L.ground(ctx.game.map, x, y, p.z);
     for (const it of ctx.game.map.itemsAt(x, y, p.z) as Item[]) {
-      out.push({ item: it, where: 'ground', pos: { x, y, z: p.z }, depth: 0, dir: DIRS[`${dx},${dy}`] });
+      out.push({ item: it, where: 'ground', loc, pos: { x, y, z: p.z }, depth: 0, dir: DIRS[`${dx},${dy}`] });
     }
   }
   return out;
@@ -108,12 +126,12 @@ function sectionOf(e: InvEntry): string {
   return categoryName(e.item).toUpperCase();
 }
 
-/** Item name with sprite icon, CDDA-ish coloring, padded to a column. */
 /** Name column width that fits the list pane (half the window) at the current size. */
 export function nameWidth(): number {
   return window.innerWidth < 1100 ? 26 : window.innerWidth < 1500 ? 32 : 38;
 }
 
+/** Item name with sprite icon, CDDA-ish coloring, padded to a column. */
 export function itemLabel(ctx: UiContext, e: InvEntry, width = nameWidth()): string {
   const it = e.item;
   const n = e.stack?.length ?? 1;
@@ -133,14 +151,8 @@ const columnHeader = (width = nameWidth()) => `<div class="pre" style="color:var
 function statusFooter(ctx: UiContext): string {
   const inv = ctx.game.player.inv;
   const wt = inv.weightCarried(), cap = inv.weightCapacity();
-  return `Weight (kg): ${c(wt > cap ? 'c_red' : 'c_light_gray', kg(wt))}/${kg(cap)}   Volume (L): ${liters(inv.volumeCarried())}/${liters(inv.volumeCapacity())}`;
-}
-
-/** Put items an action had to drop onto the player's tile. */
-export function placeDropped(ctx: UiContext, items: Item[] | undefined): void {
-  if (!items?.length) return;
-  const p = ctx.game.player;
-  for (const it of items) ctx.game.map.addItem(p.tileX, p.tileY, p.z, it);
+  const vol = inv.volumeCarried(), vcap = inv.volumeCapacity();
+  return `Weight (kg): ${c(wt > cap ? 'c_red' : 'c_light_gray', kg(wt))}/${kg(cap)}   Volume (L): ${c(vol > vcap ? 'c_red' : 'c_light_gray', liters(vol))}/${liters(vcap)}`;
 }
 
 /** Menu text for a use_action: its menu_text, else a readable name for the action type. */
@@ -152,13 +164,6 @@ function useActionLabel(ua: { type: string; menu_text?: unknown }): string {
   return names[ua.type] ?? ua.type.replace(/_/g, ' ');
 }
 
-/** Apply the bookkeeping every inventory action needs (map removal, dropped items). */
-function finish(ctx: UiContext, e: InvEntry, r: ActionResult, tookItem: boolean): ActionResult {
-  if (r.ok && e.where === 'ground' && e.pos && (tookItem || r.usedUp)) ctx.game.map.removeItem(e.pos.x, e.pos.y, e.pos.z, e.item);
-  placeDropped(ctx, r.dropped);
-  return r;
-}
-
 // ------------------------------------------------------------------ actions
 
 export type ItemAction = 'wield' | 'wear' | 'takeoff' | 'eat' | 'apply' | 'read' | 'reload' | 'unload' | 'drop' | 'examine' | 'throw';
@@ -167,16 +172,21 @@ export function doAction(ctx: UiContext, action: ItemAction, e: InvEntry): Actio
   const p = ctx.game.player;
   const inv = p.inv;
   const it = e.item;
+  // The list may be older than the world: act only on an item that is still where it was.
+  if (!isAt(it, e.loc) && action !== 'examine') {
+    ctx.game.message(`The ${it.name()} is no longer there.`, 'c_light_red');
+    return null;
+  }
   switch (action) {
     case 'wield':
-      if (e.where === 'wielded') return finish(ctx, e, inv.unwield(), false);
-      return finish(ctx, e, inv.wield(it), true);
+      if (e.where === 'wielded') return inv.unwield();
+      return inv.wield(it, e.loc);
     case 'wear':
-      return finish(ctx, e, inv.wear(it), true);
+      return inv.wear(it, e.loc);
     case 'takeoff':
-      return finish(ctx, e, inv.takeOff(it), false);
+      return inv.takeOff(it);
     case 'eat':
-      return finish(ctx, e, inv.consume(it), false);
+      return inv.consume(it, e.loc);
     case 'apply': {
       // Tool-quality usages (a shovel's till / dig) share one handler with its own menu of
       // what's possible here, so they're one entry; listing each would ask twice.
@@ -186,28 +196,28 @@ export function doAction(ctx: UiContext, action: ItemAction, e: InvEntry): Actio
         .map((ua, i) => ({ ua, i }))
         .filter(({ ua }) => !qTypes.has(ua.type) || (!quality && (quality = true)));
       if (acts.length > 1) {
-        // CDDA's activate submenu: "Light up" / "Start a fire" for a refillable lighter.
+        // The activate submenu: "Light up" / "Start a fire" for a refillable lighter.
         openMenu({
           title: it.name(),
           entries: acts.map(({ ua, i }) => ({ label: c('c_white', qTypes.has(ua.type) ? `Use your ${it.baseName()}` : useActionLabel(ua)), value: i })),
-          onSelect: (i) => void finish(ctx, e, inv.use(it, undefined, i), false),
+          onSelect: (i) => void (isAt(it, e.loc) && inv.use(it, undefined, i, e.loc)),
         });
         return null;
       }
-      return finish(ctx, e, inv.use(it, undefined, acts[0]?.i), false);
+      return inv.use(it, undefined, acts[0]?.i, e.loc);
     }
     case 'reload':
-      return finish(ctx, e, inv.reload(it), false);
+      return inv.reload(it);
     case 'unload':
-      // Containers (a pot of boiled water, a bag of chips): CDDA's unload empties them.
+      // Containers (a pot of boiled water, a bag of chips): unload empties them.
       if (!reloadable(it)) {
         unloadContainer(ctx.game, it);
         return null;
       }
-      return finish(ctx, e, inv.unload(it), false);
+      return inv.unload(it);
     case 'drop': {
       if (e.where === 'ground') return null;
-      return finish(ctx, e, inv.drop(it), false);
+      return inv.drop(it);
     }
     case 'read':
       if (itemActionHooks.read) itemActionHooks.read(it);
@@ -230,7 +240,7 @@ export function showItemInfo(ctx: UiContext, it: Item): UiWindow {
 }
 
 /** Guns and magazines, and tools that take one (a flashlight's battery) or hold ammo. */
-const reloadable = (it: Item): boolean => it.isGun() || it.isMagazine() || !!it.magazineWell() || it.magazinePockets().length > 0;
+const reloadable = (it: Item): boolean => it.isGun() || it.isMagazine() || it.takesMagazines() || it.hasIntegralMagazine() || it.isBandolier();
 
 /**
  * Actions that make sense for an item. Hotkeys are the game's own keys for the same action
@@ -243,13 +253,13 @@ function actionsFor(e: InvEntry, key: (id: string, cdda: string) => string): { a
   const out = [
     { action: 'apply' as const, key: key('apply', 'a'), label: 'Activate', ok: useActions(it.def).length > 0 },
     { action: 'read' as const, key: key('read', 'R'), label: 'Read', ok: it.isBook() },
-    { action: 'eat' as const, key: key('eat', 'E'), label: 'Eat', ok: !!it.isComestible() || it.containerPockets().some((p) => p.contents.some((c) => c.isComestible())) },
+    { action: 'eat' as const, key: key('eat', 'E'), label: 'Eat', ok: !!it.isComestible() || it.contents.some((c) => c.isComestible()) },
     { action: 'wear' as const, key: key('wear', 'W'), label: 'Wear', ok: it.isArmor() && !worn },
     { action: 'wield' as const, key: key('wield', 'w'), label: e.where === 'wielded' ? 'Put away' : 'Wield', ok: true },
     { action: 'throw' as const, key: key('throw', 't'), label: 'Throw', ok: e.where !== 'worn' },
     { action: 'takeoff' as const, key: key('takeoff', 'T'), label: 'Take off', ok: worn },
     { action: 'drop' as const, key: key('drop', 'd'), label: 'Drop', ok: e.where !== 'ground' },
-    { action: 'unload' as const, key: key('unload', 'U'), label: 'Unload', ok: reloadable(it) || it.containerPockets().some((p) => p.contents.length > 0) },
+    { action: 'unload' as const, key: key('unload', 'U'), label: 'Unload', ok: (reloadable(it) && (it.ammoRemaining() > 0 || !!it.magazine)) || (it.hasContents() && !it.isMagazine()) },
     { action: 'reload' as const, key: key('reload', 'r'), label: 'Reload', ok: reloadable(it) },
     { action: 'examine' as const, key: key('look', 'x'), label: 'Examine', ok: true },
   ];
@@ -501,20 +511,26 @@ export function openDropMenu(ctx: UiContext): UiWindow | null {
 
 export function dropRows(ctx: UiContext, chosen: MultiRow[]): void {
   const inv = ctx.game.player.inv;
-  // Drop nested items before their containers so we don't drop something twice.
+  const ground = inv.groundHere();
+  if (!ground) return;
+  // Nested items first: dropping a container carries its contents along, so a content row
+  // handled afterwards would find its item gone (and skip it rather than drop it twice).
   for (const r of [...chosen].sort((a, b) => b.entry.depth - a.entry.depth)) {
-    const it = r.entry.item;
-    if (r.entry.stack) {
-      for (const one of r.entry.stack.slice(0, r.count)) if (inv.has(one)) placeDropped(ctx, inv.drop(one).dropped);
+    const e = r.entry;
+    if (e.stack) {
+      for (const one of e.stack.slice(0, r.count)) if (isAt(one, e.loc)) dropOne(ctx, one, e.loc, ground);
       continue;
     }
-    if (!inv.has(it)) continue;
-    if (it.countByCharges && r.count < it.charges) {
-      const piece = it.split(r.count);
-      placeDropped(ctx, [piece]);
-      ctx.game.message(`You drop your ${piece.name()}.`);
-    } else placeDropped(ctx, inv.drop(it).dropped);
+    if (!isAt(e.item, e.loc)) continue;
+    dropOne(ctx, e.item, e.loc, ground, e.item.countByCharges ? Math.min(r.count, e.item.charges) : undefined);
   }
+}
+
+function dropOne(ctx: UiContext, it: Item, from: Loc, ground: Loc, count?: number): void {
+  const p = ctx.game.player;
+  const r = moveItem(it, from, ground, { count, actor: p, quiet: true });
+  if (r.ok) ctx.game.message(from.kind === 'worn' ? `You take off and drop your ${it.name()}.` : `You drop your ${r.item?.countByCharges ? `${it.baseName(r.moved)}${r.moved > 1 ? ` (${r.moved})` : ''}` : it.name()}.`);
+  else ctx.game.message(r.msg, 'c_light_red');
 }
 
 export function openPickupMenu(ctx: UiContext): UiWindow | null {
@@ -524,7 +540,7 @@ export function openPickupMenu(ctx: UiContext): UiWindow | null {
     return null;
   }
   const rows = near.map((entry) => ({ entry, max: maxOf(entry), count: 0 }));
-  // A lone item is picked up directly, like CDDA does when there's only one thing there.
+  // A lone item is picked up directly, when there's only one thing there.
   if (rows.length === 1 && rows[0].max === 1) {
     pickUpRows(ctx, [{ ...rows[0], count: 1 }]);
     return null;
@@ -539,7 +555,8 @@ export function openPickupMenu(ctx: UiContext): UiWindow | null {
 export function openTilePickup(ctx: UiContext, title: string, x: number, y: number, z: number): UiWindow | null {
   const items = ctx.game.map.itemsAt(x, y, z) as Item[];
   if (!items.length) return null;
-  const rows = stackEntries(items.map((item) => ({ item, where: 'ground' as const, pos: { x, y, z }, depth: 0, dir: title })))
+  const loc = L.ground(ctx.game.map, x, y, z);
+  const rows = stackEntries(items.map((item) => ({ item, where: 'ground' as const, loc, pos: { x, y, z }, depth: 0, dir: title })))
     .map((entry) => ({ entry, max: maxOf(entry), count: 0 }));
   if (rows.length === 1 && rows[0].max === 1) {
     pickUpRows(ctx, [{ ...rows[0], count: 1 }]);
@@ -550,28 +567,21 @@ export function openTilePickup(ctx: UiContext, title: string, x: number, y: numb
 
 export function pickUpRows(ctx: UiContext, chosen: MultiRow[]): void {
   const inv = ctx.game.player.inv;
-  const map = ctx.game.map;
   for (const r of chosen) {
     const e = r.entry;
-    const pos = e.pos!;
-    const whole = e.stack ? e.stack.slice(0, r.count) : e.item.countByCharges && r.count < e.item.charges ? [] : [e.item];
-    if (!e.stack && whole.length === 0) {
-      const piece = e.item.split(r.count);
-      if (!inv.pickUp(piece).ok) e.item.charges += piece.charges;
-      continue;
-    }
-    for (const it of whole) {
-      // CDDA's pickup asks "[W]ear it?" for clothes that don't fit a pocket; wearing is the
-      // useful answer (the evac shelter's emergency jacket). Anything else that doesn't fit is
-      // skipped and the rest of the selection is still taken.
-      const wearInstead = !inv.canStash(it) && it.isArmor() && inv.canWear(it).ok;
-      const ok = wearInstead ? inv.wear(it).ok : inv.pickUp(it).ok;
-      if (!ok) break;
-      map.removeItem(pos.x, pos.y, pos.z, it);
+    const items = e.stack ? e.stack.slice(0, r.count) : [e.item];
+    for (const it of items) {
+      if (!isAt(it, e.loc)) continue;
+      const count = !e.stack && it.countByCharges ? Math.min(r.count, it.charges) : undefined;
+      // Pickup asks "[W]ear it?" for clothes that don't fit; wearing is the useful answer (the
+      // evac shelter's emergency jacket). Anything else that doesn't fit is skipped and the
+      // rest of the selection is still taken.
+      const wearInstead = !inv.canCarry(it) && it.isArmor() && inv.canWear(it).ok;
+      const res = wearInstead ? inv.wear(it, e.loc) : inv.pickUp(it, e.loc, count);
+      if (!res.ok) break;
     }
   }
 }
-
 // ------------------------------------------------------------------ install
 
 export function installInventoryUi(ctx: UiContext): void {
@@ -597,11 +607,11 @@ export function installInventoryUi(ctx: UiContext): void {
   game.keys.register('apply', 'Activate / apply item', pick('Use item', "You don't have any items you can use.", (e) => useActions(e.item.def).length > 0, 'apply'));
   game.keys.register('drop', 'Drop items', () => openDropMenu(ctx));
   game.keys.register('pickup', 'Pick up items nearby', () => openPickupMenu(ctx));
-  game.keys.register('unload', 'Unload item', pick('Unload what?', 'You have nothing to unload.', (e) => (e.item.isGun() || e.item.isMagazine()) && e.item.ammoRemaining() > 0, 'unload', false));
+  game.keys.register('unload', 'Unload item', pick('Unload what?', 'You have nothing to unload.', (e) => (reloadable(e.item) && (e.item.ammoRemaining() > 0 || !!e.item.magazine)) || (e.item.hasContents() && !e.item.isMagazine()), 'unload', false));
   game.keys.register('reload', 'Reload wielded item', () => {
     const w = inv().wielded;
     // CDDA 'r' reloads the wielded weapon when it can take ammo, else asks.
-    if (w && reloadable(w)) return void doAction(ctx, 'reload', { item: w, where: 'wielded', depth: 0 });
+    if (w && reloadable(w)) return void doAction(ctx, 'reload', { item: w, where: 'wielded', loc: L.hands(game.player), depth: 0 });
     pick('Reload what?', 'You have nothing to reload.', (e) => reloadable(e.item), 'reload', false)();
   });
 }

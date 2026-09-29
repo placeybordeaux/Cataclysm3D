@@ -2,6 +2,7 @@ import type { GameData } from '../data/types';
 import { BODY_PARTS, isBodyPart, MAIN_PARTS, type BodyPartId, type MainPartId } from './bodyparts';
 import type { Character } from './character';
 import { createItem, type Item } from './item';
+import { consumeItem, L, moveItem, spawnItem, transaction } from './moves';
 import { cddaText } from './units';
 
 // Compact Bionic Modules (CDDA bionics.cpp / bionics.json). Data-driven core:
@@ -393,18 +394,21 @@ export class BionicState {
         this.msg(`Deactivate your ${inv.wielded.name()} first.`, 'c_light_red');
         return false;
       }
-      if (inv.wielded) {
+      // The weapon in hand goes to the inventory first; the bionic weapon is created in hand
+      // (and destroyed again on retraction: it never exists anywhere else).
+      const ok = transaction(() => {
         const old = inv.wielded;
-        inv.wielded = null;
-        const left = inv.stash(old);
-        if (left) {
-          inv.wielded = old;
-          this.msg(`You don't have room to put away your ${old.name()}.`, 'c_light_red');
-          return false;
+        if (old) {
+          const r = moveItem(old, L.hands(this.c), L.inv(this.c), { actor: this.c, quiet: true });
+          if (!r.ok) {
+            this.msg(`You don't have room to put away your ${old.name()}.`, 'c_light_red');
+            return false;
+          }
         }
-      }
-      inv.wielded = createItem(this.c.data, d.fake_weapon);
-      this.msg(`You extend your ${inv.wielded.name()}.`);
+        return spawnItem(createItem(this.c.data, d.fake_weapon!), L.hands(this.c), { actor: this.c, quiet: true, force: true }).ok;
+      });
+      if (!ok) return false;
+      this.msg(`You extend your ${inv.wielded!.name()}.`);
     }
     if (!free) this.power -= cost;
     for (const other of d.auto_deactivates ?? []) if (this.isActive(other)) this.deactivate(other);
@@ -429,7 +433,7 @@ export class BionicState {
     if (d.fake_weapon) {
       const w = this.c.inv.wielded;
       if (w && w.typeId === d.fake_weapon) {
-        this.c.inv.wielded = null;
+        consumeItem(w, L.hands(this.c));
         this.msg(`You retract your ${w.name()}.`);
       }
     } else this.msg(`You deactivate your ${this.name(id)}.`);

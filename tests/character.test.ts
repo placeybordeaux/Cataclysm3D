@@ -151,7 +151,7 @@ describe('needs', () => {
   it('drinking water: quench 50 = 250 ml -> thirst -50 within 5 minutes', () => {
     const { c } = survivor();
     c.thirst = 100;
-    c.inv.consume(createItem(data, 'water_clean'));
+    c.inv.consume(createItem(data, 'water_clean'), null);
     expect(c.instantThirst()).toBe(50);
     passTime(c, 300);
     expect(c.thirst).toBeLessThanOrEqual(51);
@@ -163,7 +163,7 @@ describe('needs', () => {
     passTime(c, 86400, 300);
     expect(c.hungerState()).toBe('Hungry');
     const kcal = c.storedKcal;
-    const r = c.inv.consume(createItem(data, 'can_beans'));
+    const r = c.inv.consume(createItem(data, 'can_beans'), null);
     expect(r.ok).toBe(true);
     expect(log).toContain('You eat your canned beans.');
     expect(c.hungerState()).toBe('');
@@ -214,7 +214,7 @@ describe('effects', () => {
     // intensity falls as duration runs down: sum over 300 s ~ 10+..+6 per minute
     expect(c.blood).toBeLessThan(-2000);
     expect(c.blood).toBeGreaterThan(-3000);
-    const r = c.inv.use(createItem(data, 'bandages'));
+    const r = c.inv.use(createItem(data, 'bandages'), undefined, 0, null);
     expect(r.ok).toBe(true);
     expect(r.msg).toContain('You stop the bleeding.');
     expect(r.moves).toBe(6000);
@@ -252,7 +252,7 @@ describe('effects', () => {
   it('painkillers: aspirin -> pkill1_nsaid adds painkiller over time', () => {
     const { c, log } = survivor();
     c.pain = 20;
-    const r = c.inv.consume(createItem(data, 'aspirin'));
+    const r = c.inv.consume(createItem(data, 'aspirin'), null);
     expect(log).toContain('You take some aspirin.');
     expect(r.ok).toBe(true);
     passTime(c, 240, 1);
@@ -278,7 +278,7 @@ describe('effects', () => {
     expect(c.hasEffect('infected', 'arm_r')).toBe(true);
     const { c: c2 } = survivor(3);
     c2.addEffect('bite', 1, { bp: 'arm_r' });
-    const r = c2.inv.use(createItem(data, 'disinfectant'));
+    const r = c2.inv.use(createItem(data, 'disinfectant'), undefined, 0, null);
     expect(r.ok).toBe(true);
     expect(c2.hasEffect('bite')).toBe(false);
   });
@@ -300,7 +300,7 @@ describe('skills, morale, focus', () => {
 
   it('tasty food adds morale (fun), which raises focus equilibrium', () => {
     const { c } = survivor();
-    c.inv.consume(createItem(data, 'chocolate'));
+    c.inv.consume(createItem(data, 'chocolate'), null);
     expect(c.morale.level()).toBe(20);
     passTime(c, 3600);
     expect(c.focus).toBeGreaterThan(100);
@@ -317,7 +317,7 @@ describe('temperature', () => {
     expect(c.bodyTempDescription()).toMatch(/cold|Freezing/i);
     expect(c.effects.intensity('cold')).toBeGreaterThanOrEqual(2);
     const { c: d } = survivor();
-    for (const id of ['hoodie', 'jacket_leather', 'jeans', 'sneakers', 'hat_hard']) d.inv.wear(createItem(data, id));
+    for (const id of ['hoodie', 'jacket_leather', 'jeans', 'sneakers', 'hat_hard']) d.inv.wear(createItem(data, id), null);
     d.env = { temperature: 10, wind: 0, precipitation: false };
     passTime(d, 3600);
     expect(d.effects.has('cold', 'torso')).toBe(false);
@@ -335,8 +335,8 @@ describe('temperature', () => {
 describe('serialization', () => {
   it('toJSON/load round-trip', () => {
     const { c } = survivor();
-    c.inv.wear(createItem(data, 'backpack'));
-    c.inv.pickUp(createItem(data, 'can_beans'));
+    c.inv.wear(createItem(data, 'backpack'), null);
+    c.inv.giveNew(createItem(data, 'can_beans'));
     c.addEffect('bleed', 300, { bp: 'leg_l' });
     c.addTrait('TOUGH');
     c.setSkill('melee', 3);

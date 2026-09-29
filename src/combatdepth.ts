@@ -3,7 +3,8 @@ import type { Renderer } from './render/renderer';
 import type { DebugApi } from './debug';
 import type { MonstersHandle } from './monsters';
 import type { Character } from './game/character';
-import { createItem, loadAmmo, type Item } from './game/item';
+import { createItem, defaultLoad, type Item } from './game/item';
+import { L, spawnOnGround } from './game/moves';
 import { aimState } from './game/combat';
 import {
   activeBuffSummary, autolearnStyles, currentStyle, learnStyle, maOf, selectStyle, styleBuffs, styleDef, styleWeaponValid,
@@ -40,10 +41,6 @@ export function installCombatDepth(game: Game, renderer: Renderer | null, monste
   combatHooks.onBlock = (who) => {
     if (who === p) renderer?.viewmodel?.block();
   };
-  combatHooks.onWeaponBroken = (who, _item, spilled) => {
-    const pos = who as unknown as { x: number; y: number; z: number };
-    for (const it of spilled) game.map.addItem(Math.floor(pos.x), Math.floor(pos.y), pos.z, it);
-  };
   combat.hooks = {
     ignite: (x, y, z) => void ignite(game, x, y, z, 1),
     addField: (x, y, z, type, n) => {
@@ -63,7 +60,7 @@ export function installCombatDepth(game: Game, renderer: Renderer | null, monste
     if (!m.has('DROPS_AMMO')) return;
     for (const [id, n] of Object.entries(monGunState(m).ammo)) {
       if (n <= 0 || !game.data.items[id]) continue;
-      game.map.addItem(m.tileX, m.tileY, m.z, createItem(game.data, id, { count: n }));
+      spawnOnGround(game.map, m.tileX, m.tileY, m.z, createItem(game.data, id, { count: n }));
     }
   });
 
@@ -271,14 +268,10 @@ function startInstall(game: Game, gun: Item, mod: Item): void {
     name: `installing ${mod.baseName()}`,
     duration: installSeconds(mod),
     onComplete: () => {
-      if (!p.inv.has(mod) || !(p.inv.has(gun) || p.inv.wielded === gun)) return game.message('You no longer have what you needed.');
-      p.inv.remove(mod);
-      const r = installGunmod(p, gun, mod);
-      if (!r.ok) {
-        game.message(r.msg, 'c_light_red');
-        if (!p.inv.stash(mod)) return;
-        game.map.addItem(p.tileX, p.tileY, p.z, mod);
-      }
+      const from = p.inv.locOf(mod);
+      if (!from || !p.inv.has(gun)) return game.message('You no longer have what you needed.');
+      const r = installGunmod(p, gun, mod, from);
+      if (!r.ok) game.message(r.msg, 'c_light_red');
     },
   });
 }
@@ -324,9 +317,9 @@ function openRemoveMods(game: Game, gun: Item): void {
       return { label: why ? `${c('c_dark_gray', m.name())} ${c('c_red', why)}` : m.name(), value: m, disabled: !!why, header: String(m.def.location ?? '') };
     }),
     onSelect: (m) => {
-      const r = removeGunmod(p, gun, m);
+      const ground = p.inv.groundHere();
+      const r = removeGunmod(p, gun, m, ground ? [L.inv(p), ground] : [L.inv(p)]);
       if (!r.ok) return void game.message(r.msg, 'c_light_red');
-      if (p.inv.stash(m)) game.map.addItem(p.tileX, p.tileY, p.z, m);
     },
   });
 }
@@ -395,16 +388,12 @@ function installDebug(api: DebugApi, game: Game, monsters: MonstersHandle): void
   api.installGunmod = (a: string, b?: string) => {
     const modId = b ?? a;
     if (b) {
-      const gun = createItem(game.data, a);
-      const well = gun.magazineWell();
-      const mag = well?.data.default_magazine ?? (well?.data.item_restriction as string[] | undefined)?.[0];
-      if (well && mag && game.data.items[mag]) well.insert(createItem(game.data, mag, { ammo: 'default' }));
-      else if (gun.ammoTypes().length) loadAmmo(gun, gun.ammoData()?.id ?? String(game.data.misc?.ammunition_type?.[gun.ammoTypes()[0]]?.default ?? ''));
-      p().inv.wield(gun);
+      const gun = createItem(game.data, a, gun0(game, a) ? { ammo: 'default' } : {});
+      p().inv.wield(gun, null);
     }
     const gun = p().inv.wielded;
     if (!gun?.isGun()) return 'not wielding a gun';
-    const r = installGunmod(p(), gun, createItem(game.data, modId));
+    const r = installGunmod(p(), gun, createItem(game.data, modId), null);
     return r.msg;
   };
   api.openGunmods = () => {
@@ -417,3 +406,8 @@ function installDebug(api: DebugApi, game: Game, monsters: MonstersHandle): void
   };
 }
 
+
+/** Does a fresh `id` gun take ammo at all (so the debug helper can load it)? */
+function gun0(game: Game, id: string): boolean {
+  return !!defaultLoad(createItem(game.data, id));
+}

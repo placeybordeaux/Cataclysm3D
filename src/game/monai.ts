@@ -15,6 +15,7 @@ import { monsterMeleeAttack, type MonsterAttackResult } from './combat';
 import type { Character } from './character';
 import { BODY_PARTS } from './bodyparts';
 import { createItem, fromSpawned, type Item } from './item';
+import { consumeItem, L, spawnOnGround } from './moves';
 import type { BodyPartId } from './bodyparts';
 import { sfx } from '../audio/sfx';
 import { bash } from './bash';
@@ -606,7 +607,7 @@ export class MonsterSystem implements GameSystem {
     }
     if (def.death_drops) {
       const rng = new Rng(hashSeed(this.game.seed, m.uid, 0xd40b));
-      for (const s of expandItemGroup(this.game.data, def.death_drops, rng)) for (const it of fromSpawned(this.game.data, s)) this.game.map.addItem(tx, ty, m.z, it);
+      for (const s of expandItemGroup(this.game.data, def.death_drops, rng)) for (const it of fromSpawned(this.game.data, s)) spawnOnGround(this.game.map, tx, ty, m.z, it);
     }
     const blood = this.bloodType(def);
     if (blood && corpseType !== 'SPLATTER') this.addField(tx, ty, m.z, blood, 2);
@@ -631,7 +632,7 @@ export class MonsterSystem implements GameSystem {
     it.vars.weight = def.weight;
     it.vars.volume = def.volume;
     if (opts.name) it.vars.name = opts.name;
-    this.game.map.addItem(Math.floor(x), Math.floor(y), z, it);
+    spawnOnGround(this.game.map, Math.floor(x), Math.floor(y), z, it);
     const rec: CorpseRecord = { item: it, x, y, z, monId: def.id, diedAt: this.game.clock.seconds, facing: opts.facing ?? 0, dormant: opts.dormant };
     this.corpses.push(rec);
     for (const f of this.onCorpse) f(rec);
@@ -659,7 +660,7 @@ export class MonsterSystem implements GameSystem {
 
   /** Forget a corpse whose item was consumed (butchered); removes it from the map too. */
   removeCorpseItem(item: Item, x: number, y: number, z: number): void {
-    this.game.map.removeItem(x, y, z, item as any);
+    consumeItem(item, L.ground(this.game.map, x, y, z));
     const i = this.corpses.findIndex((c) => c.item === item);
     if (i >= 0) {
       const [c] = this.corpses.splice(i, 1);
@@ -685,7 +686,8 @@ export class MonsterSystem implements GameSystem {
   reviveCorpse(c: CorpseRecord): Monster | null {
     const def = this.game.data.monsters[c.monId];
     if (!def) return null;
-    this.game.map.removeItem(Math.floor(c.x), Math.floor(c.y), c.z, c.item as any);
+    // the corpse becomes the monster again
+    consumeItem(c.item as Item, L.ground(this.game.map, Math.floor(c.x), Math.floor(c.y), c.z));
     this.corpses.splice(this.corpses.indexOf(c), 1);
     for (const f of this.onCorpseGone) f(c);
     const m = this.spawn(def, c.x, c.y, c.z);

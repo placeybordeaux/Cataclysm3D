@@ -2,25 +2,31 @@ import type { Game } from '../game/game';
 import type { Item } from '../game/item';
 import { liquidHooks } from '../game/crafting';
 import { drinkable, drinkLiquid, liquidTargets, pourInto, pourOnGround, type LiquidHost } from '../game/liquid';
+import { isAt, L, type Loc } from '../game/moves';
 import { c, openMenu } from './framework';
 
-// CDDA's liquid handler menu ("What to do with the clean water?"): pour it into a container
+// BN's liquid handler menu ("What to do with the clean water?"): pour it into a container
 // you choose, drink it from your hands, or pour it out. Used when a craft makes a liquid no
 // carried bottle took (boiled water in a pot), and by Unload on a container of liquid.
+//
+// The liquid is either new (a crafting result, `from` null) or still sitting in its container
+// (`from` = L.in(container)): nothing leaves it until a choice moves it, so closing the menu
+// leaves it where it was — there is no limbo in which it could be lost or duplicated.
 
 type Choice = { kind: 'container'; item: Item } | { kind: 'drink' } | { kind: 'ground' };
 
 export interface LiquidMenuOpts {
+  /** Where the liquid is (null: a new liquid that must end up somewhere). */
+  from?: Loc | null;
   /** Container the liquid came out of (not offered as a target). */
   source?: Item;
-  /** Esc: default pours it out (a crafted liquid can't stay in limbo). */
-  onCancel?: (liquid: Item) => void;
-  /** Called once the liquid is fully dealt with. */
+  /** Called once the liquid is fully dealt with (or left where it was). */
   onDone?: () => void;
 }
 
 export function openLiquidMenu(host: LiquidHost, liquid: Item, opts: LiquidMenuOpts = {}): void {
-  const targets = liquidTargets(host, liquid, opts.source);
+  const from = opts.from ?? null;
+  const targets = liquidTargets(host, liquid, opts.source, from);
   const entries = [
     ...targets.map((t) => ({
       label: `Pour into ${c('c_white', t.item.name())} ${c('c_dark_gray', `(${t.where === 'ground' ? 'nearby' : 'carried'}${t.open ? ', open' : ''}; ${t.room < liquid.charges ? `${t.room} fit` : 'fits'})`)}`,
@@ -36,53 +42,41 @@ export function openLiquidMenu(host: LiquidHost, liquid: Item, opts: LiquidMenuO
     entries,
     onSelect: (ch) => {
       chosen = true;
+      // A stale menu (the liquid moved meanwhile) must not act on it again.
+      if (from && !isAt(liquid, from)) return opts.onDone?.();
       let left: Item | null = liquid;
-      if (ch.kind === 'container') left = pourInto(host, liquid, ch.item);
-      else if (ch.kind === 'drink') left = drinkLiquid(host, liquid);
+      if (ch.kind === 'container') left = pourInto(host, liquid, ch.item, from);
+      else if (ch.kind === 'drink') left = drinkLiquid(host, liquid, from);
       else {
-        pourOnGround(host, liquid);
+        pourOnGround(host, liquid, from);
         left = null;
       }
-      // Whatever is left over asks again, like CDDA's handle_all_liquid loop. Deferred so
+      // Whatever is left over asks again, like BN's handle_all_liquid loop. Deferred so
       // this window is gone before the next opens.
       if (left) setTimeout(() => openLiquidMenu(host, left!, opts), 0);
       else opts.onDone?.();
     },
     onClose: () => {
       if (chosen) return;
-      if (opts.onCancel) opts.onCancel(liquid);
-      else pourOnGround(host, liquid);
+      // Esc: a liquid in its container stays there; a new one can't stay in limbo.
+      if (!from) pourOnGround(host, liquid, null);
       opts.onDone?.();
     },
   });
 }
 
 /**
- * CDDA Unload on a container: liquid goes through the liquid menu (Esc puts it back);
- * solid contents move to your pockets, or the ground when they don't fit.
+ * BN Unload on a container: solid contents go to your inventory, else your feet; liquid gets
+ * the liquid menu and stays in the container until you choose.
  */
 export function unloadContainer(game: Game, it: Item): boolean {
-  const pockets = it.containerPockets().filter((p) => p.contents.length);
-  if (!pockets.length) {
-    game.message(`The ${it.baseName()} is empty.`);
+  if (!it.hasContents()) {
+    game.message(`The ${it.baseName()} is already empty!`);
     return false;
   }
-  const p = game.player;
-  for (const pk of pockets) {
-    for (const inner of [...pk.contents]) {
-      pk.remove(inner);
-      if (inner.isLiquid()) {
-        openLiquidMenu(game, inner, { source: it, onCancel: (l) => void it.put(l) });
-        continue;
-      }
-      const left = p.inv.stash(inner);
-      if (left) {
-        game.map.addItem(p.tileX, p.tileY, p.z, left);
-        game.message(`You put the ${left.name()} on the ground.`);
-      } else game.message(`You take the ${inner.name()} out of the ${it.baseName()}.`);
-    }
-  }
-  return true;
+  const r = game.player.inv.unload(it);
+  for (const liquid of r.liquids) openLiquidMenu(game, liquid, { from: L.in(it), source: it });
+  return r.ok || r.liquids.length > 0;
 }
 
 export function installLiquidUi(): void {

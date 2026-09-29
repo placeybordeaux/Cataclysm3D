@@ -10,6 +10,7 @@ import { fireGun, monsterMeleeAttack } from '../src/game/combat';
 import { createItem, fromSpawned, Item } from '../src/game/item';
 import { BODY_PARTS, ALL_PARTS } from '../src/game/bodyparts';
 import { itemsOf, stackEntries, type InvEntry } from '../src/ui/inventory_ui';
+import { L, spawnItem } from '../src/game/moves';
 
 const dir = path.join(__dirname, '../public/data');
 const load = (f: string) => JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8'));
@@ -48,60 +49,55 @@ describe('real data: items', () => {
     expect(createItem(data, 'flamethrower').gunNoise()).toEqual({ volume: 4, sound: 'Fwoosh!' });
   });
 
-  // TODO(BN): written for DDA data/behaviour; fails on Bright Nights core data (Error: createItem: unknown item id "wallet"). Port with its system.
-  it.skip('identical coins inside a wallet show as one inventory line', () => {
-    const wallet = createItem(data, 'wallet');
-    const pocket = wallet.containerPockets().find((p) => p.canContain(createItem(data, 'coin_quarter')).ok)!;
-    for (let i = 0; i < 4; i++) expect(pocket.insert(createItem(data, 'coin_quarter'))).toBeNull();
-    pocket.insert(createItem(data, 'coin_dime'));
+  it('identical items inside a container show as one inventory line', () => {
+    const { c } = survivor();
+    const bag = createItem(data, 'bag_plastic');
+    const loc = L.in(bag);
+    for (let i = 0; i < 4; i++) expect(spawnItem(createItem(data, 'crowbar'), loc).ok).toBe(true);
     const entries: InvEntry[] = [
-      { item: wallet, where: 'carried', depth: 0 },
-      ...pocket.contents.map((item) => ({ item, where: 'carried' as const, depth: 1, parent: wallet })),
+      { item: bag, where: 'carried', loc: L.inv(c), depth: 0 },
+      ...bag.contents.map((item) => ({ item, where: 'carried' as const, loc, depth: 1, parent: bag })),
     ];
     const stacked = stackEntries(entries);
-    expect(stacked.map((e) => [e.item.typeId, itemsOf(e).length])).toEqual([['wallet', 1], ['coin_quarter', 4], ['coin_dime', 1]]);
+    expect(stacked.map((e) => [e.item.typeId, itemsOf(e).length])).toEqual([['bag_plastic', 1], ['crowbar', 4]]);
   });
 
-  // TODO(BN): written for DDA data/behaviour; fails on Bright Nights core data (AssertionError: expected 15000 to be greater than or equal to 25000). Port with its system.
-  it.skip('backpack, jeans, hoodie give storage and encumbrance', () => {
+  it('backpack and jeans give carrying volume; soft backpack encumbrance grows with the load', () => {
     const { c } = survivor();
-    c.inv.wear(createItem(data, 'backpack'));
-    expect(c.inv.volumeCapacity()).toBeGreaterThanOrEqual(25000);
-    expect(c.inv.encumbrance('torso')).toBe(2);
-    expect(c.inv.wear(createItem(data, 'backpack')).ok).toBe(false);
-    c.inv.wear(createItem(data, 'jeans'));
-    expect(c.inv.encumbrance('leg_l')).toBe(7);
-    expect(c.inv.pickUp(createItem(data, 'can_beans')).ok).toBe(true);
+    c.inv.wear(createItem(data, 'backpack'), null);
+    expect(c.inv.volumeCapacity()).toBe(15000);
+    expect(c.inv.encumbrance('torso')).toBe(3);
+    c.inv.wear(createItem(data, 'jeans'), null);
+    expect(c.inv.volumeCapacity()).toBe(15500);
+    expect(c.inv.giveNew(createItem(data, 'can_beans'))?.kind).toBe('inv');
   });
 
   it('water_clean spawns in a plastic bottle and quenches thirst', () => {
     const { c, log } = survivor();
-    const [bottle] = fromSpawned(data, { id: 'water_clean', count: 1, charges: 2 });
-    expect(bottle.typeId).toBe('bottle_plastic');
-    expect(bottle.name()).toBe('plastic bottle > clean water (2)');
+    const [bottle] = fromSpawned(data, { id: 'bottle_plastic', count: 1, contents: [{ id: 'water_clean', count: 1, charges: 2 }] });
+    expect(bottle.name()).toBe('clean water (plastic bottle) (2/2)');
     c.thirst = 100;
-    expect(c.inv.consume(bottle).ok).toBe(true);
+    expect(c.inv.consume(bottle, null).ok).toBe(true);
     expect(log).toContain('You drink your clean water.');
     expect(c.instantThirst()).toBe(50);
   });
 
-  // TODO(BN): written for DDA data/behaviour; fails on Bright Nights core data (AssertionError: expected 112 to be 153 // Object.is equality). Port with its system.
-  it.skip('glock_19 + glockmag + 9mm: default ammo, reload, fire', () => {
+  it('glock_19 + glockmag + 9mm: default ammo, reload, fire', () => {
     const { c } = survivor();
-    c.inv.wear(createItem(data, 'backpack'));
+    c.inv.wear(createItem(data, 'backpack'), null);
     const gun = createItem(data, 'glock_19');
-    c.inv.wield(gun);
-    c.inv.pickUp(createItem(data, 'glockmag', { ammo: 'default' }));
+    c.inv.wield(gun, null);
+    c.inv.giveNew(createItem(data, 'glockmag', { ammo: 'default' }));
     const r = c.inv.reload();
     expect(r.ok).toBe(true);
-    expect(r.moves).toBe(153);
+    // item_reload_cost: min(200, 250 ml / 20) + reload 100 / (1 + 0)
+    expect(r.moves).toBe(112);
     expect(gun.ammoRemaining()).toBe(15);
-    expect(gun.name()).toBe('Glock carry pistol (15/15)');
+    expect(gun.name()).toBe('Glock 19 (15/15)');
     const shot = fireGun(c, gun, new Rng(1));
     expect(shot.ok).toBe(true);
-    expect(shot.damage[0]).toMatchObject({ type: 'bullet', amount: 23 });
-    expect(shot.noise.sound).toBe('bang!');
-    expect(shot.noise.volume).toBeGreaterThan(50);
+    expect(shot.damage[0]).toMatchObject({ type: 'bullet', amount: 30 });
+    expect(shot.noise.sound).toBe('blam!');
     expect(gun.ammoRemaining()).toBe(14);
   });
 
@@ -110,22 +106,21 @@ describe('real data: items', () => {
     const { c } = survivor();
     c.addEffect('bleed', 600, { bp: 'leg_r' });
     c.applyDamage('leg_r', 10);
-    const r = c.inv.use(createItem(data, 'bandages'));
+    const r = c.inv.use(createItem(data, 'bandages'), undefined, 0, null);
     expect(r.msg).toContain('You stop the bleeding.');
     expect(c.hasEffect('bandaged', 'leg_r')).toBe(true);
     c.pain = 10;
-    c.inv.consume(createItem(data, 'aspirin'));
+    c.inv.consume(createItem(data, 'aspirin'), null);
     for (let i = 0; i < 240; i++) c.update(1);
     expect(c.painkiller).toBeGreaterThan(0);
   });
 
-  // TODO(BN): written for DDA data/behaviour; fails on Bright Nights core data (AssertionError: expected 'light_disposable_cell' to be 'medium_battery_cell' // Object.is equality). Port with its system.
-  it.skip('flashlight spawns with its default battery and turns on', () => {
+  it('flashlight spawns with its default battery and turns on', () => {
     const { c } = survivor();
     const fl = createItem(data, 'flashlight', { ammo: 'default' });
-    expect(fl.magazineCurrent()?.typeId).toBe('medium_battery_cell');
-    expect(fl.ammoRemaining()).toBe(56);
-    expect(c.inv.use(fl).msg).toBe('You turn the flashlight on.');
+    expect(fl.magazineCurrent()?.typeId).toBe('light_disposable_cell');
+    expect(fl.ammoRemaining()).toBe(300);
+    expect(c.inv.use(fl, undefined, 0, null).msg).toBe('You turn the flashlight on.');
     expect(fl.typeId).toBe('flashlight_on');
     expect(fl.active).toBe(true);
   });
@@ -180,22 +175,15 @@ describe('real data: items', () => {
 });
 
 describe('filling containers (fromSpawned)', () => {
-  it('batched inserts give the same result as one-by-one and stay fast', () => {
+  it('a bag full of loot keeps every item and stays fast', () => {
     const spec = { id: 'bag_canvas', count: 1, contents: [{ id: 'rock', count: 200 }, { id: 'nail', count: 1, charges: 500 }, { id: 'box_small', count: 3 }] };
     const t0 = performance.now();
     const [bag] = fromSpawned(data, spec as never);
     const ms = performance.now() - t0;
-    // reference: the same items inserted without the batch totals
-    const ref = createItem(data, 'bag_canvas');
-    for (const cs of spec.contents) {
-      for (const c of fromSpawned(data, cs as never)) {
-        let left: Item | null = c;
-        for (const p of ref.pockets) if (left && p.canContain(left).ok) left = p.insert(left);
-      }
-    }
-    const summary = (it: Item) => it.pockets.map((p) => ({ n: p.contents.length, v: p.volumeUsed(), w: p.weightUsed() }));
-    expect(summary(bag)).toEqual(summary(ref));
-    expect(bag.pockets.reduce((n, p) => n + p.contents.reduce((k, c) => k + c.count(), 0), 0)).toBeGreaterThan(20);
+    const n = (id: string) => bag.contents.filter((x) => x.typeId === id).reduce((k, x) => k + x.count(), 0);
+    expect(n('rock')).toBe(200);
+    expect(n('nail')).toBe(500);
+    expect(n('box_small')).toBe(3);
     expect(ms).toBeLessThan(200);
   });
 });

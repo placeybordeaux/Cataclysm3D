@@ -32,8 +32,8 @@ function survivor(seed = 1) {
   const log: string[] = [];
   c.onMessage = (t) => log.push(t);
   // A backpack to carry things in.
-  c.inv.wear(createItem(data, 'backpack'));
-  c.inv.wear(createItem(data, 'jeans'));
+  c.inv.wear(createItem(data, 'backpack'), null);
+  c.inv.wear(createItem(data, 'jeans'), null);
   const mods = attachBodyMods(c);
   return { c, log, ...mods };
 }
@@ -75,7 +75,7 @@ describe('mutagen and vitamins', () => {
   // TODO(BN): written for DDA data/behaviour; fails on Bright Nights core data (AssertionError: expected +0 to be 225 // Object.is equality). Port with its system.
   it.skip('drinking lizard mutagen adds its primer and catalyst vitamins (consume_drug vitamins)', () => {
     const { c, mut, log } = survivor();
-    const r = c.inv.consume(dose('mutagen_lizard'));
+    const r = c.inv.consume(dose('mutagen_lizard'), null);
     expect(r.ok).toBe(true);
     expect(mut.vitamin('mutagen_lizard')).toBe(225);
     expect(mut.vitamin('mutagen')).toBe(125);
@@ -87,11 +87,11 @@ describe('mutagen and vitamins', () => {
   // TODO(BN): written for DDA data/behaviour; fails on Bright Nights core data (AssertionError: expected true to be false // Object.is equality). Port with its system.
   it.skip('injected catalyst needs a syringe', () => {
     const { c, mut } = survivor();
-    const r = c.inv.consume(dose('iv_mutagen'));
+    const r = c.inv.consume(dose('iv_mutagen'), null);
     expect(r.ok).toBe(false);
     expect(r.msg).toMatch(/syringe/);
-    c.inv.pickUp(createItem(data, 'syringe'));
-    expect(c.inv.consume(dose('iv_mutagen')).ok).toBe(true);
+    c.inv.giveNew(createItem(data, 'syringe'));
+    expect(c.inv.consume(dose('iv_mutagen'), null).ok).toBe(true);
     expect(mut.vitamin('mutagen')).toBeGreaterThanOrEqual(750);
   });
 
@@ -110,7 +110,7 @@ describe('mutagen and vitamins', () => {
   it.skip('several doses of lizard mutagen produce valid LIZARD mutations respecting prereqs and cancels', () => {
     for (const seed of [1, 2, 3, 4, 5]) {
       const { c, mut, log } = survivor(seed);
-      for (let i = 0; i < 4; i++) expect(c.inv.consume(dose('mutagen_lizard')).ok).toBe(true);
+      for (let i = 0; i < 4; i++) expect(c.inv.consume(dose('mutagen_lizard'), null).ok).toBe(true);
       pass(c, (dt) => mut.update(dt), 4 * 86400, 60);
       const gained = [...c.traits].filter((t) => !mut.isBase(t) && t !== 'CHANGING');
       expect(gained.length, `seed ${seed}: ${log.join(' | ')}`).toBeGreaterThan(0);
@@ -185,15 +185,15 @@ describe('mutagen and vitamins', () => {
     const dropped: Item[] = [];
     mut.onDropItem = (it) => dropped.push(it);
     const boots = createItem(data, 'boots');
-    expect(c.inv.wear(boots).ok).toBe(true);
+    expect(c.inv.wear(boots, null).ok).toBe(true);
     mut.setMutation('HOOVES');
     expect(c.inv.worn.includes(boots)).toBe(false);
     expect(log.join(' ')).toContain('is destroyed!');
-    const r = c.inv.wear(createItem(data, 'boots'));
+    const r = c.inv.wear(createItem(data, 'boots'), null);
     expect(r.ok).toBe(false);
     expect(r.msg).toMatch(/Hooves mutation prevents you from wearing/);
     const mask = createItem(data, 'mask_dust');
-    expect(c.inv.wear(mask).ok).toBe(true);
+    expect(c.inv.wear(mask, null).ok).toBe(true);
     mut.setMutation('MUZZLE');
     expect(c.inv.worn.includes(mask)).toBe(false);
     expect(dropped).toContain(mask);
@@ -331,7 +331,7 @@ describe('bionics', () => {
     bio.add('bio_power_storage');
     bio.add('bio_claws');
     bio.modPower(10);
-    c.inv.wield(createItem(data, 'knife_combat'));
+    c.inv.wield(createItem(data, 'knife_combat'), null);
     expect(bio.activate('bio_claws')).toBe(true);
     expect(c.inv.wielded?.typeId).toBe('bio_claws_weapon');
     expect(c.inv.carried().some((it) => it.typeId === 'knife_combat')).toBe(true);

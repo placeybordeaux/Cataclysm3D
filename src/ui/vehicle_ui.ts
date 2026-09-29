@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import type { DebugApi } from '../debug';
 import type { Game } from '../game/game';
 import type { Item } from '../game/item';
-import { cargoVolume, has, MPH_PER_MS, type Vehicle, type VehiclePart } from '../game/vehicle';
+import { has, MPH_PER_MS, type Vehicle, type VehiclePart } from '../game/vehicle';
 import { loadVehicleData } from '../game/vehicle_data';
 import { monsterCreatureHooks, registerVehicleSave, VehicleSystem, type DriveMode } from '../game/vehicles';
 import { registerOption } from './options';
@@ -15,6 +15,7 @@ import type { UiContext } from './context';
 import { c, cssColor, getUiRoot, openMenu, openWindow, type MenuEntry } from './framework';
 import { hud } from './hud';
 import { carriedEntries, openMultiSelect, stackEntries, type InvEntry, type MultiRow } from './inventory_ui';
+import { isAt, L, moveItem } from '../game/moves';
 
 // Vehicle UI: examining parts (doors, cargo, controls, hotwiring), the '^' controls menu,
 // driving keys, a CDDA-style dashboard line while driving, and window.cdda helpers.
@@ -226,52 +227,50 @@ function showVehicleInfo(game: Game, v: Vehicle): void {
 
 function getItemsMenu(game: Game, v: Vehicle, cargo: VehiclePart): void {
   const ctx = ctxOf(game);
-  const entries: InvEntry[] = cargo.items.map((item) => ({ item, where: 'ground', depth: 0, dir: cargo.def.name }));
+  const loc = L.cargo(cargo, v);
+  const entries: InvEntry[] = cargo.items.map((item) => ({ item, where: 'ground', loc, depth: 0, dir: cargo.def.name }));
   const rows: MultiRow[] = stackEntries(entries).map((entry) => ({ entry, max: entry.stack ? entry.stack.length : entry.item.countByCharges ? entry.item.charges : 1, count: 0 }));
   openMultiSelect(ctx, `Get items from the ${v.name}'s ${cargo.def.name}`, rows, 'get', (chosen) => {
     const inv = game.player.inv;
     for (const r of chosen) {
       const items: Item[] = r.entry.stack ? r.entry.stack.slice(0, r.count) : [r.entry.item];
       for (const it of items) {
-        let piece = it;
-        if (!r.entry.stack && it.countByCharges && r.count < it.charges) piece = it.split(r.count);
-        const res = inv.pickUp(piece);
-        if (!res.ok) {
-          if (piece !== it) it.charges += piece.charges;
-          game.message(res.msg, 'c_light_red');
-          return;
-        }
-        if (piece === it) cargo.items.splice(cargo.items.indexOf(it), 1);
-        game.message(res.msg);
+        if (!isAt(it, loc)) continue;
+        const count = !r.entry.stack && it.countByCharges ? Math.min(r.count, it.charges) : undefined;
+        const res = inv.pickUp(it, loc, count);
+        if (!res.ok) return;
       }
     }
-    v.version++;
   });
 }
 
 function putItemsMenu(game: Game, v: Vehicle, cargo: VehiclePart): void {
   const ctx = ctxOf(game);
   const rows: MultiRow[] = stackEntries(carriedEntries(ctx).filter((e) => e.where === 'carried' && e.depth === 0))
-    .map((entry) => ({ entry, max: entry.stack ? entry.stack.length : 1, count: 0 }));
+    .map((entry) => ({ entry, max: entry.stack ? entry.stack.length : entry.item.countByCharges ? entry.item.charges : 1, count: 0 }));
   if (!rows.length) {
     game.message('You have nothing to put there.', 'c_light_gray');
     return;
   }
   openMultiSelect(ctx, `Put items into the ${v.name}'s ${cargo.def.name}`, rows, 'store', (chosen) => {
-    const inv = game.player.inv;
+    const p = game.player;
+    const to = L.cargo(cargo, v);
+    let any = false;
     for (const r of chosen) {
-      for (const it of (r.entry.stack ?? [r.entry.item]).slice(0, r.count)) {
-        const [used, cap] = cargoVolume(cargo);
-        if (used + it.volume() > cap) {
-          game.message(`The ${cargo.def.name} is full.`, 'c_light_red');
+      const items = r.entry.stack ? r.entry.stack.slice(0, r.count) : [r.entry.item];
+      for (const it of items) {
+        if (!isAt(it, r.entry.loc)) continue;
+        const count = !r.entry.stack && it.countByCharges ? Math.min(r.count, it.charges) : undefined;
+        const res = moveItem(it, r.entry.loc, to, { count, actor: p, quiet: true });
+        if (!res.ok) {
+          game.message(res.msg, 'c_light_red');
+          if (any) game.message(`You put items into the ${v.name}'s ${cargo.def.name}.`);
           return;
         }
-        const res = inv.drop(it);
-        for (const d of res.dropped ?? [it]) cargo.items.push(d as Item);
+        any = true;
       }
     }
-    game.message(`You put items into the ${v.name}'s ${cargo.def.name}.`);
-    v.version++;
+    if (any) game.message(`You put items into the ${v.name}'s ${cargo.def.name}.`);
   });
 }
 

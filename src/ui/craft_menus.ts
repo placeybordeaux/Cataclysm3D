@@ -2,7 +2,7 @@ import type { CraftHost } from '../game/crafting';
 import { formatDuration } from '../game/crafting';
 import { canDisassemble, disassemblables, disassemblyYield, startDisassembly, uncraftRecipe } from '../game/disassembly';
 import type { Item } from '../game/item';
-import { bookData, bookMastery, cantRead, efileDevice, readableBooks, startReading, timeToRead } from '../game/reading';
+import { bookData, bookMastery, cantRead, readableBooks, startReading, timeToRead } from '../game/reading';
 import { itemDisplayName, requirementLines } from '../game/requirements';
 import { cddaText } from '../game/units';
 import { c, colorize, openMenu } from './framework';
@@ -27,8 +27,7 @@ export function openReadMenu(game: CraftHost): void {
       const why = cantRead(game, b);
       const d = bookData(b)!;
       const ident = p.identifiedBooks.has(b.typeId);
-      const dev = efileDevice(game, b);
-      const tag = (!ident ? c('c_yellow', ' (unread)') : d.skill ? c('c_cyan', ` (${p.skillName(d.skill)} ${d.req}-${d.level})`) : '') + (dev ? c('c_light_blue', ` [on ${dev.baseName()}]`) : '');
+      const tag = !ident ? c('c_yellow', ' (unread)') : d.skill ? c('c_cyan', ` (${p.skillName(d.skill)} ${d.req}-${d.level})`) : '';
       return {
         label: c(why ? 'c_dark_gray' : 'c_white', b.name()) + tag,
         value: b,

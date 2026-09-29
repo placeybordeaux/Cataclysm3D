@@ -1,215 +1,213 @@
-import { describe, expect, it, vi } from 'vitest';
-import { createItem, fromSpawned, hourlyRotpoints, Item, placeContent, placeContents, toHitFromAccuracy } from '../src/game/item';
+import { describe, expect, it } from 'vitest';
+import { ammoRoom, containerRefusal, containerRoomFor, createItem, fromSpawned, holsterRefusal, hourlyRotpoints, inNewContainer, Item, loadAmmo } from '../src/game/item';
 import { makeData } from './fixtures/gamedata';
+
+// The BN item model (item.cpp): stacks, containers holding one load, magazines and integral
+// magazines, holsters, bandoliers, soft items growing with contents, serialization.
 
 const data = makeData();
 
 describe('item basics', () => {
-  it('to_hit from melee_accuracy sums to base -7 offsets (item_factory.cpp melee_accuracy)', () => {
-    expect(toHitFromAccuracy({ grip: 'solid', length: 'short', surface: 'any', balance: 'neutral' })).toBe(0); // pipe
-    expect(toHitFromAccuracy({ grip: 'weapon', length: 'hand', surface: 'point', balance: 'good' })).toBe(-1); // bayonet
-    expect(toHitFromAccuracy({ grip: 'solid', length: 'hand', surface: 'line', balance: 'neutral' })).toBe(-2); // glock
-    expect(toHitFromAccuracy({})).toBe(-7 + 3 + 0 + 2 + 2);
-    expect(createItem(data, 'pipe').toHit()).toBe(0);
-  });
-
-  it('attack_time = 65 + volume/62.5ml + weight/60g (item_gun_tool_ammo.cpp)', () => {
-    // pipe: 370 ml, 600 g -> 65 + 5.92 + 10
-    expect(createItem(data, 'pipe').attackTime()).toBe(80);
+  it('attack_cost = 65 + volume/62.5ml + weight/60g, per unit of a stack', () => {
+    // BN pipe: 500 ml, 1250 g, stackable
+    expect(createItem(data, 'pipe').attackTime()).toBe(Math.floor(65 + 500 / 62.5 + 1250 / 60));
   });
 
   it('melee skill follows the largest damage type', () => {
-    expect(createItem(data, 'pipe').meleeSkill()).toBe('bashing');
+    expect(createItem(data, 'crowbar').meleeSkill()).toBe('bashing');
     expect(createItem(data, 'knife_combat').meleeSkill()).toBe('stabbing');
   });
 
-  it('damage levels reduce melee damage by 10% per level above 1 (item_degrade.cpp)', () => {
-    const p = createItem(data, 'pipe');
-    expect(p.damageLevel()).toBe(0);
-    p.damage = 1000; // 1 + 4*1000/4000 = 2
-    expect(p.damageLevel()).toBe(2);
-    expect(p.meleeDamage('bash')).toBeCloseTo(9);
-    expect(p.name()).toBe('damaged pipe');
-    p.damage = -500;
-    expect(p.name()).toBe('reinforced pipe');
-  });
-
-  it('qualities', () => {
+  it('damage levels reduce melee damage by 10% per level above 1 and name the item', () => {
     const c = createItem(data, 'crowbar');
-    expect(c.qualityLevel('PRY')).toBe(3);
-    expect(c.qualityLevel('CUT')).toBe(0);
+    const full = c.meleeDamage('bash');
+    c.damage = 1000; // level 2
+    expect(c.damageLevel()).toBe(2);
+    expect(c.meleeDamage('bash')).toBeCloseTo(full * 0.9);
+    expect(c.name()).toBe('damaged crowbar');
+    c.damage = -500;
+    expect(c.name()).toBe('reinforced crowbar');
   });
 });
 
-describe('charges and stacks', () => {
-  it('ammo is count-by-charges: weight per round, volume per stack_size', () => {
+describe('charges and stacks (count_by_charges)', () => {
+  it('ammo: weight per round, volume per stack_size rounded up', () => {
     const a = createItem(data, '9mm');
     expect(a.countByCharges).toBe(true);
     expect(a.charges).toBe(50);
-    expect(a.weight()).toBe(600);
-    expect(a.volume()).toBe(115);
-    expect(a.name()).toBe('9x19mm JHP (50)');
+    expect(a.weight()).toBe(7 * 50);
+    expect(a.volume()).toBe(250);
+    a.charges = 1;
+    expect(a.volume()).toBe(5); // ceil(250 * 1 / 50)
+    expect(createItem(data, '9mm', { count: 51 }).volume()).toBe(255);
+    expect(createItem(data, '9mm', { count: 7 }).name()).toBe('9x19mm JHP (7)');
   });
 
-  it('split/merge/stacksWith', () => {
-    const a = createItem(data, '9mm', { count: 30 });
-    const b = a.split(10);
-    expect(a.charges).toBe(20);
-    expect(b.charges).toBe(10);
-    expect(a.stacksWith(b)).toBe(true);
-    expect(a.merge(b)).toBe(true);
-    expect(a.charges).toBe(30);
-    expect(() => createItem(data, 'pipe', { count: 3 })).toThrow(/separate items/);
-    const p1 = createItem(data, 'pipe'), p2 = createItem(data, 'pipe');
-    expect(p1.stacksWith(p2)).toBe(true);
-    p2.damage = 1000;
-    expect(p1.stacksWith(p2)).toBe(false);
-  });
-});
-
-describe('pockets', () => {
-  it('a plastic bottle holds 500 ml = 2 charges of water; rigid bottle volume stays 510 ml', () => {
-    const bottle = createItem(data, 'bottle_plastic');
-    const water = createItem(data, 'water_clean', { charges: 3 });
-    const left = bottle.put(water);
-    expect(left).not.toBeNull();
-    expect(left!.charges).toBe(1);
-    const inside = bottle.allContents();
-    expect(inside).toHaveLength(1);
-    expect(inside[0].charges).toBe(2);
-    expect(bottle.volume()).toBe(510);
-    expect(bottle.weight()).toBe(13 + 500);
-    expect(bottle.name()).toBe('plastic bottle > clean water (2)');
-  });
-
-  it('liquids need watertight pockets and do not mix with solids', () => {
-    const jeans = createItem(data, 'jeans');
-    expect(jeans.canContain(createItem(data, 'water_clean')).ok).toBe(false);
-    const bottle = createItem(data, 'bottle_plastic');
-    // a 9mm round (2.3 ml) passes the 17 ml opening, but then water can't join it
-    bottle.put(createItem(data, '9mm', { count: 1 }));
-    expect(bottle.canContain(createItem(data, 'water_clean')).ok).toBe(false);
-    // opening size: max_item_volume 17 ml rejects a can of beans
-    expect(createItem(data, 'bottle_plastic').canContain(createItem(data, 'can_beans')).reason).toBe('item too big for opening');
-  });
-
-  it('non-rigid containers grow with contents; length limits apply', () => {
-    const bp = createItem(data, 'backpack');
-    bp.put(createItem(data, 'can_beans'));
-    expect(bp.volume()).toBe(2000 + 250);
-    const jeans = createItem(data, 'jeans');
-    expect(jeans.canContain(createItem(data, 'pipe')).reason).toBe('item too long'); // 60 cm > 19 cm
-  });
-
-  it('magazines only take their ammo type up to the restriction', () => {
-    const mag = createItem(data, 'glockmag');
-    const ammo = createItem(data, '9mm', { count: 20 });
-    const left = mag.magazinePockets()[0].insert(ammo);
-    expect(left?.charges).toBe(5);
-    expect(mag.ammoRemaining()).toBe(15);
-    expect(mag.ammoCapacity()).toBe(15);
-    expect(mag.name()).toBe('Glock 9x19mm 15-round magazine (15/15)');
-    expect(mag.magazinePockets()[0].canContain(createItem(data, 'battery')).ok).toBe(false);
-  });
-
-  it('guns take compatible magazines in the well; loaded gun reports ammo', () => {
-    const gun = createItem(data, 'glock_19');
-    const mag = createItem(data, 'glockmag', { ammo: '9mm' });
-    expect(gun.acceptsMagazine(mag)).toBe(true);
-    expect(gun.acceptsMagazine(createItem(data, 'medium_battery_cell'))).toBe(false);
-    gun.magazineWell()!.insert(mag);
-    expect(gun.ammoRemaining()).toBe(15);
-    expect(gun.ammoData()?.id).toBe('9mm');
-    expect(gun.name()).toBe('Glock 19 pistol (15/15)');
-    expect(gun.ammoConsume(2)).toBe(2);
-    expect(gun.ammoRemaining()).toBe(13);
-    // 76 ml magazine, 250 ml well: fully inside
-    expect(gun.volume()).toBe(386);
-  });
-
-  it('gun damage and noise come from the ammo (ranged.cpp gun_noise; item_factory loudness)', () => {
-    const gun = createItem(data, 'glock_19');
-    gun.magazineWell()!.insert(createItem(data, 'glockmag', { ammo: '9mm' }));
-    expect(gun.gunDamage()).toEqual([{ type: 'bullet', amount: 23, armor_penetration: 0 }]);
-    // 9mm: range 14*2 + damage 23*2 = 74 -> "bang!"
-    expect(gun.gunNoise()).toEqual({ volume: 74, sound: 'bang!' });
-  });
-});
-
-describe('spawning', () => {
-  it('fromSpawned wraps loose liquid in its default container', () => {
-    const out = fromSpawned(data, { id: 'water_clean', count: 1 });
-    expect(out).toHaveLength(1);
-    expect(out[0].typeId).toBe('bottle_plastic');
-    expect(out[0].allContents()[0].charges).toBe(1);
-  });
-
-  it('fromSpawned makes separate non-stackable items and places contents', () => {
-    const out = fromSpawned(data, { id: 'glock_19', count: 2, contents: [{ id: 'glockmag', count: 1 }] });
-    expect(out).toHaveLength(2);
-    expect(out[0].magazineCurrent()?.typeId).toBe('glockmag');
-  });
-
-  it('placeContents bulk-places identical items exactly like one-by-one placeContent', () => {
-    const mk = (n: number) => Array.from({ length: n }, () => createItem(data, 'bandages'));
-    const a = createItem(data, 'backpack'), b = createItem(data, 'backpack');
-    const t0 = performance.now();
-    const leftA = placeContents(a, mk(6000));
-    const bulkMs = performance.now() - t0;
-    const leftB = mk(600).filter((it) => placeContent(b, it) !== null);
-    expect(a.pockets.map((p) => p.contents.length)).toEqual(b.pockets.map((p) => p.contents.length));
-    expect(a.pockets[0].contents.length).toBeGreaterThan(0);
-    expect(leftA.length).toBe(6000 - (600 - leftB.length));
-    expect(bulkMs).toBeLessThan(200);
-  });
-
-  it('unknown ids: createItem throws, fromSpawned warns once and skips', () => {
-    expect(() => createItem(data, 'nope')).toThrow(/unknown item/);
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    expect(fromSpawned(data, { id: 'nope_x', count: 1 })).toEqual([]);
-    fromSpawned(data, { id: 'nope_x', count: 1 });
-    expect(warn).toHaveBeenCalledTimes(1);
-    warn.mockRestore();
-  });
-});
-
-describe('rot (item_degrade.cpp calc_hourly_rotpoints_at_temp)', () => {
-  it('rot rates', () => {
-    expect(hourlyRotpoints(0)).toBe(0);
-    expect(hourlyRotpoints((65 - 32) / 1.8)).toBeCloseTo(3600); // 65 F
-    expect(hourlyRotpoints((81 - 32) / 1.8)).toBeCloseTo(7200); // doubles every 16 F
-  });
-
-  it('canned beans spoil after 2 days at 65 F, not in the freezer', () => {
+  it('all comestibles count by charges in BN (a can of beans is 2 portions)', () => {
     const beans = createItem(data, 'can_beans');
-    const t65 = (65 - 32) / 1.8;
-    beans.processRot(44 * 3600, t65);
-    expect(beans.goingBad()).toBe(true);
-    expect(beans.name()).toBe('canned beans (old)');
-    beans.processRot(5 * 3600, t65);
-    expect(beans.rotten()).toBe(true);
-    expect(beans.name()).toBe('canned beans (rotten)');
-    const frozen = createItem(data, 'can_beans');
-    frozen.processRot(10 * 86400, -5);
-    expect(frozen.rot).toBe(0);
+    expect(beans.countByCharges).toBe(true);
+    expect(beans.charges).toBe(2);
+    expect(beans.volume()).toBe(500);
+  });
+
+  it('stacksWith compares type and state, never contents', () => {
+    const a = createItem(data, '9mm', { count: 30 }), b = createItem(data, '9mm', { count: 10 });
+    expect(a.stacksWith(b)).toBe(true);
+    b.damage = 1000;
+    expect(a.stacksWith(b)).toBe(false);
+    expect(a.stacksWith(a)).toBe(false);
+    const g1 = createItem(data, 'glock_19'), g2 = createItem(data, 'glock_19');
+    expect(g1.stacksWith(g2)).toBe(true);
+    loadAmmo(g2, '9mm', 3);
+    expect(g1.stacksWith(g2)).toBe(false);
+  });
+
+  it('a non-stack refuses a count', () => {
+    expect(() => createItem(data, 'crowbar', { count: 3 })).toThrow(/separate items/);
+  });
+});
+
+describe('containers hold one load (item::get_remaining_capacity_for_liquid)', () => {
+  it('a plastic bottle holds 500 ml = 2 charges of water; rigid, so its volume stays the same', () => {
+    const { container: bottle, rest } = inNewContainer(data, createItem(data, 'water_clean', { charges: 3 }), 'bottle_plastic');
+    expect(rest!.charges).toBe(1);
+    expect(bottle.contents.map((c) => c.charges)).toEqual([2]);
+    expect(bottle.volume()).toBe(500);
+    expect(bottle.weight()).toBe(13 + 2 * 250);
+    expect(bottle.name()).toBe('clean water (plastic bottle) (2/2)');
+  });
+
+  it("you can't mix loads; liquids need a watertight container", () => {
+    const bottle = inNewContainer(data, createItem(data, 'water_clean', { charges: 1 }), 'bottle_plastic').container;
+    expect(containerRoomFor(bottle, createItem(data, 'water_clean', { charges: 5 }))).toBe(1);
+    expect(containerRefusal(bottle, createItem(data, 'water', { charges: 1 }))).toBe("You can't mix loads in your plastic bottle.");
+    const bag = createItem(data, 'bag_plastic');
+    expect(containerRefusal(bag, createItem(data, 'water_clean'))).toBe("That plastic bag isn't water-tight.");
+    expect(containerRoomFor(bag, createItem(data, '9mm'))).toBe(1200); // 6 L of 9mm at 50 per 250 ml
+  });
+
+  it('a soft bag grows by what it holds (item::volume for non-rigid items)', () => {
+    const bag = createItem(data, 'bag_plastic');
+    const empty = bag.volume();
+    const { container } = inNewContainer(data, createItem(data, '9mm', { count: 100 }), 'bag_plastic');
+    expect(container.volume()).toBe(empty + 500);
+  });
+
+  it('BN classification: sealed bottle, bucket, can that unseals', () => {
+    expect(createItem(data, 'bottle_plastic').isWatertight()).toBe(true);
+    expect(createItem(data, 'bucket').isBucket()).toBe(true);
+    expect(createItem(data, 'pot').isBucket()).toBe(true);
+    const can = createItem(data, 'can_medium');
+    expect(can.isBucket()).toBe(false);
+    expect(can.def.container_data?.unseals_into).toBe('can_medium_unsealed');
+  });
+
+  it('food in a container that preserves does not rot', () => {
+    const can = fromSpawned(data, { id: 'can_medium', count: 1, contents: [{ id: 'can_beans', count: 1 }] })[0];
+    const loose = createItem(data, 'can_beans');
+    can.processRot(86400, 30);
+    loose.processRot(86400, 30);
+    expect(can.contents[0].rot).toBe(0);
+    expect(loose.rot).toBeGreaterThan(0);
+  });
+});
+
+describe('guns, magazines and ammo', () => {
+  it('a magazine-fed gun: the magazine sits in the magazine slot; the well hides part of its volume', () => {
+    const gun = createItem(data, 'glock_19', { ammo: 'default' });
+    expect(gun.magazine?.typeId).toBe('glockmag');
+    expect(gun.ammoRemaining()).toBe(15);
+    expect(gun.ammoCapacity()).toBe(15);
+    expect(gun.ammoData()?.id).toBe('9mm');
+    // glockmag 250 ml fits the 250 ml well entirely
+    expect(gun.volume()).toBe(500);
+    expect(gun.weight()).toBe(600 + 105 + 15 * 7);
+    expect(gun.name()).toBe('Glock 19 (15/15)');
+    expect(gun.acceptsMagazine(createItem(data, 'glockbigmag'))).toBe(true);
+    expect(gun.acceptsMagazine(createItem(data, 'light_battery_cell'))).toBe(false);
+    expect(gun.ammoConsume(4)).toBe(4);
+    expect(gun.ammoRemaining()).toBe(11);
+  });
+
+  it('an integral magazine keeps rounds as charges of one ammo type (BN curammo)', () => {
+    const gun = createItem(data, 'sw_619');
+    expect(gun.hasIntegralMagazine()).toBe(true);
+    // a speedloader is not a magazine for the slot: it refills the cylinder
+    expect(gun.takesMagazines()).toBe(false);
+    expect(gun.ammoCapacity()).toBe(7);
+    expect(loadAmmo(gun, '38_special', 10)).toBe(7);
+    expect(gun.charges).toBe(7);
+    expect(gun.ammoId).toBe('38_special');
+    expect(gun.weight()).toBe(1074 + 7 * 8);
+    const r = ammoRoom(gun, createItem(data, '357mag_fmj'));
+    expect(r.room).toBe(0);
+  });
+
+  it('shotgun tube: loose shells count toward its capacity', () => {
+    const gun = createItem(data, 'remington_870');
+    expect(gun.hasIntegralMagazine()).toBe(true);
+    expect(ammoRoom(gun, createItem(data, 'shot_00')).room).toBe(5);
+    expect(ammoRoom(gun, createItem(data, '9mm')).why).toMatch(/can't load/);
+  });
+
+  it('a bandolier holds rounds of the listed types', () => {
+    const b = createItem(data, 'bandolier_pistol');
+    expect(ammoRoom(b, createItem(data, '9mm')).room).toBe(40);
+    expect(ammoRoom(b, createItem(data, 'shot_00')).room).toBe(0);
+  });
+
+  it('holsters take what holster_actor::can_holster allows', () => {
+    const h = createItem(data, 'holster');
+    expect(holsterRefusal(h, createItem(data, 'glock_19'))).toBeNull();
+    expect(holsterRefusal(h, createItem(data, 'remington_870'))).toMatch(/too big/);
+    expect(holsterRefusal(createItem(data, 'sheath'), createItem(data, 'knife_combat'))).toBeNull();
+    expect(holsterRefusal(createItem(data, 'sheath'), createItem(data, 'crowbar'))).toMatch(/can't put/);
+    // survivor_pack's min_volume arrives as "250ml" in the data: still read as ml
+    expect(holsterRefusal(createItem(data, 'survivor_pack'), createItem(data, 'knife_combat'))).toBeNull();
+  });
+});
+
+describe('item groups (fromSpawned)', () => {
+  it('stacks become one item; others one item each; contents go inside; magazines into the slot', () => {
+    expect(fromSpawned(data, { id: '9mm', count: 3, charges: 10 }).map((i) => i.charges)).toEqual([30]);
+    expect(fromSpawned(data, { id: 'crowbar', count: 2 })).toHaveLength(2);
+    const [gun] = fromSpawned(data, { id: 'glock_19', count: 1, contents: [{ id: 'glockmag', count: 1, charges: 9, ammo: '9mm' }] });
+    expect(gun.magazine?.ammoRemaining()).toBe(9);
+    const [box] = fromSpawned(data, { id: 'bottle_plastic', count: 1, contents: [{ id: 'water_clean', count: 1, charges: 2 }] });
+    expect(box.contents[0].charges).toBe(2);
+    expect(fromSpawned(data, { id: 'nope', count: 1 })).toEqual([]);
+  });
+
+  it('custom flags, damage and active carry over', () => {
+    const [j] = fromSpawned(data, { id: 'jeans', count: 1, flags: ['FIT'], damage: 2000 });
+    expect(j.hasFlag('FIT')).toBe(true);
+    expect(j.damage).toBe(2000);
   });
 });
 
 describe('serialization', () => {
-  it('round-trips nested contents and state', () => {
-    const bp = createItem(data, 'backpack');
-    const bottle = createItem(data, 'bottle_plastic');
-    bottle.put(createItem(data, 'water_clean', { charges: 2 }));
-    bp.put(bottle);
-    const gun = createItem(data, 'glock_19', { damage: 1000 });
-    gun.magazineWell()!.insert(createItem(data, 'glockmag', { ammo: '9mm' }));
-    bp.put(gun);
-    const j = JSON.parse(JSON.stringify(bp.toJSON()));
-    const back = Item.fromJSON(data, j);
-    expect(back.toJSON()).toEqual(bp.toJSON());
-    expect(back.weight()).toBe(bp.weight());
-    const g2 = back.allContents().find((i) => i.typeId === 'glock_19')!;
-    expect(g2.ammoRemaining()).toBe(15);
-    expect(g2.damage).toBe(1000);
+  it('round-trips charges, ammo, contents, magazine and flags', () => {
+    const gun = createItem(data, 'glock_19', { ammo: '9mm', ammoCount: 12 });
+    const rev = createItem(data, 'sw_619');
+    loadAmmo(rev, '38_special', 5);
+    const bottle = inNewContainer(data, createItem(data, 'water_clean', { charges: 2 }), 'bottle_plastic').container;
+    const j = fromSpawned(data, { id: 'jeans', count: 1, flags: ['FIT'] })[0];
+    for (const it of [gun, rev, bottle, j]) {
+      const back = Item.fromJSON(data, JSON.parse(JSON.stringify(it.toJSON())));
+      expect(back.toJSON()).toEqual(it.toJSON());
+      expect(back.name()).toBe(it.name());
+      expect(back.weight()).toBe(it.weight());
+    }
+  });
+
+  it('rejects DDA pockets (they are migrated by src/save/items.ts first)', () => {
+    expect(() => Item.fromJSON(data, { typeId: 'backpack', pockets: [[]] })).toThrow(/migrate/);
+  });
+});
+
+describe('rot', () => {
+  it('rot points: none below freezing, 3600/h at 65F', () => {
+    expect(hourlyRotpoints(-5)).toBe(0);
+    expect(hourlyRotpoints((65 - 32) / 1.8)).toBeCloseTo(3600);
   });
 });

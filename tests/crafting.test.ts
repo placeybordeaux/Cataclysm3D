@@ -45,7 +45,7 @@ function world(seed = 7): TestHost {
   player.x = 5.5;
   player.y = 5.5;
   player.z = 0;
-  player.inv.wear(createItem(data, 'backpack'));
+  player.inv.wear(createItem(data, 'backpack'), null);
   const log: string[] = [];
   player.onMessage = (t) => log.push(t);
   const host: any = {
@@ -63,8 +63,7 @@ function world(seed = 7): TestHost {
 
 const give = (h: TestHost, id: string, count?: number) => {
   const it = createItem(data, id, count !== undefined ? { count } : {});
-  const r = h.player.inv.pickUp(it);
-  expect(r.ok, r.msg).toBe(true);
+  expect(h.player.inv.giveNew(it)).not.toBeNull();
   return it;
 };
 const carried = (h: TestHost, id: string) => h.player.inv.allItems().filter((i) => i.typeId === id);
@@ -163,7 +162,7 @@ describe('crafting inventory sources', () => {
     const h = world();
     const r = findRecipe(data, 'water_clean')!;
     give(h, 'pot');
-    for (const it of fromSpawned(data, { id: 'water', count: 1, charges: 2 } as any)) h.player.inv.pickUp(it);
+    for (const it of fromSpawned(data, { id: 'water', count: 1, charges: 2 } as any)) h.player.inv.giveNew(it);
     expect(canCraft(h, r).missing).toEqual([expect.stringContaining('fire')]);
     h.map.addField(6, 6, 0, 'fd_fire', 1);
     expect(canCraft(h, r).ok).toBe(true);
@@ -182,7 +181,7 @@ describe('fire', () => {
     const h = world();
     const lighter = createItem(data, 'lighter');
     expect(loadAmmo(lighter, 'butane', 10)).toBe(10);
-    h.player.inv.pickUp(lighter);
+    h.player.inv.giveNew(lighter);
     const before = lighter.ammoRemaining();
     h.map.addItem(5, 4, 0, createItem(data, 'stick_long'));
     const r = useFirestarter(h, lighter, { moves: 500, moves_slow: 6000 }, 5, 4, 0);
@@ -245,7 +244,7 @@ describe('disassembly', () => {
     const h = world();
     const r = uncraftRecipe(data, 'stick_long')!;
     expect(disassemblyRequirements(data, r).qualities).toEqual([[{ id: 'CUT', level: 1 }]]);
-    h.player.inv.wield(createItem(data, 'stick_long'));
+    h.player.inv.wield(createItem(data, 'stick_long'), null);
     expect(startDisassembly(h, h.player.inv.wielded!)).toBe(false); // no cutting tool
     give(h, 'knife_folding');
     expect(startDisassembly(h, h.player.inv.wielded!)).toBe(true);

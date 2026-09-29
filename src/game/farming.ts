@@ -4,6 +4,7 @@ import { hasFlag } from '../world/registry';
 import { warnOnce } from '../data/warn';
 import { DAYS_PER_SEASON, SECONDS_PER_DAY } from '../core/time';
 import { createItem, type Item } from './item';
+import { destroyWhere, L, spawnItem, spawnOnGround } from './moves';
 import { isOutside } from './vision';
 import { weatherPoint } from './weather';
 import { practiceForaging } from './harvest';
@@ -165,14 +166,14 @@ export function plantSeedNow(game: Game, x: number, y: number, z: number, seedId
   const map = game.map;
   const inv = game.player.inv;
   if (!inv.hasAmount(seedId, 1)) return false;
-  const used = inv.useAmount(seedId, 1)[0];
-  const seed = used.countByCharges && used.charges > 1 ? used.split(1) : used;
+  // the seed leaves the pack and goes into the ground (used up here, placed there)
+  const seed = inv.useAmount(seedId, 1)[0];
   seed.rot = 0;
   seed.vars.planted = game.clock.seconds;
   seed.vars.hidden = 1;
   const f = map.furnAt(x, y, z);
   const flag = (seed.def.required_terrain_flag as string | undefined) ?? 'PLANTABLE';
-  map.addItem(x, y, z, seed);
+  spawnItem(seed, L.ground(map, x, y, z), { force: true, quiet: true });
   if (f.id !== 'f_null' && hasFlag(f, flag) && plantData(f).transform) map.setFurn(x, y, z, plantData(f).transform!);
   else {
     if (flag === 'PLANTABLE') map.setTer(x, y, z, map.terAt(x, y, z).id === 't_greenhouse_tilled' ? 't_greenhouse' : 't_dirt');
@@ -245,7 +246,7 @@ export function harvestPlantNow(game: Game, x: number, y: number, z: number): It
   add(seed.def.fruit as string | undefined, plants);
   for (const b of (seed.def.byproducts as string[] | undefined) ?? []) add(b, 1);
   clearPlot(game, x, y, z);
-  for (const it of out) map.addItem(p.tileX, p.tileY, p.z, it);
+  for (const it of out) spawnOnGround(map, p.tileX, p.tileY, p.z, it);
   game.message('You harvest the plant.', 'c_light_gray');
   practiceForaging(game);
   return out;
@@ -255,7 +256,7 @@ export function harvestPlantNow(game: Game, x: number, y: number, z: number): It
 function clearPlot(game: Game, x: number, y: number, z: number): void {
   const map = game.map;
   const f = map.furnAt(x, y, z);
-  for (const it of [...map.itemsAt(x, y, z)]) map.removeItem(x, y, z, it);
+  destroyWhere(L.ground(map, x, y, z), () => true);
   const base = plantData(f).base;
   map.setFurn(x, y, z, base && map.furniture.has(base) ? base : 'f_null');
 }

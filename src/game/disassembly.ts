@@ -2,6 +2,7 @@ import type { GameData, RecipeDef, RequirementData } from '../data/types';
 import { CraftingInventory } from './crafting_inv';
 import { giveOrDrop, hasCraftingLight, learnRecipe, type CraftHost } from './crafting';
 import { createItem, countByCharges, Item } from './item';
+import { consumeItem, L, locate, type Loc } from './moves';
 import { evaluateRequirements, itemDisplayName, type RequirementEval } from './requirements';
 
 // Disassembly (crafting.cpp complete_disassemble, recipe_dictionary.cpp): an item can be
@@ -95,7 +96,7 @@ export function canDisassemble(host: CraftHost, it: Item, inv?: CraftingInventor
   inv ??= CraftingInventory.gather(host.data, p, host.map, { x: p.x, y: p.y, z: p.z });
   const req = evaluateRequirements(host.data, r ? { tools: disassemblyRequirements(host.data, r).tools, qualities: disassemblyRequirements(host.data, r).qualities } : {}, inv);
   const missing = r ? [...req.missing] : [`You cannot disassemble this.`];
-  if (it.containerPockets().some((pk) => pk.contents.length)) missing.push('You must empty it first.');
+  if (it.hasContents() || it.magazine) missing.push('You must empty it first.');
   if (it.countByCharges && r && it.charges < (r.charges ?? 1)) missing.push(`You need at least ${r.charges} charges.`);
   if (!hasCraftingLight(host)) missing.push("You can't see to craft!");
   return { ok: missing.length === 0, missing, req };
@@ -116,19 +117,16 @@ export function disassemblables(host: CraftHost): { item: Item; where: 'inv' | [
   return out;
 }
 
-/** Remove the item from the inventory or the map tile it lies on. */
+/** Use up the item (or `r.charges` of a stack) where it is: carried or on a tile within reach. */
 function takeItem(host: CraftHost, it: Item, r: RecipeDef): boolean {
   const p = host.player;
+  const around: Loc[] = [];
+  for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) around.push(L.ground(host.map, Math.floor(p.x) + dx, Math.floor(p.y) + dy, p.z));
+  const loc = p.inv.locOf(it) ?? locate(it, around);
+  if (!loc) return false;
   // Stacks (ammo, charges) are disassembled `r.charges` at a time.
-  const per = it.countByCharges ? (r.charges ?? 1) : 0;
-  if (per > 0 && it.charges > per) {
-    it.split(per);
-    return true;
-  }
-  if (p.inv.remove(it)) return true;
-  for (let dy = -1; dy <= 1; dy++)
-    for (let dx = -1; dx <= 1; dx++) if (host.map.removeItem(Math.floor(p.x) + dx, Math.floor(p.y) + dy, p.z, it)) return true;
-  return false;
+  const per = it.countByCharges ? Math.min(it.charges, r.charges ?? 1) : undefined;
+  return consumeItem(it, loc, per) !== null;
 }
 
 /** complete_disassemble: roll each component against skill and damage, then hand them out. */

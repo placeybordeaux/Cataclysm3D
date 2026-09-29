@@ -14,6 +14,7 @@ import { Spawner, densityCount } from '../src/game/spawner';
 import { PlayerCombat, meleeVerb } from '../src/game/playercombat';
 import { butcherSeconds, butcherYield, yieldMult } from '../src/game/butchery';
 import { createItem, type Item } from '../src/game/item';
+import { L, spawnItem } from '../src/game/moves';
 import { findPath } from '../src/game/pathfind';
 import { Grid, hasLOS } from '../src/game/los';
 import { nextUpgradeDay, turnsToEffectSeconds } from '../src/game/monster';
@@ -442,7 +443,7 @@ describe('player attacks', () => {
 
   it('a baseball bat kills a zombie and leaves a corpse', () => {
     const { game, sys, combat } = world(3);
-    game.player.inv.wield(createItem(data, 'bat'));
+    game.player.inv.wield(createItem(data, 'bat'), null);
     const z = sys.spawnById('mon_zombie', 12.5, 11.3, 0)!;
     game.player.yaw = 0;
     let swings = 0;
@@ -462,7 +463,7 @@ describe('player attacks', () => {
 
   it('every swing reports a playerAttack outcome for hit feedback, ending in a kill', () => {
     const { game, sys, combat } = world(3);
-    game.player.inv.wield(createItem(data, 'bat'));
+    game.player.inv.wield(createItem(data, 'bat'), null);
     const seen: string[] = [];
     game.events.on('playerAttack', (e) => {
       seen.push(e.outcome);
@@ -486,8 +487,8 @@ describe('player attacks', () => {
   it('bullets hit the first monster on the ray and stop at walls', () => {
     const { game, sys, combat } = world(4);
     const gun = createItem(data, 'glock_19');
-    gun.magazineWell()!.insert(createItem(data, 'glockmag', { ammo: '9mm' }));
-    game.player.inv.wield(gun);
+    spawnItem(createItem(data, 'glockmag', { ammo: '9mm' }), L.mag(gun));
+    game.player.inv.wield(gun, null);
     game.player.recoil = 0;
     game.player.setSkill('gun', 10);
     game.player.setSkill('pistol', 10);
@@ -510,7 +511,7 @@ describe('player attacks', () => {
     const { game, sys, combat } = world(8);
     const z = sys.spawnById('mon_zombie', 12.5, 8.5, 0)!;
     const rock = createItem(data, 'rock');
-    game.player.inv.wield(rock);
+    game.player.inv.wield(rock, null);
     game.player.yaw = 0;
     game.player.dex_base = 20;
     game.player.setSkill('throw', 10);

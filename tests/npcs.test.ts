@@ -56,7 +56,7 @@ function world(seed = 11) {
   for (let y = -2; y <= 2; y++) for (let x = -2; x <= 2; x++) game.map.chunk(x, y, 0);
   const mons = new MonsterSystem(game);
   const npcs = new NpcSystem(game, nd, mons);
-  game.player.inv.wear(createItem(data, 'backpack'));
+  game.player.inv.wear(createItem(data, 'backpack'), null);
   game.systems.push(mons, npcs);
   game.clock.seconds = 12 * 3600;
   const msgs: string[] = [];
@@ -255,7 +255,7 @@ describe('dialogue on real talk topics', () => {
     expect(d.cond({ compare_string: ['yes', { u_val: 'x' }] })).toBe(true);
     expect(d.cond({ not: { compare_string: ['yes', { npc_val: 'x' }] } })).toBe(true);
     expect(d.cond({ u_has_items: { item: 'FMCNote', count: 2 } })).toBe(false);
-    for (let i = 0; i < 5; i++) game.player.inv.pickUp(createItem(data, 'FMCNote'));
+    for (let i = 0; i < 5; i++) game.player.inv.giveNew(createItem(data, 'FMCNote'));
     expect(d.cond({ u_has_items: { item: 'FMCNote', count: 2 } })).toBe(true);
     expect(d.cond({ is_season: 'SPRING' })).toBe(true);
     d.effect({ npc_add_effect: 'asked_to_follow', duration: 3600 });
@@ -304,7 +304,7 @@ describe('missions', () => {
     d.choose(yes.index);
     expect(inst.status).toBe('active');
     expect(npcs.missions.isComplete(inst, n)).toBe(false);
-    for (let i = 0; i < (def.count ?? 1); i++) game.player.inv.pickUp(createItem(data, def.item!));
+    for (let i = 0; i < (def.count ?? 1); i++) game.player.inv.giveNew(createItem(data, def.item!));
     expect(npcs.missions.isComplete(inst, n)).toBe(true);
     const d2 = npcs.talkTo(n)!;
     expect(d2.view().id).toBe('TALK_MISSION_INQUIRE');
@@ -400,7 +400,7 @@ describe('trade', () => {
     const note = createItem(data, 'FMCNote');
     expect(adjustedPrice(data, nd, n, p, note, 1, true)).toBe(adjustedPrice(data, nd, n, p, note, 1, false));
 
-    for (let i = 0; i < 3; i++) p.inv.pickUp(createItem(data, 'FMCNote'));
+    for (let i = 0; i < 3; i++) p.inv.giveNew(createItem(data, 'FMCNote'));
     n.stock.push(knife);
     const s = new TradeSession(data, nd, p, n);
     const notes = s.yours.find((e) => e.item.typeId === 'FMCNote')!;
@@ -496,8 +496,8 @@ describe('npc AI', () => {
     game.player.x = 2.5;
     game.player.y = 2.5;
     const n = npcs.spawn({ cls: 'NC_SCAVENGER' }, 30, 30, 0)!;
-    n.inv.wielded = null;
-    n.inv.wield(createItem(data, 'machete'));
+    if (n.inv.wielded) n.inv.drop(n.inv.wielded);
+    n.inv.wield(createItem(data, 'machete'), null);
     n.personality.bravery = 8;
     const hp0 = Object.values(n.hp).reduce((s, p) => s + p.cur, 0);
     const z = mons.spawnById('mon_zombie', 32.5, 30.5, 0)!;
@@ -521,8 +521,8 @@ describe('npc AI', () => {
   it('a KILL-attitude bandit attacks the survivor', () => {
     const { npcs, step, game } = world(23);
     const n = npcs.spawn({ template: 'thug' }, 16, 12, 0, { attitude: 'KILL' })!;
-    n.inv.wielded = null;
-    n.inv.wield(createItem(data, 'bat'));
+    if (n.inv.wielded) n.inv.drop(n.inv.wielded);
+    n.inv.wield(createItem(data, 'bat'), null);
     const hp0 = game.player.hpPercent();
     step(10);
     expect(game.player.hpPercent()).toBeLessThan(hp0);

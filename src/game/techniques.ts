@@ -4,6 +4,7 @@ import { warnOnce } from '../data/warn';
 import { evalMathArray, type MathHost } from './talkmath';
 import type { Character } from './character';
 import type { Item } from './item';
+import { consumeItem, L, moveItem } from './moves';
 import { BODY_PARTS, type BodyPartId } from './bodyparts';
 import { blockAttemptChance, defenseOf, guardScoreBonus } from './combatfeel';
 import {
@@ -352,6 +353,7 @@ export interface BlockResult {
 /** Hooks the world layer sets (viewmodel block pose, spilled items). */
 export const combatHooks: {
   onBlock: ((c: Character, withWhat: string) => void) | null;
+  /** A weapon broke; `spilled` is what it held, already on the ground (informational). */
   onWeaponBroken: ((c: Character, item: Item, spilled: Item[]) => void) | null;
 } = { onBlock: null, onWeaponBroken: null };
 
@@ -471,11 +473,20 @@ export interface WearResult {
   spilled?: Item[];
 }
 
-/** Remove a destroyed weapon from wherever it is (wielded or worn), spilling its contents. */
+/**
+ * A weapon breaks: what it held falls at the wielder's feet (or stays with them when there is
+ * no ground), then the weapon is gone. Returns what spilled (already placed).
+ */
 function destroyItem(c: Character, it: Item): Item[] {
-  const spilled = it.pockets.flatMap((p) => p.contents.splice(0));
-  if (c.inv.wielded === it) c.inv.wielded = null;
-  else c.inv.remove(it);
+  const loc = c.inv.locOf(it);
+  if (!loc) return [];
+  const away = c.inv.groundHere() ?? L.inv(c);
+  const spilled: Item[] = [];
+  for (const x of [...it.allContents()]) {
+    const from = x === it.magazine ? L.mag(it) : it.gunmods.includes(x) ? L.mod(it) : L.in(it);
+    if (moveItem(x, from, away, { force: true, quiet: true }).ok) spilled.push(x);
+  }
+  consumeItem(it, loc);
   combatHooks.onWeaponBroken?.(c, it, spilled);
   return spilled;
 }

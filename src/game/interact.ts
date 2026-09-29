@@ -2,6 +2,7 @@ import type { Game } from './game';
 import type { FurnitureDef, TerrainDef } from '../data/types';
 import type { Item } from './item';
 import { createItem } from './item';
+import { spawnOnGround } from './moves';
 import { CHUNK, chunkOf, localOf } from '../world/coords';
 import { hasFlag } from '../world/registry';
 import { cddaText } from './units';
@@ -143,8 +144,9 @@ function drinkFrom(game: Game, x: number, y: number, z: number, name: string, cl
   const id = clean ? 'water_clean' : 'water';
   const liquidId = game.data.items[id] ? id : 'water';
   if (!game.data.items[liquidId]) return say(game, `There's no water in the ${name}.`);
+  // a sip straight from the source: a new portion, drunk on the spot
   const w = createItem(game.data, liquidId, { charges: 1 });
-  const r = game.player.inv.consume(w);
+  const r = game.player.inv.consume(w, null);
   if (r.ok) emitSound(game, { x, y, z }, 2, 'slurp', { category: 'activity', source: game.player, sfxId: '', ambient: true });
 }
 
@@ -241,7 +243,7 @@ export function interactionsAt(game: Game, x: number, y: number, z: number): Int
       add('tear_curtains', 'Tear down the curtains', () => {
         map.setTer(x, y, z, ct);
         for (const [id, n] of [['sheet', 2], ['stick', 1], ['string_36', 1]] as const)
-          for (let i = 0; i < n; i++) if (game.data.items[id]) map.addItem(p.tileX, p.tileY, p.z, createItem(game.data, id));
+          for (let i = 0; i < n; i++) if (game.data.items[id]) spawnOnGround(map, p.tileX, p.tileY, p.z, createItem(game.data, id));
         say(game, 'You tear the curtains and curtain rod off the window frame.');
         emitSound(game, { x, y, z }, 8, 'rrrip!', { category: 'destructive_activity', source: p });
       });
@@ -307,7 +309,7 @@ export function interactionsAt(game: Game, x: number, y: number, z: number): Int
       if (di && game.data.items[di])
         later.push({ id: 'take_down', label: `Take down the ${f.name}`, run: () => {
           map.setFurn(x, y, z, 'f_null');
-          map.addItem(x, y, z, createItem(game.data, di));
+          spawnOnGround(map, x, y, z, createItem(game.data, di));
           say(game, `You take down the ${f.name}.`);
         } });
       break;

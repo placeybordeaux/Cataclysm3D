@@ -8,6 +8,7 @@ import {
 } from '../src/game/combat';
 import { heldItemExtent } from '../src/render/viewmodel';
 import { createItem } from '../src/game/item';
+import { L, spawnItem } from '../src/game/moves';
 import { refreshDefenses } from '../src/game/martialarts';
 import { makeData } from './fixtures/gamedata';
 
@@ -29,7 +30,7 @@ describe('weapon speed legibility', () => {
     const heavy = createItem(data, 'pipe');
     heavy.def = { ...heavy.def, id: 'extinguisher', name: 'large fire extinguisher', volume: 20000, weight: 7030 };
     expect(unwieldyWarning(c, heavy)).toBe('The large fire extinguisher is very unwieldy, attacks will be slow.');
-    expect(c.inv.wield(heavy).ok).toBe(true);
+    expect(c.inv.wield(heavy, null).ok).toBe(true);
   });
 
   it('held items cover the screen by size: knives small, long things capped, bulky ones shrunk', () => {
@@ -74,14 +75,14 @@ describe('melee: to-hit and crits', () => {
     expect(meleeHitBase(c, createItem(data, 'pipe'))).toBe(2 + 1 + 1);
     // torso encumbrance 20 -> -2
     const d = survivor();
-    d.inv.wear(createItem(data, 'hoodie'));
-    d.inv.wear(createItem(data, 'jacket_leather'));
+    d.inv.wear(createItem(data, 'hoodie'), null);
+    d.inv.wear(createItem(data, 'jacket_leather'), null);
     expect(meleeHitBase(d, null)).toBe(2 - 2);
   });
 
   it('hit chance vs an undodging zombie matches normal(10, 25) >= 0', () => {
     const c = survivor();
-    c.inv.wield(createItem(data, 'pipe'));
+    c.inv.wield(createItem(data, 'pipe'), null);
     expect(meleeHitChance(c, c.inv.wielded, 0)).toBeCloseTo(normalAtLeast(10, 25, 0), 5);
     expect(meleeHitChance(c, c.inv.wielded, 0)).toBeCloseTo(0.655, 2);
     const rng = new Rng(3);
@@ -137,7 +138,7 @@ describe('melee: damage (roll_melee_damage_internal)', () => {
 
   it('meleeAttack spends stamina and trains melee skills', () => {
     const c = survivor();
-    c.inv.wield(createItem(data, 'pipe'));
+    c.inv.wield(createItem(data, 'pipe'), null);
     const before = c.stamina;
     const r = meleeAttack(c, { dodge: 0, armor: { bash: 2 } }, new Rng(9), 'the zombie');
     expect(before - c.stamina).toBe(Math.floor(600 / 16) + 50);
@@ -150,7 +151,7 @@ describe('ranged', () => {
   it('Glock 19 dispersion at 8 dex/0 skill: 30 gun + 6 dex + 287.5 skill + recoil', () => {
     const c = survivor();
     const gun = createItem(data, 'glock_19');
-    gun.magazineWell()!.insert(createItem(data, 'glockmag', { ammo: '9mm' }));
+    spawnItem(createItem(data, 'glockmag', { ammo: '9mm' }), L.mag(gun));
     expect(gunDispersion(gun)).toBe(30); // (480 + 60) / 18
     expect(dispersionFromSkill(0, 300 / 18)).toBeCloseTo(287.5);
     expect(maxDispersionMoa(weaponDispersionSources(c, gun, 0))).toBeCloseTo(30 + 6 + 287.5);
@@ -162,14 +163,14 @@ describe('ranged', () => {
   it('recoil per shot: 500 / (1.8^0.8 * 1) (item::gun_recoil)', () => {
     const c = survivor();
     const gun = createItem(data, 'glock_19');
-    gun.magazineWell()!.insert(createItem(data, 'glockmag', { ammo: '9mm' }));
+    spawnItem(createItem(data, 'glockmag', { ammo: '9mm' }), L.mag(gun));
     expect(gunRecoil(c, gun)).toBeCloseTo(500 / Math.pow(600 / 333, 0.8), 3);
   });
 
   it('fireGun consumes a round, makes noise, returns a cone angle and damage', () => {
     const c = survivor();
     const gun = createItem(data, 'glock_19');
-    gun.magazineWell()!.insert(createItem(data, 'glockmag', { ammo: '9mm' }));
+    spawnItem(createItem(data, 'glockmag', { ammo: '9mm' }), L.mag(gun));
     c.recoil = 0;
     aim(c, gun, 0);
     const shot = fireGun(c, gun, new Rng(4));
@@ -241,7 +242,7 @@ describe('monsters vs the survivor', () => {
     const c = survivor();
     const log: string[] = [];
     c.onMessage = (t) => log.push(t);
-    c.inv.wear(createItem(data, 'jacket_leather'));
+    c.inv.wear(createItem(data, 'jacket_leather'), null);
     const rng = new Rng(2);
     let r;
     do r = monsterMeleeAttack(zombie, c, rng, { bp: 'arm_l' });

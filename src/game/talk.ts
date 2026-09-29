@@ -4,7 +4,8 @@ import type { GameData } from '../data/types';
 import { expandItemGroup, itemName } from '../data/index';
 import { warnOnce } from '../data/warn';
 import type { Character } from './character';
-import { createItem, fromSpawned, type Item } from './item';
+import { createItem, fromSpawned, inNewContainer, type Item } from './item';
+import { bodyLocs, canMove, consumeItem, isAt, L, moveItem, spawnItem, walkLocs } from './moves';
 import { FACTION_FOLLOWERS, FACTION_NONE, type Npc, type NpcData, type TalkTopicDef } from './npc';
 import type { MissionHost, MissionInstance, MissionSystem } from './missions';
 import { evalMath, evalMathArray, type MathHost, type MathValue, type VarScope } from './talkmath';
@@ -773,7 +774,7 @@ export class Dialogue implements MathHost {
       case 'u_available': return true;
       case 'u_has_weapon': return !!u.inv.wielded;
       case 'npc_has_weapon': return !!n.inv.wielded;
-      case 'u_can_stow_weapon': return !!u.inv.wielded && u.inv.canStash(u.inv.wielded);
+      case 'u_can_stow_weapon': return !!u.inv.wielded && canMove(u.inv.wielded, L.hands(u), L.inv(u), { actor: u }).ok;
       case 'u_can_drop_weapon': return !!u.inv.wielded;
       case 'is_day': return this.w.isDay?.() ?? true;
       case 'is_outside': case 'u_is_outside': return this.w.isOutside?.(u.x | 0, u.y | 0, u.z) ?? true;
@@ -1039,11 +1040,7 @@ export class Dialogue implements MathHost {
         this.done = true;
         return;
       case 'drop_weapon': {
-        const w = n.inv.wielded;
-        if (w) {
-          n.inv.remove(w);
-          this.w.dropItem?.(w, n.tileX, n.tileY, n.z);
-        }
+        if (n.inv.wielded) n.inv.drop(n.inv.wielded);
         return;
       }
       case 'player_weapon_away': {
@@ -1052,11 +1049,7 @@ export class Dialogue implements MathHost {
         return;
       }
       case 'player_weapon_drop': {
-        const w = u.inv.wielded;
-        if (w) {
-          u.inv.remove(w);
-          this.w.dropItem?.(w, Math.floor(u.x), Math.floor(u.y), u.z);
-        }
+        if (u.inv.wielded) u.inv.drop(u.inv.wielded);
         return;
       }
       case 'start_trade':
@@ -1130,16 +1123,24 @@ export class Dialogue implements MathHost {
         if (!this.w.pickItem) return warnOnce('talk_effect', e, `[talk] ${e} needs an item picker`) as unknown as void;
         this.w.pickItem(e === 'npc_gets_item' ? `Give what to ${n.name}?` : `What should ${n.name} use?`, items, (it) => {
           if (!it) return;
-          u.inv.remove(it);
-          if (e === 'npc_gets_item_to_use' && (it.isGun() || it.meleeDamage('bash') + it.meleeDamage('cut') + it.meleeDamage('stab') > 6)) {
-            const old = n.inv.wielded;
-            if (old) n.inv.unwield();
-            n.inv.wield(it);
-            this.reason = 'Thanks, I\'ll wield that now.';
-          } else if (n.inv.stash(it) === null) this.reason = 'Thanks, I\'ll carry that now.';
+          const from = u.inv.locOf(it);
+          if (!from) return;
+          const weapon = e === 'npc_gets_item_to_use' && (it.isGun() || it.meleeDamage('bash') + it.meleeDamage('cut') + it.meleeDamage('stab') > 6);
+          // The NPC wields a weapon (putting theirs away) or carries the gift; failing both, you keep it.
+          const quietly = <T>(fn: () => T): T => {
+            const s0 = n.onMessage;
+            n.onMessage = null;
+            try {
+              return fn();
+            } finally {
+              n.onMessage = s0;
+            }
+          };
+          if (weapon && quietly(() => n.inv.wield(it, from)).ok) this.reason = 'Thanks, I\'ll wield that now.';
+          else if (moveItem(it, from, L.inv(n), { actor: n, quiet: true }).ok) this.reason = 'Thanks, I\'ll carry that now.';
           else {
-            u.inv.pickUp(it);
             this.reason = 'I have no space to store it.';
+            return;
           }
           this.w.message(`You give ${it.name()} to ${n.name}.`);
         });
@@ -1221,10 +1222,9 @@ export class Dialogue implements MathHost {
           eocs(o.false_eocs);
           return;
         }
-        for (const it of u.inv.useAmount(id, count)) {
-          const left = n.inv.stash(it);
-          if (left) n.stock.push(left);
-        }
+        // what the survivor hands over stops being theirs and becomes the NPC's (used up here,
+        // made again there: the same quantity)
+        for (const it of u.inv.useAmount(id, count)) if (n.inv.stashNew(it)) spawnItem(it, L.stock(n), { quiet: true });
         n.op.owed += cost;
         this.w.message(`You give ${count > 1 ? `${count} ` : ''}${this.data.items[id] ? itemName(this.data.items[id], count) : id} to ${n.name}.`);
         eocs(o.true_eocs);
@@ -1255,7 +1255,7 @@ export class Dialogue implements MathHost {
       case 'u_remove_item_with': case 'npc_remove_item_with': {
         const c = who(k.split('_')[0]);
         const id = String(v);
-        for (const it of c.inv.allItems()) if (it.typeId === id) c.inv.remove(it);
+        for (const { item, loc } of walkLocs(bodyLocs(c))) if (item.typeId === id && isAt(item, loc)) consumeItem(item, loc);
         return;
       }
       case 'u_spend_cash': {
@@ -1389,9 +1389,21 @@ export class Dialogue implements MathHost {
     if (probe.countByCharges) items = [createItem(data, id, { count })];
     else items = Array.from({ length: count }, () => createItem(data, id));
     if (container && data.items[container]) {
-      const c = createItem(data, container);
-      for (const it of items) c.put(it);
-      return [c];
+      const out: Item[] = [];
+      for (const it of items) {
+        // as many containers as it takes; something that fits none stays loose
+        let left: Item | null = it;
+        for (let guard = 0; left && guard < 100; guard++) {
+          const w = inNewContainer(data, left, container);
+          if (!w.container.hasContents()) {
+            out.push(left);
+            break;
+          }
+          out.push(w.container);
+          left = w.rest;
+        }
+      }
+      return out;
     }
     void def;
     return items;
@@ -1402,8 +1414,7 @@ export class Dialogue implements MathHost {
     const quiet = u.onMessage;
     u.onMessage = null;
     try {
-      const r = u.inv.pickUp(it);
-      if (!r.ok) {
+      if (u.inv.stashNew(it)) {
         this.w.dropItem?.(it, Math.floor(u.x), Math.floor(u.y), u.z);
         this.w.message(`You drop ${it.name()} at your feet; you have no room for it.`, 'c_light_red');
       }

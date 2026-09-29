@@ -3,6 +3,7 @@ import type { Renderer } from './render/renderer';
 import type { DebugApi } from './debug';
 import { attachBodyMods, type BodyMods } from './game/bodymods';
 import { createItem, Item } from './game/item';
+import { consumeItem, L, locate, spawnItem, type Loc } from './game/moves';
 import { visionHooks } from './game/vision';
 import { interactOverrides } from './game/interact';
 import { targetTile } from './game/targeting';
@@ -23,7 +24,8 @@ export function installMutBio(game: Game, renderer: Renderer | null, api?: Debug
   const p = game.player;
   const mods = attachBodyMods(p, { isDay: () => game.clock.hourOfDay >= 6 && game.clock.hourOfDay < 20 });
   const { mut, bio } = mods;
-  const drop = (it: Item) => game.map.addItem(p.tileX, p.tileY, p.z, it);
+  // a new or given-back item (a salvaged CBM) lands at the survivor's feet
+  const drop = (it: Item) => void spawnItem(it, L.ground(game.map, p.tileX, p.tileY, p.z), { force: true, quiet: true });
   mut.onDropItem = drop;
 
   // ---- simulation
@@ -76,7 +78,8 @@ export function installMutBio(game: Game, renderer: Renderer | null, api?: Debug
     void installCbmFlow(game, mods, it, {
       autodoc: false,
       consumeItem: (x) => {
-        if (!p.inv.remove(x)) removeFromMapNear(game, x);
+        const loc = p.inv.locOf(x) ?? locate(x, nearTiles(game, 2));
+        if (loc) consumeItem(x, loc, x.countByCharges ? 1 : undefined);
       },
       dropItem: drop,
     });
@@ -122,21 +125,23 @@ function cbmsNearby(game: Game): { item: Item; consume: () => void }[] {
   const p = game.player;
   const out: { item: Item; consume: () => void }[] = [];
   const isCbm = (it: Item) => it.def.subtypes?.includes('BIONIC_ITEM');
-  for (const it of p.inv.allItems()) if (isCbm(it)) out.push({ item: it, consume: () => void p.inv.remove(it) });
+  for (const it of p.inv.allItems()) if (isCbm(it)) out.push({ item: it, consume: () => void (p.inv.locOf(it) && consumeItem(it, p.inv.locOf(it)!, it.countByCharges ? 1 : undefined)) });
   for (let dy = -2; dy <= 2; dy++)
     for (let dx = -2; dx <= 2; dx++) {
       const x = p.tileX + dx, y = p.tileY + dy;
       for (const mi of game.map.itemsAt(x, y, p.z)) {
-        if (mi instanceof Item && isCbm(mi)) out.push({ item: mi, consume: () => game.map.removeItem(x, y, p.z, mi) });
+        if (mi instanceof Item && isCbm(mi)) out.push({ item: mi, consume: () => void consumeItem(mi, L.ground(game.map, x, y, p.z), mi.countByCharges ? 1 : undefined) });
       }
     }
   return out;
 }
 
-function removeFromMapNear(game: Game, it: Item): void {
+/** The tiles within `r` of the survivor (where an Autodoc's hopper can reach). */
+function nearTiles(game: Game, r: number): Loc[] {
   const p = game.player;
-  for (let dy = -2; dy <= 2; dy++)
-    for (let dx = -2; dx <= 2; dx++) if (game.map.itemsAt(p.tileX + dx, p.tileY + dy, p.z).includes(it)) return void game.map.removeItem(p.tileX + dx, p.tileY + dy, p.z, it);
+  const out: Loc[] = [];
+  for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) out.push(L.ground(game.map, p.tileX + dx, p.tileY + dy, p.z));
+  return out;
 }
 
 function installDebug(game: Game, api: DebugApi, mods: BodyMods): void {
@@ -195,5 +200,5 @@ function installDebug(game: Game, api: DebugApi, mods: BodyMods): void {
     game.map.setFurn(x, y, p.z, 'f_autodoc');
     return { x, y };
   };
-  api.giveCbm = (id: string) => p.inv.pickUp(createItem(game.data, id)).msg;
+  api.giveCbm = (id: string) => (p.inv.giveNew(createItem(game.data, id)) ? `got ${id}` : `no room for ${id}`);
 }

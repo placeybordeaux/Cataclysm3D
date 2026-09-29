@@ -282,10 +282,11 @@ export function openTrade(ctx: NpcUiCtx, n: Npc, cost = 0, onDone?: (traded: boo
       return;
     }
     const dropped: string[] = [];
-    s.commit((it) => {
-      game.map.addItem(p.tileX, p.tileY, p.z, it);
-      dropped.push(it.name());
-    });
+    if (!s.commit((it) => dropped.push(it.name()))) {
+      note = 'Something changed; the deal is off.';
+      render();
+      return;
+    }
     traded = true;
     game.message(`You trade with ${n.name}.`, 'c_light_green');
     // Otherwise a bought backpack silently lands at your feet and looks like it vanished.

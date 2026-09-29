@@ -7,6 +7,7 @@ import { isOutside } from './vision';
 import { restockFruits } from './harvest';
 import { growPlant } from './farming';
 import type { Item } from './item';
+import { destroyWhere, L } from './moves';
 
 // Lazy per-chunk world upkeep, like CDDA map::actualize: nothing is simulated for chunks you
 // aren't near; when one comes into range again, everything that should have happened while
@@ -110,7 +111,7 @@ export class Actualizer {
       const underground = c.z < 0;
       const indoors = !underground && !isOutside(map, x, y, c.z);
       const items = list as Item[];
-      const affected = items.filter((it) => typeof it.processRot === 'function' && (it.goesBad() || it.pockets.some((p) => !p.empty)));
+      const affected = items.filter((it) => typeof it.processRot === 'function' && (it.goesBad() || it.hasContents()));
       if (!affected.length) continue;
       for (const [dt, T] of steps) {
         const temp = underground ? DEFAULT_WEATHER_GEN.base_temperature : indoors ? T + 3 : T;
@@ -118,7 +119,7 @@ export class Actualizer {
       }
       // item::has_rotten_away: long-rotten food is gone (unless the furniture keeps rotten things)
       if (!hasFlag(f, 'DONT_REMOVE_ROTTEN'))
-        for (const it of affected) if (it.goesBad() && it.relativeRot() > 2) map.removeItem(x, y, c.z, it);
+        destroyWhere(L.ground(map, x, y, c.z), (it) => affected.includes(it) && it.goesBad() && it.relativeRot() > 2);
     }
   }
 

@@ -2,6 +2,7 @@ import type { Rng } from '../core/rng';
 import type { Character } from './character';
 import { MAX_RECOIL } from './character';
 import { asArray, type Item } from './item';
+import { L, moveItem, type Loc } from './moves';
 
 // Gun depth (CDDA item_gun_tool_ammo.cpp / ranged.cpp): gunmods (install/remove with CDDA's
 // compatibility rules, mod locations incl. mounts that add_mod new slots), their effect on
@@ -78,13 +79,14 @@ export function installSeconds(mod: Item): number {
   return typeof t === 'number' && t > 0 ? t : 60;
 }
 
-/** Attach `mod` (already taken out of the inventory by the caller). */
-export function installGunmod(c: Character, gun: Item, mod: Item): { ok: boolean; msg: string } {
+/** Attach `mod` (which is at `from`: the installer's inventory, the ground...) to `gun`. */
+export function installGunmod(c: Character, gun: Item, mod: Item, from: Loc | null): { ok: boolean; msg: string } {
   const ok = gunmodCompatible(gun, mod);
   if (!ok.ok) return { ok: false, msg: `Your ${gun.baseName()} ${ok.reason}.` };
   const skill = gunmodSkillShortfall(c, gun, mod);
   if (skill) return { ok: false, msg: skill };
-  gun.gunmods.push(mod);
+  const r = moveItem(mod, from, L.mod(gun), { actor: c, quiet: true });
+  if (!r.ok) return { ok: false, msg: r.msg };
   const msg = `You successfully attached the ${mod.baseName()} to your ${gun.baseName()}.`;
   c.msg(msg, 'c_green');
   return { ok: true, msg };
@@ -101,16 +103,22 @@ export function removableReason(gun: Item, mod: Item): string | null {
   return null;
 }
 
-/** Detach a mod; returns it for the caller to stash or drop. */
-export function removeGunmod(c: Character, gun: Item, mod: Item): { ok: boolean; msg: string; mod?: Item } {
+/** Detach a mod into the first of `to` that takes it (the inventory, else the ground). */
+export function removeGunmod(c: Character, gun: Item, mod: Item, to: Loc[]): { ok: boolean; msg: string; mod?: Item } {
   const why = removableReason(gun, mod);
   if (why) return { ok: false, msg: why };
-  const i = gun.gunmods.indexOf(mod);
-  if (i < 0) return { ok: false, msg: `The ${mod.baseName()} isn't on your ${gun.baseName()}.` };
-  gun.gunmods.splice(i, 1);
-  const msg = `You remove your ${mod.baseName()} from your ${gun.baseName()}.`;
-  c.msg(msg);
-  return { ok: true, msg, mod };
+  if (!gun.gunmods.includes(mod)) return { ok: false, msg: `The ${mod.baseName()} isn't on your ${gun.baseName()}.` };
+  let last = `You have nowhere to put the ${mod.baseName()}.`;
+  for (const dest of to) {
+    const r = moveItem(mod, L.mod(gun), dest, { actor: c, quiet: true });
+    if (r.ok) {
+      const msg = `You remove your ${mod.baseName()} from your ${gun.baseName()}.`;
+      c.msg(msg);
+      return { ok: true, msg, mod };
+    }
+    last = r.msg;
+  }
+  return { ok: false, msg: last };
 }
 
 const num = (v: unknown) => (typeof v === 'number' ? v : 0);

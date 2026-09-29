@@ -3,6 +3,7 @@ import type { Game, GameSystem } from './game';
 import { aim, applyDelayedRecoil, applyFlatArmor, attackCooldownSeconds, fireGun, hitMessage, meleeAttack, normalRoll, pelletAngle, sizeRank, type ShotResult } from './combat';
 import { currentMode } from './gunmods';
 import type { Item } from './item';
+import { L, moveItem } from './moves';
 import { turnsToSeconds, type MonEffect, type Monster } from './monster';
 import { COMBAT_TURN, maOf, tickMartialArts, triggerBuffs } from './martialarts';
 import { techniqueMessage, type TargetInfo, type TechniqueOutcome } from './techniques';
@@ -735,8 +736,8 @@ export class PlayerCombat implements GameSystem {
       return false;
     }
     if (this.cooldown > 0) return false;
-    const removed = p.inv.remove(it);
-    if (!removed) {
+    const from = p.inv.locOf(it);
+    if (!from || it.hasFlag('NO_DROP') || it.hasFlag('BIONIC_WEAPON') || it.hasFlag('INTEGRATED') || from.kind === 'worn') {
       game.message(`You can't throw the ${it.name()}.`);
       return false;
     }
@@ -753,11 +754,17 @@ export class PlayerCombat implements GameSystem {
       land.x = Math.floor(hit.x - Math.sin(yaw) * 0.6);
       land.y = Math.floor(hit.y + Math.cos(yaw) * 0.6);
     }
+    // The item lands on its tile the moment it leaves the hand (the projectile is only the
+    // picture of its flight), so it is never in two places or none. One of a stack flies.
+    const moved = moveItem(it, from, L.ground(game.map, land.x, land.y, p.z), { count: it.countByCharges ? 1 : undefined, force: true, quiet: true });
+    if (!moved.ok) {
+      game.message(moved.msg, 'c_light_red');
+      return false;
+    }
     this.sys.projectiles.push({
       x: p.x, y: p.y, z: p.z, vx: (hit.x - p.x) / 0.25, vy: (hit.y - p.y) / 0.25, t: 0.25,
       glyph: { symbol: it.def.symbol ?? '*', color: it.def.color ?? 'white' },
       onArrive: () => {
-        game.map.addItem(land.x, land.y, p.z, it);
         if (!hit.hit || hit.hit.dead) return;
         const m = hit.hit;
         const bash = Math.min(it.weight() / 100 + p.str / 2, p.str * 2);

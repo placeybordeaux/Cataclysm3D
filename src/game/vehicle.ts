@@ -3,6 +3,7 @@ import type { GameData } from '../data/types';
 import { expandItemGroup } from '../data/itemgroups';
 import { warnOnce } from '../data/warn';
 import { createItem, fromSpawned, Item, type ItemJSON } from './item';
+import { L, spawnItem } from './moves';
 import type { VehicleDataFile, VPartDef } from './vehicle_data';
 
 // A CDDA vehicle: parts installed on a grid of mount points, placed in the world at a
@@ -815,14 +816,14 @@ export function placeSpawnItems(v: Vehicle, data: GameData, rng: Rng): void {
         warnOnce('item', id);
         continue;
       }
-      cargo.items.push(createItem(data, id));
+      spawnItem(createItem(data, id), L.cargo(cargo), { force: true, quiet: true });
     }
     for (const g of sp.item_groups ?? []) {
       if (!data.itemGroups[g]) {
         warnOnce('item_group', g);
         continue;
       }
-      for (const s of expandItemGroup(data, g, rng)) cargo.items.push(...fromSpawned(data, s));
+      for (const s of expandItemGroup(data, g, rng)) for (const it of fromSpawned(data, s)) spawnItem(it, L.cargo(cargo), { force: true, quiet: true });
     }
   }
 }

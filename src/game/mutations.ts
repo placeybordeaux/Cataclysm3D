@@ -2,6 +2,7 @@ import type { GameData, MutationDef } from '../data/types';
 import { ALL_PARTS, isBodyPart, type BodyPartId } from './bodyparts';
 import type { Character } from './character';
 import { armorPortion, covers, materialIds } from './inventory';
+import { consumeItem, L, moveItem, spawnItem } from './moves';
 import { asArray, createItem, type Item } from './item';
 import { cddaText } from './units';
 
@@ -426,22 +427,27 @@ export class MutationState {
         console.warn(`Unknown integrated armor "${armorId}" on ${id}`);
         continue;
       }
-      inv.worn.push(createItem(this.c.data, armorId));
+      // integrated armor grows as part of the body: created worn, never anywhere else
+      spawnItem(createItem(this.c.data, armorId), L.worn(this.c), { force: true, quiet: true });
     }
     // Clothing the new body part can't take: destroyed or pushed off (mutation_effect).
     for (const it of [...inv.worn]) {
       if (it.hasFlag('INTEGRATED') || it.hasFlag('OVERSIZE') || it.hasFlag('UNRESTRICTED')) continue;
       if (!this.conflictsWithItem(d, it)) continue;
-      inv.worn.splice(inv.worn.indexOf(it), 1);
+      // Things fall to the ground (or, with no ground to fall on, stay with you).
+      const away = this.c.inv.groundHere() ?? L.inv(this.c);
       if (d.destroys_gear) {
         this.msg(`Your ${it.name()} is destroyed!`, 'c_red');
-        for (const p of it.containerPockets()) for (const x of [...p.contents]) (p.remove(x), this.onDropItem?.(x));
+        for (const x of [...it.allContents()]) {
+          const from = x === it.magazine ? L.mag(it) : it.gunmods.includes(x) ? L.mod(it) : L.in(it);
+          if (moveItem(x, from, away, { force: true, quiet: true }).ok) this.onDropItem?.(x);
+        }
+        consumeItem(it, L.worn(this.c));
       } else {
         this.msg(`Your ${it.name()} is pushed off!`, 'c_red');
-        this.onDropItem?.(it);
+        if (moveItem(it, L.worn(this.c), away, { force: true, quiet: true }).ok) this.onDropItem?.(it);
       }
     }
-    sortWorn(this.c);
     this.onChanged?.();
   }
 
@@ -453,8 +459,8 @@ export class MutationState {
     this.gained.delete(id);
     const d = this.idx.def(id);
     for (const armorId of d?.integrated_armor ?? []) {
-      const i = this.c.inv.worn.findIndex((w) => w.typeId === armorId);
-      if (i >= 0) this.c.inv.worn.splice(i, 1);
+      const w = this.c.inv.worn.find((x) => x.typeId === armorId);
+      if (w) consumeItem(w, L.worn(this.c));
     }
     this.onChanged?.();
   }
@@ -1025,18 +1031,6 @@ export function isSoft(data: GameData, it: Item): boolean {
   const mats = [...materialIds(it.def), ...(it.def.armor ?? []).flatMap((p) => (p.material ?? []).map((m) => m.type))];
   if (!mats.length) return false;
   return mats.every((m) => data.misc?.material?.[m]?.soft === true);
-}
-
-function sortWorn(c: Character): void {
-  // Same order as Inventory.sortWorn (private there): innermost layer first.
-  const order = ['PERSONAL', 'SKINTIGHT', 'NORMAL', 'WAIST', 'OUTER', 'BELTED', 'AURA'];
-  const layer = (it: Item) => {
-    const l = armorPortion(it, ALL_PARTS.find((bp) => covers(it, bp)) ?? 'torso')?.layers?.[0];
-    if (l && order.includes(l)) return order.indexOf(l);
-    for (const f of ['PERSONAL', 'SKINTIGHT', 'WAIST', 'OUTER', 'BELTED', 'AURA']) if (it.hasFlag(f)) return order.indexOf(f);
-    return order.indexOf('NORMAL');
-  };
-  c.inv.worn.sort((a, b) => layer(a) - layer(b));
 }
 
 function shuffle<T>(arr: T[], rng: { int(lo: number, hi: number): number }): T[] {

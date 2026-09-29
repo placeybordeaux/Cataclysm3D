@@ -18,7 +18,7 @@ function survivor(wear: string[]): { c: Character; log: string[] } {
   const c = new Character(data, { seed: 3 });
   const log: string[] = [];
   c.onMessage = (t) => log.push(t);
-  for (const id of wear) c.inv.wear(createItem(data, id));
+  for (const id of wear) c.inv.wear(createItem(data, id), null);
   return { c, log };
 }
 const pass = (c: Character, s: number, step = 30) => {
