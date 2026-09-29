@@ -643,7 +643,8 @@ export class BnInventoryModel implements InventoryModel {
 
   /**
    * Take everything from a nearby source into the inventory (liquids into carried
-   * containers where they fit). Each item is its own move; what doesn't fit stays, with why.
+   * containers where they fit), most useful first (takeAllOrder). Each item is its own move;
+   * what doesn't fit stays, with why.
    */
   takeAll(source: string): TakeAllResult {
     const res: TakeAllResult = { taken: [], left: [] };
@@ -662,7 +663,7 @@ export class BnInventoryModel implements InventoryModel {
       if (x) x.count += count;
       else list.push(reason === undefined ? { name, count } : { name, count, reason });
     };
-    for (const it of [...itemsAt(from)]) {
+    for (const it of takeAllOrder([...itemsAt(from)])) {
       if (!isAt(it, from)) continue;
       const n = it.count();
       if (it.isLiquid()) {
@@ -687,6 +688,33 @@ export class BnInventoryModel implements InventoryModel {
     this.refresh(true);
     return res;
   }
+}
+
+/**
+ * The order Take all picks things up in (QA: it filled the bag in list order, 7 blankets
+ * before the jackets and food). Survival first, like a veteran looting a cupboard: food, drink
+ * and medicine, then ammo and magazines, then tools and weapons (anything with a tool quality,
+ * guns, sharp or heavy-hitting things), then the rest. Within a tier, the most valuable per
+ * litre-and-kilo first (BN's post-apocalypse price), so the heaviest, bulkiest junk comes last
+ * and is what stays behind when the bag is full.
+ */
+export function takeAllRank(it: Item): { tier: number; density: number; weight: number } {
+  const d = it.def;
+  const weapon = it.isGun() || (d.qualities?.length ?? 0) > 0 || Math.max(d.bashing ?? 0, d.cutting ?? 0) >= 8;
+  const tier = it.isComestible() ? 0 : it.isAmmo() || it.isMagazine() ? 1 : weapon ? 2 : 3;
+  const n = Math.max(1, it.count());
+  // Per unit, so a stack of 20 rounds isn't ranked as one bulky thing.
+  const vol = it.volume() / n, wt = it.weight() / n;
+  const price = d.price_postapoc ?? d.price ?? 0;
+  return { tier, density: price / Math.max(1, vol + wt), weight: wt };
+}
+
+export function takeAllOrder<T extends Item>(items: readonly T[]): T[] {
+  const r = new Map(items.map((it) => [it, takeAllRank(it)]));
+  return [...items].sort((a, b) => {
+    const x = r.get(a)!, y = r.get(b)!;
+    return x.tier - y.tier || y.density - x.density || x.weight - y.weight;
+  });
 }
 
 /** "There's no room in your inventory for the X." → "no room in your inventory". */

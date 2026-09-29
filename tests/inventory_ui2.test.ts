@@ -4,7 +4,7 @@ import { Character } from '../src/game/character';
 import { createItem, inNewContainer } from '../src/game/item';
 import { itemKey, type InventoryScope } from '../src/game/inventory_view';
 import { census, L, spawnItem, type Loc } from '../src/game/moves';
-import { BnInventoryModel } from '../src/ui2/bn/model';
+import { BnInventoryModel, takeAllOrder } from '../src/ui2/bn/model';
 import { isAccepted } from '../src/ui2/logic/dnd';
 import { FIXTURE_ITEMS, makeData } from './fixtures/gamedata';
 import { FakeGround } from './fixtures/ground';
@@ -148,6 +148,38 @@ describe('drops', () => {
     expect(r.left.some((l) => l.name.includes('backpack') && /room/.test(l.reason))).toBe(true);
     expect(r.left.some((l) => /container/.test(l.reason))).toBe(true);
     expect(census(w.locs()).counts).toEqual(before);
+  });
+
+  it('take all takes the useful things first: food, medicine and tools before a pile of clothes (QA_V2 #4)', () => {
+    const w = world();
+    w.who.inv.wear(createItem(data, 'jeans'), null); // small storage
+    const at = L.ground(w.map, 1, 0, 0);
+    // Listed first, bulky and cheap: in list order they filled the pockets.
+    for (let i = 0; i < 12; i++) spawnItem(createItem(data, 'socks'), at);
+    spawnItem(createItem(data, 'chocolate'), at);
+    spawnItem(createItem(data, 'aspirin'), at);
+    spawnItem(createItem(data, 'lighter'), at);
+    w.model.refresh();
+    const before = census(w.locs()).counts;
+    const r = w.model.takeAll('ground:1,0,0');
+    for (const want of ['chocolate', 'aspirin', 'lighter']) expect(r.taken.map((t) => t.name).join(', ')).toContain(want);
+    expect(r.left.some((l) => l.name.includes('sock') && /room/.test(l.reason))).toBe(true);
+    expect(census(w.locs()).counts).toEqual(before);
+    // …while the same socks alone do fit: in list order they took the room first.
+    const w2 = world();
+    w2.who.inv.wear(createItem(data, 'jeans'), null);
+    for (let i = 0; i < 12; i++) spawnItem(createItem(data, 'socks'), L.ground(w2.map, 1, 0, 0));
+    w2.model.refresh();
+    expect(w2.model.takeAll('ground:1,0,0').taken.some((t) => t.name.includes('sock'))).toBe(true);
+  });
+
+  it('takeAllOrder: food, ammo, tools/weapons, then the rest; bulky and cheap last within a tier', () => {
+    const mk = (id: string, count?: number) => createItem(data, id, count ? { count } : {});
+    const order = takeAllOrder([mk('hoodie'), mk('rock'), mk('9mm', 20), mk('crowbar'), mk('chocolate'), mk('socks')]).map((i) => i.typeId);
+    expect(order[0]).toBe('chocolate');
+    expect(order[1]).toBe('9mm');
+    expect(order.slice(2, 4).sort()).toEqual(['crowbar', 'rock']); // a rock is a hammer (HAMMER 1)
+    expect(order.indexOf('hoodie')).toBeGreaterThan(order.indexOf('crowbar'));
   });
 });
 
