@@ -21,6 +21,7 @@ import { installMonsters } from './monsters';
 import { installNpcs } from './npcs';
 import { installMutBio } from './mutbio';
 import { installCombatDepth } from './combatdepth';
+import { installCombatFeel } from './feel';
 import { installLabs } from './labs';
 import { installChunkTracking } from './save/tracking';
 import { installSave, takePendingLoad } from './save/install';
@@ -96,6 +97,8 @@ async function main(): Promise<void> {
   const ui = await installUi(game, renderer, worldgen, api);
   // After the UI: wraps the reload key (clears gun jams) and adds item-menu gunmod actions.
   installCombatDepth(game, renderer, monsters, api);
+  // Combat feel layer (telegraphs, guard, side-step, hit-stop, crosshair HUD); wraps reload/interact.
+  installCombatFeel(game, renderer, monsters, api);
   // After installMonsters (wraps PlayerCombat for attack events) and installSave (its saveable).
   const achievements = await installAchievements(game, worldgen, api);
 

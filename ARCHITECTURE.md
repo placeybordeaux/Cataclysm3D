@@ -363,6 +363,20 @@ tests/               vitest unit tests (pure logic, no DOM/WebGL)
 - E-files: `E_FILE_STORAGE` pockets take books/E_STORABLE items (`Item.efiles()`); `efileDevice`,
   `ereaderProblem` (reading.ts) require a charged phone/laptop.
 
+### Combat feel layer (src/game/combatfeel.ts, wired by src/feel.ts; see docs/COMBAT_FEEL.md)
+- All feel constants live in `FEEL` (presets `FEEL_PRESETS.accessible|classic`, `setFeelDifficulty(d, overrides)`
+  is the difficulty hook). The CDDA/BN math stays underneath; this layer only times and targets it.
+- Survivor swings: `PlayerCombat.beginSwing()` (LMB) → wind-up → contact (resolves via `melee(m, {phased})`
+  against `sweptArcTarget`) → recovery, `combat.swing`/`hitStop`; `melee()` without `phased` stays instant.
+  RMB guard (`defenseOf(c).guarding`, read by `blockHit`), Space/double-tap side-step (`tryDodgeRoll` bonus).
+- Monsters: `m.windup` telegraphs melee/special blows (`specialTelegraph` in monattack.ts); event
+  `monsterAttack` (windup/resolved/whiff/interrupted); hit reactions `m.flinch` + shove; surround slots;
+  `sys.struggle()` for grabs (interact key while grabbed).
+- Render hooks: `viewmodel.swing/impact/setGuard/recoil/jolt/reload/ads`, `rig.kick()/rig.ads`,
+  `SpriteHandle.setSize`, `hitFx.tracer/watchTracers`, `playerAttack.hitStop`. HUD: `src/ui/combatHud.ts`.
+- Debug: `cdda.feel`, `cdda.setFeel(d)`, `cdda.feelState()`, `cdda.recordFrames(n, dt, each)` (frame-exact
+  captures for animation timing); `tools/drive.ts seq "…"` (timed real input + screenshot bursts), `xbdown/xbup`.
+
 ### Extension points (prefer these over editing someone else's code)
 
 - `game.systems.push({ name, update(game, realDt, gameDt) })` for per-tick simulation.
