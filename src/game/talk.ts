@@ -456,7 +456,9 @@ export class Dialogue implements MathHost {
       case 'U_INTIMIDATE': v = intimidation(this.u); break;
       case 'TOTAL': v = 0; break;
       default:
+        if (['anger', 'fear', 'trust', 'value'].includes(attr)) return this.parseMod(attr.toUpperCase(), factor);
         if (attr.startsWith('u_has_trait: ')) v = this.u.hasTrait(attr.slice(13)) ? 1 : 0;
+        else if (attr.startsWith('u_has_flag: ') || attr.startsWith('npc_has_flag: ') || attr === 'OWED' || attr === 'INTIMIDATE') v = 0;
         else if (attr.startsWith('npc_has_trait: ')) v = n.hasTrait(attr.slice(15)) ? 1 : 0;
         else warnOnce('talk_mod', attr, `[talk] unknown trial mod "${attr}"`);
     }
@@ -639,8 +641,40 @@ export class Dialogue implements MathHost {
       case 'u_has_trait': return this.u.hasTrait(String(args[0])) ? 1 : 0;
       case 'n_has_trait': return this.npc.hasTrait(String(args[0])) ? 1 : 0;
       case 'days_since': return Math.floor(now / SECONDS_PER_DAY);
+      case 'n_npc_anger': case 'u_npc_anger': return this.npc.op.anger;
+      case 'n_npc_trust': case 'u_npc_trust': return this.npc.op.trust;
+      case 'n_npc_fear': case 'u_npc_fear': return this.npc.op.fear;
+      case 'n_npc_value': case 'u_npc_value': return this.npc.op.value;
+      case 'u_pain': return this.u.perceivedPain();
+      case 'n_pain': return this.npc.perceivedPain();
+      case 'u_morale': return this.u.morale.level();
+      case 'u_item_count': return this.u.inv.countOf(String(args[0]));
+      case 'n_item_count': return this.npc.inv.countOf(String(args[0]));
+      case 'u_proficiency': return this.u.proficiencies.has(String(args[0])) ? (kw.format === 'percent' ? 100 : 1) : 0;
+      case 'num_input': return Number(args[1] ?? 0);
     }
     return undefined;
+  }
+
+  assign(name: string, args: MathValue[], value: number): boolean {
+    const op = this.npc.op;
+    switch (name) {
+      case 'n_npc_anger': case 'u_npc_anger': op.anger = value; if (op.anger > this.npc.hostileAngerLevel()) this.makeHostile(); return true;
+      case 'n_npc_trust': case 'u_npc_trust': op.trust = value; return true;
+      case 'n_npc_fear': case 'u_npc_fear': op.fear = value; return true;
+      case 'n_npc_value': case 'u_npc_value': op.value = value; return true;
+      case 'u_val': case 'n_val': {
+        const c = name === 'u_val' ? this.u : this.npc;
+        const what = String(args[0]);
+        if (what === 'thirst') c.thirst = value;
+        else if (what === 'hunger') c.hunger = value;
+        else if (what === 'sleepiness') c.sleepiness = value;
+        else if (what === 'stamina') c.stamina = value;
+        else return false;
+        return true;
+      }
+    }
+    return false;
   }
 
   private charVal(c: Character, what: string): number | undefined {
@@ -660,6 +694,16 @@ export class Dialogue implements MathHost {
       case 'pain': return c.perceivedPain();
       case 'stamina': return c.stamina;
       case 'size': return 3;
+      case 'pos_x': return Math.floor((c as TalkPlayer).x ?? 0);
+      case 'pos_y': return Math.floor((c as TalkPlayer).y ?? 0);
+      case 'pos_z': return (c as TalkPlayer).z ?? 0;
+      case 'focus': return c.focus;
+      case 'dodge': return c.dodge();
+      case 'owed': return this.npc.op.owed;
+      case 'cash': return this.w.cash;
+      case 'allies': return this.w.alliesNear?.().length ?? 0;
+      case 'exp': return 0;
+      case 'power': case 'power_max': case 'power_percentage': case 'mana': case 'mana_max': case 'mana_percentage': return 0;
     }
     warnOnce('talk_val', what, `[talk] unsupported u_val/n_val "${what}"`);
     return undefined;
@@ -857,6 +901,11 @@ export class Dialogue implements MathHost {
         return !!e && this.cond(e.condition);
       }
       case 'npc_role_nearby': return false;
+      case 'follower_present': return (this.w.alliesNear?.() ?? []).some((a) => a.templateId === String(v) || a.name === String(v));
+      case 'u_has_wielded_with_weapon_category': case 'npc_has_wielded_with_weapon_category': {
+        const w = who(k.split('_')[0])!.inv.wielded;
+        return !!w && ((w.def as { weapon_category?: string[] }).weapon_category ?? []).includes(String(v));
+      }
       case 'npc_aim_rule': case 'npc_engagement_rule': case 'npc_rule': case 'npc_override': return false;
       case 'u_has_worn_with_flag': case 'npc_has_worn_with_flag': return who(k.split('_')[0])!.inv.worn.some((it) => it.hasFlag(String(v)));
       case 'u_can_see': case 'npc_can_see': return true;
@@ -1069,7 +1118,7 @@ export class Dialogue implements MathHost {
             if (old) n.inv.unwield();
             n.inv.wield(it);
             this.reason = 'Thanks, I\'ll wield that now.';
-          } else if (!n.inv.stash(it)) this.reason = 'Thanks, I\'ll carry that now.';
+          } else if (n.inv.stash(it) === null) this.reason = 'Thanks, I\'ll carry that now.';
           else {
             u.inv.pickUp(it);
             this.reason = 'I have no space to store it.';
@@ -1154,10 +1203,26 @@ export class Dialogue implements MathHost {
           eocs(o.false_eocs);
           return;
         }
-        for (const it of u.inv.useAmount(id, count)) if (!n.inv.stash(it)) n.stock.push(it);
+        for (const it of u.inv.useAmount(id, count)) {
+          const left = n.inv.stash(it);
+          if (left) n.stock.push(left);
+        }
         n.op.owed += cost;
         this.w.message(`You give ${count > 1 ? `${count} ` : ''}${this.data.items[id] ? itemName(this.data.items[id], count) : id} to ${n.name}.`);
         eocs(o.true_eocs);
+        return;
+      }
+      case 'u_consume_item_sum': {
+        // [{item, amount}]: consume in order until the summed fraction reaches 1.
+        let need = 1;
+        for (const e of Array.isArray(v) ? v : []) {
+          const amt = Math.max(1, this.num(e.amount, 1));
+          const have = u.inv.countOf(String(e.item));
+          const use = Math.min(have, Math.ceil(need * amt));
+          if (use > 0) u.inv.useAmount(String(e.item), use);
+          need -= use / amt;
+          if (need <= 0) break;
+        }
         return;
       }
       case 'u_consume_item': case 'npc_consume_item': {
@@ -1329,6 +1394,7 @@ const IGNORED_EFFECTS = new Set([
   'do_read', 'do_eread', 'do_read_repeatedly', 'study_npc_zone', 'do_vehicle_deconstruct', 'do_vehicle_repair', 'do_chop_plank',
   'do_butcher', 'do_chop_trees', 'do_fishing', 'do_farming', 'do_disassembly', 'do_craft', 'dismiss', 'u_bulk_trade_accept',
   'npc_bulk_trade_accept', 'u_bulk_donate', 'npc_bulk_donate', 'u_make_sound', 'npc_make_sound', 'u_cast_spell', 'npc_cast_spell',
+  'u_run_npc_eocs', 'npc_run_npc_eocs', 'u_run_inv_eocs', 'npc_run_inv_eocs',
 ]);
 
 /** Keys that are arguments of an effect object, never the effect itself. */

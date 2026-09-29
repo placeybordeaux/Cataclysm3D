@@ -602,16 +602,24 @@ export class Overmap {
       const uniq = def.flags.includes('OVERMAP_UNIQUE') || def.flags.includes('GLOBALLY_UNIQUE');
       let count = uniq ? (rng.int(1, 100) <= lo * area * 2 ? 1 : 0) : rollRemainder(rng.int(lo, hi) * area, rng);
       if (id === 'Evac Shelter') count = Math.max(count, r.cities.length > 0 ? 1 : 0);
+      // The refugee center (Free Merchants NPC hub) is globally unique: exactly one, placed
+      // near the start town so new survivors can find it, like CDDA's scenarios point them at.
+      if (id === 'evac_center') {
+        if (!start || !r.cities.length) continue;
+        this.tryPlaceWild(r, rng, def, r.cities[0], true);
+        continue;
+      }
       for (let k = 0; k < count; k++) this.tryPlaceWild(r, rng, def, start && id === 'Evac Shelter' ? r.cities[0] : undefined);
     }
   }
 
-  private tryPlaceWild(r: Region, rng: Rng, def: SpecialDef, near?: City): boolean {
+  /** `widen`: big specials (the refugee center) search ever further from `near` until they fit. */
+  private tryPlaceWild(r: Region, rng: Rng, def: SpecialDef, near?: City, widen = false): boolean {
     const [dmin, dmax] = def.cityDistance;
-    for (let tries = 0; tries < 80; tries++) {
+    for (let tries = 0; tries < (widen ? 400 : 80); tries++) {
       let x: number, y: number;
       if (near) {
-        const ang = rng.next() * Math.PI * 2, dist = near.size + rng.int(Math.max(dmin, 1), Math.max(dmin, dmax));
+        const ang = rng.next() * Math.PI * 2, dist = near.size + rng.int(Math.max(dmin, 1), Math.max(dmin, dmax)) + (widen ? Math.floor(tries / 8) : 0);
         x = Math.round(near.x - r.x0 + Math.cos(ang) * dist);
         y = Math.round(near.y - r.y0 + Math.sin(ang) * dist);
       } else {

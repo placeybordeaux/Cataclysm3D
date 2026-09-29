@@ -13,6 +13,8 @@ export interface MathHost {
   setVar(scope: VarScope, name: string, value: string | undefined): void;
   /** Named functions (time_since, u_skill, rng...). `kw` holds 'key': value arguments. */
   call(name: string, args: MathValue[], kw: Record<string, MathValue>): number | undefined;
+  /** Write through a mutator function (n_npc_anger() += 1); false when unsupported. */
+  assign?(name: string, args: MathValue[], value: number): boolean;
 }
 
 export type VarScope = 'u' | 'npc' | 'global' | 'context';
@@ -87,7 +89,14 @@ class Parser {
       }
     }
     this.i = save;
-    return this.expr(0);
+    const e = this.expr(0);
+    // Mutator functions: "n_npc_anger() += 2", "u_val('strength') = 6".
+    const op = this.peek();
+    if (e.t === 'call' && op && ['=', '+=', '-=', '*=', '/=', '%=', '++', '--'].includes(op)) {
+      this.next();
+      return op === '++' || op === '--' ? { t: 'assign', op, target: e } : { t: 'assign', op, target: e, v: this.expr(0) };
+    }
+    return e;
   }
   expr(minPrec: number): Node {
     let a = this.unary();
@@ -230,13 +239,16 @@ function evalNode(n: Node, h: MathHost): MathValue {
       return r;
     }
     case 'assign': {
-      if (n.target.t !== 'var') return 0;
-      const { scope, name } = n.target;
-      const cur = num(h.getVar(scope, name));
+      const t = n.target;
+      let cur: number;
+      if (t.t === 'var') cur = num(h.getVar(t.scope, t.name));
+      else if (t.t === 'call') cur = Number(evalNode(t, h));
+      else return 0;
       const v = n.v ? Number(evalNode(n.v, h)) : 0;
       const next = n.op === '=' ? v : n.op === '+=' ? cur + v : n.op === '-=' ? cur - v : n.op === '*=' ? cur * v : n.op === '/=' ? (v ? cur / v : 0)
         : n.op === '%=' ? (v ? cur % v : 0) : n.op === '++' ? cur + 1 : cur - 1;
-      h.setVar(scope, name, String(next));
+      if (t.t === 'var') h.setVar(t.scope, t.name, String(next));
+      else if (!h.assign?.(t.name, t.args.map((a) => evalNode(a, h)), next)) warnOnce('math_assign', t.name, `[talk] can't assign to ${t.name}()`);
       return next;
     }
   }

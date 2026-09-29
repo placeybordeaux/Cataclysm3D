@@ -14,6 +14,7 @@ import { installCrafting } from './ui/crafting_install';
 import { installWorldInteraction } from './worldInteraction';
 import { lightAt } from './game/vision';
 import { installMonsters } from './monsters';
+import { installNpcs } from './npcs';
 import { installChunkTracking } from './save/tracking';
 import { installSave, takePendingLoad } from './save/install';
 
@@ -63,6 +64,7 @@ async function main(): Promise<void> {
   // Crafting/reading probe `game.lightAt` for "too dark" checks; back it with real vision light.
   (game as unknown as { lightAt: (x: number, y: number, z: number) => number }).lightAt = (x, y, z) => lightAt(game, x, y, z);
   const monsters = installMonsters(game, renderer, worldgen, api);
+  await installNpcs(game, renderer, worldgen, monsters, api);
   // Before installUi: the UI registers the save key only when game.save exists.
   const save = await installSave(game, { api, genKind, worldgen, monsters });
   game.events.on('gameLoaded', () => renderer.chunks.invalidateAll());

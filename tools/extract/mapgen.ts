@@ -42,6 +42,8 @@ export const WILD_SPECIALS = [
   'rural_house', 'rural_house_yard', 'campsite', 'junkyard', 'Radio Tower', 'desolate barn',
   'Hunting Blind', 'LMOE Shelter', 'Pond', 'Derelict Property', 'Moonshine Still', 'Sugar House',
   'shooting range', '4x4_microlab_surface', 'Cave', 'Toxic Waste Dump', 'Swamp Shack',
+  // The Free Merchants' refugee center (NPC hub); overmap.ts keeps one near the start town.
+  'evac_center',
 ];
 
 /** Base terrains the overmap generator emits directly. */

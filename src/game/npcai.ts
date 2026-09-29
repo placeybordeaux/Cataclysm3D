@@ -734,8 +734,8 @@ export class NpcSystem implements GameSystem, TalkWorld, MissionHost {
     const r = this.muted(n, () => n.inv.reload(gun));
     if (!r.ok) {
       // Out of ammo: put the gun away and fight with fists (npc::wield_better_weapon, simplified).
-      if (!n.inv.stash(gun)) return;
       n.inv.wielded = null;
+      if (n.inv.stash(gun)) n.inv.wielded = gun;
       return;
     }
     n.attackCooldown = Math.max(0.5, (r.moves || 100) / 100 / ACTION_SCALE);
@@ -959,6 +959,15 @@ export class NpcSystem implements GameSystem, TalkWorld, MissionHost {
     t.spawned = true;
     if (mon) t.uid = mon.uid;
     return mon;
+  }
+
+  /** Forget every NPC, mission and dialogue variable (new game / save without NPC data). */
+  clear(): void {
+    for (const n of [...this.npcs]) this.remove(n);
+    this.missions.fromJSON({ nextUid: 1, missions: [] });
+    for (const m of [this.playerVars, this.globals, this.playerTalkEffects, this.factionTrust, this.kills, this.speciesKills] as Map<string, unknown>[]) m.clear();
+    this.spawnedKeys.clear();
+    this.cash = 0;
   }
 
   // ---------------------------------------------------------------- save / load

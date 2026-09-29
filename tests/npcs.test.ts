@@ -15,6 +15,7 @@ import { Rng } from '../src/core/rng';
 import { Dialogue, parseDuration } from '../src/game/talk';
 import { evalMath, type MathHost } from '../src/game/talkmath';
 import { createItem } from '../src/game/item';
+import { TradeSession, adjustedPrice, priceAdjustment } from '../src/game/trade';
 
 const dir = path.join(__dirname, '../public/data');
 const load = (f: string) => JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8'));
@@ -54,6 +55,7 @@ function world(seed = 11) {
   for (let y = -2; y <= 2; y++) for (let x = -2; x <= 2; x++) game.map.chunk(x, y, 0);
   const mons = new MonsterSystem(game);
   const npcs = new NpcSystem(game, nd, mons);
+  game.player.inv.wear(createItem(data, 'backpack'));
   game.systems.push(mons, npcs);
   game.clock.seconds = 12 * 3600;
   const msgs: string[] = [];
@@ -219,7 +221,7 @@ describe('dialogue on real talk topics', () => {
     expect(d.cond({ compare_string: ['yes', { u_val: 'x' }] })).toBe(true);
     expect(d.cond({ not: { compare_string: ['yes', { npc_val: 'x' }] } })).toBe(true);
     expect(d.cond({ u_has_items: { item: 'FMCNote', count: 2 } })).toBe(false);
-    game.player.inv.pickUp(createItem(data, 'FMCNote', { count: 5 }));
+    for (let i = 0; i < 5; i++) game.player.inv.pickUp(createItem(data, 'FMCNote'));
     expect(d.cond({ u_has_items: { item: 'FMCNote', count: 2 } })).toBe(true);
     expect(d.cond({ is_season: 'SPRING' })).toBe(true);
     d.effect({ npc_add_effect: 'asked_to_follow', duration: 3600 });
@@ -293,6 +295,86 @@ describe('missions', () => {
     expect(npcs.missions.isComplete(inst, n)).toBe(true);
     delete nd.missions.TEST_KILL;
   });
+});
+
+describe('trade', () => {
+  it('CDDA price adjustment curve', () => {
+    expect(priceAdjustment(0)).toBe(1);
+    expect(priceAdjustment(2)).toBeCloseTo(1.13, 5);
+    expect(priceAdjustment(-2)).toBeCloseTo(1 / 1.13, 5);
+    expect(priceAdjustment(9)).toBeCloseTo(priceAdjustment(5), 5);
+  });
+
+  it('values goods with the int/speech markup, currency at face value, and settles the balance', () => {
+    const { npcs, game } = world();
+    const n = npcs.spawn({ template: 'free_merchants_merchant' }, 14, 12, 0)!;
+    const p = game.player;
+    p.int_base = 8;
+    n.int_base = 8;
+    n.setSkill('speech', 0);
+    p.setSkill('speech', 0);
+    p.resetStats();
+    n.resetStats();
+    const knife = createItem(data, 'knife_hunting');
+    const base = knife.def.price_postapoc ?? knife.def.price ?? 0;
+    // Equal int/speech: net adjustment 1 -> NPC sells at +25%, buys at -25%.
+    expect(adjustedPrice(data, nd, n, p, knife, 1, true)).toBe(Math.ceil(base * 1.25));
+    expect(adjustedPrice(data, nd, n, p, knife, 1, false)).toBe(Math.ceil(base * 0.75));
+    const note = createItem(data, 'FMCNote');
+    expect(adjustedPrice(data, nd, n, p, note, 1, true)).toBe(adjustedPrice(data, nd, n, p, note, 1, false));
+
+    for (let i = 0; i < 3; i++) p.inv.pickUp(createItem(data, 'FMCNote'));
+    n.stock.push(knife);
+    const s = new TradeSession(data, nd, p, n);
+    const notes = s.yours.find((e) => e.item.typeId === 'FMCNote')!;
+    expect(notes.max).toBe(3);
+    const theirKnife = s.theirs.find((e) => e.item === knife)!;
+    s.toggle(theirKnife);
+    expect(s.balance()).toBe(-theirKnife.price);
+    n.op = { trust: 0, fear: 0, value: 0, anger: 0, owed: 0 };
+    n.personality.altruism = 0;
+    const enough = Math.ceil(theirKnife.price / (notes.price / 3));
+    if (enough <= 3) {
+      s.setCount(notes, enough);
+      expect(s.canAccept().ok).toBe(true);
+      expect(s.commit(() => {})).toBe(true);
+      expect(p.inv.countOf('knife_hunting')).toBe(1);
+      expect(p.inv.countOf('FMCNote')).toBe(3 - enough);
+      expect(n.stock).not.toContain(knife);
+      expect(n.op.owed).toBeGreaterThanOrEqual(0);
+    } else {
+      expect(s.canAccept().ok).toBe(false);
+    }
+  });
+
+  it('refuses a lopsided deal, followers trade freely', () => {
+    const { npcs, game } = world();
+    const n = npcs.spawn({ cls: 'NC_SCAVENGER' }, 14, 12, 0)!;
+    n.op = { trust: 0, fear: 0, value: 0, anger: 0, owed: 0 };
+    n.personality.altruism = 0;
+    n.stock.push(createItem(data, 'knife_hunting'));
+    const s = new TradeSession(data, nd, game.player, n);
+    s.toggle(s.theirs.find((e) => e.item.typeId === 'knife_hunting')!);
+    expect(s.canAccept().ok).toBe(false);
+    new Dialogue(npcs, n).effect('follow');
+    expect(s.canAccept().ok).toBe(true);
+  });
+});
+
+describe('coverage', () => {
+  it('every extracted talk topic renders (line + responses) without throwing', () => {
+    const { npcs } = world(31);
+    const n = npcs.spawn({ cls: 'NC_SCAVENGER' }, 14, 12, 0)!;
+    let lines = 0;
+    for (const id of Object.keys(nd.topics)) {
+      const d = new Dialogue(npcs, n);
+      (d as unknown as { topics: string[] }).topics.push(id);
+      const v = d.view();
+      if (v.line) lines++;
+      for (const r of v.responses) expect(typeof r.text).toBe('string');
+    }
+    expect(lines).toBeGreaterThan(Object.keys(nd.topics).length * 0.8);
+  }, 60000);
 });
 
 describe('npc AI', () => {

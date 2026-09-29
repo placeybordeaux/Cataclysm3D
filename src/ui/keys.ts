@@ -52,6 +52,8 @@ export const DEFAULT_BINDINGS: Record<string, string[]> = {
   help: ['?'],
   menu: ['Escape'],
   save: ['S'],
+  chat: ['C'], // CDDA 'C' chat: talk to nearby NPCs / order followers
+  missions: ['M'], // CDDA 'M' mission log
 };
 
 export class Keys {
@@ -79,6 +81,11 @@ export class Keys {
   /** For the help screen: [keys, name] for every registered action. */
   list(): [string[], string][] {
     return [...this.actions.values()].map((a) => [DEFAULT_BINDINGS[a.id], a.name]);
+  }
+
+  /** The handler currently registered for an action (to wrap it, e.g. `e` talking to NPCs). */
+  handler(id: string): (() => void) | undefined {
+    return this.actions.get(id)?.handler;
   }
 
   keyFor(id: string): string {

@@ -688,6 +688,20 @@ export class MapgenRunner {
         }
         return;
       }
+      case 'npcs': {
+        const template = evalValue(d.class, dat.params, rng);
+        const x = px(), y = py();
+        if (!template || !MapBuffer.inb(x, y)) return;
+        buf.npcs.push({
+          template, x, y,
+          ...(d.unique_id ? { uniqueId: String(d.unique_id) } : {}),
+          ...(d.target ? { target: true } : {}),
+          ...(d.add_trait ? { addTrait: Array.isArray(d.add_trait) ? d.add_trait : [d.add_trait] } : {}),
+        });
+        return;
+      }
+      case 'remove_npcs':
+        return;
       case 'vehicles': {
         const id = evalValue(d.vehicle, dat.params, rng);
         const chance = typeof d.chance === 'number' ? d.chance : 100;

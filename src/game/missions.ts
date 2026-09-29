@@ -133,7 +133,11 @@ export class MissionSystem {
     const npc = m.npcUid >= 0 ? h.npcByUid(m.npcUid) : undefined;
     const dlg = d ?? h.dialogueFor(npc);
     const start = def.start;
-    if (typeof start === 'string') warnOnce('mission_start', start, `[missions] hardcoded mission start "${start}" is unsupported`);
+    if (typeof start === 'string') {
+      // Hardcoded mission_start functions: only the ones that point somewhere.
+      if (start === 'reveal_refugee_center') this.assignTarget(m, { om_terrain: 'evac_center_18', reveal_radius: 3, search_range: 160 }, npc);
+      else warnOnce('mission_start', start, `[missions] hardcoded mission start "${start}" is unsupported`);
+    }
     else if (start && typeof start === 'object') {
       if (start.assign_mission_target) this.assignTarget(m, start.assign_mission_target, npc);
       if (start.update_mapgen) this.readTargetMonster(m, start.update_mapgen);
@@ -230,7 +234,10 @@ export class MissionSystem {
       const n = def.count ?? 1;
       if (h.player.inv.countOf(def.item) >= n) {
         const items = h.player.inv.useAmount(def.item, n);
-        if (npc) for (const it of items) if (!npc.inv.stash(it)) npc.stock.push(it);
+        if (npc) for (const it of items) {
+          const left = npc.inv.stash(it);
+          if (left) npc.stock.push(left);
+        }
         h.message(`You hand over ${n > 1 ? `${n} ` : ''}${h.data.items[def.item] ? itemName(h.data.items[def.item], n) : def.item}.`);
       }
     }
