@@ -56,6 +56,11 @@ export interface MissionHost {
   omtRotation?(x: number, y: number, z: number): number;
   /** Reveal overmap tiles around an OMT (reveal_radius). */
   reveal?(x: number, y: number, radius: number): void;
+  /**
+   * Run an update_mapgen (id, or inline object) on the live map at an OMT. False if it
+   * couldn't run (unknown id, no world generator).
+   */
+  mapgenUpdate?(src: string | Record<string, unknown>, omt: { x: number; y: number; z: number }, opts?: { dropMissionTargets?: boolean }): boolean;
   /** A dialogue with `npc` for running mission effects outside a conversation. */
   dialogueFor(npc: Npc | undefined): Dialogue | null;
 }
@@ -142,8 +147,12 @@ export class MissionSystem {
     }
     else if (start && typeof start === 'object') {
       if (start.assign_mission_target) this.assignTarget(m, start.assign_mission_target, npc);
-      if (start.update_mapgen) this.readTargetMonster(m, start.update_mapgen);
+      // mission_type::parse_funcs: talk effects first, then the update_mapgen functions
       if (start.effect !== undefined) dlg?.effect(start.effect);
+      if (start.update_mapgen) {
+        this.readTargetMonster(m, start.update_mapgen);
+        this.runUpdateMapgen(m, start.update_mapgen, npc);
+      }
     }
     if (!m.target && (def.goal === 'MGOAL_GO_TO') && def.destination) this.assignTarget(m, { om_terrain: def.destination }, npc);
     const name = def.name ?? m.id;
@@ -153,23 +162,53 @@ export class MissionSystem {
 
   /** assign_mission_target: nearest (or random within search_range) OMT of the terrain type. */
   private assignTarget(m: MissionInstance, t: any, npc: Npc | undefined): void {
+    const found = this.findTarget(t, npc, m.id);
+    m.target = found;
+    this.host.reveal?.(found.x, found.y, t.reveal_radius ?? 1);
+  }
+
+  /**
+   * mission_util::get_om_terrain_pos: the OMT a mission_target_params object names - the
+   * nearest `om_terrain` from the survivor (or the NPC with origin_npc), plus offsets; no
+   * om_terrain = the origin's own OMT. Also used by dialogue `mapgen_update`.
+   */
+  findTarget(t: any, npc: Npc | undefined, what = 'mapgen_update'): { x: number; y: number; z: number } {
     const h = this.host;
     const terrain: string | undefined = typeof t.om_terrain === 'string' ? t.om_terrain : undefined;
     const origin = t.origin_npc && npc ? npc : h.player;
     const from = { x: Math.floor(origin.x / 24), y: Math.floor(origin.y / 24) };
-    const z = typeof t.z === 'number' ? t.z : 0;
+    const z = typeof t.z === 'number' ? t.z : terrain ? 0 : Math.round(origin.z);
     let found: { x: number; y: number } | null = null;
-    if (terrain && h.findOmt) {
+    if (!terrain) found = from;
+    else if (h.findOmt) {
       const match = t.om_terrain_match_type ?? 'TYPE';
       const pred = (id: string) => (match === 'PREFIX' ? id.startsWith(terrain) : match === 'CONTAINS' ? id.includes(terrain) : match === 'EXACT' ? id === terrain : omtMatches(id, terrain));
       found = h.findOmt(pred, from, { minDist: t.min_distance ?? 0, maxDist: t.search_range ?? 80, random: !!t.random });
     }
     if (!found) {
-      warnOnce('mission_target', `${m.id}:${terrain}`, `[missions] ${m.id}: no "${terrain}" found near the survivor; using a spot nearby`);
+      warnOnce('mission_target', `${what}:${terrain}`, `[missions] ${what}: no "${terrain}" found near the survivor; using a spot nearby`);
       found = { x: from.x + h.rng.int(-6, 6) || 5, y: from.y + h.rng.int(-6, 6) || 5 };
     }
-    m.target = { x: found.x + (t.offset_x ?? 0), y: found.y + (t.offset_y ?? 0), z };
-    h.reveal?.(m.target.x, m.target.y, t.reveal_radius ?? 1);
+    return { x: found.x + (t.offset_x ?? 0), y: found.y + (t.offset_y ?? 0), z };
+  }
+
+  /**
+   * A mission's own start/end/fail "update_mapgen" (inline objects with an om_terrain to
+   * find near the mission target). "target": true monsters stay with readTargetMonster.
+   */
+  private runUpdateMapgen(m: MissionInstance, um: any, npc: Npc | undefined): void {
+    if (!this.host.mapgenUpdate) return;
+    for (const u of Array.isArray(um) ? um : [um]) {
+      if (!u || typeof u !== 'object') continue;
+      let at = m.target;
+      if (typeof u.om_terrain === 'string' && this.host.findOmt) {
+        const from = m.target ?? { x: Math.floor(this.host.player.x / 24), y: Math.floor(this.host.player.y / 24) };
+        const f = this.host.findOmt((id) => omtMatches(id, u.om_terrain), from, { maxDist: 30 });
+        if (f) at = { x: f.x, y: f.y, z: typeof u.z === 'number' ? u.z : 0 };
+      }
+      if (!at) at = this.findTarget(u, npc, m.id);
+      this.host.mapgenUpdate(u, at, { dropMissionTargets: true });
+    }
   }
 
   /** update_mapgen place_monster with "target": true -> the monster MGOAL_KILL_MONSTER is about. */
@@ -247,7 +286,10 @@ export class MissionSystem {
     }
     m.status = 'succeeded';
     const dlg = d ?? h.dialogueFor(npc);
-    if (def?.end && typeof def.end === 'object' && def.end.effect !== undefined) dlg?.effect(def.end.effect);
+    if (def?.end && typeof def.end === 'object') {
+      if (def.end.effect !== undefined) dlg?.effect(def.end.effect);
+      if (def.end.update_mapgen) this.runUpdateMapgen(m, def.end.update_mapgen, npc);
+    }
     h.message(`Mission complete: ${def?.name ?? m.id}`, 'c_light_green');
     if (def?.followup && npc) this.create(def.followup, npc);
   }
@@ -258,7 +300,10 @@ export class MissionSystem {
     m.status = 'failed';
     const npc = m.npcUid >= 0 ? this.host.npcByUid(m.npcUid) : undefined;
     const dlg = d ?? this.host.dialogueFor(npc);
-    if (def?.fail && typeof def.fail === 'object' && def.fail.effect !== undefined) dlg?.effect(def.fail.effect);
+    if (def?.fail && typeof def.fail === 'object') {
+      if (def.fail.effect !== undefined) dlg?.effect(def.fail.effect);
+      if (def.fail.update_mapgen) this.runUpdateMapgen(m, def.fail.update_mapgen, npc);
+    }
     this.host.message(`Mission failed: ${def?.name ?? m.id}`, 'c_light_red');
   }
 

@@ -251,6 +251,28 @@ const enqueueOm = (id: string) => {
   for (const m of omtDefs.get(id) ?? []) if (!keptOm.has(m)) { keptOm.add(m); scan(m.object); }
 };
 for (const id of wantOm) enqueueOm(id);
+// update_mapgen (mapgen with "update_mapgen_id"): only the ones dialogue, missions and EOCs
+// can run (ids referenced from npcs.json, so run extract:npcs first), plus the palettes/
+// nested chunks they and the missions' inline "update_mapgen" objects use. CDDA runs the
+// first definition of an id (update_mapgens[id].funcs()[0]).
+const npcsPath = join(OUT, 'npcs.json');
+const npcsText = existsSync(npcsPath) ? readFileSync(npcsPath, 'utf8') : null;
+if (!npcsText) console.warn(`${npcsPath} missing: no update_mapgen kept (run extract:npcs before extract:mapgen)`);
+const updateDefs = new Map<string, any>();
+for (const m of all('mapgen')) if (m.update_mapgen_id && !updateDefs.has(m.update_mapgen_id)) updateDefs.set(m.update_mapgen_id, m);
+const keptUpdates = new Map<string, any>();
+if (npcsText) {
+  for (const [id, m] of updateDefs) if (npcsText.includes(JSON.stringify(id))) keptUpdates.set(id, m);
+  // unshift: processed after everything the world generator needs, so the object order
+  // (and thus mapgen.json) of the existing content doesn't change.
+  for (const m of keptUpdates.values()) queue.unshift(m.object);
+  for (const md of Object.values<any>(JSON.parse(npcsText).missions ?? {})) {
+    for (const phase of ['start', 'end', 'fail']) {
+      const um = md?.[phase]?.update_mapgen;
+      for (const u of Array.isArray(um) ? um : um ? [um] : []) queue.unshift({ ...u, om_terrain: undefined });
+    }
+  }
+}
 // Strings anywhere inside kept objects that name nested chunks/palettes/terrains pull those
 // in. Over-inclusion (a string that merely looks like an id) is harmless.
 while (queue.length) {
@@ -336,6 +358,9 @@ for (const m of keptOm) {
 for (const id of keptNested) {
   mapgenOut.nested[id] = nestedDefs.get(id)!.map((m) => ({ w: weightOf(m.weight), o: mapgenOut.objects.push(normalizeMapgenItems(strip(m.object))) - 1 }));
 }
+for (const [id, m] of [...keptUpdates].sort(([a], [b]) => (a < b ? -1 : 1))) {
+  (mapgenOut.update ??= {})[id] = mapgenOut.objects.push(normalizeMapgenItems(strip(m.object))) - 1;
+}
 const palettesOut: Record<string, any> = {};
 for (const id of keptPalettes) palettesOut[id] = normalizeMapgenItems(strip(paletteRaw.get(id)));
 
@@ -368,7 +393,7 @@ const outputs: [string, unknown][] = [
   ['overmap.json', overmapOut],
 ];
 console.log(`om_terrain ids with mapgen: ${Object.keys(mapgenOut.omt).length} (of ${omtDefs.size}), ` +
-  `nested: ${keptNested.size} (of ${nestedDefs.size}), palettes: ${keptPalettes.size} (of ${paletteRaw.size}), ` +
+  `nested: ${keptNested.size} (of ${nestedDefs.size}), update_mapgen: ${keptUpdates.size} (of ${updateDefs.size}), palettes: ${keptPalettes.size} (of ${paletteRaw.size}), ` +
   `terrains: ${Object.keys(usedTerrains).length}, specials: ${Object.keys(usedSpecials).length}`);
 if (!DRY) mkdirSync(OUT, { recursive: true });
 for (const [file, data] of outputs) {

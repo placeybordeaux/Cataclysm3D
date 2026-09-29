@@ -117,6 +117,11 @@ export class VehicleSystem implements GameSystem, MapOverlay {
     // CDDA part_collision -> map::bash with the object's share of the impact damage.
     this.onBash = (x, y, z, strength) => bash(game, x, y, z, Math.round(strength), { source: this }).success;
     map.onChunkGenerated.push((c) => this.queueChunk(c));
+    // update_mapgen on a live chunk: its new vehicles are new even if the chunk is from a save.
+    map.onChunkUpdated.push((c) => {
+      this.pending.push(...c.vehicles);
+      c.vehicles = [];
+    });
     for (const c of map.loadedChunks()) this.queueChunk(c);
   }
 

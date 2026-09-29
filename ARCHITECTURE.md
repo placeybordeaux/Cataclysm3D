@@ -177,6 +177,12 @@ tests/               vitest unit tests (pure logic, no DOM/WebGL)
   warn once, false/no-op); `talkmath.ts` evaluates `math` expressions. `missions.ts`
   `MissionSystem` (FIND_ITEM, KILL_MONSTER_TYPE/SPEC, KILL_MONSTER target, GO_TO(_TYPE),
   ASSASSINATE, CONDITION). `trade.ts` `TradeSession` (npctrade.cpp prices, balance, credit).
+- **update_mapgen**: `worldgen.applyUpdate(map, idOrObject, omx, omy, z)` runs an update_mapgen
+  on the live chunk (rotated like CDDA, existing items kept, `chunk.version` bumped, new
+  spawns/vehicles/NPCs via `map.onChunkUpdated`). mapgen.json `update` holds the ids npcs.json
+  references (so `extract:npcs` runs before `extract:mapgen`). Dialogue `mapgen_update` and
+  mission start/end/fail `update_mapgen` go through `NpcSystem.mapgenUpdate`;
+  `cdda.mapgenUpdate(id, omx?, omy?, z?)`.
 - Mapgen `npcs`/`place_npcs` fill `chunk.npcSpawns` (consumed + cleared by installNpcs, skipped
   for chunks generated before a loaded save); the `evac_center` refugee center special is placed
   near the start town (overmap.ts). Towns get a few random survivors / bandits.
