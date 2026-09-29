@@ -18,6 +18,7 @@ import { lightAt } from './game/vision';
 import { installMonsters } from './monsters';
 import { installNpcs } from './npcs';
 import { installMutBio } from './mutbio';
+import { installLabs } from './labs';
 import { installChunkTracking } from './save/tracking';
 import { installSave, takePendingLoad } from './save/install';
 
@@ -74,6 +75,7 @@ async function main(): Promise<void> {
   await installVehicles(game, renderer, api);
   await installNpcs(game, renderer, worldgen, monsters, api);
   installMutBio(game, renderer, api);
+  installLabs(game, worldgen, api);
   // Before installUi: the UI registers the save key only when game.save exists.
   const save = await installSave(game, { api, genKind, worldgen, monsters });
   game.events.on('gameLoaded', () => renderer.chunks.invalidateAll());

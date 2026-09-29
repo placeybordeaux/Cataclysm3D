@@ -6,7 +6,7 @@
 
 export const CHUNK = 24;
 export const LEVEL_HEIGHT = 2.6;
-export const MIN_Z = -3;
+export const MIN_Z = -7;
 export const MAX_Z = 5;
 
 export interface TilePos {

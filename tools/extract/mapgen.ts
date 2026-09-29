@@ -44,6 +44,10 @@ export const WILD_SPECIALS = [
   'shooting range', '4x4_microlab_surface', 'Cave', 'Toxic Waste Dump', 'Swamp Shack',
   // The Free Merchants' refugee center (NPC hub); overmap.ts keeps one near the start town.
   'evac_center',
+  // CDDA 0.J+ labs are modular JSON specials (the hardcoded lab/lab_stairs/lab_finale
+  // generator is gone): the 6-floor mutagen lab (surface security + parking, residential,
+  // cargo, mutagen research floors down to z-7). overmap.ts guarantees one near the start.
+  'lab_mutagen_6_level',
 ];
 
 /** Base terrains the overmap generator emits directly. */

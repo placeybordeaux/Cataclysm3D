@@ -887,6 +887,11 @@ export class MonsterSystem implements GameSystem {
   }
 
   private moveToward(m: Monster, brain: MonBrain, dt: number): void {
+    // CDDA IMMOBILE (turrets, fungal towers, lab containment specimens): never moves.
+    if (m.type.flags.includes('IMMOBILE')) {
+      m.moving = false;
+      return;
+    }
     let tx = brain.gx, ty = brain.gy;
     const dGoal = Math.hypot(tx - m.x, ty - m.y);
     if (dGoal < 0.35) {
