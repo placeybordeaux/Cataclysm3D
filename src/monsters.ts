@@ -12,6 +12,9 @@ import { monsterSize, type Monster } from './game/monster';
 import { createItem, loadAmmo, type Item } from './game/item';
 import { snippet } from './data/index';
 import { openMenu } from './ui/framework';
+import { registerOption } from './ui/options';
+import { cycleDensity, defaultDensity, densityLabel, registerDensityHost } from './game/density';
+import { registerSaveable } from './save/registry';
 
 // Wiring for monsters & combat: simulation systems, spawning, player attacks, keys, danger
 // checks, rendering and window.cdda helpers. main.ts calls installMonsters() once.
@@ -37,6 +40,27 @@ export function installMonsters(game: Game, renderer: Renderer | null, worldgen:
   const spawner = new Spawner(sys, worldgen ? overmapView(worldgen) : null);
   const combat = new PlayerCombat(game, sys);
   game.systems.push(sys, combat);
+  // Zombie density (CDDA SPAWN_DENSITY): the remembered choice until character creation
+  // or a loaded save says otherwise. In the browser, spawns wait for the game to start so
+  // the chunks generated behind the title screen use the density picked for the new game.
+  spawner.opts.density = defaultDensity();
+  registerDensityHost(game, { get: () => spawner.opts.density, set: (v) => void (spawner.opts.density = v) });
+  registerSaveable<number>(game, 'zombieDensity', {
+    order: 19,
+    save: () => spawner.opts.density,
+    load: (v) => void (spawner.opts.density = v),
+    missing: () => void (spawner.opts.density = 1),
+  });
+  if (renderer) {
+    spawner.hold();
+    game.events.on('gameLoaded', () => spawner.discardHeld());
+    registerOption({
+      name: 'Zombie density',
+      value: () => densityLabel(spawner.opts.density),
+      change: (d) => void (spawner.opts.density = cycleDensity(spawner.opts.density, d)),
+      desc: 'CDDA spawn density for this world (0.5x / 1.0x / 2.0x), already eased for real time at 1.0x.  Changes apply to areas you haven\'t visited yet.',
+    });
+  }
   spawner.install();
   let view: MonsterView | null = null;
   if (renderer) {

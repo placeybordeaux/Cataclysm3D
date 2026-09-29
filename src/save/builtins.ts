@@ -179,6 +179,7 @@ interface MonsterJSON {
   aggro: boolean;
   friendly?: boolean;
   name?: string;
+  horde?: boolean;
   effects?: [MonEffect, number][];
   attackCooldown?: number;
   busy?: number;
@@ -215,6 +216,7 @@ function monsterToJSON(m: Monster): MonsterJSON {
   };
   if (m.friendly) j.friendly = true;
   if (m.name) j.name = m.name;
+  if (m.horde) j.horde = true;
   // 'grabbing' is tied to the grab link we don't persist (the survivor starts free).
   const eff = [...m.effects].filter(([e, t]) => t > 0 && e !== 'grabbing');
   if (eff.length) j.effects = eff;
@@ -270,6 +272,7 @@ function restoreMonster(game: Game, sys: MonsterSystem, j: MonsterJSON, ctx: Loa
     rng: new Rng(hashSeed(game.seed, Math.floor(j.x * 16), Math.floor(j.y * 16), j.z, sys.all.length, 0x10ad)),
   });
   m.hp = j.hp;
+  m.horde = !!j.horde;
   m.facing = j.facing;
   m.anger = j.anger;
   m.morale = j.morale;

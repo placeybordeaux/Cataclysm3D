@@ -411,8 +411,21 @@ export class MonsterSystem implements GameSystem {
    */
   hear(x: number, y: number, z: number, vol: number, source?: unknown): void {
     if (vol <= 0) return;
+    const sig = hordeSignal(vol, z);
     for (const m of this.all) {
       if (m.dead || m === source || !m.has('HEARS')) continue;
+      if (m.dormant) {
+        // Outside the reality bubble CDDA's monsters are unloaded and hear nothing; only
+        // overmap hordes get a signal from loud noises (overmap::signal_hordes), out to
+        // sig_power submaps. Their interest is the pursuit time.
+        if (!m.horde || sig <= 0 || m.z !== z) continue;
+        const distSm = Math.max(Math.abs(m.x - x), Math.abs(m.y - y)) / 12;
+        if (distSm > sig) continue;
+        const interest = Math.max(30, (sig + 1 - distSm) * 15);
+        const err = 12;
+        if (m.morale >= 0) m.wanderTo(x + m.rng.int(-err, err), y + m.rng.int(-err, err), Math.max(m.wanderTime, turnsToSeconds(interest * 10)));
+        continue;
+      }
       // Sound through floors is heavily muffled.
       const v = m.z === z ? vol : Math.abs(m.z - z) === 1 ? vol / 3 : 0;
       if (v <= 0) continue;
@@ -1162,4 +1175,15 @@ const BODY_PART_NAMES: Record<string, string> = Object.fromEntries(Object.entrie
 
 function key(x: number, y: number, z: number): number {
   return ((x & 0x7ff) | ((y & 0x7ff) << 11) | ((z + 8) << 22)) >>> 0;
+}
+
+/**
+ * sounds.cpp get_signal_for_hordes: sounds above volume 60 reach overmap hordes within
+ * ceil(vol / 12) submaps (at least 8, at most 180); underground noise is divided by 2 per
+ * level down. 0 = hordes can't hear it.
+ */
+export function hordeSignal(vol: number, z = 0): number {
+  const v = z < 0 ? vol / (2 * Math.abs(z)) : vol;
+  if (v <= 60) return 0;
+  return Math.min(180, Math.max(8, Math.ceil(v / 12)));
 }

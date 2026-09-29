@@ -9,8 +9,8 @@ import type { GameData } from '../src/data/types';
 import { Game } from '../src/game/game';
 import type { Input } from '../src/core/input';
 import type { Chunk, ChunkGenerator, GameMap } from '../src/world/map';
-import { MonsterSystem, ambientLight } from '../src/game/monai';
-import { Spawner } from '../src/game/spawner';
+import { MonsterSystem, ambientLight, hordeSignal } from '../src/game/monai';
+import { Spawner, densityCount } from '../src/game/spawner';
 import { PlayerCombat, meleeVerb } from '../src/game/playercombat';
 import { butcherSeconds, butcherYield, yieldMult } from '../src/game/butchery';
 import { createItem, type Item } from '../src/game/item';
@@ -133,15 +133,18 @@ describe('monster AI', () => {
     expect(broke).toBe(true);
   });
 
-  it('dormant monsters far away drift toward loud noises (horde behaviour)', () => {
+  it('dormant horde members far away drift toward loud noises; lone unloaded zombies stay put', () => {
     const { game, sys } = world();
     const z = sys.spawnById('mon_zombie', 12.5 + 70, 12.5, 0)!;
+    const loner = sys.spawnById('mon_zombie', 12.5 - 70, 12.5, 0)!;
+    z.horde = true;
     step(game, 0.6);
     expect(z.dormant).toBe(true);
     game.events.emit('sound', { x: 12, y: 12, z: 0, volume: 80, description: 'BANG!' });
-    const x0 = z.x;
+    const x0 = z.x, l0 = loner.x;
     step(game, 3);
     expect(z.x).toBeLessThan(x0);
+    expect(loner.x).toBe(l0);
   });
 
   it('a rabbit flees from a nearby survivor', () => {
@@ -218,7 +221,7 @@ describe('pathing & line of sight', () => {
 describe('spawning', () => {
   function spawnSet(seed: number) {
     const { game, sys } = world(seed);
-    const sp = new Spawner(sys, null, { safeRadius: 0 });
+    const sp = new Spawner(sys, null, { safeRadius: 0, realtimeScale: 1 });
     const c = game.map.chunk(1, 1, 0)!;
     c.spawns = [
       { kind: 'group', id: 'GROUP_VANILLA', x: 36, y: 36, z: 0, area: [24, 24, 47, 47], count: 4 },
@@ -238,7 +241,7 @@ describe('spawning', () => {
 
   it('place_monsters density scales the number of rolls (density * rng(10, 50))', () => {
     const { game, sys } = world(5);
-    const sp = new Spawner(sys, null, { safeRadius: 0 });
+    const sp = new Spawner(sys, null, { safeRadius: 0, realtimeScale: 1 });
     const c = game.map.chunk(-2, -2, 0)!;
     c.spawns = [{ kind: 'group', id: 'GROUP_ZOMBIE', x: -48, y: -48, z: 0, area: [-48, -48, -25, -25], density: 0.5 }];
     sp.onChunk(c);
@@ -532,5 +535,68 @@ describe('butchery', () => {
     expect(z.items.some((i) => i.typeId === 'meat_tainted_human')).toBe(true);
     const b = butcherYield(data, game.player, data.monsters.mon_boomer, 30, 'full', new Rng(2));
     expect(b.ok).toBe(false);
+  });
+});
+
+describe('zombie density (CDDA SPAWN_DENSITY) and horde hearing', () => {
+  it('densityCount thins spawns below 1 and multiplies above 1', () => {
+    const rng = new Rng(3);
+    let half = 0, dbl = 0;
+    for (let i = 0; i < 2000; i++) {
+      half += densityCount(4, 0.5, rng);
+      dbl += densityCount(4, 2, rng);
+    }
+    expect(half / 2000).toBeCloseTo(2, 0);
+    expect(dbl / 2000).toBe(8);
+  });
+
+  it('scales place_monsters spawns with the density option', () => {
+    const count = (density: number) => {
+      const { game, sys } = world(5);
+      const sp = new Spawner(sys, null, { safeRadius: 0, density, realtimeScale: 1 });
+      const c = game.map.chunk(-2, -2, 0)!;
+      c.spawns = [{ kind: 'group', id: 'GROUP_ZOMBIE', x: -48, y: -48, z: 0, area: [-48, -48, -25, -25], density: 0.5 }];
+      sp.onChunk(c);
+      return sys.all.length;
+    };
+    expect(count(2)).toBeGreaterThan(count(0.5));
+  });
+
+  it('holds spawns until release, and drops them when a save replaces the map', () => {
+    const { game, sys } = world(11);
+    const sp = new Spawner(sys, null, { safeRadius: 0, realtimeScale: 1 });
+    sp.hold();
+    const c = game.map.chunk(1, 1, 0)!;
+    c.spawns = [{ kind: 'monster', id: 'mon_zombie', x: 30, y: 30, z: 0, count: 1 }];
+    sp.onChunk(c);
+    expect(sys.all.length).toBe(0);
+    sp.opts.density = 2;
+    sp.release();
+    expect(sys.all.length).toBe(2);
+    sp.hold();
+    const d = game.map.chunk(-1, 1, 0)!;
+    d.spawns = [{ kind: 'monster', id: 'mon_zombie', x: -20, y: 30, z: 0, count: 1 }];
+    sp.onChunk(d);
+    sp.discardHeld();
+    sp.release();
+    expect(sys.all.length).toBe(2);
+  });
+
+  it('outside the bubble only hordes hear gunfire, out to CDDA signal range', () => {
+    expect(hordeSignal(50)).toBe(0);
+    expect(hordeSignal(74)).toBe(8);
+    expect(hordeSignal(300)).toBe(25);
+    const { game, sys } = world(3);
+    const loner = sys.spawnById('mon_zombie', 12.5 + 80, 12.5, 0)!;
+    const horde = sys.spawnById('mon_zombie', 12.5 - 80, 12.5, 0)!;
+    const farHorde = sys.spawnById('mon_zombie', 12.5, 12.5 + 8 * 12 + 30, 0)!;
+    horde.horde = farHorde.horde = true;
+    step(game, 0.1);
+    expect(loner.dormant && horde.dormant && farHorde.dormant).toBe(true);
+    sys.hear(12, 12, 0, 74);
+    expect(loner.wanderTime).toBe(0);
+    expect(horde.wanderTime).toBeGreaterThan(0);
+    expect(Math.hypot(horde.wanderX - 12, horde.wanderY - 12)).toBeLessThan(20);
+    expect(farHorde.wanderTime).toBe(0);
   });
 });

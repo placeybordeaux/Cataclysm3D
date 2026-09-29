@@ -32,14 +32,32 @@ export interface OvermapView {
 export interface SpawnerOptions {
   /**
    * Scale on CDDA's SPAWN_CITY_HORDE_SCALAR (80 zombies per city size). 1 = CDDA default.
-   * Real-time melee is harder than turn-based, so the default is lower.
+   * Real-time melee is harder than turn-based (no time to think between blows), so the
+   * default is lower; the player-facing knob is `density`.
    */
   cityHordeScale?: number;
-  /** Scale on mapgen group densities (CDDA SPAWN_DENSITY). */
+  /**
+   * The "Zombie density" world option = CDDA's SPAWN_DENSITY: scales every non-animal spawn
+   * (overmap static spawns, mapgen monsters and place_monsters, city hordes) the way
+   * CDDA does. 1 = default. Read at spawn time, so changing it affects chunks generated later.
+   */
   density?: number;
+  /**
+   * Real-time adjustment on non-horde spawns at every density (house zombies etc.):
+   * CDDA's numbers assume you get a turn to think per step.
+   */
+  realtimeScale?: number;
   /** No hostile spawns closer than this to the player when a chunk generates. */
   safeRadius?: number;
 }
+
+/**
+ * Real-time tuning (see SpawnerOptions): city hordes at 20% of CDDA's 80 zombies per city
+ * size, other hostile spawns at 75%, so the default "Zombie density 1.0" leaves suburbs
+ * around the evac shelter with roughly a handful of zombies per block instead of a crowd.
+ */
+export const CITY_HORDE_REALTIME = 0.2;
+export const SPAWN_REALTIME = 0.75;
 
 /** CDDA external_options defaults. */
 const CITY_HORDE_THRESHOLD = 4;
@@ -67,7 +85,37 @@ export class Spawner {
   skipChunk: ((c: Chunk) => boolean) | null = null;
 
   constructor(readonly sys: MonsterSystem, readonly overmap: OvermapView | null = null, opts: SpawnerOptions = {}) {
-    this.opts = { cityHordeScale: 0.3, density: 1, safeRadius: 10, ...opts };
+    this.opts = { cityHordeScale: CITY_HORDE_REALTIME, density: 1, realtimeScale: SPAWN_REALTIME, safeRadius: 10, ...opts };
+  }
+
+  /**
+   * Chunks whose spawns wait for the game to start (title screen / character creation run
+   * over a live world): the density chosen for the new game must apply to them too.
+   * Null = spawn immediately.
+   */
+  private held: Chunk[] | null = null;
+
+  /** Queue chunk spawns until release() (main.ts holds them while the title screen is up). */
+  hold(): void {
+    this.held ??= [];
+  }
+
+  /** Spawn everything queued by hold() and stop queueing. */
+  release(): void {
+    const q = this.held;
+    this.held = null;
+    for (const c of q ?? []) this.onChunk(c);
+  }
+
+  /** Drop queued chunks (a save was loaded: they were replaced by the saved map). */
+  discardHeld(): void {
+    if (this.held) this.held = [];
+  }
+
+  /** SPAWN_DENSITY for a monster group / monster (animals use SPAWN_ANIMAL_DENSITY = 1). */
+  densityFor(groupId: string | null, horde = false): number {
+    if (groupId && this.sys.game.data.monsterGroups[groupId]?.is_animal) return 1;
+    return this.opts.density * (horde ? 1 : this.opts.realtimeScale);
   }
 
   /** Hook into map generation; also consumes chunks generated before installation. */
@@ -88,6 +136,10 @@ export class Spawner {
   }
 
   onChunk(c: Chunk): void {
+    if (this.held) {
+      this.held.push(c);
+      return;
+    }
     const requests = c.spawns;
     // Spawn points are one-shot (CDDA removes them once spawned) so reloads don't duplicate.
     c.spawns = [];
@@ -108,7 +160,12 @@ export class Spawner {
         warnOnce('monster', r.id);
         return;
       }
-      this.place(c, [{ id: r.id, count: r.count ?? 1 }], r.x, r.y, rng, r);
+      // jmapgen_monster: CDDA multiplies the spawn odds by SPAWN_DENSITY (capped, the excess
+      // turning into extra monsters). Mapgen already rolled the raw odds, so thin/multiply here.
+      // Real-time tuning is about hostiles; a pet dog in a yard spawns at plain SPAWN_DENSITY.
+      const d = data.monsters[r.id].aggression > 0 ? this.densityFor(null) : this.opts.density;
+      const n = r.friendly ? r.count ?? 1 : densityCount(r.count ?? 1, d, rng);
+      if (n > 0) this.place(c, [{ id: r.id, count: n }], r.x, r.y, rng, r);
       return;
     }
     if (!data.monsterGroups[r.id]) {
@@ -117,8 +174,9 @@ export class Spawner {
     }
     const area = r.area ?? [r.x, r.y, r.x, r.y];
     if (r.count !== undefined || r.density === undefined && !this.isPlaceMonsters(r)) {
-      // Population points (overmap spawns / monster-group entries).
-      let pop = r.count ?? 1;
+      // Population points (overmap spawns / monster-group entries), density-scaled like
+      // overmap static spawns (odds x SPAWN_DENSITY).
+      let pop = densityCount(r.count ?? 1, this.densityFor(r.id), rng);
       while (pop > 0) {
         const res = pickFromMonsterGroup(data, r.id, rng, this.groupCtx());
         pop -= Math.max(1, res.reduce((s, x) => s + x.count, 0));
@@ -127,7 +185,7 @@ export class Spawner {
       }
       return;
     }
-    const density = (r.density ?? this.omtDensity(c)) * this.opts.density;
+    const density = (r.density ?? this.omtDensity(c)) * this.densityFor(r.id);
     let num = rollRemainder(density * (10 + rng.next() * 40), rng);
     while (num > 0) {
       const res = pickFromMonsterGroup(data, r.id, rng, this.groupCtx());
@@ -166,7 +224,7 @@ export class Spawner {
   }
 
   /** Put each individual of each result near (x, y) on a free passable tile of this chunk. */
-  private place(c: Chunk, res: MonsterSpawn[], x: number, y: number, rng: Rng, r?: Pick<SpawnRequest, 'friendly' | 'name'>): void {
+  private place(c: Chunk, res: MonsterSpawn[], x: number, y: number, rng: Rng, r?: Pick<SpawnRequest, 'friendly' | 'name'>, horde = false): void {
     const map = this.sys.game.map;
     const data = this.sys.game.data;
     const p = this.sys.game.player;
@@ -206,11 +264,12 @@ export class Spawner {
         if (!this.inChunk(c, tx, ty) || !map.passable(tx, ty, c.z)) continue;
         const hostile = def.aggression > 0 && !r?.friendly;
         if (hostile && p.z === c.z && Math.hypot(tx + 0.5 - p.x, ty + 0.5 - p.y) < this.opts.safeRadius) continue;
-        this.sys.spawn(def, tx + 0.3 + rng.next() * 0.4, ty + 0.3 + rng.next() * 0.4, c.z, {
+        const m = this.sys.spawn(def, tx + 0.3 + rng.next() * 0.4, ty + 0.3 + rng.next() * 0.4, c.z, {
           friendly: r?.friendly,
           name: r?.name,
           rng: new Rng(hashSeed(this.sys.game.seed, tx, ty, c.z, this.stats.monsters)),
         });
+        if (horde) m.horde = true;
         this.stats.monsters++;
       }
     }
@@ -227,20 +286,24 @@ export class Spawner {
    * overmap::place_mongroups: cities above the size threshold (or 1 in 16 small ones) get
    * size * 80 zombies spread over road submaps within size * 1.5 OMTs, denser toward the
    * centre (4 submaps per road OMT near the middle, fewer further out), 10 per group.
-   * We roll this per road chunk: each eligible submap gets a GROUP_ZOMBIE_HORDE population
-   * of 10 with probability desired / (10 * eligible submaps).
+   * We roll this per road chunk: each eligible submap gets roll_remainder(desired / (10 *
+   * eligible submaps)) GROUP_ZOMBIE_HORDE populations of 10.
    */
   private cityHorde(c: Chunk, rng: Rng): void {
     const om = this.overmap!;
     if (om.omtType(c.cx, c.cy, 0) !== 'road') return;
-    const scale = this.opts.cityHordeScale;
+    // overmap::place_mongroups: desired = size * scalar * SPAWN_DENSITY.
+    const scale = this.opts.cityHordeScale * this.densityFor(null, true);
     if (scale <= 0) return;
     for (const city of om.citiesNear(c.cx, c.cy)) {
       const h = this.hordeFor(city);
       if (!h) continue;
       const subs = h.subs.get(`${c.cx},${c.cy}`) ?? 0;
       if (!subs) continue;
-      const p = Math.min(1, (h.desired * scale) / (10 * h.totalSubs));
+      // Expected 10-zombie groups per eligible submap. CDDA deals groups round-robin over
+      // the shuffled submap list and reuses it when there are more groups than submaps, so
+      // this can exceed 1 (small road net, high density).
+      const k = (h.desired * scale) / (10 * h.totalSubs);
       const quads: [number, number][] = [[0, 0], [12, 0], [0, 12], [12, 12]];
       // CDDA shuffles the 4 quadrants and keeps `subs` of them.
       for (let i = quads.length - 1; i > 0; i--) {
@@ -248,15 +311,15 @@ export class Spawner {
         [quads[i], quads[j]] = [quads[j], quads[i]];
       }
       for (let q = 0; q < subs; q++) {
-        if (rng.next() >= p) continue;
+        const groups = rollRemainder(k, rng);
         const X = c.cx * CHUNK + quads[q][0], Y = c.cy * CHUNK + quads[q][1];
-        let pop = 10;
+        let pop = 10 * groups;
         while (pop > 0) {
           const res = pickFromMonsterGroup(this.sys.game.data, 'GROUP_ZOMBIE_HORDE', rng, this.groupCtx());
           pop -= Math.max(1, res.reduce((s, x) => s + x.count, 0));
           const [x, y] = this.randomPoint(c, [X, Y, X + 11, Y + 11], rng);
           const before = this.stats.monsters;
-          this.place(c, res, x, y, rng);
+          this.place(c, res, x, y, rng, undefined, true);
           this.stats.horde += this.stats.monsters - before;
         }
       }
@@ -290,6 +353,16 @@ export class Spawner {
     this.cities.set(key, res);
     return res;
   }
+}
+
+/**
+ * A spawn of `count` whose odds were already rolled at density 1, rescaled to density `d`:
+ * below 1 it happens with probability d (CDDA scales the odds), above 1 it brings d times
+ * as many (CDDA caps the odds and multiplies the count instead).
+ */
+export function densityCount(count: number, d: number, rng: Rng): number {
+  if (d >= 1) return rollRemainder(count * d, rng);
+  return rng.next() < d ? count : 0;
 }
 
 /** CDDA roll_remainder: integer part plus a chance for the fraction. */

@@ -100,6 +100,8 @@ async function main(): Promise<void> {
   const loaded = pending ? await save.applyPending(pending) : false;
   api.ready = true;
   if (!loaded) await ui.boot();
+  // Spawns were held while the title screen / character creation ran (density choice).
+  monsters.spawner.release();
   save.startSession();
 }
 

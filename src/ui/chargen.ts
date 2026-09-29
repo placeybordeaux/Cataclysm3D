@@ -1,4 +1,5 @@
 import { Rng } from '../core/rng';
+import { cycleDensity, defaultDensity, densityLabel, setDefaultDensity, zombieDensity } from '../game/density';
 import type { ItemGroupDef, MutationDef } from '../data/types';
 import { expandItemGroup } from '../data/itemgroups';
 import { fromSpawned, type Item } from '../game/item';
@@ -27,6 +28,8 @@ export interface Build {
   stats: Stats;
   male: boolean;
   name: string;
+  /** World option: zombie density (CDDA SPAWN_DENSITY), see src/game/density.ts. */
+  density?: number;
 }
 
 const TABS = ['SCENARIO', 'PROFESSION', 'TRAITS', 'STATS', 'DESCRIPTION'] as const;
@@ -59,6 +62,7 @@ export function defaultBuild(ctx: UiContext): Build {
     stats: { str: BASE_STAT, dex: BASE_STAT, int: BASE_STAT, per: BASE_STAT },
     male,
     name: randomName(ctx.data.names, male),
+    density: defaultDensity(),
   };
 }
 
@@ -81,6 +85,10 @@ export function applyBuild(ctx: UiContext, b: Build): void {
   const data = game.data;
   p.name = b.name;
   p.male = b.male;
+  if (b.density !== undefined) {
+    zombieDensity(game)?.set(b.density);
+    setDefaultDensity(b.density);
+  }
   p.str_base = b.stats.str;
   p.dex_base = b.stats.dex;
   p.int_base = b.stats.int;
@@ -248,6 +256,10 @@ export function openCharGen(ctx: UiContext): Promise<Build | null> {
             b.male = !b.male;
             return true;
           }
+          if (k === 'z') {
+            b.density = cycleDensity(b.density ?? 1, 1);
+            return true;
+          }
           if (k === 'F' || k === 'Enter') {
             void finish();
             return true;
@@ -363,6 +375,8 @@ export function openCharGen(ctx: UiContext): Promise<Build | null> {
           `${c('c_light_gray', 'Profession:')} ${c('c_white', profName(b.profession, b.male))}`,
           `${c('c_light_gray', 'Stats:')} Str ${b.stats.str}  Dex ${b.stats.dex}  Int ${b.stats.int}  Per ${b.stats.per}`,
           `${c('c_light_gray', 'Traits:')} ${allTraits.length ? allTraits.map((t) => c('c_white', t)).join(', ') : c('c_dark_gray', 'none')}`,
+          '',
+          `${c('c_light_gray', 'Zombie density:')} ${c((b.density ?? 1) > 1 ? 'c_light_red' : (b.density ?? 1) < 1 ? 'c_light_green' : 'c_white', densityLabel(b.density ?? 1))}   ${c('c_dark_gray', '(z to change)')}`,
           '',
           `${c('c_yellow', 'Press F (or Enter) to finish and start the game.')}`,
         ].map((l) => `<div class="wrap">${l}</div>`).join('');

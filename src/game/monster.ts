@@ -107,6 +107,12 @@ export class Monster {
   seesPlayer = false;
   /** True while outside the reality bubble: kept, not simulated. */
   dormant = true;
+  /**
+   * Member of a city horde (CDDA overmap mongroup with horde = true). Only these hear loud
+   * noises from outside the reality bubble (sounds.cpp signal_hordes); other dormant monsters
+   * are "unloaded" and deaf, as in CDDA.
+   */
+  horde = false;
   dead = false;
   /** Current path (tile centres) toward goal and bookkeeping for re-planning. */
   path: [number, number][] = [];
