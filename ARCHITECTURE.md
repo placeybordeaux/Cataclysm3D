@@ -18,6 +18,10 @@ tileset, rendered in the "3D pixel art" style of *Project Shadowglass*.
 
 ## Source material
 
+- **v2: game data comes from Cataclysm: Bright Nights** (`~/code/Cataclysm-BN`, read-only;
+  C++ in `src/` is the reference, there are no JSON docs). The extractor's default checkout
+  is BN (`CDDA_DIR` overrides). The normalized item/container/magazine/armor model and BN's
+  carrying rules are in `docs/BN_DATA_MODEL.md`; DDA notes below are historical.
 - CDDA source + data: `~/code/Cataclysm-DDA` (read-only! never modify). JSON docs:
   `~/code/Cataclysm-DDA/doc/JSON/` (JSON_INFO, MAPGEN, ITEM, MONSTERS, …). C++ in `src/`
   is the ground truth for formulas (e.g. `melee.cpp`, `monattack.cpp`, `character.cpp`).
