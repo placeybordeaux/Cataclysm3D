@@ -35,6 +35,8 @@ export interface UiMetrics {
   fontSmall: number;
   /** Titles, px. */
   fontLarge: number;
+  /** Line height, px: whole pixels so nothing below a text line lands between pixels. */
+  lineHeight: number;
   /** Grid-cell icon edge, px: 32px UltiCa sprites × an integer. */
   icon: number;
   /** List-row icon edge, px (also an integer multiple of the 32px sprite). */
@@ -44,10 +46,10 @@ export interface UiMetrics {
 export function uiMetrics(scale: UiScale): UiMetrics {
   switch (scale) {
     case 1:
-      return { scale, u: 1, font: 16, fontSmall: 12, fontLarge: 16, icon: 32, rowIcon: 32 };
+      return { scale, u: 1, font: 16, fontSmall: 12, fontLarge: 16, lineHeight: 20, icon: 32, rowIcon: 32 };
     case 2:
-      return { scale, u: 2, font: 22, fontSmall: 16, fontLarge: 24, icon: 64, rowIcon: 32 };
+      return { scale, u: 2, font: 22, fontSmall: 16, fontLarge: 24, lineHeight: 28, icon: 64, rowIcon: 32 };
     case 3:
-      return { scale, u: 3, font: 32, fontSmall: 24, fontLarge: 36, icon: 96, rowIcon: 64 };
+      return { scale, u: 3, font: 32, fontSmall: 24, fontLarge: 36, lineHeight: 40, icon: 96, rowIcon: 64 };
   }
 }

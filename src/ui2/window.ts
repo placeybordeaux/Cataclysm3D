@@ -6,6 +6,7 @@
 import { h, ui2Layers, viewport } from './dom';
 import { acquireSurface, pushKeys } from './host';
 import { iconEl } from './icons';
+import { snapPx } from './theme';
 import { clampRect, cascade } from './logic/layout';
 import type { IconRef } from './logic/items';
 
@@ -127,8 +128,8 @@ export function openPanel(opts: PanelOpts): Panel {
   function place(x: number, y: number): void {
     const r = el.getBoundingClientRect();
     const c = clampRect({ x, y, w: r.width, h: r.height }, viewport());
-    el.style.left = `${c.x}px`;
-    el.style.top = `${c.y}px`;
+    el.style.left = `${snapPx(c.x)}px`;
+    el.style.top = `${snapPx(c.y)}px`;
   }
 
   let closed = false;
@@ -144,7 +145,7 @@ export function openPanel(opts: PanelOpts): Panel {
     moveTo(x, y, remember = false) {
       place(x, y);
       if (remember) {
-        positions[opts.id] = { x: parseInt(el.style.left), y: parseInt(el.style.top) };
+        positions[opts.id] = { x: parseFloat(el.style.left), y: parseFloat(el.style.top) };
         savePositions();
       }
     },
@@ -194,7 +195,7 @@ export function openPanel(opts: PanelOpts): Panel {
       titlebar.removeEventListener('pointerup', up);
       titlebar.removeEventListener('pointercancel', up);
       el.classList.remove('moving');
-      positions[opts.id] = { x: parseInt(el.style.left), y: parseInt(el.style.top) };
+      positions[opts.id] = { x: parseFloat(el.style.left), y: parseFloat(el.style.top) };
       savePositions();
     };
     titlebar.addEventListener('pointermove', move);
@@ -203,7 +204,7 @@ export function openPanel(opts: PanelOpts): Panel {
   });
 
   // Content growing (items added) or the viewport shrinking must not push the title bar off.
-  const ro = new ResizeObserver(() => place(parseInt(el.style.left), parseInt(el.style.top)));
+  const ro = new ResizeObserver(() => place(parseFloat(el.style.left), parseFloat(el.style.top)));
   ro.observe(el);
   return panel;
 }

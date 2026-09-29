@@ -81,6 +81,7 @@ export const DEFAULT_BINDINGS: Record<string, string[]> = {
   achievements: [')'], // CDDA ')' diary / achievements / scores
   // --- ui2 preview (src/ui2/install.ts): mouse-first inventory on mock data ---
   inventory2: ['Tab'],
+  world_menu: ['o'], // context menu for what's under the crosshair (RMB is guard/aim while captured)
 };
 
 /** localStorage key for the player's rebinds (a diff over DEFAULT_BINDINGS). */

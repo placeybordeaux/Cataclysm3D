@@ -5,7 +5,7 @@
 
 #ui2 {
   position: fixed; inset: 0; pointer-events: none; z-index: 5;
-  font-family: 'Terminus', 'Unifont', 'DejaVu Sans Mono', monospace; font-size: var(--fs); line-height: 1.25;
+  font-family: 'Terminus', 'Unifont', 'DejaVu Sans Mono', monospace; font-size: var(--fs); line-height: var(--lh);
   color: var(--p-text); user-select: none; -webkit-user-select: none;
   --cell: calc(var(--icon) + var(--u) * 6);
   --gap: calc(var(--u) * 2);
@@ -139,7 +139,7 @@
 #ui2 .ui2-badge { font-weight: normal; }
 
 /* containers */
-#ui2 .ui2-container { outline: none; overflow-y: auto; max-height: 56vh; min-height: calc(var(--cell) + var(--u) * 2); padding: var(--u); }
+#ui2 .ui2-container { outline: none; overflow-y: auto; max-height: min(56vh, calc(var(--cell) * 7)); min-height: calc(var(--cell) + var(--u) * 2); padding: var(--u); }
 #ui2 .ui2-container.grid { display: flex; flex-wrap: wrap; gap: var(--gap); align-content: flex-start; }
 #ui2 .ui2-container.row { display: flex; flex-direction: column; }
 #ui2 .ui2-container:focus-visible { outline: var(--u) dashed var(--p-accent-dim); outline-offset: calc(var(--u) * -1); }
@@ -299,7 +299,7 @@ body.ui2-dragging, body.ui2-dragging * { cursor: grabbing !important; }
 #ui2 .ui2-hot-slot.pressed { animation: ui2-press .12s steps(2); border-image: var(--skin-inset-sel); }
 
 /* ---- paper doll ---- */
-#ui2 .ui2-doll { position: relative; flex: none; align-self: center; margin: var(--u) 0 calc(var(--u) * 2); }
+#ui2 .ui2-doll { --gap: calc(var(--u) * 6); position: relative; flex: none; align-self: flex-start; margin: var(--u) calc(var(--u) * 8) calc(var(--u) * 4); }
 #ui2 .ui2-doll-figure {
   position: absolute; left: 50%; top: calc(var(--cell) * .45); transform: translateX(-50%);
   width: calc(16px * var(--u) * 3); height: calc(40px * var(--u) * 3); image-rendering: pixelated; pointer-events: none;

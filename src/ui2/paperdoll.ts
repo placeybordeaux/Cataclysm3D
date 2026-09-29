@@ -19,11 +19,13 @@ export interface DollSlot extends DollSlotPos {
 }
 
 export function paperDollView(model: InventoryModel, slots: DollSlot[]): { el: HTMLElement; destroy(): void } {
-  // Extents in cell units (the CSS places slots with calc() so they follow the UI scale).
-  const ext = paperDollLayout(slots, 1, 0).size;
+  // Validates ids (duplicates throw); the CSS places slots with calc() so they follow the scale.
+  paperDollLayout(slots, 1, 0);
+  const maxCol = Math.max(...slots.map((s) => s.col)), maxRow = Math.max(...slots.map((s) => s.row));
   const el = h('div', { class: 'ui2-doll' });
-  el.style.width = `calc(${ext.w} * var(--cell) + ${Math.ceil(ext.w) - 1} * var(--gap))`;
-  el.style.height = `calc(${ext.h} * var(--cell) + ${Math.ceil(ext.h) - 1} * var(--gap))`;
+  // The furthest slot's offset plus one cell (slots sit at k·(cell+gap), k may be fractional).
+  el.style.width = `calc(${maxCol} * (var(--cell) + var(--gap)) + var(--cell))`;
+  el.style.height = `calc(${maxRow} * (var(--cell) + var(--gap)) + var(--cell))`;
   el.appendChild(figure());
   const wells = new Map<string, HTMLElement>();
   const unregs: (() => void)[] = [];

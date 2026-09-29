@@ -88,7 +88,7 @@ export function openInventoryScreen(model: MockInventoryModel, o: InventoryScree
   }
 
   // --- Ground
-  panels.push(containerPanel(model, 'ground', { ...base, id: 'inv.ground', title: 'Ground', mode: 'row', width: 'calc(var(--row-icon) * 11 + var(--u) * 40)' }));
+  panels.push(containerPanel(model, 'ground', { ...base, id: 'inv.ground', title: 'Ground', mode: window.innerHeight >= 800 ? 'row' : 'grid', width: 'calc(var(--fs) * 17 + var(--row-icon) * 2)' }));
 
   // Drop on the world = drop on the ground (at your feet for now).
   if (o.worldEl) {

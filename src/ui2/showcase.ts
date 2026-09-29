@@ -68,6 +68,13 @@ export async function runUi2Showcase(canvas: HTMLCanvasElement): Promise<void> {
     ui2: {
       model,
       hotbar,
+      /** Centre of the first button/tab/menu row whose text contains `text` (for xclick). */
+      textRect(text: string) {
+        const el = [...document.querySelectorAll('#ui2 button, #ui2 .ui2-menu-row, #ui2 .ui2-list-row')].find((e) => e.textContent?.includes(text));
+        if (!el) return null;
+        const r = el.getBoundingClientRect();
+        return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
+      },
       rect(sel: string) {
         const el = document.querySelector(sel);
         if (!el) return null;
@@ -103,7 +110,8 @@ export async function runUi2Showcase(canvas: HTMLCanvasElement): Promise<void> {
 // --- controls ---------------------------------------------------------------------------------
 
 function openControls(model: Parameters<typeof openInventoryScreen>[0], invOpts: Parameters<typeof openInventoryScreen>[1], raw: RawItems): void {
-  const p = openPanel({ id: 'showcase.controls', title: 'UI2 showcase', x: 8, y: 8, closable: false, width: 'calc(var(--fs) * 17)' });
+  // Bottom-left (clamped on screen): the top-left corner is where toasts appear.
+  const p = openPanel({ id: 'showcase.controls', title: 'UI2 showcase', x: 8, y: window.innerHeight, closable: false, width: 'calc(var(--fs) * 22)' });
   const scaleRow = h('div', { class: 'sc-row' });
   const drawScale = () =>
     scaleRow.replaceChildren(

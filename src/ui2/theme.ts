@@ -62,24 +62,41 @@ export function installTheme(root: HTMLElement): void {
   window.addEventListener('resize', () => applyScale());
 }
 
+let lastDpr = 0;
+
 function applyScale(): void {
   if (!rootEl) return;
   const s = resolveScale(pref, window.innerWidth, window.innerHeight);
-  const changed = s !== metrics.scale || !rootEl.dataset.scale;
+  const dpr = window.devicePixelRatio || 1;
+  const changed = s !== metrics.scale || dpr !== lastDpr || !rootEl.dataset.scale;
   metrics = uiMetrics(s);
+  lastDpr = dpr;
   if (!changed) return;
+  // Pixel art must land on *device* pixels: with browser zoom (or a 1.04 desktop scale) a CSS
+  // px isn't one. Every art pixel is a whole number of device pixels, expressed back in CSS px.
+  const dev = (css: number) => Math.max(1, Math.round(css * dpr));
+  const ud = dev(metrics.u);
+  const iconK = dev(metrics.icon / 32);
+  const rowK = dev(metrics.rowIcon / 32);
   const r = rootEl.style;
-  r.setProperty('--u', `${metrics.u}px`);
+  r.setProperty('--u', `${ud / dpr}px`);
   r.setProperty('--fs', `${metrics.font}px`);
   r.setProperty('--fs-s', `${metrics.fontSmall}px`);
   r.setProperty('--fs-l', `${metrics.fontLarge}px`);
-  r.setProperty('--icon', `${metrics.icon}px`);
-  r.setProperty('--row-icon', `${metrics.rowIcon}px`);
-  r.setProperty('--icon-k', String(metrics.icon / 32));
-  r.setProperty('--row-icon-k', String(metrics.rowIcon / 32));
-  for (const [name, spec] of Object.entries(SKINS)) r.setProperty(`--skin-${name}`, skinCss(spec, metrics.u));
+  r.setProperty('--lh', `${dev(metrics.lineHeight) / dpr}px`);
+  r.setProperty('--icon', `${(32 * iconK) / dpr}px`);
+  r.setProperty('--row-icon', `${(32 * rowK) / dpr}px`);
+  r.setProperty('--icon-k', String(iconK / dpr));
+  r.setProperty('--row-icon-k', String(rowK / dpr));
+  for (const [name, spec] of Object.entries(SKINS)) r.setProperty(`--skin-${name}`, skinCss(spec, ud, dpr));
   rootEl.dataset.scale = String(s);
   for (const f of listeners) f(metrics);
+}
+
+/** Snap a CSS length to the device pixel grid (window positions, popups). */
+export function snapPx(css: number): number {
+  const dpr = window.devicePixelRatio || 1;
+  return Math.round(css * dpr) / dpr;
 }
 
 const kebab = (s: string) => s.replace(/[A-Z]/g, (c) => '-' + c.toLowerCase());
@@ -121,8 +138,8 @@ export const SKINS: Record<string, SkinSpec> = {
 
 const RING = 3;
 
-/** Draw a skin at integer scale `u`; returns a CSS border-image value. */
-function skinCss(spec: SkinSpec, u: number): string {
+/** Draw a skin at `u` device pixels per art pixel; returns a CSS border-image value. */
+function skinCss(spec: SkinSpec, u: number, dpr: number): string {
   if (typeof document === 'undefined') return 'none';
   const n = RING * 2 + 2;
   const c = document.createElement('canvas');
@@ -148,5 +165,5 @@ function skinCss(spec: SkinSpec, u: number): string {
       const litSide = y === d ? x < n - 1 - d : x === d ? y < n - 1 - d : false;
       px(x, y, litSide ? lit : shade);
     }
-  return `url(${c.toDataURL()}) ${RING * u} fill / ${RING * u}px stretch`;
+  return `url(${c.toDataURL()}) ${RING * u} fill / ${(RING * u) / dpr}px stretch`;
 }

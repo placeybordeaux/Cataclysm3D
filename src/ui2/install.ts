@@ -118,14 +118,25 @@ export function installUi2(game: Game, renderer: Renderer, ctx: UiContext, api: 
     if (primary && 'action' in primary) primary.action?.();
   });
 
+  // While the mouse is captured RMB is guard/aim, so the crosshair's context menu is a key.
+  // It opens at the screen centre; being a ui2 surface it frees the cursor for pointing.
+  game.keys.register('world_menu', 'Actions for what you look at (context menu)', () => {
+    const t = hover.fromHit(game.lookAt(6));
+    if (!t) return game.message('Nothing there to act on.', 'c_light_gray');
+    const items = worldMenu(t);
+    if (!items.length) return game.message(`Nothing to do with the ${t.name}.`, 'c_light_gray');
+    const r = canvas.getBoundingClientRect();
+    openContextMenu({ x: r.left + r.width / 2, y: r.top + r.height / 2 }, items, { title: t.name });
+  });
+
   // Built-in world entry: what `x` look mode would say about it.
   worldContextProviders.push((t) => [
     {
       label: 'Look at', key: 'L', time: 0,
       action: () => {
         const text = describeHit(ctx, t.hit as RayHit<LookCreature>).replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
-        const [title, ...rest] = text.split('\n').filter(Boolean);
-        toast({ category: 'info', title: title ?? t.name, body: rest.slice(0, 3).join(' ') || undefined, key: `look:${t.x},${t.y},${t.z}` });
+        const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
+        toast({ category: 'info', title: t.name, body: lines.slice(0, 4).join(' · ') || undefined, key: `look:${t.x},${t.y},${t.z}` });
       },
     },
   ]);
@@ -163,6 +174,13 @@ export function installUi2(game: Game, renderer: Renderer, ctx: UiContext, api: 
       hover: hover.current()?.name ?? null,
       menu: [...document.querySelectorAll('.ui2-menu')].map((m) => [...m.querySelectorAll('.ui2-menu-row')].map((r) => r.textContent)),
     }),
+    /** Centre of the first button/tab/menu row whose text contains `text` (for xclick). */
+    textRect(text: string) {
+      const el = [...document.querySelectorAll('#ui2 button, #ui2 .ui2-menu-row, #ui2 .ui2-list-row')].find((e) => e.textContent?.includes(text));
+      if (!el) return null;
+      const r = el.getBoundingClientRect();
+      return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
+    },
     rect(sel: string) {
       const el = document.querySelector(sel);
       if (!el) return null;
@@ -202,6 +220,10 @@ function worldHover(game: Game, renderer: Renderer) {
       { x: ndc.x, y: ndc.z, h: ndc.y },
       { maxDist: 40, creatureAt: (tx, ty, tz) => game.creatureAt(tx, ty, tz), skipOrigin: renderer.cameraMode === 'first', vehicleAt: (tx, ty, tz) => vehicleSolidHeight(game, tx, ty, tz) },
     );
+    return fromHit(hit);
+  };
+
+  const fromHit = (hit: RayHit<LookCreature> | null): WorldTarget | null => {
     if (!hit) return null;
     const items = hit.kind === 'floor' ? game.map.itemsAt(hit.x, hit.y, hit.z) : [];
     const kind: WorldTarget['kind'] = items.length ? 'items' : (hit.kind as WorldTarget['kind']);
@@ -218,6 +240,7 @@ function worldHover(game: Game, renderer: Renderer) {
 
   return {
     pick,
+    fromHit,
     current: () => cur,
     update(x: number, y: number) {
       cur = pick(x, y);
