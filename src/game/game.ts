@@ -22,7 +22,7 @@ export class Game {
   readonly events = new EventBus();
   readonly clock = new GameClock();
   readonly map: GameMap;
-  readonly player = new PlayerAvatar();
+  readonly player: PlayerAvatar;
   readonly systems: GameSystem[] = [];
   paused = false;
   private acc = 0;
@@ -30,6 +30,9 @@ export class Game {
 
   constructor(readonly data: GameData, readonly seed: number, readonly input: Input) {
     this.map = new GameMap(seed);
+    this.player = new PlayerAvatar(data, { seed });
+    this.player.onMessage = (text, color) => this.message(text, color);
+    this.player.onDeath = (cause) => this.events.emit('playerDied', { cause });
     for (const t of Object.values(data.terrain)) this.map.terrain.add(t);
     for (const f of Object.values(data.furniture)) this.map.furniture.add(f);
   }
@@ -55,6 +58,7 @@ export class Game {
   tick(dt: number): void {
     const gameDt = this.clock.advanceReal(dt);
     this.updatePlayerMovement(dt);
+    this.player.update(gameDt);
     for (const s of this.systems) s.update(this, dt, gameDt);
   }
 
@@ -77,6 +81,8 @@ export class Game {
     const wy = -fy * cos + fx * sin;
     const cost = this.map.moveCost(p.tileX, p.tileY, p.z) || 100;
     const v = p.moveSpeed(cost) * dt;
+    const [ox, oy] = [p.x, p.y];
     [p.x, p.y] = moveWithCollision(this.map, p.x, p.y, p.z, wx * v, wy * v);
+    p.onMoved(Math.hypot(p.x - ox, p.y - oy), cost);
   }
 }
