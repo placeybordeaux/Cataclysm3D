@@ -51,6 +51,8 @@ export class CraftingInventory {
   static gather(data: GameData, c: Character, map: GameMap | null, pos: CrafterPos | null, range = CRAFT_RANGE): CraftingInventory {
     const inv = new CraftingInventory(data, c, map, pos);
     for (const top of c.inv.topLevel()) inv.addTree(top, 'inv', null, undefined, c.inv.worn.includes(top));
+    // Body-provided pseudo tools (bionic toolset, finger lighter…) act like fixed furniture tools.
+    for (const f of c.inv.qualityProviders) for (const it of f()) inv.sources.push({ item: it, kind: 'environment', parent: null });
     if (map && pos) {
       const cx = Math.floor(pos.x), cy = Math.floor(pos.y);
       let fire = false;

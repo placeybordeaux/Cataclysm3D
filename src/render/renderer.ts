@@ -74,6 +74,18 @@ export class Renderer {
   handsBusy = false;
   /** Per-frame hooks run at the start of render() (e.g. vehicle meshes following vehicles). */
   readonly beforeRender: ((dt: number) => void)[] = [];
+  /**
+   * Night vision strength (0 none .. ~2 for CDDA's +10 sight range): brightens the night
+   * image via exposure. Set by src/mutbio.ts from mutations / active bionics.
+   */
+  nightVision = 0;
+  /**
+   * Extra sprite layers for the third-person survivor between the body and the clothes, like
+   * CDDA's mutation overlays (`overlay_mutation_FUR`…). Returns base ids without the
+   * `overlay_[gender_]` prefix handling: full ids tried in order are
+   * overlay_<gender>_mutation_<id>, overlay_mutation_<id>.
+   */
+  playerMutationOverlays: (() => string[]) | null = null;
   private playerSprite: SpriteHandle | null = null;
   private last = performance.now();
   private time = 0;
@@ -343,9 +355,10 @@ export class Renderer {
     const ratio = Math.max(this.lightmap.naturalLevel, 1) / Math.max(lum, 1);
     // top-down mostly shows the outdoors around the player's building: adapt only a little
     const k = day * (this.rig.mode === 'top' ? 0.3 : 1);
-    const target = 1 + (Math.min(2.2, Math.max(1, Math.sqrt(ratio))) - 1) * k;
+    const target = (1 + (Math.min(2.2, Math.max(1, Math.sqrt(ratio))) - 1) * k) * (1 + this.nightVision * this.skyState.night);
     const pl = this.pipeline;
     pl.exposure = this.snapExposure ? target : pl.exposure + (target - pl.exposure) * Math.min(1, dt * 1.5);
+    pl.nightVision = Math.min(1, this.nightVision * this.skyState.night);
     this.snapExposure = false;
   }
 
@@ -389,7 +402,8 @@ export class Renderer {
     if (this.playerLookT > 0) return;
     this.playerLookT = 0.25;
     const inv = this.game.player.inv;
-    const look = [...inv.worn.map((w) => w.typeId), '|', inv.wielded?.typeId ?? ''].join(',');
+    const muts = this.playerMutationOverlays?.() ?? [];
+    const look = [...inv.worn.map((w) => w.typeId), '|', inv.wielded?.typeId ?? '', '|', ...muts].join(',');
     if (look === this.playerLook) return;
     this.playerLook = look;
     const src = this.source;
@@ -397,7 +411,7 @@ export class Renderer {
     // Until character creation hands out clothes the survivor wears nothing; show the
     // default outfit rather than a naked sprite in that case.
     const worn = inv.worn.length ? inv.worn.map((w) => w.typeId) : ['jeans', 'tshirt', 'sneakers', 'jacket_flannel'];
-    src.playerLayers = src.layersFor(worn, inv.wielded?.typeId ?? null);
+    src.playerLayers = src.layersFor(worn, inv.wielded?.typeId ?? null, this.game.player.male ? 'male' : 'female', muts);
     this.playerSprite!.setFrame(src.sprite('player'), 1.75);
   }
 

@@ -18,6 +18,8 @@ import { omtLabel, playerOmt, type UiContext } from './context';
 export type PromptProvider = (game: Game) => string | null | undefined;
 
 const providers: PromptProvider[] = [];
+/** Extra sidebar lines (e.g. bionic power) inserted under the stats; CDDA-tagged HTML. */
+const sidebarProviders: ((game: Game) => string[] | null)[] = [];
 let explicitPrompt: string | null = null;
 
 export const hud = {
@@ -34,6 +36,14 @@ export const hud = {
     return () => {
       const i = providers.indexOf(fn);
       if (i >= 0) providers.splice(i, 1);
+    };
+  },
+  /** Add lines to the sidebar (under the stats block). Returns an unregister function. */
+  addSidebarProvider(fn: (game: Game) => string[] | null): () => void {
+    sidebarProviders.push(fn);
+    return () => {
+      const i = sidebarProviders.indexOf(fn);
+      if (i >= 0) sidebarProviders.splice(i, 1);
     };
   },
   /** Sidebar safe-mode indicator (placeholder until the monster system drives it). */
@@ -202,6 +212,7 @@ export class Hud {
     L.push(`${stat('Str', p.str, p.str_base)}  ${stat('Dex', p.dex, p.dex_base)}  ${stat('Int', p.int, p.int_base)}  ${stat('Per', p.per, p.per_base)}`);
     const morale = p.morale.level();
     L.push(`${lbl('Mood:')} ${colorize(moraleFace(morale, this.ctx.data.moodFaces))}  ${lbl('Focus:')} ${c('c_white', String(Math.round(p.focus)))}  ${lbl('Move:')} ${c(MOVE_MODE[p.moveMode][1], MOVE_MODE[p.moveMode][0])}`);
+    for (const f of sidebarProviders) L.push(...(f(game) ?? []));
 
     // --- needs (CDDA only shows a label when not normal)
     const needs: string[] = [];

@@ -187,6 +187,16 @@ export class Character {
   private healAcc = {} as Record<MainPartId, number>;
   private traitDefs = new Map<string, MutationDef>();
   readonly effectTypes: EffectRegistry;
+  /**
+   * Extra enchantment sources beyond traits (installed bionics: src/game/bionics.ts). Each
+   * returns its summed {add, multiply} for an enchant_vals id, or null when it has none.
+   */
+  readonly enchantProviders: ((value: string) => { add: number; multiply: number } | null)[] = [];
+  /**
+   * Decides whether a trait enchantment's CDDA `condition` holds (src/game/mutations.ts sets
+   * it: ACTIVE needs the mutation powered, simple dialogue conditions). Unset: always true.
+   */
+  enchantCondition: ((condition: unknown, traitId: string) => boolean) | null = null;
 
   constructor(readonly data: GameData, opts: { seed?: number } = {}) {
     this.rng = new Rng(opts.seed ?? 12345);
@@ -224,21 +234,35 @@ export class Character {
     this.traits.delete(id);
     this.recalcHp();
   }
+  /** The trait/mutation definition (misc.mutation or the built-in fallbacks), if known. */
+  traitDef(id: string): MutationDef | undefined {
+    return this.traitDefs.get(id);
+  }
   traitName(id: string): string {
     return cddaText(this.traitDefs.get(id)?.name) || id;
   }
   /** Sum of trait enchantment values for a CDDA enchant_vals::mod id. */
   enchant(value: string): { add: number; multiply: number } {
     let add = 0, multiply = 0;
+    const named = this.data.misc?.enchantment as Record<string, { values?: { value: string; add?: number; multiply?: number }[]; condition?: unknown }> | undefined;
     for (const id of this.traits) {
-      for (const e of this.traitDefs.get(id)?.enchantments ?? []) {
-        if (typeof e === 'string') continue;
+      for (const raw of this.traitDefs.get(id)?.enchantments ?? []) {
+        // CDDA lets traits reference a standalone "enchantment" object by id.
+        const e = typeof raw === 'string' ? named?.[raw] : raw;
+        if (!e) continue;
+        if (e.condition !== undefined && this.enchantCondition && !this.enchantCondition(e.condition, id)) continue;
         for (const v of e.values ?? []) {
           if (v.value !== value) continue;
           add += v.add ?? 0;
           multiply += v.multiply ?? 0;
         }
       }
+    }
+    for (const p of this.enchantProviders) {
+      const r = p(value);
+      if (!r) continue;
+      add += r.add;
+      multiply += r.multiply;
     }
     return { add, multiply };
   }

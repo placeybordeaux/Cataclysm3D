@@ -59,6 +59,9 @@ export const DEFAULT_BINDINGS: Record<string, string[]> = {
   vehicle_horn: ['n'], // CDDA controls menu 'n'
   chat: ['C'], // CDDA 'C' chat: talk to nearby NPCs / order followers
   missions: ['M'], // CDDA 'M' mission log
+  // --- body modifications (src/ui/mutbio_ui.ts) ---
+  bionics: ['p'], // CDDA 'p' view/activate bionics
+  mutations: ['['], // CDDA '[' view/activate mutations
 };
 
 export class Keys {

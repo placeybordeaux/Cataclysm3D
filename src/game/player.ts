@@ -33,6 +33,8 @@ export class PlayerAvatar extends Character {
     cost *= 1 + legEnc / 100;
     // Fleet-footed on flat ground (MOVECOST_FLATGROUND_MOD enchantment).
     if (moveCost <= 100) cost = this.byEnchant(cost, 'MOVECOST_FLATGROUND_MOD');
+    // General MOVE_COST enchantments (mutations such as hooves/leg changes).
+    cost = Math.max(1, this.byEnchant(cost, 'MOVE_COST'));
     const legMul = [1, 0.5, 0.25][this.brokenLegs()];
     return (this.speed / cost) * ACTION_SCALE * modeMul * legMul;
   }

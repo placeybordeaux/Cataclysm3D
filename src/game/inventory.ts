@@ -107,6 +107,18 @@ export class Inventory {
    * registers 'firestarter', which needs the map). Consulted for types use() doesn't know.
    */
   readonly useHandlers = new Map<string, (it: Item, ua: { type: string; [k: string]: any }) => ActionResult>();
+  /**
+   * Hooks for body modifications (src/game/mutations.ts, bionics.ts): extra reasons an item
+   * can't be worn (restricts_gear), extra encumbrance per part, flat natural armor, extra
+   * tool-quality providers (bionic pseudo tools), and checks/effects around consuming
+   * (mutagen vitamins, syringes).
+   */
+  readonly wearChecks: ((it: Item) => string | null)[] = [];
+  readonly extraEncumbrance: ((bp: BodyPartId) => number)[] = [];
+  readonly naturalArmor: ((bp: BodyPartId, dtype: string) => number)[] = [];
+  readonly qualityProviders: (() => Item[])[] = [];
+  readonly consumeChecks: ((food: Item) => string | null)[] = [];
+  readonly onConsume: ((portion: Item) => string | void)[] = [];
 
   constructor(readonly owner: Character) {}
 
@@ -220,11 +232,13 @@ export class Inventory {
 
   /** Remove an item so the caller can put it on the map (result.dropped). */
   drop(it: Item): ActionResult {
+    if (it.hasFlag('BIONIC_WEAPON') || it.hasFlag('INTEGRATED')) return this.say(false, `You cannot drop your ${it.name()}.`);
     if (!this.remove(it)) return this.say(false, `You don't have that item.`);
     return this.say(true, `You drop your ${it.name()}.`, 100, { dropped: [it] });
   }
 
   canWield(it: Item): { ok: boolean; reason?: string } {
+    if (this.wielded?.hasFlag('BIONIC_WEAPON') && this.wielded !== it) return { ok: false, reason: `You cannot unwield your ${this.wielded.name()}.` };
     if (it.isLiquid()) return { ok: false, reason: "You can't wield spilt liquids." };
     if (this.owner.brokenArms() >= 2) return { ok: false, reason: "You can't wield anything with two broken arms." };
     if (this.owner.brokenArms() === 1 && (it.weight() > this.owner.str * 250 || it.hasFlag('ALWAYS_TWOHAND')))
@@ -253,6 +267,8 @@ export class Inventory {
   unwield(): ActionResult {
     const w = this.wielded;
     if (!w) return this.say(false, 'You are already empty-handed.');
+    // Bionic weapons are retracted through the bionics menu (CDDA NO_UNWIELD).
+    if (w.hasFlag('BIONIC_WEAPON')) return this.say(false, `You cannot unwield your ${w.name()}.`);
     if (!this.canStash(w)) return this.say(false, `You have no space to store your ${w.name()}.`);
     this.wielded = null;
     this.stash(w);
@@ -276,6 +292,10 @@ export class Inventory {
     }
     if (it.hasFlag('RESTRICT_HANDS') && this.wielded && (this.wielded.hasFlag('ALWAYS_TWOHAND') || this.wielded.weight() > 5000))
       return { ok: false, reason: "You don't have a hand free to wear that." };
+    for (const check of this.wearChecks) {
+      const reason = check(it);
+      if (reason) return { ok: false, reason };
+    }
     return { ok: true };
   }
 
@@ -294,6 +314,7 @@ export class Inventory {
   takeOff(it: Item): ActionResult {
     const i = this.worn.indexOf(it);
     if (i < 0) return this.say(false, 'You are not wearing that item.');
+    if (it.hasFlag('INTEGRATED')) return this.say(false, `You can't take off your ${it.name()}; it's part of you.`);
     this.worn.splice(i, 1);
     const dropped: Item[] = [];
     if (this.canStash(it)) this.stash(it);
@@ -343,6 +364,7 @@ export class Inventory {
       if (list.length < 2) continue;
       total += list.reduce((a, b) => a + b, 0) - Math.max(...list);
     }
+    for (const f of this.extraEncumbrance) total += f(bp);
     return total;
   }
 
@@ -400,20 +422,36 @@ export class Inventory {
         u.amount = Math.max(0, u.amount - mitigation);
       }
     }
+    // Mutation/bionic armor is under the clothes (CDDA passive_absorb_hit after worn armor).
+    for (const f of this.naturalArmor) {
+      for (const u of out) {
+        if (u.amount <= 0) continue;
+        const res = f(bp, u.type);
+        if (res <= 0) continue;
+        u.amount = Math.max(0, u.amount - Math.max(res - u.armor_penetration, 0) * (u.armor_multiplier ?? 1));
+        u.armor_penetration = Math.max(0, u.armor_penetration - res);
+      }
+    }
     return out.map((u) => ({ type: u.type, amount: u.amount }));
   }
 
   // ------------------------------------------------------------ tools & crafting queries
+  /** Carried items plus pseudo tools from qualityProviders (bionic toolsets). */
+  private qualityItems(): Item[] {
+    const out = this.allItems();
+    for (const f of this.qualityProviders) out.push(...f());
+    return out;
+  }
   maxQuality(id: string): number {
     let best = 0;
-    for (const it of this.allItems()) best = Math.max(best, it.qualityLevel(id));
+    for (const it of this.qualityItems()) best = Math.max(best, it.qualityLevel(id));
     return best;
   }
   hasQuality(id: string, level = 1): boolean {
     return this.maxQuality(id) >= level;
   }
   findByQuality(id: string, level = 1): Item[] {
-    return this.allItems().filter((it) => it.qualityLevel(id) >= level);
+    return this.qualityItems().filter((it) => it.qualityLevel(id) >= level);
   }
   /** Count by type: charges for stackables, items otherwise. */
   countOf(typeId: string): number {
@@ -460,6 +498,10 @@ export class Inventory {
     const food = this.comestibleIn(it);
     const c = this.owner;
     if (!food) return this.say(false, "That doesn't look edible.");
+    for (const check of this.consumeChecks) {
+      const reason = check(food);
+      if (reason) return this.say(false, reason);
+    }
     const liquid = food.isLiquid();
     const portion = food.countByCharges ? food.split(Math.min(1, food.charges)) : food;
     const def = portion.def;
@@ -476,7 +518,8 @@ export class Inventory {
       this.remove(food);
       it.removeContent(food);
     }
-    c.ingest(def.calories ?? 0, solids, liquid ? Math.max(water, portion.volume()) : water);
+    // NO_INGEST (mutagens, injected drugs) bypasses the stomach.
+    if (!portion.hasFlag('NO_INGEST')) c.ingest(def.calories ?? 0, solids, liquid ? Math.max(water, portion.volume()) : water);
     if (def.stim) c.stim += def.stim;
     if (def.sleepiness_mod) c.sleepiness -= def.sleepiness_mod;
     // Character::fun_for: rot sours taste; morale lasts 2 h, decaying after 1 h.
@@ -491,6 +534,11 @@ export class Inventory {
     if (fun < 0) c.morale.add('morale_food_bad', fun, fun * 6, 7200, 3600, false, portion.typeId);
     else if (fun > 0) c.morale.add('morale_food_good', fun, fun * 3, 7200, 3600, false, portion.typeId);
     let msg = '';
+    const extra: string[] = [];
+    for (const f of this.onConsume) {
+      const m = f(portion);
+      if (m) extra.push(m);
+    }
     for (const ua of useActions(def)) {
       if (ua.type === 'consume_drug') {
         for (const e of (ua.effects ?? []) as { id: string; duration: number | string; bp?: string; intensity?: number }[])
@@ -499,6 +547,7 @@ export class Inventory {
       }
     }
     if (!msg) msg = `You ${liquid ? 'drink' : 'eat'} your ${portion.name()}${portion.rotten() ? ' (rotten)' : ''}.`;
+    if (extra.length) msg = [msg, ...extra].join('  ');
     const moves = liquid ? 100 : Math.max(100, Math.min(1000, Math.floor(portion.volume() / 5) * 10));
     return this.say(true, msg, moves, { usedUp: it === food && (portion === food || food.charges <= 0) });
   }

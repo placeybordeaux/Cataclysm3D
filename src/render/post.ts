@@ -62,6 +62,7 @@ uniform float uCrease;
 uniform float uLutSize;
 uniform float uExposure;
 uniform float uHurt;
+uniform float uNightVision;
 uniform vec2 uDitherOffset;
 varying vec2 vUv;
 
@@ -127,6 +128,13 @@ void main() {
 
     // --- fog -------------------------------------------------------------------------
     col = mix(col, uFogColor, fog);
+  }
+
+  // night vision (mutations / bionic NV): amplified, green-tinted luminance
+  if (uNightVision > 0.0) {
+    float l = dot(col, vec3(0.3, 0.59, 0.11));
+    vec3 nv = vec3(0.42, 1.0, 0.48) * min(1.0, pow(l * 6.0, 0.7) * 0.55);
+    col = mix(col, max(col, nv), uNightVision);
   }
 
   // hurt flash: red vignette, strongest at the edges, before grading so it gets dithered
@@ -195,6 +203,8 @@ export class PixelPipeline {
   exposure = 1;
   /** 0..1 red hurt vignette (renderer.hurtFlash decays it). */
   hurt = 0;
+  /** 0..1 night-vision amplification + green tint (renderer.nightVision at night). */
+  nightVision = 0;
   /** @internal signs of the view-anchored dither offset (verified with cdda.shimmerTest) */
   dirX = 1;
   dirY = 1;
@@ -216,7 +226,7 @@ export class PixelPipeline {
         uRes: { value: new THREE.Vector2() }, uNear: { value: 0.1 }, uFar: { value: 300 },
         uFogColor: { value: new THREE.Color() }, uFogNear: { value: 20 }, uFogFar: { value: 80 }, uFogMax: { value: 1 },
         uMode: { value: 0 }, uDither: { value: 0.05 }, uOutline: { value: 0.5 }, uCrease: { value: 0.2 },
-        uExposure: { value: 1 }, uHurt: { value: 0 },
+        uExposure: { value: 1 }, uHurt: { value: 0 }, uNightVision: { value: 0 },
         uDitherOffset: { value: new THREE.Vector2() },
       },
       depthTest: false,
@@ -304,6 +314,7 @@ export class PixelPipeline {
     u.uCrease.value = o.crease;
     u.uExposure.value = this.exposure;
     u.uHurt.value = this.hurt;
+    u.uNightVision.value = this.nightVision;
     if (o.ditherAnchor === 'view') {
       // camera yaw/pitch in pixel-angles (rotation order YXZ: y = -yaw, x = pitch)
       const q = (2 * Math.tan((camera.fov * Math.PI) / 360)) / this.lowH;

@@ -125,9 +125,12 @@ export function critChance(c: Character, weapon: Item | null, rollHit: number, t
 export function rollMeleeDamage(c: Character, weapon: Item | null, crit: boolean, rng: Rng, average = false): RolledDamage[] {
   const out: RolledDamage[] = [];
   const unarmed = !weapon;
-  const types = new Set(['bash', 'cut', 'stab', ...Object.keys(weapon?.def.melee_damage ?? {})]);
+  // Unarmed blows land with whatever covers the hand (outfit::current_unarmed_weapon): claws
+  // and other integrated mutation armor add their melee damage, gloves mostly nothing.
+  const fist = unarmed ? unarmedWeapon(c) : null;
+  const types = new Set(['bash', 'cut', 'stab', ...Object.keys((weapon ?? fist)?.def.melee_damage ?? {})]);
   for (const dt of types) {
-    let dmg = weapon ? weapon.meleeDamage(dt) : 0;
+    let dmg = weapon ? weapon.meleeDamage(dt) : fist ? fist.meleeDamage(dt) : 0;
     if (dt !== 'bash' && dt !== 'cut' && dt !== 'stab') {
       if (dmg > 0) out.push({ type: dt, amount: dmg, armor_penetration: 0, armor_multiplier: 1 });
       continue;
@@ -165,6 +168,12 @@ export function rollMeleeDamage(c: Character, weapon: Item | null, crit: boolean
     out.push({ type: dt, amount: dmg * mul, armor_penetration: arpen, armor_multiplier: armorMult });
   }
   return out;
+}
+
+/** Outermost worn item covering the right hand (the punching surface), or null. */
+export function unarmedWeapon(c: Character): Item | null {
+  const list = c.inv.wornCovering('hand_r');
+  return list.find((it) => it.def.melee_damage && Object.keys(it.def.melee_damage).length) ?? null;
 }
 
 /** Flat per-type monster armor (MonsterDef.armor) applied like resistances::get_effective_resist. */

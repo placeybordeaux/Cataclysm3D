@@ -127,9 +127,14 @@ export class AtlasTextureSource implements TileTextureSource {
    * (inner to outer), then the wielded item's. Tries the gendered overlay id first like CDDA
    * (overlay_male_worn_X, then overlay_worn_X); items without art are skipped.
    */
-  layersFor(worn: string[], wielded: string | null, gender: 'male' | 'female' = 'male'): string[] {
+  layersFor(worn: string[], wielded: string | null, gender: 'male' | 'female' = 'male', mutations: string[] = []): string[] {
     const pick = (...ids: string[]) => ids.find((id) => this.atlas.has(id));
     const out = [`player_${gender}`];
+    // Mutation overlays sit on the skin, under clothing (CDDA draws them first).
+    for (const id of mutations) {
+      const o = pick(`overlay_${gender}_mutation_${id}`, `overlay_mutation_${id}`);
+      if (o) out.push(o);
+    }
     for (const id of worn) {
       const o = pick(`overlay_${gender}_worn_${id}`, `overlay_worn_${id}`);
       if (o) out.push(o);

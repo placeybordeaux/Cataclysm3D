@@ -185,6 +185,25 @@ tests/               vitest unit tests (pure logic, no DOM/WebGL)
   `cdda.respondText(s)`, `cdda.trade()`, `cdda.missions()`, `cdda.missionLog()`,
   `cdda.teleportRefugeeCenter('merchant'|'lobby'|'outside')`, `cdda.faceNpc()`.
 
+### Mutations & bionics (src/game/mutations.ts, bionics.ts, bodymods.ts; wired by src/mutbio.ts)
+- `attachBodyMods(character)` → `{ mut: MutationState, bio: BionicState }` (UI-free, unit-tested in
+  tests/mutbio.test.ts); `bodyMods(c)` fetches them. Mutations live in `Character.traits` (so trait
+  enchantments apply); `MutationState` adds CDDA's vitamin system (mutagen = `mutagen` catalyst +
+  category primer vitamins, slurry decays_into, excess effects), the CHANGING EOC timers,
+  mutate / mutate_category / mutate_towards / remove_mutation, thresholds, purifier dummies,
+  integrated armor (worn INTEGRATED items), restricts_gear, encumbrance, activation.
+- `BionicState`: installed CBMs, power (kJ), slots, install odds (`bionicSuccessChance`) and failure
+  consequences, act/react/trigger costs, fake weapons, pseudo tools, enchantments, protec, fuel.
+- Hooks other code can use: `Character.enchantProviders` / `enchantCondition`; `Inventory.wearChecks`,
+  `extraEncumbrance`, `naturalArmor`, `qualityProviders` (also fed into CraftingInventory),
+  `consumeChecks`, `onConsume`; `visionHooks(game).lights / .nightVision` (src/game/vision.ts,
+  `visionThreshold`, `bodyLight`); `renderer.nightVision`, `renderer.playerMutationOverlays`;
+  `hud.addSidebarProvider`; `charsheetSections` (src/ui/charsheet.ts). Unarmed damage uses the
+  outermost worn item on the hand (claws). Keys: `[` mutations, `p` bionics; CBMs `A`pply to
+  self-install; `e` on an Autodoc. Save section `bodymods` (order 15). Debug: `cdda.mutate(id|cat)`,
+  `cdda.mutations()`, `cdda.addVitamin(id,n)`, `cdda.installBionic(id,{surgery})`, `cdda.bionics()`,
+  `cdda.givePower(kj)`, `cdda.toggleBionic(id)`, `cdda.spawnAutodoc(dx,dy)`, `cdda.giveCbm(id)`.
+
 ### Extension points (prefer these over editing someone else's code)
 
 - `game.systems.push({ name, update(game, realDt, gameDt) })` for per-tick simulation.

@@ -136,6 +136,58 @@ export function itemLight(it: Item): number {
 
 const chunkLights = new WeakMap<Chunk, { version: number; list: LightSource[] }>();
 
+/** A personal light that isn't an item (bionic flashlight): luminance and beam vs glow. */
+export interface BodyLight {
+  lum: number;
+  directional: boolean;
+  name: string;
+}
+
+/**
+ * Per-game hooks for body modifications (src/game/mutations.ts, bionics.ts): personal light
+ * sources, and night vision as extra sight range (Character::get_vision_threshold).
+ */
+export interface VisionHooks {
+  lights: ((game: Game) => BodyLight | null)[];
+  nightVision: ((game: Game) => number)[];
+}
+const visionHookMap = new WeakMap<Game, VisionHooks>();
+export function visionHooks(game: Game): VisionHooks {
+  let h = visionHookMap.get(game);
+  if (!h) visionHookMap.set(game, (h = { lights: [], nightVision: [] }));
+  return h;
+}
+
+/** Brightest body light (bionic flashlight…), or null. */
+export function bodyLight(game: Game): BodyLight | null {
+  let best: BodyLight | null = null;
+  for (const f of visionHooks(game).lights) {
+    const l = f(game);
+    if (l && l.lum > (best?.lum ?? 0)) best = l;
+  }
+  return best;
+}
+
+/** Extra night-vision sight range from mutations/bionics (NIGHTVISION +2 … NIGHT_VISION +10). */
+export function nightVisionRange(game: Game): number {
+  let r = 0;
+  for (const f of visionHooks(game).nightVision) r = Math.max(r, f(game));
+  return r;
+}
+
+/**
+ * Character::get_vision_threshold: the light level below which you can't see. Base range is
+ * per/3; night vision adds to it. Clamped to LIGHT_AMBIENT_LOW like CDDA.
+ */
+export function visionThreshold(game: Game, light: number): number {
+  const nv = nightVisionRange(game);
+  if (nv <= 0) return LIGHT_AMBIENT_LOW;
+  const dimming = 1 + (light - LIGHT_AMBIENT_MINIMAL) / (LIGHT_AMBIENT_LIT - LIGHT_AMBIENT_MINIMAL);
+  const range = Math.max(1, game.player.per / 3 + nv);
+  const LIGHT_TRANSPARENCY_OPEN_AIR = 0.038376418216;
+  return Math.min(LIGHT_AMBIENT_LOW, (LIGHT_AMBIENT_MINIMAL / Math.exp(range * LIGHT_TRANSPARENCY_OPEN_AIR) - 0.01) * Math.max(1, dimming));
+}
+
 /** Static + field + item light sources in a chunk, cached until the chunk changes. */
 export function chunkLightSources(game: Game, c: Chunk): LightSource[] {
   const hit = chunkLights.get(c);
@@ -168,7 +220,7 @@ export function chunkLightSources(game: Game, c: Chunk): LightSource[] {
 export function playerLight(game: Game): number {
   let best = 0;
   for (const it of game.player.inv.allItems()) best = Math.max(best, itemLight(it));
-  return best;
+  return Math.max(best, bodyLight(game)?.lum ?? 0);
 }
 
 /** Point-light contribution: lum / d², cut off once it falls under LIGHT_AMBIENT_LOW/4. */
@@ -255,7 +307,8 @@ export function playerCanSee(game: Game, x: number, y: number, z: number): boole
   if (d <= 1) return true;
   if (d > MAX_VIEW_DISTANCE) return false;
   if (!lineOfSight(game.map, p.tileX, p.tileY, x, y, z)) return false;
-  return lightAt(game, x, y, z) > LIGHT_AMBIENT_LOW;
+  const l = lightAt(game, x, y, z);
+  return l > visionThreshold(game, l);
 }
 
 /** Alias kept short for other systems: can the player see this tile? */

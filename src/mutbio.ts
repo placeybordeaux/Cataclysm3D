@@ -1,0 +1,199 @@
+import type { Game } from './game/game';
+import type { Renderer } from './render/renderer';
+import type { DebugApi } from './debug';
+import { attachBodyMods, type BodyMods } from './game/bodymods';
+import { createItem, Item } from './game/item';
+import { visionHooks } from './game/vision';
+import { interactOverrides } from './game/interact';
+import { targetTile } from './game/targeting';
+import { hasFlag } from './world/registry';
+import { registerSaveable } from './save/registry';
+import { hud } from './ui/hud';
+import { charsheetSections } from './ui/charsheet';
+import { bionicsSheetBox, installCbmFlow, openAutodocMenu, openBionicsMenu, openMutationsMenu, powerBar } from './ui/mutbio_ui';
+import type { MutationStateJSON } from './game/mutations';
+import type { BionicStateJSON } from './game/bionics';
+
+// Wiring for mutations and bionics (src/game/mutations.ts, bionics.ts, bodymods.ts): the
+// player's hooks, per-tick simulation, vision/light/sprite hooks, keys (`[` mutations,
+// `p` bionics), CBM `A`pply self-install, Autodoc examine, sidebar power, '@' box, save
+// section 'bodymods' and window.cdda helpers. main.ts calls installMutBio() once.
+
+export function installMutBio(game: Game, renderer: Renderer | null, api?: DebugApi): BodyMods {
+  const p = game.player;
+  const mods = attachBodyMods(p, { isDay: () => game.clock.hourOfDay >= 6 && game.clock.hourOfDay < 20 });
+  const { mut, bio } = mods;
+  const drop = (it: Item) => game.map.addItem(p.tileX, p.tileY, p.z, it);
+  mut.onDropItem = drop;
+
+  // ---- simulation
+  let lastX = p.x, lastY = p.y;
+  game.systems.push({
+    name: 'bodymods',
+    update(_g, _realDt, gameDt) {
+      mut.update(gameDt);
+      bio.update(gameDt);
+      const moved = Math.hypot(p.x - lastX, p.y - lastY);
+      lastX = p.x;
+      lastY = p.y;
+      // Teleports aren't walking: only count plausible steps for the torsion ratchet.
+      if (moved > 0 && moved < 2) bio.onMoved(moved);
+      // Bionic weapon gone from the hands some other way (thrown, swapped): power it down.
+      for (const b of bio.bionics) {
+        const fw = b.powered ? bio.def(b.id)?.fake_weapon : undefined;
+        if (fw && p.inv.wielded?.typeId !== fw) bio.deactivate(b.id, true);
+      }
+    },
+  });
+
+  // ---- vision / light
+  const hooks = visionHooks(game);
+  hooks.lights.push(() => {
+    const lum = bio.light();
+    return lum > 0 ? { lum, directional: true, name: 'Cranial Flashlight' } : null;
+  });
+  hooks.nightVision.push(() => Math.max(mut.nightVisionRange(), bio.nightVisionRange()));
+  if (renderer) {
+    renderer.playerMutationOverlays = () => mut.overlays();
+    renderer.beforeRender.push(() => {
+      // CDDA +10 range (NV goggles / bionic) ≈ doubles the night image; natural NV less.
+      renderer.nightVision = Math.max(mut.nightVisionRange(), bio.nightVisionRange()) / 5;
+    });
+  }
+
+  // ---- UI
+  const hasDom = typeof document !== 'undefined' && !!renderer;
+  if (hasDom) {
+    game.keys.register('mutations', 'View/activate mutations', () => void openMutationsMenu(game, mods));
+    game.keys.register('bionics', 'View/activate bionics', () => void openBionicsMenu(game, mods));
+    hud.addSidebarProvider(() => (bio.maxPower() > 0 ? [`${'Power:'.padEnd(6)} ${powerBar(mods, 8)}`] : null));
+    charsheetSections.push(() => bionicsSheetBox(mods));
+  }
+
+  // CBMs: `A`pply = self-install (CDDA needs an Autodoc; we allow it with the manual odds).
+  p.inv.useHandlers.set('install_bionic', (it) => {
+    if (!hasDom) return { ok: false, msg: 'No UI to confirm the operation.', moves: 0 };
+    void installCbmFlow(game, mods, it, {
+      autodoc: false,
+      consumeItem: (x) => {
+        if (!p.inv.remove(x)) removeFromMapNear(game, x);
+      },
+      dropItem: drop,
+    });
+    return { ok: true, msg: '', moves: 0 };
+  });
+
+  // Autodoc: `e` on an f_autodoc (or its couch) opens the operation menu.
+  const autodocAimed = () => {
+    const t = targetTile(game);
+    if (!t) return false;
+    const f = game.map.furnAt(t.x, t.y, t.z);
+    return hasFlag(f, 'AUTODOC') || hasFlag(f, 'AUTODOC_COUCH');
+  };
+  interactOverrides.push({
+    interact: (g) => {
+      if (!autodocAimed() || !hasDom) return false;
+      openAutodocMenu(g, mods, () => cbmsNearby(g), drop);
+      return true;
+    },
+    prompt: () => (autodocAimed() ? `[${game.keys.keyFor('interact')}] Use the Autodoc` : null),
+  });
+
+  // ---- save
+  registerSaveable<{ mut: MutationStateJSON; bio: BionicStateJSON }>(game, 'bodymods', {
+    order: 15, // after the player (10): traits and worn integrated armor are already loaded
+    save: () => ({ mut: mut.toJSON(), bio: bio.toJSON() }),
+    load: (data, ctx) => {
+      mut.load(data.mut);
+      bio.load(data.bio, ctx.warn);
+    },
+    missing: () => {
+      mut.load({ vitamins: {}, powered: [], base: [...p.traits], time: 0, nextChangingCheck: 1800, nextChangingMutate: 0 });
+      bio.load({ bionics: [], power: 0 });
+    },
+  });
+
+  if (api) installDebug(game, api, mods);
+  return mods;
+}
+
+/** CBM items the player carries or that lie within 2 tiles (the Autodoc's hopper). */
+function cbmsNearby(game: Game): { item: Item; consume: () => void }[] {
+  const p = game.player;
+  const out: { item: Item; consume: () => void }[] = [];
+  const isCbm = (it: Item) => it.def.subtypes?.includes('BIONIC_ITEM');
+  for (const it of p.inv.allItems()) if (isCbm(it)) out.push({ item: it, consume: () => void p.inv.remove(it) });
+  for (let dy = -2; dy <= 2; dy++)
+    for (let dx = -2; dx <= 2; dx++) {
+      const x = p.tileX + dx, y = p.tileY + dy;
+      for (const mi of game.map.itemsAt(x, y, p.z)) {
+        if (mi instanceof Item && isCbm(mi)) out.push({ item: mi, consume: () => game.map.removeItem(x, y, p.z, mi) });
+      }
+    }
+  return out;
+}
+
+function removeFromMapNear(game: Game, it: Item): void {
+  const p = game.player;
+  for (let dy = -2; dy <= 2; dy++)
+    for (let dx = -2; dx <= 2; dx++) if (game.map.itemsAt(p.tileX + dx, p.tileY + dy, p.z).includes(it)) return void game.map.removeItem(p.tileX + dx, p.tileY + dy, p.z, it);
+}
+
+function installDebug(game: Game, api: DebugApi, mods: BodyMods): void {
+  const { mut, bio } = mods;
+  const p = game.player;
+  /**
+   * Mutate: a trait id mutates towards it (prerequisites first, like CDDA's debug menu); a
+   * category id (LIZARD, HUMAN …) does one mutate_category step without vitamins; no
+   * argument = one random vitamin-weighted mutate(). Returns the visible mutations after.
+   */
+  api.mutate = (idOrCat?: string, n = 1) => {
+    if (idOrCat && !mut.idx.categories.has(idOrCat) && mut.idx.def(idOrCat)) {
+      // Keep stepping up the prerequisite chain until the trait is there (debug menu style);
+      // stepping again once present would undo it (mutate_towards removes children).
+      for (let i = 0; i < 12 && !p.hasTrait(idOrCat); i++) if (!mut.mutateTowards(idOrCat, 'ANY', false)) break;
+      return api.mutations();
+    }
+    for (let i = 0; i < n; i++) {
+      if (!idOrCat) mut.mutate(0, true);
+      else if (mut.idx.categories.has(idOrCat)) mut.mutateCategory(idOrCat, false);
+      else throw new Error(`cdda.mutate: unknown mutation or category ${idOrCat}`);
+    }
+    return api.mutations();
+  };
+  api.mutations = () => ({
+    traits: [...p.traits].map((id) => ({ id, name: mut.name(id), visible: mut.idx.visible(id), powered: mut.isPowered(id), base: mut.isBase(id) })),
+    vitamins: Object.fromEntries(Object.entries(mut.vitamins).filter(([, v]) => v)),
+    levels: Object.fromEntries(mut.categoryLevels()),
+    threshold: mut.thresholdCategory(),
+  });
+  api.addVitamin = (id: string, n: number) => mut.vitaminMod(id, n);
+  api.removeMutation = (id: string) => mut.removeMutation(id);
+  api.toggleMutation = (id: string) => mut.toggle(id);
+  /** Install without surgery (debug); `roll` < chance runs the real odds instead. */
+  api.installBionic = (id: string, opts: { surgery?: boolean; autodoc?: boolean; roll?: number } = {}) => {
+    if (!bio.def(id)) throw new Error(`cdda.installBionic: unknown bionic ${id}`);
+    if (opts.surgery) return bio.install(id, { autodoc: opts.autodoc, roll: opts.roll });
+    const blocker = bio.installBlocker(id);
+    if (blocker) return { ok: false, messages: [blocker] };
+    bio.add(id);
+    return { ok: true, messages: [`Installed ${bio.name(id)}.`] };
+  };
+  api.bionics = () => ({
+    power: +bio.power.toFixed(4),
+    maxPower: bio.maxPower(),
+    installed: bio.bionics.map((b) => ({ id: b.id, name: bio.name(b.id), powered: b.powered, included: !!b.included })),
+  });
+  api.givePower = (kj: number) => {
+    bio.modPower(kj);
+    return bio.power;
+  };
+  api.toggleBionic = (id: string) => (bio.toggle(id), bio.isActive(id));
+  api.bionicChance = (itemId: string, autodoc = false) => bio.successChance(itemId, autodoc);
+  api.spawnAutodoc = (dx = 2, dy = 0) => {
+    const x = p.tileX + dx, y = p.tileY + dy;
+    game.map.setFurn(x, y, p.z, 'f_autodoc');
+    return { x, y };
+  };
+  api.giveCbm = (id: string) => p.inv.pickUp(createItem(game.data, id)).msg;
+}

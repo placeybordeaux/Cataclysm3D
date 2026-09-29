@@ -7,6 +7,9 @@ import type { UiContext } from './context';
 // The '@' character sheet, laid out like CDDA's player_display.cpp: a header line, then
 // boxes for STATS / ENCUMBRANCE / SPEED on top, TRAITS / EFFECTS / BODY below, then SKILLS.
 
+/** Extra boxes (e.g. BIONICS from src/ui/mutbio_ui.ts) shown under the main grid. */
+export const charsheetSections: ((ctx: UiContext) => { title: string; body: string } | null)[] = [];
+
 const box = (title: string, body: string) => `<div class="cdda-box"><div class="box-title">${title}</div><div class="pre" style="padding:0 .5em">${body}</div></div>`;
 
 export function openCharacterSheet(ctx: UiContext): UiWindow {
@@ -46,7 +49,8 @@ export function openCharacterSheet(ctx: UiContext): UiWindow {
   speedLines.push('', `Mood: ${colorize(moraleFace(p.morale.level(), ctx.data.moodFaces))}  ${c('c_light_gray', `(${p.morale.level()})`)}`, `Focus: ${c('c_light_gray', String(Math.round(p.focus)))}`);
 
   const traitDefs = (misc.mutation ?? {}) as Record<string, any>;
-  const traits = [...p.traits].map((id) => {
+  // Hidden traits (player_display false: CHANGING, thresholds' helpers…) aren't listed, like CDDA.
+  const traits = [...p.traits].filter((id) => traitDefs[id]?.player_display !== false).map((id) => {
     const pts = traitDefs[id]?.points ?? 0;
     return c(pts > 0 ? 'c_light_green' : pts < 0 ? 'c_light_red' : 'c_yellow', p.traitName(id));
   });
@@ -88,8 +92,15 @@ export function openCharacterSheet(ctx: UiContext): UiWindow {
       ${box('STATS', stats)}${box('ENCUMBRANCE', enc)}${box('SPEED', speedLines.join('\n'))}
       ${box('TRAITS', traits.join('\n') || c('c_dark_gray', 'None'))}${box('EFFECTS', effects.join('\n') || c('c_dark_gray', 'None'))}${box('BODY', body)}
     </div>
+    ${extraBoxes(ctx)}
     <div style="margin-top:6px">${box('SKILLS', skills)}</div>`;
   const grid = w.body.lastElementChild!.querySelector('.pre') as HTMLElement;
   grid.style.columnCount = '3';
   return w;
+}
+
+function extraBoxes(ctx: UiContext): string {
+  const list = charsheetSections.map((f) => f(ctx)).filter((x): x is { title: string; body: string } => !!x);
+  if (!list.length) return '';
+  return `<div style="display:grid;grid-template-columns:repeat(${Math.min(3, list.length)},minmax(0,1fr));gap:6px;margin-top:6px">${list.map((b) => box(b.title, b.body)).join('')}</div>`;
 }

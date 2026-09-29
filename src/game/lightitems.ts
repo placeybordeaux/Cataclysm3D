@@ -1,7 +1,7 @@
 import type { Game } from './game';
 import type { Item } from './item';
 import { useActions } from './inventory';
-import { itemLight } from './vision';
+import { bodyLight, itemLight } from './vision';
 
 // Portable light: the renderer's flashlight follows the player's shining item. Turning a
 // flashlight on/off is CDDA's `transform` use_action (flashlight ↔ flashlight_on), handled
@@ -39,6 +39,9 @@ export function playerLightState(game: Game): { on: boolean; lum: number; direct
   }
   // Flashlights/headlamps throw a beam; lamps, lanterns and candles glow all round.
   const directional = !!best && !best.hasFlag('FIRE') && !/lamp|lantern|candle|torch/.test(best.typeId);
+  // A bionic light (Cranial Flashlight) competes with carried ones.
+  const body = bodyLight(game);
+  if (body && body.lum > lum) return { on: true, lum: body.lum, directional: body.directional, item: null };
   return { on: lum > 0, lum, directional, item: best };
 }
 
