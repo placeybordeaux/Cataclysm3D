@@ -21,7 +21,7 @@ describe('melee: attack speed (melee.cpp Character::attack_speed)', () => {
     const c = survivor();
     const pipe = createItem(data, 'pipe');
     expect(attackSpeedMoves(c, pipe)).toBe(76);
-    expect(attackCooldownSeconds(c, pipe)).toBeCloseTo(76 / 100 / 3);
+    expect(attackCooldownSeconds(c, pipe)).toBeCloseTo(76 / 100 / 2);
   });
 
   it('unarmed: attack_time 65 -> 32 + 32 - 4 = 60; melee 10 -> 32 + 10 - 4', () => {

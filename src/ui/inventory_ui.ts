@@ -1,6 +1,7 @@
 import type { Item } from '../game/item';
 import type { ActionResult } from '../game/inventory';
 import { useActions } from '../game/inventory';
+import { patchInteractUi } from '../game/interact';
 import { c, openMenu, openWindow, type MenuEntry, type UiWindow } from './framework';
 import { fit, kg, liters } from './format';
 import { categoryName, escapeHtml, itemInfo } from './iteminfo';
@@ -464,6 +465,22 @@ export function openPickupMenu(ctx: UiContext): UiWindow | null {
   return openMultiSelect(ctx, 'Pick up which items?', rows, 'pick up', (chosen) => pickUpRows(ctx, chosen));
 }
 
+/**
+ * `e` on a locker/dresser/pile: the multi-select pickup for that one tile, so emptying a
+ * locker is `,` Enter rather than one item per keypress.
+ */
+export function openTilePickup(ctx: UiContext, title: string, x: number, y: number, z: number): UiWindow | null {
+  const items = ctx.game.map.itemsAt(x, y, z) as Item[];
+  if (!items.length) return null;
+  const rows = stackEntries(items.map((item) => ({ item, where: 'ground' as const, pos: { x, y, z }, depth: 0, dir: title })))
+    .map((entry) => ({ entry, max: maxOf(entry), count: 0 }));
+  if (rows.length === 1 && rows[0].max === 1) {
+    pickUpRows(ctx, [{ ...rows[0], count: 1 }]);
+    return null;
+  }
+  return openMultiSelect(ctx, title, rows, 'take', (chosen) => pickUpRows(ctx, chosen));
+}
+
 export function pickUpRows(ctx: UiContext, chosen: MultiRow[]): void {
   const inv = ctx.game.player.inv;
   const map = ctx.game.map;
@@ -487,6 +504,7 @@ export function pickUpRows(ctx: UiContext, chosen: MultiRow[]): void {
 
 export function installInventoryUi(ctx: UiContext): void {
   const { game } = ctx;
+  patchInteractUi({ pickup: (title, x, y, z) => void openTilePickup(ctx, title, x, y, z) });
   const inv = () => game.player.inv;
   const pick = (title: string, none: string, filter: (e: InvEntry) => boolean, act: ItemAction, nearby = true) => () =>
     openItemPicker(ctx, { title, none, filter, includeNearby: nearby, onPick: (e) => doAction(ctx, act, e) });

@@ -233,7 +233,7 @@ Keys: `V` camera mode, `F` flashlight.
   (WASD collide with CDDA keys `w`/`W`/`E`… — movement keys win; CDDA-menu actions that
   collide get an alternative binding and all are listed in `?` help. Keep a keybinding
   table in one place: src/ui/keys.ts.)
-- Combat: real-time melee with cooldown = CDDA attack move cost / ACTION_SCALE; hit
+- Combat: real-time melee with cooldown = CDDA attack move cost / `MELEE_SCALE` (2 turns/s, slower than movement so fights read blow by blow; monster swings too); hit
   chance and damage use CDDA formulas (to-hit vs dodge, bash/cut/stab, armor, crits,
   body-part targeting). Ranged: hitscan with CDDA dispersion → cone spread.
 - Monsters use CDDA stats; speed → movement rate; senses (vision day/night, hearing via

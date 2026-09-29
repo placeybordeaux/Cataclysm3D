@@ -35,6 +35,9 @@ export function terrainShape(t: TerrainDef): TerrainShape {
   // the extractor doesn't carry it yet, CDDA's `_o` id suffix).
   if ((t.close || /_o$/.test(t.id)) && /door|gate/.test(t.id) && t.move_cost > 0) return 'door_open';
   if (f('WINDOW')) return 'window';
+  // Roof gutters are THIN_OBSTACLE but only ankle-high; as fence panels they floated along
+  // every roof edge like barbed wire.
+  if (/^t_gutter/.test(t.id)) return 'floor';
   if (f('THIN_OBSTACLE') || /fence|railing|_bars/.test(t.id)) return 'fence';
   if (f('LIQUID')) return 'liquid';
   if (f('NO_FLOOR') && !f('WALL')) return 'none';

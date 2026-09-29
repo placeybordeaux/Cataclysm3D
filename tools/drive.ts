@@ -52,6 +52,7 @@ const browser = await puppeteer.launch({
   executablePath: chrome,
   headless: true,
   args: ['--no-sandbox', ...gl, `--window-size=${size[0]},${size[1]}`],
+  protocolTimeout: 30 * 60_000,
 });
 const page = await browser.newPage();
 await page.setViewport({ width: size[0], height: size[1] });

@@ -1,6 +1,6 @@
 import type { DamageUnit, MonsterDef } from '../data/types';
 import type { Rng } from '../core/rng';
-import { ACTION_SCALE } from '../core/time';
+import { ACTION_SCALE, MELEE_SCALE } from '../core/time';
 import { ALL_PARTS, BODY_PARTS, type BodyPartId } from './bodyparts';
 import { MAX_RECOIL, type Character, type DamageResult } from './character';
 import { asArray, type Item } from './item';
@@ -80,9 +80,9 @@ export function attackSpeedMoves(c: Character, weapon: Item | null): number {
   return Math.max(25, Math.trunc(cost));
 }
 
-/** Real-time cooldown between swings: moves / 100 turns / ACTION_SCALE turns per second. */
+/** Real-time cooldown between swings: moves / 100 turns / MELEE_SCALE turns per second. */
 export function attackCooldownSeconds(c: Character, weapon: Item | null): number {
-  return attackSpeedMoves(c, weapon) / 100 / ACTION_SCALE;
+  return attackSpeedMoves(c, weapon) / 100 / MELEE_SCALE;
 }
 
 /** melee.cpp stumble(): extra moves lost on a miss with heavy/bulky weapons. */
@@ -221,14 +221,14 @@ export function meleeAttack(c: Character, target: MeleeTarget, rng: Rng, targetN
     meleeTrain(c, weapon, false, rng);
     const message = st >= 60 ? 'You miss and stumble with the momentum.' : st >= 10 ? 'You swing wildly and miss.' : 'You miss.';
     c.msg(message);
-    return { hit, crit: false, hitSpread: spread, damage: [], total: 0, moves, cooldownSeconds: moves / 100 / ACTION_SCALE, staminaCost, message };
+    return { hit, crit: false, hitSpread: spread, damage: [], total: 0, moves, cooldownSeconds: moves / 100 / MELEE_SCALE, staminaCost, message };
   }
   const crit = rng.next() < critChance(c, weapon, roll, target.dodge * 5);
   const damage = applyFlatArmor(rollMeleeDamage(c, weapon, crit, rng), target.armor);
   const total = Math.floor(damage.reduce((s, d) => s + d.amount, 0));
   meleeTrain(c, weapon, true, rng);
   const message = `You ${crit ? 'critically ' : ''}hit ${targetName}${total > 0 ? ` for ${total} damage` : ' but do no damage'}.`;
-  return { hit, crit, hitSpread: spread, damage, total, moves, cooldownSeconds: moves / 100 / ACTION_SCALE, staminaCost, message };
+  return { hit, crit, hitSpread: spread, damage, total, moves, cooldownSeconds: moves / 100 / MELEE_SCALE, staminaCost, message };
 }
 
 /** melee.cpp melee_train: hits train (5..10), misses (2..5); melee gets half. */
@@ -489,5 +489,5 @@ export function monsterMeleeAttack(
 
 /** monster::melee_attack cost: 100 moves per attack at the monster's speed, in seconds. */
 export function monsterAttackCooldownSeconds(mon: MonsterDef, moveCost = 100): number {
-  return moveCost / Math.max(1, mon.speed) / ACTION_SCALE;
+  return moveCost / Math.max(1, mon.speed) / MELEE_SCALE;
 }
