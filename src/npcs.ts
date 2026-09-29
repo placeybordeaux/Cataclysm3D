@@ -164,6 +164,10 @@ export async function installNpcs(game: Game, renderer: Renderer | null, worldge
 
   // ---------------------------------------------------------------- spawning
   const startOmt = { x: Math.floor(game.player.x / CHUNK), y: Math.floor(game.player.y / CHUNK) };
+  // The refugee center is the NPC hub the evacuee is meant to find, but nothing in the world
+  // pointed at it (it can sit 20+ OMTs away in a forest). Mark it on the map from the start, as
+  // CDDA's evacuation broadcasts do; a loaded save replaces overmapSeen with its own.
+  if (worldgen) revealRefugeeCenter(game, worldgen, startOmt);
   const onChunk = (c: Chunk) => {
     // Chunks generated before a loaded save already made their NPCs (they're in the save).
     const prior = chunkTracker(game)?.priorGenerated.has(chunkKey(c.cx, c.cy, c.z)) ?? false;
@@ -210,6 +214,20 @@ function spawnMapgenNpc(sys: NpcSystem, template: string, x: number, y: number, 
  * classes, some of whom walk up to talk or carry a job, and the odd bandit gang member
  * who attacks on sight (never right next to the evac shelter).
  */
+/** Add the refugee center's OMTs (evac_center special) to the overmap memory. */
+export function revealRefugeeCenter(game: Game, wg: WorldGenerator, from: { x: number; y: number }): { x: number; y: number } | null {
+  const sp = wg.overmap.findSpecial('evac_center', from, 3);
+  if (!sp) return null;
+  let n = 0, sx = 0, sy = 0;
+  for (let dy = -18; dy <= 18; dy++)
+    for (let dx = -18; dx <= 18; dx++) {
+      if (!/^(refctr|evac_center)/.test(wg.overmap.omtAt(sp.x + dx, sp.y + dy, 0).id)) continue;
+      game.overmapSeen.add(`${sp.x + dx},${sp.y + dy},0`);
+      (n++, (sx += sp.x + dx), (sy += sp.y + dy));
+    }
+  return n ? { x: Math.round(sx / n), y: Math.round(sy / n) } : null;
+}
+
 function randomSurvivor(sys: NpcSystem, wg: WorldGenerator, c: Chunk, start: { x: number; y: number }): void {
   const o = wg.overmap.omtAt(c.cx, c.cy, 0);
   const inCity = !!o.special?.city || (o.type === 'road' && !!wg.overmap.closestCity(c.cx, c.cy, 0));
