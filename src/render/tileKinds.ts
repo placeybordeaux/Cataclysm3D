@@ -34,6 +34,9 @@ export function terrainShape(t: TerrainDef): TerrainShape {
   // Open doors are passable and lose the DOOR flag; they have a `close` transform (or, while
   // the extractor doesn't carry it yet, CDDA's `_o` id suffix).
   if ((t.close || /_o$/.test(t.id)) && /door|gate/.test(t.id) && t.move_cost > 0) return 'door_open';
+  // Boarded-up windows are opaque: as a window their sparse board sprite became a see-through
+  // pane of floating grey squares, so draw them as a wall of boards.
+  if (f('WINDOW') && !f('TRANSPARENT') && /boarded|barricade|reinforced|shutter/.test(t.id)) return 'wall';
   if (f('WINDOW')) return 'window';
   // Roof gutters are THIN_OBSTACLE but only ankle-high; as fence panels they floated along
   // every roof edge like barbed wire.
