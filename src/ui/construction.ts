@@ -155,9 +155,9 @@ export function openConstructionMenu(game: CraftHost): ConstructionMenu {
         `Skills required: ${skills.length ? skills.map(([s, l]) => `<color_${p.getSkill(s) >= l ? 'green' : 'red'}>${p.skillName(s)} (${l})</color>`).join(', ') : '<color_green>N/A</color>'}`,
       );
       const pre = con.pre_terrain;
-      if (pre) out.push(`Required terrain: <color_cyan>${(Array.isArray(pre) ? pre : [pre]).slice(0, 3).map((id) => terOrFurnName(data, id)).join(' or ')}</color>`);
+      if (pre) out.push(`Required terrain: <color_cyan>${terOrFurnName(data, pre)}</color>`);
       const flags = con.pre_flags === undefined ? [] : Array.isArray(con.pre_flags) ? con.pre_flags : [con.pre_flags];
-      if (flags.length) out.push(`Required conditions: <color_cyan>${flags.map((f) => (typeof f === 'string' ? f : f.flag)).join(', ')}</color>`);
+      if (flags.length) out.push(`Required conditions: <color_cyan>${flags.join(', ')}</color>`);
       if (con.post_terrain) out.push(`Result: <color_cyan>${terOrFurnName(data, con.post_terrain)}</color>`);
       out.push(`Time to complete: <color_cyan>${formatDuration(con.time)}</color>`);
       if (con.pre_note) out.push(`<color_light_gray>${con.pre_note}</color>`);
