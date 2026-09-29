@@ -56,6 +56,7 @@ export async function installNpcs(game: Game, renderer: Renderer | null, worldge
   if (worldgen) {
     const om = worldgen.overmap;
     sys.omtAt = (x, y, z) => om.omtAt(x, y, z).id;
+    sys.omtRotation = (x, y, z) => om.omtAt(x, y, z).rot;
     sys.cityName = () => om.closestCity(Math.floor(game.player.x / CHUNK), Math.floor(game.player.y / CHUNK))?.name ?? 'town';
     sys.findOmt = (pred, from, opts) => {
       const min = opts.minDist ?? 0, max = Math.min(opts.maxDist ?? 80, 160);
@@ -285,6 +286,13 @@ function installDebug(api: DebugApi, game: Game, sys: NpcSystem, wg: WorldGenera
     if (!c) return null;
     api.pressKey?.('abcdefghijklmnopqrstuvwxyz'[i]);
     return api.dialogue();
+  };
+  /** Pick the first response whose text contains `text`. */
+  api.respondText = (text: string) => {
+    const c = current();
+    if (!c) return null;
+    const i = c.d.view().responses.findIndex((r) => r.text.includes(text));
+    return i < 0 ? { error: `no response containing "${text}"`, ...api.dialogue() } : api.respond(i);
   };
   api.trade = (uid?: number) => {
     const n = find(uid);

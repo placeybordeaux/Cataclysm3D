@@ -332,7 +332,7 @@ export function openMissionLog(ctx: NpcUiCtx): UiWindow {
       const def = sys.missions.def(m);
       const giver = m.npcUid >= 0 ? sys.npcByUid(m.npcUid) : undefined;
       html += `${c('c_white', def?.name ?? m.id)}${giver ? c('c_light_gray', `  (from ${giver.displayName()})`) : ''}\n`;
-      html += `  ${c('c_light_cyan', sys.missions.goalText(m))}\n`;
+      html += `  <span style="color:var(--c-light_cyan)">${colorize(sys.missions.goalText(m))}</span>\n`;
       if (m.target) {
         const ox = Math.floor(p.x / CHUNK), oy = Math.floor(p.y / CHUNK);
         const dx = m.target.x - ox, dy = m.target.y - oy;
@@ -341,7 +341,7 @@ export function openMissionLog(ctx: NpcUiCtx): UiWindow {
         html += `  ${c('c_light_gray', 'Target:')} ${c('c_yellow', dir)}\n`;
       }
       if (m.deadline !== undefined) html += `  ${c('c_light_gray', 'Deadline:')} ${c('c_light_red', `${Math.max(0, Math.round((m.deadline - game.clock.seconds) / 3600))} hours`)}\n`;
-      if (def?.description) html += `  ${c('c_dark_gray', esc(sys.missions.host.dialogueFor(giver)?.parseTags(def.description) ?? def.description))}\n`;
+      if (def?.description) html += `  <span style="color:var(--c-dark_gray)">${colorize(sys.missions.host.dialogueFor(giver)?.parseTags(def.description) ?? def.description)}</span>\n`;
       html += '\n';
     }
     win.body.innerHTML = html;

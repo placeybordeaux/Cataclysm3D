@@ -361,6 +361,42 @@ describe('trade', () => {
   });
 });
 
+describe('save', () => {
+  it("round-trips NPCs, missions and dialogue vars through the 'npcs' saveable", async () => {
+    const { installNpcs } = await import('../src/npcs');
+    const { serializeGame, applySave } = await import('../src/save/format');
+    const build = async () => {
+      const game = new Game(data, 77, fakeInput());
+      game.map.generator = new FlatGen();
+      game.player.x = 12.5;
+      game.player.y = 12.5;
+      for (let y = -1; y <= 1; y++) for (let x = -1; x <= 1; x++) game.map.chunk(x, y, 0);
+      const h = await installNpcs(game, null, null, null, undefined, nd);
+      return { game, sys: h.sys };
+    };
+    const A = await build();
+    const n = A.sys.spawn({ template: 'free_merchants_merchant' }, 14, 12, 0)!;
+    const d = A.sys.talkTo(n)!;
+    d.effect([{ u_add_var: 'met', value: 'yes' }, { npc_add_var: 'mood', value: 'good' }, 'follow']);
+    const inst = A.sys.missions.offeredBy(n)[0];
+    A.sys.missions.assign(inst, d);
+    n.op.trust = 4;
+    const file = JSON.parse(JSON.stringify(serializeGame(A.game, { slot: 't', name: 'x', gen: 'test' })));
+    const B = await build();
+    B.sys.spawn({ cls: 'NC_SCAVENGER' }, 13, 13, 0);
+    applySave(B.game, file);
+    expect(B.sys.npcs.length).toBe(1);
+    const m = B.sys.npcs[0];
+    expect(m.name).toBe('Smokes');
+    expect(m.isAlly()).toBe(true);
+    expect(m.op.trust).toBe(4);
+    expect(m.vars.get('mood')).toBe('good');
+    expect(B.sys.playerVars.get('met')).toBe('yes');
+    expect(B.sys.missions.active().map((x) => x.id)).toEqual(['MISSION_FREE_MERCHANTS_EVAC_1']);
+    expect(B.sys.missions.assignedFrom(m).length).toBe(1);
+  });
+});
+
 describe('coverage', () => {
   it('every extracted talk topic renders (line + responses) without throwing', () => {
     const { npcs } = world(31);

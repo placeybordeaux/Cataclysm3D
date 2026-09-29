@@ -95,6 +95,7 @@ export class NpcSystem implements GameSystem, TalkWorld, MissionHost {
   cityName?: () => string;
   omtAt?: (x: number, y: number, z: number) => string | undefined;
   findOmt?: MissionHost['findOmt'];
+  omtRotation?: MissionHost['omtRotation'];
   reveal?: MissionHost['reveal'];
 
   private lastPlayerZ = NaN;

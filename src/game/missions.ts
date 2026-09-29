@@ -52,6 +52,8 @@ export interface MissionHost {
   omtAt?(x: number, y: number, z: number): string | undefined;
   /** Nearest OMT (z0) satisfying `pred` within `maxDist` OMTs of `from` (or a random one). */
   findOmt?(pred: (omtId: string) => boolean, from: { x: number; y: number }, opts: { minDist?: number; maxDist?: number; random?: boolean }): { x: number; y: number } | null;
+  /** Rotation (quarter turns) of the OMT's mapgen, so update_mapgen coordinates land right. */
+  omtRotation?(x: number, y: number, z: number): number;
   /** Reveal overmap tiles around an OMT (reveal_radius). */
   reveal?(x: number, y: number, radius: number): void;
   /** A dialogue with `npc` for running mission effects outside a conversation. */
@@ -181,7 +183,9 @@ export class MissionSystem {
           if (at) tgt = { x: at.x, y: at.y, z: 0 };
         }
         if (!tgt) continue;
-        const x = Array.isArray(pm.x) ? pm.x[0] : pm.x ?? 12, y = Array.isArray(pm.y) ? pm.y[0] : pm.y ?? 12;
+        let x = Array.isArray(pm.x) ? pm.x[0] : pm.x ?? 12, y = Array.isArray(pm.y) ? pm.y[0] : pm.y ?? 12;
+        // Same convention as MapBuffer.rotate: each quarter turn maps (x, y) -> (23 - y, x).
+        for (let t = this.host.omtRotation?.(tgt.x, tgt.y, tgt.z) ?? 0; t > 0; t--) [x, y] = [23 - y, x];
         m.targetMonster = { group: pm.group, monster: pm.monster, name: pm.name, x: tgt.x * 24 + x, y: tgt.y * 24 + y, z: tgt.z, spawned: false, dead: false };
       }
     }
