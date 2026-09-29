@@ -120,9 +120,26 @@ export function openAchievements(game: Game, h: AchievementsHandle): void {
   render();
 }
 
-/** CDDA shows a popup on completion; ours is a non-blocking toast so real-time play continues. */
+/**
+ * CDDA shows a popup on completion; ours is a non-blocking toast so real-time play continues.
+ * Toasts queue and show one at a time (with a "+N more" hint), so a burst of completions
+ * (a debug kill-all, several skill levels at once) doesn't pile up over open windows.
+ */
+const toastQueue: AchievementDef[] = [];
+let toastBusy = false;
 function showToast(a: AchievementDef): void {
   if (typeof document === 'undefined') return;
+  toastQueue.push(a);
+  if (!toastBusy) nextToast();
+}
+
+function nextToast(): void {
+  const a = toastQueue.shift();
+  if (!a) {
+    toastBusy = false;
+    return;
+  }
+  toastBusy = true;
   const root = getUiRoot();
   let host = root.querySelector('.achievement-toasts') as HTMLElement | null;
   if (!host) {
@@ -133,9 +150,14 @@ function showToast(a: AchievementDef): void {
   }
   const el = document.createElement('div');
   Object.assign(el.style, { background: '#000', border: '1px solid var(--c-light_green)', padding: '4px 12px', whiteSpace: 'pre', textAlign: 'center', opacity: '0', transition: 'opacity 0.4s' });
-  el.innerHTML = `${c('c_yellow', 'Achievement completed!')}\n${c('c_light_green', a.name)}${a.description ? `\n${c('c_light_gray', a.description)}` : ''}`;
+  const more = toastQueue.length ? `\n${c('c_dark_gray', `(+${toastQueue.length} more)`)}` : '';
+  el.innerHTML = `${c('c_yellow', 'Achievement completed!')}\n${c('c_light_green', a.name)}${a.description ? `\n${c('c_light_gray', a.description)}` : ''}${more}`;
   host.appendChild(el);
   requestAnimationFrame(() => (el.style.opacity = '1'));
-  setTimeout(() => (el.style.opacity = '0'), 5000);
-  setTimeout(() => el.remove(), 5600);
+  const hold = toastQueue.length ? 2500 : 5000;
+  setTimeout(() => (el.style.opacity = '0'), hold);
+  setTimeout(() => {
+    el.remove();
+    nextToast();
+  }, hold + 400);
 }

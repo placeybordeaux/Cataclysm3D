@@ -139,7 +139,8 @@ function installLabDebug(api: DebugApi, game: Game, wg: WorldGenerator): void {
   };
   /**
    * Teleport into the nearest lab at z `level` (0 = surface buildings, -1..-6 below), onto a
-   * walkable indoor tile near the level's stairs. Returns the position or null.
+   * walkable indoor tile next to the level's stairs (or elevator controls). Returns the
+   * position or null. `special` picks the microlab: cdda.teleportLab(-2, '4x4_microlab_surface').
    */
   api.teleportLab = (level = -2, special = LAB_SPECIAL) => {
     const list = cells(special).filter((e) => e.z === level);
@@ -152,7 +153,7 @@ function installLabDebug(api: DebugApi, game: Game, wg: WorldGenerator): void {
         for (let lx = 1; lx < CHUNK - 1; lx++) {
           const x = e.x * CHUNK + lx, y = e.y * CHUNK + ly;
           const t = game.map.terAt(x, y, level);
-          const stairs = hasFlag(t, 'GOES_UP') || hasFlag(t, 'GOES_DOWN');
+          const stairs = hasFlag(t, 'GOES_UP') || hasFlag(t, 'GOES_DOWN') || t.examine_action === 'elevator';
           if (!stairs) continue;
           // prefer stairs near the lab's centre
           const d = Math.hypot(x - sp.x * CHUNK, y - sp.y * CHUNK);
@@ -187,6 +188,29 @@ function installLabDebug(api: DebugApi, game: Game, wg: WorldGenerator): void {
         if (isConsole(game, pl.tileX + dx, pl.tileY + dy, pl.z)) return useComputer(game, pl.tileX + dx, pl.tileY + dy, pl.z, autoUi(game, picks)).then(() => true);
     return false;
   };
+  /**
+   * Ride the elevator: finds the nearest powered control within 12 tiles, steps into its cab
+   * if needed, and goes to floor `toZ` (default: the lowest other floor). Returns the result.
+   */
+  api.rideElevator = (toZ?: number) => {
+    const pl = p();
+    let ctl: [number, number] | null = null, bd = Infinity;
+    for (let dy = -12; dy <= 12; dy++)
+      for (let dx = -12; dx <= 12; dx++)
+        if (game.map.terAt(pl.tileX + dx, pl.tileY + dy, pl.z).examine_action === 'elevator' && Math.hypot(dx, dy) < bd) (bd = Math.hypot(dx, dy)), (ctl = [pl.tileX + dx, pl.tileY + dy]);
+    if (!ctl) return 'no elevator control';
+    const floors = elevatorFloors(game, ctl[0], ctl[1], pl.z);
+    const dest = toZ ?? floors.filter((f) => f.z !== pl.z).map((f) => f.z).sort((a, b) => a - b)[0];
+    if (dest === undefined) return 'no other floor';
+    if (!hasFlag(game.map.terAt(pl.tileX, pl.tileY, pl.z), 'ELEVATOR'))
+      for (let dy = -1; dy <= 1; dy++)
+        for (let dx = -1; dx <= 1; dx++)
+          if (hasFlag(game.map.terAt(ctl[0] + dx, ctl[1] + dy, pl.z), 'ELEVATOR') && !hasFlag(game.map.terAt(pl.tileX, pl.tileY, pl.z), 'ELEVATOR')) {
+            pl.x = ctl[0] + dx + 0.5;
+            pl.y = ctl[1] + dy + 0.5;
+          }
+    return rideElevator(game, ctl[0], ctl[1], pl.z, dest) ?? { z: pl.z, x: pl.tileX, y: pl.tileY, floors: floors.map((f) => f.z) };
+  };
   /** Swipe (or hack) the nearest card reader within 2 tiles. */
   api.swipeCard = () => {
     const pl = p();
@@ -197,6 +221,37 @@ function installLabDebug(api: DebugApi, game: Game, wg: WorldGenerator): void {
         if (cr) return useCardreader(game, x, y, pl.z, cr, autoUi(game));
       }
     return 'no card reader';
+  };
+  /**
+   * Screenshot helper: teleport into the lab at `level` and stand two tiles from the most
+   * interesting loose loot pile (CBMs/mutagen/ID cards score high), facing it.
+   */
+  api.faceLabLoot = (level = -5, special = LAB_SPECIAL) => {
+    if (!api.teleportLab(level, special)) return null;
+    const pl = p(), m = game.map;
+    let best: { x: number; y: number; sx: number; sy: number } | null = null, bs = -1;
+    for (let dy = -40; dy <= 40; dy++)
+      for (let dx = -40; dx <= 40; dx++) {
+        const x = pl.tileX + dx, y = pl.tileY + dy;
+        const items = m.itemsAt(x, y, pl.z) as Item[];
+        if (!items.length || hasFlag(m.furnAt(x, y, pl.z), 'CONTAINER')) continue;
+        let s = items.length;
+        for (const it of items) if (it.def.flags?.includes('CBM') || /mutagen|serum|^id_/.test(it.typeId)) s += 10;
+        if (s <= bs) continue;
+        for (const [ox, oy] of [[0, 2], [2, 0], [0, -2], [-2, 0]]) {
+          if (m.passable(x + ox, y + oy, pl.z) && m.passable(x + ox / 2, y + oy / 2, pl.z) && m.furnAt(x + ox, y + oy, pl.z).id === 'f_null') {
+            best = { x, y, sx: x + ox, sy: y + oy };
+            bs = s;
+            break;
+          }
+        }
+      }
+    if (!best) return null;
+    pl.x = best.sx + 0.5;
+    pl.y = best.sy + 0.5;
+    pl.yaw = Math.atan2(best.x - best.sx, -(best.y - best.sy));
+    pl.pitch = -0.35;
+    return { x: best.x, y: best.y, z: pl.z, items: (m.itemsAt(best.x, best.y, pl.z) as Item[]).map((i) => i.typeId) };
   };
   /** Items of interest (CBMs, mutagens, ID cards) on the current level within `r` tiles. */
   api.labLoot = (r = 48) => {
