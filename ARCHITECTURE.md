@@ -274,23 +274,36 @@ tests/               vitest unit tests (pure logic, no DOM/WebGL)
 ### Mutations & bionics (src/game/mutations.ts, bionics.ts, bodymods.ts; wired by src/mutbio.ts)
 - `attachBodyMods(character)` → `{ mut: MutationState, bio: BionicState }` (UI-free, unit-tested in
   tests/mutbio.test.ts); `bodyMods(c)` fetches them. Mutations live in `Character.traits` (so trait
-  enchantments apply); `MutationState` adds CDDA's vitamin system (mutagen = `mutagen` catalyst +
-  category primer vitamins, slurry decays_into, excess effects), the CHANGING EOC timers,
-  mutate / mutate_category / mutate_towards / remove_mutation, thresholds, purifier dummies,
-  integrated armor (worn INTEGRATED items), restricts_gear, encumbrance, activation.
-- `BionicState`: installed CBMs, power (kJ), slots, install odds (`bionicSuccessChance`) and failure
-  consequences, act/react/trigger costs, fake weapons, pseudo tools, enchantments, protec, fuel.
+  enchantments apply). `MutationState` follows **BN** (no vitamins/CHANGING): mutagen use actions
+  (`useMutagen` = mutagen_actor, `useMutagenIv` = mutagen_iv_actor, `purify` = PURIFIER/PURIFY_IV/
+  PURIFY_SMART, `rejection` = try_reject_mutagen) run from `Inventory.onConsume`; BALANCED_MUTATIONS
+  `mutate()` spends the `accumulated_mutagen` effect via `mutationChances()` (`startGame()` gives BN's
+  27 days); `mutateCategory` / `mutateTowards` / `removeMutation`; `categoryLevels()` =
+  set_highest_cat_level; `testCrossingThreshold(cat, tier)` with `threshTier`/`threshCategory`
+  (threshold_muts index = tier); restricts_gear pushes gear off; BN `armor` resistances,
+  `night_vision_range`, activation costs/cooldowns.
+- `BionicState` (BN): stored `maxPowerLevel` (capacity on install), `fake_item` (BIONIC_WEAPON →
+  wielded; otherwise a crafting pseudo tool while passive/powered), `stat_bonus`, bash/cut/
+  bullet_protec, `bio_enchantments` (add/multiply/max: LUMINATION, NIGHT_VISION), MULTIINSTALL,
+  INITIALLY_ACTIVATE, required_bionics, slots only with CBM_SLOTS_ENABLED; `install()` always installs
+  and adds BN complications on a failed roll; `anesthesiaNeeded` = requirement "anesthetic" ×
+  difficulty × 2 × 7. Self-install needs MANUAL_BIONIC_INSTALLATION (off): use an Autodoc.
+- Starting kit: `professionItems(data, prof, male, traits, rng)` (src/game/profession.ts: groups,
+  trait substitutions/bonuses, FIT); chargen's `applyBuild` also installs profession `CBMs` (power
+  full), spawns tame `pets`, powers starts_active mutations and calls `mut.startGame()`.
 - Hooks other code can use: `Character.enchantProviders` / `enchantCondition`; `Inventory.wearChecks`,
   `extraEncumbrance`, `naturalArmor`, `qualityProviders` (also fed into CraftingInventory),
-  `consumeChecks`, `onConsume`; `visionHooks(game).lights / .nightVision` (src/game/vision.ts,
-  `visionThreshold`, `bodyLight`); `renderer.nightVision`, `renderer.playerMutationOverlays`;
-  `hud.addSidebarProvider`; `charsheetSections` (src/ui/charsheet.ts). Unarmed damage uses the
-  outermost worn item on the hand (claws). Keys: `[` mutations, `p` bionics; CBMs `A`pply to
-  self-install; `e` on an Autodoc. Save section `bodymods` (order 15). Debug: `cdda.mutate(id|cat)`,
-  `cdda.mutations()`, `cdda.addVitamin(id,n)`, `cdda.installBionic(id,{surgery})`, `cdda.bionics()`,
-  `cdda.givePower(kj)`, `cdda.toggleBionic(id)`, `cdda.spawnAutodoc(dx,dy)`, `cdda.giveCbm(id)`.
+  `consumeChecks` (comestible `tool`, mutagen refusal), `onConsume`; `visionHooks(game).lights /
+  .nightVision` (src/game/vision.ts, `visionThreshold`, `bodyLight`); `renderer.nightVision`,
+  `renderer.playerMutationOverlays`; `hud.addSidebarProvider`; `charsheetSections`
+  (src/ui/charsheet.ts). Keys: `[` mutations, `p` bionics; `e` on an Autodoc. Save section
+  `bodymods` (order 15). Debug: `cdda.mutate(id|cat)`, `cdda.mutations()`, `cdda.crossThreshold(cat)`,
+  `cdda.installBionic(id,{surgery})`, `cdda.bionics()`, `cdda.givePower(kj)`, `cdda.toggleBionic(id)`,
+  `cdda.spawnAutodoc(dx,dy)`, `cdda.giveCbm(id)`.
+- Projectiles: `projectileHit` (src/game/projectile.ts) = BN deal_projectile_attack severity/hit
+  location, used by the survivor's shots and monster gun actors.
 ### Scores & achievements (src/game/achievements.ts, src/achievements.ts, src/ui/achievements_ui.ts)
-- Data: `public/data/achievements.json` (`npm run extract:achievements`, part of `data:all`): CDDA
+- Data: `public/data/achievements.json` (`npm run extract:achievements`, part of `data:all`): BN
   achievements + conducts, event_statistics, event_transformations, scores; loaded by the install.
 - `AchievementTracker` (UI-free, tests/achievements.test.ts) = CDDA stats_tracker + achievements_tracker:
   `emit(type, fields, count?)` with CDDA event names/fields, `flush()` re-checks watching achievements,
