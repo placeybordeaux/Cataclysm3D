@@ -834,11 +834,11 @@ function undoAll(log: Undo[]): void {
  * Unload `host` (BN avatar_funcs::unload_item): a container's / holster's / bandolier's
  * contents, a gun's magazine, or the rounds in a magazine or integral magazine. Each thing goes
  * to the first of `to` that takes it (BN: your inventory, else dropped at your feet); what no
- * destination takes stays where it was. Liquids never go to an inventory: unless a destination
- * is the ground they stay in `host` and are reported in `liquids`, so the caller can offer the
- * liquid menu (pour into a container, drink, pour out).
+ * destination takes stays where it was. Liquids stay in `host` and are reported in `liquids`, so
+ * the caller can offer the liquid menu (pour into a container, drink, pour out), unless
+ * `pourLiquids` lets them go to a ground destination.
  */
-export function unloadItem(host: Item, to: Loc | Loc[], opts: MoveOpts = {}): MoveResult & { liquids: Item[] } {
+export function unloadItem(host: Item, to: Loc | Loc[], opts: MoveOpts & { pourLiquids?: boolean } = {}): MoveResult & { liquids: Item[] } {
   const dests = Array.isArray(to) ? to : [to];
   const liquids: Item[] = [];
   const actor = opts.actor ?? dests.map(locOwner).find((c) => c) ?? null;
@@ -864,7 +864,7 @@ export function unloadItem(host: Item, to: Loc | Loc[], opts: MoveOpts = {}): Mo
     let moves = 0, moved = 0;
     let last: MoveResult | null = null;
     for (const c of [...host.contents]) {
-      if (c.isLiquid() && !dests.some((d) => d.kind === 'ground')) {
+      if (c.isLiquid() && !(opts.pourLiquids && dests.some((d) => d.kind === 'ground'))) {
         liquids.push(c);
         continue;
       }

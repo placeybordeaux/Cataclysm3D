@@ -200,7 +200,7 @@ const OPS: [number, Op][] = [
     if (!all.length) return null;
     const { item } = w.rng.pick(all);
     const how = w.rng.int(0, 2);
-    const r = how === 0 ? c.inv.unload(item) : unloadItem(item, how === 1 ? [L.inv(c)] : [c.inv.groundHere()!], { actor: c });
+    const r = how === 0 ? c.inv.unload(item) : unloadItem(item, how === 1 ? [L.inv(c)] : [c.inv.groundHere()!], { actor: c, pourLiquids: true });
     return { name: `unload ${item.typeId} (${['inv+ground', 'inv', 'ground'][how]}): ${r.ok ? 'ok' : r.code}` };
   }],
   [5, (w) => {

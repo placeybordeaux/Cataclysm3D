@@ -81,7 +81,7 @@ export function itemInfo(it: Item, who: Character): string {
       const enc = portion?.encumbrance ?? 0, full = portion?.max_encumbrance ?? enc;
       L.push(`Coverage: ${num(portion?.coverage ?? 0)}%   Warmth: ${num(d.warmth ?? 0)}`);
       L.push(`Encumbrance: ${num(enc)}${full !== enc ? ` (${full === 0 ? '+1 per 500 ml carried' : `${num(full)} when full`})` : ''}`);
-      if (d.storage) L.push(`Storage: ${c('c_light_green', `+${num(+liters(d.storage))} L`)} carrying capacity when worn`);
+      if (d.storage) L.push(`Storage: +${num(+liters(d.storage))} L carrying capacity when worn`);
       const r = (t: string) => who.inv.armorResist(it, first, t);
       L.push(`<b>Protection</b>: Bash: ${num(+r('bash').toFixed(2))}  Cut: ${num(+r('cut').toFixed(2))}  Ballistic: ${num(+r('bullet').toFixed(2))}`);
       L.push(`  Acid: ${num(+r('acid').toFixed(2))}  Fire: ${num(+r('heat').toFixed(2))}  Environmental: ${num(d.environmental_protection ?? 0)}`);
