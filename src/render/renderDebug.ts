@@ -1,27 +1,19 @@
 import type { DebugApi } from '../debug';
 import type { Game } from '../game/game';
 import type { Renderer } from './renderer';
-import { createItem } from '../game/item';
 
 // window.cdda helpers for the renderer (light map, hit feedback, fields, viewmodel).
 // Offsets (dx, dy) are relative to the player's tile.
 
 export function installRenderDebug(api: DebugApi, game: Game, renderer: Renderer): void {
   const tile = () => ({ x: Math.floor(game.player.x), y: Math.floor(game.player.y), z: game.player.z });
-  /** Light level (CDDA units) at the player's tile or an offset from it. */
-  api.lightAt = (dx = 0, dy = 0) => {
-    const t = tile();
-    return +renderer.lightAt(t.x + dx, t.y + dy, t.z).toFixed(2);
-  };
+  // cdda.lightAt(x, y, z) / addField(x, y, z, type) / placeItem(id, dx, dy) / attack() come from
+  // worldInteraction, crafting and monsters (installed later; same-named helpers here were
+  // silently overwritten). vision lightAt reads this renderer's light map where it's exact.
   /** Add a light-map lamp near the player; returns the handle (h.remove()). */
   api.addLight = (dx: number, dy: number, opts: { intensity?: number; radius?: number; color?: number; flicker?: boolean } = {}) => {
     const t = tile();
     return renderer.lights.add({ x: t.x + dx + 0.5, y: t.y + dy + 0.5, z: t.z, ...opts });
-  };
-  /** Put a field (fd_fire, fd_blood, fd_smoke, ...) on a tile near the player. */
-  api.addField = (type: string, dx: number, dy: number, intensity = 1) => {
-    const t = tile();
-    game.map.addField(t.x + dx, t.y + dy, t.z, type, intensity);
   };
   /**
    * ASCII view of the light map around the player: natural share 0-9 (outdoor = 9),
@@ -46,12 +38,6 @@ export function installRenderDebug(api: DebugApi, game: Game, renderer: Renderer
       rows.push(r);
     }
     return rows.join('\n');
-  };
-  /** Drop an item on the map at an offset from the player (or absolute with abs=true). */
-  api.placeItem = (id: string, dx: number, dy: number, abs = false) => {
-    const t = tile();
-    const x = abs ? dx : t.x + dx, y = abs ? dy : t.y + dy;
-    game.map.addItem(x, y, t.z, createItem(game.data, id));
   };
   /** Turn the player to face tile (x, y) (absolute tile coords; +0.5 = centre). */
   api.lookAt = (x: number, y: number, pitchDeg = 0) => {
@@ -130,8 +116,8 @@ export function installRenderDebug(api: DebugApi, game: Game, renderer: Renderer
   };
   api.shake = (amount = 0.5) => renderer.shake(amount);
   api.hurtFlash = (amount = 0.5) => renderer.hurtFlash(amount);
-  /** Viewmodel animation: 'melee' | 'fire' | 'throw'. */
-  api.attack = (kind: 'melee' | 'fire' | 'throw' = 'melee') => renderer.viewmodel?.attack(kind);
+  /** Viewmodel animation only: 'melee' | 'fire' | 'throw' (cdda.attack() really attacks). */
+  api.viewmodelAttack = (kind: 'melee' | 'fire' | 'throw' = 'melee') => renderer.viewmodel?.attack(kind);
   /** Freeze the viewmodel in an attack pose at t (0..1) for screenshots; null releases. */
   api.viewmodelPose = (kind: 'melee' | 'fire' | 'throw' | null, t = 0.5) => renderer.viewmodel?.freeze(kind, t);
 }

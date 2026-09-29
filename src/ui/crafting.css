@@ -12,7 +12,4 @@
 #ui .craft-detail { flex: 1; overflow-y: auto; white-space: pre-wrap; min-width: 0; }
 #ui .craft-body { display: flex; flex-direction: column; height: 100%; }
 #ui .craft-status { color: var(--c-light_gray); white-space: pre; }
-#ui .activity-bar { position: absolute; left: 50%; bottom: 14vh; transform: translateX(-50%); min-width: 44ch; background: rgba(0,0,0,.85);
   border: 1px solid var(--c-light_gray); padding: 2px 8px; white-space: pre; text-align: center; }
-#ui .activity-bar .bar { color: var(--c-light_green); }
-#ui .activity-bar .rest { color: var(--c-dark_gray); }

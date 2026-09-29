@@ -18,7 +18,6 @@ import { Weather, type WeatherKind } from './weather';
 import { Viewmodel } from './viewmodel';
 import { DecorLayer } from './decor';
 import { displayIrradiance } from './lightfield';
-import type { LightHandle } from './lights';
 
 export { CDDA_COLORS, cddaColor } from './colors';
 
@@ -82,8 +81,6 @@ export class Renderer {
   private frames = 0;
   private fpsT = 0;
   private trauma = 0;
-  private muzzleLight: LightHandle;
-  private muzzleT = 0;
   private playerLook = '';
   private snapExposure = true;
   private shadowT = 1;
@@ -127,8 +124,6 @@ export class Renderer {
     this.decor.sprites.skyVisAt = this.sprites.skyVisAt;
 
     this.viewmodel = new Viewmodel();
-    this.muzzleLight = this.lights.add({ x: 0, y: 0, z: 0, color: 0xffc070, intensity: 0, radius: 7, height: 1.4 });
-    this.viewmodel.onMuzzleFlash = (sec) => { this.muzzleT = sec; };
     game.events.on('playerHurt', (e) => {
       const k = Math.min(1, e.amount / 20);
       this.shake(0.25 + k * 0.6);
@@ -320,9 +315,8 @@ export class Renderer {
 
     const vm = this.viewmodel!;
     vm.enabled = this.rig.mode === 'first' && !this.handsBusy;
-    this.muzzleT = Math.max(0, this.muzzleT - dt);
-    this.muzzleLight.set(p.x, p.y, p.z);
-    this.muzzleLight.intensity = this.muzzleT > 0 ? 2.5 : 0;
+    // Gunfire lights the scene through MonsterView's muzzle handle (every camera mode);
+    // viewmodel.onMuzzleFlash stays free for effects tied to the first-person gun.
     let overlay: { scene: THREE.Scene; camera: THREE.Camera } | undefined;
     if (vm.enabled) {
       this.viewmodelTint(vm.tint);
