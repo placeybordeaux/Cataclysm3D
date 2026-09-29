@@ -224,6 +224,29 @@ export function setupPixelTexture(t: THREE.Texture): void {
   t.needsUpdate = true;
 }
 
+/**
+ * UltiCa draws top-down drop shadows into many sprites (trees, cars, some monsters) as pure
+ * black at ~50-75% alpha. Standing up as billboards they became black blobs hanging off tree
+ * canopies, so clear them. Real outlines are opaque, so only translucent black goes.
+ */
+function stripDropShadows(img: HTMLImageElement): CanvasImageSource {
+  if (typeof document === 'undefined') return img;
+  const c = document.createElement('canvas');
+  c.width = img.naturalWidth;
+  c.height = img.naturalHeight;
+  const ctx = c.getContext('2d', { willReadFrequently: true });
+  if (!ctx) return img;
+  ctx.drawImage(img, 0, 0);
+  const id = ctx.getImageData(0, 0, c.width, c.height);
+  const d = id.data;
+  for (let i = 0; i < d.length; i += 4) {
+    const a = d[i + 3];
+    if (a > 0 && a < 230 && d[i] < 12 && d[i + 1] < 12 && d[i + 2] < 12) d[i + 3] = 0;
+  }
+  ctx.putImageData(id, 0, 0);
+  return c;
+}
+
 async function loadImage(url: string): Promise<HTMLImageElement> {
   const img = new Image();
   img.decoding = 'async';
@@ -241,10 +264,11 @@ export function loadAtlas(baseUrl = `${import.meta.env.BASE_URL ?? '/'}atlas/`):
     if (!res.ok) throw new Error(`atlas.json: HTTP ${res.status} (run npm run atlas)`);
     const index = (await res.json()) as AtlasIndex;
     if (index.version !== 1) throw new Error(`atlas.json version ${index.version} unsupported`);
-    const [images, glyphs] = await Promise.all([
+    const [raw, glyphs] = await Promise.all([
       Promise.all(index.pages.map((p) => loadImage(baseUrl + p.file))),
       loadImage(baseUrl + index.glyphs.file),
     ]);
+    const images = raw.map(stripDropShadows);
     const textures = images.map((img) => {
       const t = new THREE.Texture(img);
       setupPixelTexture(t);
