@@ -136,7 +136,9 @@ export function bash(game: Game, x: number, y: number, z: number, strength: Bash
     res.volume = volume;
     if (opts.silent || !sound) return;
     playBashSfx(x, y, z, success, id, sound, glass);
-    emitSound(game, { x, y, z }, volume, sound, { category: 'combat', source: src, sfxId: '' });
+    // Monsters still hear it, but the survivor's own smashing isn't narrated back as
+    // "You hear whack!" after every swing (the smash messages already say what happened).
+    emitSound(game, { x, y, z }, volume, sound, { category: 'combat', source: src, sfxId: '', ambient: src === game.player });
   };
 
   if (!info || !def) {
