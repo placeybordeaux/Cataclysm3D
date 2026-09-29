@@ -103,7 +103,7 @@ function surfaceKind(def: TerrainDef): number {
  * get twigs/leaves, open ground rocks, town surfaces litter.
  */
 export function emitProps(geo: Geo, white: TileFrame, x: number, y: number, z: number, base: number, def: TerrainDef,
-  treeTile: boolean, floor: boolean, occupied: boolean, nearTree: boolean, outdoor: boolean, G: GroundField | null,
+  treeTile: boolean, floor: boolean, occupied: boolean, nearTree: boolean, outdoor: boolean, G: Pick<GroundField, 'heightAt'> | { heightAt(x: number, y: number): number } | null,
   pud: { g: GeomBuilder | undefined }): void {
   if (!outdoor || occupied || (!floor && !treeTile)) return;
   const kind = treeTile ? 1 : surfaceKind(def);
@@ -111,6 +111,7 @@ export function emitProps(geo: Geo, white: TileFrame, x: number, y: number, z: n
   const h = hash2(x, y, 77);
   const r = (i: number) => hash2(x, y, 100 + i) / 4294967296;
   const gy = (px: number, py: number) => base + (G ? G.heightAt(px, py, z) : 0);
+  void z;
   const g = geo(white);
   if (kind === 1) {
     if (h % 7 === 0 || (treeTile && h % 3 === 0)) {

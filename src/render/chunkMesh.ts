@@ -6,13 +6,13 @@ import { GeomBuilder } from './geometry';
 import type { TileFrame, TileTextureSource } from './textureSource';
 import { hasFlag } from '../world/registry';
 import { fieldStyle, furnitureShape, terrainShape, type FurnitureShape, type TerrainShape } from './tileKinds';
-import { type GroundField, vnoise } from './ground';
+import { type GroundField, RAISE, vnoise } from './ground';
 import type { LookFeatures } from './look';
 import { emitProps } from './props';
 import { doorCasing, fence as fenceParts, hipRoofTile, METAL, wallBand, windowDetail, type ArchFrames } from './arch';
 import { frameAverage } from './framePixels';
 import type { VoxelProps } from './voxel';
-import type { TreeSpec } from './trees';
+import { isBareTree, type TreeSpec } from './trees';
 
 // Builds the static geometry of one chunk at one z-level: merged quads grouped by texture
 // page (one draw call per page), plus the billboards the chunk contributes. Light sources
@@ -197,24 +197,68 @@ export function buildChunkMesh(
     const k = (i: number) => (r + i) & 3;
     geo(f).quad(c[k(0)], c[k(1)], c[k(2)], c[k(3)], [0, 1, 0], [0, 0, 1, 1], f, ao && [ao[k(0)], ao[k(1)], ao[k(2)], ao[k(3)]], cut);
   };
+  // Local caches of the ground field for this chunk (+1 tile / +2 corner border): the mesher
+  // asks for the same corners and tile classes many times per tile, and the field's own
+  // lookups go through string-keyed chunk maps.
+  const GC = 27; // corners x0c-1 .. x0c+25
+  const cornerCache = new Float32Array(GC * GC).fill(NaN);
+  const tileCls = new Int8Array(26 * 26).fill(-2); // -2 unknown, 0 flat, 1 relief, 2 raised
+  const cls = (tx: number, ty: number) => {
+    const i = (ty - y0c + 1) * 26 + (tx - x0c + 1);
+    if (i < 0 || i >= 676 || tx < x0c - 1 || tx > x0c + 24) return G!.isRelief(tx, ty, z) ? 1 : G!.tileRaise(tx, ty, z) > 0 ? 2 : 0;
+    if (tileCls[i] === -2) tileCls[i] = G!.isRelief(tx, ty, z) ? 1 : G!.tileRaise(tx, ty, z) > 0 ? 2 : 0;
+    return tileCls[i];
+  };
+  const isRel = (tx: number, ty: number) => !!G && cls(tx, ty) === 1;
+  const raiseOf = (tx: number, ty: number) => (G && cls(tx, ty) === 2 ? RAISE : 0);
+  const cornerH = (X: number, Y: number) => {
+    const i = (Y - y0c + 1) * GC + (X - x0c + 1);
+    if (X < x0c - 1 || X > x0c + 25 || Y < y0c - 1 || Y > y0c + 25) return G!.corner(X, Y, z);
+    let h = cornerCache[i];
+    if (Number.isNaN(h)) cornerCache[i] = h = G!.corner(X, Y, z);
+    return h;
+  };
+  const cornerN = (X: number, Y: number): [number, number, number] => {
+    const dx = (cornerH(X + 1, Y) - cornerH(X - 1, Y)) / 2, dy = (cornerH(X, Y + 1) - cornerH(X, Y - 1)) / 2;
+    const l = Math.hypot(dx, 1, dy);
+    return [-dx / l, 1 / l, -dy / l];
+  };
+  /** Visual ground height at a float position inside this chunk (props, items). */
+  const heightLocal = (px: number, py: number) => {
+    if (!G) return 0;
+    const tx = Math.floor(px), ty = Math.floor(py);
+    const k = cls(tx, ty);
+    if (k === 2) return RAISE;
+    if (k !== 1) return 0;
+    const fx = px - tx, fy = py - ty;
+    const a = cornerH(tx, ty), b = cornerH(tx + 1, ty), d = cornerH(tx, ty + 1), e = cornerH(tx + 1, ty + 1);
+    return a + (b - a) * fx + (d - a) * fy + (a - b - d + e) * fx * fy;
+  };
+  const groundLocal = { heightAt: (px: number, py: number) => heightLocal(px, py) };
+  const macroCache = new Map<number, [number, number, number]>();
   /** Large-scale colour variation of outdoor ground at a corner (look `macroTint`). */
   const macro = (X: number, Y: number): [number, number, number] => {
+    const key = (X + 32768) * 65536 + (Y + 32768);
+    let m = macroCache.get(key);
+    if (m) return m;
     const v = 0.86 + vnoise(X / 13, Y / 13, 7) * 0.24 + (vnoise(X / 4, Y / 4, 9) - 0.5) * 0.08;
     const w = (vnoise(X / 29, Y / 29, 8) - 0.5) * 0.22;
-    return [v * (1 + w), v * (1 + w * 0.4), v * (1 - w)];
+    m = [v * (1 + w), v * (1 + w * 0.4), v * (1 - w)];
+    macroCache.set(key, m);
+    return m;
   };
   /**
    * Ground quad for tile (x, y): relief heights / curb raise from the ground field and the
    * macro tint on outdoor ground; the classic path is topQuad. `lift` stacks decals on it.
    */
   const groundQuad = (x: number, y: number, y0: number, f: TileFrame, ao: number[] | undefined, outdoor: boolean, lift = 0) => {
-    const relief = G ? G.isRelief(x, y, z) : false;
-    const raise = G && !relief ? G.tileRaise(x, y, z) : 0;
+    const relief = isRel(x, y);
+    const raise = relief ? 0 : raiseOf(x, y);
     const tint = !!LF?.macroTint && outdoor;
     if (!relief && !tint) return topQuad(x, y, y0 + raise + lift, f, ao);
     const P: [number, number][] = [[x, y + 1], [x + 1, y + 1], [x + 1, y], [x, y]];
-    const c: [number, number, number][] = P.map(([X, Y]) => [X, y0 + raise + lift + (relief ? G!.corner(X, Y, z) : 0), Y]);
-    const nrm = P.map(([X, Y]) => (relief ? G!.cornerNormal(X, Y, z) : ([0, 1, 0] as [number, number, number])));
+    const c: [number, number, number][] = P.map(([X, Y]) => [X, y0 + raise + lift + (relief ? cornerH(X, Y) : 0), Y]);
+    const nrm = P.map(([X, Y]) => (relief ? cornerN(X, Y) : ([0, 1, 0] as [number, number, number])));
     const col: number[] = [];
     P.forEach(([X, Y], i) => {
       const k = ao ? ao[i] : 1;
@@ -233,7 +277,7 @@ export function buildChunkMesh(
   };
   /** Surface height of a ground-bearing tile at one of its corners (relief or curb). */
   const surfH = (tx: number, ty: number, X: number, Y: number) =>
-    !G ? 0 : G.isRelief(tx, ty, z) ? G.corner(X, Y, z) : G.tileRaise(tx, ty, z);
+    !G ? 0 : isRel(tx, ty) ? cornerH(X, Y) : raiseOf(tx, ty);
   const groundBearing = (sh: number) => sh === S.floor || sh === S.tree || sh === S.shrub || sh === S.door || sh === S.door_open || sh === S.fence;
 
   for (let ly = 0; ly < CHUNK; ly++)
@@ -408,7 +452,7 @@ export function buildChunkMesh(
           const kind = /chain|wire/.test(def.id) ? 'chain' : /rail|bars|metal|iron|steel/.test(def.id) ? 'metal' : 'wood';
           if (A) {
             const cn = [0, 1, 2, 3].map((d) => conn(nShape[d]));
-            const fb = base + (G ? G.tileRaise(x, y, z) : 0);
+            const fb = base + raiseOf(x, y);
             const avg = frameAverage(pane);
             fenceParts(geo, A, x, y, fb, h, kind, cn, kind === 'wood' ? [avg[0] * 1.1, avg[1] * 1.1, avg[2] * 1.1] : METAL);
             if (kind !== 'chain') break;
@@ -434,7 +478,7 @@ export function buildChunkMesh(
           // Tall trees dissolve (dithered) when the camera is right next to them instead of
           // filling the view with a handful of giant texels. (A 3D trunk box was tried: it
           // never lines up with the billboard's drawn trunk and looked worse.)
-          if (LF?.trees3d && extras?.near) trees.push({ x: x + 0.5 + jx, y: y + 0.5 + jy, z, frame: f, height: h, shrub: shape === S.shrub, seed: seed ^ 0x5bd1e995 });
+          if (LF?.trees3d && extras?.near && !isBareTree(f, shape === S.shrub)) trees.push({ x: x + 0.5 + jx, y: y + 0.5 + jy, z, frame: f, height: h, shrub: shape === S.shrub, seed: seed ^ 0x5bd1e995 });
           else sprites.push({ x: x + 0.5 + jx, y: y + 0.5 + jy, z, frame: f, height: h, kind: 'tree', fadeNear: shape === S.tree });
           break;
         }
@@ -480,7 +524,7 @@ export function buildChunkMesh(
       if (LF?.props && extras) {
         const li = ly * CHUNK + lx;
         emitProps(geo, extras.white, x, y, z, base, def, shape === S.tree || shape === S.shrub, shape === S.floor,
-          chunk.furn[li] !== 0 || chunk.items.has(li), nShape.some((ns) => ns === S.tree), curSky >= 1, G, pud);
+          chunk.furn[li] !== 0 || chunk.items.has(li), nShape.some((ns) => ns === S.tree), curSky >= 1, G ? groundLocal : null, pud);
       }
       // Furniture
       const fi = chunk.furn[ly * CHUNK + lx];
@@ -496,7 +540,7 @@ export function buildChunkMesh(
       if (fi !== 0) {
         const fdef = map.furniture.defs[fi];
         const fs = shapes.furniture(fi);
-        const fb = base + (G ? G.tileRaise(x, y, z) : 0);
+        const fb = base + raiseOf(x, y);
         if (fs === 'billboard' && LF?.voxelProps && extras?.near && extras?.voxels && extras.voxels.furniture(geo, extras.white, src, fdef.id, x, y, fb, seed, facingYaw(nShape, isWall))) {
           // drawn as a voxel volume
         } else if (fs === 'billboard') {
@@ -528,7 +572,9 @@ export function buildChunkMesh(
           const it = list[list.length - 1 - k];
           if (items && !items(it.typeId)) continue;
           const f = src.item(it.typeId);
-          if (LF?.voxelProps && extras?.near && extras?.voxels && extras.voxels.item(geo, extras.white, f, x, y, base + (G ? G.heightAt(x + 0.5, y + 0.5, z) : 0) + itemLift, seed, k)) continue;
+          // only the top of a pile becomes a volume (the rest stay small billboards): piles in
+          // stores and warehouses otherwise dominate the chunk's meshing time
+          if (k === 0 && LF?.voxelProps && extras?.near && extras?.voxels && extras.voxels.item(geo, extras.white, f, x, y, base + heightLocal(x + 0.5, y + 0.5) + itemLift, seed, k)) continue;
           const h = (f.h / (f.ppm ?? 16)) * 0.5;
           // pile offsets: deterministic per tile so rebuilds don't shuffle the heap
           const a = ((seed >> (k * 3)) & 7) * 0.785 + k * 2.1;

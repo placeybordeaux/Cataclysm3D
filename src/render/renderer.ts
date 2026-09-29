@@ -298,7 +298,7 @@ export class Renderer {
     this.decor.enabled = !f.grass;
     this.grass.enabled = f.grass;
     // volumetric trees/props only for the chunks around the player (billboards beyond)
-    this.chunks.lodRadius = f.trees3d || f.voxelProps ? 2.3 : 0;
+    this.chunks.lodRadius = f.trees3d || f.voxelProps ? 1.8 : 0;
     // roofs of two-storey buildings live two levels up
     this.chunks.levelsAbove = f.archDetail ? 2 : 1;
     this.grass.invalidate();

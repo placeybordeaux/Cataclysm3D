@@ -184,9 +184,26 @@ export class GrassLayer {
     const R = this.radius + this.step, z = this.cz;
     this.uRadius.value = this.radius + this.step;
     const x0 = Math.floor(this.cx), y0 = Math.floor(this.cy);
-    const mats: number[] = [];
-    const cols: number[] = [];
-    const m = new THREE.Matrix4(), q = new THREE.Quaternion(), p = new THREE.Vector3(), s = new THREE.Vector3(), up = new THREE.Vector3(0, 1, 0);
+    // instance matrices written directly (yaw rotation * scale + translation): composing
+    // Matrix4s and spreading their elements made each rebuild a visible hitch
+    let cap = 4096, n = 0;
+    let mats = new Float32Array(cap * 16), cols = new Float32Array(cap * 3);
+    const add = (px: number, py: number, pz: number, yaw: number, sx: number, sy: number, sz: number, r: number, g: number, b: number) => {
+      if (n === cap) {
+        cap *= 2;
+        const m2 = new Float32Array(cap * 16), c2 = new Float32Array(cap * 3);
+        m2.set(mats); c2.set(cols);
+        mats = m2; cols = c2;
+      }
+      const c = Math.cos(yaw), sn = Math.sin(yaw), o = n * 16;
+      // column-major: X axis, Y axis, Z axis, translation (rotation about Y)
+      mats[o] = c * sx; mats[o + 1] = 0; mats[o + 2] = -sn * sx; mats[o + 3] = 0;
+      mats[o + 4] = 0; mats[o + 5] = sy; mats[o + 6] = 0; mats[o + 7] = 0;
+      mats[o + 8] = sn * sz; mats[o + 9] = 0; mats[o + 10] = c * sz; mats[o + 11] = 0;
+      mats[o + 12] = px; mats[o + 13] = py; mats[o + 14] = pz; mats[o + 15] = 1;
+      cols[n * 3] = r; cols[n * 3 + 1] = g; cols[n * 3 + 2] = b;
+      n++;
+    };
     const winter = this.season === 'winter';
     const colCache = new Map<string, [number, number, number]>();
     for (let y = y0 - R; y <= y0 + R; y++)
@@ -220,21 +237,16 @@ export class GrassLayer {
           const px = x + 0.05 + r(0) * 0.9, py = y + 0.05 + r(1) * 0.9;
           const gy = z * LEVEL_HEIGHT + this.ground.heightAt(px, py, z) - 0.02;
           const hh = kind.h0 + (kind.h1 - kind.h0) * r(2);
-          p.set(px, gy, py);
-          q.setFromAxisAngle(up, r(3) * Math.PI);
-          s.set(kind.w * (0.8 + r(4) * 0.4), hh, kind.w);
-          m.compose(p, q, s);
-          mats.push(...m.elements);
           const v = kind.bright * (0.8 + r(5) * 0.4);
           const hue = (hash2(x, y, k + 99) & 255) / 255 - 0.5;
-          cols.push(base[0] * v * (1 + hue * 0.15), base[1] * v, base[2] * v * (1 - hue * 0.15));
+          add(px, gy, py, r(3) * Math.PI, kind.w * (0.8 + r(4) * 0.4), hh, kind.w, base[0] * v * (1 + hue * 0.15), base[1] * v, base[2] * v * (1 - hue * 0.15));
         }
       }
-    const count = mats.length / 16;
+    const count = n;
     if (!count) return;
     const mesh = new THREE.InstancedMesh(this.geo, this.mat, count);
-    (mesh.instanceMatrix.array as Float32Array).set(mats);
-    mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(cols), 3);
+    (mesh.instanceMatrix.array as Float32Array).set(mats.subarray(0, count * 16));
+    mesh.instanceColor = new THREE.InstancedBufferAttribute(cols.slice(0, count * 3), 3);
     mesh.castShadow = false;
     mesh.receiveShadow = true;
     mesh.frustumCulled = false;

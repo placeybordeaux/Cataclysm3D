@@ -50,6 +50,7 @@ window.lookView = async (name) => {
     c.look(yaw + 25, -8);
   } else if (name === 'forest') {
     c.setHour(15);
+    c.teleportOmt(town.x, town.y);
     const f = c.findOmt('forest', 60);
     c.teleportOmt(f.x, f.y, 0, 12, 22);
     c.look(-20, -3);
@@ -57,7 +58,7 @@ window.lookView = async (name) => {
     c.setHour(23.2);
     c.teleportOmt(town.x, town.y);
     const h = c.findOmt('house', 40);
-    c.teleportOmt(h.x, h.y, 0, 23, 0);
+    c.teleportOmt(h.x, h.y, 0, 20, -1);
     c.look(-100, -8);
     c.flashlight(true);
   } else if (name === 'top') {

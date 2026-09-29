@@ -33,6 +33,8 @@ export class SkylineLayer {
   enabled = false;
   private mesh: THREE.Mesh | null = null;
   private key = '';
+  private bx = 0;
+  private by = 0;
   private mat: THREE.ShaderMaterial;
   readonly uniforms = {
     uSunDir: { value: new THREE.Vector3(0, 1, 0) },
@@ -80,9 +82,12 @@ export class SkylineLayer {
     this.group.visible = on;
     if (!on) return;
     const ox = Math.floor(px / CHUNK), oy = Math.floor(py / CHUNK);
-    const key = `${ox},${oy},${radius}`;
-    if (key === this.key) return;
-    this.key = key;
+    // rebuild only after moving a few OMTs: the ring is far away, and a rebuild walks
+    // hundreds of overmap tiles
+    if (this.key === `${radius}` && Math.max(Math.abs(ox - this.bx), Math.abs(oy - this.by)) < 3) return;
+    this.key = `${radius}`;
+    this.bx = ox;
+    this.by = oy;
     this.rebuild(ox, oy, radius);
   }
 
@@ -131,7 +136,8 @@ export class SkylineLayer {
         }
       }
     };
-    const inner = radius + 0.6, outer = radius + 13;
+    // inner edge one ring further out than the drawn chunks: the centre lags up to 2 OMTs
+    const inner = radius + 2.6, outer = radius + 13;
     for (let dy = -Math.ceil(outer); dy <= Math.ceil(outer); dy++)
       for (let dx = -Math.ceil(outer); dx <= Math.ceil(outer); dx++) {
         const d = Math.hypot(dx, dy);

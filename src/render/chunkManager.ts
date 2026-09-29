@@ -43,6 +43,12 @@ export interface ChunkStats {
   skippedEmpty: number;
   /** first builds of chunks already inside the clearly visible (not fogged) range: pop-in, cumulative */
   lateBuilds: number;
+  /** slowest single build (ms) and builds over 8 ms, cumulative (look perf) */
+  maxBuildMs: number;
+  slowBuilds: number;
+  /** of which: mesh data, 3D trees (ms, cumulative) */
+  meshMs: number;
+  treeMs: number;
 }
 
 const key = (cx: number, cy: number, z: number) => ((z + 16) * 4096 + (cx + 2048)) * 4096 + (cy + 2048);
@@ -57,7 +63,7 @@ export class ChunkManager {
   budgetMs = 4;
   /** Distance (tiles) inside which a chunk appearing counts as visible pop-in (set by the renderer from the fog). */
   visibleDist = 1e9;
-  readonly stats: ChunkStats = { entries: 0, pending: 0, builtThisFrame: 0, lastBuildMs: 0, skippedEmpty: 0, lateBuilds: 0 };
+  readonly stats: ChunkStats = { entries: 0, pending: 0, builtThisFrame: 0, lastBuildMs: 0, skippedEmpty: 0, lateBuilds: 0, maxBuildMs: 0, slowBuilds: 0, meshMs: 0, treeMs: 0 };
   private entries = new Map<number, Entry>();
   private dirty: Entry[] = [];
   private shapes: ShapeTable;
@@ -148,6 +154,8 @@ export class ChunkManager {
       const b0 = performance.now();
       this.build(e);
       this.stats.lastBuildMs = performance.now() - b0;
+      this.stats.maxBuildMs = Math.max(this.stats.maxBuildMs, this.stats.lastBuildMs);
+      if (this.stats.lastBuildMs > 8) this.stats.slowBuilds++;
       built++;
     }
     this.stats.builtThisFrame = built;
@@ -180,7 +188,9 @@ export class ChunkManager {
       this.stats.skippedEmpty++;
       return;
     }
+    const t0 = performance.now();
     const data = buildChunkMesh(this.map, this.shapes, this.source, e.chunk, this.season, undefined, this.extras?.(e.near));
+    this.stats.meshMs += performance.now() - t0;
     const g = new THREE.Group();
     g.name = `chunk ${e.cx},${e.cy},${e.z}`;
     for (const [page, gb] of data.pages) {
@@ -198,7 +208,11 @@ export class ChunkManager {
       pm.matrixAutoUpdate = false;
       g.add(pm);
     }
-    if (this.extraObjects) for (const o of this.extraObjects(data, e.cx, e.cy, e.z)) g.add(o);
+    if (this.extraObjects) {
+      const t1 = performance.now();
+      for (const o of this.extraObjects(data, e.cx, e.cy, e.z)) g.add(o);
+      this.stats.treeMs += performance.now() - t1;
+    }
     g.matrixAutoUpdate = false;
     g.visible = e.visible;
     this.group.add(g);

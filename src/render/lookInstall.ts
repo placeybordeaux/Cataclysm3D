@@ -5,6 +5,7 @@ import { registerOption } from '../ui/options';
 import { LOOK_NAMES, LOOKS, isLookName, look } from './look';
 import type { Renderer } from './renderer';
 import { frameStats, summarize } from '../perfDebug';
+import { voxelStats } from './voxel';
 
 // Wires the visual styles (look.ts) into the game: the Options entry, the automation API
 // and the per-look scene layers that need game/world access (skyline from the overmap).
@@ -27,6 +28,7 @@ export function installLooks(game: Game, renderer: Renderer, worldgen: WorldGene
   });
   const a = api as DebugApi & Record<string, unknown>;
   a.looks = LOOK_NAMES;
+  a.voxelStats = voxelStats;
   a.setLook = (name: string) => {
     if (!isLookName(name)) throw new Error(`unknown look ${name}`);
     renderer.setLook(name);
@@ -48,6 +50,8 @@ export function installLooks(game: Game, renderer: Renderer, worldgen: WorldGene
     frameStats.recording = true;
     await new Promise((r) => setTimeout(r, seconds * 1000));
     frameStats.recording = false;
-    return { look: look.name, interval: summarize(frameStats.interval), work: summarize(frameStats.work), stats: renderer.stats() };
+    // renderer-only cost, synchronised with the GPU (the frame interval also carries the sim)
+    const bench = (a.benchRender as ((n: number) => { msPerFrame: number }) | undefined)?.(40);
+    return { look: look.name, interval: summarize(frameStats.interval), work: summarize(frameStats.work), renderMs: bench?.msPerFrame, stats: renderer.stats() };
   };
 }

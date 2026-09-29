@@ -8,7 +8,8 @@
 // Options: --out <dir> (default docs/screenshots/looks), --views a,b (default all six),
 // --size WxH (default 1920x1080), --gpu (ANGLE/Vulkan instead of SwiftShader), --bench
 // (records cdda.benchView per view and prints a table), --tweak '<json>' (cdda.lookTweak
-// before each view), --js '<expr>' (run after each view is set up), --dry-run, --help.
+// before each view), --js '<expr>' (run after each view is set up), --print '<expr>' (log
+// its JSON after each shot), --dry-run, --help.
 import { createServer } from 'vite';
 import puppeteer from 'puppeteer-core';
 import { mkdirSync, readFileSync } from 'node:fs';
@@ -31,6 +32,7 @@ const viewsArg = opt('--views', '');
 const size = opt('--size', '1920x1080').split('x').map(Number);
 const tweak = opt('--tweak', '');
 const extraJs = opt('--js', '');
+const printJs = opt('--print', '');
 const params = opt('--params', '');
 const bench = argv.includes('--bench');
 const dry = argv.includes('--dry-run');
@@ -83,6 +85,7 @@ try {
       await new Promise((r) => setTimeout(r, 400));
       const file = resolve(`${out}/${look}_${v}.png`);
       await page.screenshot({ path: file as `${string}.png` });
+      if (printJs) console.log(`  ${look}/${v}: ${JSON.stringify(await page.evaluate(`(async () => { const cdda = window.cdda; return (${printJs}); })()`))}`);
       if (bench) {
         // let chunk builds / grass rebuilds triggered by the teleport finish first
         await new Promise((r) => setTimeout(r, 2500));
@@ -96,11 +99,11 @@ try {
   await server.close();
 }
 if (bench) {
-  console.log('look       view      fps(p50)  p50ms  p99ms  work50 work99  tris');
+  console.log('look       view      fps(p50)  p50ms  p99ms  work50 work99  render  tris');
   for (const [l, r] of Object.entries(results))
     for (const [v, b] of Object.entries(r)) {
-      const x = b as { interval: { p50: number; p99: number }; work: { p50: number; p99: number }; stats: { triangles: number } };
-      console.log(`${l.padEnd(10)} ${v.padEnd(9)} ${(1000 / x.interval.p50).toFixed(0).padStart(8)}  ${String(x.interval.p50).padStart(5)}  ${String(x.interval.p99).padStart(5)}  ${String(x.work.p50).padStart(6)} ${String(x.work.p99).padStart(6)}  ${x.stats.triangles}`);
+      const x = b as { interval: { p50: number; p99: number }; work: { p50: number; p99: number }; renderMs: number; stats: { triangles: number } };
+      console.log(`${l.padEnd(10)} ${v.padEnd(9)} ${(1000 / x.interval.p50).toFixed(0).padStart(8)}  ${String(x.interval.p50).padStart(5)}  ${String(x.interval.p99).padStart(5)}  ${String(x.work.p50).padStart(6)} ${String(x.work.p99).padStart(6)}  ${String(x.renderMs).padStart(6)}  ${x.stats.triangles}`);
     }
   console.log(JSON.stringify(results));
 }

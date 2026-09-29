@@ -19,6 +19,7 @@ import { terrainShape } from './tileKinds';
 // keyed by the versions of the 3x3 chunks around it (the ramp reaches across borders).
 
 export const RAISE = 0.14;
+const EPOCH_MS = 40;
 const RAMP = 3;
 
 /** Per-terrain classification: 0 flat, >0 relief amplitude, <0 raised (curb). */
@@ -72,6 +73,11 @@ export class GroundField {
   private road = new Uint8Array(0);
   private cache = new Map<number, CornerCache>();
   private grid = new Float32Array(W * W);
+  // Short-lived memos: the map keys chunks by strings, and the mesher asks for thousands of
+  // corners per chunk. Entries live for one EPOCH_MS window so edits/evictions show up.
+  private epoch = -1;
+  private chunkMemo = new Map<number, Chunk | null>();
+  private fieldMemo = new Map<number, Float32Array | null>();
   private roadGrid = new Uint8Array(W * W);
 
   constructor(private map: GameMap) {}
@@ -83,6 +89,8 @@ export class GroundField {
   /** Forget cached fields (look switched). */
   reset(): void {
     this.cache.clear();
+    this.chunkMemo.clear();
+    this.fieldMemo.clear();
     this.cls = new Float32Array(0);
   }
 
@@ -125,9 +133,29 @@ export class GroundField {
     return this.tileClass(c, li) > 0;
   }
 
+  private tick(): void {
+    const e = Math.floor(performance.now() / EPOCH_MS);
+    if (e !== this.epoch) {
+      this.epoch = e;
+      this.chunkMemo.clear();
+      this.fieldMemo.clear();
+    }
+  }
+
   private loaded(x: number, y: number, z: number): Chunk | null {
     const cx = Math.floor(x / CHUNK), cy = Math.floor(y / CHUNK);
-    return this.map.hasChunk(cx, cy, z) ? this.map.chunk(cx, cy, z) : null;
+    return this.chunkAt(cx, cy, z);
+  }
+
+  private chunkAt(cx: number, cy: number, z: number): Chunk | null {
+    this.tick();
+    const k = ((z + 16) * 4096 + (cx + 2048)) * 4096 + (cy + 2048);
+    let c = this.chunkMemo.get(k);
+    if (c === undefined) {
+      c = this.map.hasChunk(cx, cy, z) ? this.map.chunk(cx, cy, z) : null;
+      this.chunkMemo.set(k, c);
+    }
+    return c;
   }
 
   /** Relief height at integer corner (X, Y) (0 without relief). */
@@ -165,15 +193,23 @@ export class GroundField {
 
   /** Corner field of chunk (cx, cy, z), rebuilt when it or a neighbour changes. */
   private field(cx: number, cy: number, z: number): Float32Array | null {
-    const m = this.map;
-    if (!m.hasChunk(cx, cy, z)) return null;
+    const key = ((z + 16) * 4096 + (cx + 2048)) * 4096 + (cy + 2048);
+    this.tick();
+    const memo = this.fieldMemo.get(key);
+    if (memo !== undefined) return memo;
+    const f = this.fieldUncached(cx, cy, z, key);
+    this.fieldMemo.set(key, f);
+    return f;
+  }
+
+  private fieldUncached(cx: number, cy: number, z: number, key: number): Float32Array | null {
+    if (!this.chunkAt(cx, cy, z)) return null;
     let sig = 17;
     for (let dy = -1; dy <= 1; dy++)
       for (let dx = -1; dx <= 1; dx++) {
-        const v = m.hasChunk(cx + dx, cy + dy, z) ? m.chunk(cx + dx, cy + dy, z)!.version + 1 : 0;
-        sig = (Math.imul(sig, 31) + v) | 0;
+        const c = this.chunkAt(cx + dx, cy + dy, z);
+        sig = (Math.imul(sig, 31) + (c ? c.version + 1 : 0)) | 0;
       }
-    const key = ((z + 16) * 4096 + (cx + 2048)) * 4096 + (cy + 2048);
     const hit = this.cache.get(key);
     if (hit && hit.sig === sig) return hit.h;
     const h = this.compute(cx, cy, z);

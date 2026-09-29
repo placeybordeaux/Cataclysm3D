@@ -251,6 +251,15 @@ function beam(g: GeomBuilder, f: TileFrame, a: V3, b: V3, r0: number, r1: number
   }
 }
 
+/**
+ * Bare trees (winter, dead) keep their billboard: their look is the sprite's fine branch
+ * drawing, which crossed planes only reproduced as giant texels up close, and a billboard
+ * can dissolve when the camera walks into it.
+ */
+export function isBareTree(f: TileFrame, shrub: boolean): boolean {
+  return !!analyse(f, shrub)?.bare;
+}
+
 /** Build one chunk's trees: trunk geometry (world material) + clumps (instanced). */
 export function buildTrees(specs: TreeSpec[], ground: GroundField | null, proc: ProceduralTextureSource, white: TileFrame): THREE.Object3D[] {
   const trunkG = new GeomBuilder();
