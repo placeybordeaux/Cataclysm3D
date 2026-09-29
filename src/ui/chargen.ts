@@ -10,7 +10,6 @@ import {
   STAT_MAX, STAT_MIN, statPointsUsed, statStepCost, traitPointsUsed, type ProfessionDef, type ScenarioDef, type StatId, type Stats,
 } from './chargen_logic';
 import { spriteImg, type UiContext } from './context';
-import { possibleItems } from '../data/itemgroups';
 import { applyProfessionKnowledge } from '../game/crafting';
 
 // New character (CDDA newcharacter.cpp), simplified to five tabs: SCENARIO, PROFESSION,
@@ -292,13 +291,16 @@ export function openCharGen(ctx: UiContext): Promise<Build | null> {
       return `Points left: Stats ${c(col(pl.statLeft), String(pl.statLeft))}  Traits ${c(col(pl.traitLeft), String(pl.traitLeft))}  Skills ${c(col(pl.skillLeft), String(pl.skillLeft))}`;
     }
 
+    // The same roll applyBuild makes, so the list shows what you will actually start with
+    // (a wallet with its three bills, not every coin the wallet distribution could hold).
     function itemsOf(pr: ProfessionDef, male: boolean): string[] {
-      const ids = new Set<string>();
+      const rng = new Rng(ctx.game.seed ^ 0x5eed);
+      const items: Item[] = [];
       for (const key of ['both', male ? 'male' : 'female'] as const) {
         const g = pr.items?.[key] as ItemGroupDef | undefined;
-        if (g) possibleItems(ctx.game.data, g, ids);
+        if (g) for (const sp of expandItemGroup(ctx.game.data, g, rng)) items.push(...fromSpawned(ctx.game.data, sp));
       }
-      return [...ids].map((id) => ctx.game.data.items[id]).filter(Boolean).map((d) => `${spriteImg(ctx.renderer, d.id) || '<span class="icon"></span>'}${esc(cddaText(d.name))}`);
+      return items.map((it) => `${spriteImg(ctx.renderer, it.typeId) || '<span class="icon"></span>'}${esc(it.name())}`);
     }
 
     function render() {
