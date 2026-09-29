@@ -1,0 +1,409 @@
+import type { Game } from './game';
+import type { FurnitureDef, TerrainDef } from '../data/types';
+import type { Item } from './item';
+import { createItem } from './item';
+import { CHUNK, chunkOf, localOf } from '../world/coords';
+import { hasFlag } from '../world/registry';
+import { cddaText } from './units';
+import { emitSound } from './sound';
+import { sfx } from '../audio/sfx';
+import { isOutside } from './vision';
+import { targetTile, type TargetTile } from './targeting';
+import { goStairs } from './zlevels';
+import { goToSleep, comfortAt } from './rest';
+import { ignite, fieldName } from './fields';
+import { playerSeesTrap, trapAt, trapDef } from './traps';
+
+// Examine / interact (`e`), after CDDA iexamine.cpp and map::open_door / close_door.
+// interactionsAt() lists what can be done with a tile (pure, testable); the key handler
+// runs the first one or shows a menu when there are several. interactionPrompt() is the
+// HUD hint ("[e] Open closed wood door").
+
+export interface Interaction {
+  id: string;
+  /** Menu / prompt text, e.g. "Open closed wood door". */
+  label: string;
+  run: () => void;
+}
+
+/** UI hooks so this module stays testable without a DOM (set by installInteract). */
+export interface InteractUi {
+  menu?: (title: string, entries: { label: string; run: () => void }[]) => void;
+  text?: (title: string, body: string) => void;
+  /** Pick up from a list of map items at (x, y, z). */
+  pickup?: (title: string, x: number, y: number, z: number) => void;
+}
+
+let ui: InteractUi = {};
+export function setInteractUi(u: InteractUi): void {
+  ui = u;
+}
+
+const insideOf = (game: Game) => {
+  const p = game.player;
+  return !isOutside(game.map, p.tileX, p.tileY, p.z);
+};
+
+function openCloseFlags(def: TerrainDef | FurnitureDef): boolean {
+  return hasFlag(def, 'OPENCLOSE_INSIDE');
+}
+
+/** map::open_door. Returns a message on refusal, null on success. */
+export function openDoor(game: Game, x: number, y: number, z: number): string | null {
+  const map = game.map;
+  const t = map.terAt(x, y, z), f = map.furnAt(x, y, z);
+  const inside = insideOf(game);
+  if (t.open && map.terrain.has(t.open)) {
+    if (openCloseFlags(t) && !inside) return hasFlag(t, 'LOCKED') ? `The ${t.name} is locked.` : `You can't open the ${t.name} from outside.`;
+    map.setTer(x, y, z, t.open);
+    sfx.door('open', { x: x + 0.5, y: y + 0.5, z }, t.id);
+    emitSound(game, { x, y, z }, 6, 'swish', { category: 'movement', source: game.player, sfxId: '' });
+    game.events.emit('mapChanged', { x, y, z });
+    return null;
+  }
+  if (f.open && map.furniture.has(f.open)) {
+    if (openCloseFlags(f) && !inside) return `You can't open the ${f.name} from outside.`;
+    map.setFurn(x, y, z, f.open);
+    sfx.door('open', { x: x + 0.5, y: y + 0.5, z }, f.id);
+    emitSound(game, { x, y, z }, 6, 'swish', { category: 'movement', source: game.player, sfxId: '' });
+    return null;
+  }
+  return `That can't be opened.`;
+}
+
+/** map::close_door: refuses when something is in the way. */
+export function closeDoor(game: Game, x: number, y: number, z: number): string | null {
+  const map = game.map;
+  const t = map.terAt(x, y, z), f = map.furnAt(x, y, z);
+  const inside = insideOf(game);
+  const p = game.player;
+  if (p.tileX === x && p.tileY === y && p.z === z) return "There's you in the way!";
+  if (t.close && map.terrain.has(t.close)) {
+    if (openCloseFlags(t) && !inside) return `You can't close the ${t.name} from outside.`;
+    if (map.itemsAt(x, y, z).length) return `There's ${map.itemsAt(x, y, z).length > 1 ? 'some stuff' : 'something'} in the way!`;
+    if (f.id !== 'f_null') return `There's a ${f.name} in the way!`;
+    map.setTer(x, y, z, t.close);
+    sfx.door('close', { x: x + 0.5, y: y + 0.5, z }, t.id);
+    emitSound(game, { x, y, z }, 10, 'swish', { category: 'movement', source: p, sfxId: '' });
+    game.events.emit('mapChanged', { x, y, z });
+    return null;
+  }
+  if (f.close && map.furniture.has(f.close)) {
+    if (openCloseFlags(f) && !inside) return `You can't close the ${f.name} from outside.`;
+    map.setFurn(x, y, z, f.close);
+    sfx.door('close', { x: x + 0.5, y: y + 0.5, z }, f.id);
+    emitSound(game, { x, y, z }, 10, 'swish', { category: 'movement', source: p, sfxId: '' });
+    return null;
+  }
+  return `That can't be closed.`;
+}
+
+function say(game: Game, msg: string | null, color = 'c_light_gray'): void {
+  if (msg) game.message(msg, color);
+}
+
+function examineAction(def: TerrainDef | FurnitureDef): string | null {
+  const e = def.examine_action;
+  if (typeof e === 'string') return e;
+  if (e && typeof e === 'object' && typeof (e as { type?: unknown }).type === 'string') return (e as { type: string }).type;
+  return null;
+}
+
+/** Items the player carries with a tool quality ≥ level. */
+function toolWith(game: Game, q: string, level = 1): Item | null {
+  return game.player.inv.findByQuality(q, level)[0] ?? null;
+}
+
+function drinkFrom(game: Game, x: number, y: number, z: number, name: string, clean: boolean): void {
+  const id = clean ? 'water_clean' : 'water';
+  const liquidId = game.data.items[id] ? id : 'water';
+  if (!game.data.items[liquidId]) return say(game, `There's no water in the ${name}.`);
+  const w = createItem(game.data, liquidId, { charges: 1 });
+  const r = game.player.inv.consume(w);
+  if (r.ok) emitSound(game, { x, y, z }, 2, 'slurp', { category: 'activity', source: game.player, sfxId: '', ambient: true });
+}
+
+function signText(game: Game, x: number, y: number, z: number): string | null {
+  const c = game.map.chunk(chunkOf(x), chunkOf(y), z);
+  return c?.signs.get(localOf(y) * CHUNK + localOf(x)) ?? null;
+}
+
+function lockpickAttempt(game: Game, x: number, y: number, z: number, def: TerrainDef | FurnitureDef, isFurn: boolean): void {
+  const p = game.player;
+  const pick = toolWith(game, 'LOCKPICK', 1);
+  if (!pick) return;
+  const result = typeof def.lockpick_result === 'string' ? def.lockpick_result : null;
+  if (!result) return say(game, `The ${def.name} has no lock you can pick.`);
+  game.activities.start({
+    name: 'picking the lock',
+    duration: Math.max(60, 600 - p.dex * 20 - p.getSkill('traps') * 60),
+    onComplete: () => {
+      // lockpick_activity_actor: skill, dexterity and tool quality against the lock.
+      const q = pick.qualityLevel('LOCKPICK');
+      const chance = Math.min(95, 20 + p.getSkill('traps') * 10 + (p.dex - 8) * 5 + q * 15);
+      if (p.rng.chance(chance)) {
+        if (isFurn) game.map.setFurn(x, y, z, result);
+        else game.map.setTer(x, y, z, result);
+        say(game, cddaText(def.lockpick_message) || 'With a satisfying click, the lock opens.', 'c_green');
+        p.practice('traps', 5);
+      } else {
+        say(game, 'The lock stumps your efforts to pick it.', 'c_light_red');
+        p.practice('traps', 2);
+      }
+    },
+  });
+}
+
+function pryAttempt(game: Game, x: number, y: number, z: number, def: TerrainDef): void {
+  const p = game.player;
+  const pry = def.prying as { result?: string; message?: string; prying_data?: { difficulty?: number; prying_level?: number; noisy?: boolean; failure?: string } } | undefined;
+  if (!pry?.result) return say(game, `You can't pry the ${def.name} open.`);
+  const level = pry.prying_data?.prying_level ?? 1;
+  const tool = toolWith(game, 'PRY', level);
+  if (!tool) return say(game, `You need a tool with prying ${level} to pry that open.`);
+  game.activities.start({
+    name: 'prying',
+    duration: 60,
+    onComplete: () => {
+      // iexamine prying: str + tool quality vs difficulty.
+      const diff = pry.prying_data?.difficulty ?? 5;
+      const roll = p.rng.int(0, p.str + tool.qualityLevel('PRY') * 2);
+      if (pry.prying_data?.noisy) emitSound(game, { x, y, z }, 12, 'crunch!', { category: 'destructive_activity', source: p });
+      if (roll >= diff) {
+        game.map.setTer(x, y, z, pry.result!);
+        say(game, pry.message ?? 'You pry it open.', 'c_green');
+      } else say(game, pry.prying_data?.failure ?? "You pry, but can't get it open.", 'c_light_red');
+    },
+  });
+}
+
+/** Everything the player can do with tile (x, y, z), most relevant first. */
+export function interactionsAt(game: Game, x: number, y: number, z: number): Interaction[] {
+  const map = game.map;
+  const p = game.player;
+  const t = map.terAt(x, y, z), f = map.furnAt(x, y, z);
+  const out: Interaction[] = [];
+  const add = (id: string, label: string, run: () => void) => out.push({ id, label, run });
+  const tAct = examineAction(t), fAct = f.id !== 'f_null' ? examineAction(f) : null;
+  const inside = insideOf(game);
+  const onTile = p.tileX === x && p.tileY === y;
+
+  // --- stairs
+  if (hasFlag(t, 'GOES_UP')) add('stairs_up', `Go up the ${t.name}`, () => goStairs(game, 'up'));
+  if (hasFlag(t, 'GOES_DOWN')) add('stairs_down', `Go down the ${t.name}`, () => goStairs(game, 'down'));
+
+  // --- locked doors / objects
+  const locked = hasFlag(t, 'LOCKED') || tAct === 'locked_object' || tAct === 'locked_object_pickable';
+  if (locked && !inside) {
+    const canPick = !!toolWith(game, 'LOCKPICK') && typeof t.lockpick_result === 'string';
+    const pry = t.prying as { prying_data?: { prying_level?: number } } | undefined;
+    const canPry = !!pry && !!toolWith(game, 'PRY', pry.prying_data?.prying_level ?? 1);
+    if (canPick) add('lockpick', `Pick the lock of the ${t.name}`, () => lockpickAttempt(game, x, y, z, t, false));
+    if (canPry) add('pry', `Pry open the ${t.name}`, () => pryAttempt(game, x, y, z, t));
+    if (!canPick && !canPry)
+      add('locked', `Examine ${t.name} (locked)`, () => {
+        sfx.doorLocked({ x: x + 0.5, y: y + 0.5, z });
+        say(game, `The ${t.name} is locked.  If only you had something to pry it with…`);
+      });
+  }
+
+  // --- curtains (CDDA iexamine::curtains)
+  if (tAct === 'curtains' && inside) {
+    if (t.open) add('open', `Open the ${t.name}`, () => say(game, openDoor(game, x, y, z)));
+    if (t.close) add('close', `Close the ${t.name}`, () => say(game, closeDoor(game, x, y, z)));
+    const ct = typeof t.curtain_transform === 'string' ? t.curtain_transform : null;
+    if (ct && map.terrain.has(ct))
+      add('tear_curtains', 'Tear down the curtains', () => {
+        map.setTer(x, y, z, ct);
+        for (const [id, n] of [['sheet', 2], ['stick', 1], ['string_36', 1]] as const)
+          for (let i = 0; i < n; i++) if (game.data.items[id]) map.addItem(p.tileX, p.tileY, p.z, createItem(game.data, id));
+        say(game, 'You tear the curtains and curtain rod off the window frame.');
+        emitSound(game, { x, y, z }, 8, 'rrrip!', { category: 'destructive_activity', source: p });
+      });
+  } else if (!locked || inside) {
+    // --- doors, windows, gates: open / close (terrain, then furniture)
+    const isDoorish = hasFlag(t, 'DOOR') || hasFlag(t, 'WINDOW') || !!t.open || !!t.close;
+    const tBlocked = openCloseFlags(t) && !inside;
+    if (tBlocked) {
+      if (t.open || t.close) add('examine', `Examine ${t.name}`, () => say(game, `You can't reach the ${t.name}'s latch from outside.`));
+    } else if (t.open && !(locked && !inside)) add('open', `${locked ? 'Unlock and open' : 'Open'} ${t.name}`, () => say(game, openDoor(game, x, y, z)));
+    else if (t.close && isDoorish && !onTile) add('close', `Close ${t.name}`, () => say(game, closeDoor(game, x, y, z)));
+    if (f.open) add('open', `Open ${f.name}`, () => say(game, openDoor(game, x, y, z)));
+    else if (f.close) add('close', `Close ${f.name}`, () => say(game, closeDoor(game, x, y, z)));
+  }
+
+  // --- furniture examine actions
+  const act = fAct ?? tAct;
+  const def = fAct ? f : t;
+  switch (act) {
+    case 'sign': {
+      const text = signText(game, x, y, z);
+      add('read_sign', `Read the ${def.name}`, () => {
+        const msg = text ? `The sign says: ${text}` : 'Nothing legible on the sign.';
+        if (ui.text) ui.text(def.name, msg);
+        else say(game, msg);
+      });
+      break;
+    }
+    case 'water_source':
+    case 'finite_water_source':
+      add('drink', `Drink from the ${def.name}`, () => drinkFrom(game, x, y, z, def.name, false));
+      break;
+    case 'gaspump':
+    case 'pay_gas':
+      add('examine', `Examine ${def.name}`, () => say(game, `The ${def.name} is out of order.  There's no power to run the pump.`));
+      break;
+    case 'vending':
+      add('examine', `Use ${def.name}`, () => say(game, 'The vending machine is out of order.  Without power it won\'t take your money.  You could smash it open.'));
+      break;
+    case 'atm':
+      add('examine', `Use ${def.name}`, () => say(game, 'The ATM is dark and unresponsive.'));
+      break;
+    case 'cardreader':
+    case 'cardreader_robofac':
+    case 'cardreader_fp':
+      add('examine', `Examine ${def.name}`, () => say(game, 'You need an ID card to use this.'));
+      break;
+    case 'elevator':
+      add('examine', `Use ${def.name}`, () => say(game, 'The elevator has no power.'));
+      break;
+    case 'fireplace':
+      if (!fieldsFire(game, x, y, z)) {
+        const starter = game.player.inv.allItems().find((it) => it.hasFlag('FIRESTARTER'));
+        if (starter) add('light_fire', `Light a fire in the ${def.name}`, () => lightFire(game, x, y, z, starter));
+      }
+      break;
+    case 'deployed_furniture': {
+      const di = typeof f.deployed_item === 'string' ? f.deployed_item : null;
+      if (di && game.data.items[di])
+        add('take_down', `Take down the ${f.name}`, () => {
+          map.setFurn(x, y, z, 'f_null');
+          map.addItem(x, y, z, createItem(game.data, di));
+          say(game, `You take down the ${f.name}.`);
+        });
+      break;
+    }
+    case 'ledge':
+      break;
+  }
+
+  // --- lighting a fire on any flammable-fuel tile (a pile of wood), when holding a firestarter
+  if (!out.some((o) => o.id === 'light_fire') && hasFlag(f, 'FIRE_CONTAINER') && !fieldsFire(game, x, y, z)) {
+    const starter = game.player.inv.allItems().find((it) => it.hasFlag('FIRESTARTER'));
+    if (starter) add('light_fire', `Light a fire in the ${f.name}`, () => lightFire(game, x, y, z, starter));
+  }
+
+  // --- sleeping spots
+  if (f.id !== 'f_null' && typeof f.comfort === 'number' && f.comfort >= 3)
+    add('sleep', `Sleep on the ${f.name}`, () => {
+      if (!onTile) {
+        p.x = x + 0.5;
+        p.y = y + 0.5;
+      }
+      goToSleep(game);
+    });
+
+  // --- containers & items
+  const items = map.itemsAt(x, y, z);
+  if (items.length || (f.id !== 'f_null' && hasFlag(f, 'CONTAINER'))) {
+    const where = f.id !== 'f_null' ? f.name : t.name;
+    const n = items.length;
+    add('pickup', n ? `Look in the ${where} (${n} item${n === 1 ? '' : 's'})` : `Look in the ${where}`, () => {
+      if (!n) return say(game, `The ${where} is empty.`);
+      if (ui.pickup) ui.pickup(`${where[0].toUpperCase()}${where.slice(1)}`, x, y, z);
+      else say(game, `There ${n === 1 ? 'is' : 'are'} ${n} item${n === 1 ? '' : 's'} in the ${where}.`);
+    });
+  }
+
+  // --- fallback: describe it
+  if (!out.length && (f.id !== 'f_null' || !map.passable(x, y, z) || tAct)) {
+    add('examine', `Examine ${def.name}`, () => describe(game, x, y, z));
+  }
+  return out;
+}
+
+function fieldsFire(game: Game, x: number, y: number, z: number): boolean {
+  return game.map.fieldsAt(x, y, z).some((f) => f.type === 'fd_fire');
+}
+
+function lightFire(game: Game, x: number, y: number, z: number, starter: Item): void {
+  const p = game.player;
+  if (starter.ammoRemaining() <= 0 && (starter.def.max_charges ?? 0) > 0 && starter.charges <= 0) return say(game, `Your ${starter.name()} is empty.`);
+  game.activities.start({
+    name: 'lighting a fire',
+    duration: 60,
+    onComplete: () => {
+      starter.ammoConsume(1);
+      ignite(game, x, y, z, 1);
+      say(game, 'You successfully light a fire.', 'c_green');
+      p.practice('survival', 1);
+    },
+  });
+}
+
+/** The fallback examine: name, description, what's there. */
+export function describeText(game: Game, x: number, y: number, z: number): { title: string; body: string } {
+  const map = game.map;
+  const t = map.terAt(x, y, z), f = map.furnAt(x, y, z);
+  const parts: string[] = [];
+  const main = f.id !== 'f_null' ? f : t;
+  if (main.description) parts.push(cddaText(main.description));
+  if (f.id !== 'f_null') parts.push(`There is a ${f.name} here, on ${t.name}.`);
+  const sign = signText(game, x, y, z);
+  if (sign) parts.push(`The sign says: ${sign}`);
+  for (const fd of map.fieldsAt(x, y, z)) parts.push(`There is ${fieldName(game, fd)} here.`);
+  if (trapAt(game, x, y, z) && playerSeesTrap(game, x, y, z)) parts.push(`There is a ${trapDef(game, trapAt(game, x, y, z)!)?.name} here.`);
+  const items = map.itemsAt(x, y, z) as unknown as Item[];
+  if (items.length) parts.push(`There ${items.length === 1 ? 'is' : 'are'} ${items.map((i) => (typeof i.name === 'function' ? i.name() : i.typeId)).slice(0, 6).join(', ')}${items.length > 6 ? ', …' : ''} here.`);
+  if (f.id === 'f_null' && t.id !== 't_null') {
+    const c = comfortAt(game, x, y, z);
+    if (c.comfort >= 3) parts.push('It looks comfortable to sleep on.');
+  }
+  return { title: main.name, body: parts.join('\n\n') || `That is a ${main.name}.` };
+}
+
+function describe(game: Game, x: number, y: number, z: number): void {
+  const d = describeText(game, x, y, z);
+  if (ui.text) ui.text(d.title, d.body);
+  else say(game, `${d.title}: ${d.body}`);
+}
+
+/** `e`: act on the aimed tile (the first interaction, or a menu when there are several). */
+export function interact(game: Game, target: TargetTile | null = targetTile(game)): boolean {
+  const p = game.player;
+  if (p.dead || p.isAsleep()) return false;
+  // Nothing aimed at: the tile you stand on (stairs, items), CDDA examines your own square.
+  const tt = target ?? { x: p.tileX, y: p.tileY, z: p.z, dist: 0 };
+  const list = interactionsAt(game, tt.x, tt.y, tt.z);
+  if (!list.length) {
+    if (!target) game.message('There is nothing to examine there.', 'c_light_gray');
+    else describe(game, tt.x, tt.y, tt.z);
+    return false;
+  }
+  // Open/close/stairs are unambiguous actions; others with alternatives get a menu.
+  const primary = list[0];
+  if (list.length === 1 || ['open', 'close', 'stairs_up', 'stairs_down'].includes(primary.id) || !ui.menu) {
+    primary.run();
+    return true;
+  }
+  const t = game.map.terAt(tt.x, tt.y, tt.z), f = game.map.furnAt(tt.x, tt.y, tt.z);
+  ui.menu((f.id !== 'f_null' ? f.name : t.name).replace(/^./, (c) => c.toUpperCase()), list);
+  return true;
+}
+
+/** HUD hint for the aimed tile, e.g. "[e] Open closed wood door", or null. */
+export function interactionPrompt(game: Game): string | null {
+  const p = game.player;
+  if (p.dead || p.isAsleep() || game.activities.current) return null;
+  const t = targetTile(game);
+  const key = game.keys.keyFor('interact');
+  if (t) {
+    const list = interactionsAt(game, t.x, t.y, t.z);
+    if (list.length) return `[${key}] ${list[0].label}${list.length > 1 ? ' …' : ''}`;
+  }
+  // Standing on stairs: suggest the stair keys.
+  const here = game.map.terAt(p.tileX, p.tileY, p.z);
+  if (hasFlag(here, 'GOES_UP')) return `[${game.keys.keyFor('stairs_up')}] Go up the ${here.name}`;
+  if (hasFlag(here, 'GOES_DOWN')) return `[${game.keys.keyFor('stairs_down')}] Go down the ${here.name}`;
+  return null;
+}

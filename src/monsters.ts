@@ -1,4 +1,4 @@
-import type { Game } from './game/game';
+import type { Game, LookCreature } from './game/game';
 import type { Renderer } from './render/renderer';
 import type { DebugApi } from './debug';
 import type { WorldGenerator } from './world/worldgen';
@@ -7,7 +7,7 @@ import { Spawner, type OvermapView } from './game/spawner';
 import { PlayerCombat, type ViewModelHook } from './game/playercombat';
 import { MonsterView } from './render/monsterView';
 import { butcherSeconds, butcherToolQuality, butcherYield, type ButcherKind } from './game/butchery';
-import { monsterSize } from './game/monster';
+import { monsterSize, type Monster } from './game/monster';
 import { createItem, loadAmmo, type Item } from './game/item';
 import { snippet } from './data/index';
 import { openMenu } from './ui/framework';
@@ -53,6 +53,26 @@ export function installMonsters(game: Game, renderer: Renderer | null, worldgen:
     return `You see ${m.name ? n : `${/^[aeiou]/i.test(n) ? 'an' : 'a'} ${n}`}!`;
   });
 
+  // Look mode / crosshair raycasts see monsters.
+  game.creatureAt = (x, y, z) => {
+    const m = sys.monsterAt(x, y, z);
+    return m ? { name: m.displayName(), symbol: m.type.symbol, color: m.type.color, describe: () => describeMonster(m), monster: m } as LookCreature : null;
+  };
+
+  // Sidebar safe-mode indicator: danger while a hostile is in view (CDDA safe mode).
+  let safeT = 0;
+  game.systems.push({
+    name: 'safe-mode',
+    update(_g, dt) {
+      if ((safeT -= dt) > 0) return;
+      safeT = 0.5;
+      const hud = api?.hud as { safeMode?: { text: string; color: string } } | undefined;
+      if (!hud) return;
+      const m = sys.visibleHostile(40);
+      hud.safeMode = m ? { text: 'DANGER', color: 'c_red' } : { text: 'SAFE', color: 'c_green' };
+    },
+  });
+
   game.keys.register('fire', 'Fire wielded weapon', () => {
     if (game.player.inv.wielded?.isGun()) combat.fire();
     else game.message('You are not wielding a ranged weapon.');
@@ -62,6 +82,16 @@ export function installMonsters(game: Game, renderer: Renderer | null, worldgen:
 
   if (api) installDebug(api, game, sys, spawner, combat);
   return { sys, spawner, combat, view };
+}
+
+/** Look-mode text: CDDA monster::extended_description basics (health, attitude, description). */
+export function describeMonster(m: Monster): string {
+  const f = m.hp / m.hpMax;
+  const health = f >= 1 ? '<color_green>It is uninjured.</color>' : f > 0.75 ? '<color_light_green>It is lightly injured.</color>'
+    : f > 0.5 ? '<color_yellow>It is moderately injured.</color>' : f > 0.25 ? '<color_light_red>It is heavily injured.</color>' : '<color_red>It is nearly dead!</color>';
+  const att = { attack: '<color_red>Hostile!</color>', flee: '<color_light_green>Fleeing!</color>', follow: '<color_yellow>Tracking.</color>', ignore: '<color_light_gray>Ignoring.</color>', friend: '<color_green>Friendly.</color>' }[m.attitude()];
+  const status = [m.hasEffect('downed') ? 'downed' : '', m.hasEffect('stunned') ? 'stunned' : '', m.hasEffect('grabbing') ? 'grabbing' : ''].filter(Boolean).join(', ');
+  return `${att}  ${health}${status ? `  <color_light_blue>(${status})</color>` : ''}\n${m.type.description ?? ''}`;
 }
 
 // ------------------------------------------------------------------ throw / butcher UI

@@ -12,6 +12,10 @@ import { defaultMelee, trySpecial } from './monattack';
 import { createItem, fromSpawned, type Item } from './item';
 import type { BodyPartId } from './bodyparts';
 import { sfx } from '../audio/sfx';
+import { bash } from './bash';
+import { addField, fieldDamageAt } from './fields';
+import { emitSound, heardVolume, type SoundCategory } from './sound';
+import { lightAt, playerCanSee } from './vision';
 
 // The monster simulation (CDDA monmove.cpp + monster.cpp, real-time). Monsters live in `all`
 // forever once spawned; only those inside the "reality bubble" (ACTIVE_RADIUS tiles of the
@@ -75,14 +79,6 @@ export function dormantBase(id: string): string | null {
   return null;
 }
 
-/** Optional seams other systems may fill in (see ARCHITECTURE / report). */
-export interface GameSeams {
-  /** World agent's terrain/furniture bash (src/game/bash.ts). */
-  bash?: (x: number, y: number, z: number, strength: number) => boolean | { success?: boolean } | void;
-  /** UI agent's stats block. */
-  stats?: { kills?: Record<string, number> | Map<string, number> };
-}
-
 /** Sun/moon light 0..100 at an hour of day (CDDA default_daylight_level = 100). */
 export function ambientLight(hour: number): number {
   const MOON = 5;
@@ -120,13 +116,13 @@ export class MonsterSystem implements GameSystem {
   private activeTimer = 0;
   private dormantTimer = 0;
   private upgradeTimer = 0;
+  private fieldTimer = 0;
   private spatial = new Map<number, Monster[]>();
   private pathQueue: Monster[] = [];
   private pathBudget = 0;
   private lastPX = NaN;
   private lastPY = NaN;
   private grabRollTimer = 0;
-  private speechCooldown = 0;
   private lightCache = 100;
   private dirty = false;
 
@@ -231,12 +227,13 @@ export class MonsterSystem implements GameSystem {
     return this.lightCache;
   }
 
+  /**
+   * vision.ts lightAt at the survivor's tile (sun/moon through windows, lamps, fires, a lit
+   * flashlight they carry): CDDA uses the light at the *target* to decide visibility.
+   */
   private computeLight(): number {
     const p = this.game.player;
-    let amb = ambientLight(this.game.clock.hourOfDay);
-    const above = this.grid.ter(p.tileX, p.tileY, p.z + 1);
-    if (above && above.id !== 't_open_air' && above.id !== 't_null') amb *= 0.5;
-    return Math.max(amb, this.playerLight());
+    return Math.max(lightAt(this.game, p.tileX, p.tileY, p.z), this.playerLight());
   }
 
   /** Effective range at which `m` notices the player (vision_day/night, crouching). */
@@ -247,17 +244,22 @@ export class MonsterSystem implements GameSystem {
     return r;
   }
 
-  /** Can the player see this monster? (for messages & danger checks) */
+  /** Can the player see this monster? (vision.ts playerCanSee: range, LOS, light at its tile) */
   playerSees(m: Monster): boolean {
     const p = this.game.player;
     if (m.z !== p.z || p.dead) return false;
-    const d = this.distToPlayer(m);
-    let range = 60 * (ambientLight(this.game.clock.hourOfDay) / 100);
-    if (this.playerLight() > 0) range = Math.max(range, 20);
-    range = Math.max(range, 4);
-    if (p.hasEffect('boomered') || p.hasEffect('blind')) range = 1;
-    if (d > range) return false;
-    return hasLOS(this.grid, p.tileX, p.tileY, m.tileX, m.tileY, p.z);
+    if (p.hasEffect('boomered') || p.hasEffect('blind')) return this.distToPlayer(m) <= 1.5;
+    // A debug/renderer flashlight isn't an item, so it doesn't show up in lightAt: let it
+    // reveal what stands in front of the survivor.
+    if (this.playerLight() > 0 && this.distToPlayer(m) <= 20 && hasLOS(this.grid, p.tileX, p.tileY, m.tileX, m.tileY, p.z)) return true;
+    return playerCanSee(this.game, m.tileX, m.tileY, m.z);
+  }
+
+  /** Live monster standing on a tile (bubble only), for look mode / raycasts. */
+  monsterAt(x: number, y: number, z: number): Monster | null {
+    const l = this.spatial.get(key(x, y, z));
+    if (l) for (const m of l) if (!m.dead && m.tileX === x && m.tileY === y && m.z === z) return m;
+    return null;
   }
 
   monstersNear(x: number, y: number, z: number, r: number): Monster[] {
@@ -276,21 +278,21 @@ export class MonsterSystem implements GameSystem {
     if (this.playerSees(m)) this.message(text, color);
   }
 
-  speechMessage(m: Monster, sound: string): void {
-    if (this.speechCooldown > 0) return;
-    this.speechCooldown = 6;
-    this.message(this.playerSees(m) ? `${m.TheName()}: ${sound}` : `You hear ${sound}`);
-  }
-
-  /** Emit a noise for AI hearing (and audio). `sfxId: ''` when the caller already played it. */
-  emitSound(x: number, y: number, z: number, volume: number, description: string, source?: unknown, sfxId?: string): void {
-    this.game.events.emit('sound', { x, y, z, volume, description, source, ...(sfxId !== undefined ? { sfxId } : {}) });
+  /**
+   * Make a noise through sound.ts (AI hearing via the `sound` event, the survivor's "You hear…"
+   * messages, audio). `sfxId: ''` when the caller already played it.
+   */
+  emitSound(x: number, y: number, z: number, volume: number, description: string, source?: unknown, sfxId?: string, category: SoundCategory = 'combat', ambient = false): void {
+    emitSound(this.game, { x, y, z }, volume, description, { source: source === 'player' ? this.game.player : source, sfxId, category, ambient });
   }
 
   addField(x: number, y: number, z: number, type: string, intensity: number): void {
     if (!this.grid.known(x, y, z)) return;
-    if (!this.game.data.misc.field_type?.[type]) warnOnce('field_type', type);
-    this.game.map.addField(x, y, z, type, intensity);
+    if (!this.game.data.misc.field_type?.[type]) {
+      warnOnce('field_type', type);
+      return;
+    }
+    addField(this.game, x, y, z, type, intensity);
   }
 
   launchProjectile(m: Monster, tx: number, ty: number, tz: number, glyph: { symbol: string; color: string }, speed: number, onArrive: () => void): void {
@@ -341,7 +343,9 @@ export class MonsterSystem implements GameSystem {
       const dist = Math.max(Math.abs(m.x - x), Math.abs(m.y - y));
       if (v * 2 <= dist) continue;
       const good = m.has('GOODHEARING');
-      const volume = good ? 2 * v - dist : v - dist;
+      // In the bubble, sound.ts adds weather and wall muffling; dormant monsters (whose
+      // chunks may not exist) use the bare CDDA formula so we never trigger mapgen.
+      const volume = m.dormant ? (good ? 2 * v - dist : v - dist) : heardVolume(this.game, { x, y, z, volume: v }, { x: m.tileX, y: m.tileY, z }, good ? 2 : 1);
       if (volume <= 0) continue;
       const err = volume < 2 ? 10 : volume < 5 ? 5 : volume < 10 ? 3 : volume < 20 ? 1 : 0;
       const tx = x + m.rng.int(-err, err), ty = y + m.rng.int(-err, err);
@@ -421,12 +425,8 @@ export class MonsterSystem implements GameSystem {
     if (this.grabbedBy === m) this.releaseGrab();
     const def = m.type;
     const tx = m.tileX, ty = m.tileY;
-    if (killer === 'player') {
-      this.kills.set(def.id, (this.kills.get(def.id) ?? 0) + 1);
-      const k = (this.game as unknown as GameSeams).stats?.kills;
-      if (k instanceof Map) k.set(def.id, (k.get(def.id) ?? 0) + 1);
-      else if (k && typeof k === 'object') k[def.id] = (k[def.id] ?? 0) + 1;
-    }
+    // game.stats.kills is filled by the UI from the creatureDied event (killer === player).
+    if (killer === 'player') this.kills.set(def.id, (this.kills.get(def.id) ?? 0) + 1);
     for (const o of this.monstersNear(m.x, m.y, m.z, 15)) if (o.type.default_faction === def.default_faction) this.trigger(o, 'FRIEND_DIED', 15);
     const df = (def.death_function && typeof def.death_function === 'object' ? def.death_function : {}) as { message?: string; corpse_type?: string; effect?: { id?: string } };
     // Overkill gibs the body (CDDA mdeath splatter when damage >> max hp).
@@ -466,7 +466,7 @@ export class MonsterSystem implements GameSystem {
     }
     const blood = this.bloodType(def);
     if (blood && corpseType !== 'SPLATTER') this.addField(tx, ty, m.z, blood, 2);
-    this.game.events.emit('creatureDied', { creature: m, killer });
+    this.game.events.emit('creatureDied', { creature: m, killer: killer === 'player' ? this.game.player : killer });
     for (const f of this.onDied) f(m, corpse);
   }
 
@@ -559,7 +559,6 @@ export class MonsterSystem implements GameSystem {
       this.lastPX = p.x;
       this.lastPY = p.y;
     }
-    this.speechCooldown = Math.max(0, this.speechCooldown - dt);
     this.lightCache = this.computeLight();
     this.activeTimer -= dt;
     if (this.activeTimer <= 0) {
@@ -571,6 +570,11 @@ export class MonsterSystem implements GameSystem {
     if (this.dormantTimer <= 0) {
       this.dormantTimer = 1;
       this.driftDormant(1);
+    }
+    this.fieldTimer -= dt;
+    if (this.fieldTimer <= 0) {
+      this.fieldTimer = 1 / ACTION_SCALE;
+      this.fieldDamage();
     }
     this.upgradeTimer -= gameDt;
     if (this.upgradeTimer <= 0) {
@@ -854,8 +858,7 @@ export class MonsterSystem implements GameSystem {
       m.busy = 100 / m.speed / ACTION_SCALE;
       return;
     }
-    const bash = (this.game as unknown as GameSeams).bash;
-    if (!bash || !(m.has('BASHES') || m.has('DESTROYS'))) {
+    if (!(m.has('BASHES') || m.has('DESTROYS'))) {
       m.path = [];
       return;
     }
@@ -865,7 +868,7 @@ export class MonsterSystem implements GameSystem {
     if (m.has('GROUP_BASH')) {
       for (const o of this.monstersNear(x + 0.5, y + 0.5, m.z, 2.5)) if (o !== m && o.has('GROUP_BASH')) str += (o.type.melee_dice * o.type.melee_dice_sides) / 2;
     }
-    bash(x, y, m.z, Math.round(str));
+    bash(this.game, x, y, m.z, Math.round(str), { source: m });
     m.attackCooldown = 100 / m.speed / ACTION_SCALE;
     m.path = [];
     m.pathAge = 99;
@@ -879,9 +882,8 @@ export class MonsterSystem implements GameSystem {
       if (m.dead || m.dormant) continue;
       const brain = this.brains.get(m);
       if (!brain) continue;
-      const bashFn = (this.game as unknown as GameSeams).bash;
       const res = findPath(this.grid, m.tileX, m.tileY, Math.floor(brain.gx), Math.floor(brain.gy), m.z, {
-        bash: !!bashFn && (m.has('BASHES') || m.has('DESTROYS')),
+        bash: m.has('BASHES') || m.has('DESTROYS'),
         doors: m.has('CAN_OPEN_DOORS'),
         maxNodes: Math.min(1500, Math.max(200, this.pathBudget)),
         margin: 10,
@@ -999,6 +1001,19 @@ export class MonsterSystem implements GameSystem {
     }
   }
 
+  /** Fire under a monster burns it once per turn (fields.ts fieldDamageAt, CDDA monster::process_effects). */
+  private fieldDamage(): void {
+    for (const m of this.active) {
+      if (m.dead) continue;
+      const d = fieldDamageAt(this.game, m.tileX, m.tileY, m.z, { materials: m.type.material, flags: m.type.flags, heatArmor: m.type.armor?.heat ?? 0 });
+      if (!d || d.amount <= 0) continue;
+      this.hurt(m, d.amount, null);
+      m.addEffect('onfire', 1);
+      // Burning animals panic; zombies keep coming.
+      if (!m.has('UNBREAKABLE_MORALE')) m.morale -= 10;
+    }
+  }
+
   /** monster::try_upgrade for monsters in the bubble whose evolution day has come. */
   private processUpgrades(): void {
     const day = dayOf(this.game.clock.seconds);
@@ -1016,6 +1031,16 @@ export class MonsterSystem implements GameSystem {
 
   /** Nearest hostile the player can see within `range`, for "You see a zombie!" interrupts. */
   visibleHostile(range = 30): Monster | null {
+    // Danger checks run every tick during activities; the answer only needs to be ~4 Hz fresh.
+    const c = this.hostileCache;
+    if (c && c.range === range && this.time - c.t < 0.25 && !(c.m?.dead)) return c.m;
+    const m = this.findVisibleHostile(range);
+    this.hostileCache = { t: this.time, range, m };
+    return m;
+  }
+  private hostileCache: { t: number; range: number; m: Monster | null } | null = null;
+
+  private findVisibleHostile(range: number): Monster | null {
     let best: Monster | null = null, bd = Infinity;
     for (const m of this.active) {
       if (m.dead || m.attitude() !== 'attack') continue;

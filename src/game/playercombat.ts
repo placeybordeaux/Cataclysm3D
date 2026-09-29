@@ -96,6 +96,10 @@ export class PlayerCombat implements GameSystem {
   /** Monster under the crosshair within reach: exact ray hit preferred, else smallest angle. */
   meleeTarget(reach = MELEE_REACH): Monster | null {
     const p = this.game.player;
+    // The UI's camera raycast (game.lookAt) knows exactly which sprite the crosshair is on.
+    const look = this.game.lookAt?.(reach + 1.5);
+    const hit = look?.kind === 'creature' ? (look.creature as { monster?: Monster } | undefined)?.monster : undefined;
+    if (hit && !hit.dead && Math.hypot(hit.x - p.x, hit.y - p.y) - hit.radius <= reach) return hit;
     let best: Monster | null = null, bestScore = Infinity;
     for (const m of this.sys.active) {
       if (m.dead || m.z !== p.z) continue;

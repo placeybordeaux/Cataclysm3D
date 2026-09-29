@@ -1,0 +1,18 @@
+/* Crafting / construction screens (src/ui/crafting.ts, construction.ts): CDDA's tab bar
+   and two-pane recipe browser. */
+#ui .craft-tabs { white-space: pre; display: flex; flex-wrap: wrap; gap: 0 1ch; border-bottom: 1px solid var(--c-dark_gray); padding-bottom: 1px; }
+#ui .craft-tabs .tab { color: var(--c-light_gray); cursor: pointer; }
+#ui .craft-tabs .tab.sel { color: var(--c-white); background: var(--c-dark_gray); }
+#ui .craft-tabs.sub .tab { color: var(--c-dark_gray); }
+#ui .craft-tabs.sub .tab.sel { color: var(--c-light_green); background: none; }
+#ui .craft-cols { display: flex; gap: 10px; min-height: 0; flex: 1; }
+#ui .craft-list { flex: 0 0 38ch; overflow-y: auto; overflow-x: hidden; border-right: 1px solid var(--c-dark_gray); }
+#ui .craft-list .row { white-space: pre; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
+#ui .craft-list .row.sel { background: var(--c-blue); }
+#ui .craft-detail { flex: 1; overflow-y: auto; white-space: pre-wrap; min-width: 0; }
+#ui .craft-body { display: flex; flex-direction: column; height: 100%; }
+#ui .craft-status { color: var(--c-light_gray); white-space: pre; }
+#ui .activity-bar { position: absolute; left: 50%; bottom: 14vh; transform: translateX(-50%); min-width: 44ch; background: rgba(0,0,0,.85);
+  border: 1px solid var(--c-light_gray); padding: 2px 8px; white-space: pre; text-align: center; }
+#ui .activity-bar .bar { color: var(--c-light_green); }
+#ui .activity-bar .rest { color: var(--c-dark_gray); }

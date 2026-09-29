@@ -197,16 +197,14 @@ function speech(sys: MonsterSystem, m: Monster): void {
 
 function sayLine(sys: MonsterSystem, m: Monster, line: { sound: string; volume: number }): void {
   sfx.monsterVoice(m.id, m);
-  sys.emitSound(m.x, m.y, m.z, line.volume, line.sound, m, '');
-  // Only surface nearby speech in the log, like CDDA's "You hear moaning." spam filter.
-  if (sys.distToPlayer(m) <= Math.min(line.volume, 12)) sys.speechMessage(m, line.sound);
+  // sound.ts prints "From the north you hear moaning."; keep distant chatter out of the log.
+  sys.emitSound(m.x, m.y, m.z, line.volume, line.sound, m, '', 'speech', sys.distToPlayer(m) > 12);
 }
 
 function shriek(sys: MonsterSystem, m: Monster, stun: boolean): boolean {
   if (!m.seesPlayer || sys.distToPlayer(m) > 4.5) return false;
   m.busy = Math.max(m.busy, 2.4 * 100 / m.speed / 3);
-  sys.message(`${m.TheName()} lets out a terrible shriek!`, 'c_red');
-  sys.emitSound(m.x, m.y, m.z, 50, 'a terrible shriek!', m, '');
+  sys.emitSound(m.x, m.y, m.z, 50, 'a terrible shriek!', m, undefined, 'alert');
   if (stun && sys.rng.oneIn(2)) sys.game.player.addEffect('dazed', turnsToEffectSeconds(sys.rng.int(2, 5)));
   return true;
 }

@@ -8,7 +8,11 @@ import { loadWorldgenData } from './world/worldgen_data';
 import { installWorldgenDebug } from './world/worldgen_debug';
 import { installDebugApi } from './debug';
 import { initUi } from './ui/framework';
+import { installUi } from './ui/index';
 import { installAudio } from './audio/install';
+import { installCrafting } from './ui/crafting_install';
+import { installWorldInteraction } from './worldInteraction';
+import { lightAt } from './game/vision';
 import { installMonsters } from './monsters';
 
 // URL params (all optional): seed=<int>, gen=world|test (default world), debug=1 (render stats overlay),
@@ -47,7 +51,12 @@ async function main(): Promise<void> {
   const api = installDebugApi(game, renderer);
   if (worldgen) installWorldgenDebug(api, game, worldgen);
   installAudio(game, api);
+  installCrafting(game, api);
+  installWorldInteraction(game, renderer, api);
+  // Crafting/reading probe `game.lightAt` for "too dark" checks; back it with real vision light.
+  (game as unknown as { lightAt: (x: number, y: number, z: number) => number }).lightAt = (x, y, z) => lightAt(game, x, y, z);
   installMonsters(game, renderer, worldgen, api);
+  const ui = await installUi(game, renderer, worldgen, api);
 
   let last = performance.now();
   const loop = (now: number) => {
@@ -59,6 +68,8 @@ async function main(): Promise<void> {
   };
   requestAnimationFrame(loop);
   api.ready = true;
+  // Title screen / character creation (skipped with ?skipmenu=1 and under automation).
+  await ui.boot();
 }
 
 main().catch((e) => {

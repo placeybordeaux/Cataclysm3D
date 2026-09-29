@@ -107,6 +107,29 @@ tests/               vitest unit tests (pure logic, no DOM/WebGL)
 - Seams: `game.bash?.(x, y, z, str)` (bash.ts) lets zombies smash doors;
   `game.stats?.kills` gets kill counts; `renderer.viewmodel?.attack(kind)` is called on
   attacks. Rendering: `src/render/monsterView.ts` (sprites, corpses, blood decals).
+- Crafting (`crafting*.ts`, `requirements.ts`, `construction.ts`, `disassembly.ts`, `reading.ts`,
+  `fire.ts`): functions take a `CraftHost` (Game satisfies it). `CraftingInventory.gather` =
+  inventory + map items/furniture pseudo tools within 2 tiles + `fire` from a nearby `fd_fire`.
+  Knowledge lives on Character (`learnedRecipes`, `identifiedBooks`, `proficiencies`).
+  `hasCraftingLight` uses `game.lightAt`/`map.lightAt(x,y,z)` if present (>= 4 = bright enough).
+  Other systems' use_actions: `inv.useHandlers.set(type, fn)` (crafting registers `firestarter`).
+  UI + keys (`& * ( R`) + `cdda.*` helpers: `installCrafting(game, api)` in src/ui/crafting_install.ts.
+
+### World interaction (src/game, installed by src/worldInteraction.ts)
+
+- `sound.ts` `emitSound(game, {x,y,z}, volume, desc, {category?, source?, sfxId?})` — use it
+  for every noise (not `events.emit('sound')` directly): the player hears it (log, waking,
+  interrupting activities) and monsters poll `soundsHeardAt(game, x,y,z, hearing)` /
+  `recentSounds(game)`; CDDA sound_distance + weather attenuation + wall muffling.
+- `vision.ts` `lineOfSight`, `lightAt(game,x,y,z)` (CDDA light units), `playerCanSee`,
+  `creatureCanSee(game, from, to, visionDay, visionNight)`, `tooDarkReason(game,'read'|'craft')`.
+- `bash.ts` `bash(game,x,y,z, str | {bash,cut}, {source?,silent?,destroy?})` with CDDA
+  persistent map damage; `playerSmash` is the `X` key.
+- `fields.ts` fire/smoke/blood processing near the player; `ignite`, `addField`,
+  `fieldDamageAt(game,x,y,z,{materials,flags})` for monsters standing in fire.
+- `targeting.ts` `targetTile(game)` = tile under the crosshair within reach; `interact.ts`
+  (`e`), `zlevels.ts` (`<`/`>`, falling), `rest.ts` (`|` wait, `$` sleep), `weather.ts`
+  (`game.weather`), `traps.ts`, `lightitems.ts` (`F`: flashlight transform).
 
 ### Extension points (prefer these over editing someone else's code)
 
@@ -213,6 +236,24 @@ and wall style). Keys: `V` camera mode, `F` flashlight.
   register `game.activities.dangerChecks.push(() => reason | null)`.
 - **Items on the map** are real `Item` instances (`src/game/item.ts`). Mapgen emits
   `ItemSpawn`s which `GameMap.itemFactory` (set in Game) converts via `fromSpawned`.
+- **Tile raycasts** `src/game/raycast.ts`: `raycastTiles(map, {x,y,h}, dir, {maxDist,
+  creatureAt, throughTransparent})` → first creature / furniture / terrain / floor / ceiling
+  hit (h = metres, x/y tiles; same as three.js X/Z). `dirFromYawPitch(yaw, pitch)`.
+  `game.lookAt(maxDist?)` = ray through the crosshair of the active camera (any mode).
+  Monsters: set `game.creatureAt = (x, y, z) => LookCreature | null` so look mode and rays see them.
+- **HUD** `src/ui/hud.ts`: `hud.setPrompt('[e] Open door' | null)` (sticky) or
+  `hud.addPromptProvider(game => text | null)` (per frame, first non-null wins; returns an
+  unregister fn). `hud.safeMode = {text, color}`. The HUD also draws the activity bar.
+- **Stats** `game.stats` (src/game/stats.ts): `addKill(monId)` (auto-counted from
+  `creatureDied` events whose `killer === game.player`; don't double count), `itemsCrafted`,
+  `distanceWalked` (tracked by the UI), for the memorial screen.
+- **Overmap memory** `game.overmapSeen`: Set of `"omx,omy,z"` (UI reveals ~3 OMTs around you by
+  day, 15 at start). **Save/load hooks**: set `game.save`, `game.load`, `game.hasSave`; the menus
+  grey out until they exist. Modal windows pause the sim (`game.pauseInMenus`).
+- **UI data** `public/data/ui.json` (`npm run extract:ui`): title art, tombstone, names, help.
+  Boot shows the title screen unless `?skipmenu=1` (or under automation without `?menu=1`).
+  `cdda.ui.quickStart()` makes a default Evacuee; `cdda.ui.open('inventory'|'map'|…)`,
+  `cdda.spawnItem(id, dx, dy)`, `cdda.pressKey(key)`, `cdda.ui.lookHit()`.
 
 ## Merge etiquette for parallel agents
 

@@ -1,4 +1,3 @@
-import * as THREE from 'three';
 import type { Game, GameSystem } from '../game/game';
 import { monsterSize, type Monster } from '../game/monster';
 import type { CorpseRecord, MonsterSystem } from '../game/monai';
@@ -10,7 +9,8 @@ import type { SpriteHandle } from './sprites';
 import type { TileFrame } from './textureSource';
 import type { LightHandle } from './lights';
 
-// Billboards for monsters, their corpses, projectiles and blood decals. Runs as a
+// Billboards for monsters, their corpses and projectiles (blood/bile/acid decals are drawn by
+// render/worldFx.ts from the map fields the monster system adds). Runs as a
 // GameSystem (30 Hz) so `cdda.step()` + `cdda.settle()` screenshots see the same state the
 // simulation has; movement at 30 Hz reads fine in the pixel-art style.
 //
@@ -53,7 +53,6 @@ export class MonsterView implements GameSystem {
   private muzzleT = 0;
   private lastShots = 0;
   private corpseCheck = 0;
-  readonly decals: DecalLayer;
 
   constructor(readonly game: Game, readonly renderer: Renderer, readonly sys: MonsterSystem, readonly combat: PlayerCombat | null) {
     loadAtlas().then(
@@ -76,8 +75,6 @@ export class MonsterView implements GameSystem {
       const v = this.views.get(m);
       if (v && v.typeId !== m.type.id) this.refresh(m, v);
     });
-    this.decals = new DecalLayer(game, () => this.atlas);
-    renderer.scene.add(this.decals.group);
     this.installHurtFlash();
   }
 
@@ -222,90 +219,5 @@ export class MonsterView implements GameSystem {
       if (this.muzzleT <= 0) this.muzzle.intensity = 0;
     }
     this.sys.playerLight = () => (this.renderer.flashlightOn ? 60 : 0);
-    this.decals.update(dt);
-  }
-}
-
-/**
- * Flat blood/bile/acid decals on the floor for fields the monster system adds. Fields other
- * than fire aren't drawn by the chunk mesher, so this layer scans loaded chunks near the
- * player for liquid-ish fields and rebuilds one merged mesh per texture page when they change.
- */
-export class DecalLayer {
-  readonly group = new THREE.Group();
-  private meshes: THREE.Mesh[] = [];
-  private sig = '';
-  private timer = 0;
-  static readonly TYPES = new Set(['fd_blood', 'fd_bile', 'fd_acid', 'fd_gibs_flesh', 'fd_blood_veggy', 'fd_blood_insect', 'fd_blood_invertebrate', 'fd_gibs_insect']);
-
-  constructor(private game: Game, private atlas: () => Atlas | null) {
-    this.group.name = 'decals';
-  }
-
-  update(dt: number): void {
-    this.timer -= dt;
-    if (this.timer > 0) return;
-    this.timer = 0.25;
-    const a = this.atlas();
-    if (!a) return;
-    const p = this.game.player;
-    const R = 40;
-    const list: { x: number; y: number; z: number; type: string; i: number }[] = [];
-    for (const c of this.game.map.loadedChunks()) {
-      if (c.fields.size === 0 || Math.abs(c.z - p.z) > 1) continue;
-      const X = c.cx * 24, Y = c.cy * 24;
-      if (X + 24 < p.x - R || X > p.x + R || Y + 24 < p.y - R || Y > p.y + R) continue;
-      for (const [k, fl] of c.fields) for (const f of fl) {
-        if (!DecalLayer.TYPES.has(f.type)) continue;
-        list.push({ x: X + (k % 24), y: Y + Math.floor(k / 24), z: c.z, type: f.type, i: f.intensity });
-      }
-    }
-    const sig = list.map((d) => `${d.x},${d.y},${d.z},${d.type},${d.i}`).join(';');
-    if (sig === this.sig) return;
-    this.sig = sig;
-    for (const m of this.meshes) {
-      this.group.remove(m);
-      m.geometry.dispose();
-    }
-    this.meshes = [];
-    const byTex = new Map<THREE.Texture, number[][]>();
-    for (const d of list) {
-      const hit = a.lookup(d.type, { variantSeed: d.x * 7349 + d.y * 3163 });
-      const fr = hit?.fg ?? hit?.bg;
-      if (!fr) continue;
-      let arr = byTex.get(fr.texture);
-      if (!arr) byTex.set(fr.texture, (arr = []));
-      // Stronger fields cover more of the tile.
-      const s = 0.55 + 0.15 * Math.min(3, d.i);
-      const cx = d.x + 0.5, cy = d.y + 0.5, h = d.z * LEVEL_HEIGHT + 0.015;
-      const x0 = cx - s / 2, x1 = cx + s / 2, y0 = cy - s / 2, y1 = cy + s / 2;
-      const { u0, v0, u1, v1 } = fr.uv;
-      arr.push([x0, h, y0, u0, v1, x1, h, y0, u1, v1, x1, h, y1, u1, v0, x0, h, y1, u0, v0]);
-    }
-    for (const [tex, quads] of byTex) {
-      const pos = new Float32Array(quads.length * 12);
-      const uv = new Float32Array(quads.length * 8);
-      const nrm = new Float32Array(quads.length * 12);
-      const idx: number[] = [];
-      quads.forEach((q, n) => {
-        for (let v = 0; v < 4; v++) {
-          pos.set([q[v * 5], q[v * 5 + 1], q[v * 5 + 2]], n * 12 + v * 3);
-          uv.set([q[v * 5 + 3], q[v * 5 + 4]], n * 8 + v * 2);
-          nrm.set([0, 1, 0], n * 12 + v * 3);
-        }
-        const b = n * 4;
-        idx.push(b, b + 2, b + 1, b, b + 3, b + 2);
-      });
-      const g = new THREE.BufferGeometry();
-      g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-      g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
-      g.setAttribute('normal', new THREE.BufferAttribute(nrm, 3));
-      g.setIndex(idx);
-      const mat = new THREE.MeshLambertMaterial({ map: tex, alphaTest: 0.4, transparent: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2, side: THREE.DoubleSide });
-      const mesh = new THREE.Mesh(g, mat);
-      mesh.receiveShadow = true;
-      this.meshes.push(mesh);
-      this.group.add(mesh);
-    }
   }
 }
