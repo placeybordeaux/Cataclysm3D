@@ -16,7 +16,7 @@ import { loadItemSafe } from '../save/items';
 import type { Item, ItemJSON } from './item';
 import type { Game, GameSystem } from './game';
 import {
-  has, MPH_PER_MS, passengerImpactDamage, resolveCollision, spawnVehicle, Vehicle, type VehicleJSON, type VehiclePart,
+  CRUISE_STEP_VMIPH, has, MPH_PER_MS, passengerImpactDamage, VMIPH_PER_MS, resolveCollision, spawnVehicle, Vehicle, type VehicleJSON, type VehiclePart,
 } from './vehicle';
 import { pickVehicleProto, type VehicleDataFile } from './vehicle_data';
 
@@ -38,6 +38,20 @@ export interface DriveInput {
   /** handbrake (Space) */
   brake: boolean;
 }
+
+/**
+ * How W/S drive. 'cruise' is CDDA's model: each press moves the cruise target by 4 mph and
+ * the engine accelerates/brakes toward it (vehicle::cruise_thrust + thrust). 'direct' is a
+ * plain accelerator pedal: W accelerates while held, S brakes then reverses.
+ */
+export type DriveMode = 'cruise' | 'direct';
+
+/**
+ * Held W/S repeat the cruise step after this delay, then every CRUISE_REPEAT seconds (8 mph/s):
+ * slow enough that a held key can't outrun the driver's reactions.
+ */
+const CRUISE_REPEAT_DELAY = 0.4;
+const CRUISE_REPEAT = 0.5;
 
 export interface CreatureHooks {
   /** Creature standing in a tile (not the player). Defaults to game.creatureAt. */
@@ -78,6 +92,13 @@ export class VehicleSystem implements GameSystem, MapOverlay {
   input: DriveInput = { throttle: 0, steer: 0, brake: false };
   /** When true, `input` is not overwritten from the keyboard (cdda.drive, tests). */
   scriptedInput = false;
+  /** Driving model (options screen "Driving controls"). */
+  driveMode: DriveMode = 'cruise';
+  /** Cruise-key state: sign of the held W/S and seconds until it repeats. */
+  private cruiseHeld = 0;
+  private cruiseRepeatIn = 0;
+  /** A held key stops repeating at the safe speed; a fresh press is needed to go past it. */
+  private cruiseHeldAtSafe = false;
   readonly rng: Rng;
   creatureHooks: CreatureHooks;
   /** Bash a tile with `strength`; return true if it broke (default: bash.ts, CDDA map::bash). */
@@ -439,6 +460,7 @@ export class VehicleSystem implements GameSystem, MapOverlay {
     }
     if (this.pending.length) this.flushPending();
     if (this.driving && !this.scriptedInput) this.readKeys();
+    if (this.driving && this.driveMode === 'cruise') this.updateCruise(this.driving, realDt);
     for (const v of this.list) this.simulate(v, realDt);
     const p = game.player;
     this.engineSounds.update(this.list, { x: p.x, y: p.y, z: p.z }, this.driving, realDt);
@@ -449,6 +471,42 @@ export class VehicleSystem implements GameSystem, MapOverlay {
     const cap = this.game.input.captured;
     const f = (code: string) => (!cap && k.has(code) ? 1 : 0);
     this.input = { throttle: f('KeyW') - f('KeyS'), steer: f('KeyD') - f('KeyA'), brake: !!f('Space') };
+  }
+
+  /**
+   * Turn held W/S into CDDA cruise_thrust presses: one step on press, then repeating while
+   * held. Holding the key pauses at the safe speed (CDDA's snap point) so a held W can't carry
+   * you into engine-straining speeds without a deliberate second press. Space is CDDA's
+   * handbrake: it zeroes the cruise target.
+   */
+  private updateCruise(v: Vehicle, dt: number): void {
+    const dir = Math.sign(this.input.throttle);
+    if (this.input.brake) v.cruiseVelocity = 0;
+    if (dir === 0) {
+      this.cruiseHeld = 0;
+      this.cruiseHeldAtSafe = false;
+      return;
+    }
+    let press = false;
+    if (dir !== this.cruiseHeld) {
+      this.cruiseHeld = dir;
+      this.cruiseRepeatIn = CRUISE_REPEAT_DELAY;
+      this.cruiseHeldAtSafe = false;
+      press = true;
+    } else if ((this.cruiseRepeatIn -= dt) <= 0 && !this.cruiseHeldAtSafe) {
+      this.cruiseRepeatIn += CRUISE_REPEAT;
+      press = true;
+    }
+    if (!press) return;
+    if (!v.engineOn && dir > 0 && v.velocity >= 0) {
+      // CDDA thrust(): the accelerator does nothing with the engine off.
+      if (this.cruiseRepeatIn === CRUISE_REPEAT_DELAY) this.game.message(`The ${v.name}'s engine isn't on!`);
+      return;
+    }
+    const offroad = this.offroad(v);
+    v.cruiseThrust(dir * CRUISE_STEP_VMIPH, offroad);
+    const safe = Math.trunc(v.maxVelocity(true, offroad) * VMIPH_PER_MS);
+    if (dir > 0 && v.cruiseVelocity === safe) this.cruiseHeldAtSafe = true;
   }
 
   /** Terrain drag multiplier under the vehicle's wheels (CDDA wheel_terrain_modifiers, simplified). */
@@ -489,45 +547,52 @@ export class VehicleSystem implements GameSystem, MapOverlay {
     }
     if (!v.engineOn && Math.abs(v.velocity) < STOP_EPS && inp.throttle === 0 && inp.steer === 0) {
       v.velocity = 0;
+      // CDDA: thrusting with the engine off fails and zeroes cruise control.
+      v.cruiseVelocity = 0;
       return;
     }
 
     const offroad = this.offroad(v);
     const mass = v.mass();
     const wheelsOk = v.validWheelConfig();
-    let a = 0;
     let load = 0.05;
     const vel = v.velocity;
-    if (wheelsOk && hasPower && inp.throttle > 0) {
-      if (vel >= -0.5) {
-        const acc = v.acceleration(vel, offroad);
-        a += inp.throttle * acc;
-        load = Math.min(1, inp.throttle);
-      } else a += BRAKE_DECEL;
-    } else if (inp.throttle < 0) {
-      if (vel > 0.5) a -= BRAKE_DECEL;
-      else if (wheelsOk && hasPower) {
-        // Combustion engines are weak in reverse (max_reverse_velocity = max / 4).
-        const electric = v.engines.every((e) => e.def.fuel_type === 'battery' || e.def.fuel_type === 'muscle');
-        const maxRev = v.maxVelocity(false, offroad) * (electric ? 1 : 0.25);
-        if (-vel < maxRev) a -= v.acceleration(vel, offroad) * 0.6;
-        load = 0.5;
-      }
-    }
-    if (inp.brake) a -= Math.sign(vel) * BRAKE_DECEL * 1.3;
     // Drag: CDDA's F = c_air v^2 + c_roll (33.3 + v); without intact wheels the vehicle
     // scrapes along on its frame and stops almost at once.
     const cAir = v.coeffAirDrag();
     const cRoll = wheelsOk ? v.coeffRollingDrag(offroad) : v.coeffRollingDrag(offroad) * 20;
-    const drag = (cAir * vel * vel + cRoll * (33.3 + Math.abs(vel))) / mass;
-    // Brakes (and the handbrake) only ever bring the vehicle to a stop, never reverse it.
-    const braking = inp.brake || (inp.throttle < 0 && vel > 0.5) || (inp.throttle > 0 && vel < -0.5);
-    let nv = vel + a * dt;
-    const dragDv = drag * dt;
-    if (nv > 0) nv = Math.max(0, nv - dragDv);
-    else if (nv < 0) nv = Math.min(0, nv + dragDv);
-    if (braking && vel !== 0 && Math.sign(nv) !== Math.sign(vel)) nv = 0;
-    if (Math.abs(nv) < STOP_EPS && inp.throttle === 0) nv = 0;
+    const dragDv = ((cAir * vel * vel + cRoll * (33.3 + Math.abs(vel))) / mass) * dt;
+    let nv: number;
+    if (driven && this.driveMode === 'cruise') {
+      const r = this.cruiseStep(v, dt, offroad, dragDv, wheelsOk && hasPower);
+      nv = r.nv;
+      load = Math.max(load, r.load);
+    } else {
+      let a = 0;
+      if (wheelsOk && hasPower && inp.throttle > 0) {
+        if (vel >= -0.5) {
+          const acc = v.acceleration(vel, offroad);
+          a += inp.throttle * acc;
+          load = Math.min(1, inp.throttle);
+        } else a += BRAKE_DECEL;
+      } else if (inp.throttle < 0) {
+        if (vel > 0.5) a -= BRAKE_DECEL;
+        else if (wheelsOk && hasPower) {
+          // Combustion engines are weak in reverse (max_reverse_velocity = max / 4).
+          const maxRev = -v.maxReverseVelocity(offroad);
+          if (-vel < maxRev) a -= v.acceleration(vel, offroad) * 0.6;
+          load = 0.5;
+        }
+      }
+      if (inp.brake) a -= Math.sign(vel) * BRAKE_DECEL * 1.3;
+      // Brakes (and the handbrake) only ever bring the vehicle to a stop, never reverse it.
+      const braking = inp.brake || (inp.throttle < 0 && vel > 0.5) || (inp.throttle > 0 && vel < -0.5);
+      nv = vel + a * dt;
+      if (nv > 0) nv = Math.max(0, nv - dragDv);
+      else if (nv < 0) nv = Math.min(0, nv + dragDv);
+      if (braking && vel !== 0 && Math.sign(nv) !== Math.sign(vel)) nv = 0;
+      if (Math.abs(nv) < STOP_EPS && inp.throttle === 0) nv = 0;
+    }
     if (hasPower && Math.abs(nv) > 0.1) load = Math.max(load, Math.min(1, ((cAir * nv * nv + cRoll * (33.3 + Math.abs(nv))) * Math.abs(nv)) / v.totalPower()));
     v.velocity = nv;
 
@@ -559,6 +624,46 @@ export class VehicleSystem implements GameSystem, MapOverlay {
         this.soundAcc.set(v, 0);
       } else this.soundAcc.set(v, acc);
     }
+  }
+
+  /**
+   * One physics step toward the cruise target (CDDA vehicle::thrust with cruise control):
+   * the engine accelerates toward the target without overshooting it, brakes (20 mph/s in
+   * CDDA, BRAKE_DECEL here) plus engine braking slow it down, reverse gets 60% thrust for
+   * non-electric engines. `canThrust` = working wheels and engine power.
+   */
+  private cruiseStep(v: Vehicle, dt: number, offroad: number, dragDv: number, canThrust: boolean): { nv: number; load: number } {
+    const vel = v.velocity;
+    const target = v.cruiseVelocity / VMIPH_PER_MS;
+    let nv = vel;
+    // Coasting: drag only, toward zero.
+    if (nv > 0) nv = Math.max(0, nv - dragDv);
+    else if (nv < 0) nv = Math.min(0, nv + dragDv);
+    const want = target - nv;
+    if (Math.abs(want) < 1e-6) return { nv: target, load: 0 };
+    const thd = Math.sign(want);
+    // Thrusting = pushing the way we're already moving (or from rest); otherwise it's braking.
+    const thrusting = nv === 0 ? true : Math.sign(nv) === thd;
+    let load = 0;
+    let dv: number;
+    if (thrusting) {
+      if (!canThrust) {
+        // CDDA thrust() without a working engine: "engine isn't on" and cruise drops to 0.
+        v.cruiseVelocity = 0;
+        return { nv: Math.abs(nv) < STOP_EPS ? 0 : nv, load: 0 };
+      }
+      const electric = v.engines.some((e) => e.enabled && e.hp > 0 && e.def.fuel_type === 'battery');
+      const acc = v.acceleration(nv, offroad) * (thd < 0 && !electric ? 0.6 : 1);
+      dv = Math.min(acc * dt, Math.abs(want));
+      load = acc > 0 ? Math.min(1, dv / (acc * dt)) : 1;
+    } else {
+      // Brakes plus engine braking, and never past zero in one step (it then thrusts the other way).
+      const decel = BRAKE_DECEL + (canThrust ? v.acceleration(nv, offroad) : 0);
+      dv = Math.min(decel * dt, Math.abs(want), Math.abs(nv));
+    }
+    nv += thd * dv;
+    if (Math.abs(nv) < STOP_EPS && target === 0) nv = 0;
+    return { nv, load };
   }
 
   /**

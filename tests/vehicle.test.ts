@@ -4,7 +4,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { Rng } from '../src/core/rng';
 import type { GameData } from '../src/data/types';
 import { Game } from '../src/game/game';
-import { resolveCollision, rotate, simpleCubicSolution, spawnVehicle, Vehicle, has } from '../src/game/vehicle';
+import { cruiseThrust, CRUISE_STEP_VMIPH, MPH_PER_MS, VMIPH_PER_MS, resolveCollision, rotate, simpleCubicSolution, spawnVehicle, Vehicle, has } from '../src/game/vehicle';
 import type { VehicleDataFile } from '../src/game/vehicle_data';
 import { registerVehicleSave, VehicleSystem } from '../src/game/vehicles';
 import { createItem } from '../src/game/item';
@@ -162,6 +162,7 @@ describe('physics', () => {
     const r = vs.startEngine(v);
     expect(r.ok).toBe(true);
     const fuel0 = v.fuelLeft('gasoline');
+    vs.driveMode = 'direct';
     vs.scriptedInput = true;
     vs.input = { throttle: 1, steer: 0, brake: false };
     for (let i = 0; i < 90; i++) game.tick(1 / 30);
@@ -193,6 +194,105 @@ describe('physics', () => {
     const l = pristineCar(vs, 50, 10);
     l.locked = true;
     expect(vs.startEngine(l).msg).toMatch(/hotwire/);
+  });
+});
+
+describe('cruise control (CDDA default driving)', () => {
+  it('cruise_thrust steps 4 mph, snaps to the safe speed, clamps to max and reverse', () => {
+    // safe 45 mph, max 60, reverse -15 (combustion: max / 4)
+    const step = (c: number, n: number) => cruiseThrust(c, n * CRUISE_STEP_VMIPH, 4500, 6000, -1500);
+    expect(step(0, 1)).toBe(400);
+    expect(step(400, 1)).toBe(800);
+    expect(step(4400, 1)).toBe(4500); // crossing the safe speed stops on it
+    expect(step(4500, 1)).toBe(4800); // the next press goes past, back onto the 4 mph grid
+    expect(step(5600, 1)).toBe(6000);
+    expect(step(6000, 1)).toBe(6000);
+    expect(step(6000, -1)).toBe(5600);
+    expect(step(4500, -1)).toBe(4400);
+    expect(step(0, -1)).toBe(-400);
+    expect(step(-1200, -1)).toBe(-1500);
+    expect(step(-1500, 1)).toBe(-1200);
+  });
+
+  const drivingCar = () => {
+    const { game, vs } = world();
+    const v = pristineCar(vs, 10, 10, 0);
+    game.player.x = 10.5;
+    game.player.y = 10.5;
+    vs.takeControls(v);
+    expect(vs.startEngine(v).ok).toBe(true);
+    vs.scriptedInput = true;
+    vs.input = { throttle: 0, steer: 0, brake: false };
+    return { game, vs, v };
+  };
+  const mph = (v: Vehicle) => v.velocity * MPH_PER_MS;
+
+  it('converges on the target without overshooting, and holds it', () => {
+    const { game, v } = drivingCar();
+    v.cruiseVelocity = 2000;
+    let peak = 0;
+    for (let i = 0; i < 30 * 10; i++) {
+      game.tick(1 / 30);
+      peak = Math.max(peak, mph(v));
+    }
+    expect(mph(v)).toBeCloseTo(20, 1);
+    expect(peak).toBeLessThanOrEqual(20.001);
+    // Lowering the target brakes down to it.
+    v.cruiseVelocity = 800;
+    for (let i = 0; i < 30 * 4; i++) game.tick(1 / 30);
+    expect(mph(v)).toBeCloseTo(8, 1);
+    // Zero stops the car, and it stays stopped.
+    v.cruiseVelocity = 0;
+    for (let i = 0; i < 30 * 4; i++) game.tick(1 / 30);
+    expect(v.velocity).toBe(0);
+  });
+
+  it('W taps raise the target 4 mph; a held W pauses at the safe speed; Space zeroes it', () => {
+    const { game, vs, v } = drivingCar();
+    const tap = (throttle: number) => {
+      vs.input = { throttle, steer: 0, brake: false };
+      game.tick(1 / 30);
+      vs.input = { throttle: 0, steer: 0, brake: false };
+      game.tick(1 / 30);
+    };
+    tap(1);
+    tap(1);
+    expect(v.cruiseVelocity).toBe(800);
+    tap(-1);
+    expect(v.cruiseVelocity).toBe(400);
+    // Released keys leave the target alone: the car keeps cruising at 4 mph.
+    for (let i = 0; i < 30 * 5; i++) game.tick(1 / 30);
+    expect(mph(v)).toBeCloseTo(4, 1);
+    const safe = Math.trunc(v.maxVelocity(true) * VMIPH_PER_MS);
+    vs.input = { throttle: 1, steer: 0, brake: false };
+    for (let i = 0; i < 30 * 30; i++) game.tick(1 / 30);
+    // (burnt fuel lightens the car, nudging its safe speed by a hair)
+    expect(Math.abs(v.cruiseVelocity - safe)).toBeLessThanOrEqual(3);
+    tap(1);
+    expect(v.cruiseVelocity).toBeGreaterThan(safe);
+    vs.input = { throttle: 0, steer: 0, brake: true };
+    game.tick(1 / 30);
+    expect(v.cruiseVelocity).toBe(0);
+  });
+
+  it('reaching 50 mph takes deliberate presses: holding W for 4 s stays well under it', () => {
+    const { game, vs, v } = drivingCar();
+    vs.input = { throttle: 1, steer: 0, brake: false };
+    for (let i = 0; i < 30 * 4; i++) game.tick(1 / 30);
+    expect(mph(v)).toBeLessThan(v.cruiseVelocity / 100 + 0.01);
+    expect(mph(v)).toBeLessThan(40);
+  });
+
+  it('cruise target survives save/load; engine off drops it', () => {
+    const { vs, v } = drivingCar();
+    v.cruiseVelocity = 1200;
+    const j = v.toJSON();
+    expect(j.cruise).toBe(1200);
+    expect(Vehicle.fromJSON(vdata, data, j).cruiseVelocity).toBe(1200);
+    const { game } = { game: (vs as unknown as { game: Game }).game };
+    v.engineOn = false;
+    for (let i = 0; i < 3; i++) game.tick(1 / 30);
+    expect(v.cruiseVelocity).toBe(0);
   });
 });
 
