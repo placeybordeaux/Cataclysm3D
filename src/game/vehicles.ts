@@ -20,7 +20,7 @@ import { L, moveItem } from './moves';
 import type { Item, ItemJSON } from './item';
 import type { Game, GameSystem } from './game';
 import {
-  CRUISE_STEP_VMIPH, has, MPH_PER_MS, passengerImpactDamage, VMIPH_PER_MS, resolveCollision, spawnVehicle, Vehicle, type VehicleJSON, type VehiclePart,
+  CRUISE_STEP_VMIPH, has, MPH_PER_MS, passengerImpactDamage, VMIPH_PER_MS, resolveBodyCollision, resolveCollision, spawnVehicle, Vehicle, type VehicleJSON, type VehiclePart,
 } from './vehicle';
 import { pickVehicleProto, type VehicleDataFile } from './vehicle_data';
 
@@ -104,7 +104,9 @@ export interface CreatureHooks {
   at(x: number, y: number, z: number): unknown | null;
   /** kg, for the collision maths (CDDA monster weight). */
   mass(c: unknown): number;
-  /** Apply run-over damage; return true if it died. */
+  /** Max HP (BN caps a part's damage from one body at it); default 100. */
+  hpMax?(c: unknown): number;
+  /** Apply run-over damage (before the creature's own armor); return true if it died. */
   damage(c: unknown, dmg: number, v: Vehicle): boolean;
   /** Put a flung creature down at world point (x, y) (the system picks a free spot). */
   place(c: unknown, x: number, y: number): void;
@@ -1004,7 +1006,7 @@ export class VehicleSystem implements GameSystem, MapOverlay {
       if (c) {
         const h = this.creatureHooks;
         const res = this.hitBody(v, part, {
-          name: h.title ? h.title(c) : `the ${h.name(c)}`, mass: h.mass(c), damage: (dmg) => h.damage(c, dmg, v),
+          name: h.title ? h.title(c) : `the ${h.name(c)}`, mass: h.mass(c), hpMax: h.hpMax?.(c), damage: (dmg) => h.damage(c, dmg, v),
           fling: (force) => {
             const spot = this.flingSpot(t.tx + 0.5, t.ty + 0.5, fdx, fdy, force, free);
             if (!spot) return false;
@@ -1097,12 +1099,13 @@ export class VehicleSystem implements GameSystem, MapOverlay {
     return null;
   }
 
-  private hitBody(v: Vehicle, part: VehiclePart, target: { name: string; mass: number; damage: (dmg: number) => boolean; fling: (force: number) => boolean }): boolean {
+  private hitBody(v: Vehicle, part: VehiclePart, target: { name: string; mass: number; hpMax?: number; damage: (dmg: number) => boolean; fling: (force: number) => boolean }): boolean {
     let dead = false, flung = false;
-    const r = resolveCollision({
-      mass: v.mass(), velocity: v.velocity, mass2: target.mass, e: 0.3, partDens: 15, body: true,
-      smash: (objDmg) => {
-        const dam = Math.round((objDmg * (part.def.damage_modifier ?? 100)) / 100);
+    // BN's impulse model (resolveBodyCollision); the part's damage_modifier is applied inside.
+    const r = resolveBodyCollision({
+      mass: v.mass(), velocity: v.velocity, mass2: target.mass, damageModifier: part.def.damage_modifier, hpMax: target.hpMax ?? 100,
+      hit: (objDmg) => {
+        const dam = Math.round(objDmg);
         if (dam > 0) dead = target.damage(dam) || dead;
         // Fling when the vehicle hits hard enough (CDDA: |vel2_a| > 10 mph or momentum).
         const vmph = Math.abs(v.velocity) * MPH_PER_MS;
@@ -1112,7 +1115,7 @@ export class VehicleSystem implements GameSystem, MapOverlay {
     });
     this.damagePart(v, part, r.partDmg);
     if (r.objDmg > 20) part.blood = Math.min(600, part.blood + 50 + r.objDmg * 2.5);
-    if (this.driving === v) this.say(`Your ${v.name}'s ${part.def.name} rams into ${target.name}!`, 'c_yellow');
+    if (this.driving === v) this.say(`Your ${v.name}'s ${part.def.name} rams into ${target.name}${dead ? ', killing it' : ''}!`, dead ? 'c_light_green' : 'c_yellow');
     this.emitSound(v, 20, 'smash!', ['smash_success', 'hit_vehicle'], 'combat');
     v.velocity = r.velocity;
     if (!(dead || flung)) {
@@ -1207,11 +1210,15 @@ export function monsterCreatureHooks(ms: MonsterSystem): CreatureHooks {
   return {
     at: (x, y, z) => ms.monsterAt(x, y, z),
     mass: (c) => Math.max(1, ((c as Monster).type.weight ?? 80000) / 1000),
-    damage: (c, dmg) => {
+    hpMax: (c) => (c as Monster).hpMax,
+    damage: (c, dmg, v) => {
       const m = c as Monster;
       const stun = (m.rng.int(0, dmg) > 10 ? 1 : 0) + (m.rng.int(0, dmg) > 40 ? 1 : 0);
       if (stun) m.addEffect('stunned', stun / ACTION_SCALE);
-      ms.hurt(m, dmg, 'player');
+      // BN: minus the torso's bash armor, then apply_damage(driver) — the kill is the
+      // driver's (stats, achievements, progression), a runaway car's is nobody's.
+      const armored = Math.max(0, dmg - (m.type.armor?.bash ?? 0));
+      ms.hurt(m, armored, ms.game.vehicles?.driving === v ? 'player' : null);
       return m.dead;
     },
     place: (c, x, y) => {

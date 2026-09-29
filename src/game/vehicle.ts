@@ -678,6 +678,72 @@ export function resolveCollision(inp: CollisionInput): CollisionResult {
   return { partDmg, objDmg: objTotal, velocity: vel / MPH_PER_MS, smashed };
 }
 
+/** BN vehicle_move.cpp imp_conv_const: damage per newton-second of impulse. */
+export const IMPULSE_TO_DAMAGE = 0.1;
+
+export interface BodyCollisionInput {
+  /** Vehicle mass, kg. */
+  mass: number;
+  /** Vehicle velocity, m/s (signed). */
+  velocity: number;
+  /** The creature's mass, kg. */
+  mass2: number;
+  /** The colliding part's damage_modifier (percent, BN `dmg_mod`). */
+  damageModifier?: number;
+  /** The creature's max HP: BN caps the part damage from one body at it. */
+  hpMax: number;
+  /**
+   * Called with the damage BN deals to the creature for this impact step (before its armor,
+   * which the owner of the creature applies); returns whether it died or was knocked clear.
+   */
+  hit: (objDmg: number) => boolean;
+}
+
+/**
+ * BN's body branch of vehicle::part_collision. Unlike DDA (and our terrain loop above, which
+ * turns lost kinetic energy in mph² into damage), BN converts the **impulse** each side takes
+ * into damage (0.1 per N·s). DDA's numbers gave a zombie ~10 damage at 20 mph and no car
+ * ever killed one (QA: "Kills 0" after ramming six); BN's give ~90, so an ordinary zombie
+ * (80 HP, bash armor 0–2) dies when run over at 20 mph, as players expect.
+ */
+export function resolveBodyCollision(inp: BodyCollisionInput): CollisionResult {
+  const { mass, mass2 } = inp;
+  const e = 0.3;
+  // BN pre-divides dmg_mod by 100 in integer maths (50 and 80 -> 0 -> 1, 150 -> 1).
+  const dmgMod = Math.trunc((inp.damageModifier ?? 100) / 100) || 1;
+  let vel = inp.velocity;
+  const sign = Math.sign(vel);
+  let vel2 = 0, partTotal = 0, objTotal = 0;
+  let smashed = false;
+  for (let guard = 0; guard < 100 && !smashed && Math.sign(vel) === sign && Math.round(vel * 100) !== 0; guard++) {
+    const vel1 = vel;
+    let vel1a = (mass * vel1 + mass2 * vel2 + e * mass2 * (vel2 - vel1)) / (mass + mass2);
+    const vel2a = (mass * vel1 + mass2 * vel2 + e * mass * (vel1 - vel2)) / (mass + mass2);
+    const impulseVeh = Math.abs(mass * (vel1a - vel1));
+    const impulseObj = Math.abs(mass2 * (vel2a - vel2));
+    // Part damage is capped by what the body can absorb, and unspent momentum is given back.
+    const partDmg = Math.min(inp.hpMax / dmgMod, impulseVeh * IMPULSE_TO_DAMAGE);
+    const objDmg = impulseObj * IMPULSE_TO_DAMAGE * dmgMod;
+    partTotal += partDmg;
+    objTotal += objDmg;
+    const recovered = vel1 - Math.sign(vel1) * (partDmg / IMPULSE_TO_DAMAGE) / mass;
+    if (Math.abs(recovered) < Math.abs(vel1)) vel1a = recovered;
+    smashed = inp.hit(objDmg);
+    if (!smashed) {
+      if (Math.abs(vel2a) > Math.abs(vel2)) vel2 = vel2a;
+      else {
+        // The vehicle's momentum isn't big enough to push the critter.
+        vel = 0;
+        break;
+      }
+    }
+    const next = vel1a * (smashed ? 1 : 0.9);
+    // BN: rounding must not keep the loop going without slowing down.
+    vel = !smashed && Math.abs(next) >= Math.abs(vel1) ? 0 : next;
+  }
+  return { partDmg: partTotal, objDmg: objTotal, velocity: vel, smashed };
+}
+
 /** Passenger impact (vehicle_move.cpp throw_passenger): bash damage to the torso, or 0. */
 export function passengerImpactDamage(dVelMph: number, seatbeltBonus: number, rng: Rng): number {
   const d = Math.floor(Math.abs(dVelMph));
