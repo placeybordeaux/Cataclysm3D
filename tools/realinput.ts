@@ -490,6 +490,9 @@ const scenarios: Scenario[] = [
   ['rebind', 'Options > Key bindings: rebind wear to y; movement keys refused; reset', async () => {
     await toGameplay();
     await js(`cdda.giveItem('jacket_light')`); // setup: something the Wear menu can list
+    // Right after the fullscreen scenario, Chrome is still settling its keyboard/pointer lock
+    // (an Esc pressed in that second is lost); give it a moment like a player would.
+    await sleep(1500);
     await x.key('Escape');
     await until((t) => t.panelIds.includes('scr.esc'));
     await x.key('o');
