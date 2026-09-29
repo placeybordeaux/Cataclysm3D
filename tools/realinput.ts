@@ -387,7 +387,8 @@ const scenarios: Scenario[] = [
     check('…and gameplay pauses behind the resume hint', s.hint && s.lockPaused, s);
     await sleep(1400);
     await x.key('w');
-    s = await until((t) => t.lock);
+    // The hint follows the lock a frame later (it's drawn from requestAnimationFrame).
+    s = await until((t) => t.lock && !t.hint);
     check('any key resumes mouse-look', s.lock && !s.hint, { s, refusals: await js('cdda.game.input.lockRefusals'), now: await js('performance.now()') });
     await x.key('Escape');
     await sleep(1400);
@@ -791,7 +792,7 @@ const scenarios: Scenario[] = [
     const c0 = await censusNow();
     const tabs = await js<string[]>(`[...document.querySelectorAll('#ui2 [data-id="inv.nearby"] .ui2-tab')].map((t) => t.textContent)`);
     check('g opens the inventory on the Nearby places', tabs.length > 0, tabs);
-    const east = await js<{ x: number; y: number } | null>(`(() => { const t = [...document.querySelectorAll('#ui2 [data-id="inv.nearby"] .ui2-tab')].find((e) => /east/i.test(e.textContent)); if (!t) return null; const r = t.getBoundingClientRect(); return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) }; })()`);
+    const east = await js<{ x: number; y: number } | null>(`(() => { const t = [...document.querySelectorAll('#ui2 [data-id="inv.nearby"] .ui2-tab')].find((e) => /^east/i.test(e.textContent.trim())); if (!t) return null; const r = t.getBoundingClientRect(); return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) }; })()`);
     if (east) await x.click(east.x, east.y);
     await sleep(250);
     const take = await js<{ x: number; y: number } | null>('cdda.ui2.textRect("Take all")');

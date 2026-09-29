@@ -184,6 +184,9 @@ export function installBnInventory(game: Game, ctx: UiContext, api: DebugApi, ca
       if (t) extraTiles = [{ x: +t[1], y: +t[2], z: +t[3] }];
     }
     closeGroup('picker');
+    // Free the mouse before building the screen: while the lock is still on, the browser eats an
+    // Esc pressed during a slow first open (to exit the lock) and the inventory would stay up.
+    game.input.releaseForMenu();
     openBnInventory(env, {
       focus, worldEl: canvas, hotbar, closeKeys: [...inventoryKeys(), 'Backspace'],
       onClose: () => {

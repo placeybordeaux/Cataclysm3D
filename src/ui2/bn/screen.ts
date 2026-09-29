@@ -79,7 +79,8 @@ export function openBnInventory(env: ListEnv, o: ScreenOpts = {}): void {
     ...base,
     id: 'inv.equip',
     title: 'Equipment',
-    width: 'calc(var(--cell) * 3 + var(--gap) * 2 + var(--fs) * 18 + var(--row-icon))',
+    // Wider on ultrawide screens (names stop truncating), the 1080p size as the floor.
+    width: 'calc(var(--cell) * 3 + var(--gap) * 2 + var(--row-icon) + clamp(var(--fs) * 18, 22vw - var(--cell) * 3, var(--fs) * 26))',
     footer: pauseNote,
     onClose: () => {
       for (const c of cleanups.splice(0)) c();
@@ -111,7 +112,7 @@ export function openBnInventory(env: ListEnv, o: ScreenOpts = {}): void {
   };
   refreshStorage();
   cleanups.push(m.onChange(refreshStorage));
-  const invP = openPanel({ ...base, id: 'inv.carried', title: 'Inventory', width: 'calc(var(--fs) * 21 + var(--row-icon) * 2)', onClose: () => inv.destroy() });
+  const invP = openPanel({ ...base, id: 'inv.carried', title: 'Inventory', width: 'calc(clamp(var(--fs) * 21, 18vw, var(--fs) * 30) + var(--row-icon) * 2)', onClose: () => inv.destroy() });
   invP.body.append(invVol.el, invWt.el, storageNote, inv.el);
   panels.push(invP);
 
@@ -159,8 +160,9 @@ export function openBnInventory(env: ListEnv, o: ScreenOpts = {}): void {
   const poll = setInterval(() => m.refresh(), 400);
   cleanups.push(() => clearInterval(poll));
 
-  const fresh = panels.filter((p) => !rememberedPosition(p.id));
-  if (fresh.length === panels.length) layoutPanels(panels);
+  // Any window without a remembered spot (first time, or one the player never moved): lay the
+  // screen out as a row again rather than cascading the new one over the others.
+  if (panels.some((p) => !rememberedPosition(p.id))) layoutPanels(panels);
   equip.front();
 }
 
@@ -187,7 +189,7 @@ function openNearby(env: ListEnv, focus: string | null): Panel {
   const own: (() => void)[] = [];
   const p = openPanel({
     group: BN_GROUP, pauses: true, id: 'inv.nearby', title: 'Nearby',
-    width: 'calc(var(--fs) * 21 + var(--row-icon) * 2)',
+    width: 'calc(clamp(var(--fs) * 21, 18vw, var(--fs) * 30) + var(--row-icon) * 2)',
     onClose: () => {
       own.splice(0).forEach((c) => c());
       nearbyApi = null;
