@@ -12,7 +12,7 @@ import { AtlasLookup, SEASONS } from '../../src/render/atlasIndex';
 const argv = process.argv.slice(2);
 if (argv.includes('--help') || argv.includes('-h')) {
   console.log(`coverage: sprite coverage of CDDA ids in public/atlas/atlas.json
-  --cdda DIR    CDDA checkout (default ~/code/Cataclysm-DDA); reads DIR/data/json only (no mods)
+  --cdda DIR    game checkout (default ~/code/Cataclysm-BN); reads DIR/data/json only (no mods)
   --atlas FILE  atlas index (default public/atlas/atlas.json)
   --missing N   list up to N missing ids per category (default 0)`);
   process.exit(0);
@@ -21,7 +21,7 @@ const arg = (n: string) => {
   const i = argv.indexOf(n);
   return i >= 0 ? argv[i + 1] : undefined;
 };
-const CDDA = arg('--cdda') ?? join(process.env.HOME ?? '', 'code/Cataclysm-DDA');
+const CDDA = arg('--cdda') ?? join(process.env.HOME ?? '', 'code/Cataclysm-BN');
 const index = JSON.parse(readFileSync(arg('--atlas') ?? 'public/atlas/atlas.json', 'utf8')) as AtlasIndex;
 const MISSING = Number(arg('--missing') ?? 0);
 const atlas = new AtlasLookup(index);
@@ -40,7 +40,10 @@ const ids: Record<string, Set<string>> = { terrain: new Set(), furniture: new Se
 function walk(d: string): void {
   for (const e of readdirSync(d)) {
     const p = join(d, e);
-    if (statSync(p).isDirectory()) walk(p);
+    // BN's data tree has dangling symlinks (external_tileset/README.md); skip them.
+    const st = statSync(p, { throwIfNoEntry: false });
+    if (!st) continue;
+    if (st.isDirectory()) walk(p);
     else if (e.endsWith('.json')) {
       const data = JSON.parse(readFileSync(p, 'utf8'));
       for (const o of (Array.isArray(data) ? data : [data]) as Obj[]) {
