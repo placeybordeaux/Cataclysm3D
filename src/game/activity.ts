@@ -24,6 +24,14 @@ export interface ActivitySpec {
   warp?: number;
   /** Whether danger interrupts it (sleeping is interrupted by noise via other means). */
   interruptible?: boolean;
+  /** What kind of work ('craft', 'construction', 'read', 'disassemble'…), for UIs that show more. */
+  kind?: string;
+  /** The thing being worked on (the in-progress craft item, the book…). */
+  target?: unknown;
+  /** Map tile the work happens at (a construction site), for an in-world progress bar. */
+  at?: { x: number; y: number; z: number };
+  /** A richer UI draws this activity's progress; the plain HUD bar can stay out of the way. */
+  customUi?: boolean;
 }
 
 export class Activity {

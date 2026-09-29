@@ -159,6 +159,13 @@ export class Item implements MapItem {
     const c = this.def.container_data;
     return !!c && c.watertight && !c.seals && !c.unseals_into;
   }
+  /**
+   * BN is_craft: an in-progress craft (or, with vars.con_id, an unfinished construction) that
+   * holds the components used so far in its contents (src/game/crafting.ts, construction.ts).
+   */
+  isCraft(): boolean {
+    return this.typeId === 'craft';
+  }
   /** Something in it (container, holster, bandolier, magazine rounds). */
   hasContents(): boolean {
     return this._contents.length > 0;
@@ -181,6 +188,8 @@ export class Item implements MapItem {
   /** Grams including what it holds. */
   weight(): number {
     if (this.countByCharges) return this.unitWeight() * this.charges;
+    // BN item::weight: an in-progress craft weighs what its components weigh.
+    if (this.isCraft()) return this._contents.reduce((w, c) => w + c.weight(), 0);
     let w = this.def.weight;
     if (this.isGun()) for (const m of this._gunmods) w *= (m.def.weight_multiplier as number | undefined) ?? 1;
     if (this.ammoId && this.charges > 0 && !this.isMagazine()) w += this.charges * (this.data.items[this.ammoId]?.weight ?? 0);
@@ -192,6 +201,8 @@ export class Item implements MapItem {
   /** ml; a soft (non-rigid) item grows by what it holds; a magazine sticks out past the well. */
   volume(): number {
     if (this.countByCharges) return Math.ceil((this.def.volume * this.charges) / this.stackSize());
+    // BN item::volume: an in-progress craft is as big as its components (at least 1 ml).
+    if (this.isCraft()) return Math.max(1, this._contents.reduce((v, c) => v + c.volume(), 0));
     let v = this.def.volume;
     if (!this.def.rigid) for (const c of this._contents) v += c.volume();
     if (this._magazine) v += Math.max(0, this._magazine.volume() - (this.def.magazine_well ?? 0));
@@ -491,6 +502,8 @@ export class Item implements MapItem {
 
   // --- display (item::tname / display_name, simplified) ---
   baseName(quantity = 1): string {
+    // "in progress wooden spear", "unfinished Build Wooden Wall" (set by crafting / construction)
+    if (this.isCraft() && typeof this.vars.craft_label === 'string') return this.vars.craft_label;
     if (quantity !== 1 && this.def.name_plural) return this.def.name_plural;
     return cddaText(this.def.name, quantity !== 1);
   }
@@ -511,6 +524,11 @@ export class Item implements MapItem {
     let s = this.label(quantity);
     let amt = '';
     const inner = this._contents;
+    if (this.isCraft()) {
+      // BN tname: "in progress wooden spear (35%)"
+      const batch = Number(this.vars.craft_batch ?? 1);
+      return `${s}${batch > 1 ? ` (${batch})` : ''} (${Math.floor(Number(this.vars.craft_progress ?? 0) * 100)}%)`;
+    }
     if (this.isContainer() && inner.length === 1) {
       const c = inner[0];
       s = `${c.label(c.count())} (${s})`;

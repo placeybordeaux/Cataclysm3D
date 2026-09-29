@@ -253,7 +253,8 @@ has disassembly-only recipes. `misc.nested_category` holds BN nested recipe menu
   migrated by src/save/items.ts (worn clothes' pocket contents move to the flat inventory).
 - **Item groups at runtime: done.** `fromSpawned` honours `damage`, `active`, `flags` (FIT,
   custom flags), `snippet`, and gun → magazine → ammo nesting.
-- **Crafting.** No proficiencies, no practice recipes, no recipe variants or steps, no
+- **Crafting: done** (in-progress `craft` items, BN success dice, light multiplier, book_learn,
+  decomp_learn, construction pre_furniture/deny_flags/needs_diggable; ARCHITECTURE.md). Was: No proficiencies, no practice recipes, no recipe variants or steps, no
   `byproduct_group`; `time` is seconds; `autolearn` is already expanded to skill levels;
   `book_learn` pairs; `contained`/`container`; `result_mult`; charges on results;
   `decomp_learn` for learning by disassembly; `nested_category` menus. Tool qualities and

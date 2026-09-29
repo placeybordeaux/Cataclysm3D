@@ -1,19 +1,21 @@
 import type { GameData, RecipeDef, RequirementData } from '../data/types';
-import { CraftingInventory } from './crafting_inv';
-import { giveOrDrop, hasCraftingLight, learnRecipe, type CraftHost } from './crafting';
-import { createItem, countByCharges, Item } from './item';
-import { consumeItem, L, locate, type Loc } from './moves';
-import { evaluateRequirements, itemDisplayName, type RequirementEval } from './requirements';
+import { abandonCraft, craftingInventory, craftState, exceedsRecipeRequirements, giveOrDrop, lightSpeedMultiplier, learnRecipe, meetsSkills, recipeIndex, type CraftHost } from './crafting';
+import type { CraftingInventory } from './crafting_inv';
+import { createItem, countByCharges, inNewContainer, Item } from './item';
+import { consumeItem, L, locate, unloadItem, type Loc } from './moves';
+import { consumeRequirements, evaluateRequirements, itemDisplayName, type RequirementEval } from './requirements';
 
-// Disassembly (crafting.cpp complete_disassemble, recipe_dictionary.cpp): an item can be
-// taken apart if misc.uncraft has a recipe for it, or a recipe that makes it is
-// "reversible". Tools and qualities of the recipe are needed (with CDDA's replacements:
-// welders/forges become fine metal sawing, sewing becomes cutting); components come back
-// minus "no_recover" ones, each rolled against skill and item damage.
+// Disassembly after Bright Nights (crafting.cpp can_disassemble / complete_disassemble,
+// recipe_dictionary.cpp): an item comes apart if misc.uncraft has a recipe for it, a recipe that
+// makes it is reversible, or it's a book (torn into paper). The tools and qualities of the
+// recipe are needed, with BN's replacements (welders/forges → fine metal sawing, sewing →
+// cutting, presses → pulling); components come back minus no_recover / UNRECOVERABLE ones,
+// each rolled against skill and the item's damage. Contents, magazines and rounds come out
+// first. An in-progress craft comes apart into the components it holds.
 
 const uncraftCache = new WeakMap<GameData, Map<string, RecipeDef>>();
 
-/** item id -> the recipe used to take it apart. */
+/** item id → the recipe used to take it apart (recipe_dictionary uncraft map). */
 export function uncraftIndex(data: GameData): Map<string, RecipeDef> {
   let idx = uncraftCache.get(data);
   if (idx) return idx;
@@ -21,8 +23,19 @@ export function uncraftIndex(data: GameData): Map<string, RecipeDef> {
   for (const [id, r] of Object.entries((data.misc.uncraft ?? {}) as Record<string, RecipeDef>)) idx.set(r.result ?? id, r);
   for (const r of data.recipes) {
     if (!r.reversible || !r.result || idx.has(r.result)) continue;
-    const t = typeof r.reversible === 'object' && r.reversible.time ? r.reversible.time : r.time;
-    idx.set(r.result, { ...r, time: t, uncraftOf: r.id } as RecipeDef);
+    idx.set(r.result, r);
+  }
+  // Books with no recipe: pages of paper (uncraft_book × volume / 12.5 ml, 10 s a page).
+  const book = data.misc.requirement?.uncraft_book as RequirementData | undefined;
+  if (book) {
+    for (const d of Object.values(data.items)) {
+      if (idx.has(d.id) || !d.subtypes?.includes('BOOK') || !(d.volume > 0)) continue;
+      const pages = Math.max(1, Math.floor(d.volume / 12.5));
+      idx.set(d.id, {
+        id: d.id, type: 'uncraft', result: d.id, category: 'CC_NONCRAFT', difficulty: 0, time: pages * 10, autolearn: false, result_mult: 1, contained: false, reversible: true,
+        components: book.components.map((g) => g.map((c) => ({ ...c, count: c.count * pages }))), tools: book.tools, qualities: book.qualities,
+      });
+    }
   }
   uncraftCache.set(data, idx);
   return idx;
@@ -32,45 +45,36 @@ export function uncraftRecipe(data: GameData, itemId: string): RecipeDef | undef
   return uncraftIndex(data).get(itemId);
 }
 
-const TOOL_TO_QUALITY: Record<string, { id: string; level: number } | null> = {
-  welder: { id: 'SAW_M_FINE', level: 1 },
-  welder_crude: { id: 'SAW_M_FINE', level: 1 },
-  oxy_torch: { id: 'SAW_M_FINE', level: 1 },
-  forge: { id: 'SAW_M_FINE', level: 1 },
-  char_forge: { id: 'SAW_M_FINE', level: 1 },
-  crucible: null,
-  press: { id: 'PULL', level: 1 },
-};
-
 /** requirement_data::disassembly_requirements. */
 export function disassemblyRequirements(data: GameData, r: RecipeDef): RequirementData {
   const newQ: { id: string; level: number }[] = [];
   let removeFire = false;
-  const tools = (r.tools ?? [])
-    .filter((grp) => {
-      for (const t of grp) {
-        if (t.id in TOOL_TO_QUALITY) {
-          const q = TOOL_TO_QUALITY[t.id];
-          if (q) newQ.push(q);
-          if (t.id === 'press') removeFire = true;
-          return false;
-        }
-        if (t.id === 'fire' && removeFire) return false;
-      }
-      return true;
-    })
-    // Disassembly never burns tool charges: just the tool's presence is required.
-    .map((grp) => grp.map((t) => ({ ...t, count: -1 })));
-  const qualities = (r.qualities ?? []).filter((grp) => {
-    for (const q of grp) {
-      if (q.id === 'SEW') {
-        newQ.push({ id: 'CUT', level: q.level });
-        return false;
-      }
-      if (q.id === 'GLARE' || q.id === 'KNIT') return false;
+  let pulling = 'none' as 'none' | 'plain' | 'rifle' | 'shell';
+  const tools = (r.tools ?? []).filter((grp) => {
+    for (const t of grp) {
+      const id = t.id;
+      if (['welder', 'welder_crude', 'oxy_torch', 'forge', 'char_forge'].includes(id)) return void newQ.push({ id: 'SAW_M_FINE', level: 1 }), false;
+      if (id === 'sewing_kit' || id === 'mold_plastic') return void newQ.push({ id: 'CUT', level: 1 }), false;
+      if (id === 'crucible') return false;
+      if (id === 'press_workbench') return (pulling = 'rifle'), (removeFire = true), false;
+      if (id === 'press_dowel') return (pulling = 'shell'), (removeFire = true), false;
+      if (id === 'press') return (pulling = 'plain'), (removeFire = true), false;
+      if (id === 'fire' && removeFire) return false;
     }
     return true;
   });
+  if (pulling === 'shell') newQ.push({ id: 'CUT', level: 1 });
+  else if (pulling === 'rifle') newQ.push({ id: 'PULL', level: 2 });
+  else if (pulling === 'plain') newQ.push({ id: 'PULL', level: 1 });
+  const qualities = (r.qualities ?? [])
+    .map((grp) => {
+      for (const q of grp) {
+        if (q.id === 'SEW') return void newQ.push({ id: 'CUT', level: q.level }), [];
+        if (q.id === 'GLARE' || q.id === 'KNIT') return [];
+      }
+      return grp;
+    })
+    .filter((g) => g.length);
   for (const q of newQ) if (!qualities.some((g) => g.some((x) => x.id === q.id))) qualities.push([q]);
   const components = (r.components ?? [])
     .map((grp) => grp.filter((c) => !c.no_recover && !data.items[c.id]?.flags?.includes('UNRECOVERABLE')))
@@ -78,90 +82,139 @@ export function disassemblyRequirements(data: GameData, r: RecipeDef): Requireme
   return { tools, qualities, components };
 }
 
-/** What taking one `itemId` apart yields: the first alternative of each component group. */
+/** What taking one apart yields: the first alternative of each component group. */
 export function disassemblyYield(data: GameData, r: RecipeDef): { id: string; count: number }[] {
   const req = disassemblyRequirements(data, r);
   return req.components.map((grp) => ({ id: grp[0].id, count: Math.max(1, Math.abs(grp[0].count)) }));
+}
+
+/** recipe::disassembly_batch_size: stacks come apart `charges` at a time. */
+export function disassemblyBatch(r: RecipeDef): number {
+  return Math.max(1, r.charges ?? 1);
 }
 
 export interface DisassemblyCheck {
   ok: boolean;
   missing: string[];
   req: RequirementEval;
+  /** Seconds it takes. */
+  time: number;
 }
 
-export function canDisassemble(host: CraftHost, it: Item, inv?: CraftingInventory): DisassemblyCheck {
+/** crafting::can_disassemble. */
+export function canDisassemble(host: CraftHost, it: Item, inv: CraftingInventory = craftingInventory(host)): DisassemblyCheck {
+  const empty = { ok: false, req: evaluateRequirements(host.data, {}, inv), time: 0 };
+  if (craftState(host.data, it)) return { ...empty, ok: true, missing: [], time: 1 };
   const r = uncraftRecipe(host.data, it.typeId);
-  const p = host.player;
-  inv ??= CraftingInventory.gather(host.data, p, host.map, { x: p.x, y: p.y, z: p.z });
-  const req = evaluateRequirements(host.data, r ? { tools: disassemblyRequirements(host.data, r).tools, qualities: disassemblyRequirements(host.data, r).qualities } : {}, inv);
-  const missing = r ? [...req.missing] : [`You cannot disassemble this.`];
-  if (it.hasContents() || it.magazine) missing.push('You must empty it first.');
-  if (it.countByCharges && r && it.charges < (r.charges ?? 1)) missing.push(`You need at least ${r.charges} charges.`);
-  if (!hasCraftingLight(host)) missing.push("You can't see to craft!");
-  return { ok: missing.length === 0, missing, req };
+  if (!r || it.hasFlag('ETHEREAL_ITEM')) return { ...empty, missing: ['You cannot disassemble this.'] };
+  const need = disassemblyRequirements(host.data, r);
+  const req = evaluateRequirements(host.data, { tools: need.tools, qualities: need.qualities }, inv);
+  const missing = [...req.missing];
+  if (lightSpeedMultiplier(host, r) <= 0) missing.push("You can't see to craft!");
+  const food = it.isComestible() ? it : it.contents.find((c) => c.isComestible());
+  if (food?.goesBad() && food.rotten()) missing.push("It's rotten, I'm not taking that apart.");
+  if (it.countByCharges && it.charges < disassemblyBatch(r)) missing.push(`You need at least ${disassemblyBatch(r)} charges of ${it.baseName(2)}.`);
+  return { ok: missing.length === 0, missing, req, time: Math.max(1, r.time) };
 }
 
-/** Candidates for the `(` menu: carried items and items within reach that have an uncraft recipe. */
+/** Candidates: carried items and items within reach that can come apart. */
 export function disassemblables(host: CraftHost): { item: Item; where: 'inv' | [number, number, number] }[] {
   const p = host.player;
   const out: { item: Item; where: 'inv' | [number, number, number] }[] = [];
   const idx = uncraftIndex(host.data);
-  for (const it of p.inv.carried()) if (idx.has(it.typeId)) out.push({ item: it, where: 'inv' });
-  if (p.inv.wielded && idx.has(p.inv.wielded.typeId)) out.push({ item: p.inv.wielded, where: 'inv' });
+  const ok = (it: Item) => idx.has(it.typeId) || !!craftState(host.data, it);
+  for (const it of p.inv.carried()) if (ok(it)) out.push({ item: it, where: 'inv' });
+  if (p.inv.wielded && ok(p.inv.wielded)) out.push({ item: p.inv.wielded, where: 'inv' });
   for (let dy = -1; dy <= 1; dy++)
     for (let dx = -1; dx <= 1; dx++) {
       const x = Math.floor(p.x) + dx, y = Math.floor(p.y) + dy;
-      for (const mi of host.map.itemsAt(x, y, p.z)) if (mi instanceof Item && idx.has(mi.typeId)) out.push({ item: mi, where: [x, y, p.z] });
+      for (const mi of host.map.itemsAt(x, y, p.z)) if (mi instanceof Item && ok(mi)) out.push({ item: mi, where: [x, y, p.z] });
     }
   return out;
 }
 
-/** Use up the item (or `r.charges` of a stack) where it is: carried or on a tile within reach. */
-function takeItem(host: CraftHost, it: Item, r: RecipeDef): boolean {
+function whereIs(host: CraftHost, it: Item): Loc | null {
   const p = host.player;
   const around: Loc[] = [];
   for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) around.push(L.ground(host.map, Math.floor(p.x) + dx, Math.floor(p.y) + dy, p.z));
-  const loc = p.inv.locOf(it) ?? locate(it, around);
-  if (!loc) return false;
-  // Stacks (ammo, charges) are disassembled `r.charges` at a time.
-  const per = it.countByCharges ? Math.min(it.charges, r.charges ?? 1) : undefined;
-  return consumeItem(it, loc, per) !== null;
+  return p.inv.locOf(it) ?? locate(it, around);
 }
 
-/** complete_disassemble: roll each component against skill and damage, then hand them out. */
-export function finishDisassembly(host: CraftHost, it: Item, r: RecipeDef): Item[] {
+/**
+ * complete_disassemble: empty it, use it up (one batch of a stack), roll each component
+ * against skill and damage, hand them out, and maybe learn the recipe. Returns what came out.
+ */
+export function finishDisassembly(host: CraftHost, it: Item, r: RecipeDef): Item[] | null {
   const c = host.player, data = host.data;
+  const loc = whereIs(host, it);
+  if (!loc) return null;
+  const p = host.player;
+  const ground = L.ground(host.map, Math.floor(p.x), Math.floor(p.y), p.z);
+  // remove_ammo: contents, magazines and loaded rounds come out first.
+  if (it.hasContents() || it.magazine || (it.ammoRemaining() > 0 && !it.countByCharges)) unloadItem(it, [L.inv(p), ground], { actor: p, quiet: true, pourLiquids: true });
+  const need = disassemblyRequirements(data, r);
+  const inv = craftingInventory(host);
+  if (need.tools.some((g) => g.some((t) => t.count > 0))) consumeRequirements({ tools: need.tools }, inv);
+  host.message(`You disassemble the ${it.name()} into its components.`);
+  const batch = it.countByCharges ? disassemblyBatch(r) : undefined;
+  if (!consumeItem(it, loc, batch)) return null;
+
   const skill = r.skill_used ?? '';
-  const skillDice = 2 + Math.round(c.getSkill(skill) * 4), skillSides = 16 + c.int;
-  const diffDice = r.difficulty ?? 0, diffSides = 24;
-  if (skill) c.practice(skill, (r.difficulty ?? 0) * 2, r.difficulty ?? 0);
-  const dmgChance = Math.pow(0.8, it.damageLevel());
-  const recovered = new Map<string, number>(), lost = new Map<string, number>();
+  const skillDice = 2 + c.getSkill(skill) * 4, skillSides = 16 + c.int;
+  const diffDice = r.difficulty ?? 0;
+  if (skill) c.practice(skill, diffDice * 2, diffDice);
+  const dmgChance = Math.min(1, Math.pow(0.8, it.damageLevel()));
   const out: Item[] = [];
   for (const { id, count } of disassemblyYield(data, r)) {
-    if (!data.items[id]) continue;
-    const byCharges = countByCharges(data.items[id]);
-    // Charge-counted components are one roll for the whole amount, like CDDA's single item.
-    const units = byCharges ? [count] : Array(count).fill(1);
+    const def = data.items[id];
+    if (!def) continue;
+    // Charge-counted components (and liquids) come out as one stack, like BN.
+    const units = countByCharges(def) ? [count] : Array<number>(count).fill(1);
     for (const n of units) {
-      const ok = (diffDice === 0 || c.rng.dice(skillDice, skillSides) > c.rng.dice(diffDice, diffSides)) && dmgChance > c.rng.next();
-      (ok ? recovered : lost).set(id, ((ok ? recovered : lost).get(id) ?? 0) + n);
-      if (ok) out.push(createItem(data, id, byCharges ? { charges: n } : {}));
+      const made = createItem(data, id, countByCharges(def) ? { charges: n } : {});
+      if (diffDice !== 0 && c.rng.dice(skillDice, skillSides) <= c.rng.dice(diffDice, 24)) {
+        host.message(`You fail to recover ${made.name()}.`, 'c_light_red');
+        continue;
+      }
+      if (!(dmgChance > c.rng.next())) {
+        host.message(`You fail to recover ${made.name()} from the ${it.baseName()}.`, 'c_light_red');
+        continue;
+      }
+      if (!made.countByCharges && made.ammoTypes().length) {
+        // tools that can be unloaded come apart unloaded
+        made.charges = 0;
+        made.ammoId = null;
+      }
+      if (it.flags.includes('FIT') && made.hasFlag('VARSIZE') && !made.flags.includes('FIT')) made.flags.push('FIT');
+      if (made.isLiquid() && r.flags?.includes('UNCRAFT_LIQUIDS_CONTAINED') && made.def.container) {
+        const { container } = inNewContainer(data, made, made.def.container);
+        out.push(container);
+      } else out.push(made);
     }
   }
-  for (const [id, n] of lost) host.message(`You fail to recover ${n} ${itemDisplayName(data, id, n)}.`, 'c_light_red');
-  for (const [id, n] of recovered) host.message(`You recover ${n} ${itemDisplayName(data, id, n)}.`, 'c_light_green');
-  const learnId = (r as { uncraftOf?: string }).uncraftOf;
-  if (learnId && (r as { decomp_learn?: number }).decomp_learn !== undefined && !c.learnedRecipes.has(learnId) && c.getSkill(skill) >= Number((r as any).decomp_learn) && c.rng.oneIn(4)) {
-    learnRecipe(c, learnId);
-    host.message(`You learned a recipe for ${it.baseName()} from disassembling it!`, 'c_light_green');
+  const got = new Map<string, number>();
+  for (const o of out) got.set(o.baseName(), (got.get(o.baseName()) ?? 0) + o.count());
+  if (got.size) host.message(`You recover ${[...got].map(([n, k]) => `${k} ${n}`).join(', ')}.`, 'c_light_green');
+  giveOrDrop(host, out);
+
+  // decomp_learn: learning the recipe (the one with the uncraft's id) by taking it apart.
+  const learnable = recipeIndex(data).get(r.id);
+  if (learnable && r.decomp_learn?.length && !c.learnedRecipes.has(learnable.id)) {
+    if (meetsSkills(c, r.decomp_learn)) {
+      const bonus = (1 + exceedsRecipeRequirements(c, r)) * Math.max(1, 0.9 + c.int * 0.025);
+      if (c.rng.next() * 4 < bonus && learnRecipe(c, learnable.id)) host.message(`You learned a recipe for ${it.baseName()} from disassembling it!`, 'c_light_green');
+      else host.message(`You might be able to learn a recipe for ${it.baseName()} if you disassemble another.`, 'c_light_gray');
+    } else host.message('If you had better skills, you might learn a recipe next time.', 'c_light_gray');
   }
   return out;
 }
 
+/** Called after a disassembly finishes (UI refresh). */
+export const disassembledHooks: ((itemId: string) => void)[] = [];
+
 /** Start disassembling `it`: an activity of the uncraft recipe's time. */
 export function startDisassembly(host: CraftHost, it: Item, opts: { instant?: boolean } = {}): boolean {
+  if (craftState(host.data, it)) return abandonCraft(host, it);
   const r = uncraftRecipe(host.data, it.typeId);
   const check = canDisassemble(host, it);
   if (!r || !check.ok) {
@@ -169,15 +222,18 @@ export function startDisassembly(host: CraftHost, it: Item, opts: { instant?: bo
     return false;
   }
   const done = () => {
-    if (!takeItem(host, it, r)) {
-      host.message(`The ${it.name()} is gone.`, 'c_light_red');
-      return;
-    }
-    giveOrDrop(host, finishDisassembly(host, it, r));
+    const out = finishDisassembly(host, it, r);
+    if (!out) return host.message(`The ${it.baseName()} is gone.`, 'c_light_red');
+    for (const h of disassembledHooks) h(it.typeId);
   };
   if (opts.instant) {
     done();
     return true;
   }
-  return host.activities.start({ name: `disassembling the ${it.baseName()}`, duration: Math.max(1, r.time), onComplete: done });
+  return host.activities.start({ name: `disassembling the ${it.baseName()}`, kind: 'disassemble', target: it, customUi: true, duration: check.time, onComplete: done });
+}
+
+/** Display names of what `r` yields ("2 sticks, 1 rag"). */
+export function yieldText(data: GameData, r: RecipeDef): string {
+  return disassemblyYield(data, r).map((y) => `${y.count} ${itemDisplayName(data, y.id, y.count)}`).join(', ');
 }
