@@ -345,6 +345,18 @@ describe('skills, morale, focus', () => {
     passTime(c, 3 * 3600);
     expect(c.morale.level()).toBe(0);
   });
+
+  it('optimists get +9 permanent morale and count good morale 1.2x (get_temper_mult)', () => {
+    const { c } = survivor();
+    c.addTrait('OPTIMISTIC');
+    c.update(1);
+    expect(c.morale.level()).toBe(10); // trunc(9 x 1.2)
+    c.inv.consume(createItem(data, 'chocolate'));
+    expect(c.morale.level()).toBe(Math.trunc(Math.sqrt(10 * 10 + 24 * 24)));
+    c.removeTrait('OPTIMISTIC');
+    c.update(1);
+    expect(c.morale.has('morale_perm_optimist')).toBe(false);
+  });
 });
 
 describe('temperature', () => {

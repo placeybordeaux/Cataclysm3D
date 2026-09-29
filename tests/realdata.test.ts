@@ -105,6 +105,17 @@ describe('real data: items', () => {
     expect(gun.ammoRemaining()).toBe(14);
   });
 
+  it('BN effect_type rules: adrenaline hides pain and wears off into its comedown (effects_on_remove)', () => {
+    const { c } = survivor();
+    c.pain = 30;
+    c.addEffect('adrenaline', 60);
+    expect(c.perceivedPain()).toBe(0);
+    for (let i = 0; i < 61; i++) c.update(1);
+    expect(c.hasEffect('adrenaline')).toBe(false);
+    expect(c.hasEffect('adrenaline_comedown')).toBe(true);
+    expect(c.perceivedPain()).toBeGreaterThan(0);
+  });
+
   it('bandages stop bleeding (heal_actor bleed 0.9); aspirin is a painkiller', () => {
     const { c } = survivor();
     c.addEffect('bleed', 600, { bp: 'leg_r' });

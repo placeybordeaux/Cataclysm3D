@@ -915,11 +915,29 @@ export class Character {
     }
     return e;
   }
-  removeEffect(id: string, bp?: BodyPartId): boolean {
-    const had = this.effects.get(id, bp);
+  /**
+   * Remove an effect (all body parts when `bp` is omitted). `decayed` = it ran out of duration
+   * (Creature::process_effects), which triggers `effects_on_remove` entries allowed on decay;
+   * an explicit removal triggers those with allow_on_remove (effect::create_child_effects).
+   */
+  removeEffect(id: string, bp?: BodyPartId, decayed = false): boolean {
+    const had = bp === undefined ? this.effects.all().filter((e) => e.id === id) : [this.effects.get(id, bp)].filter((e): e is Effect => !!e);
     const ok = this.effects.remove(id, bp);
-    if (ok && had?.type.def.remove_message) this.msg(cddaText(had.type.def.remove_message));
-    return ok;
+    if (!ok) return false;
+    const def = had[0]?.type.def;
+    if (def?.remove_message) this.msg(cddaText(def.remove_message));
+    type Caused = { effect_type: string; intensity_requirement?: number; allow_on_decay?: boolean; allow_on_remove?: boolean; duration?: number; inherit_duration?: boolean; intensity?: number; inherit_intensity?: boolean; body_part?: BodyPartId; inherit_body_part?: boolean };
+    for (const parent of had) {
+      for (const c of (parent.type.def.effects_on_remove ?? []) as Caused[]) {
+        if (parent.intensity < (c.intensity_requirement ?? 0)) continue;
+        if (decayed ? c.allow_on_decay === false : !c.allow_on_remove) continue;
+        const dur = c.inherit_duration ? parent.duration : c.duration || this.effectTypes.get(c.effect_type).maxDuration;
+        if (c.inherit_duration && dur < 1) continue;
+        const b = c.inherit_body_part ? parent.bp ?? undefined : c.body_part;
+        this.addEffect(c.effect_type, dur, { bp: b, intensity: c.inherit_intensity ? parent.intensity : c.intensity ?? 1 });
+      }
+    }
+    return true;
   }
   hasEffect(id: string, bp?: BodyPartId): boolean {
     return this.effects.has(id, bp);
@@ -1098,6 +1116,10 @@ export class Character {
     };
     fake('thirsty', this.thirst - THIRST.VERY_THIRSTY);
     fake('sleep_deprived', this.sleepDeprivation >= SLEEP_DEPRIVATION.HARMLESS ? this.sleepDeprivation : 0);
+    // player_morale's mutation hooks: Optimist +9 / Bad Temper -9 permanent morale, which
+    // also switch on the temper multipliers (Morale.temperMult).
+    this.morale.setPermanent('morale_perm_optimist', this.hasTrait('OPTIMISTIC') ? 9 : 0);
+    this.morale.setPermanent('morale_perm_badtemper', this.hasTrait('BADTEMPER') ? -9 : 0);
   }
 
   /** Recompute stat/speed bonuses (Character::reset_stats + recalc_speed_bonus). */
@@ -1355,7 +1377,7 @@ export class Character {
       if (e.intensity > 1 && e.type.intDecayTick && this.turn % e.type.intDecayTick === 0 && e.type.maxDuration > e.duration) {
         e.setIntensity(Math.max(1, e.intensity + e.type.intDecayStep));
       }
-      if (e.duration <= 0) this.removeEffect(e.id, e.bp ?? undefined);
+      if (e.duration <= 0) this.removeEffect(e.id, e.bp ?? undefined, true);
       else if (!e.permanent && !e.type.def.permanent) e.modDuration(-1);
     }
     if (this.dead) return;
