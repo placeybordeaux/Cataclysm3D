@@ -11,7 +11,7 @@
 //                  and print timings, % JSON mapgen, unsupported features
 //   --png file     render a top-down colour map (terrain/furniture colours) to a PNG
 //   --around x,y   OMT centre for --png (default: start shelter); --radius R OMTs (default 4)
-//   --z Z          z-level for --png (default 0)
+//   --z Z          z-level for --png (default 0); --scale S pixels per tile (default 3)
 //   --coverage     run every om_terrain mapgen in the data once and report unsupported
 //                  features / unknown ids across all of it
 //   --quiet        don't print per-feature warnings
@@ -95,7 +95,7 @@ if (png) {
   const R = Number(get('--radius') ?? 4);
   const [ax, ay] = get('--around') ? get('--around')!.split(',').map(Number) : [start.omx, start.omy];
   const z = Number(get('--z') ?? 0);
-  const S = 3, span = (2 * R + 1) * 24;
+  const S = Number(get('--scale') ?? 3), span = (2 * R + 1) * 24;
   const img = new PNG({ width: span * S, height: span * S });
   for (let oy = -R; oy <= R; oy++)
     for (let ox = -R; ox <= R; ox++) {
