@@ -4,3 +4,4 @@ shots/
 *.log
 node_modules
 .claude/
+.scratch/
