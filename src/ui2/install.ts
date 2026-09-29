@@ -29,6 +29,7 @@ import { installTheme, setScalePref, scalePref, currentMetrics } from './theme';
 import { setHost, shortcut, settings, saveSettings, surfacesOpen } from './host';
 import { closeGroup, openPanels } from './window';
 import { openContextMenu, closeMenu, menuOpen } from './menu';
+import { dragging } from './dragdrop';
 import { worldContextProviders, worldMenu, type WorldTarget } from './world';
 import { toast, toastState } from './toast';
 import { inventoryOpen, toggleInventoryScreen } from './inventory_screen';
@@ -227,7 +228,8 @@ function worldHover(game: Game, renderer: Renderer) {
       box.position.set(cur.x + 0.5, cur.z * LEVEL_HEIGHT + tall / 2 + 0.005, cur.y + 0.5);
       box.visible = true;
       label.textContent = cur.name;
-      label.style.display = '';
+      // Mid-drag the ghost says what a drop does; the outline alone shows where.
+      label.style.display = dragging() ? 'none' : '';
       label.style.left = `${x}px`;
       label.style.top = `${y}px`;
     },
