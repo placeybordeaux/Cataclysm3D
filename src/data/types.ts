@@ -3,12 +3,18 @@
 // units, so runtime code never parses "250 ml" or "30 m" strings.
 //
 // Units convention (everywhere in this codebase):
-//   volume: ml, weight: g, length: tiles (1 tile == 1 m), duration: game seconds,
-//   energy: kJ (for batteries: charges), money: cents, temperature: celsius.
+//   volume: ml, weight: g, duration: game seconds, energy: kJ, power: W, money: cents,
+//   temperature: celsius. Item/pocket lengths (longest_side, barrel_length, ...) are in cm;
+//   map distances are tiles (1 tile == 1 m).
+//
+// Items use modern CDDA's `type: "ITEM"` + `subtypes`; `ItemDef.type` is a convenience
+// "primary" subtype (GUN > GUNMOD > AMMO > MAGAZINE > COMESTIBLE > BOOK > BIONIC_ITEM >
+// TOOL > ARMOR > ...; GENERIC if none), `subtypes` is authoritative.
 //
 // Fields are optional unless CDDA always has them. Extend these interfaces freely, but
 // keep names close to the CDDA JSON key (snake_case preserved) so the docs at
-// ~/code/Cataclysm-DDA/doc/JSON/*.md stay a valid reference.
+// ~/code/Cataclysm-DDA/doc/JSON/*.md stay a valid reference. Every def also carries the
+// remaining CDDA keys verbatim (after unit conversion), hence the index signatures.
 
 /** CDDA color name, e.g. "c_red", "light_gray", "i_yellow". Kept verbatim. */
 export type CddaColor = string;
@@ -16,6 +22,9 @@ export type CddaColor = string;
 export interface Glyph {
   symbol: string;
   color: CddaColor;
+  /** CDDA allows [spring, summer, autumn, winter] arrays; symbol/color hold the spring entry. */
+  symbol_seasonal?: string[];
+  color_seasonal?: CddaColor[];
 }
 
 export interface BashInfo {
@@ -26,12 +35,14 @@ export interface BashInfo {
   ter_set?: string;
   furn_set?: string;
   items?: ItemGroupRef;
+  [extra: string]: unknown;
 }
 
 export interface DeconstructInfo {
   ter_set?: string;
   furn_set?: string;
   items?: ItemGroupRef;
+  [extra: string]: unknown;
 }
 
 export interface TerrainDef extends Glyph {
@@ -41,8 +52,9 @@ export interface TerrainDef extends Glyph {
   move_cost: number; // 0 = impassable
   coverage?: number;
   flags: string[];
-  connects_to?: string;
+  connects_to?: string[];
   connect_groups?: string[];
+  rotates_to?: string[];
   open?: string;
   close?: string;
   bash?: BashInfo;
@@ -50,9 +62,11 @@ export interface TerrainDef extends Glyph {
   roof?: string;
   transforms_into?: string;
   light_emitted?: number;
+  /** explicit looks_like, else the copy-from parent (for sprite fallback) */
   looks_like?: string;
-  examine_action?: string;
+  examine_action?: unknown;
   harvest_by_season?: unknown;
+  [extra: string]: unknown;
 }
 
 export interface FurnitureDef extends Glyph {
@@ -69,30 +83,65 @@ export interface FurnitureDef extends Glyph {
   deconstruct?: DeconstructInfo;
   light_emitted?: number;
   looks_like?: string;
-  examine_action?: string;
+  examine_action?: unknown;
   crafting_pseudo_item?: string | string[];
   max_volume?: number;
+  connects_to?: string[];
+  connect_groups?: string[];
+  rotates_to?: string[];
+  [extra: string]: unknown;
 }
 
 export type ItemGroupRef = string | ItemGroupDef;
 
+/**
+ * One entry of an item group (doc/JSON/ITEM_SPAWN.md). The extractor folds the legacy
+ * "items"/"groups" arrays, "count-min"/"count-max", object-form "container-item" etc. into
+ * this single shape. Exactly one of item / group / distribution / collection is set.
+ */
 export interface ItemGroupEntry {
   item?: string;
   group?: string;
   distribution?: ItemGroupEntry[];
   collection?: ItemGroupEntry[];
+  /** default 100. In a collection: percent chance (<= 100). In a distribution: relative weight. */
   prob?: number;
+  /** default 1; [min, max] is rolled once per entry */
   count?: number | [number, number];
+  /** -1 = default/full; [min, -1] = min up to capacity */
   charges?: number | [number, number];
-  "container-item"?: string;
   damage?: number | [number, number];
+  /** each spawned item is put in its own container of this type */
+  'container-item'?: string;
+  /** all `count` items of this entry go together into one container of this type */
+  'entry-wrapper'?: string;
+  'container-variant'?: string;
+  'container-group'?: string;
+  'contents-item'?: string[];
+  'contents-group'?: string[];
+  'ammo-item'?: string;
+  'ammo-group'?: string;
+  variant?: string;
+  'custom-flags'?: string[];
+  sealed?: boolean;
+  active?: boolean;
+  /** holiday-only entry ("halloween", "christmas", ...) */
+  event?: string;
+  [extra: string]: unknown;
 }
 
 export interface ItemGroupDef {
   id?: string;
   subtype: 'distribution' | 'collection';
   entries: ItemGroupEntry[];
+  /** everything the group creates goes into one container of this type */
+  'container-item'?: string;
+  'container-variant'?: string;
   on_overflow?: string;
+  /** percent chance that guns/magazines/tools spawn loaded / with a magazine */
+  ammo?: number;
+  magazine?: number;
+  sealed?: boolean;
 }
 
 export interface DamageUnit {
@@ -100,25 +149,39 @@ export interface DamageUnit {
   amount: number;
   armor_penetration?: number;
   armor_multiplier?: number;
+  [extra: string]: unknown;
 }
 
 export interface ItemDef extends Glyph {
   id: string;
-  type: string; // CDDA type: GENERIC, TOOL, COMESTIBLE, ARMOR, GUN, AMMO, MAGAZINE, BOOK, GUNMOD, ...
+  /** primary subtype (see header): GENERIC, TOOL, COMESTIBLE, ARMOR, GUN, AMMO, MAGAZINE, BOOK, GUNMOD, ... */
+  type: string;
+  /** CDDA `subtypes`, e.g. ["TOOL", "ARMOR"]; empty for generic items */
+  subtypes: string[];
   name: string;
-  name_plural?: string;
+  name_plural: string;
   description?: string;
-  category?: string;
+  /** item category id: explicit, or CDDA's per-subtype fallback (guns, ammo, tools, clothing, food, ...) */
+  category: string;
   weight: number; // g
   volume: number; // ml
-  longest_side?: number; // tiles*100 ~ cm
-  price?: number;
+  longest_side?: number; // cm
+  price?: number; // cents
+  price_postapoc?: number; // cents
   material: string[];
+  /** only present when portions are uneven, e.g. { steel: 3, wood: 1 } */
+  material_portions?: Record<string, number>;
   flags: string[];
+  looks_like?: string;
   // melee
+  /** damage type -> amount, e.g. { bash: 16 } */
+  melee_damage?: Record<string, number>;
+  /** convenience: melee_damage.bash */
   bashing?: number;
+  /** convenience: max(melee_damage.cut, melee_damage.stab) */
   cutting?: number;
-  to_hit?: number;
+  /** computed from CDDA's { grip, length, surface, balance } object; -2 when absent */
+  to_hit: number;
   techniques?: string[];
   qualities?: [string, number][];
   use_action?: unknown;
@@ -127,9 +190,10 @@ export interface ItemDef extends Glyph {
   calories?: number;
   quench?: number;
   fun?: number;
-  spoils_in?: number;
+  spoils_in?: number; // seconds
   healthy?: number;
-  addiction_type?: string;
+  addiction_type?: unknown;
+  charges?: number;
   // tool / charges
   max_charges?: number;
   initial_charges?: number;
@@ -140,32 +204,34 @@ export interface ItemDef extends Glyph {
   warmth?: number;
   encumbrance?: number;
   environmental_protection?: number;
-  // gun
+  // gun / book (both use CDDA's "skill" key)
   skill?: string;
   ranged_damage?: DamageUnit[];
+  thrown_damage?: DamageUnit[];
   range?: number;
   dispersion?: number;
   recoil?: number;
   reload?: number;
-  modes?: [string, string, number][];
-  magazines?: [string, string[]][];
+  modes?: unknown[][];
   // ammo
   ammo_type?: string;
-  damage?: DamageUnit[];
+  /** stack size of one "charge" unit for ammo */
   count?: number;
+  damage?: DamageUnit[];
   // book
-  skill_book?: string;
   required_level?: number;
   max_level?: number;
-  time?: number;
+  time?: number; // seconds to read
   intelligence?: number;
+  chapters?: number;
   // containers
   pocket_data?: unknown[];
   [extra: string]: unknown;
 }
 
+/** special_attacks entry; the ["ID", cooldown] shorthand is normalized to { id, cooldown }. */
 export interface MonsterAttack {
-  id?: string;
+  id: string;
   type?: string;
   cooldown?: number;
   [k: string]: unknown;
@@ -174,13 +240,16 @@ export interface MonsterAttack {
 export interface MonsterDef extends Glyph {
   id: string;
   name: string;
+  name_plural: string;
   description?: string;
   species: string[];
   default_faction: string;
-  volume: number;
-  weight: number;
+  volume: number; // ml
+  weight: number; // g
   hp: number;
   speed: number;
+  /** moves per melee attack (default 100) */
+  attack_cost: number;
   aggression: number;
   morale: number;
   melee_skill: number;
@@ -191,53 +260,114 @@ export interface MonsterDef extends Glyph {
   armor?: Record<string, number>; // damage type -> armor
   vision_day: number;
   vision_night: number;
-  hearing?: number;
-  special_attacks?: unknown[];
+  material: string[];
+  special_attacks?: MonsterAttack[];
   death_function?: unknown;
   death_drops?: ItemGroupRef;
   harvest?: string;
   flags: string[];
-  upgrades?: { half_life?: number; into_group?: string; into?: string };
-  luminance?: number;
+  /** half_life / age_grow are in days, as in CDDA */
+  upgrades?: { half_life?: number; into_group?: string; into?: string; age_grow?: number; [k: string]: unknown };
+  luminance: number;
   looks_like?: string;
   diff?: number;
   [extra: string]: unknown;
 }
 
-export interface MonsterGroupDef {
-  id: string;
-  default?: string;
-  monsters: { monster?: string; group?: string; weight?: number; freq?: number; cost_multiplier?: number; pack_size?: [number, number]; starts?: number; ends?: number }[];
+export interface MonsterGroupEntry {
+  monster?: string;
+  group?: string;
+  /** relative weight ("freq" in old JSON); default 1 */
+  weight: number;
+  cost_multiplier?: number;
+  pack_size?: [number, number];
+  /** game seconds since the cataclysm */
+  starts?: number;
+  ends?: number;
+  conditions?: string[];
+  event?: string;
+  [k: string]: unknown;
 }
 
+export interface MonsterGroupDef {
+  id: string;
+  /** explicit default, else the highest-weight monster entry (as CDDA computes it) */
+  default?: string;
+  is_animal?: boolean;
+  monsters: MonsterGroupEntry[];
+  [k: string]: unknown;
+}
+
+/**
+ * Component or tool alternative. For tools, count > 0 is charges consumed and -1 means
+ * "must be present". Recipes/constructions arrive with LIST references already inlined.
+ */
 export interface RecipeComponent {
   id: string;
   count: number;
-  /** true when id refers to a requirement list (CDDA "LIST") */
+  /** true when id refers to a requirement list (CDDA "LIST"); never set after expansion */
   list?: boolean;
+  /** component is not returned on disassembly */
+  no_recover?: boolean;
 }
 
-export interface RecipeDef {
+export interface QualityRequirement {
+  id: string;
+  level: number;
+  /** number of tools needed with this quality (default 1) */
+  amount?: number;
+}
+
+/** Outer array: all required (AND). Inner array: alternatives (OR). */
+export interface RequirementData {
+  components: RecipeComponent[][];
+  tools: RecipeComponent[][];
+  qualities: QualityRequirement[][];
+}
+
+export interface RecipeStep {
+  name: string;
+  time: number; // seconds
+  activity_level?: string;
+  tools: RecipeComponent[][];
+  qualities: QualityRequirement[][];
+  proficiencies?: unknown[];
+  [k: string]: unknown;
+}
+
+/**
+ * Normalized recipe (also the shape of misc.uncraft and misc.practice entries). `using`
+ * references and LIST entries are expanded into components/tools/qualities.
+ */
+export interface RecipeDef extends RequirementData {
+  /** CDDA recipe id: result [+ "_" + variant] [+ "_" + id_suffix] */
+  id: string;
+  type?: string;
   result: string;
   id_suffix?: string;
+  variant?: string;
   category: string;
   subcategory?: string;
   skill_used?: string;
   difficulty: number;
   skills_required?: [string, number][];
+  /** seconds; for step recipes, the sum of the step times */
   time: number;
+  activity_level?: string;
   book_learn?: unknown;
   autolearn?: boolean | [string, number][];
-  qualities: { id: string; level: number; amount?: number }[][];
-  tools: RecipeComponent[][];
-  components: RecipeComponent[][];
+  /** step recipes: per-step time/tools/qualities; top-level tools/qualities hold the union */
+  steps?: RecipeStep[];
   byproducts?: [string, number][];
+  byproduct_group?: ItemGroupRef;
   result_mult?: number;
   charges?: number;
   batch_time_factors?: [number, number];
   flags?: string[];
   proficiencies?: unknown[];
-  reversible?: boolean;
+  reversible?: boolean | { time: number };
+  never_learn?: boolean;
+  [k: string]: unknown;
 }
 
 export interface GameData {
@@ -248,6 +378,15 @@ export interface GameData {
   monsters: Record<string, MonsterDef>;
   monsterGroups: Record<string, MonsterGroupDef>;
   recipes: RecipeDef[];
-  /** Everything else keyed by CDDA type then id (materials, professions, effects, ...). */
+  /**
+   * Everything else keyed by misc type then id (materials, professions, effects, ...).
+   * Keys are CDDA types, lower-cased where CDDA shouts (ITEM_CATEGORY -> item_category,
+   * MONSTER_FACTION -> monster_faction, SPECIES -> species, SPELL -> spell,
+   * MIGRATION -> item_migration). Special shapes:
+   *   snippet: category -> string[];  speech: monster id -> {sound, volume}[];
+   *   dream: mutation category -> {messages, strength}[];  requirement: RequirementData;
+   *   uncraft / practice: RecipeDef;  construction: requirements expanded like recipes;
+   *   profession.items.{both,male,female}: ItemGroupDef (collection).
+   */
   misc: Record<string, Record<string, any>>;
 }

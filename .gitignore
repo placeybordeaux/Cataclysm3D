@@ -1,6 +1,7 @@
-node_modules/
 dist/
 vendor/
 shots/
 *.log
+node_modules
+.claude/
 .scratch/

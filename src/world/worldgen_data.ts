@@ -119,8 +119,6 @@ export interface OvermapData {
   /** Wilderness specials this build scatters (subset chosen by the extractor). */
   wildSpecials: string[];
   names: { city: string[]; given: string[]; family: string[] };
-  /** terrain id -> terrain it puts on the z-level above (CDDA ter_t::roof) */
-  terrainRoof: Record<string, string>;
 }
 
 export interface WorldgenData {

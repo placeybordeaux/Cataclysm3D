@@ -9,12 +9,15 @@
 // closed over nested chunks, palettes and predecessor terrains. That keeps mapgen.json
 // a few MB instead of ~8 MB of labs/dimensions/basecamps we never generate.
 
-import { readFileSync, readdirSync, statSync, writeFileSync, mkdirSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { homedir } from 'node:os';
 import type {
   ForestBiome, MapgenData, OterDef, OvermapData, RegionSettings, SpecialDef, SpecialOvermap,
 } from '../../src/world/worldgen_data';
+import type { ItemGroupRef } from '../../src/data/types';
+import { defaultCddaDir, loadCddaObjects, objectIds, resolveFamily } from './cdda';
+import { prepareObject } from './prepare';
+import { migrateGroup, normalizeGroupRef, type ItemMigration } from './itemgroup';
 
 const argv = process.argv.slice(2);
 if (argv.includes('--help') || argv.includes('-h')) {
@@ -28,10 +31,9 @@ const arg = (name: string, def: string) => {
   const i = argv.indexOf(name);
   return i >= 0 ? argv[i + 1] : def;
 };
-const CDDA = resolve(arg('--cdda', join(homedir(), 'code/Cataclysm-DDA')));
+const CDDA = resolve(arg('--cdda', defaultCddaDir()));
 const OUT = resolve(arg('--out', 'public/data'));
 const DRY = argv.includes('--dry-run');
-const DATA = join(CDDA, 'data/json');
 
 /** Wilderness overmap specials we scatter outside towns (must exist, non-mutable). */
 export const WILD_SPECIALS = [
@@ -51,36 +53,16 @@ const LINEAR_SUFFIXES = ['_straight', '_curved', '_end', '_tee', '_four_way'];
 const DIRS = ['_north', '_east', '_south', '_west'];
 
 // ---------------------------------------------------------------------------------------
-// Load
+// Load (shared loader from tools/extract/cdda.ts; the main extractor skips these types)
 
-function walk(dir: string, out: string[] = []): string[] {
-  for (const e of readdirSync(dir)) {
-    const p = join(dir, e);
-    if (statSync(p).isDirectory()) walk(p, out);
-    else if (e.endsWith('.json')) out.push(p);
-  }
-  return out;
-}
-
-const byType = new Map<string, any[]>();
-let files = 0;
-for (const f of walk(DATA)) {
-  let d: any;
-  try {
-    d = JSON.parse(readFileSync(f, 'utf8'));
-  } catch (e) {
-    throw new Error(`Failed to parse ${f}: ${e}`);
-  }
-  files++;
-  for (const o of Array.isArray(d) ? d : [d]) {
-    if (!o || typeof o !== 'object' || typeof o.type !== 'string') continue;
-    let l = byType.get(o.type);
-    if (!l) byType.set(o.type, (l = []));
-    l.push(o);
-  }
-}
+const WANTED_TYPES = [
+  'mapgen', 'palette', 'overmap_terrain', 'overmap_special', 'city_building', 'overmap_location', 'region_settings',
+  'region_settings_city', 'region_settings_forest', 'region_settings_lake', 'region_settings_forest_mapgen',
+  'forest_biome_mapgen', 'forest_biome_component', 'region_settings_terrain_furniture', 'region_terrain_furniture', 'MIGRATION',
+];
+const byType = loadCddaObjects(CDDA, { types: WANTED_TYPES });
 const all = (t: string) => byType.get(t) ?? [];
-console.log(`read ${files} files from ${DATA}`);
+console.log(`loaded ${WANTED_TYPES.map((t) => all(t).length).reduce((a, b) => a + b, 0)} worldgen objects from ${CDDA}`);
 
 /** Strip "//" comment keys recursively (they're 10-15% of mapgen bytes). */
 function strip(o: any): any {
@@ -98,32 +80,11 @@ const ids = (v: any): string[] => (v === undefined ? [] : Array.isArray(v) ? v :
 // ---------------------------------------------------------------------------------------
 // Overmap terrains (copy-from / extend / delete resolution)
 
-const oterRaw = new Map<string, any>();
-for (const o of all('overmap_terrain')) {
-  if (o.abstract) oterRaw.set(o.abstract, o);
-  for (const id of ids(o.id)) oterRaw.set(id, { ...o, id });
-}
-const oterResolved = new Map<string, any>();
-function resolveOter(id: string, depth = 0): any {
-  const done = oterResolved.get(id);
-  if (done) return done;
-  const raw = oterRaw.get(id);
-  if (!raw) throw new Error(`overmap_terrain copy-from target missing: ${id}`);
-  if (depth > 20) throw new Error(`copy-from loop at ${id}`);
-  const base = raw['copy-from'] ? resolveOter(raw['copy-from'], depth + 1) : {};
-  const r: any = { ...base, ...raw };
-  let flags: string[] = raw.flags ? [...raw.flags] : [...(base.flags ?? [])];
-  if (raw.extend?.flags) flags.push(...raw.extend.flags);
-  if (raw.delete?.flags) flags = flags.filter((f) => !raw.delete.flags.includes(f));
-  r.flags = [...new Set(flags)];
-  oterResolved.set(id, r);
-  return r;
-}
+const oterFamily = resolveFamily(all('overmap_terrain'), {}, prepareObject).byId;
 const terrains: Record<string, OterDef> = {};
-for (const o of all('overmap_terrain')) {
-  for (const id of ids(o.id)) {
-    const r = resolveOter(id);
-    const def: OterDef = { id, name: str(r.name) || id, sym: str(r.sym ?? '?'), color: str(r.color ?? 'white'), flags: r.flags };
+for (const [id, r] of oterFamily) {
+  {
+    const def: OterDef = { id, name: str(r.name) || id, sym: str(r.sym ?? '?'), color: str(r.color ?? 'white'), flags: [...new Set<string>(r.flags ?? [])] };
     if (r.uniform_terrain) def.uniform = r.uniform_terrain;
     const b = Array.isArray(r.mapgen) ? r.mapgen.find((m: any) => m.builtin) : undefined;
     if (b) def.builtin = b.builtin;
@@ -183,11 +144,11 @@ const rsCity = byId('region_settings_city', rs.cities);
 const rsForest = byId('region_settings_forest', rs.forests);
 const rsLake = byId('region_settings_lake', rs.lakes);
 const rsComp = byId('region_settings_forest_mapgen', rs.forest_composition);
-const componentRaw = new Map(all('forest_biome_component').map((c) => [c.id, c]));
+const components = resolveFamily(all('forest_biome_component')).byId;
 const resolveComponent = (id: string): any => {
-  const c = componentRaw.get(id);
+  const c = components.get(id);
   if (!c) throw new Error(`forest_biome_component ${id} missing`);
-  return c['copy-from'] ? { ...resolveComponent(c['copy-from']), ...c } : c;
+  return c;
 };
 const forestBiomes: ForestBiome[] = rsComp.biomes.map((bid: string) => {
   const b = byId('forest_biome_mapgen', bid);
@@ -231,26 +192,6 @@ const region: RegionSettings = {
   regionTerrain,
   regionFurniture,
 };
-
-// ---------------------------------------------------------------------------------------
-// Terrain roofs (for auto-roofing z+1 over terrain that declares one)
-
-const terRaw = new Map<string, any>();
-for (const o of all('terrain')) {
-  if (o.abstract) terRaw.set(o.abstract, o);
-  for (const id of ids(o.id)) terRaw.set(id, o);
-}
-const roofOf = (id: string, depth = 0): string | undefined => {
-  const o = terRaw.get(id);
-  if (!o || depth > 20) return undefined;
-  if (o.roof !== undefined) return o.roof || undefined;
-  return o['copy-from'] ? roofOf(o['copy-from'], depth + 1) : undefined;
-};
-const terrainRoof: Record<string, string> = {};
-for (const o of all('terrain')) for (const id of ids(o.id)) {
-  const r = roofOf(id);
-  if (r) terrainRoof[id] = r;
-}
 
 // ---------------------------------------------------------------------------------------
 // Mapgen reachability
@@ -332,10 +273,55 @@ while (queue.length) {
   visit(o);
 }
 
+// Item migrations (Item_factory::finalize applies these to every item group, and mapgen
+// migrates single item ids when it spawns them).
+const itemsPath = join(OUT, 'items.json');
+const knownItems: Record<string, unknown> | null = existsSync(itemsPath) ? JSON.parse(readFileSync(itemsPath, 'utf8')) : null;
+const migrations = new Map<string, ItemMigration>();
+for (const m of all('MIGRATION')) {
+  if (m.from_variant) continue;
+  for (const id of objectIds(m)) {
+    if (typeof m.replace !== 'string') migrations.delete(id);
+    else migrations.set(id, m.variant ? { replace: m.replace, variant: m.variant } : { replace: m.replace });
+  }
+}
+if (knownItems) for (const [id, m] of migrations) if (!knownItems[m.replace]) migrations.delete(id);
+const migrateItem = (id: unknown) => (typeof id === 'string' ? migrations.get(id)?.replace ?? id : id);
+
+/**
+ * Mapgen inline item groups ("items": {"item": {...}}) use CDDA's raw group syntax; convert
+ * them to the normalized ItemGroupDef the runtime expander reads (defaulting to
+ * "collection", as jmapgen_item_group does), and migrate obsolete item ids.
+ */
+function normalizeMapgenItems(obj: any): any {
+  const group = (e: any) => {
+    if (e && typeof e === 'object' && e.item !== undefined && typeof e.item !== 'string') {
+      const ref = normalizeGroupRef(e.item, 'collection') as ItemGroupRef;
+      migrateGroup(ref, migrations);
+      e.item = ref;
+    }
+  };
+  const single = (e: any) => {
+    if (e && typeof e === 'object' && typeof e.item === 'string') e.item = migrateItem(e.item);
+  };
+  const each = (v: any, f: (e: any) => void) => (Array.isArray(v) ? v.forEach(f) : f(v));
+  for (const v of Object.values<any>(obj.items ?? {})) each(v, group);
+  for (const v of Object.values<any>(obj.item ?? {})) each(v, single);
+  for (const m of Object.values<any>(obj.mapping ?? {})) {
+    if (m.items) each(m.items, group);
+    if (m.item) each(m.item, single);
+  }
+  (obj.place_items ?? []).forEach(group);
+  (obj.place_item ?? []).forEach(single);
+  (obj.place_loot ?? []).forEach(single);
+  for (const v of Object.values<any>(obj.sealed_item ?? {})) each(v, (e) => { group(e.items); single(e.item); });
+  return obj;
+}
+
 const weightOf = (w: any): number => (w === undefined ? 1000 : typeof w === 'number' ? w : w.default ?? 1000);
 const mapgenOut: MapgenData = { omt: {}, nested: {}, objects: [] };
 for (const m of keptOm) {
-  const o = mapgenOut.objects.push(strip(m.object)) - 1;
+  const o = mapgenOut.objects.push(normalizeMapgenItems(strip(m.object))) - 1;
   const w = weightOf(m.weight);
   const om = m.om_terrain;
   const add = (id: string, ox?: number, oy?: number) => {
@@ -346,10 +332,10 @@ for (const m of keptOm) {
   else om.forEach((row: string[], ry: number) => row.forEach((id, rx) => add(id, rx * 24, ry * 24)));
 }
 for (const id of keptNested) {
-  mapgenOut.nested[id] = nestedDefs.get(id)!.map((m) => ({ w: weightOf(m.weight), o: mapgenOut.objects.push(strip(m.object)) - 1 }));
+  mapgenOut.nested[id] = nestedDefs.get(id)!.map((m) => ({ w: weightOf(m.weight), o: mapgenOut.objects.push(normalizeMapgenItems(strip(m.object))) - 1 }));
 }
 const palettesOut: Record<string, any> = {};
-for (const id of keptPalettes) palettesOut[id] = strip(paletteRaw.get(id));
+for (const id of keptPalettes) palettesOut[id] = normalizeMapgenItems(strip(paletteRaw.get(id)));
 
 // ---------------------------------------------------------------------------------------
 // Names
@@ -369,7 +355,6 @@ const overmapOut: OvermapData = {
   region,
   wildSpecials: WILD_SPECIALS,
   names: { city: nameList('city'), given: nameList('given'), family: nameList('family') },
-  terrainRoof,
 };
 
 // ---------------------------------------------------------------------------------------

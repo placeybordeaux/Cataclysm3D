@@ -3,7 +3,7 @@ import type { ForestBiome, RegionSettings } from '../worldgen_data';
 import { MapBuffer, OMT } from './buffer';
 import type { MapgenDat } from './jsonmapgen';
 import { weightedPick } from './values';
-import type { ExpandedItem } from '../../data/itemgroups';
+import type { SpawnedItem } from '../../data/itemgroups';
 
 // Procedural generators for terrain CDDA builds in C++ (mapgen_functions.cpp): forests
 // (mapgen_forest, driven by region_settings forest biomes), rivers and lakes (builtin
@@ -47,7 +47,7 @@ function biomeFeature(b: ForestBiome, rng: Rng): string | undefined {
  * the same soft forest/field borders without CDDA's full perimeter spline machinery.
  */
 export function mapgenForest(
-  dat: MapgenDat, buf: MapBuffer, region: RegionSettings, expandItems: (ref: unknown, rng: Rng) => ExpandedItem[],
+  dat: MapgenDat, buf: MapBuffer, region: RegionSettings, expandItems: (ref: unknown, rng: Rng) => SpawnedItem[],
 ): void {
   const rng = dat.rng;
   const self = biomeFor(region, dat.oter.type);

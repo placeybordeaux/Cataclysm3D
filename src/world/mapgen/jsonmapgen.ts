@@ -5,7 +5,7 @@ import { MapBuffer, OMT } from './buffer';
 import type { GenStats } from './stats';
 import { evalValue, intR, IntR, ParamCtx, ParamDef, parseWeighted, rollR, Scope, weightedPick } from './values';
 import { MatchType, OmtRef, otMatch, rotateOffset } from '../overmap/oter';
-import type { ExpandedItem } from '../../data/itemgroups';
+import type { SpawnedItem } from '../../data/itemgroups';
 
 // Interpreter for CDDA's "json" mapgen method (src/mapgen.cpp mapgen_function_json /
 // jmapgen_* pieces). A mapgen object is compiled once into per-symbol piece lists (palettes
@@ -105,7 +105,7 @@ export interface MapgenEnv {
   furnitureKnown(id: string): boolean;
   /** furniture id that bashing `id` leaves behind ('' = nothing), for ransacked vending machines */
   furnitureBashTo(id: string): string | undefined;
-  expandItems(ref: unknown, rng: Rng): ExpandedItem[];
+  expandItems(ref: unknown, rng: Rng): SpawnedItem[];
   /** Run another OMT type's mapgen into `levels` (predecessor_mapgen support). */
   runPredecessor(type: string, dat: MapgenDat, levels: Levels): void;
 }
@@ -467,7 +467,7 @@ export class MapgenRunner {
     return true;
   }
 
-  private addItems(buf: MapBuffer, i: number, list: ExpandedItem[]): void {
+  private addItems(buf: MapBuffer, i: number, list: SpawnedItem[]): void {
     for (const e of list) {
       const it: MapItem = { typeId: e.id };
       if (e.count !== 1) it.count = e.count;

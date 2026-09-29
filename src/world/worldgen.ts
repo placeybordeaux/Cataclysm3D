@@ -38,15 +38,22 @@ export class WorldGenerator implements ChunkGenerator {
   private stackArgs = new Map<string, Map<string, string>>();
   private looseSpecialArgs = new Map<string, Map<string, string>>();
   private terFlagCache = new Map<string, readonly string[] | undefined>();
+  /** CDDA ter_furn_migration: obsolete ids still used by some mapgen -> current ids */
+  private terMigration = new Map<string, { ter: string; furn?: string }>();
+  private furnMigration = new Map<string, string>();
 
   constructor(readonly seed: number, readonly wg: WorldgenData, readonly game: GameData) {
     this.overmap = new Overmap(seed, wg.overmap);
+    for (const m of Object.values<any>(game.misc?.ter_furn_migration ?? {})) {
+      if (m.from_ter && m.to_ter) this.terMigration.set(m.from_ter, { ter: m.to_ter, furn: m.to_furn });
+      if (m.from_furn && m.to_furn) this.furnMigration.set(m.from_furn, m.to_furn);
+    }
     const env: MapgenEnv = {
       seed,
       data: wg,
       stats: this.stats,
       terrainFlags: (id) => this.terrainFlags(id),
-      furnitureKnown: (id) => !!this.map?.furniture.has(id),
+      furnitureKnown: (id) => !!this.map?.furniture.has(id) || this.furnMigration.has(id),
       furnitureBashTo: (id) => {
         const m = this.map;
         const n = m?.furniture.tryIndex(id);
@@ -67,7 +74,7 @@ export class WorldGenerator implements ChunkGenerator {
   private terrainFlags(id: string): readonly string[] | undefined {
     if (this.terFlagCache.has(id)) return this.terFlagCache.get(id);
     const m = this.map;
-    const n = m?.terrain.tryIndex(id);
+    const n = m?.terrain.tryIndex(this.terMigration.get(id)?.ter ?? id);
     const flags = m && n !== undefined ? m.terrain.get(n).flags : undefined;
     this.terFlagCache.set(id, flags);
     return flags;
@@ -206,11 +213,10 @@ export class WorldGenerator implements ChunkGenerator {
   private addRoofs(map: GameMap, c: Chunk, buf: MapBuffer): void {
     const below = map.chunk(c.cx, c.cy, c.z - 1);
     if (!below) return;
-    const roofs = this.wg.overmap.terrainRoof;
     for (let i = 0; i < OMT * OMT; i++) {
       if (buf.ter[i] !== 't_open_air') continue;
       const t = map.terrain.get(below.ter[i]);
-      const r = roofs[t.id];
+      const r = t.roof;
       if (!r) continue;
       if (!hasFlag(t, 'TREE') && !hasFlag(t, 'INDOORS') && !hasFlag(t, 'WALL')) continue;
       if (this.terrainFlags(r) !== undefined) buf.ter[i] = r;
@@ -221,6 +227,13 @@ export class WorldGenerator implements ChunkGenerator {
     const air = map.terrain.index('t_open_air');
     let empty = true;
     for (let i = 0; i < OMT * OMT; i++) {
+      const mt = this.terMigration.get(b.ter[i]);
+      if (mt) {
+        b.ter[i] = mt.ter;
+        if (mt.furn && !b.furn[i]) b.furn[i] = mt.furn;
+      }
+      const mf = this.furnMigration.get(b.furn[i]);
+      if (mf) b.furn[i] = mf;
       let t = map.terrain.tryIndex(b.ter[i] || 't_open_air');
       if (t === undefined) {
         this.stats.unknownId('terrain', b.ter[i], 'chunk write');

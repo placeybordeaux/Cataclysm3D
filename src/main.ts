@@ -8,10 +8,15 @@ import { loadWorldgenData } from './world/worldgen_data';
 import { installWorldgenDebug } from './world/worldgen_debug';
 import { installDebugApi } from './debug';
 
-// URL params (all optional): seed=<int>, gen=world|test (default world), debug=1
+// URL params (all optional): seed=<int>, gen=world|test (default world), debug=1,
+// debug=atlas (sprite sheet view instead of the game, see src/render/atlasDebug.ts)
 
 async function main(): Promise<void> {
   const params = new URLSearchParams(location.search);
+  if (params.get('debug') === 'atlas') {
+    const { runAtlasDebug } = await import('./render/atlasDebug');
+    return runAtlasDebug(document.getElementById('view') as HTMLCanvasElement);
+  }
   const seed = Number(params.get('seed') ?? Math.floor(Math.random() * 2 ** 31));
   const genKind = params.get('gen') ?? 'world';
   if (genKind !== 'world' && genKind !== 'test') throw new Error(`unknown gen=${genKind} (expected world or test)`);
