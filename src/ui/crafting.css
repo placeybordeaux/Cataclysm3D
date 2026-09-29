@@ -12,4 +12,3 @@
 #ui .craft-detail { flex: 1; overflow-y: auto; white-space: pre-wrap; min-width: 0; }
 #ui .craft-body { display: flex; flex-direction: column; height: 100%; }
 #ui .craft-status { color: var(--c-light_gray); white-space: pre; }
-  border: 1px solid var(--c-light_gray); padding: 2px 8px; white-space: pre; text-align: center; }
