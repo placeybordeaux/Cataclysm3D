@@ -13,6 +13,13 @@ export interface DebugApi {
   teleport(x: number, y: number, z?: number): void;
   look(yawDeg: number, pitchDeg?: number): void;
   setHour(h: number): void;
+  /** Renderer helpers: camera mode ('first'|'third'|'top'), flashlight, weather, chunk flush. */
+  setCameraMode(mode: 'first' | 'third' | 'top'): void;
+  flashlight(on: boolean): void;
+  setWeather(kind: 'clear' | 'rain' | 'storm' | 'snow'): void;
+  /** Build all pending chunk meshes and render one frame (use before screenshots). */
+  settle(): void;
+  renderStats(): Record<string, number | string>;
   /** Extra helpers registered by subsystems (spawnMonster, giveItem, ...). */
   [k: string]: any;
 }
@@ -38,6 +45,22 @@ export function installDebugApi(game: Game, renderer: Renderer): DebugApi {
     setHour(h) {
       const c = game.clock;
       c.seconds = Math.floor(c.seconds / 86400) * 86400 + h * 3600;
+    },
+    setCameraMode(mode) {
+      renderer.setCameraMode(mode);
+    },
+    flashlight(on) {
+      renderer.setFlashlight(on);
+    },
+    setWeather(kind) {
+      renderer.setWeather(kind);
+    },
+    settle() {
+      renderer.flushChunks();
+      renderer.render();
+    },
+    renderStats() {
+      return renderer.stats();
     },
   };
   (window as any).cdda = api;

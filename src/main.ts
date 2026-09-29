@@ -5,7 +5,8 @@ import { Renderer } from './render/renderer';
 import { TestGenerator } from './world/testgen';
 import { installDebugApi } from './debug';
 
-// URL params (all optional): seed=<int>, gen=test, debug=1, debug=atlas (sprite sheet view
+// URL params (all optional): seed=<int>, gen=test, debug=1 (render stats overlay),
+// renderer params px/grade/tex/cam/walls (see src/render/renderer.ts), debug=atlas (sprite sheet view
 // instead of the game, see src/render/atlasDebug.ts)
 
 async function main(): Promise<void> {
@@ -21,6 +22,8 @@ async function main(): Promise<void> {
   const game = new Game(data, seed, input);
   game.map.generator = new TestGenerator();
   const renderer = new Renderer(canvas, game);
+  // Wait for the tile atlas so the first frames (and screenshots) use the real art.
+  await renderer.ready;
   const api = installDebugApi(game, renderer);
 
   let last = performance.now();
