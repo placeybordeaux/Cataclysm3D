@@ -24,6 +24,7 @@ import {
   aimLevel, aimThresholds, currentMode, cycleMode, gunModes, gunmodCompatible, installGunmod, isJammed, removeGunmod, sightDispersion,
 } from '../src/game/gunmods';
 import { Monster } from '../src/game/monster';
+import { monGunState } from '../src/game/monguns';
 
 const dir = path.join(__dirname, '../public/data');
 const load = (f: string) => JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8'));
@@ -461,5 +462,44 @@ describe('NPC parity', () => {
     const info = monsterTargetInfo(z);
     expect(info).toMatchObject({ size: 3, bodytype: 'human', isMonster: true });
     expect(info.species).toContain('ZOMBIE');
+  });
+});
+
+describe('monster guns (gun_actor)', () => {
+  const tick = (game: Game, seconds: number) => {
+    for (let i = 0; i < Math.round(seconds * 30); i++) game.tick(1 / 30);
+  };
+
+  it('a turret announces its target lock, then fires from its starting_ammo', () => {
+    const { game, sys, msgs } = world(11);
+    const t = sys.spawnById('mon_turret', 12.5, 6.5, 0)!;
+    tick(game, 6);
+    const lock = msgs.findIndex((m) => m === 'The improvised MP5 turret says "Hostile detected."');
+    const fire = msgs.findIndex((m) => m === 'The improvised MP5 turret fires its H&K MP5A2 submachine gun!');
+    expect(lock).toBeGreaterThanOrEqual(0);
+    expect(fire).toBeGreaterThan(lock);
+    expect(monGunState(t).ammo['9mm']).toBeLessThan(30);
+  });
+
+  it('out of range the turret holds fire; with no ammo left it only clicks', () => {
+    const { game, sys, msgs } = world(12);
+    const t = sys.spawnById('mon_turret', 12.5, 12.5 - 20, 0)!; // MP5 turret: ranges [0, 14]
+    tick(game, 3);
+    expect(msgs.some((m) => /fires its/.test(m))).toBe(false);
+    t.y = 7.5;
+    monGunState(t).ammo['9mm'] = 0;
+    monGunState(t).targetedUntil = Infinity;
+    msgs.length = 0;
+    tick(game, 3);
+    expect(msgs.some((m) => /fires its/.test(m))).toBe(false);
+  });
+
+  it('a feral human throws rocks as a visible projectile', () => {
+    const { game, sys, msgs } = world(13);
+    const f = sys.spawnById('mon_feral_human_pipe', 12.5, 8.5, 0)!;
+    f.anger = 100;
+    tick(game, 8);
+    expect(msgs.some((m) => m === 'The feral human throws a rock!')).toBe(true);
+    expect(monGunState(f).ammo.rock).toBeLessThan(6);
   });
 });

@@ -16,6 +16,7 @@ import {
 } from './game/gunmods';
 import { monsterTargetInfo } from './game/playercombat';
 import { explode } from './game/explosion';
+import { monGunState, monsterGunHooks } from './game/monguns';
 import { addField, ignite } from './game/fields';
 import { readHooks } from './game/reading';
 import { registerSaveable } from './save/registry';
@@ -54,6 +55,17 @@ export function installCombatDepth(game: Game, renderer: Renderer | null, monste
     },
     explode: (x, y, z, power, factor, fire) => void explode(game, monsters.sys, x, y, z, power, factor, fire),
   };
+
+  // Monster guns draw their bullet lines with the survivor's tracers; DROPS_AMMO monsters
+  // (turrets, secubots) leave their unspent ammo behind.
+  monsterGunHooks.tracer = (x0, y0, x1, y1, z) => void combat.tracers.push({ x0, y0, x1, y1, z, t: 0.08 });
+  monsters.sys.onDied.push((m) => {
+    if (!m.has('DROPS_AMMO')) return;
+    for (const [id, n] of Object.entries(monGunState(m).ammo)) {
+      if (n <= 0 || !game.data.items[id]) continue;
+      game.map.addItem(m.tileX, m.tileY, m.z, createItem(game.data, id, { count: n }));
+    }
+  });
 
   // --- learning styles: manuals (read or activate), autolearn (Brawling), trait choices
   const learnFromManual = (who: Character, it: Item): boolean => {

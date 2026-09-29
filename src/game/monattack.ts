@@ -1,5 +1,6 @@
 import type { DamageUnit } from '../data/types';
 import { warnOnce } from '../data/warn';
+import { gunActor } from './monguns';
 import { monsterCanAttackHigh, monsterMeleeAttack, selectBodyPart, type MonsterAttackResult } from './combat';
 import { BODY_PARTS, type BodyPartId } from './bodyparts';
 import { SIZE_RANK, turnsToEffectSeconds, turnsToSeconds, type Monster, type SpecialAttackState } from './monster';
@@ -338,8 +339,8 @@ export function trySpecial(sys: MonsterSystem, m: Monster, sa: SpecialAttackStat
       const ranges = d.ranges as [number, number, string][] | undefined;
       return boomerVomit(sys, m, ranges?.[0]?.[1] ?? 2);
     }
-    warnOnce('monster_attack', id);
-    return false;
+    // Turrets, secubots, armed humans/zombies, rock throwers (src/game/monguns.ts).
+    return gunActor(sys, m, sa, (c) => evalCondition(sys, m, c));
   }
   switch (id) {
     case 'PARROT':
