@@ -220,6 +220,8 @@ export class TradeSession {
         const units: [Item, number | undefined][] = e.item.countByCharges ? [[e.item, e.count]] : e.items.slice(0, e.count).map((x) => [x, undefined]);
         for (const [it, count] of units) {
           if (!isAt(it, e.loc)) return false;
+          // Part of the stack went (eaten, fired) while the screen was open: the offer is stale.
+          if (count !== undefined && count > it.count()) return false;
           let moved = false;
           for (const dest of to()) {
             const r = moveItem(it, e.loc, dest, { count, quiet: true, actor: dest.kind === 'inv' ? dest.who : undefined });

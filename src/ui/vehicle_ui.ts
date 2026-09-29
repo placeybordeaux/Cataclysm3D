@@ -38,6 +38,20 @@ export interface VehicleTarget {
 
 let rendererRef: Renderer | null = null;
 
+/**
+ * The vehicle screens, replaceable: installScreens (src/screens/install.ts) swaps in the ui2
+ * vehicle panel and driving HUD; these curses menus are the default.
+ */
+export const vehicleScreens = {
+  /** `e` on a part that isn't a door (and `e` at the wheel: the whole vehicle). */
+  partMenu: (game: Game, v: Vehicle, mx: number, my: number): void => openPartMenu(game, v, mx, my),
+  info: (game: Game, v: Vehicle): void => showVehicleInfo(game, v),
+  /** `^` while driving. */
+  controls: (game: Game): void => controlsMenu(game),
+  /** The CDDA dashboard line while driving; off when a replacement HUD is installed. */
+  legacyDashboard: true,
+};
+
 /** Vehicle part under the crosshair within reach (~2 m), or the tile ahead in top-down view. */
 export function targetVehicle(game: Game, renderer: Renderer | null = rendererRef): VehicleTarget | null {
   const vs = game.vehicles;
@@ -151,7 +165,7 @@ export function examineVehicle(game: Game, x: number, y: number, z: number): boo
     if (msg) game.message(msg);
     return true;
   }
-  openPartMenu(game, o.v, o.mx, o.my);
+  vehicleScreens.partMenu(game, o.v, o.mx, o.my);
   return true;
 }
 
@@ -275,7 +289,7 @@ function putItemsMenu(game: Game, v: Vehicle, cargo: VehiclePart): void {
   });
 }
 
-function takeControls(game: Game, v: Vehicle): void {
+export function takeControls(game: Game, v: Vehicle): void {
   const vs = game.vehicles!;
   if (vs.reachableControls() !== v) {
     game.message(`You can't reach the controls of the ${v.name} from here.`, 'c_light_gray');
@@ -285,7 +299,7 @@ function takeControls(game: Game, v: Vehicle): void {
   game.message(r.msg, r.ok ? undefined : 'c_light_red');
 }
 
-function hotwire(game: Game, v: Vehicle): void {
+export function hotwire(game: Game, v: Vehicle): void {
   const vs = game.vehicles!;
   const mech = game.player.getSkill('mechanics');
   const t = vs.hotwireTime(mech);
@@ -327,7 +341,7 @@ function dashboard(game: Game): HTMLElement {
   let shown = 0;
   const update = (dt = 1 / 60) => {
     // Not over the death screen (dying at the wheel left the dashboard on the tombstone).
-    const v = game.player.dead ? null : game.vehicles?.driving;
+    const v = game.player.dead || !vehicleScreens.legacyDashboard ? null : game.vehicles?.driving;
     if (v) shown += (v.velocity * MPH_PER_MS - shown) * Math.min(1, dt * 10);
     else shown = 0;
     const html = v ? dashHtml(game, v, shown) : '';
@@ -409,7 +423,7 @@ export async function installVehicles(game: Game, renderer: Renderer, api?: Debu
     fn(v);
   };
   game.keys.register('control_vehicle', 'Control vehicle', () => {
-    if (vs.driving) return controlsMenu(game);
+    if (vs.driving) return vehicleScreens.controls(game);
     const v = vs.reachableControls();
     if (!v) {
       game.message('No vehicle controls in reach.', 'c_light_gray');
@@ -435,7 +449,7 @@ export async function installVehicles(game: Game, renderer: Renderer, api?: Debu
     interact: (g) => {
       // At the wheel, 'e' examines the vehicle you're driving (CDDA EXAMINE_VEHICLE).
       if (vs.driving) {
-        showVehicleInfo(g, vs.driving);
+        vehicleScreens.info(g, vs.driving);
         return true;
       }
       const t = targetVehicle(g, renderer);

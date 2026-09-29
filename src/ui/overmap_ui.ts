@@ -6,6 +6,7 @@ import { button, h, openContextMenu, textPrompt, attachTooltip, type MenuItem, t
 import { atlasOf, omtLabel, playerOmt, type UiContext } from './context';
 import { openScreen } from './screen2';
 import { mapMarks, noteAt, removeNote, setNote, type MapNote } from './mapmarks';
+import { mapMarkers } from '../game/mapmarkers';
 
 // 'm' map (CDDA overmap_ui.cpp, rebuilt for the mouse): the world at one UltiCa overmap sprite
 // per overmap tile (OMT) when zoomed in, one pixel of the sprite's average colour when zoomed
@@ -336,6 +337,18 @@ export function openOvermap(ctx: UiContext): Panel | null {
       const isDest = marks.destination && marks.destination.x === n.x && marks.destination.y === n.y && marks.destination.z === n.z;
       if (ZOOMS[zi] >= 12 && !isDest) label(n.x, n.y, n.text, 'note');
     }
+    // Markers other systems contribute (mission targets…): a magenta ring, the tracked one bold.
+    for (const mk of mapMarkers()) {
+      if (mk.z !== cz) continue;
+      const fx = mk.x !== undefined ? mk.x / CHUNK : mk.omx + 0.5, fy = mk.y !== undefined ? mk.y / CHUNK : mk.omy + 0.5;
+      const { sx, sy } = toScreen(fx, fy);
+      g.strokeStyle = '#c080e0';
+      g.lineWidth = Math.max(1, (mk.tracked ? 3 : 1.5) * dpr);
+      g.beginPath();
+      g.arc(sx * dpr, sy * dpr, Math.max(5 * dpr, cell * 0.35), 0, Math.PI * 2);
+      g.stroke();
+      label(fx - 0.5, fy - 1.3, `${mk.tracked ? '★ ' : ''}${mk.label}`, 'mission');
+    }
     const d = marks.destination;
     if (d && d.z === cz) {
       const { sx, sy } = toScreen(d.x + 0.5, d.y + 0.5);
@@ -406,6 +419,7 @@ export function openOvermap(ctx: UiContext): Panel | null {
     sw('<span style="color:#fff">▲</span>', 'You (facing)');
     sw('<span style="color:#e0b050">◯</span>', 'Destination');
     sw('<span style="color:#e0b050">◆</span>', 'Your note');
+    sw('<span style="color:#c080e0">◯</span>', 'Mission target (★ tracked)');
     entry('house_01', 'House');
     entry('road', 'Road', { connections: 5 });
     entry('forest', 'Forest');

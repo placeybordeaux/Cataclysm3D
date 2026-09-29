@@ -61,6 +61,7 @@
 #ui2 .om-label.ref { color: var(--p-info); }
 #ui2 .om-label.note { color: var(--p-warn); transform: translate(calc(var(--u) * 6), -50%); }
 #ui2 .om-label.dest { color: var(--p-accent); }
+#ui2 .om-label.mission { color: var(--p-magic); }
 #ui2 .om-side { width: calc(var(--fs) * 14); flex: none; display: flex; flex-direction: column; gap: calc(var(--u) * 3); overflow: auto; font-size: var(--fs-s); }
 #ui2 .om-hover { min-height: calc(var(--lh) * 3); }
 #ui2 .om-legend { display: grid; grid-template-columns: auto 1fr; gap: var(--u) calc(var(--u) * 3); align-items: center; }

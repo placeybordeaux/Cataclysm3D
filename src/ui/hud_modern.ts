@@ -33,6 +33,7 @@ import {
 } from './hud_logic';
 import { BODY_H, BODY_W, PART_BOX, paintBody, pixelIcon, type BodyKey } from './pixelart';
 import { mapMarks } from './mapmarks';
+import { mapMarkers } from '../game/mapmarkers';
 import { refugeeCenterOmt, seenKey } from './overmap_ui';
 import { CHUNK } from '../world/coords';
 import './hud_modern.css';
@@ -297,8 +298,8 @@ export class ModernHud {
     this.dangerNames = list.slice(0, 6).map((m) => `${m.displayName()} (${Math.round(Math.hypot(m.x - p.x, m.y - p.y))} m)`);
     // Destination and the refugee centre: diamonds with the distance under them.
     const marks = mapMarks(g);
-    const poi = (ox: number, oy: number, cls: string, label: string) => {
-      const tx = ox * CHUNK + CHUNK / 2, ty = oy * CHUNK + CHUNK / 2;
+    const poi = (ox: number, oy: number, cls: string, label: string, exact?: { x?: number; y?: number }) => {
+      const tx = exact?.x ?? ox * CHUNK + CHUNK / 2, ty = exact?.y ?? oy * CHUNK + CHUNK / 2;
       const d = Math.hypot(tx - p.x, ty - p.y);
       if (d < CHUNK / 2) return;
       const s = stripPos(relativeAngle(bearing(p.x, p.y, tx, ty), p.yaw), FOV);
@@ -308,6 +309,16 @@ export class ModernHud {
       put(`hud2-poi ${cls}${s.clamped ? ' edge' : ''}${ahead ? ' ahead' : ''}`, s.x, ahead ? `◆ ${label} · ${d >= 1000 ? `${(d / 1000).toFixed(1)} km` : `${Math.round(d / 10) * 10} m`}` : '◆');
     };
     if (marks.destination && marks.destination.z === p.z) poi(marks.destination.x, marks.destination.y, 'dest', marks.destination.label);
+    // Mission targets (src/game/mapmarkers.ts): the tracked one with its name, others as marks.
+    for (const mk of mapMarkers()) {
+      if (mk.kind !== 'mission' || mk.z !== p.z) continue;
+      if (mk.tracked) poi(mk.omx, mk.omy, 'mission tracked', mk.label, mk);
+      else {
+        const tx = mk.x ?? mk.omx * CHUNK + CHUNK / 2, ty = mk.y ?? mk.omy * CHUNK + CHUNK / 2;
+        const s = stripPos(relativeAngle(bearing(p.x, p.y, tx, ty), p.yaw), FOV);
+        if (!s.clamped) put('hud2-poi mission', s.x, '◇');
+      }
+    }
     if (this.refugee === undefined && this.ctx.worldgen) this.refugee = refugeeCenterOmt(this.ctx.worldgen, playerOmt(this.ctx));
     if (this.refugee && p.z === 0 && g.overmapSeen.has(seenKey(this.refugee.x, this.refugee.y, 0)) && !(marks.destination && marks.destination.x === this.refugee.x && marks.destination.y === this.refugee.y))
       poi(this.refugee.x, this.refugee.y, 'ref', 'Refugee Center');
@@ -457,6 +468,9 @@ export class ModernHud {
 
   private renderWeapon(): void {
     const g = this.ctx.game;
+    // While driving, the driving HUD (src/screens/vehicle.ts) takes the bottom-right corner.
+    const driving = !!(g as unknown as { vehicles?: { driving?: unknown } }).vehicles?.driving;
+    this.el.classList.toggle('driving', driving);
     const p = g.player;
     const w = p.inv.wielded;
     const extras = this.extraLines();

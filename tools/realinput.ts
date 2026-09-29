@@ -18,6 +18,7 @@ import puppeteer, { type Page } from 'puppeteer-core';
 import { mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { startXvfb, XInput } from './lib/realinput';
+import { screenScenarios } from './realinput_screens';
 
 const argv = process.argv.slice(2);
 const opt = (n: string, d: string) => (argv.includes(n) ? argv[argv.indexOf(n) + 1] : d);
@@ -292,6 +293,14 @@ const scenarios: Scenario[] = [
       await x.key(k);
       let s = await until((t) => opened(t) > 0, 1200);
       const msgs = (await log()).slice(before);
+      const menu = await js<number>(`document.querySelectorAll('#ui2 .ui2-menu').length`);
+      if (!opened(s) && menu) {
+        // A ui2 context menu (C: talk / orders): Esc closes it.
+        check(`${k} opens a context menu`, true);
+        await x.key('Escape');
+        await toGameplay();
+        continue;
+      }
       if (!opened(s)) {
         // Not every key opens a window (nothing to butcher here); it must at least say something.
         check(`${k}: no window, but a message says why`, msgs.length > 0, msgs.length ? msgs.join(' / ') : 'no window and no message');
@@ -302,7 +311,8 @@ const scenarios: Scenario[] = [
       check(`${k} opens ${title || top}`, !title || top === title, [s.windows, s.panelIds, s.look]);
       if (ui2) check(`${k}: the cursor is free for pointing`, !s.lock, s);
       await shot(`menu_${top || k}`);
-      if (!s.look) {
+      // Footer legend + fit: legacy windows and the status screens (other ui2 screens keep their own footers).
+      if (!s.look && (!ui2 || title)) {
         const sel = ui2 ? '#ui2 .ui2-win' : '.cdda-window';
         const legend = await js<string>(`[...document.querySelectorAll('${ui2 ? '#ui2 .ui2-win .ui2-footer' : '.cdda-window .footer'}')].pop()?.textContent ?? ''`);
         check(`${k}: footer names the close keys`, /Esc/.test(legend), legend);
@@ -825,6 +835,9 @@ const scenarios: Scenario[] = [
     check('Enter returns to the title without a "Leave site?" prompt', !dialogs.includes('beforeunload'), dialogs);
   }],
 ];
+
+// Interaction screens (dialogue, trade, missions, vehicles, body, Autodoc, scores): before 'death'.
+scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...screenScenarios({ page: () => page, x: () => x, js, check, shot, toGameplay, sleep }));
 
 if (argv.includes('--list') || argv.includes('--dry-run')) {
   for (const [n, what] of scenarios) console.log(`${only && !only.has(n) ? '  (skip)' : '  run   '} ${n.padEnd(11)} ${what}`);

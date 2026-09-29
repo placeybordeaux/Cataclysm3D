@@ -187,6 +187,26 @@ export async function installCbmFlow(game: Game, mods: BodyMods, it: Item, opts:
     : opts.autodoc ? `WARNING: There is a ${100 - chance} percent chance of complications, such as damage or faulty installation!  Continue anyway?`
       : `WARNING: There is a ${100 - chance} percent chance of complications, such as damage or faulty installation!  The following skills affect self-installation: First Aid, Electronics, and Mechanics.\n\nContinue anyway?`;
   if (!(await confirm(`${opts.autodoc ? 'Autodoc Mk. XI.  ' : ''}Install <color_white>${bio.name(bid)}</color>?\n${q}`, { destructive: true }))) return false;
+  return beginInstall(game, mods, it, opts);
+}
+
+/**
+ * The operation itself, once the player has agreed (the ui2 Autodoc screen asks its own way):
+ * anesthesia, the CBM and install program used up, the Autodoc's narration, then the
+ * operation as an uninterruptible activity with the roll at the end. False if it can't start.
+ */
+export function beginInstall(game: Game, mods: BodyMods, it: Item, opts: InstallFlowOpts): boolean {
+  const { bio } = mods;
+  const p = game.player;
+  const blocker = bio.installBlocker(it);
+  if (blocker) {
+    game.message(blocker, 'c_light_red');
+    return false;
+  }
+  const bid = bio.idx.bionicOf(it.typeId);
+  const program = it.def.installation_data as string | undefined;
+  const programItem = program ? p.inv.allItems().find((x) => x.typeId === program) : undefined;
+  const skillLevel = programItem ? 10 : -1;
   const need = bio.anesthesiaNeeded(it.typeId);
   const anesthesia = opts.autodoc && bio.needsAnesthesia();
   if (anesthesia && bio.anesthesiaAvailable() < need) {
@@ -267,8 +287,15 @@ async function uninstallFlow(game: Game, mods: BodyMods, id: string, dropItem: (
   const { bio } = mods;
   const chance = bio.successChance(id, true);
   if (!(await confirm(`Uninstall <color_white>${bio.name(id)}</color>?  ${chance}% chance of success.`, { destructive: true }))) return;
+  beginUninstall(game, mods, id, dropItem);
+}
+
+/** The removal once agreed: an uninterruptible activity, the roll at the end. */
+export function beginUninstall(game: Game, mods: BodyMods, id: string, dropItem: (it: Item) => void): boolean {
+  const { bio } = mods;
+  const chance = bio.successChance(id, true);
   const difficulty = bio.idx.difficulty(id);
-  game.activities.start({
+  return game.activities.start({
     name: `removing ${bio.name(id)}`,
     duration: Math.max(1, difficulty) * 20 * 60,
     interruptible: false,
