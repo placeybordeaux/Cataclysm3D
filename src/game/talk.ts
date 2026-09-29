@@ -546,10 +546,10 @@ export class Dialogue implements MathHost {
 
   // ---------------------------------------------------------------- tags
 
-  /** parse_tags: snippets (recursively), then the game-state tags. */
+  /** parse_tags: snippets (recursively), then the game-state tags. '…' is allowed: "<punc.…>". */
   parseTags(text: string, depth = 0): string {
     if (!text || depth > 6) return text;
-    return text.replace(/<([a-zA-Z_!?][a-zA-Z0-9_!?:'. -]*)>/g, (m, tag: string) => {
+    return text.replace(/<([a-zA-Z_!?][a-zA-Z0-9_!?:'. \u2026-]*)>/g, (m, tag: string) => {
       if (tag.startsWith('color_')) return m;
       const special = this.specialTag(tag);
       if (special !== undefined) return special;

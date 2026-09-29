@@ -163,6 +163,19 @@ describe('dialogue math', () => {
 });
 
 describe('dialogue on real talk topics', () => {
+  it('expands punctuation snippets with an ellipsis and the default goodbye', () => {
+    const { npcs } = world(3);
+    const n = npcs.spawn({ template: 'free_merchants_merchant' }, 14, 12, 0)!;
+    const d = npcs.talkTo(n)!;
+    expect(d.parseTags('I gotta go<punc.…>')).toMatch(/^I gotta go[.…]$/);
+    expect(d.parseTags('Go<punc…!>')).toMatch(/^Go[…!]$/);
+    // TALK_DONE says a CDDA <end_talking_bye> line, never a raw "<bye>" tag.
+    const bye = (d as unknown as { byeMessage(): string }).byeMessage();
+    expect(bye).not.toMatch(/[<>]/);
+    expect(bye.length).toBeGreaterThan(0);
+  });
+
+
   it('Smokes: first meeting sets u_val, then the talk menu opens', () => {
     const { npcs } = world(3);
     const n = npcs.spawn({ template: 'free_merchants_merchant' }, 14, 12, 0)!;
