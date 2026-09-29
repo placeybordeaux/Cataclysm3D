@@ -313,6 +313,7 @@ export class WorldGenerator implements ChunkGenerator {
     }));
     c.vehicles = b.vehicles.map((v) => ({ ...v, x: X + v.x, y: Y + v.y, z: c.z }));
     c.zones = b.zones.map((z) => ({ type: z.type, faction: z.faction, x0: X + z.x0, y0: Y + z.y0, x1: X + z.x1, y1: Y + z.y1, z: c.z }));
+    c.npcSpawns = b.npcs.map((n) => ({ ...n, x: X + n.x, y: Y + n.y, z: c.z }));
     c.empty = empty && c.items.size === 0;
     c.version++;
   }
@@ -335,6 +336,7 @@ export class WorldGenerator implements ChunkGenerator {
     b.spawns = c.spawns.map((s) => ({ ...s, x: s.x - X, y: s.y - Y, x2: s.area ? s.area[2] - X : undefined, y2: s.area ? s.area[3] - Y : undefined }));
     b.vehicles = c.vehicles.map((v) => ({ ...v, x: v.x - X, y: v.y - Y }));
     b.zones = c.zones.map((z) => ({ ...z, x0: z.x0 - X, y0: z.y0 - Y, x1: z.x1 - X, y1: z.y1 - Y }));
+    b.npcs = c.npcSpawns.map((n) => ({ template: n.template, x: n.x - X, y: n.y - Y, uniqueId: n.uniqueId, target: n.target, addTrait: n.addTrait }));
     return b;
   }
 
@@ -399,4 +401,5 @@ function applyOverlay(dst: MapBuffer, ov: MapBuffer): void {
   dst.spawns.push(...ov.spawns);
   dst.vehicles.push(...ov.vehicles);
   dst.zones.push(...ov.zones);
+  dst.npcs.push(...ov.npcs);
 }

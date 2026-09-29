@@ -32,6 +32,17 @@ export interface LocalVehicle {
   fuel?: number;
 }
 
+/** mapgen "npcs"/"place_npcs": an npc template placed at a local tile. */
+export interface LocalNpc {
+  /** npc template id (CDDA calls the field "class"). */
+  template: string;
+  x: number;
+  y: number;
+  uniqueId?: string;
+  target?: boolean;
+  addTrait?: string[];
+}
+
 export interface LocalZone {
   type: string;
   faction?: string;
@@ -55,6 +66,7 @@ export class MapBuffer {
   spawns: LocalSpawn[] = [];
   vehicles: LocalVehicle[] = [];
   zones: LocalZone[] = [];
+  npcs: LocalNpc[] = [];
 
   constructor(fillTer = '', fillFurn = '') {
     this.ter = new Array(OMT * OMT).fill(fillTer);
@@ -134,6 +146,7 @@ export class MapBuffer {
       // An unrotated vehicle (rotation omitted = 0) still turns with its rotated mapgen.
       v.rotation = ((v.rotation ?? 0) + 90 * turns) % 360;
     }
+    for (const n of this.npcs) [n.x, n.y] = rp(n.x, n.y);
     for (const z of this.zones) {
       const [ax, ay] = rp(z.x0, z.y0), [bx, by] = rp(z.x1, z.y1);
       z.x0 = Math.min(ax, bx); z.x1 = Math.max(ax, bx);

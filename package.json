@@ -13,6 +13,7 @@
     "worldgen": "tsx tools/worldgen.ts",
     "extract:ui": "tsx tools/extract/ui.ts",
     "extract:vehicles": "tsx tools/extract/vehicles.ts",
+    "extract:npcs": "tsx tools/extract/npcs.ts",
     "atlas": "tsx tools/atlas/index.ts",
     "shot": "tsx tools/shot.ts",
     "audio": "tsx tools/audio/index.ts"

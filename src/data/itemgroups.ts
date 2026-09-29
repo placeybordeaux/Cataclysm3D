@@ -153,7 +153,8 @@ class Expander {
     for (const g of e['contents-group'] ?? []) contents.push(...this.group(g, stackIds));
     if (contents.length) it.contents = [...(it.contents ?? []), ...stack(contents)];
     const container = e['container-item'] ?? (e['container-group'] ? this.group(e['container-group'], stackIds)[0]?.id : undefined);
-    if (container) return { id: container, count: 1, contents: [it] };
+    // "container-item": "null" is CDDA's explicit "no container" (loose items).
+    if (container && container !== 'null') return { id: container, count: 1, contents: [it] };
     return it;
   }
 }

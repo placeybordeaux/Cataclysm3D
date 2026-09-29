@@ -157,6 +157,33 @@ tests/               vitest unit tests (pure logic, no DOM/WebGL)
   {fuel,status})`, `cdda.vehicles()`, `cdda.enterVehicle()`, `cdda.drive(throttle, steer,
   s, brake?)`, `cdda.roadTrip(proto)`, `cdda.gotoVehicle(regex, {angle, dist})`,
   `cdda.vehicleLights(on)`, `cdda.vehicleAt(dx, dy)`.
+### NPCs, dialogue, trade, missions (src/game, wired by src/npcs.ts `installNpcs`)
+- Data: `public/data/npcs.json` (`npm run extract:npcs`, tools/extract/npcs.ts): npc templates,
+  npc_class, talk_topic (merged like CDDA: responses append across definitions), mission_definition,
+  faction, reachable effect_on_condition, name lists. Snippets (`<greet>`…) stay in misc.snippet.
+- `npc.ts` `Npc extends Character` (+ position, attitude, faction, personality, `op` opinion
+  trust/fear/value/anger/owed, dialogue `vars`, chatbin, shop `stock`); `generateNpc(data, nd,
+  {template}|{cls}, seed)` = npc::randomize (4d3 stats + class bonuses, class skills, gear from
+  `<class>_<slot>`/`npc_<slot>` groups, names). `toJSON/fromJSON`.
+- `npcai.ts` `NpcSystem` (`game.npcs`): reality bubble like monsters; goals fight / flee / follow /
+  return (guards, shopkeepers, "wait here") / approach (TALK, MUG) / wander; melee via combat.ts,
+  guns via fireGun with reload. It is also the dialogue world and mission host (survivor vars,
+  faction trust, kills). `spawn(spec, x, y, z, opts)`, `talkTo(n)`, `npcAt`, `toJSON/fromJSON`.
+  Monsters hunt NPCs through the additive `MonsterSystem.extraTargets` hook; the player hits
+  NPCs through `PlayerCombat.attackGuard` / `npcMelee` / `npcShot` (friendly ones ask first).
+- `talk.ts` `Dialogue`: CDDA dynamic lines, responses (switch/default, show_always, truefalse,
+  trials with talk_trial::calc_chance), a large subset of conditions/effects (unsupported ones
+  warn once, false/no-op); `talkmath.ts` evaluates `math` expressions. `missions.ts`
+  `MissionSystem` (FIND_ITEM, KILL_MONSTER_TYPE/SPEC, KILL_MONSTER target, GO_TO(_TYPE),
+  ASSASSINATE, CONDITION). `trade.ts` `TradeSession` (npctrade.cpp prices, balance, credit).
+- Mapgen `npcs`/`place_npcs` fill `chunk.npcSpawns` (consumed + cleared by installNpcs, skipped
+  for chunks generated before a loaded save); the `evac_center` refugee center special is placed
+  near the start town (overmap.ts). Towns get a few random survivors / bandits.
+- UI `src/ui/npc_ui.ts`: dialogue window, trade screen, mission log (`M`), chat menu (`C`);
+  `e` on an NPC talks. Save section `'npcs'` (order 25). Debug: `cdda.spawnNpc(templateOrClass,
+  dx, dy, {attitude, follow})`, `cdda.npcs()`, `cdda.talk()`, `cdda.dialogue()`, `cdda.respond(i)`,
+  `cdda.respondText(s)`, `cdda.trade()`, `cdda.missions()`, `cdda.missionLog()`,
+  `cdda.teleportRefugeeCenter('merchant'|'lobby'|'outside')`, `cdda.faceNpc()`.
 
 ### Extension points (prefer these over editing someone else's code)
 

@@ -57,6 +57,8 @@ export const DEFAULT_BINDINGS: Record<string, string[]> = {
   vehicle_engine: ['k'], // ignition (CDDA controls menu 's')
   vehicle_headlights: ['h'], // CDDA controls menu 'h'
   vehicle_horn: ['n'], // CDDA controls menu 'n'
+  chat: ['C'], // CDDA 'C' chat: talk to nearby NPCs / order followers
+  missions: ['M'], // CDDA 'M' mission log
 };
 
 export class Keys {
@@ -89,6 +91,11 @@ export class Keys {
   /** Whether some system registered a handler for the action. */
   has(id: string): boolean {
     return this.actions.has(id);
+  }
+
+  /** The handler currently registered for an action (to wrap it, e.g. `e` talking to NPCs). */
+  handler(id: string): (() => void) | undefined {
+    return this.actions.get(id)?.handler;
   }
 
   keyFor(id: string): string {

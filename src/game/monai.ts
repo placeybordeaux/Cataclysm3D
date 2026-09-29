@@ -9,6 +9,9 @@ import { Monster, dayOf, turnsToSeconds, upgradeTarget } from './monster';
 import { Grid, clearWalk, hasLOS } from './los';
 import { findPath } from './pathfind';
 import { defaultMelee, trySpecial } from './monattack';
+import { monsterMeleeAttack, type MonsterAttackResult } from './combat';
+import type { Character } from './character';
+import { BODY_PARTS } from './bodyparts';
 import { createItem, fromSpawned, type Item } from './item';
 import type { BodyPartId } from './bodyparts';
 import { sfx } from '../audio/sfx';
@@ -58,6 +61,23 @@ export interface Projectile {
   onArrive: () => void;
 }
 
+/**
+ * A creature other than the survivor that hostile monsters hunt (NPCs). Supplied by the NPC
+ * system through MonsterSystem.extraTargets so monai.ts needs no NPC imports.
+ */
+export interface MonsterTarget {
+  x: number;
+  y: number;
+  z: number;
+  readonly dead: boolean;
+  /** Character body that takes the hit (monsterMeleeAttack). */
+  character: Character;
+  /** "Rita Mendez" for messages. */
+  name: string;
+  /** Called after a monster attack resolved (damage after armor, 0 on a miss). */
+  onHit(m: Monster, damage: number): void;
+}
+
 export interface CorpseRecord {
   item: Item;
   x: number;
@@ -100,6 +120,10 @@ export class MonsterSystem implements GameSystem {
   readonly rng: Rng;
   grabbedBy: Monster | null = null;
   activeRadius = ACTIVE_RADIUS;
+  /** Other creatures hostile monsters attack (NPCs); set by the NPC system. */
+  extraTargets: () => MonsterTarget[] = () => [];
+  /** Current non-player target per monster (chosen in think()). */
+  readonly creatureTargets = new Map<Monster, MonsterTarget>();
   /** Extra light (0..100) the player carries, e.g. a lit flashlight; set by the renderer wiring. */
   playerLight: () => number = () => 0;
   /** Renderer/UI listeners. */
@@ -326,6 +350,56 @@ export class MonsterSystem implements GameSystem {
     if (g) g.effects.delete('grabbing');
     this.grabbedBy = null;
     if (this.game.player.hasEffect('grabbed')) this.game.player.effects.remove('grabbed');
+  }
+
+  // ------------------------------------------------------------------ non-player targets (NPCs)
+
+  /** Nearest noticed extra target closer than `playerDist` (monsters go for whoever is nearest). */
+  private pickCreatureTarget(m: Monster, playerDist: number): MonsterTarget | null {
+    const list = this.extraTargets();
+    if (!list.length) return null;
+    const range = m.sightRange(this.lightCache);
+    let best: MonsterTarget | null = null, bd = Math.min(playerDist, Math.max(range, 3.5));
+    for (const t of list) {
+      if (t.dead || t.z !== m.z) continue;
+      const d = Math.hypot(t.x - m.x, t.y - m.y);
+      if (d >= bd) continue;
+      if (!hasLOS(this.grid, m.tileX, m.tileY, Math.floor(t.x), Math.floor(t.y), m.z)) continue;
+      best = t;
+      bd = d;
+    }
+    return best;
+  }
+
+  inMeleeRangeOf(m: Monster, t: MonsterTarget, range = 1): boolean {
+    if (t.dead || t.z !== m.z) return false;
+    if (Math.hypot(t.x - m.x, t.y - m.y) > this.reach(m, range)) return false;
+    return hasLOS(this.grid, m.tileX, m.tileY, Math.floor(t.x), Math.floor(t.y), m.z) && this.noWallBetween(m.x, m.y, t.x, t.y, m.z);
+  }
+
+  /** Plain monster melee against an NPC; narrated only when the survivor can see it. */
+  private meleeCreature(m: Monster, t: MonsterTarget): void {
+    const hasDamage = m.type.melee_dice > 0 || (m.type.melee_damage ?? []).some((u) => u.amount > 0);
+    if (!hasDamage) return;
+    const c = t.character;
+    const sink = c.onMessage;
+    c.onMessage = null;
+    let res: MonsterAttackResult;
+    try {
+      res = monsterMeleeAttack(m.type, c, this.rng, { name: m.TheName() });
+    } finally {
+      c.onMessage = sink;
+    }
+    if (res.hit) {
+      sfx.monsterHit(m);
+      const dmg = res.result?.damage ?? 0;
+      const part = BODY_PART_NAMES[res.bp ?? 'torso'] ?? 'body';
+      this.messageIfSeen(m, `${m.TheName()} hits ${t.name}'s ${part}.`, dmg > 0 ? undefined : 'c_light_gray');
+      t.onHit(m, dmg);
+    } else {
+      this.messageIfSeen(m, `${m.TheName()} misses ${t.name}.`, 'c_light_gray');
+      t.onHit(m, 0);
+    }
   }
 
   // ------------------------------------------------------------------ hearing
@@ -613,6 +687,7 @@ export class MonsterSystem implements GameSystem {
     this.active = this.active.filter((m) => !m.dead);
     for (const m of dead) {
       this.brains.delete(m);
+      this.creatureTargets.delete(m);
       for (const f of this.onRemoved) f(m);
     }
   }
@@ -675,7 +750,15 @@ export class MonsterSystem implements GameSystem {
 
     const att = m.attitude();
     brain.speedMul = 1;
-    if (att === 'attack' && (m.seesPlayer || (m.lastSeenAge < MEMORY && sameZ))) {
+    // NPCs nearer than the survivor (or when the survivor is out of sight) draw hostile monsters.
+    const other = att === 'attack' && !m.friendly ? this.pickCreatureTarget(m, m.seesPlayer ? dist : Infinity) : null;
+    if (other) this.creatureTargets.set(m, other);
+    else this.creatureTargets.delete(m);
+    if (other) {
+      brain.goal = 'chase';
+      brain.gx = other.x;
+      brain.gy = other.y;
+    } else if (att === 'attack' && (m.seesPlayer || (m.lastSeenAge < MEMORY && sameZ))) {
       brain.goal = 'chase';
       [brain.gx, brain.gy] = m.lastSeenAge === 0 ? [p.x, p.y] : [m.lastSeenX, m.lastSeenY];
     } else if (att === 'flee' && sameZ && (m.seesPlayer || dist < 8)) {
@@ -768,11 +851,27 @@ export class MonsterSystem implements GameSystem {
         m.busy = 0.15;
       }
     }
+    const ct = this.creatureTargets.get(m);
+    if (ct && !ct.dead && att === 'attack' && m.busy <= 0) {
+      // Track the target between think() ticks and swing when adjacent.
+      brain.gx = ct.x;
+      brain.gy = ct.y;
+      if (this.inMeleeRangeOf(m, ct)) {
+        this.face(m, ct.x, ct.y);
+        m.moving = false;
+        if (m.attackCooldown <= 0) {
+          this.meleeCreature(m, ct);
+          m.attackCooldown = (m.type.attack_cost || 100) / m.speed / ACTION_SCALE;
+          m.busy = 0.15;
+        }
+        return;
+      }
+    }
     if (m.busy > 0 || brain.goal === 'none') {
       m.moving = false;
       return;
     }
-    if (brain.goal === 'chase' && this.inMeleeRange(m)) {
+    if (brain.goal === 'chase' && !ct && this.inMeleeRange(m)) {
       m.moving = false;
       this.face(m, p.x, p.y);
       return;
@@ -1055,6 +1154,8 @@ export class MonsterSystem implements GameSystem {
     return best;
   }
 }
+
+const BODY_PART_NAMES: Record<string, string> = Object.fromEntries(Object.entries(BODY_PARTS).map(([id, d]) => [id, d.name]));
 
 function key(x: number, y: number, z: number): number {
   return ((x & 0x7ff) | ((y & 0x7ff) << 11) | ((z + 8) << 22)) >>> 0;

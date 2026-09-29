@@ -61,6 +61,21 @@ export interface VehicleRequest {
   fuel?: number;
 }
 
+/**
+ * An NPC placed by mapgen ("npcs" / "place_npcs"), consumed (and cleared) by the NPC system
+ * like monster spawns. Absolute tiles.
+ */
+export interface NpcSpawnRequest {
+  /** npc template id */
+  template: string;
+  x: number;
+  y: number;
+  z: number;
+  uniqueId?: string;
+  target?: boolean;
+  addTrait?: string[];
+}
+
 /** Mapgen zone (e.g. ZONE_START_POINT from the evac shelter). Absolute tile rectangle. */
 export interface MapZone {
   type: string;
@@ -94,6 +109,7 @@ export class Chunk {
   spawns: SpawnRequest[] = [];
   vehicles: VehicleRequest[] = [];
   zones: MapZone[] = [];
+  npcSpawns: NpcSpawnRequest[] = [];
   /** Which overmap terrain / mapgen produced this chunk (debugging, stats). */
   omt?: { id: string; source: string };
   /** Bumped on every mutation so the renderer can rebuild meshes lazily. */
