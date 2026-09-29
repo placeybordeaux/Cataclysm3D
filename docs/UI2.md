@@ -216,6 +216,7 @@ The real inventory on the BN item model (docs/INVENTORY_MODEL.md), replacing the
 - **Hotbar**: bindings keep the exact item (`HotbarBinding.ref` = ItemView id) and fall back to
   another of the same type you carry; greyed with 0 when none is left. Use = the item's primary
   action (eat, wield, …); a wielded one is put away. Mounted as soon as gameplay starts.
+- **Screenshots**: `docs/screenshots/ui2/inventory/` (1920×1080 and 3440×1304, from the real-input run).
 - **Automation**: `cdda.inv2.{model, hotbar, open(focus?), census(), rectOf(typeId, sel), where(typeId), spawn(id, dx, dy, {charges, contents})}`.
 - **Tests**: `tests/inventory_ui2.test.ts` (views, drops, liquids, the v1 bag scenario, take all, a
   conservation fuzz over the model's operations); real input: `tools/realinput.ts --only
