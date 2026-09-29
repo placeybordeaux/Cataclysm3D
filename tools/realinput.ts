@@ -18,6 +18,7 @@ import puppeteer, { type Page } from 'puppeteer-core';
 import { mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { startXvfb, XInput } from './lib/realinput';
+import { screenScenarios } from './realinput_screens';
 
 const argv = process.argv.slice(2);
 const opt = (n: string, d: string) => (argv.includes(n) ? argv[argv.indexOf(n) + 1] : d);
@@ -619,6 +620,9 @@ const scenarios: Scenario[] = [
     check('Enter returns to the title without a "Leave site?" prompt', !dialogs.includes('beforeunload'), dialogs);
   }],
 ];
+
+// Interaction screens (dialogue, trade, missions, vehicles, body, Autodoc, scores): before 'death'.
+scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...screenScenarios({ page: () => page, x: () => x, js, check, shot, toGameplay, sleep }));
 
 if (argv.includes('--list') || argv.includes('--dry-run')) {
   for (const [n, what] of scenarios) console.log(`${only && !only.has(n) ? '  (skip)' : '  run   '} ${n.padEnd(11)} ${what}`);

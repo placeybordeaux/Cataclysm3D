@@ -1,0 +1,245 @@
+// Real-input scenarios for the interaction screens (src/screens): dialogue, trade, missions,
+// vehicles, bionics / mutations / martial arts, the Autodoc and achievements. Every action a
+// player takes goes through xdotool (keys, clicks, drags); `cdda.*` only sets the scene
+// (spawn an NPC, give items, seat you at the wheel) and reads state. Plugged into
+// tools/realinput.ts's scenario list (run: --only talk,trade,missions,vehicle,body,autodoc,scores).
+
+import type { Page } from 'puppeteer-core';
+import type { XInput } from './lib/realinput';
+
+export interface ScreensCtx {
+  page: () => Page;
+  x: () => XInput;
+  js: <T>(code: string) => Promise<T>;
+  check: (name: string, ok: boolean, detail?: unknown) => boolean;
+  shot: (name: string) => Promise<void>;
+  toGameplay: () => Promise<unknown>;
+  sleep: (ms: number) => Promise<unknown>;
+}
+
+type Scenario = [name: string, what: string, run: () => Promise<void>];
+
+interface U { surfaces: number; tacticalPause: boolean; locked: boolean; panels: string[]; menu: string[][] }
+
+export function screenScenarios(c: ScreensCtx): Scenario[] {
+  const { js, check, shot, sleep } = c;
+  const u = () => js<U>('cdda.ui2.state()');
+  /** Centre of the first element matching a selector (page coords), or null. */
+  const at = (sel: string) => js<[number, number] | null>(`(() => { const e = document.querySelector(${JSON.stringify(sel)}); if (!e) return null; const r = e.getBoundingClientRect(); return [Math.round(r.left + r.width / 2), Math.round(r.top + r.height / 2)]; })()`);
+  const clickSel = async (sel: string, button = 1) => {
+    const p = await at(sel);
+    if (!p) return false;
+    await c.x().click(p[0], p[1], button);
+    await sleep(150);
+    return true;
+  };
+  const drag = async (from: [number, number], to: [number, number]) => {
+    const x = c.x();
+    await x.moveTo(from[0], from[1], 2);
+    await x.buttonDown(1);
+    await x.moveTo(to[0], to[1], 14);
+    await sleep(80);
+    await x.buttonUp(1);
+    await sleep(250);
+  };
+  const waitPanel = async (id: string, open = true, ms = 3000) => {
+    const end = Date.now() + ms;
+    let v = await u();
+    while (v.panels.includes(id) !== open && Date.now() < end) {
+      await sleep(80);
+      v = await u();
+    }
+    return v;
+  };
+
+  return [
+    ['talk', 'dialogue: e talks, cursor freed + paused, typewriter skips, 1-9 answer, Esc leaves', async () => {
+      await c.toGameplay();
+      await js(`cdda.godMode?.(true); cdda.ui2.settings.pauseInInventory = true; cdda.ui2.saveSettings(); cdda.screens.prefs.speed = 'slow'`);
+      await js(`(() => { const uid = cdda.spawnNpc('NC_SCAVENGER', 0, -2, { attitude: 'NULL' }); cdda.faceNpc(uid); cdda.game.player.pitch = -0.05; return uid; })()`);
+      await sleep(600);
+      await c.x().key('e');
+      let v = await waitPanel('talk');
+      check('e on an NPC opens the conversation panel', v.panels.includes('talk'), v.panels);
+      check('…with the cursor free and time paused (Accessible)', !v.locked && v.tacticalPause, v);
+      const typing = await js<boolean>(`!!document.querySelector('#ui2 .ix-said.typing')`);
+      check('the NPC line types itself out', typing);
+      await shot('talk_typing');
+      await c.x().key('space');
+      await sleep(150);
+      check('Space completes the line', !(await js<boolean>(`!!document.querySelector('#ui2 .ix-said.typing')`)));
+      const keys = await js<string[]>(`[...document.querySelectorAll('#ui2 .ix-resp .ix-resp-key')].map(k => k.textContent)`);
+      check('answers are numbered 1…', keys[0] === '1' && keys.length >= 2, keys);
+      await shot('talk_answers');
+      const before = await js<number>(`cdda.screens.dialogue().panel.body.querySelectorAll('.ix-line').length`);
+      // Pick the first answer that isn't "leave", by its number key.
+      const i = await js<number>(`[...document.querySelectorAll('#ui2 .ix-resp')].findIndex(b => !b.classList.contains('unavailable') && !/Bye|leave|go now/i.test(b.textContent))`);
+      await c.x().key(String(Math.max(0, i) + 1));
+      await sleep(400);
+      v = await u();
+      const after = v.panels.includes('talk') ? await js<number>(`cdda.screens.dialogue().panel.body.querySelectorAll('.ix-line').length`) : before + 1;
+      check('a number key answers (the history grows)', after > before, { before, after });
+      // Layout switch from the title bar (mouse).
+      if (v.panels.includes('talk')) {
+        await clickSel('#ui2 .ix-layout-btn');
+        check('the title-bar button switches the layout', await js<boolean>(`!!document.querySelector('#ui2 .ix-dlg.layout-book')`));
+        await shot('talk_book');
+        await clickSel('#ui2 .ix-layout-btn');
+        await c.x().key('Escape');
+        v = await waitPanel('talk', false);
+        check('Esc leaves the conversation', !v.panels.includes('talk') && !v.tacticalPause, v);
+      }
+      await js(`cdda.screens.prefs.speed = 'normal'`);
+    }],
+    ['trade', 'trade: drag goods onto the table with the real mouse, make the deal, items conserved', async () => {
+      await c.toGameplay();
+      await js(`(() => { const uid = cdda.spawnNpc('evac_merchant', 0, -2); cdda.faceNpc(uid); for (let i = 0; i < 12; i++) cdda.giveItem('FMCNote'); cdda.__tradeNpc = uid; })()`);
+      // Setup opens the screen (the dialogue route is covered by 'talk'); everything after is real input.
+      await js(`cdda.trade(cdda.__tradeNpc)`);
+      let v = await waitPanel('trade');
+      check('the trade panel opens with a free cursor', v.panels.includes('trade') && !v.locked, v);
+      await shot('trade_open');
+      const counts = () => js<{ player: Record<string, number>; total: Record<string, number> }>(`(() => {
+        const p = cdda.game.player, n = cdda.npcSystem.npcByUid(cdda.__tradeNpc);
+        const tally = (list, o) => { for (const it of list) for (const x of it.walk()) o[x.typeId] = (o[x.typeId] ?? 0) + x.count(); return o; };
+        const player = tally([...p.inv.carried(), ...p.inv.worn, ...(p.inv.wielded ? [p.inv.wielded] : [])], {});
+        const npc = tally([...n.inv.carried(), ...n.inv.worn, ...(n.inv.wielded ? [n.inv.wielded] : []), ...n.stock], {});
+        const ground = tally(cdda.game.map.itemsAt(p.tileX, p.tileY, p.z), {});
+        const total = {}; for (const o of [player, npc, ground]) for (const [k, c] of Object.entries(o)) total[k] = (total[k] ?? 0) + c;
+        return { player, total };
+      })()`);
+      const before = await counts();
+      // Their cheapest good onto "You get".
+      const row = await js<{ i: number; name: string } | null>(`(() => { const rows = [...document.querySelectorAll('#ui2 [data-testid="trade-theirs"] .ix-trow')]; if (!rows.length) return null; const price = (r) => parseFloat(r.querySelector('.ix-trow-price').textContent.replace(/[^0-9.]/g, '')); let best = 0; rows.forEach((r, i) => { if (price(r) < price(rows[best])) best = i; }); return { i: best, name: rows[best].querySelector('.ix-trow-name').textContent }; })()`);
+      const from = row ? await js<[number, number]>(`(() => { const r = document.querySelectorAll('#ui2 [data-testid="trade-theirs"] .ix-trow')[${row.i}].getBoundingClientRect(); return [Math.round(r.left + 40), Math.round(r.top + r.height / 2)]; })()`) : null;
+      const getZone = await at('#ui2 [data-testid="trade-get"]');
+      if (from && getZone) await drag(from, getZone);
+      const asked = await js<number>(`cdda.screens.trade().session.theirs.filter(e => e.count > 0).length`);
+      check(`dragging "${row?.name}" onto "You get" asks for it`, asked === 1, asked);
+      // Notes onto "You give" (drag the notes row).
+      const notes = await js<[number, number] | null>(`(() => { const r = [...document.querySelectorAll('#ui2 [data-testid="trade-yours"] .ix-trow')].find(e => /Merch|note/i.test(e.textContent)); if (!r) return null; const b = r.getBoundingClientRect(); return [Math.round(b.left + 40), Math.round(b.top + b.height / 2)]; })()`);
+      const giveZone = await at('#ui2 [data-testid="trade-give"]');
+      if (notes && giveZone) await drag(notes, giveZone);
+      const offered = await js<number>(`cdda.screens.trade().session.yours.filter(e => e.count > 0).length`);
+      check('dragging your notes onto "You give" offers them', offered >= 1, offered);
+      const ok = await js<boolean>(`cdda.screens.trade().session.canAccept().ok`);
+      await shot('trade_offer');
+      await clickSel('#ui2 [data-testid="trade-deal"]');
+      v = await waitPanel('trade', false);
+      const after = await counts();
+      if (ok) check('"Make the deal" goes through and closes the screen', !v.panels.includes('trade'), v.panels);
+      check('no item was created or lost by the trade', JSON.stringify(Object.entries(after.total).sort()) === JSON.stringify(Object.entries(before.total).sort()), { before: before.total, after: after.total });
+      if (ok) check('what you asked for is yours now', Object.keys(after.player).some((k) => (after.player[k] ?? 0) > (before.player[k] ?? 0)), { before: before.player, after: after.player });
+      if (v.panels.includes('trade')) await c.x().key('Escape');
+    }],
+    ['missions', 'mission log: M opens it (free cursor), tabs by mouse, M closes', async () => {
+      await c.toGameplay();
+      await js(`(() => { const id = Object.keys(cdda.npcSystem.nd.missions).find(k => cdda.npcSystem.nd.missions[k].goal === 'MGOAL_FIND_ITEM'); const n = cdda.npcSystem.nearest(40); const uid = cdda.giveMission(id, n?.uid); const m = cdda.npcSystem.missions.get(uid); m.target = { x: Math.floor(cdda.game.player.x / 24) + 5, y: Math.floor(cdda.game.player.y / 24) - 3, z: 0 }; })()`);
+      await c.x().key('M');
+      let v = await waitPanel('missions');
+      check('M opens the mission log', v.panels.includes('missions') && !v.locked, v);
+      const rows = await js<number>(`document.querySelectorAll('#ui2 [data-testid="mission-list"] .ix-mrow').length`);
+      check('the active job is listed', rows >= 1, rows);
+      await clickSel('#ui2 .ix-mtarget .ui2-btn');
+      check('Track marks it for the map', await js<boolean>(`cdda.screens.markers().some(m => m.kind === 'mission' && m.tracked)`));
+      await shot('missions');
+      await c.x().key('M');
+      v = await waitPanel('missions', false);
+      check('M closes it again', !v.panels.includes('missions'), v.panels);
+    }],
+    ['vehicle', 'vehicle: ^ at the wheel opens the panel, diagram click, engine button, driving HUD', async () => {
+      await c.toGameplay();
+      await js(`(() => { cdda.spawnVehicle('car', 0, -6, 0); cdda.enterVehicle(undefined, { start: true }); })()`);
+      await sleep(400);
+      check('the driving HUD shows while at the wheel', await js<boolean>(`getComputedStyle(document.querySelector('#ui2 .ix-drivehud')).display !== 'none'`));
+      await shot('drive_hud');
+      await c.x().key('asciicircum');
+      let v = await waitPanel('vehicle');
+      check('^ at the wheel opens the vehicle panel', v.panels.includes('vehicle') && !v.locked, v);
+      const cells = await js<number>(`document.querySelectorAll('#ui2 .ix-vcell').length`);
+      check('the parts diagram has a square per mount', cells >= 8, cells);
+      const second = await at('#ui2 .ix-vcell:not(.selected)');
+      if (second) await c.x().click(second[0], second[1]);
+      await sleep(200);
+      check('clicking a square selects it', await js<boolean>(`!!document.querySelector('#ui2 .ix-vcell.selected')`));
+      await shot('vehicle_panel');
+      const was = await js<boolean>(`cdda.vehicleSystem.driving.engineOn`);
+      const btn = await js<[number, number] | null>(`(() => { const b = [...document.querySelectorAll('#ui2 .ix-veh-controls .ui2-btn')].find(e => /engine/i.test(e.textContent)); if (!b) return null; const r = b.getBoundingClientRect(); return [Math.round(r.left + r.width / 2), Math.round(r.top + r.height / 2)]; })()`);
+      if (btn) await c.x().click(btn[0], btn[1]);
+      await sleep(300);
+      check('the engine button starts/stops the engine', (await js<boolean>(`cdda.vehicleSystem.driving.engineOn`)) !== was);
+      await c.x().key('Escape');
+      v = await waitPanel('vehicle', false);
+      check('Esc closes it', !v.panels.includes('vehicle'), v.panels);
+      await js(`cdda.exitVehicle()`);
+    }],
+    ['body', 'bionics (p), mutations ([), martial arts (_): panels, switches by mouse', async () => {
+      await c.toGameplay();
+      await js(`cdda.installBionic('bio_power_storage'); cdda.installBionic('bio_flashlight'); cdda.givePower(100)`);
+      await c.x().key('p');
+      let v = await waitPanel('bionics');
+      check('p opens the bionics panel', v.panels.includes('bionics') && !v.locked, v);
+      const sw = await at('#ui2 .ix-switch');
+      if (sw) await c.x().click(sw[0], sw[1]);
+      await sleep(200);
+      check('clicking the switch turns the bionic on', await js<boolean>(`cdda.bionics().installed.some(b => b.id === 'bio_flashlight' && b.powered)`));
+      await shot('bionics');
+      await c.x().key('p');
+      v = await waitPanel('bionics', false);
+      check('p closes it', !v.panels.includes('bionics'), v.panels);
+      await js(`cdda.mutate('NIGHTVISION')`);
+      await c.x().key('bracketleft');
+      v = await waitPanel('mutations');
+      check('[ opens mutations', v.panels.includes('mutations'), v.panels);
+      await shot('mutations');
+      await c.x().key('Escape');
+      await waitPanel('mutations', false);
+      await c.x().key('underscore');
+      v = await waitPanel('martialarts');
+      check('_ opens martial arts', v.panels.includes('martialarts'), v.panels);
+      await shot('martialarts');
+      await c.x().key('Escape');
+      await waitPanel('martialarts', false);
+    }],
+    ['autodoc', 'Autodoc: e on it, odds + risks shown, Operate asks once, the operation starts', async () => {
+      await c.toGameplay();
+      await js(`(() => { const p = cdda.game.player; cdda.spawnAutodoc(0, -1); p.yaw = 0; p.pitch = -0.6; cdda.giveCbm('bio_flashlight'); cdda.installBionic('bio_painkiller'); })()`);
+      await sleep(400);
+      await c.x().key('e');
+      let v = await waitPanel('autodoc');
+      if (!v.panels.includes('autodoc')) {
+        check('e on the Autodoc opens the surgery screen', false, v.panels);
+        return;
+      }
+      check('e on the Autodoc opens the surgery screen', true);
+      const odds = await js<string>(`document.querySelector('#ui2 .ix-odds')?.textContent ?? ''`);
+      check('the chosen CBM shows its odds', /\d+%/.test(odds), odds);
+      check('…and what can go wrong', await js<boolean>(`document.querySelectorAll('#ui2 .ix-risks li').length === 3 || /No risk/.test(document.querySelector('#ui2 .ix-odds').textContent)`));
+      await shot('autodoc');
+      const btn = await js<[number, number] | null>(`(() => { const b = [...document.querySelectorAll('#ui2 [data-testid="autodoc-detail"] .ui2-btn')].find(e => /Begin/.test(e.textContent)); if (!b) return null; const r = b.getBoundingClientRect(); return [Math.round(r.left + r.width / 2), Math.round(r.top + r.height / 2)]; })()`);
+      if (btn) await c.x().click(btn[0], btn[1]);
+      await sleep(300);
+      await shot('autodoc_confirm');
+      const dialog = await js<string>(`document.querySelector('#ui2 .ui2-dialog')?.textContent ?? ''`);
+      check('Begin asks once, restating the odds', /success|risk/i.test(dialog), dialog);
+      await c.x().key(/complications/.test(dialog) ? 'y' : 'Return');
+      await sleep(400);
+      v = await u();
+      check('agreeing starts the operation (the screen closes)', !v.panels.includes('autodoc'), v.panels);
+      check('…as a long activity', await js<boolean>(`!!cdda.game.activities.current`), await js(`cdda.game.activities.current?.name ?? null`));
+      await js(`cdda.game.activities.current && cdda.game.activities.cancel('test done')`);
+    }],
+    ['scores', 'achievements: ) opens the journal-style panel, tabs by keys', async () => {
+      await c.toGameplay();
+      await c.x().key('parenright');
+      let v = await waitPanel('achievements');
+      check(') opens the achievements panel', v.panels.includes('achievements') && !v.locked, v);
+      check('achievements are journal cards', (await js<number>(`document.querySelectorAll('#ui2 .pg-entry.ix-ach').length`)) > 0);
+      await shot('achievements');
+      await c.x().key('Right');
+      await c.x().key('parenright');
+      v = await waitPanel('achievements', false);
+      check(') closes it', !v.panels.includes('achievements'), v.panels);
+    }],
+  ];
+}

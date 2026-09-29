@@ -9,6 +9,7 @@ import { CHUNK, chunkKey } from './world/coords';
 import { oterRotation } from './world/overmap/oter';
 import { NpcSystem, type NpcSystemJSON } from './game/npcai';
 import type { Npc, NpcData } from './game/npc';
+import type { Item } from './game/item';
 import type { Dialogue } from './game/talk';
 import { NpcView } from './render/npcView';
 import { hud } from './ui/hud';
@@ -18,13 +19,32 @@ import { chunkTracker } from './save/tracking';
 import { registerSaveable } from './save/registry';
 import { sanitizeItemJSON } from './save/items';
 import { confirmAttackNpc, factionName, openChatMenu, openDialogue, openMissionLog, openTrade, pickItemMenu, type NpcUiCtx } from './ui/npc_ui';
-import type { UiWindow } from './ui/framework';
 import { DATA_BASE } from './core/assets';
 
 // Wiring for NPCs: data (public/data/npcs.json), the simulation system, mapgen placements
 // (the refugee center's Free Merchants) and random survivors in towns, player combat hooks,
 // keys (C chat, M missions, e talks to the NPC under the crosshair), HUD prompt, look mode,
 // save section 'npcs', rendering and window.cdda helpers. main.ts awaits installNpcs() once.
+
+/**
+ * The NPC screens, replaceable: installScreens (src/screens/install.ts) swaps in the ui2
+ * panels; the curses windows in src/ui/npc_ui.ts are the default (tests, stripped builds).
+ */
+export interface DialogueView {
+  readonly closed: boolean;
+  close(): void;
+  /** Choose response `i` of the visible list, as a click would. */
+  pick?(i: number): void;
+}
+export const npcScreens = {
+  dialogue: (ctx: NpcUiCtx, d: Dialogue, onClose: () => void): DialogueView => openDialogue(ctx, d, onClose),
+  trade: (ctx: NpcUiCtx, n: Npc, cost: number, onDone?: (traded: boolean) => void): void => void openTrade(ctx, n, cost, onDone),
+  missionLog: (ctx: NpcUiCtx): void => void openMissionLog(ctx),
+  /** `C`: talk to someone nearby, orders for followers, yell. */
+  chat: (ctx: NpcUiCtx, talk: (n: Npc) => void): void => openChatMenu(ctx, talk),
+  /** Dialogue effects that take one of your items (npc_gets_item). */
+  pickItem: (title: string, items: Item[], onPick: (it: Item | null) => void): void => pickItemMenu(title, items, onPick),
+};
 
 export interface NpcsHandle {
   sys: NpcSystem;
@@ -88,19 +108,19 @@ export async function installNpcs(game: Game, renderer: Renderer | null, worldge
 
   // ---------------------------------------------------------------- UI hooks
   const uiCtx = (): NpcUiCtx => ({ game, renderer: renderer!, sys });
-  let current: { d: Dialogue; win: UiWindow } | null = null;
+  let current: { d: Dialogue; win: DialogueView } | null = null;
   const talk = (n: Npc) => {
     if (!renderer || typeof document === 'undefined') return;
     const d = sys.talkTo(n);
     if (!d) return;
-    const win = openDialogue(uiCtx(), d, () => {
+    const win = npcScreens.dialogue(uiCtx(), d, () => {
       if (current?.d === d) current = null;
     });
     current = { d, win };
   };
   if (renderer && typeof document !== 'undefined') {
-    sys.startTrade = (n, cost = 0, onDone) => void openTrade(uiCtx(), n, cost, onDone);
-    sys.pickItem = pickItemMenu;
+    sys.startTrade = (n, cost = 0, onDone) => npcScreens.trade(uiCtx(), n, cost, onDone);
+    sys.pickItem = (title, items, onPick) => npcScreens.pickItem(title, items, onPick);
     sys.confirmAttack = confirmAttackNpc;
     sys.onWantsTalk = (n) => {
       if (game.input.captured || game.player.dead) return;
@@ -159,10 +179,10 @@ export async function installNpcs(game: Game, renderer: Renderer | null, worldge
   game.keys.register('chat', 'Chat with NPCs / order followers', () => {
     const n = npcUnderCrosshair(4);
     if (n) return talk(n);
-    if (renderer) openChatMenu(uiCtx(), talk);
+    if (renderer) npcScreens.chat(uiCtx(), talk);
   });
   game.keys.register('missions', 'View missions', () => {
-    if (renderer) openMissionLog(uiCtx());
+    if (renderer) npcScreens.missionLog(uiCtx());
   });
 
   // ---------------------------------------------------------------- spawning
@@ -272,7 +292,7 @@ export function describeNpc(sys: NpcSystem, n: Npc): string {
 
 // ------------------------------------------------------------------ debug API
 
-function installDebug(api: DebugApi, game: Game, sys: NpcSystem, wg: WorldGenerator | null, talk: (n: Npc) => void, current: () => { d: Dialogue; win: UiWindow } | null, uiCtx: () => NpcUiCtx): void {
+function installDebug(api: DebugApi, game: Game, sys: NpcSystem, wg: WorldGenerator | null, talk: (n: Npc) => void, current: () => { d: Dialogue; win: DialogueView } | null, uiCtx: () => NpcUiCtx): void {
   const p = () => game.player;
   api.npcSystem = sys;
   /** Spawn an NPC by template id (e.g. 'free_merchants_merchant') or npc_class id ('NC_SCAVENGER') at (dx, dy) tiles from the survivor. */
@@ -309,7 +329,8 @@ function installDebug(api: DebugApi, game: Game, sys: NpcSystem, wg: WorldGenera
   api.respond = (i: number) => {
     const c = current();
     if (!c) return null;
-    api.pressKey?.('abcdefghijklmnopqrstuvwxyz'[i]);
+    if (c.win.pick) c.win.pick(i);
+    else api.pressKey?.('abcdefghijklmnopqrstuvwxyz'[i]);
     return api.dialogue();
   };
   /** Pick the first response whose text contains `text`. */
@@ -321,10 +342,10 @@ function installDebug(api: DebugApi, game: Game, sys: NpcSystem, wg: WorldGenera
   };
   api.trade = (uid?: number) => {
     const n = find(uid);
-    if (n) openTrade(uiCtx(), n);
+    if (n) npcScreens.trade(uiCtx(), n, 0);
     return !!n;
   };
-  api.missionLog = () => openMissionLog(uiCtx());
+  api.missionLog = () => npcScreens.missionLog(uiCtx());
   api.missions = () => [...sys.missions.all.values()].map((m) => ({ uid: m.uid, id: m.id, status: m.status, giver: m.npcUid, goal: sys.missions.goalText(m), target: m.target }));
   /** Accept a mission from an NPC without the dialogue (tests). */
   api.giveMission = (id: string, uid?: number) => {
