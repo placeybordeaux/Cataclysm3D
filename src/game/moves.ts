@@ -470,7 +470,7 @@ function checkFrom(it: Item, from: Loc, opts: MoveOpts): MoveResult | null {
 }
 
 /** Static rules for putting `n` of `it` at `to`; returns how many are accepted, or a failure. */
-function checkTo(it: Item, n: number, to: Loc, opts: MoveOpts, actor: Character | null): Plan | MoveResult {
+function checkTo(it: Item, n: number, to: Loc, opts: MoveOpts, actor: Character | null, from: Loc | null = null): Plan | MoveResult {
   const partialOk = (room: number, why: string, code: WhyNot): Plan | MoveResult => {
     if (room <= 0) return fail(code, why);
     if (room < n && !opts.partial) return fail(code, why);
@@ -492,6 +492,14 @@ function checkTo(it: Item, n: number, to: Loc, opts: MoveOpts, actor: Character 
     case 'inv': {
       if (it.isLiquid()) return fail('liquid', 'Spilt liquids cannot be picked back up.  Try mopping them up instead.');
       if (holdsLooseLiquid(it)) return fail('needs_seal', `That ${it.baseName()} must be on the ground or held to hold contents!`);
+      if (it.countByCharges && opts.partial && !opts.force) {
+        // As many as fit (BN pickup of part of a stack); the after-the-fact check stays exact.
+        const inv = to.who.inv;
+        const free = inv.volumeCapacity() - inv.volumeCarried();
+        let room = Math.floor(free / it.unitVolume() + 1e-9);
+        if (locOwner(from) !== to.who && it.unitWeight() > 0) room = Math.min(room, Math.floor((inv.weightCapacity() * 4 - inv.weightCarried()) / it.unitWeight()));
+        return partialOk(room, `There's no room in your inventory for the ${it.name()}.`, 'no_room');
+      }
       return { n };
     }
     case 'in': {
@@ -670,7 +678,7 @@ export function moveItem(it: Item, from: Loc | null, to: Loc, opts: MoveOpts = {
   }
   // Probe the destination with the part that would move (its volume/weight decide).
   const probe = it.countByCharges && want < it.charges ? cloneStack(it, want) : it;
-  const plan = checkTo(probe, want, to, opts, actor);
+  const plan = checkTo(probe, want, to, opts, actor, from);
   if ('ok' in plan) return plan;
   const n = plan.n;
 
