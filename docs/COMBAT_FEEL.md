@@ -80,6 +80,15 @@ plus screenshot bursts (`docs/screenshots/combat_feel/before_*.png`, about 80 ms
 - **Grabs**: a *GRABBED by the zombie, mash [e] to break free* banner with a struggle bar, and the
   prompt under the crosshair. Each press of the interact key rolls CDDA's break-free check,
   at most once per turn. Each failure adds +3 to the next roll (Classic +1). Walking away still rolls, as in CDDA.
+- **Grab pacing and escape (QA_V2's first fight)**: melee specials (grab, bite, scratch) cool down on the
+  melee clock, like the swings they share a budget with. Accessible also stretches grab cooldowns ×1.6
+  (`FEEL.grabCooldownMul`). A staggering blow (≥ `staggerShare` of its HP, or a crit) makes the grabber
+  let go: "The zombie loses its grip on you!" (`FEEL.staggerBreaksGrab`, off in Classic).
+- **Why a blow missed**: the `playerAttack` event carries a `reason`, and the crosshair shows it for a
+  second: *miss: dodged* (the target's dodge made the difference), *miss: clumsy swing* / *wild swing* /
+  *off balance* (your hit roll or the weapon's stumble), *too small to hit*, *out of reach* (a whiff with
+  a monster in the arc just past the weapon's reach) and *no damage* (armor took it all). The rule is
+  `missReason()` in combatfeel.ts.
 
 ### Hit reactions (`monai.ts react`, `monsterView.ts`, `hitFx.ts`)
 - Every damaging player hit makes the monster **flinch**. The flinch lasts up to 0.35 s, scaled by damage/max HP. The monster pauses and

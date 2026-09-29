@@ -10,11 +10,12 @@ import { Character } from '../src/game/character';
 import { MonsterSystem } from '../src/game/monai';
 import { PlayerCombat } from '../src/game/playercombat';
 import { createItem } from '../src/game/item';
+import { MELEE_SCALE } from '../src/core/time';
 import { tryDodgeRoll } from '../src/game/combat';
 import { blockHit, logarithmicRange } from '../src/game/techniques';
 import { refreshDefenses } from '../src/game/martialarts';
 import {
-  FEEL, FEEL_PRESETS, blockAttemptChance, defenseOf, guardScoreBonus, hitStopSeconds, setFeelDifficulty, sidestepDodgeRoll,
+  FEEL, FEEL_PRESETS, blockAttemptChance, defenseOf, guardScoreBonus, hitStopSeconds, missReason, setFeelDifficulty, sidestepDodgeRoll,
   surroundAngles, sweptArcTarget, swingTiming, telegraphSeconds,
 } from '../src/game/combatfeel';
 
@@ -325,6 +326,77 @@ describe('guard and side-step map onto CDDA block / dodge', () => {
     }
     expect(sys.grabbedBy).toBe(null);
     expect(defenseOf(game.player).struggle).toBe(0);
+  });
+});
+
+describe('the first fight (QA_V2: long, four grabs, misses with no visible cause)', () => {
+  function grabbed(game: Game, sys: MonsterSystem) {
+    const z = sys.spawnById('mon_zombie', 12.5, 11.4, 0)!;
+    for (const s of z.specials) s.cooldown = 999;
+    z.attackCooldown = 999;
+    sys.grabbedBy = z;
+    z.addEffect('grabbing', 100);
+    game.player.addEffect('grabbed', 1000);
+    return z;
+  }
+
+  it('grab cooldowns run on the melee clock; Accessible spaces grabs out further, Classic keeps BN', () => {
+    for (const d of ['classic', 'accessible'] as const) {
+      setFeelDifficulty(d);
+      const { game, sys } = world();
+      tough(game);
+      const z = sys.spawnById('mon_zombie', 12.5, 11.4, 0)!;
+      for (const s of z.specials) s.cooldown = s.def.id === 'GRAB' ? 0 : 999;
+      step(game, 0.05);
+      expect(z.windup?.special?.def.id).toBe('GRAB');
+      step(game, z.windup!.t + 0.05);
+      const grab = z.specials.find((s) => s.def.id === 'GRAB')!;
+      const bn = (grab.def.cooldown as number) / MELEE_SCALE;
+      if (d === 'classic') expect(grab.cooldown).toBeCloseTo(bn, 1);
+      else expect(grab.cooldown).toBeGreaterThan(bn * 1.4);
+    }
+  });
+
+  it('Accessible: a staggering blow makes the grabber let go; Classic: only struggling does', () => {
+    for (const d of ['accessible', 'classic'] as const) {
+      setFeelDifficulty(d);
+      const { game, sys } = world();
+      tough(game);
+      const z = grabbed(game, sys);
+      sys.hurt(z, Math.ceil(z.hpMax * FEEL_PRESETS[d].staggerShare), 'player');
+      expect(sys.grabbedBy === null).toBe(d === 'accessible');
+    }
+  });
+
+  it('a miss says why: dodged, too small, off balance / wild / clumsy swing', () => {
+    expect(missReason({ spread: -3, dodge: 10 })).toBe('dodged');
+    expect(missReason({ spread: -12, dodge: 10 })).toBe('clumsy swing');
+    expect(missReason({ spread: -3, dodge: 0, size: 15 })).toBe('too small to hit');
+    expect(missReason({ spread: -3, dodge: 0, stumble: 25 })).toBe('wild swing');
+    expect(missReason({ spread: -3, dodge: 0, stumble: 60 })).toBe('off balance');
+  });
+
+  it('the playerAttack event carries the reason for a miss or an out-of-reach whiff', () => {
+    const { game, sys, combat } = world();
+    tough(game);
+    const reasons: string[] = [];
+    game.events.on('playerAttack', (e) => e.reason && reasons.push(`${e.outcome}:${e.reason}`));
+    const z = sys.spawnById('mon_zombie', 12.5, 10.2, 0)!; // ~2.3 m ahead: beyond a fist's reach
+    for (const s of z.specials) s.cooldown = 999;
+    z.attackCooldown = 999;
+    z.addEffect('stunned', 100);
+    game.player.yaw = 0;
+    combat.melee(null);
+    expect(reasons).toContain('whiff:out of reach');
+    // Up close with a hopeless hit roll: a miss with a reason.
+    z.x = 12.5;
+    z.y = 11.5;
+    game.player.dex_base = 1;
+    game.player.resetStats();
+    z.effects.delete('stunned'); // stunned monsters can't dodge
+    z.type = { ...z.type, dodge: 30 };
+    for (let i = 0; i < 20 && !reasons.some((r) => r.startsWith('miss:')); i++) combat.melee(z);
+    expect(reasons.some((r) => r === 'miss:dodged')).toBe(true);
   });
 });
 

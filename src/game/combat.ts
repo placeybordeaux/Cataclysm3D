@@ -408,6 +408,8 @@ export interface MeleeResult {
   wear?: WearResult;
   /** Glass weapon shattered on the blow. */
   shatter?: ShatterResult;
+  /** On a miss: stumble moves the swing cost (heavy/unwieldy weapons stumble more). */
+  stumble?: number;
 }
 
 /**
@@ -446,7 +448,7 @@ export function meleeAttack(c: Character, target: MeleeTarget, rng: Rng, targetN
     const wear = handleMeleeWear(c, weapon, 1, rng);
     c.modStamina(-staminaCost);
     triggerBuffs(c, 'onattack');
-    return { hit, crit: false, hitSpread: spread, damage: [], total: 0, moves, cooldownSeconds: moves / 100 / MELEE_SCALE, staminaCost, message, technique: recovery, wear };
+    return { hit, crit: false, hitSpread: spread, damage: [], total: 0, moves, cooldownSeconds: moves / 100 / MELEE_SCALE, staminaCost, message, technique: recovery, wear, stumble: st };
   }
   const crit = rng.next() < critChance(c, weapon, meleeHitRoll(c, weapon, rng), target.dodge * 5);
   let technique: TechniqueDef | null = null;

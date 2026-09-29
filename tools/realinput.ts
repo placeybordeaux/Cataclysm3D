@@ -709,6 +709,52 @@ const scenarios: Scenario[] = [
     check('wheel zooms in top-down view', mode !== 'top' || d1 !== d0, { mode, d0, d1 });
     await x.key('v');
   }],
+  ['firstfight', "first fight on Accessible: long pointy stick vs one zombie, LMB when in reach, mash e when grabbed: over in ~8–12 s; misses say why", async () => {
+    await toGameplay();
+    // Setup: the starter spear, a fresh survivor's health, one zombie a few steps ahead.
+    await js(`(() => { cdda.clearMonsters(20); cdda.giveItem('pointy_stick_long', { wield: true }); const p = cdda.game.player; for (const k of Object.keys(p.hp)) p.hp[k].cur = p.hp[k].max; p.stamina = p.staminaMax(); })()`);
+    const preset = await js<string>(`cdda.difficulty()?.preset ?? cdda.difficulty()?.id ?? ''`).catch(() => '');
+    const uid = await js<number>(`cdda.spawnMonster('mon_zombie', 0, -4)`);
+    const a0 = (await attacks()).length;
+    type FightState = { dead: boolean; grabbed: boolean; d: number; cd: number; swing: boolean; why: string; hp: number };
+    const read = () => js<FightState>(`(() => {
+      const m = cdda.game.monsters.all.find((z) => z.uid === ${uid}), p = cdda.game.player;
+      const w = document.querySelector('.combat-why');
+      const why = w && w.style.display !== 'none' ? w.textContent : '';
+      if (!m || m.dead) return { dead: true, grabbed: false, d: 0, cd: 0, swing: false, why, hp: 0 };
+      // Aiming is the combat suites' job: keep the crosshair on its chest (setup, not input).
+      p.yaw = Math.atan2(m.x - p.x, -(m.y - p.y)); p.pitch = -0.08;
+      return { dead: false, grabbed: !!cdda.game.monsters.grabbedBy, d: Math.hypot(m.x - p.x, m.y - p.y) - m.radius, cd: cdda.combat.cooldown, swing: !!cdda.combat.swing, why, hp: m.hp };
+    })()`);
+    const t0 = Date.now();
+    let grabs = 0, wasGrabbed = false, st = await read(), engaged = 0;
+    const whys = new Set<string>();
+    while (!st.dead && Date.now() - t0 < 45_000 && !(await state()).deathScreen) {
+      if (st.why && !whys.size) await shot('firstfight_why');
+      if (st.why) whys.add(st.why);
+      if (st.grabbed) {
+        if (!wasGrabbed) grabs++;
+        await x.key('e', 30);
+      } else if (st.d > 1.9) {
+        await x.hold('w', 150);
+      } else {
+        if (!engaged) engaged = Date.now();
+        if (st.cd <= 0 && !st.swing) await x.clickHere(1);
+      }
+      wasGrabbed = st.grabbed;
+      await sleep(60);
+      st = await read();
+    }
+    const secs = ((Date.now() - (engaged || t0)) / 1000);
+    const blows = (await attacks()).slice(a0);
+    const misses = blows.filter((b) => b.outcome === 'miss' || b.outcome === 'whiff').length;
+    console.log(`    first fight: ${secs.toFixed(1)} s from first reach, ${grabs} grabs, ${blows.length} blows (${misses} missed), reasons seen: ${[...whys].join(', ') || '-'} [${preset}]`);
+    check('the zombie dies', st.dead, st);
+    check('the fight lasts at most ~14 s from first contact (goal 8–12 s)', st.dead && secs <= 14, { secs, grabs, blows: blows.map((b) => b.outcome) });
+    check('at most 2 grabs', grabs <= 2, grabs);
+    if (misses) check('a miss shows why near the crosshair (dodged / clumsy swing / out of reach)', [...whys].some((w) => /miss:|out of reach/.test(w)), [...whys]);
+    await js(`cdda.clearMonsters(20)`);
+  }],
   ['ui2', 'ui2 inventory: Tab frees the cursor (no resume hint), drag & drop, context menu, pause, Tab re-captures', async () => {
     await toGameplay();
     type U = { surfaces: number; tacticalPause: boolean; locked: boolean; panels: string[]; menu: string[][] };

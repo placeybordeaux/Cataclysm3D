@@ -34,6 +34,8 @@ export interface GameEvents {
     blood?: string | null;
     /** Freeze-frame seconds the blow earned (feel layer); the struck sprite holds too. */
     hitStop?: number;
+    /** Why it didn't connect, for the crosshair: "dodged", "out of reach", "clumsy swing", "no damage". */
+    reason?: string;
   };
   /** BN character_gets_headshot: the survivor's projectile landed with missed_by ≤ 0.1. */
   playerHeadshot: { target: unknown };

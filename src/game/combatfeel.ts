@@ -82,6 +82,10 @@ export interface FeelConstants {
   // --- grabs
   /** Each struggle press adds this to the next break-free roll (cumulative, resets on success). */
   struggleBonus: number;
+  /** GRAB / GRAB_DRAG cooldowns are this many times BN's (the first fight lost newcomers to grab loops). */
+  grabCooldownMul: number;
+  /** A blow that staggers the grabber (staggerShare of its HP, or a crit) makes it let go. */
+  staggerBreaksGrab: boolean;
 
   // --- hit reactions (monsters)
   /** Flinch (s) per unit of damage/maxHP, capped: the monster pauses and its wind-up slips. */
@@ -113,7 +117,7 @@ const ACCESSIBLE: FeelConstants = {
   telegraph: 0.5, telegraphMin: 0.4, telegraphMax: 0.8, telegraphHeavyMul: 1.5, telegraphLeap: 0.45, lunge: 0.35, monsterRecovery: 0.35,
   guardBlockBonus: 8, parryWindow: 0.35, parryBonus: 10, parryStun: 0.8, guardMoveMul: 0.55, guardStaminaPerSec: 60,
   dodgeDistance: 1.3, dodgeTime: 0.18, dodgeCooldown: 0.6, dodgeWindow: 0.3, dodgeBonus: 6, dodgeStamina: 300, doubleTap: 0.25,
-  struggleBonus: 3,
+  struggleBonus: 3, grabCooldownMul: 1.6, staggerBreaksGrab: true,
   flinchPerHp: 1.2, flinchMax: 0.35, staggerShare: 0.2, shovePerHp: 1.2, shoveMax: 0.35,
   holdInside: 0.2, surroundRange: 3.5,
   adsFov: 50,
@@ -125,7 +129,7 @@ const CLASSIC: FeelConstants = {
   telegraph: 0.35, telegraphMin: 0.25, telegraphMax: 0.6, telegraphLeap: 0.3, lunge: 0.45, monsterRecovery: 0.2,
   guardBlockBonus: 4, parryWindow: 0.18, parryBonus: 6, parryStun: 0.5, guardMoveMul: 0.45, guardStaminaPerSec: 120,
   dodgeWindow: 0.22, dodgeBonus: 3, dodgeStamina: 450,
-  struggleBonus: 1,
+  struggleBonus: 1, grabCooldownMul: 1, staggerBreaksGrab: false,
   staggerShare: 0.3,
 };
 
@@ -215,6 +219,20 @@ export function bearing(ox: number, oy: number, x: number, y: number): number {
  * angular size counts, so a big target at the edge of the arc still gets clipped), ties to the
  * nearer one. `blocked(c)` rejects targets behind walls.
  */
+/**
+ * Why a melee blow missed, in two or three words for the crosshair (QA: "swing wildly and
+ * miss" twice in a row with no visible cause). `spread` is BN's hit spread (hit roll minus the
+ * target's dodge × 5 and size penalty; < 0 = miss), `dodge` the dodge × 5 part, `size` the
+ * size penalty part, `stumble` the stumble moves of the swing.
+ */
+export function missReason(o: { spread: number; dodge: number; size?: number; stumble?: number }): string {
+  if (o.dodge > 0 && o.spread + o.dodge >= 0) return 'dodged';
+  const size = o.size ?? 0;
+  if (size > 0 && o.spread + o.dodge + size >= 0) return 'too small to hit';
+  const st = o.stumble ?? 0;
+  return st >= 60 ? 'off balance' : st >= 10 ? 'wild swing' : 'clumsy swing';
+}
+
 export function sweptArcTarget<T extends ArcCandidate>(
   origin: { x: number; y: number; yaw: number },
   candidates: readonly T[],

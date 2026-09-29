@@ -219,6 +219,33 @@ In both presets a single zombie on open ground is never a threat. Two are danger
 in Classic. What kills on day 1 is being caught by more than that, cornered, or chased until
 out of stamina.
 
+#### The first fight (`npm run sim -- --scenario first`, 30 seeds per row)
+
+QA_V2 timed a newcomer's first fight (long pointy stick against one zombie, Accessible) at
+~20 s with four grabs. The `first` scenario plays it the way a newcomer does: it walks in and
+swings when the weapon is ready after a ~0.35 s beat. When grabbed, it mashes the interact key
+about 5 times a second and doesn't swing meanwhile.
+
+| preset | fight s (median / p90) | grabs (median / max) | time grabbed (median s) | hits | misses | HP lost |
+|---|---|---|---|---|---|---|
+| Accessible, before | 7.0 / 10.5 | 1 / 3 | 0.2 | 4 | 2 | 5 |
+| Accessible, now | 6.2 / 9.0 | 1 / 1 | 0.1 | 4 | 2 | 4 |
+| Classic, before | 11.0 / 15.1 | 3 / 5 | 1.8 | 6 | 3 | 23.5 |
+| Classic, now | 9.8 / 14.9 | 2 / 5 | 1.0 | 6 | 3 | 26 |
+
+Three changes produced these numbers:
+- **Grab, bite and scratch cooldowns run on the melee clock** (both presets). BN counts them
+  in turns. They were converted at the movement rate (3 turns/s) while the swings they
+  alternate with run at `MELEE_SCALE` (2 turns/s). As a result a zombie grabbed ~1.5× as often
+  per swing as in BN. Classic is now closer to BN's own ratio.
+- **Accessible spaces grabs out further** (`FEEL.grabCooldownMul` 1.6, Classic 1).
+- **Accessible: a staggering blow makes the grabber let go** (`FEEL.staggerBreaksGrab`). That
+  is 20 % of its HP or a crit. The banner says "mash [e] to break free (or hit it hard)".
+
+A human fight runs longer than the bot's: aiming, stepping in and out, guarding. The real-input
+check (`tools/realinput.ts --only firstfight`) plays the fight with xdotool and requires it
+to end within 14 s of first contact, with at most 2 grabs.
+
 #### First night in the shelter
 
 The survivor wears the starting kit, stays inside the shelter and sleeps on the floor at 22:00.

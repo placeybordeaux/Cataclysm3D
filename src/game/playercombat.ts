@@ -10,7 +10,7 @@ import { techniqueMessage, type TargetInfo, type TechniqueOutcome } from './tech
 import type { MonsterSystem } from './monai';
 import { Grid, hasLOS } from './los';
 import { sfx, type MeleeSkill } from '../audio/sfx';
-import { FEEL, arcFor, defenseOf, hitStopSeconds, sweptArcTarget, swingTiming, type SwingStyle, type SwingTiming } from './combatfeel';
+import { FEEL, arcFor, defenseOf, hitStopSeconds, missReason, sweptArcTarget, swingTiming, type SwingStyle, type SwingTiming } from './combatfeel';
 import { moveWithCollision } from './physics';
 import { projectileHit } from './projectile';
 
@@ -368,7 +368,11 @@ export class PlayerCombat implements GameSystem {
       this.cooldown = phased ? Math.max(this.cooldown, cd - o.phased!) : cd;
       p.modStamina(-20);
       sfx.meleeWhiff((w?.weight() ?? 0) > 2000);
-      this.feedback('melee', 'whiff', null, p.x + Math.sin(p.yaw) * reach, p.y - Math.cos(p.yaw) * reach, 0);
+      // Something in the swing's arc just beyond the weapon's reach: say so (a zombie drawn at
+      // arm's length can still be a step too far).
+      const near = this.sys.active.filter((q) => !q.dead && q.z === p.z);
+      const short = sweptArcTarget(p, near, reach + 1.2, arcFor(swingStyleOf(w)), (q) => !hasLOS(this.grid, p.tileX, p.tileY, q.tileX, q.tileY, p.z));
+      this.feedback('melee', 'whiff', null, p.x + Math.sin(p.yaw) * reach, p.y - Math.cos(p.yaw) * reach, 0, 0, short ? 'out of reach' : undefined);
       return false;
     }
     const hit = this.swingAt(m, { reach, primary: true, elapsed: o.phased });
@@ -406,7 +410,7 @@ export class PlayerCombat implements GameSystem {
     if (res.shatter) this.sys.emitSound(p.x, p.y, p.z, 16, 'Crack!', 'player', '');
     if (!res.hit) {
       if (o.primary) sfx.meleeWhiff((p.inv.wielded?.weight() ?? 0) > 2000);
-      this.feedback('melee', 'miss', m, m.x, m.y, 0);
+      this.feedback('melee', 'miss', m, m.x, m.y, 0, 0, missReason({ spread: res.hitSpread, dodge: m.dodge() * 5, size: m.sizeMeleePenalty(), stumble: res.stumble }));
       return false;
     }
     let dominant = 'bash', best = 0;
@@ -427,7 +431,7 @@ export class PlayerCombat implements GameSystem {
       m.busy = Math.max(m.busy, stop);
     }
     // Before the technique can knock it away: the impact is where it stood when struck.
-    this.feedback('melee', res.crit ? 'crit' : 'hit', m, m.x, m.y, res.total, stop);
+    this.feedback('melee', res.crit ? 'crit' : 'hit', m, m.x, m.y, res.total, stop, res.total <= 0 ? 'no damage' : undefined);
     if (m.dead) triggerBuffs(p, 'onkill');
     else if (res.outcome) applyTechniqueToMonster(m, res.outcome, p.x, p.y, rng);
     if (victims.length) {
@@ -441,7 +445,7 @@ export class PlayerCombat implements GameSystem {
    * Tell hit-feedback listeners (particles, stagger, crosshair marker) how an attack went.
    * The impact point is the near side of the target (what the camera sees get hit).
    */
-  private feedback(kind: 'melee' | 'gun' | 'throw', outcome: 'hit' | 'crit' | 'miss' | 'whiff', m: Monster | null, x: number, y: number, damage: number, hitStop = 0): void {
+  private feedback(kind: 'melee' | 'gun' | 'throw', outcome: 'hit' | 'crit' | 'miss' | 'whiff', m: Monster | null, x: number, y: number, damage: number, hitStop = 0, reason?: string): void {
     const p = this.game.player;
     if (m) {
       const d = Math.hypot(m.x - p.x, m.y - p.y) || 1;
@@ -455,6 +459,7 @@ export class PlayerCombat implements GameSystem {
       heavy: !!m && damage > 0 && (damage >= m.hpMax * 0.3 || outcome === 'crit' || damage >= 20),
       blood: m ? this.sys.bloodType(m.type) : undefined,
       hitStop,
+      reason,
     });
   }
 

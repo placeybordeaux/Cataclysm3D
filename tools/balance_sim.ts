@@ -49,7 +49,7 @@ const HELP = `balance_sim: headless difficulty-preset simulation (see docs/BALAN
 
   --preset accessible|classic   preset to simulate (default accessible)
   --seeds N                     world seeds (default 20), starting at --seed0 (default 1)
-  --scenario all|day1|duel|needs|cold (default all)
+  --scenario all|day1|duel|first|needs|cold (default all)
   --hours H                     day1 length in game hours from 08:00 (default 24)
   --set key=value[,key=value]   override preset knobs (e.g. --set spawnScale=0.5,safeRadius=16)
   --out FILE                    append JSON-lines records here
@@ -531,7 +531,7 @@ class Newcomer {
  * weapon is ready, never guard or side-step. Real-time loop (telegraphs, hit-stop, swing
  * phases) exactly as in play.
  */
-function duel(seed: number, weapon: string, foes: number): Record<string, number | string | boolean> {
+function duel(seed: number, weapon: string, foes: number, o: { mash?: boolean } = {}): Record<string, number | string | boolean> {
   const { game: gd } = data();
   const game = new Game(gd, seed, fakeInput());
   const floor = 't_dirt';
@@ -557,14 +557,25 @@ function duel(seed: number, weapon: string, foes: number): Record<string, number
   const ms: Monster[] = [];
   for (let i = 0; i < foes; i++) ms.push(mons.sys.spawn(gd.monsters.mon_zombie, 34.5, 29.5 + 2 * i, 0));
   const hp0 = MAIN_PARTS.reduce((a, bp) => a + p.hp[bp].cur, 0);
-  let t = 0, swings = 0;
+  let t = 0, swings = 0, grabs = 0, grabbedFor = 0, wasGrabbed = false, readyFor = 0;
+  const outcomes: Record<string, number> = {};
+  game.events.on('playerAttack', (e) => void (outcomes[e.outcome] = (outcomes[e.outcome] ?? 0) + 1));
   while (t < 180 && !p.dead && ms.some((m) => !m.dead)) {
+    const held = !!mons.sys.grabbedBy;
+    if (held && !wasGrabbed) grabs++;
+    wasGrabbed = held;
+    if (held) grabbedFor += TICK;
+    // The newcomer mashes the interact key when grabbed, as the banner says (~5 presses/s),
+    // and doesn't swing meanwhile; between swings they take ~0.35 s to react.
+    if (held && o.mash && Math.round(t / TICK) % 6 === 0) mons.sys.struggle();
+    const busy = o.mash && (held || (mons.combat.cooldown <= 0 && (readyFor += TICK) < 0.35));
+    if (mons.combat.cooldown > 0) readyFor = 0;
     const m = ms.filter((x) => !x.dead).sort((a, c) => Math.hypot(a.x - p.x, a.y - p.y) - Math.hypot(c.x - p.x, c.y - p.y))[0];
     game.input.held.clear();
     p.yaw = Math.atan2(m.x - p.x, -(m.y - p.y));
     const d = Math.hypot(m.x - p.x, m.y - p.y) - m.radius;
     if (d > 0.9) game.input.held.add('KeyW');
-    if (d <= 1.15 && mons.combat.cooldown <= 0 && !mons.combat.swing) {
+    if (d <= 1.15 && mons.combat.cooldown <= 0 && !mons.combat.swing && !busy) {
       mons.combat.beginSwing();
       swings++;
     }
@@ -572,7 +583,10 @@ function duel(seed: number, weapon: string, foes: number): Record<string, number
     t += TICK;
   }
   const hp1 = MAIN_PARTS.reduce((a, bp) => a + Math.max(0, p.hp[bp].cur), 0);
-  return { weapon, foes, won: !p.dead && ms.every((m) => m.dead), died: p.dead, seconds: +t.toFixed(1), swings, swingsPerSec: +(swings / t).toFixed(2), hpLost: hp0 - hp1, torsoLeft: p.hp.torso.cur };
+  return {
+    weapon, foes, won: !p.dead && ms.every((m) => m.dead), died: p.dead, seconds: +t.toFixed(1), swings, swingsPerSec: +(swings / t).toFixed(2), hpLost: hp0 - hp1, torsoLeft: p.hp.torso.cur,
+    grabs, grabbedFor: +grabbedFor.toFixed(1), hits: (outcomes.hit ?? 0) + (outcomes.crit ?? 0) + (outcomes.kill ?? 0) + (outcomes.block ?? 0), misses: outcomes.miss ?? 0, whiffs: outcomes.whiff ?? 0,
+  };
 }
 
 // ------------------------------------------------------------------ needs over 3 days
@@ -683,6 +697,11 @@ function run(): Rec[] {
     if (args.out) appendFileSync(args.out, JSON.stringify(r) + '\n');
   };
   if (want('needs')) emit({ scenario: 'needs', preset: label, seed: 0, ...needs() });
+  // The first fight of a newcomer (QA_V2): a long pointy stick against one zombie, mashing the
+  // interact key when grabbed (not swinging meanwhile), a beat of reaction between swings.
+  // The goal on Accessible is ~8–12 s.
+  if (want('first'))
+    for (let seed = s0; seed < s0 + n; seed++) emit({ scenario: 'first', preset: label, seed, ...duel(seed, 'pointy_stick_long', 1, { mash: true }) });
   if (want('duel'))
     for (const weapon of ['fists', 'knife_chef', 'pipe', 'crowbar', 'bat'])
       for (const foes of [1, 2])
@@ -760,6 +779,18 @@ function summarise(recs: Rec[]): void {
       const [pr, w, f] = k.split('|');
       const rs = du.filter((r) => r.preset === pr && r.weapon === w && String(r.foes) === f);
       console.log(`| ${pr} | ${w} | ${f} | ${rs.length} | ${rs.filter((r) => r.won).length} | ${rs.filter((r) => r.died).length} | ${median(rs.map((r) => r.seconds as number)).toFixed(0)} | ${median(rs.map((r) => r.hpLost as number))} | ${median(rs.map((r) => r.swingsPerSec as number)).toFixed(2)} |`);
+    }
+  }
+  const fi = recs.filter((r) => r.scenario === 'first') as unknown as (Record<string, number | string | boolean> & Rec)[];
+  if (fi.length) {
+    console.log('\n## First fight: long pointy stick vs one zombie, mashing e when grabbed\n');
+    console.log('| preset | runs | won | fight s (median / p90) | grabs (median / max) | grabbed s (median) | hits | misses | whiffs | HP lost |');
+    console.log('|---|---|---|---|---|---|---|---|---|---|');
+    for (const pr of [...new Set(fi.map((r) => r.preset))]) {
+      const rs = fi.filter((r) => r.preset === pr);
+      const secs = rs.map((r) => r.seconds as number).sort((a, b) => a - b);
+      const m = (k: string) => median(rs.map((r) => r[k] as number));
+      console.log(`| ${pr} | ${rs.length} | ${rs.filter((r) => r.won).length} | ${m('seconds').toFixed(1)} / ${secs[Math.floor(secs.length * 0.9)]?.toFixed(1)} | ${m('grabs')} / ${Math.max(...rs.map((r) => r.grabs as number))} | ${m('grabbedFor').toFixed(1)} | ${m('hits')} | ${m('misses')} | ${m('whiffs')} | ${m('hpLost')} |`);
     }
   }
   const cd = recs.filter((r) => r.scenario === 'cold') as unknown as (Record<string, number | string | boolean> & Rec)[];

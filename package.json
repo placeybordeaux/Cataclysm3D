@@ -18,6 +18,7 @@
     "extract:achievements": "tsx tools/extract/achievements.ts",
     "atlas": "tsx tools/atlas/index.ts",
     "shot": "tsx tools/shot.ts",
+    "sim": "NODE_OPTIONS='--import ./tools/lib/css-register.mjs' tsx tools/balance_sim.ts",
     "audio": "tsx tools/audio/index.ts"
   },
   "dependencies": {

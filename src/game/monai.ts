@@ -525,6 +525,12 @@ export class MonsterSystem implements GameSystem {
     const share = dmg / Math.max(1, m.hpMax);
     const flinch = Math.min(FEEL.flinchMax, share * FEEL.flinchPerHp);
     m.flinch = Math.max(m.flinch, flinch);
+    // Accessible: a staggering blow makes the grabber let go (grab escape by fighting back,
+    // not only by mashing the struggle key).
+    if (FEEL.staggerBreaksGrab && this.grabbedBy === m && (share >= FEEL.staggerShare || crit)) {
+      this.releaseGrab();
+      this.message(`${m.TheName()} loses its grip on you!`, 'c_light_green');
+    }
     const w = m.windup;
     if (w) {
       if (share >= FEEL.staggerShare || crit) this.interruptWindup(m);
@@ -1027,7 +1033,12 @@ export class MonsterSystem implements GameSystem {
   /** Cooldowns after a special attack went off. */
   private specialDone(m: Monster, sa: MonsterWindup['special'] & object, isMelee: boolean, charged = false): void {
     const cd = typeof sa.def.cooldown === 'number' ? sa.def.cooldown : 0;
-    sa.cooldown = Math.max(sa.cooldown, turnsToSeconds(cd));
+    // Melee specials (grab, bite, scratch) count their cooldown on the melee clock, like the
+    // swings they alternate with: on the movement clock a zombie grabbed ~1.5× as often per
+    // swing as in BN. Accessible also spaces grabs out (FEEL.grabCooldownMul).
+    const grab = sa.def.id === 'GRAB' || sa.def.id === 'GRAB_DRAG';
+    const secs = isMelee ? (cd / MELEE_SCALE) * (grab ? FEEL.grabCooldownMul : 1) : turnsToSeconds(cd);
+    sa.cooldown = Math.max(sa.cooldown, secs);
     const cost = typeof sa.def.move_cost === 'number' ? sa.def.move_cost : 100;
     // A telegraphed blow already charged its swing cycle when the wind-up began (startWindup).
     if (isMelee && !charged) m.attackCooldown = Math.max(m.attackCooldown, cost / m.speed / MELEE_SCALE);

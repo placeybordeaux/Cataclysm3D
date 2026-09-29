@@ -14,6 +14,7 @@ import { cssColor } from './framework';
 //  - threat wedges on a ring: red toward whoever just hurt you (fades), yellow pulsing toward
 //    a monster winding up a blow outside your view (the telegraph you can't see)
 //  - a GRABBED banner with the struggle key and a bar that fills as struggling builds up
+//  - why a blow didn't connect ("miss: dodged", "out of reach", "no damage"), briefly, above it
 // Everything is pointer-events: none and hidden in top-down view and menus.
 
 const NS = 'http://www.w3.org/2000/svg';
@@ -52,6 +53,8 @@ export class CombatHud {
   private guard: SVGPathElement;
   private threatG: SVGGElement;
   private grabEl: HTMLDivElement;
+  private whyEl: HTMLDivElement;
+  private whyT = 0;
   private threats: Threat[] = [];
   private readyBlink = 0;
   private wasCooling = false;
@@ -82,7 +85,21 @@ export class CombatHud {
       background: 'rgba(0,0,0,.65)', padding: '1px 6px', color: cssColor('c_light_red'), textShadow: '1px 1px 0 #000', display: 'none',
     });
     this.root.appendChild(this.grabEl);
+    this.whyEl = document.createElement('div');
+    this.whyEl.className = 'combat-why';
+    Object.assign(this.whyEl.style, {
+      position: 'absolute', left: '0', top: '-40px', transform: 'translateX(-50%)', whiteSpace: 'nowrap',
+      color: cssColor('c_light_gray'), textShadow: '1px 1px 0 #000, -1px -1px 0 #000', display: 'none',
+    });
+    this.root.appendChild(this.whyEl);
     parent.appendChild(this.root);
+
+    game.events.on('playerAttack', (e) => {
+      if (e.kind !== 'melee' || !e.reason) return;
+      this.whyEl.textContent = e.outcome === 'miss' ? `miss: ${e.reason}` : e.reason;
+      this.whyEl.style.color = cssColor(e.reason === 'dodged' || e.reason === 'no damage' ? 'c_yellow' : 'c_light_gray');
+      this.whyT = 1.0;
+    });
 
     game.events.on('playerHurt', (e) => {
       const m = e.source as { x?: number; y?: number } | undefined;
@@ -176,12 +193,19 @@ export class CombatHud {
       }, this.threatG);
     }
 
+    // --- why the last blow didn't connect (fades out over its last 0.3 s)
+    this.whyT = Math.max(0, this.whyT - dt);
+    this.whyEl.style.display = this.whyT > 0 ? '' : 'none';
+    if (this.whyT > 0) this.whyEl.style.opacity = String(Math.min(1, this.whyT / 0.3));
+
     // --- grabbed
     const g = this.sys.grabbedBy;
     if (g) {
       const key = game.keys.label('interact');
       const n = Math.min(1, def.struggle / 12);
-      this.grabEl.innerHTML = `GRABBED by ${g.theName()} — mash <span style="color:${cssColor('c_yellow')}">[${key}]</span> to break free`
+      // Accessible: a hard enough hit also makes it let go (FEEL.staggerBreaksGrab).
+      const alt = FEEL.staggerBreaksGrab ? ' (or hit it hard)' : '';
+      this.grabEl.innerHTML = `GRABBED by ${g.theName()} — mash <span style="color:${cssColor('c_yellow')}">[${key}]</span> to break free${alt}`
         + `<div style="height:3px;margin-top:2px;background:#333"><div style="height:3px;width:${(n * 100).toFixed(0)}%;background:${cssColor('c_yellow')}"></div></div>`;
       this.grabEl.style.display = '';
     } else this.grabEl.style.display = 'none';
