@@ -39,21 +39,20 @@ export function staminaBar(cur: number, max: number): Colored {
   return bar(cur, max, 5, true, STAMINA_COLORS);
 }
 
-/** display::hunger_text_color */
+/** Character::get_hunger_description colours (BN). */
 export function hungerColor(state: string): string {
   return (
     ({
-      Engorged: 'c_red', Full: 'c_yellow', Satisfied: 'c_green', Peckish: 'c_light_gray', Hungry: 'c_yellow',
-      'Near starving': 'c_red', 'Starving!': 'c_red', Famished: 'c_light_red',
+      Engorged: 'c_pink', Sated: 'c_green', Hungry: 'c_yellow', 'Very Hungry': 'c_yellow', Famished: 'c_light_red', Starving: 'c_red',
     } as Record<string, string>)[state] ?? 'c_white'
   );
 }
 
-/** display::thirst_text_color */
+/** Character::get_thirst_description colours (BN). */
 export function thirstColor(desc: string): string {
   if (desc === 'Parched' || desc === 'Dehydrated') return 'c_light_red';
-  if (desc === 'Very thirsty' || desc === 'Thirsty') return 'c_yellow';
-  if (desc === 'Turgid' || desc === 'Hydrated' || desc === 'Slaked') return 'c_green';
+  if (desc === 'Very Thirsty' || desc === 'Thirsty') return 'c_yellow';
+  if (desc === 'Turgid' || desc === 'Hydrated') return 'c_green';
   return 'c_white';
 }
 

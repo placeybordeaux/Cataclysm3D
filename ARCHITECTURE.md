@@ -101,8 +101,14 @@ tests/               vitest unit tests (pure logic, no DOM/WebGL)
 ### Survivor simulation (src/game, UI-free)
 
 - `item.ts` Item/Pocket (charges, damage, rot, pockets, magazines), `createItem`, `fromSpawned`.
-- `character.ts` Character: stats, skills, body-part HP, pain, stamina, needs, sleep, blood,
-  morale/focus, body temperature, traits. `update(gameDt)` in game seconds.
+- `character.ts` Character: stats, skills, body-part HP, pain, stamina, needs, sleep,
+  morale/focus, body temperature, traits. `update(gameDt)` in game seconds. BN rules (file
+  header lists the DDA differences): `storedKcal` capped at `maxStoredKcal()` (17500), a
+  calorie-only `stomach`, instant thirst, flat 10000 stamina. Traits act through
+  `mutationValue(field)` (BN mutation_branch floats, BN aggregation) and BN enchantments
+  (`enchant(value)` / `enchantBonus(value, base)` = add + base × multiply + max; providers in
+  `enchantProviders`). `sleepComfort` (set by rest.ts) feeds `rollCanSleep`.
+- `healing.ts` BN heal_actor (`applyHealActor`), used by Inventory.use for `heal` actions.
 - `effects.ts` data-driven effect_type (misc.effect_type, with built-in fallbacks).
 - `inventory.ts` `character.inv`: wield/wear/pick up/drop/consume/use/reload, qualities,
   encumbrance, armor absorption. Actions return `{ok, msg, moves, dropped?}`.
