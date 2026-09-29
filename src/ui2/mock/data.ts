@@ -28,6 +28,8 @@ export interface RawItem {
   flags?: string[];
   armor?: { covers?: string[]; encumbrance?: number | number[] }[];
   pocket_data?: { pocket_type?: string; max_contains_volume?: number; max_contains_weight?: number; holster?: boolean }[];
+  /** Bright Nights: one undivided storage volume (ml) instead of DDA's pocket_data. */
+  storage?: number;
   melee_damage?: Record<string, number>;
   to_hit?: number;
   warmth?: number;
@@ -71,7 +73,9 @@ export function mockItem(raw: RawItem, n: number, seq: string): ItemView {
   const subtypes = raw.subtypes ?? [];
   const stackable = subtypes.some((s) => STACKY.has(s)) || raw.count !== undefined || raw.charges !== undefined;
   const pockets = (raw.pocket_data ?? []).filter((p) => (p.pocket_type ?? 'CONTAINER') === 'CONTAINER');
-  const capVol = pockets.reduce((a, p) => a + (p.max_contains_volume ?? 0), 0);
+  // DDA data describes pockets; the BN items.json the game ships has `storage` (ml) and no
+  // weight limit. Without the fallback nothing in BN data is a container: no backpack window.
+  const capVol = pockets.length ? pockets.reduce((a, p) => a + (p.max_contains_volume ?? 0), 0) : raw.storage ?? 0;
   const capWt = pockets.reduce((a, p) => a + (p.max_contains_weight ?? 0), 0);
   const covers = [...new Set((raw.armor ?? []).flatMap((a) => a.covers ?? []))];
   const stats: ItemStat[] = [];

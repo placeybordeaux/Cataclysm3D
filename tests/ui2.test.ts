@@ -268,5 +268,12 @@ describe('ui2 mock store', () => {
     const k = buildMockKit(raw, (m) => warnings.push(m));
     // Lenient: the BN data port may rename a few ids; the showcase just shows fewer items.
     expect(k.typeIds.length).toBeGreaterThan(20);
+    // BN items carry `storage`, not pocket_data: the backpack must still be a container
+    // with its kit inside (the showcase's backpack window and drag target depend on it).
+    const bag = k.store.contents('worn:back')[0];
+    expect(bag?.typeId).toBe('backpack');
+    expect(bag.capacity?.volume).toBeGreaterThan(0);
+    expect(k.store.contents(insideOf(bag.id)).length).toBeGreaterThan(3);
+    expect(warnings.filter((w) => /container .* missing/.test(w))).toEqual([]);
   });
 });
