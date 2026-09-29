@@ -48,13 +48,15 @@ export function openEscMenu(ctx: UiContext, onQuit: () => void): Panel {
     },
   ];
   let sel = 0;
+  const openedAt = performance.now();
   const col = h('div', { class: 'esc-col', attrs: { 'data-testid': 'esc-menu' } });
   const buttons = entries.map((e, i) => {
     const b = button(e.label, () => void activate(i), { key: e.key, disabled: e.disabled, tone: e.tone });
     b.dataset.i = String(i);
     // Only a real mouse move takes the highlight: the cursor reappears mid-screen when the lock
     // ends, and must not steal Resume's highlight from Enter.
-    b.addEventListener('mousemove', (ev) => (ev.movementX || ev.movementY) && select(i));
+    // …and the unlock itself can report a jump of the resting cursor: ignore the first 400 ms.
+    b.addEventListener('mousemove', (ev) => (ev.movementX || ev.movementY) && performance.now() - openedAt > 400 && select(i));
     return b;
   });
   col.append(...buttons);

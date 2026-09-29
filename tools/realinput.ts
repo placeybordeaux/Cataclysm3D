@@ -702,12 +702,13 @@ const scenarios: Scenario[] = [
     await x.key('i');
     await sleep(300);
     await x.key('Escape');
-    await until((t) => t.windows.length > 0, 2000);
+    await until((t) => t.panelIds.includes('scr.esc'), 2000);
     const e0 = await clock();
     await sleep(1000);
     const e1 = await clock();
-    const paused = await js<boolean>('cdda.game.paused');
-    check('Classic: the Esc menu stops time (game.paused, not only the lost mouse)', e1 === e0 && paused, { e0, e1, paused, windows: (await state()).windows });
+    // The ui2 Esc menu is a pauses: 'always' surface: a pause hold, not only the lost mouse.
+    const paused = await js<boolean>('cdda.game.tacticalPause');
+    check('Classic: the Esc menu stops time (a pause hold, not only the lost mouse)', e1 === e0 && paused, { e0, e1, paused, panels: (await state()).panelIds });
     await js(`cdda.setDifficulty('accessible')`);
     await toGameplay();
   }],
