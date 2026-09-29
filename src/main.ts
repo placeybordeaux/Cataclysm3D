@@ -77,7 +77,7 @@ async function main(): Promise<void> {
   if (worldgen) installWorldgenDebug(api, game, worldgen);
   installPerfDebug(api, game, worldgen ? () => worldgen!.overmap.citiesNear(game.player.x / 24, game.player.y / 24) : undefined);
   installAudio(game, api);
-  installCrafting(game, api);
+  installCrafting(game, api, renderer);
   installWorldInteraction(game, renderer, api);
   installNature(game, renderer, api);
   // One light model: vision.ts lightAt (monster vision, "too dark", playerCanSee) reads the
