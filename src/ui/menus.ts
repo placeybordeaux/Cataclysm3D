@@ -27,6 +27,7 @@ export function showMainMenu(ctx: UiContext, hud: Hud): Promise<void> {
   return new Promise((resolve) => {
     hud.setVisible(false);
     game.paused = true;
+    ctx.renderer.hideViewmodel = true;
     const root = getUiRoot();
     const el = document.createElement('div');
     el.className = 'screen dim main-menu';
@@ -53,6 +54,7 @@ export function showMainMenu(ctx: UiContext, hud: Hud): Promise<void> {
       p.yaw = saved.yaw;
       p.pitch = saved.pitch;
       game.paused = false;
+      ctx.renderer.hideViewmodel = false;
       hud.setVisible(true);
       resolve();
     };
