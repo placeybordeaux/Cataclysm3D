@@ -55,7 +55,10 @@ tileset, rendered in the "3D pixel art" style of *Project Shadowglass*.
   so **anything a player does must also be checked with OS-level input**: `drive.ts serve
   --headful --params "...&realinput=1"` runs a windowed Chromium on Xvfb with `xkey`/`xmove`/
   `xclick`/`state` commands (xdotool), and `tools/realinput.ts` is the scripted real-input
-  regression (pointer lock, Esc, fullscreen, stuck keys, AZERTY, rebinding…; ~160 checks).
+  regression (pointer lock, Esc, fullscreen, stuck keys, AZERTY, rebinding, inventory, quit…; ~315
+  checks). `--gpu` (via `heavy --kind gpu`) renders on the real GPU — SwiftShader is too slow for the
+  default look; `--browser firefox` runs it in Firefox (the human's browser); `--hmr` like `npm run dev`.
+  Findings of the v2 newcomer playthrough: docs/QA_V2.md.
 - Static assets are fetched relative to `ASSET_BASE` (src/core/assets.ts, Vite `base: './'`), so
   `dist/` works from any sub-path: never hard-code `/data/`, `/atlas/`, `/audio/`.
 - `window.cdda` (src/debug.ts) is the automation API. Register helpers for anything you
