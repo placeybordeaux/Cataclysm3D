@@ -20,6 +20,8 @@ import { installNpcs } from './npcs';
 import { installMutBio } from './mutbio';
 import { installChunkTracking } from './save/tracking';
 import { installSave, takePendingLoad } from './save/install';
+import { frameStats, installPerfDebug } from './perfDebug';
+import { ChunkPrefetcher } from './world/prefetch';
 
 // URL params (all optional): seed=<int>, gen=world|test (default world), debug=1 (render stats overlay),
 // renderer params px/grade/tex/cam/walls (see src/render/renderer.ts), debug=atlas (sprite sheet view
@@ -61,6 +63,7 @@ async function main(): Promise<void> {
   await renderer.ready;
   const api = installDebugApi(game, renderer);
   if (worldgen) installWorldgenDebug(api, game, worldgen);
+  installPerfDebug(api, game, worldgen ? () => worldgen!.overmap.citiesNear(game.player.x / 24, game.player.y / 24) : undefined);
   installAudio(game, api);
   installCrafting(game, api);
   installWorldInteraction(game, renderer, api);
@@ -76,12 +79,19 @@ async function main(): Promise<void> {
   game.events.on('gameLoaded', () => renderer.chunks.invalidateAll());
   const ui = await installUi(game, renderer, worldgen, api);
 
+  // Mapgen ahead of the player in idle time (see src/world/prefetch.ts); ?prefetch=0 disables.
+  const prefetch = new ChunkPrefetcher(game.map, () => game.player);
+  api.prefetch = prefetch;
+  if (params.get('prefetch') !== '0') prefetch.start();
+
   let last = performance.now();
   const loop = (now: number) => {
     const dt = Math.min((now - last) / 1000, 0.1);
     last = now;
     game.frame(dt);
+    prefetch.observe(now);
     renderer.render();
+    frameStats.frame(performance.now() - now, now);
     requestAnimationFrame(loop);
   };
   requestAnimationFrame(loop);

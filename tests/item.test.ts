@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createItem, fromSpawned, hourlyRotpoints, Item, toHitFromAccuracy } from '../src/game/item';
+import { createItem, fromSpawned, hourlyRotpoints, Item, placeContent, placeContents, toHitFromAccuracy } from '../src/game/item';
 import { makeData } from './fixtures/gamedata';
 
 const data = makeData();
@@ -148,6 +148,19 @@ describe('spawning', () => {
     const out = fromSpawned(data, { id: 'glock_19', count: 2, contents: [{ id: 'glockmag', count: 1 }] });
     expect(out).toHaveLength(2);
     expect(out[0].magazineCurrent()?.typeId).toBe('glockmag');
+  });
+
+  it('placeContents bulk-places identical items exactly like one-by-one placeContent', () => {
+    const mk = (n: number) => Array.from({ length: n }, () => createItem(data, 'bandages'));
+    const a = createItem(data, 'backpack'), b = createItem(data, 'backpack');
+    const t0 = performance.now();
+    const leftA = placeContents(a, mk(6000));
+    const bulkMs = performance.now() - t0;
+    const leftB = mk(600).filter((it) => placeContent(b, it) !== null);
+    expect(a.pockets.map((p) => p.contents.length)).toEqual(b.pockets.map((p) => p.contents.length));
+    expect(a.pockets[0].contents.length).toBeGreaterThan(0);
+    expect(leftA.length).toBe(6000 - (600 - leftB.length));
+    expect(bulkMs).toBeLessThan(200);
   });
 
   it('unknown ids: createItem throws, fromSpawned warns once and skips', () => {

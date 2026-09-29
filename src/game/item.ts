@@ -215,6 +215,8 @@ export class Pocket {
   }
 }
 
+const cbcCache = new WeakMap<ItemDef, boolean>();
+
 export class Item implements MapItem {
   typeId: string;
   def: ItemDef;
@@ -240,7 +242,10 @@ export class Item implements MapItem {
 
   // --- classification ---
   get countByCharges(): boolean {
-    return countByCharges(this.def);
+    // Hot in weight()/volume() sums; defs are immutable so the answer is cached per def.
+    let v = cbcCache.get(this.def);
+    if (v === undefined) cbcCache.set(this.def, (v = countByCharges(this.def)));
+    return v;
   }
   isAmmo(): boolean {
     return hasSubtype(this.def, 'AMMO');
@@ -780,10 +785,8 @@ export function fromSpawned(data: GameData, s: SpawnedItem): Item[] {
     const it = new Item(data, def);
     if (it.hasFlag('SPAWN_ACTIVE')) it.active = true;
     for (const cs of s.contents ?? []) {
-      for (const c of fromSpawned(data, cs)) {
-        const left = placeContent(it, c);
-        if (left) warnOnce('fit', `${c.typeId}>${it.typeId}`, `fromSpawned: ${c.typeId} does not fit in ${it.typeId}`);
-      }
+      for (const c of placeContents(it, fromSpawned(data, cs)))
+        warnOnce('fit', `${c.typeId}>${it.typeId}`, `fromSpawned: ${c.typeId} does not fit in ${it.typeId}`);
     }
     if (s.charges !== undefined && s.charges > 0) {
       if ((def.max_charges ?? 0) > 0 && !it.magazineWell() && it.magazinePockets().length === 0) it.charges = Math.min(s.charges, def.max_charges!);
@@ -803,6 +806,52 @@ export function placeContent(into: Item, it: Item): Item | null {
   for (const p of into.pockets) {
     if (!left) break;
     if (p.canContain(left).ok) left = p.insert(left);
+  }
+  return left;
+}
+
+/**
+ * placeContent for many items; returns what didn't fit. Mapgen puts thousands of identical
+ * loose items in one container (a 30 gallon barrel of 6000 quicklime powders), and inserting
+ * them one by one re-sums the pocket each time (O(n²): seconds of frame time). Runs of
+ * identical empty non-charge items are therefore sized once per pocket and pushed in bulk.
+ */
+export function placeContents(into: Item, items: Item[]): Item[] {
+  const left: Item[] = [];
+  const plain = (x: Item) => !x.countByCharges && x.pockets.every((p) => p.empty);
+  let i = 0;
+  while (i < items.length) {
+    const it = items[i];
+    let j = i + 1;
+    if (plain(it)) while (j < items.length && items[j].def === it.def && items[j].damage === it.damage && items[j].rot === it.rot && plain(items[j])) j++;
+    if (j - i < 8) {
+      for (; i < j; i++) {
+        const l = placeContent(into, items[i]);
+        if (l) left.push(l);
+      }
+      continue;
+    }
+    let k = i;
+    const v = it.volume(), w = it.weight();
+    for (const p of into.pockets) {
+      if (k >= j) break;
+      // Holsters take one stack only; leave them (and non-container pockets) to placeContent.
+      if (p.type !== 'CONTAINER' || p.data.holster || !p.canContain(it).ok) continue;
+      const volLeft = p.volumeRemaining();
+      const wtLeft = p.weightRemaining() / (p.data.weight_multiplier ?? 1);
+      let n = j - k;
+      if (v > 0) n = Math.min(n, Math.floor(volLeft / v + 1e-9));
+      if (w > 0) n = Math.min(n, Math.floor(wtLeft / w + 1e-9));
+      for (let m = 0; m < n; m++) p.contents.push(items[k++]);
+    }
+    // Identical items: if the next one doesn't fit anywhere, none of the rest will either.
+    for (; k < j; k++) {
+      if (placeContent(into, items[k])) {
+        left.push(...items.slice(k, j));
+        break;
+      }
+    }
+    i = j;
   }
   return left;
 }
