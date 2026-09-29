@@ -5,10 +5,15 @@ import { Renderer } from './render/renderer';
 import { TestGenerator } from './world/testgen';
 import { installDebugApi } from './debug';
 
-// URL params (all optional): seed=<int>, gen=test, debug=1
+// URL params (all optional): seed=<int>, gen=test, debug=1, debug=atlas (sprite sheet view
+// instead of the game, see src/render/atlasDebug.ts)
 
 async function main(): Promise<void> {
   const params = new URLSearchParams(location.search);
+  if (params.get('debug') === 'atlas') {
+    const { runAtlasDebug } = await import('./render/atlasDebug');
+    return runAtlasDebug(document.getElementById('view') as HTMLCanvasElement);
+  }
   const seed = Number(params.get('seed') ?? Math.floor(Math.random() * 2 ** 31));
   const canvas = document.getElementById('view') as HTMLCanvasElement;
   const data = await loadGameData();
