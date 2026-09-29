@@ -313,8 +313,16 @@ function installDebug(api: DebugApi, game: Game, sys: NpcSystem, wg: WorldGenera
     if (!wg) return null;
     const sp = wg.overmap.findSpecial('evac_center', { x: Math.floor(p().x / CHUNK), y: Math.floor(p().y / CHUNK) }, 3);
     if (!sp) return null;
-    // Generate the whole center so its NPCs exist, then stand next to one of them.
-    for (let dy = -1; dy < 18; dy++) for (let dx = -1; dx < 18; dx++) game.map.chunk(sp.x + dx, sp.y + dy, 0);
+    // Generate the whole center so its NPCs exist, then stand next to one of them. The special
+    // is rotated, so its OMTs can lie on any side of the origin: find them by id.
+    let bx0 = Infinity, by0 = Infinity, bx1 = -Infinity, by1 = -Infinity;
+    for (let dy = -18; dy <= 18; dy++)
+      for (let dx = -18; dx <= 18; dx++) {
+        if (!/^(refctr|evac_center)/.test(wg.overmap.omtAt(sp.x + dx, sp.y + dy, 0).id)) continue;
+        game.map.chunk(sp.x + dx, sp.y + dy, 0);
+        bx0 = Math.min(bx0, sp.x + dx), by0 = Math.min(by0, sp.y + dy), bx1 = Math.max(bx1, sp.x + dx), by1 = Math.max(by1, sp.y + dy);
+      }
+    if (bx0 === Infinity) (bx0 = bx1 = sp.x), (by0 = by1 = sp.y);
     const merchant = sys.npcs.find((n) => n.templateId === 'free_merchants_merchant');
     const anchor = where === 'merchant' ? merchant : where === 'lobby' ? sys.npcs.find((n) => n.templateId === 'refugee_beggar1') ?? merchant : null;
     let x: number, y: number;
@@ -324,8 +332,9 @@ function installDebug(api: DebugApi, game: Game, sys: NpcSystem, wg: WorldGenera
       y = anchor.tileY + (spot?.[1] ?? 1) + 0.5;
       p().yaw = Math.atan2(anchor.x - x, -(anchor.y - y));
     } else {
-      x = (sp.x + 7) * CHUNK + 12;
-      y = (sp.y + 16) * CHUNK + 4;
+      // just outside the south fence, midway along it
+      x = Math.floor((bx0 + bx1) / 2) * CHUNK + 12;
+      y = (by1 + 1) * CHUNK + 4;
     }
     p().x = x;
     p().y = y;

@@ -310,7 +310,7 @@ function dashHtml(game: Game, v: Vehicle): string {
     const pct = cap ? Math.round((100 * v.fuelLeft(t)) / cap) : 0;
     const bars = Math.round(pct / 20);
     const col = pct > 50 ? 'c_light_green' : pct > 15 ? 'c_yellow' : 'c_red';
-    return `${c('c_light_gray', t === 'battery' ? 'Bat' : (v.vdata.fuels[t]?.name ?? t).slice(0, 4))} ${c(col, '|'.repeat(bars) + '.'.repeat(5 - bars))}`;
+    return `${c('c_light_gray', t === 'battery' ? 'Bat' : capitalize(v.vdata.fuels[t]?.name ?? t))} ${c(col, '|'.repeat(bars) + '.'.repeat(5 - bars))}`;
   };
   const parts = [
     c('c_white', v.name),
@@ -528,4 +528,9 @@ function installVehicleDebug(api: DebugApi, game: Game, vs: VehicleSystem): void
   api.examineVehicle = (dx: number, dy: number) => examineVehicle(game, p().tileX + dx, p().tileY + dy, p().z);
   api.vehicleSystem = vs;
   api.vehiclesJSON = () => vs.toJSON();
+}
+
+/** 'gasoline' -> 'Gasoline' (a clipped 'gaso' read like a typo on the dashboard). */
+function capitalize(s: string): string {
+  return s.charAt(0).toUpperCase() + s.slice(1);
 }

@@ -515,7 +515,9 @@ export class MonsterSystem implements GameSystem {
     const corpseType = gibbed ? 'SPLATTER' : df.corpse_type ?? 'NORMAL';
     const seen = this.playerSees(m);
     if (seen) {
-      const msg = gibbed ? `The ${monsterName(def)} is torn apart!` : (df.message ?? 'The %s dies!').replace('%s', monsterName(def));
+      // Named monsters (mission targets) die by name, as they fought: "Sean McLaughlin dies!"
+      const tmpl = gibbed ? 'The %s is torn apart!' : df.message ?? 'The %s dies!';
+      const msg = m.name ? tmpl.replace(/\b[Tt]he %s/, m.name).replace('%s', m.name) : tmpl.replace('%s', monsterName(def));
       if (msg) this.message(msg, killer === 'player' ? 'c_light_green' : undefined);
     }
     sfx.monsterDeath(def.id, m, gibbed);

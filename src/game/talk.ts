@@ -276,11 +276,18 @@ export class Dialogue implements MathHost {
     return undefined;
   }
 
+  /**
+   * dialog_helper::bye_message: the class's bye_message_override is a snippet *category*
+   * ("null" = say nothing); otherwise the template's snip_bye, default "<end_talking_bye>".
+   */
   private byeMessage(): string {
     const cls = this.w.nd.classes[this.npc.classId];
     const o = cls?.bye_message_override;
     if (o === 'null') return '';
-    return this.parseTags(o ?? '<bye>');
+    if (typeof o === 'string') return this.parseTags(o.startsWith('<') ? o : `<${o}>`);
+    const tem = this.npc.templateId ? this.w.nd.templates[this.npc.templateId] : undefined;
+    const snip = tem?.snip_bye;
+    return this.parseTags(typeof snip === 'string' ? snip : '<end_talking_bye>');
   }
 
   private describeMission(): string {
