@@ -327,7 +327,10 @@ export function interactionsAt(game: Game, x: number, y: number, z: number): Int
 
   // --- containers & items (a planted crop keeps its seed as a hidden item: not a container)
   const items = map.itemsAt(x, y, z);
-  if (!hasFlag(f, 'PLANT') && (items.length || (f.id !== 'f_null' && hasFlag(f, 'CONTAINER')))) {
+  // Tiny "containers" (a potted plant's 10 L of soil) only get an entry when something is in
+  // them; an empty locker or dresser still invites a look.
+  const storage = hasFlag(f, 'CONTAINER') && !(typeof f.max_volume === 'number' && f.max_volume <= 10000);
+  if (!hasFlag(f, 'PLANT') && (items.length || (f.id !== 'f_null' && storage))) {
     const where = f.id !== 'f_null' ? f.name : t.name;
     const n = items.length;
     // Loose items on the ground read as items, not as "the floor".

@@ -226,6 +226,17 @@ describe('examine / doors', () => {
     expect(interactionsAt(game, 10, 10, 0).map((i) => i.id)).toContain('sleep');
     expect(comfortAt(game, 10, 10, 0).comfort).toBe(5);
   });
+
+  it('an empty potted plant offers nothing to look in; an empty locker still does', () => {
+    const { game } = makeGame();
+    place(game, 10, 9);
+    game.map.setFurn(11, 9, 0, 'f_indoor_plant');
+    game.map.setFurn(12, 9, 0, 'f_locker');
+    expect(interactionsAt(game, 11, 9, 0).map((i) => i.id)).not.toContain('pickup');
+    expect(interactionsAt(game, 12, 9, 0).map((i) => i.label)).toContain('Look in the locker');
+    game.map.addItem(11, 9, 0, createItem(game.data, 'rock'));
+    expect(interactionsAt(game, 11, 9, 0).find((i) => i.id === 'pickup')?.label).toMatch(/^Look in the .*\(1 item\)$/);
+  });
 });
 
 describe('z-levels', () => {

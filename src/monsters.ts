@@ -72,12 +72,29 @@ export function installMonsters(game: Game, renderer: Renderer | null, worldgen:
   }
   (game as unknown as { monsters: MonsterSystem }).monsters = sys;
 
-  // Danger checks (CDDA safe mode / activity interruption).
-  game.activities.dangerChecks.push(() => {
-    const m = sys.visibleHostile(30);
-    if (!m) return null;
+  // Danger checks (CDDA activity distractions). You can't start with a hostile in view
+  // within 30 tiles; once busy, you're interrupted when a hostile comes within 30 or a new
+  // one is spotted anywhere in view (CDDA hostile_spotted_far: MAX_VIEW_DISTANCE 60), but not
+  // by one that was already in sight far away when you started.
+  const DANGER_NEAR = 30, VIEW = 60;
+  let snap: { act: unknown; seen: Set<Monster> } | null = null;
+  const seeName = (m: Monster) => {
     const n = m.displayName();
     return `You see ${m.name ? n : `${/^[aeiou]/i.test(n) ? 'an' : 'a'} ${n}`}!`;
+  };
+  game.activities.dangerChecks.push(() => {
+    const act = game.activities.current;
+    if (!act) {
+      const m = sys.visibleHostile(DANGER_NEAR);
+      return m ? seeName(m) : null;
+    }
+    const list = sys.visibleHostiles(VIEW);
+    if (snap?.act !== act) snap = { act, seen: new Set(list.filter((m) => sys.distToPlayer(m) > DANGER_NEAR)) };
+    for (const m of list) {
+      if (sys.distToPlayer(m) <= DANGER_NEAR) return seeName(m);
+      if (!snap.seen.has(m)) return `${m.displayName().replace(/^./, (ch) => ch.toUpperCase())} spotted!`;
+    }
+    return null;
   });
 
   // Look mode / crosshair raycasts see monsters.

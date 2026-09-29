@@ -1157,6 +1157,21 @@ export class MonsterSystem implements GameSystem {
   }
   private hostileCache: { t: number; range: number; m: Monster | null } | null = null;
 
+  /** Every hostile the survivor can see within `range`, nearest first (~4 Hz fresh). */
+  visibleHostiles(range = 60): Monster[] {
+    const c = this.hostilesCache;
+    if (c && c.range === range && this.time - c.t < 0.25) return c.list.filter((m) => !m.dead);
+    const list: Monster[] = [];
+    for (const m of this.active) {
+      if (m.dead || m.attitude() !== 'attack' || this.distToPlayer(m) > range) continue;
+      if (this.playerSees(m)) list.push(m);
+    }
+    list.sort((a, b) => this.distToPlayer(a) - this.distToPlayer(b));
+    this.hostilesCache = { t: this.time, range, list };
+    return list;
+  }
+  private hostilesCache: { t: number; range: number; list: Monster[] } | null = null;
+
   private findVisibleHostile(range: number): Monster | null {
     let best: Monster | null = null, bd = Infinity;
     for (const m of this.active) {
