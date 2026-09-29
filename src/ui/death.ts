@@ -5,6 +5,7 @@ import type { Hud } from './hud';
 import type { UiContext } from './context';
 import { achievementsOf } from '../achievements';
 import { GameClock } from '../core/time';
+import { saveHandle } from '../save/install';
 
 // Death: CDDA's end screen (end_screen.json "death_tombstone" over the ascii_tombstone
 // picture, with name / time survived / kills stamped onto the stone), then the memorial
@@ -92,8 +93,10 @@ export function showDeathScreen(ctx: UiContext, hud: Hud, cause: string, diedAt 
     e.stopPropagation();
     if (e.key === 'Enter') {
       release();
-      if (input.value) console.info(`Last words: ${input.value}`);
-      location.reload();
+      const words = input.value.trim();
+      const saved = words ? saveHandle(game)?.manager.setLastWords(words) : undefined;
+      // Reload once the memorial entry has them (or right away if saving isn't available).
+      void Promise.resolve(saved).catch(() => {}).finally(() => location.reload());
     }
   };
   (window as any).cdda && ((window as any).cdda.deathScreen = el);

@@ -112,6 +112,7 @@ function memorialDetail(e: MemorialEntry): string {
   const kills = e.topKills.map(([id, n]) => `  <color_white>${String(n).padStart(3)}</color> <color_light_gray>${e.killNames?.[id] ?? id}</color>`);
   return colorize([
     `<color_light_red>In memory of</color> <color_white>${e.name}</color>`,
+    e.lastWords ? `<color_light_gray>"${e.lastWords.replace(/</g, '&lt;')}"</color>` : '',
     e.profession ? `<color_light_gray>${e.profession}${e.scenario ? ` · ${e.scenario}` : ''}</color>` : '',
     '',
     `<color_light_gray>Cause of death:</color> <color_red>${e.cause}</color>`,

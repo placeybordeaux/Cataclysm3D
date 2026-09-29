@@ -539,6 +539,9 @@ describe('SaveManager', () => {
     await expect(mgr.read(meta.slot)).rejects.toThrow(SaveError);
     A.game.player.dead = true;
     await expect(mgr.save()).rejects.toThrow(/dead/);
+    // the death screen's "Last Words:" land on that memorial entry
+    await mgr.setLastWords('Tell my wife I said... hello.');
+    expect((await mgr.memorial())[0].lastWords).toBe('Tell my wife I said... hello.');
   });
 
   it('unload fallback: a synchronous localStorage copy is recovered on the next boot', async () => {

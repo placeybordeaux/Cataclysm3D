@@ -35,6 +35,8 @@ export interface MemorialEntry {
   seed: number;
   /** Achievements completed during this life (names). */
   achievements?: string[];
+  /** Typed on the death screen (CDDA's "Last Words:"). */
+  lastWords?: string;
 }
 
 export interface SaveManagerOptions {
@@ -199,6 +201,17 @@ export class SaveManager {
     await this.queue(async () => {
       const list = await this.memorial();
       list.push(entry);
+      await this.backend.put('memorial', list);
+    });
+  }
+
+  /** The death screen's "Last Words:" go on the newest memorial entry. */
+  async setLastWords(text: string): Promise<void> {
+    await this.queue(async () => {
+      const list = await this.memorial();
+      const last = list[list.length - 1];
+      if (!last) return;
+      last.lastWords = text;
       await this.backend.put('memorial', list);
     });
   }
