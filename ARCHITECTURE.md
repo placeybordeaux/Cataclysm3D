@@ -86,6 +86,27 @@ tests/               vitest unit tests (pure logic, no DOM/WebGL)
   encumbrance, armor absorption. Actions return `{ok, msg, moves, dropped?}`.
 - `combat.ts` pure CDDA melee/ranged/monster-attack math taking an Rng.
 - `player.ts` PlayerAvatar = Character + position/view. Game wires `onMessage`/`onDeath`.
+- Terrain `move_cost` is in units of 50 moves (2 = flat ground = 100 moves): multiply by 50
+  before passing to `moveSpeed`.
+
+### Monsters & combat (src/game, wired by src/monsters.ts `installMonsters`)
+
+- `monster.ts` Monster instance (float pos, hp, anger/morale, effects, specials, upgrades);
+  timers are real seconds (`turnsToSeconds`); player effects from monster attacks use
+  `turnsToEffectSeconds` (turns × CLOCK_SCALE / ACTION_SCALE game seconds).
+- `monai.ts` MonsterSystem (`game.monsters`): reality bubble (60 tiles, z±1) — the rest are
+  dormant but drift toward loud noises (hordes); hearing via `sound` events; vision by light;
+  chase/flee/wander/idle; budgeted A* (`pathfind.ts`) over `los.ts` Grid (never generates
+  chunks); `hurt(m, dmg, 'player')`, `die`, corpses (`corpses`, `onDied`, `onCorpseGone`),
+  kills. Emits `playerHurt` and `creatureDied`.
+- `monattack.ts` special attacks: data melee/bite actors (misc.monster_attack), leap, boomer
+  bile, and hardcoded SHRIEK, ACID, RESURRECT, SHOCKSTORM, PARROT, SMASH...
+- `spawner.ts` consumes `chunk.spawns` (then clears them) + CDDA city hordes; tuning knob
+  `cityHordeScale` (0.3 of CDDA's 80 zombies × city size).
+- `playercombat.ts` LMB melee (crosshair cone) / hitscan guns / `G` throw; `butchery.ts`.
+- Seams: `game.bash?.(x, y, z, str)` (bash.ts) lets zombies smash doors;
+  `game.stats?.kills` gets kill counts; `renderer.viewmodel?.attack(kind)` is called on
+  attacks. Rendering: `src/render/monsterView.ts` (sprites, corpses, blood decals).
 - Crafting (`crafting*.ts`, `requirements.ts`, `construction.ts`, `disassembly.ts`, `reading.ts`,
   `fire.ts`): functions take a `CraftHost` (Game satisfies it). `CraftingInventory.gather` =
   inventory + map items/furniture pseudo tools within 2 tiles + `fire` from a nearby `fd_fire`.
@@ -94,12 +115,36 @@ tests/               vitest unit tests (pure logic, no DOM/WebGL)
   Other systems' use_actions: `inv.useHandlers.set(type, fn)` (crafting registers `firestarter`).
   UI + keys (`& * ( R`) + `cdda.*` helpers: `installCrafting(game, api)` in src/ui/crafting_install.ts.
 
+### World interaction (src/game, installed by src/worldInteraction.ts)
+
+- `sound.ts` `emitSound(game, {x,y,z}, volume, desc, {category?, source?, sfxId?})` — use it
+  for every noise (not `events.emit('sound')` directly): the player hears it (log, waking,
+  interrupting activities) and monsters poll `soundsHeardAt(game, x,y,z, hearing)` /
+  `recentSounds(game)`; CDDA sound_distance + weather attenuation + wall muffling.
+- `vision.ts` `lineOfSight`, `lightAt(game,x,y,z)` (CDDA light units), `playerCanSee`,
+  `creatureCanSee(game, from, to, visionDay, visionNight)`, `tooDarkReason(game,'read'|'craft')`.
+- `bash.ts` `bash(game,x,y,z, str | {bash,cut}, {source?,silent?,destroy?})` with CDDA
+  persistent map damage; `playerSmash` is the `X` key.
+- `fields.ts` fire/smoke/blood processing near the player; `ignite`, `addField`,
+  `fieldDamageAt(game,x,y,z,{materials,flags})` for monsters standing in fire.
+- `targeting.ts` `targetTile(game)` = tile under the crosshair within reach; `interact.ts`
+  (`e`), `zlevels.ts` (`<`/`>`, falling), `rest.ts` (`|` wait, `$` sleep), `weather.ts`
+  (`game.weather`), `traps.ts`, `lightitems.ts` (`F`: flashlight transform).
+
 ### Extension points (prefer these over editing someone else's code)
 
 - `game.systems.push({ name, update(game, realDt, gameDt) })` for per-tick simulation.
 - `game.events.on('sound' | 'message' | …)` typed bus in `src/core/events.ts` — add event
   types there.
 - `map.onChunkGenerated` for spawning things when chunks appear.
+- **Save/load** (src/save): any system with persistent state calls
+  `registerSaveable(game, 'key', { save: () => json, load: (json, ctx) => …, missing?, order? })`
+  (src/save/registry.ts; `ctx.warn(msg)` for dropped unknown ids; order: map 0, world 5,
+  player 10, monsters 20, default 50). Map chunks are saved only when dirty (changed since
+  generation — tracked automatically, no calls needed); state kept *outside* the chunk
+  (like bash.ts map damage) must be saved by its owner. Saves are gzip JSON in IndexedDB,
+  one slot per character; death deletes the save and adds a memorial entry.
+  `cdda.save.{save,list,load,queueLoad,stats,memorial}`; `npm run shot -- … --reload`.
 - `input.onPress(e => …)` for global keys, `input.capture(handler)` for modal menus.
 - Audio: call `sfx.meleeHit(...)`, `sfx.gunshot(...)`, `sfx.door(...)`… from `src/audio/sfx.ts`
   (no-ops without audio), or put `sfxId`/`sfxVariant` (CDDA sound_effect id/variant) on
@@ -132,17 +177,44 @@ distance-dependent asset detail for readability. Our implementation:
 Pipeline: scene → low-res MRT target (~360 px tall, exact integer upscale; colour + view
 normals + depth) → post pass (depth/normal outlines, fog, Bayer dither, palette/LUT grade)
 → nearest blit. URL params: `px=`, `grade=palette|smooth|off`, `tex=atlas|procedural`,
-`cam=first|third|top`, `walls=tinted|sprite`, `debug=1` (stats overlay; F6/F7 cycle grade
-and wall style). Keys: `V` camera mode, `F` flashlight.
+`cam=first|third|top`, `walls=tinted|sprite`, `radius=<chunks, default 4>`,
+`dither=view|screen`, `debug=1` (stats overlay; F6/F7 cycle grade and wall style).
+Keys: `V` camera mode, `F` flashlight.
 
 - **Sprites** (creatures, items, effects): `const h = renderer.sprites.add({ x, y, z,
   frame | glyph: {symbol, color}, height, anchor, lift })` → `h.set(x, y, z)`,
   `h.setFrame(frame, height?)`, `h.flash(color, seconds)`, `h.setVisible(b)`, `h.remove()`.
   Tile coords (+0.5 = tile centre). Billboards are lit, shadowed and darker indoors.
+  Spec extras: `opacity` (0..1, dithered screen-door; `h.setOpacity(v)`), `fadeNear`
+  (dissolve when the camera is within ~2 m). Monster-count scale is fine: dynamic sprites
+  share one instanced draw per texture page. Static per-chunk sets use `sprites.addStatic`.
 - **Lights**: `const l = renderer.lights.add({ x, y, z, color, intensity, radius, height,
-  flicker })` → `l.set(...)`, `l.intensity = …`, `l.remove()`. Nearest 8 are active.
-  Terrain/furniture `light_emitted` and `fd_fire` fields are picked up automatically.
-  `renderer.setFlashlight(on)` is the items-system hook.
+  flicker })` → `l.set(...)`, `l.intensity = …`, `l.remove()`. Terrain/furniture
+  `light_emitted`, `fd_fire` fields and items with a `LIGHT_<n>` flag are picked up
+  automatically. `renderer.setFlashlight(on)` is the items-system hook.
+  All of them go through the **light map** (src/render/lightmap.ts + lightfield.ts): a
+  CDDA-lightmap-style CPU pass over 128×128 tiles of the player's z-level (sun/sky through
+  open sky, windows and doors as directional cones + a little bounce; every source
+  shadowcast with CDDA's falloff), uploaded as a float texture the world/sprite shaders
+  sample (masked bilinear, so light never crosses a wall). The nearest 4 sources also get a
+  three.js point light for normal shading, gated by the light map (no leaks). Natural light
+  rebuilds when chunks change, artificial light at ≤10 Hz (fire flicker) or when a handle
+  changes. Daytime interiors use eye adaptation (exposure); nights stay dark.
+- **Light queries**: `renderer.lightAt(x, y, z)` → CDDA light level in luminance units
+  (daylight ~100, lit room ≥10, `LIGHT_AMBIENT_LOW` 3.5 = too dark to see) — use it for
+  vision/stealth. Exact on the player's level within 64 tiles, an indoor/outdoor estimate
+  elsewhere.
+- **Viewmodel** (first person only): `renderer.viewmodel?.attack('melee'|'fire'|'throw')`
+  animates the wielded item (`player.inv.wielded`, atlas sprite composited with a pixel
+  fist; bare fists when unarmed): swing/punch, recoil + muzzle flash + light, throw.
+  Walking bob and look sway are automatic.
+- **Hit feedback**: `renderer.shake(0..1)`, `renderer.hurtFlash(0..1)` (red vignette);
+  both fire automatically on `game.events.emit('playerHurt', { amount, bp? })`.
+- **Fields** (`chunk.fields`): liquids/gore/debris (fd_blood, fd_bile, fd_gibs_*, fd_acid…)
+  are floor decals, smoke/gases are dithered translucent billboards, fire is a billboard +
+  light; see `fieldStyle()` in tileKinds.ts. Rain stops at roofs (light-map cover texture).
+- **Items on the map**: top item as a small billboard, piles show up to 3; items sit on
+  tables/counters, are hidden inside CONTAINER furniture (lockers, dressers, fridges).
 - **Tile art**: everything goes through `TileTextureSource` (src/render/textureSource.ts);
   `AtlasTextureSource` (UltiCa) falls back to `ProceduralTextureSource`. Monster/item
   systems should get frames via `renderer.source.sprite(id)` / `.item(id)` / `.glyph()`.
@@ -151,7 +223,12 @@ and wall style). Keys: `V` camera mode, `F` flashlight.
   Plain three.js objects added to `renderer.scene` are auto-patched for the MRT output.
 - Map edits need no renderer calls: chunk meshes rebuild when `chunk.version` changes.
 - Debug API: `cdda.setCameraMode`, `cdda.flashlight`, `cdda.setWeather`, `cdda.settle()`
-  (build all chunks + render; call before screenshots), `cdda.renderStats()`.
+  (build all chunks + render; call before screenshots), `cdda.renderStats()`,
+  `cdda.lightAt(dx,dy)`, `cdda.lightmapAscii(r)`, `cdda.addLight(dx,dy,{…})`,
+  `cdda.addField(type,dx,dy,n)`, `cdda.placeItem(id,dx,dy)`, `cdda.lookAt(x,y)`,
+  `cdda.findFurniture(re)`, `cdda.attack(kind)`, `cdda.viewmodelPose(kind,t)` (freeze an
+  attack pose), `cdda.shake(a)`, `cdda.hurtFlash(a)`, `cdda.benchRender(n)` (ms/frame),
+  `cdda.shimmerTest(frames, px/frame)` (pixel-stability metric for a slow pan).
   `tools/render-shots.sh <prefix>` renders the regression screenshot set.
 
 ## Game design conversion rules

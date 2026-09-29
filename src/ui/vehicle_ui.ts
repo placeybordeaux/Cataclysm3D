@@ -4,7 +4,9 @@ import type { Game } from '../game/game';
 import type { Item } from '../game/item';
 import { cargoVolume, has, MPH_PER_MS, type Vehicle, type VehiclePart } from '../game/vehicle';
 import { loadVehicleData } from '../game/vehicle_data';
-import { VehicleSystem } from '../game/vehicles';
+import { monsterCreatureHooks, registerVehicleSave, VehicleSystem } from '../game/vehicles';
+import type { MonsterSystem } from '../game/monai';
+import { interactOverrides } from '../game/interact';
 import type { Renderer } from '../render/renderer';
 import { VehicleRenderer } from '../render/vehicleMesh';
 import { LEVEL_HEIGHT } from '../world/coords';
@@ -332,6 +334,10 @@ export async function installVehicles(game: Game, renderer: Renderer, api?: Debu
   rendererRef = renderer;
   game.vehicles = vs;
   game.systems.push(vs);
+  registerVehicleSave(game, vs);
+  // Run-overs hit real monsters when the monster system is installed (main.ts: before us).
+  const ms = (game as unknown as { monsters?: MonsterSystem }).monsters;
+  if (ms) vs.creatureHooks = monsterCreatureHooks(ms);
   new VehicleRenderer(renderer, game, vs);
 
   const needDriving = (fn: (v: Vehicle) => void) => () => {
@@ -357,15 +363,22 @@ export async function installVehicles(game: Game, renderer: Renderer, api?: Debu
   }));
   game.keys.register('vehicle_headlights', 'Toggle headlights (driving)', needDriving((v) => game.message(vs.toggleHeadlights(v))));
   game.keys.register('vehicle_horn', 'Sound horn (driving)', needDriving((v) => game.message(vs.honk(v))));
-  // Until the world-interaction system owns 'e', examine vehicles with it; that system
-  // should call examineVehicle() first when it takes over.
+  // 'e' belongs to world interaction (src/game/interact.ts); vehicles get the first go at
+  // it. Without that system (tests, stripped builds) 'e' examines vehicles directly.
+  interactOverrides.push({
+    interact: (g) => {
+      const t = targetVehicle(g, renderer);
+      return t ? examineVehicle(g, t.x, t.y, t.z) : false;
+    },
+    prompt: vehicleInteractPrompt,
+  });
   if (!game.keys.has('interact')) {
     game.keys.register('interact', 'Examine / interact', () => {
       const t = targetVehicle(game, renderer);
       if (t) examineVehicle(game, t.x, t.y, t.z);
     });
+    hud.addPromptProvider(vehicleInteractPrompt);
   }
-  hud.addPromptProvider(vehicleInteractPrompt);
   const dash = dashboard(game) as HTMLElement & { update: () => void };
   renderer.beforeRender.push(() => dash.update());
 

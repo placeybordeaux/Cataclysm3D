@@ -24,11 +24,14 @@ if (argv.includes('--help') || argv.includes('-h')) {
   --wait <sec>       real seconds to let frames render before each capture (default 0.5)
   --size WxH         viewport (default 960x540)
   --print <js>       evaluate and print JSON result (no screenshot)
+  --reload           reload the page (same browser profile: IndexedDB/localStorage/sessionStorage
+                     survive) and wait for window.cdda.ready again; later steps run on the new page.
+                     An --eval that makes the page navigate (e.g. loading a save) also waits for it.
   --keep-errors      don't exit non-zero on page errors`);
   process.exit(0);
 }
 
-type Step = { kind: 'eval' | 'out' | 'print'; value: string };
+type Step = { kind: 'eval' | 'out' | 'print' | 'reload'; value: string };
 const steps: Step[] = [];
 let params = '';
 let wait = 0.5;
@@ -41,6 +44,7 @@ for (let i = 0; i < argv.length; i++) {
   else if (a === '--eval') steps.push({ kind: 'eval', value: v }), i++;
   else if (a === '--out') steps.push({ kind: 'out', value: v }), i++;
   else if (a === '--print') steps.push({ kind: 'print', value: v }), i++;
+  else if (a === '--reload') steps.push({ kind: 'reload', value: '' });
   else if (a === '--wait') (wait = Number(v)), i++;
   else if (a === '--size') (size = v.split('x').map(Number)), i++;
   else if (a === '--keep-errors') keepErrors = true;
@@ -72,13 +76,28 @@ try {
     errors++;
     console.log(`[page exception] ${(e as Error).stack ?? e}`);
   });
+  const waitReady = async () => {
+    await page.waitForFunction('window.cdda?.ready || window.cddaError', { timeout: 120_000 });
+    const err = await page.evaluate('window.cddaError');
+    if (err) throw new Error(`game failed to boot:\n${err}`);
+  };
   await page.goto(url, { waitUntil: 'load' });
-  await page.waitForFunction('window.cdda?.ready || window.cddaError', { timeout: 120_000 });
-  const err = await page.evaluate('window.cddaError');
-  if (err) throw new Error(`game failed to boot:\n${err}`);
+  await waitReady();
   for (const s of steps) {
-    if (s.kind === 'eval') {
-      await page.evaluate(`(async () => { const cdda = window.cdda; ${s.value}; })()`);
+    if (s.kind === 'reload') {
+      await page.reload({ waitUntil: 'load' });
+      await waitReady();
+      console.log('reloaded');
+    } else if (s.kind === 'eval') {
+      try {
+        await page.evaluate(`(async () => { const cdda = window.cdda; ${s.value}; })()`);
+      } catch (e) {
+        // The page navigated away mid-eval (e.g. loading a save of another world reloads the
+        // page): carry on with the new page once it's ready.
+        if (!/Execution context was destroyed|navigat/i.test(String((e as Error).message))) throw e;
+        await waitReady();
+        console.log('page navigated during eval; continuing on the new page');
+      }
     } else if (s.kind === 'print') {
       const r = await page.evaluate(`(async () => { const cdda = window.cdda; return (${s.value}); })()`);
       console.log(JSON.stringify(r, null, 2));

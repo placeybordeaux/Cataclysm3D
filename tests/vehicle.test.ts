@@ -6,7 +6,9 @@ import type { GameData } from '../src/data/types';
 import { Game } from '../src/game/game';
 import { resolveCollision, rotate, simpleCubicSolution, spawnVehicle, Vehicle, has } from '../src/game/vehicle';
 import type { VehicleDataFile } from '../src/game/vehicle_data';
-import { VehicleSystem } from '../src/game/vehicles';
+import { registerVehicleSave, VehicleSystem } from '../src/game/vehicles';
+import { createItem } from '../src/game/item';
+import { saveRegistry } from '../src/save/registry';
 import type { Chunk, ChunkGenerator, GameMap } from '../src/world/map';
 import { loadNodeData } from '../tools/lib/node_data';
 
@@ -315,5 +317,45 @@ describe('spawn state and persistence', () => {
     vs.flushPending();
     expect(vs.list.length).toBe(1);
     expect(vs.at(30, 30, 0)).not.toBeNull();
+  });
+});
+
+describe('save/load section', () => {
+  it('replaces vehicle state, keeps cargo and the driver, drops unknown prototypes', () => {
+    const { game, vs } = world();
+    registerVehicleSave(game, vs);
+    const v = pristineCar(vs, 10, 10, 90);
+    const trunk = v.parts.find((p) => p.def.id === 'trunk')!;
+    trunk.items = [createItem(data, 'water_clean')];
+    game.player.x = v.x;
+    game.player.y = v.y;
+    vs.takeControls(v);
+    const section = saveRegistry(game).sorted().find(([k]) => k === 'vehicles')![1];
+    const saved = JSON.parse(JSON.stringify(section.save())) as { vehicles: { uid: number; proto: string }[] };
+    saved.vehicles.push({ ...saved.vehicles[0], uid: 999, proto: 'no_such_vehicle' });
+    // something that must disappear on load
+    pristineCar(vs, 40, 40, 0);
+    const warnings: string[] = [];
+    const ctx = { game, data, version: 1, warn: (m: string) => warnings.push(m) };
+    section.load(saved, ctx);
+    expect(vs.list.length).toBe(1);
+    expect(vs.driving?.uid).toBe(v.uid);
+    expect(vs.list[0].parts.find((p) => p.def.id === 'trunk')!.items[0].typeId).toBe('water_clean');
+    expect(vs.at(40, 40, 0)).toBeNull();
+    expect(vs.at(10, 10, 0)).not.toBeNull();
+    expect(warnings.some((w) => /no_such_vehicle/.test(w))).toBe(true);
+    section.missing!(ctx);
+    expect(vs.list.length).toBe(0);
+  });
+
+  it("doesn't respawn mapgen vehicles for chunks generated before the save", () => {
+    const { game, vs } = world();
+    vs.skipChunk = (c) => c.cx === 1 && c.cy === 1;
+    const c = game.map.chunk(1, 1, 0)!;
+    c.vehicles = [{ id: 'car', x: 30, y: 30, z: 0 }];
+    (vs as any).queueChunk(c);
+    vs.flushPending();
+    expect(vs.list.length).toBe(0);
+    expect(c.vehicles.length).toBe(0);
   });
 });

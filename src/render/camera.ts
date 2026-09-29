@@ -35,6 +35,12 @@ export class CameraRig {
   readonly subPixel = new THREE.Vector2();
   /** Point the lights/shadows should centre on (player feet in top mode, eye otherwise). */
   readonly focus = new THREE.Vector3();
+  /**
+   * First person: quantize yaw/pitch to the angle of one low-res pixel, so a slow turn
+   * scrolls the image in whole-pixel steps (exact at the screen centre) instead of
+   * resampling every texel at a new sub-pixel phase each frame.
+   */
+  snapRotation = true;
 
   update(dt: number, p: PlayerAvatar, map: GameMap, aspect: number, lowResHeight: number): void {
     const cam = this.camera;
@@ -57,7 +63,10 @@ export class CameraRig {
       const bobY = Math.abs(Math.sin(this.bobPhase)) * this.bobAmp * 1.6 - this.bobAmp * 0.8;
       const bobX = Math.cos(this.bobPhase) * this.bobAmp * 0.6;
       cam.position.set(p.x - fwdZ * bobX, base + eyeH + bobY, p.y + fwdX * bobX);
-      cam.rotation.set(p.pitch, -p.yaw, 0, 'YXZ');
+      if (this.snapRotation) {
+        const q = (2 * Math.tan((cam.fov * Math.PI) / 360)) / lowResHeight;
+        cam.rotation.set(Math.round(p.pitch / q) * q, -Math.round(p.yaw / q) * q, 0, 'YXZ');
+      } else cam.rotation.set(p.pitch, -p.yaw, 0, 'YXZ');
       this.focus.copy(cam.position);
     } else if (this.mode === 'third') {
       cam.fov = this.fovFirst;

@@ -1,9 +1,10 @@
 import * as THREE from 'three';
 import type { Chunk, GameMap } from '../world/map';
 import { CHUNK } from '../world/coords';
-import { buildChunkMesh, ShapeTable, type ChunkLight } from './chunkMesh';
+import { buildChunkMesh, ShapeTable } from './chunkMesh';
 import { worldMaterials } from './materials';
-import type { SpriteHandle, SpriteLayer } from './sprites';
+import type { SpriteLayer, StaticSpriteGroup } from './sprites';
+import { LEVEL_HEIGHT } from '../world/coords';
 import type { TileTextureSource } from './textureSource';
 import { terrainShape } from './tileKinds';
 
@@ -25,8 +26,7 @@ interface Entry {
   sig: number;
   builtSig: number;
   group: THREE.Group | null;
-  sprites: SpriteHandle[];
-  lights: ChunkLight[];
+  sprites: StaticSpriteGroup | null;
   visible: boolean;
   d2: number;
 }
@@ -36,20 +36,21 @@ export interface ChunkStats {
   pending: number;
   builtThisFrame: number;
   lastBuildMs: number;
+  /** empty (open-air) chunks skipped instead of meshed, cumulative */
+  skippedEmpty: number;
 }
 
 const key = (cx: number, cy: number, z: number) => ((z + 16) * 4096 + (cx + 2048)) * 4096 + (cy + 2048);
 
 export class ChunkManager {
   readonly group = new THREE.Group();
-  radius = 3;
+  /** Chunks drawn around the player (circular); post-pass fog hides the edge. */
+  radius = 4;
   levelsBelow = 1;
   levelsAbove = 1;
   /** Max milliseconds of meshing per frame (at least one chunk is always built). */
   budgetMs = 4;
-  readonly stats: ChunkStats = { entries: 0, pending: 0, builtThisFrame: 0, lastBuildMs: 0 };
-  /** Set whenever the set of chunk light sources changed (renderer forwards to LightManager). */
-  lightsDirty = true;
+  readonly stats: ChunkStats = { entries: 0, pending: 0, builtThisFrame: 0, lastBuildMs: 0, skippedEmpty: 0 };
   private entries = new Map<number, Entry>();
   private dirty: Entry[] = [];
   private shapes: ShapeTable;
@@ -74,13 +75,6 @@ export class ChunkManager {
     return terrainShape(this.map.terAt(x, y, z + 1)) !== 'none';
   }
 
-  /** Iterate built chunk light lists (for LightManager). */
-  lightLists(): ChunkLight[][] {
-    const out: ChunkLight[][] = [];
-    for (const e of this.entries.values()) if (e.lights.length && e.visible) out.push(e.lights);
-    return out;
-  }
-
   update(px: number, py: number, pz: number, zVisible: (z: number) => boolean, unlimited = false): void {
     const pcx = Math.floor(px / CHUNK), pcy = Math.floor(py / CHUNK);
     const R = this.radius;
@@ -99,7 +93,7 @@ export class ChunkManager {
         if (!deps[0]) continue; // outside MIN_Z..MAX_Z
         created++;
         this.entries.set(k, {
-          cx, cy, z, chunk: deps[0], deps, sig: 0, builtSig: -1, group: null, sprites: [], lights: [],
+          cx, cy, z, chunk: deps[0], deps, sig: 0, builtSig: -1, group: null, sprites: null,
           visible: true, d2: 0,
         });
       }
@@ -156,6 +150,14 @@ export class ChunkManager {
 
   private build(e: Entry): void {
     this.dispose(e);
+    const c = e.chunk;
+    // Open sky (most chunks above ground): nothing to mesh. `empty` is maintained by
+    // worldgen/setTer; items and fields are checked because addItem/addField don't clear it.
+    if (c.empty && c.items.size === 0 && c.fields.size === 0 && c.furn.every((f) => f === 0)) {
+      e.builtSig = e.sig;
+      this.stats.skippedEmpty++;
+      return;
+    }
     const data = buildChunkMesh(this.map, this.shapes, this.source, e.chunk, this.season);
     const g = new THREE.Group();
     g.name = `chunk ${e.cx},${e.cy},${e.z}`;
@@ -173,21 +175,24 @@ export class ChunkManager {
     g.visible = e.visible;
     this.group.add(g);
     e.group = g;
-    for (const s of data.sprites) {
-      const h = this.sprites.add({ x: s.x, y: s.y, z: s.z, frame: s.frame, height: s.height, lift: s.kind === 'item' ? -0.12 * s.height : 0 });
-      if (!e.visible) h.setVisible(false);
-      e.sprites.push(h);
+    if (data.sprites.length) {
+      // chunk-sized bounds (+ tallest sprite) so the whole group frustum-culls
+      let top = 1;
+      for (const s of data.sprites) top = Math.max(top, s.height + (s.lift ?? 0));
+      const bounds = new THREE.Sphere(new THREE.Vector3(e.cx * CHUNK + CHUNK / 2, e.z * LEVEL_HEIGHT + top / 2, e.cy * CHUNK + CHUNK / 2), Math.hypot(CHUNK * 0.75, top / 2) + 2);
+      e.sprites = this.sprites.addStatic(data.sprites.map((s) => ({
+        x: s.x, y: s.y, z: s.z, frame: s.frame, height: s.height, lift: s.lift ?? 0,
+        opacity: s.opacity, fadeNear: s.fadeNear,
+      })), bounds);
+      if (!e.visible) e.sprites.setVisible(false);
     }
-    e.lights = data.lights;
     e.builtSig = e.sig;
-    this.lightsDirty = true;
   }
 
   private setVisible(e: Entry, v: boolean): void {
     e.visible = v;
     if (e.group) e.group.visible = v;
-    for (const s of e.sprites) s.setVisible(v);
-    if (e.lights.length) this.lightsDirty = true;
+    e.sprites?.setVisible(v);
   }
 
   private dispose(e: Entry): void {
@@ -196,9 +201,7 @@ export class ChunkManager {
       this.group.remove(e.group);
       e.group = null;
     }
-    for (const s of e.sprites) s.remove();
-    e.sprites.length = 0;
-    if (e.lights.length) this.lightsDirty = true;
-    e.lights = [];
+    e.sprites?.dispose();
+    e.sprites = null;
   }
 }

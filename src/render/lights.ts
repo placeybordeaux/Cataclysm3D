@@ -1,16 +1,23 @@
 import * as THREE from 'three';
 import { LEVEL_HEIGHT } from '../world/coords';
-import type { ChunkLight } from './chunkMesh';
 
 // All scene lights. The *number* of each light type is fixed at construction so shader
-// programs never recompile at runtime: point lights come from a pool of POOL_SIZE that is
-// reassigned every frame to the nearest active sources (unused slots get intensity 0).
+// programs never recompile at runtime.
+//
+// Lamps, fires and other light sources are lit in two layers:
+//  * the CDDA-style light map (lightmap.ts) shadowcasts every source over the tile grid, so
+//    light never passes through walls; it gives a flat (normal-independent) term, and
+//  * a pool of POOL_SIZE three.js point lights, reassigned every frame to the nearest
+//    sources, adds normal-based shading and round light pools. Point lights are unoccluded,
+//    so the shader multiplies them by a gate from the light map (zero where the map says no
+//    artificial light arrives): no leaks, but lamps still model the surfaces they light.
 //
 // Other systems add lights with:
 //   const h = renderer.lights.add({ x, y, z, color: 0xff9040, radius: 8, intensity: 1, flicker: true });
 //   h.set(x, y, z); h.intensity = 0.5; h.remove();
+// Changing a handle makes the light map rebuild on the next frame (brief muzzle flashes work).
 
-export const POOL_SIZE = 8;
+export const POOL_SIZE = 4;
 
 export interface LightSpec {
   x: number;
@@ -39,15 +46,34 @@ interface Source {
   color: number; intensity: number; radius: number; flicker: boolean;
   phase: number;
   d2: number;
+  /** light-map view of this source (luminance derived from intensity/radius) */
+  lum: number;
 }
 
-/** CDDA luminance -> our light params. CDDA lamps are ~ 20-120 lum; fires ~ 50-150. */
-export function fromLuminance(l: ChunkLight): Source {
-  const radius = Math.min(14, 3 + Math.sqrt(l.luminance) * 0.9);
+/** Handle intensity/radius -> CDDA luminance for the light map (a radius-8, intensity-1
+ *  lamp is ~ a CDDA 40 lum light). */
+function handleLuminance(s: Source): number {
+  return s.intensity * s.radius * 5;
+}
+
+/** A tile light source found by the light map (terrain/furniture light_emitted, fire, items). */
+export interface StaticLight {
+  x: number; // tile coords, integer
+  y: number;
+  z: number;
+  lum: number;
+  color: number;
+  flicker: boolean;
+  /** metres above the floor */
+  height: number;
+}
+
+/** CDDA luminance -> point-light params. CDDA lamps are ~ 20-120 lum; fires ~ 20-160. */
+function fromStatic(l: StaticLight): Source {
   return {
-    x: l.x, y: l.y, z: l.z, height: l.height, color: l.color,
-    intensity: Math.min(2, 0.4 + l.luminance / 80), radius, flicker: l.flicker,
-    phase: (l.x * 12.9898 + l.y * 78.233) % 6.283, d2: 0,
+    x: l.x + 0.5, y: l.y + 0.5, z: l.z, height: l.height, color: l.color,
+    intensity: Math.min(2, 0.4 + l.lum / 80), radius: Math.min(14, 3 + Math.sqrt(l.lum) * 0.9), flicker: l.flicker,
+    phase: (l.x * 12.9898 + l.y * 78.233) % 6.283, d2: 0, lum: l.lum,
   };
 }
 
@@ -56,7 +82,7 @@ export function fromLuminance(l: ChunkLight): Source {
 interface SkyKey { h: number; sun: number; sunI: number; hemiSky: number; hemiGround: number; hemiI: number; zenith: number; horizon: number; fog: number }
 // Hemisphere intensities look high because three's Lambert divides ambient by pi; the
 // ground colour doubles as bounce light (ceilings and interiors are lit only by it).
-const NIGHT: Omit<SkyKey, 'h'> = { sun: 0x7088c8, sunI: 0.5, hemiSky: 0x3a5088, hemiGround: 0x1a1a26, hemiI: 1.25, zenith: 0x03050c, horizon: 0x0e1628, fog: 0x0c1220 };
+const NIGHT: Omit<SkyKey, 'h'> = { sun: 0x7088c8, sunI: 0.38, hemiSky: 0x3a5088, hemiGround: 0x1a1a26, hemiI: 0.95, zenith: 0x03050c, horizon: 0x0e1628, fog: 0x0a0f1a };
 const KEYS: SkyKey[] = [
   { h: 0, ...NIGHT },
   { h: 4.5, ...NIGHT },
@@ -129,13 +155,18 @@ export class LightManager {
   pointScale = 6;
   private pool: THREE.PointLight[] = [];
   private dynamic = new Set<Source>();
-  private chunkLights: Source[][] = [];
+  private statics: Source[] = [];
+  private staticList: readonly StaticLight[] | null = null;
   private active: Source[] = [];
+  /** A handle changed since the light map last read them (renderer forces a rebuild). */
+  handlesDirty = false;
   private time = 0;
   /** Shadow frustum half-size in metres around the camera focus. */
   shadowExtent = 30;
 
-  constructor(shadowMapSize = 1024) {
+  // 768: ~8 cm texels over the 60 m frustum, still finer than a low-res pixel at a few
+  // metres, at ~half the shadow-pass fill cost of 1024 (see renderer shadowHz too).
+  constructor(shadowMapSize = 768) {
     this.group.name = 'lights';
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(shadowMapSize, shadowMapSize);
@@ -162,25 +193,38 @@ export class LightManager {
     const s: Source = {
       x: spec.x, y: spec.y, z: spec.z, height: spec.height ?? 1.2, color: spec.color ?? 0xffd9a0,
       intensity: spec.intensity ?? 1, radius: spec.radius ?? 8, flicker: spec.flicker ?? false,
-      phase: Math.random() * 6.283, d2: 0,
+      phase: Math.random() * 6.283, d2: 0, lum: 0,
     };
+    s.lum = handleLuminance(s);
     this.dynamic.add(s);
+    this.handlesDirty = true;
     const self = this;
+    // Only changes that move light between tiles or switch it on/off force a rebuild.
     return {
-      set(x, y, z) { s.x = x; s.y = y; s.z = z; },
+      set(x, y, z) {
+        if (Math.floor(x) !== Math.floor(s.x) || Math.floor(y) !== Math.floor(s.y) || z !== s.z) self.handlesDirty = true;
+        s.x = x; s.y = y; s.z = z;
+      },
       get intensity() { return s.intensity; },
-      set intensity(v: number) { s.intensity = v; },
+      set intensity(v: number) { if (v !== s.intensity) self.handlesDirty = true; s.intensity = v; s.lum = handleLuminance(s); },
       get color() { return s.color; },
-      set color(v: number) { s.color = v; },
+      set color(v: number) { if (v !== s.color) self.handlesDirty = true; s.color = v; },
       get radius() { return s.radius; },
-      set radius(v: number) { s.radius = v; },
-      remove() { self.dynamic.delete(s); },
+      set radius(v: number) { if (v !== s.radius) self.handlesDirty = true; s.radius = v; s.lum = handleLuminance(s); },
+      remove() { self.dynamic.delete(s); self.handlesDirty = true; },
     };
   }
 
-  /** Chunk manager hands over static sources per built chunk (replaced wholesale). */
-  setChunkLights(all: ChunkLight[][]): void {
-    this.chunkLights = all.map((list) => list.map(fromLuminance));
+  /** Handles for the light map (lightmap.ts reads x/y/z/lum/color/flicker/phase). */
+  handles(): Iterable<Source> {
+    return this.dynamic;
+  }
+
+  /** Tile sources found by the light map; they compete for the point-light pool too. */
+  setStaticLights(list: readonly StaticLight[]): void {
+    if (list === this.staticList) return;
+    this.staticList = list;
+    this.statics = list.map(fromStatic);
   }
 
   get activeCount(): number {
@@ -219,8 +263,8 @@ export class LightManager {
       s.d2 = dx * dx + dy * dy + dz * dz;
       if (s.d2 < 60 * 60) act.push(s);
     };
-    for (const s of this.dynamic) consider(s);
-    for (const list of this.chunkLights) for (const s of list) consider(s);
+    for (const s of this.dynamic) if (s.intensity > 0) consider(s);
+    for (const s of this.statics) consider(s);
     if (act.length > POOL_SIZE) act.sort((a, b) => a.d2 - b.d2);
     for (let i = 0; i < POOL_SIZE; i++) {
       const p = this.pool[i];

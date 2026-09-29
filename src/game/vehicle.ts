@@ -477,7 +477,11 @@ export class Vehicle {
     };
   }
 
-  static fromJSON(vdata: VehicleDataFile, data: GameData, j: VehicleJSON): Vehicle {
+  /**
+   * Rebuild from toJSON output. Unknown part ids are dropped with `opts.warn`; cargo goes
+   * through `opts.loadItem` (the save system's unknown-id-tolerant loader) when given.
+   */
+  static fromJSON(vdata: VehicleDataFile, data: GameData, j: VehicleJSON, opts: { warn?: (msg: string) => void; loadItem?: (j: ItemJSON) => Item | null } = {}): Vehicle {
     const v = new Vehicle(vdata, j.proto);
     v.uid = j.uid;
     nextUid = Math.max(nextUid, j.uid + 1);
@@ -485,7 +489,8 @@ export class Vehicle {
     for (const pj of j.parts) {
       const def = vdata.parts[pj.id];
       if (!def) {
-        warnOnce('vehicle_part', pj.id);
+        if (opts.warn) opts.warn(`vehicle ${j.proto}: dropped unknown part ${pj.id}`);
+        else warnOnce('vehicle_part', pj.id);
         continue;
       }
       const p = v.addPart(def, pj.mx, pj.my, pj.variant);
@@ -494,7 +499,7 @@ export class Vehicle {
       p.enabled = !!pj.enabled;
       p.fuelType = pj.fuelType ?? p.fuelType;
       p.charges = pj.charges ?? 0;
-      p.items = (pj.items ?? []).map((ij) => Item.fromJSON(data, ij));
+      p.items = (pj.items ?? []).map((ij) => (opts.loadItem ? opts.loadItem(ij) : Item.fromJSON(data, ij))).filter((it): it is Item => !!it);
       p.fault = pj.fault;
       p.blood = pj.blood ?? 0;
     }

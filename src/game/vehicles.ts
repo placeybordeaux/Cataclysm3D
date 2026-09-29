@@ -1,9 +1,18 @@
 import { hashSeed, Rng } from '../core/rng';
+import { bash } from './bash';
+import { ACTION_SCALE } from '../core/time';
+import type { MonsterSystem } from './monai';
+import type { Monster } from './monster';
+import { emitSound, type SoundCategory } from './sound';
 import { MAIN_PARTS, type BodyPartId } from './bodyparts';
 import type { GameData, TerrainDef, FurnitureDef } from '../data/types';
 import type { Chunk, GameMap, MapOverlay, VehicleRequest } from '../world/map';
 import { hasFlag } from '../world/registry';
-import { chunkOf } from '../world/coords';
+import { chunkKey, chunkOf } from '../world/coords';
+import { registerSaveable } from '../save/registry';
+import { chunkTracker } from '../save/tracking';
+import { loadItemSafe } from '../save/items';
+import type { Item, ItemJSON } from './item';
 import type { Game, GameSystem } from './game';
 import {
   has, MPH_PER_MS, passengerImpactDamage, resolveCollision, spawnVehicle, Vehicle, type VehicleJSON, type VehiclePart,
@@ -18,8 +27,7 @@ import { pickVehicleProto, type VehicleDataFile } from './vehicle_data';
 //   game.vehicles                       this system (set by installVehicles)
 //   vehicles.at(x, y, z)                vehicle + mount occupying a tile
 //   vehicles.creatureHooks              how run-overs damage/fling monsters (monster system)
-//   vehicles.onBash                     terrain smashing by a moving vehicle (defaults to a
-//                                       minimal bash: ter_set/furn_set + sound)
+//   vehicles.onBash                     terrain smashing by a moving vehicle (bash.ts)
 
 export interface DriveInput {
   /** -1..1: W accelerates, S brakes then reverses */
@@ -71,7 +79,7 @@ export class VehicleSystem implements GameSystem, MapOverlay {
   scriptedInput = false;
   readonly rng: Rng;
   creatureHooks: CreatureHooks;
-  /** Bash a tile with `strength`; return true if it broke. Default: minimal CDDA map::bash. */
+  /** Bash a tile with `strength`; return true if it broke (default: bash.ts, CDDA map::bash). */
   onBash: (x: number, y: number, z: number, strength: number) => boolean;
   /** Listeners: vehicle added/removed (renderer). */
   readonly onAdded: ((v: Vehicle) => void)[] = [];
@@ -109,7 +117,8 @@ export class VehicleSystem implements GameSystem, MapOverlay {
       },
       name: (c) => (c as { name?: string }).name ?? 'something',
     };
-    this.onBash = (x, y, z, strength) => defaultBash(game, x, y, z, strength, this.rng);
+    // CDDA part_collision -> map::bash with the object's share of the impact damage.
+    this.onBash = (x, y, z, strength) => bash(game, x, y, z, Math.round(strength), { source: this }).success;
     map.onChunkGenerated.push((c) => this.queueChunk(c));
     for (const c of map.loadedChunks()) this.queueChunk(c);
   }
@@ -192,10 +201,26 @@ export class VehicleSystem implements GameSystem, MapOverlay {
     return true;
   }
 
+  /**
+   * Chunks whose vehicle requests were consumed in an earlier session (set by the save
+   * hook): regenerating such a chunk must not spawn its vehicles again, they're in the save.
+   */
+  skipChunk: ((c: Chunk) => boolean) | null = null;
+
   private queueChunk(c: Chunk): void {
     if (!c.vehicles.length) return;
-    this.pending.push(...c.vehicles);
+    const reqs = c.vehicles;
+    // Requests are one-shot (like CDDA's mapgen placing the vehicle): clear them so a saved
+    // dirty chunk doesn't carry them into the next session.
     c.vehicles = [];
+    if (this.skipChunk?.(c)) return;
+    this.pending.push(...reqs);
+  }
+
+  private rescanAcc = 0;
+  /** Late z-level overlays can add requests to chunks after generation; pick those up. */
+  private rescan(): void {
+    for (const c of this.game.map.loadedChunks()) if (c.vehicles.length) this.queueChunk(c);
   }
 
   /** Spawn queued mapgen requests (outside chunk generation, so neighbours can be checked). */
@@ -360,7 +385,7 @@ export class VehicleSystem implements GameSystem, MapOverlay {
     if (!horns.length) return `The ${v.name} has no horn.`;
     if (v.fuelLeft('battery') <= 0) return `The ${v.name}'s horn is silent: the battery is dead.`;
     const vol = Math.max(...horns.map((h) => h.def.bonus ?? 40));
-    this.emitSound(v, vol, 'honking!', 'horn_car');
+    this.emitSound(v, vol, 'honking!', 'horn_car', 'alert');
     return 'You honk the horn!';
   }
 
@@ -390,16 +415,22 @@ export class VehicleSystem implements GameSystem, MapOverlay {
    * the soundpack build excludes engine/vehicle effects for now, so events carry sfxId ''
    * (audio stays quiet, monsters still hear it). Wire cddaSfx through once they exist.
    */
-  emitSound(v: Vehicle, volume: number, description: string, cddaSfx?: string): void {
+  emitSound(v: Vehicle, volume: number, description: string, cddaSfx?: string, category: SoundCategory = 'movement'): void {
     if (volume <= 0) return;
     void cddaSfx;
-    this.game.events.emit('sound', { x: v.x, y: v.y, z: v.z, volume, description, source: v, sfxId: '' });
+    // The driver doesn't need "You hear vroom!" every second: engine/door noises are ambient.
+    const ambient = category === 'movement' || this.driving === v;
+    emitSound(this.game, { x: v.x, y: v.y, z: v.z }, volume, description, { source: v, category, sfxId: '', ambient });
   }
 
   // --- simulation ---------------------------------------------------------------------
 
   update(game: Game, realDt: number): void {
     this.simTime += realDt;
+    if ((this.rescanAcc += realDt) > 2) {
+      this.rescanAcc = 0;
+      this.rescan();
+    }
     if (this.pending.length) this.flushPending();
     if (this.driving && !this.scriptedInput) this.readKeys();
     for (const v of this.list) this.simulate(v, realDt);
@@ -443,7 +474,7 @@ export class VehicleSystem implements GameSystem, MapOverlay {
       const acc = (this.soundAcc.get(v) ?? 0) + dt;
       if (acc >= 1 && !v.engineOn) {
         const alarm = v.withFlag('SECURITY', true)[0];
-        if (alarm && v.fuelLeft('battery') > 0) this.emitSound(v, alarm.def.bonus ?? 60, 'WHOOP WHOOP', 'alarm');
+        if (alarm && v.fuelLeft('battery') > 0) this.emitSound(v, alarm.def.bonus ?? 60, 'WHOOP WHOOP', 'alarm', 'alarm');
         else v.alarmOn = false;
         this.soundAcc.set(v, 0);
       } else if (!v.engineOn) this.soundAcc.set(v, acc);
@@ -581,7 +612,7 @@ export class VehicleSystem implements GameSystem, MapOverlay {
         const op = collisionPart(other.v, other.mx, other.my);
         this.damagePart(other.v, op, r.objDmg);
         this.impactMessage(v, part, `the ${other.v.name}`, 'smash!');
-        this.emitSound(v, 50, 'smash!', 'smash_success');
+        this.emitSound(v, 50, 'smash!', 'smash_success', 'combat');
         v.velocity = Math.abs(r.velocity) < 0.3 ? 0 : r.velocity;
         stopped = true;
         break;
@@ -633,7 +664,7 @@ export class VehicleSystem implements GameSystem, MapOverlay {
       });
       this.damagePart(v, part, r.partDmg);
       this.impactMessage(v, part, name, 'smash!');
-      this.emitSound(v, r.smashed ? 80 : 50, 'smash!', 'smash_success');
+      this.emitSound(v, r.smashed ? 80 : 50, 'smash!', 'smash_success', 'combat');
       v.velocity = r.velocity;
       if (!r.smashed) {
         if (Math.abs(v.velocity) < 0.5 || Math.sign(v.velocity) !== Math.sign(velBefore)) v.velocity = 0;
@@ -667,7 +698,7 @@ export class VehicleSystem implements GameSystem, MapOverlay {
     this.damagePart(v, part, r.partDmg);
     if (r.objDmg > 20) part.blood = Math.min(600, part.blood + 50 + r.objDmg * 2.5);
     if (this.driving === v) this.say(`Your ${v.name}'s ${part.def.name} rams into ${target.name}!`, 'c_yellow');
-    this.emitSound(v, 20, 'smash!', 'hit_vehicle');
+    this.emitSound(v, 20, 'smash!', 'hit_vehicle', 'combat');
     v.velocity = r.velocity;
     if (!(dead || flung)) {
       v.velocity = 0;
@@ -722,17 +753,86 @@ export class VehicleSystem implements GameSystem, MapOverlay {
 
   // --- persistence ----------------------------------------------------------------------
 
-  toJSON(): { vehicles: VehicleJSON[]; driving: number | null; pending: VehicleRequest[] } {
+  toJSON(): VehicleSaveJSON {
     return { vehicles: this.list.map((v) => v.toJSON()), driving: this.driving?.uid ?? null, pending: [...this.pending] };
   }
 
-  fromJSON(data: GameData, j: { vehicles: VehicleJSON[]; driving: number | null; pending?: VehicleRequest[] }): void {
-    for (const v of [...this.list]) this.remove(v);
-    for (const vj of j.vehicles) this.add(Vehicle.fromJSON(this.vdata, data, vj));
+  /** Replace all vehicle state (save/load). Unknown prototypes/parts are dropped via `warn`. */
+  fromJSON(data: GameData, j: VehicleSaveJSON, opts: { warn?: (msg: string) => void; loadItem?: (j: ItemJSON) => Item | null } = {}): void {
+    this.clear();
+    for (const vj of j.vehicles ?? []) {
+      if (!this.vdata.vehicles[vj.proto]) {
+        (opts.warn ?? console.warn)(`dropped vehicle of unknown prototype ${vj.proto}`);
+        continue;
+      }
+      this.add(Vehicle.fromJSON(this.vdata, data, vj, opts));
+    }
     this.pending = [...(j.pending ?? [])];
     this.driving = this.list.find((v) => v.uid === j.driving) ?? null;
     if (this.driving) this.game.movementOverride = () => this.driving !== null;
   }
+
+  /** Remove every vehicle and forget queued requests. */
+  clear(): void {
+    for (const v of [...this.list]) this.remove(v);
+    this.pending = [];
+    this.driving = null;
+    this.input = { throttle: 0, steer: 0, brake: false };
+    this.soundAcc.clear();
+    this.load.clear();
+  }
+}
+
+/**
+ * Run-over hooks backed by the monster system (src/game/monai.ts): CDDA part_collision's
+ * body branch applies torso damage, may stun, and flings the critter away.
+ */
+export function monsterCreatureHooks(ms: MonsterSystem): CreatureHooks {
+  return {
+    at: (x, y, z) => ms.monsterAt(x, y, z),
+    mass: (c) => Math.max(1, ((c as Monster).type.weight ?? 80000) / 1000),
+    damage: (c, dmg) => {
+      const m = c as Monster;
+      const stun = (m.rng.int(0, dmg) > 10 ? 1 : 0) + (m.rng.int(0, dmg) > 40 ? 1 : 0);
+      if (stun) m.addEffect('stunned', stun / ACTION_SCALE);
+      ms.hurt(m, dmg, 'player');
+      return m.dead;
+    },
+    fling: (c, dx, dy, force) => {
+      const m = c as Monster;
+      // A forced move (the monster AI's dash): ~force/10 tiles, capped.
+      const dist = Math.min(5, Math.max(1, force / 10));
+      const speed = 10;
+      m.dashVx = dx * speed;
+      m.dashVy = dy * speed;
+      m.dashTime = dist / speed;
+      m.addEffect('downed', 1);
+    },
+    name: (c) => (c as Monster).displayName(),
+  };
+}
+
+export interface VehicleSaveJSON {
+  vehicles: VehicleJSON[];
+  /** uid of the vehicle the player is driving */
+  driving: number | null;
+  /** mapgen requests queued but not yet placed */
+  pending: VehicleRequest[];
+}
+
+/**
+ * Plug vehicles into save/load (src/save/registry.ts). Order 30: after the map (0) and the
+ * player (10), since the driver is restored into the seat they were saved in.
+ */
+export function registerVehicleSave(game: Game, vs: VehicleSystem): void {
+  vs.skipChunk = (c) => chunkTracker(game)?.priorGenerated.has(chunkKey(c.cx, c.cy, c.z)) ?? false;
+  registerSaveable<VehicleSaveJSON>(game, 'vehicles', {
+    order: 30,
+    // Round-trip through JSON so the section is plain data (Item.toJSON etc.).
+    save: () => JSON.parse(JSON.stringify(vs.toJSON())),
+    load: (data, ctx) => vs.fromJSON(ctx.data, data, { warn: ctx.warn, loadItem: (j) => loadItemSafe(ctx.data, j, ctx.warn) }),
+    missing: () => vs.clear(),
+  });
 }
 
 // CDDA vehicle.cpp engine sound messages by noise level.
@@ -786,25 +886,4 @@ export function obstacleAt(map: GameMap, x: number, y: number, z: number, wheel:
 function wallBash(d: TerrainDef | FurnitureDef): boolean {
   if (!d.bash || d.bash.bash_below) return false;
   return !('move_cost' in d && hasFlag(d, 'FLAT'));
-}
-
-/**
- * Minimal CDDA map::bash for vehicle impacts: furniture first, then terrain; succeeds when
- * the strength beats a roll between str_min and str_max, turning the tile into its
- * ter_set/furn_set. (The world-interaction system may replace this via vehicles.onBash.)
- */
-export function defaultBash(game: Game, x: number, y: number, z: number, strength: number, rng: Rng): boolean {
-  const map = game.map;
-  const f = map.furnAt(x, y, z);
-  const t = map.terAt(x, y, z);
-  const tgt = f.id !== 'f_null' && wallBash(f) ? 'furn' : wallBash(t) ? 'ter' : null;
-  if (!tgt) return false;
-  const b = (tgt === 'furn' ? f.bash : t.bash)!;
-  if (strength < b.str_min || strength < rng.int(b.str_min, Math.max(b.str_min, b.str_max))) return false;
-  if (tgt === 'furn') map.setFurn(x, y, z, b.furn_set ?? 'f_null');
-  // CDDA: ter_set t_null means "whatever the ground is"; outdoors that's dirt.
-  else map.setTer(x, y, z, b.ter_set && b.ter_set !== 't_null' ? b.ter_set : 't_dirt');
-  game.events.emit('mapChanged', { x, y, z });
-  game.events.emit('sound', { x, y, z, volume: 40, description: b.sound ?? 'smash!' });
-  return true;
 }

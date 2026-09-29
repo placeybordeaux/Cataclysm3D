@@ -93,6 +93,14 @@ export class WorldGenerator implements ChunkGenerator {
 
   // ------------------------------------------------------------------------------------
 
+  /**
+   * Drop overlays waiting for chunks that were never generated. Needed when the map is
+   * cleared (save loaded into a running game): the sources regenerate and re-queue them.
+   */
+  resetPending(): void {
+    this.pending.clear();
+  }
+
   generate(map: GameMap, c: Chunk): void {
     this.map = map;
     // Upper levels need the level below first: roofs/tree tops and z+1 overlays come from it.
@@ -121,6 +129,7 @@ export class WorldGenerator implements ChunkGenerator {
       const tz = c.z + dz;
       if (map.hasChunk(c.cx, c.cy, tz)) {
         const target = map.chunk(c.cx, c.cy, tz)!;
+        if (map.overlayFilter && !map.overlayFilter(target, key)) continue;
         const tmp = this.readChunk(map, target);
         applyOverlay(tmp, b);
         this.writeChunk(map, target, tmp);
