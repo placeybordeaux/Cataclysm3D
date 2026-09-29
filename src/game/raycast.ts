@@ -22,7 +22,7 @@ export interface RayMap {
   hasFloor(x: number, y: number, z: number): boolean;
 }
 
-export type RayHitKind = 'creature' | 'furniture' | 'terrain' | 'floor' | 'ceiling';
+export type RayHitKind = 'creature' | 'vehicle' | 'furniture' | 'terrain' | 'floor' | 'ceiling';
 
 export interface RayHit<C = unknown> {
   kind: RayHitKind;
@@ -44,6 +44,11 @@ export interface RayOpts<C> {
   maxDist?: number;
   /** Creature standing in tile (x, y, z), if any. Do not return the viewer. */
   creatureAt?: (x: number, y: number, z: number) => C | null | undefined;
+  /**
+   * Height (m) of a vehicle part column standing in tile (x, y, z), 0 = none. Vehicles are
+   * a map overlay, not terrain/furniture, so the caller supplies them (game.vehicles).
+   */
+  vehicleAt?: (x: number, y: number, z: number) => number;
   /** Ignore solids in the cell the ray starts in (default true: you stand in an open door). */
   skipOrigin?: boolean;
   /** Treat see-through obstacles (fences, windows, railings, shrubs) as transparent. */
@@ -159,6 +164,11 @@ export function raycastTiles<C = unknown>(
         const t = slab(tEnter, tExit, base, CREATURE_HEIGHT);
         if (t !== null) cands.push([t, 'creature', cr]);
       }
+      const vh = opts.vehicleAt?.(cx, cy, cz) ?? 0;
+      if (vh > 0) {
+        const t = slab(tEnter, tExit, base, vh);
+        if (t !== null) cands.push([t, 'vehicle', undefined]);
+      }
       const f = map.furnAt(cx, cy, cz);
       const tf = slab(tEnter, tExit, base, furnitureSolidHeight(f));
       if (tf !== null) cands.push([tf, 'furniture', undefined]);
@@ -168,7 +178,7 @@ export function raycastTiles<C = unknown>(
         if (tt !== null) cands.push([tt, 'terrain', undefined]);
       }
       if (cands.length) {
-        // Earliest wins; ties go to creature > furniture > terrain (list order).
+        // Earliest wins; ties go to creature > vehicle > furniture > terrain (list order).
         let best = cands[0];
         for (const c of cands) if (c[0] < best[0] - 1e-9) best = c;
         return hit(best[1], cx, cy, cz, best[0], best[2]);

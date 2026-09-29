@@ -29,6 +29,18 @@ function world(over: Record<string, TerrainDef> = {}, furn: Record<string, Furni
 const EYE = 1.6;
 
 describe('raycastTiles', () => {
+  it('vehicle columns block the ray (creatures in the same tile win ties)', () => {
+    const m = world({ '5,2,0': WALL });
+    const car = (x: number, y: number) => (x === 5 && y === 5 ? 1.6 : 0);
+    const hit = raycastTiles(m, { x: 5.5, y: 8.5, h: EYE - 0.3 }, dirFromYawPitch(0, 0), { vehicleAt: car });
+    expect(hit?.kind).toBe('vehicle');
+    expect([hit!.x, hit!.y]).toEqual([5, 5]);
+    // looking over the roof (eye above 1.6 m, level) reaches the wall behind
+    expect(raycastTiles(m, { x: 5.5, y: 8.5, h: EYE + 0.1 }, dirFromYawPitch(0, 0), { vehicleAt: car })?.kind).toBe('terrain');
+    const zed = raycastTiles(m, { x: 5.5, y: 8.5, h: EYE - 0.3 }, dirFromYawPitch(0, 0), { vehicleAt: car, creatureAt: (x, y) => (x === 5 && y === 5 ? 'zed' : null) });
+    expect(zed?.kind).toBe('creature');
+  });
+
   it('looking north hits the first wall tile', () => {
     const m = world({ '5,2,0': WALL });
     const hit = raycastTiles(m, { x: 5.5, y: 8.5, h: EYE }, dirFromYawPitch(0, 0));

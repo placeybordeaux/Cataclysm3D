@@ -345,6 +345,9 @@ Keys: `V` camera mode, `F` flashlight.
   hit (h = metres, x/y tiles; same as three.js X/Z). `dirFromYawPitch(yaw, pitch)`.
   `game.lookAt(maxDist?)` = ray through the crosshair of the active camera (any mode).
   Monsters: set `game.creatureAt = (x, y, z) => LookCreature | null` so look mode and rays see them.
+  `game.creatureAt` is a chain: installNpcs wraps the monsters' version (NPC first, else
+  monster). Vehicles block rays via `vehicleAt` (kind `'vehicle'`); look mode lists the vehicle
+  name, condition and the parts at that spot (`describeVehicleAt` in src/ui/vehicle_ui.ts).
 - **HUD** `src/ui/hud.ts`: `hud.setPrompt('[e] Open door' | null)` (sticky) or
   `hud.addPromptProvider(game => text | null)` (per frame, first non-null wins; returns an
   unregister fn). `hud.safeMode = {text, color}`. The HUD also draws the activity bar.
