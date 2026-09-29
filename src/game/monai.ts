@@ -1,4 +1,5 @@
 import { Rng, hashSeed } from '../core/rng';
+import { BALANCE } from './balance';
 import { MonsterStash } from './monstash';
 import { ACTION_SCALE, MELEE_SCALE } from '../core/time';
 import { pickFromMonsterGroup, expandItemGroup, getMonster, monsterName } from '../data/index';
@@ -681,7 +682,7 @@ export class MonsterSystem implements GameSystem {
     this.corpses.splice(this.corpses.indexOf(c), 1);
     for (const f of this.onCorpseGone) f(c);
     const m = this.spawn(def, c.x, c.y, c.z);
-    m.hp = Math.max(1, Math.round(def.hp * 0.75));
+    m.hp = Math.max(1, Math.round(m.hpMax * 0.75));
     return m;
   }
 
@@ -1304,7 +1305,7 @@ export class MonsterSystem implements GameSystem {
       const dx = m.wanderX - m.x, dy = m.wanderY - m.y;
       const d = Math.hypot(dx, dy);
       if (d < 1) continue;
-      const step = Math.min(d, (m.type.speed / 100) * ACTION_SCALE * 0.5 * dt);
+      const step = Math.min(d, (m.type.speed / 100) * ACTION_SCALE * 0.5 * BALANCE.monsterSpeed * dt);
       m.x += (dx / d) * step;
       m.y += (dy / d) * step;
     }

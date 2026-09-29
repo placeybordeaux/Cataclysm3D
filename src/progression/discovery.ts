@@ -157,6 +157,12 @@ export class NudgeQueue {
 }
 
 /**
+ * Recipe ids announced by a "you could craft" nudge that the player hasn't looked at yet: the
+ * crafting screen marks them NEW (and starts on them) and clears the set when it closes.
+ */
+export const newRecipes = new Set<string>();
+
+/**
  * Recipes that just became craftable and are worth telling about: craftable now, not a
  * moment ago, never crafted and never announced. Pure; the caller supplies the sets.
  */

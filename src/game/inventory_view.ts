@@ -357,7 +357,8 @@ export function verdict(who: Character, it: Item, from: Loc, to: Loc, count?: nu
 }
 
 export interface ItemAction {
-  id: 'wield' | 'unwield' | 'wear' | 'takeoff' | 'eat' | 'drink' | 'activate' | 'read' | 'reload' | 'unload' | 'drop' | 'pickup' | 'open';
+  id: 'wield' | 'unwield' | 'wear' | 'takeoff' | 'eat' | 'drink' | 'activate' | 'read' | 'reload' | 'unload' | 'drop' | 'pickup' | 'open'
+    | 'read_once' | 'disassemble' | 'craft_continue' | 'craft_abandon';
   label: string;
   /** BN moves (100 = 1 s of game time); the UI shows it as time. */
   moves: number;
@@ -367,6 +368,12 @@ export interface ItemAction {
   /** Run it. Returns the Inventory action result. */
   run(): { ok: boolean; msg: string };
 }
+
+/**
+ * Other systems' item actions (crafting: read, disassemble, continue a craft). A provider's
+ * action replaces a built-in one with the same id (the built-in "read" is a placeholder).
+ */
+export const itemActionProviders: ((who: Character, it: Item, loc: Loc) => ItemAction[])[] = [];
 
 /**
  * The actions for an item where it is, in BN's order, the obvious one marked primary (what
@@ -418,6 +425,14 @@ export function itemActions(who: Character, it: Item, loc: Loc): ItemAction[] {
     const d = why(L.inv(who));
     out.push({ id: 'pickup', label: 'Pick up', moves: cost(L.inv(who)) || 100, disabled: d, primary: !out.some((a) => a.primary) && !d, run: () => inv.pickUp(it, loc) });
   } else if (onMe) out.push({ id: 'drop', label: 'Drop', moves: cost(ground), disabled: why(ground), run: () => inv.drop(it, ground) });
+  for (const p of itemActionProviders) {
+    for (const a of p(who, it, loc)) {
+      const i = out.findIndex((o) => o.id === a.id);
+      if (a.primary) for (const o of out) o.primary = false;
+      if (i >= 0) out[i] = a;
+      else out.push(a);
+    }
+  }
   return out;
 }
 

@@ -6,7 +6,7 @@ import type { GameData } from '../src/data/types';
 import { Game } from '../src/game/game';
 import { cruiseThrust, CRUISE_STEP_VMIPH, MPH_PER_MS, VMIPH_PER_MS, resolveCollision, rotate, simpleCubicSolution, spawnVehicle, Vehicle, has } from '../src/game/vehicle';
 import type { VehicleDataFile } from '../src/game/vehicle_data';
-import { registerVehicleSave, VehicleSystem } from '../src/game/vehicles';
+import { feltAcceleration, maxSteerAt, registerVehicleSave, VehicleSystem } from '../src/game/vehicles';
 import { createItem } from '../src/game/item';
 import { saveRegistry } from '../src/save/registry';
 import type { Chunk, ChunkGenerator, GameMap } from '../src/world/map';
@@ -197,7 +197,7 @@ describe('physics', () => {
   });
 });
 
-describe('cruise control (CDDA default driving)', () => {
+describe('cruise control (CDDA driving model option)', () => {
   it('cruise_thrust steps 4 mph, snaps to the safe speed, clamps to max and reverse', () => {
     // safe 45 mph, max 60, reverse -15 (combustion: max / 4)
     const step = (c: number, n: number) => cruiseThrust(c, n * CRUISE_STEP_VMIPH, 4500, 6000, -1500);
@@ -221,6 +221,8 @@ describe('cruise control (CDDA default driving)', () => {
     game.player.y = 10.5;
     vs.takeControls(v);
     expect(vs.startEngine(v).ok).toBe(true);
+    // CDDA's model is an option now; direct driving is the default.
+    vs.driveMode = 'cruise';
     vs.scriptedInput = true;
     vs.input = { throttle: 0, steer: 0, brake: false };
     return { game, vs, v };
@@ -295,6 +297,127 @@ describe('cruise control (CDDA default driving)', () => {
     v.engineOn = false;
     for (let i = 0; i < 3; i++) game.tick(1 / 30);
     expect(v.cruiseVelocity).toBe(0);
+  });
+});
+
+describe('direct driving (default)', () => {
+  const driving = (proto = 'car') => {
+    const { game, vs } = world();
+    const v = vs.spawn(proto, 10, 10, 0, 0, { fuel: 100, status: 2, rng: new Rng(7) })!;
+    for (const p of v.parts) if (has(p, 'OPENABLE')) p.open = false;
+    v.locked = false;
+    vs.takeControls(v);
+    expect(vs.startEngine(v).ok).toBe(true);
+    vs.scriptedInput = true;
+    return { game, vs, v };
+  };
+  const mph = (v: Vehicle) => v.velocity * MPH_PER_MS;
+  const run = (game: Game, seconds: number, until?: () => boolean) => {
+    let t = 0;
+    while (t < seconds && !(until && until())) {
+      game.tick(1 / 30);
+      t += 1 / 30;
+    }
+    return t;
+  };
+
+  it('is the default model', () => {
+    expect(world().vs.driveMode).toBe('direct');
+  });
+
+  it('W: a car does 0-30 mph in 3-5 s; electric and heavy vehicles stay in a playable band', () => {
+    for (const [proto, lo, hi] of [['car', 3, 5], ['suv_electric', 2.5, 5], ['semi_truck', 4, 7], ['car_sports', 2, 4]] as const) {
+      const { game, vs, v } = driving(proto);
+      vs.input = { throttle: 1, steer: 0, brake: false };
+      const t = run(game, 15, () => mph(v) >= 30);
+      expect(t, proto).toBeGreaterThan(lo);
+      expect(t, proto).toBeLessThan(hi);
+    }
+  });
+
+  it('responds at once: moving within a quarter second of pressing W', () => {
+    const { game, vs, v } = driving();
+    vs.input = { throttle: 1, steer: 0, brake: false };
+    run(game, 0.25);
+    expect(mph(v)).toBeGreaterThan(0.5);
+  });
+
+  it('releasing W coasts: slows noticeably but keeps rolling', () => {
+    const { game, vs, v } = driving();
+    vs.input = { throttle: 1, steer: 0, brake: false };
+    run(game, 15, () => mph(v) >= 30);
+    vs.input = { throttle: 0, steer: 0, brake: false };
+    run(game, 3);
+    expect(mph(v)).toBeLessThan(27);
+    expect(mph(v)).toBeGreaterThan(18);
+  });
+
+  it('S brakes firmly (30 mph to 0 in ~1.5-2 s), holds at 0 briefly, then reverses', () => {
+    const { game, vs, v } = driving();
+    v.velocity = 30 / MPH_PER_MS;
+    vs.input = { throttle: -1, steer: 0, brake: false };
+    const t = run(game, 5, () => v.velocity <= 0);
+    expect(t).toBeGreaterThan(1.3);
+    expect(t).toBeLessThan(2.1);
+    expect(v.velocity).toBe(0);
+    run(game, 0.15);
+    expect(v.velocity).toBe(0); // no instant flip into reverse
+    run(game, 1.5);
+    expect(v.velocity).toBeLessThan(-0.5);
+  });
+
+  it('Space (handbrake) stops the car and never reverses it', () => {
+    const { game, vs, v } = driving();
+    v.velocity = 10;
+    vs.input = { throttle: 0, steer: 0, brake: true };
+    run(game, 2);
+    expect(v.velocity).toBe(0);
+  });
+
+  it('steering narrows with speed: lateral acceleration stays car-like at 50 mph', () => {
+    const { game, vs, v } = driving();
+    v.velocity = 50 / MPH_PER_MS;
+    vs.input = { throttle: 0.3, steer: 1, brake: false };
+    run(game, 1);
+    const lat = (v.velocity * v.velocity * Math.tan(Math.abs(v.steer))) / v.wheelbase();
+    expect(lat).toBeLessThan(6);
+    expect(lat).toBeGreaterThan(3);
+    // and at parking speed the full lock is available
+    expect(maxSteerAt(1, v.wheelbase())).toBeCloseTo(0.6, 2);
+  });
+
+  it('steering eases in rather than snapping', () => {
+    const { game, vs, v } = driving();
+    v.velocity = 5;
+    vs.input = { throttle: 0.3, steer: 1, brake: false };
+    game.tick(1 / 30);
+    expect(Math.abs(v.steer)).toBeLessThan(0.1);
+    run(game, 0.6);
+    expect(Math.abs(v.steer)).toBeGreaterThan(0.3);
+  });
+
+  it('cruise control key locks the current speed; S cancels it', () => {
+    const { game, vs, v } = driving();
+    expect(vs.toggleCruise()).toMatch(/Get moving/);
+    vs.input = { throttle: 1, steer: 0, brake: false };
+    run(game, 15, () => mph(v) >= 25);
+    expect(vs.toggleCruise()).toMatch(/set to 2[5-6] mph/);
+    vs.input = { throttle: 0, steer: 0, brake: false };
+    run(game, 5);
+    expect(mph(v)).toBeGreaterThan(24);
+    vs.input = { throttle: -1, steer: 0, brake: false };
+    game.tick(1 / 30);
+    expect(vs.cruiseOn).toBe(false);
+    vs.input = { throttle: 0, steer: 0, brake: false };
+    run(game, 3);
+    expect(mph(v)).toBeLessThan(22);
+  });
+
+  it('felt acceleration compresses CDDA launch figures toward a car', () => {
+    expect(feltAcceleration(6.5)).toBeCloseTo(3.4, 1);
+    expect(feltAcceleration(26)).toBeLessThanOrEqual(5);
+    expect(feltAcceleration(2)).toBeGreaterThanOrEqual(1.2);
+    expect(feltAcceleration(11)).toBeGreaterThan(feltAcceleration(6.5));
   });
 });
 

@@ -1,22 +1,22 @@
 import type { Character } from './character';
 import type { Item } from './item';
-import { bookRecipeIndex, hasCraftingLight, learnRecipe, recipeName, type CraftHost } from './crafting';
+import { bookRecipeIndex, fineVisionMod, FINE_VISION_THRESHOLD, learnRecipe, recipeName, type CraftHost } from './crafting';
 import { cddaText } from './units';
 
-// Reading (activity_actor.cpp read_activity_actor, character_knowledge.cpp), simplified to
-// one skill level per skill (no separate theory/practice): the first read of a book is a
-// quick skim that identifies it; after that each session ("chapter") trains the book's skill
-// up to its max_level, gives the book's fun as morale, and teaches the recipes the book
-// contains once you have the skill for them. Reading continues session after session until
-// the skill goes up, the book has nothing left to teach, or you're interrupted — like CDDA.
+// Reading after Bright Nights (avatar.cpp read / do_read / time_to_read, skill.cpp readBook):
+// the first time you open a book you learn what's in it at once (skim); each session
+// ("chapter") then gives the book's fun as morale, memorises every recipe in it your skill can
+// follow, and trains its skill up to max_level. "Read until you gain a level" keeps going
+// session after session; "read once" stops after one. Martial-arts manuals train through
+// readHooks (src/game/martialarts.ts).
 
 export interface BookData {
   skill?: string;
-  /** Skill needed to understand it (CDDA "required_level"). */
+  /** Skill needed to understand it (BN "required_level"). */
   req: number;
-  /** Max level it can train to (CDDA "max_level"). */
+  /** Max level it can train to (BN "max_level"). */
   level: number;
-  /** Seconds per session. */
+  /** Seconds per session (BN minutes × 60). */
   time: number;
   intel: number;
   fun: number;
@@ -27,29 +27,32 @@ export function bookData(it: Item): BookData | null {
   if (!it.isBook()) return null;
   const d = it.def;
   return {
-    skill: (d.read_skill as string | undefined) ?? (d.skill as string | undefined),
+    skill: (d.skill as string | undefined) || undefined,
     req: d.required_level ?? 0,
     level: d.max_level ?? 0,
     time: d.time ?? 60,
     intel: d.intelligence ?? 0,
-    fun: Number(d.read_fun ?? d.fun ?? 0),
+    fun: Number(d.fun ?? 0),
     chapters: d.chapters ?? 0,
   };
 }
 
-/** Character::read_speed as a percentage (100 at int 8). */
+/** Character::read_speed: moves per minute of book time (6000 at Int 8, −300 per point above). */
 export function readSpeed(c: Character): number {
-  return (180 / (2 + c.int / 8)) * (100 / 60);
+  let ret = 6000 - 300 * (c.int - 8);
+  ret *= c.mutationValue('reading_speed_multiplier');
+  ret = c.byEnchant(ret, 'READING_SPEED');
+  return Math.max(100, ret);
 }
 
-/** Character::time_to_read: skimming an unidentified book takes a tenth of the time. */
-export function timeToRead(c: Character, it: Item): number {
+/** avatar::time_to_read in seconds: book minutes × read speed × vision, + the complexity penalty. */
+export function timeToRead(c: Character, it: Item, visionMod = 1): number {
   const b = bookData(it);
   if (!b) return 0;
-  let t = (b.time * readSpeed(c)) / 100;
-  if (b.intel > c.int) t += (b.time * (b.intel - c.int)) / 60;
-  if (!c.identifiedBooks.has(it.typeId)) t /= 10;
-  return Math.max(1, Math.round(t));
+  const minutes = b.time / 60;
+  let moves = minutes * readSpeed(c) * Math.max(1, visionMod);
+  if (b.intel > c.int) moves += minutes * (b.intel - c.int) * 100;
+  return Math.max(1, Math.round(moves / 100));
 }
 
 export type Mastery = 'cant_understand' | 'learning' | 'mastered' | 'no_skill';
@@ -63,85 +66,112 @@ export function bookMastery(c: Character, it: Item): Mastery {
   return 'learning';
 }
 
-/** Why `c` can't read `it` right now (CDDA read_condition_result wording), or null. */
+/** character_funcs::is_fun_to_read (fun, ignoring traits that change it). */
+function funToRead(it: Item): boolean {
+  return (bookData(it)?.fun ?? 0) > 0;
+}
+
+/** avatar::get_book_reader: why `c` can't read `it` right now (BN wording), or null. */
 export function cantRead(host: CraftHost, it: Item): string | null {
   const c = host.player;
   const b = bookData(it);
   if (!b) return `Your ${it.name()} is not good reading material.`;
-  if (!hasCraftingLight(host) && !it.hasFlag('CAN_USE_IN_DARK')) return "It's too dark to read!";
-  if (c.identifiedBooks.has(it.typeId)) {
-    const m = bookMastery(c, it);
-    if (m === 'cant_understand') return `${c.skillName(b.skill!)} ${b.req} needed to understand.  You have ${c.getSkill(b.skill!)}.`;
-    if (b.fun <= 0 && c.morale.level() < -40) return 'What\'s the point of studying?  (Your morale is too low!)';
-    if (m === 'mastered' && b.fun <= 0 && !teachableRecipes(c, it).length) return `You won't learn anything more from ${cddaText(it.def.name)}.`;
-  }
+  if (!funToRead(it) && c.morale.level() < -40) return "What's the point of studying?  (Your morale is too low!)";
+  if (b.skill && c.getSkill(b.skill) < b.req) return `${c.skillName(b.skill)} ${b.req} needed to understand.  You have ${c.getSkill(b.skill)}`;
+  if (b.intel > 0 && c.hasTrait('ILLITERATE')) return "You're illiterate!";
+  if (fineVisionMod(host) > FINE_VISION_THRESHOLD && !it.hasFlag('CAN_USE_IN_DARK')) return "It's too dark to read!";
   return null;
 }
 
 /** Recipes the book would teach `c` now that aren't known yet. */
 export function teachableRecipes(c: Character, it: Item) {
   return (bookRecipeIndex(c.data).get(it.typeId) ?? []).filter(
-    (br) => !c.learnedRecipes.has(br.recipe.id) && (!br.recipe.skill_used || c.getSkill(br.recipe.skill_used) >= br.level),
+    (br) => !c.learnedRecipes.has(br.recipe.id) && !br.recipe.never_learn && (!br.recipe.skill_used || c.getSkill(br.recipe.skill_used) >= br.level),
   );
 }
 
-/** Info lines shown when a book is identified (avatar::identify). */
+/** Nothing left to gain: skill maxed (or none), no recipes to learn, no fun. */
+export function nothingToLearn(c: Character, it: Item): boolean {
+  const b = bookData(it)!;
+  const trains = !!b.skill && c.getSkill(b.skill) < b.level && c.getSkill(b.skill) < 10;
+  return !trains && teachableRecipes(c, it).length === 0;
+}
+
+/** skim_book_msg: what the first look at a book tells you. */
 export function identifyLines(c: Character, it: Item): string[] {
   const b = bookData(it)!;
   const out = [`You skim ${cddaText(it.def.name)} to find out what's in it.`];
-  if (b.skill) {
-    out.push(`Can bring your ${c.skillName(b.skill)} knowledge to ${b.level}.`);
-    if (b.req) out.push(`Requires ${c.skillName(b.skill)} knowledge level ${b.req} to understand.`);
+  if (b.skill && c.getSkill(b.skill) < 10) {
+    out.push(`Can bring your ${c.skillName(b.skill)} skill to ${b.level}.`);
+    if (b.req) out.push(`Requires ${c.skillName(b.skill)} level ${b.req} to understand.`);
   }
   if (b.intel) out.push(`Requires intelligence of ${b.intel} to easily read.`);
-  if (b.fun) out.push(`Reading this book affects your morale by ${b.fun}.`);
-  out.push(`A chapter of this book takes ${Math.round(b.time / 60)} minutes to read.`);
+  if (b.fun) out.push(`Reading this book affects your morale by ${b.fun}`);
+  const min = Math.round(b.time / 60);
+  out.push(`A chapter of this book takes ${min} minute${min === 1 ? '' : 's'} to read.`);
   const rec = bookRecipeIndex(c.data).get(it.typeId) ?? [];
-  if (rec.length) out.push(`This book contains ${rec.length} crafting recipe${rec.length === 1 ? '' : 's'}: ${rec.slice(0, 6).map((r) => recipeName(c.data, r.recipe)).join(', ')}${rec.length > 6 ? ', …' : ''}.`);
+  if (rec.length) out.push(`This book contains ${rec.length} crafting recipe${rec.length === 1 ? '' : 's'}: ${rec.slice(0, 6).map((r) => recipeName(c.data, r.recipe)).join(', ')}${rec.length > 6 ? ', …' : ''}`);
   return out;
 }
 
+/** Character::adjust_for_focus. */
+function adjustForFocus(c: Character, amount: number): number {
+  let focus = c.focus + c.enchantBonus('EFFECTIVE_FOCUS', c.focus);
+  if (c.hasTrait('FASTLEARNER')) focus += 15;
+  if (c.hasTrait('SLOWLEARNER')) focus -= 15;
+  focus += (c.int - 8) * 5;
+  return c.rollRemainder((amount * focus) / 100);
+}
+
+/** BN SkillLevel::train (exercise stored ×100: a level takes 10000 × (level+1)²). */
+function train(c: Character, skill: string, amount: number): boolean {
+  const sk = (c.skills[skill] ??= { level: 0, exercise: 0 });
+  sk.exercise += amount * 100;
+  if (sk.exercise >= 10000 * (sk.level + 1) ** 2) {
+    sk.exercise = 0;
+    sk.level++;
+    return true;
+  }
+  return false;
+}
+
+/** Exercise towards the next level of `skill`, 0..1 (the reading UI's bar). */
+export function skillProgress(c: Character, skill: string): number {
+  const sk = c.skills[skill];
+  if (!sk) return 0;
+  return Math.min(1, sk.exercise / (10000 * (sk.level + 1) ** 2));
+}
+
 /**
- * read_activity_actor::read_book + SkillLevel::readBook: experience (lvl+1)*rng(min,max)*100
- * where min/max come from session minutes and intelligence. Returns true on level up.
+ * do_read's skill part: min/max experience from the session's minutes and Int, focus-adjusted,
+ * then SkillLevel::readBook. Returns true on level up.
  */
 export function trainFromBook(c: Character, it: Item, host?: CraftHost): boolean {
   const b = bookData(it)!;
   if (!b.skill) return false;
-  const sk = (c.skills[b.skill] ??= { level: 0, exercise: 0 });
-  if (sk.level >= b.level) return false;
+  const lvl = c.getSkill(b.skill);
+  if (lvl >= b.level || lvl >= 10) return false;
   const minutes = b.time / 60;
-  const focus = Math.max(1, c.focus) / 100;
-  let minEx = Math.max(1, Math.floor(minutes / 10 + c.int / 4));
-  let maxEx = Math.floor(minutes / 5 + c.int / 2 - sk.level);
-  minEx = Math.round(minEx * focus);
-  maxEx = Math.max(minEx, Math.min(10, Math.max(2, Math.round(maxEx * focus))));
-  minEx = Math.max(1, minEx * (sk.level + 1));
-  maxEx = Math.max(minEx, maxEx * (sk.level + 1));
-  const gain = (sk.level + 1) * c.rng.int(minEx, maxEx) * 100;
-  sk.exercise += gain;
-  const need = () => 10000 * (sk.level + 1) ** 2;
-  let leveled = false;
-  while (sk.exercise >= need() && sk.level < b.level) {
-    sk.exercise -= need();
-    sk.level++;
-    leveled = true;
-  }
+  let minEx = adjustForFocus(c, Math.max(1, Math.floor(minutes / 10 + c.int / 4)));
+  let maxEx = adjustForFocus(c, Math.floor(minutes / 5 + c.int / 2 - lvl));
+  maxEx = Math.max(minEx, Math.min(10, Math.max(2, maxEx)));
+  minEx = Math.max(1, minEx * (lvl + 1));
+  maxEx = Math.max(minEx, maxEx * (lvl + 1));
+  const leveled = train(c, b.skill, (lvl + 1) * c.rng.int(minEx, maxEx));
   const say = (t: string, col?: string) => (host ? host.message(t, col) : c.msg(t, col));
-  if (leveled) say(`Your skill in ${c.skillName(b.skill)} increases to level ${sk.level}.`, 'c_light_green');
-  else say(`You learn a little about ${c.skillName(b.skill)}!  (${Math.floor((100 * sk.exercise) / need())}%)`, 'c_cyan');
-  if (sk.level >= b.level) say(`You can no longer learn from ${cddaText(it.def.name)}.`);
+  if (leveled) say(`You increase ${c.skillName(b.skill)} to level ${lvl + 1}.`, 'c_light_green');
+  else say(`You learn a little about ${c.skillName(b.skill)}!  (${Math.floor(skillProgress(c, b.skill) * 100)}%)`, 'c_cyan');
   return leveled;
 }
 
-/** Learn every recipe from the book the reader now has the skill for. */
+/** Memorise every recipe from the book the reader now has the skill for. */
 export function learnBookRecipes(c: Character, it: Item, host?: CraftHost): string[] {
   const learned: string[] = [];
   for (const br of teachableRecipes(c, it)) {
     if (!learnRecipe(c, br.recipe.id)) continue;
-    const name = br.name || recipeName(c.data, br.recipe);
+    const name = recipeName(c.data, br.recipe);
     learned.push(name);
-    (host ? host.message.bind(host) : c.msg.bind(c))(`You learn how to craft ${name}.`, 'c_light_green');
+    (host ? host.message.bind(host) : c.msg.bind(c))(`You memorize a recipe for ${name}.`, 'c_light_green');
   }
   return learned;
 }
@@ -149,53 +179,94 @@ export function learnBookRecipes(c: Character, it: Item, host?: CraftHost): stri
 /** Called after each full read session of a book (martial-arts manuals teach their style). */
 export const readHooks: ((c: Character, it: Item, host: CraftHost) => void)[] = [];
 
-/** One read session; returns whether to keep reading. */
-function finishSession(host: CraftHost, it: Item): boolean {
+export type ReadMode = 'until_level' | 'once';
+
+/** do_read: one session. Returns whether to keep reading (until-level mode, no level yet). */
+function finishSession(host: CraftHost, it: Item, mode: ReadMode): boolean {
   const c = host.player;
   const b = bookData(it)!;
-  if (!c.identifiedBooks.has(it.typeId)) {
-    c.identifiedBooks.add(it.typeId);
-    for (const l of identifyLines(c, it)) host.message(l, 'c_light_gray');
-    return false;
-  }
   if (b.fun !== 0) c.morale.add('morale_book', b.fun * 5, b.fun * 15, 3600, 1800, true, it.typeId);
   for (const h of readHooks) h(c, it, host);
-  const mastery = bookMastery(c, it);
-  let keepGoing = false;
-  if (mastery === 'learning') keepGoing = !trainFromBook(c, it, host) && bookMastery(c, it) === 'learning';
   learnBookRecipes(c, it, host);
+  let keepGoing = false;
+  if (b.skill && c.getSkill(b.skill) < b.level && c.getSkill(b.skill) < 10) {
+    const leveled = trainFromBook(c, it, host);
+    if (!leveled && mode === 'until_level') keepGoing = true;
+    if (c.getSkill(b.skill) >= b.level && !teachableRecipes(c, it).length) host.message(`You can no longer learn from ${cddaText(it.def.name)}.`);
+  } else if (b.skill && !teachableRecipes(c, it).length) host.message(`You can no longer learn from ${cddaText(it.def.name)}.`);
   return keepGoing;
 }
 
-/** Start (continuous) reading of `it`. Returns false with a message if it can't be read. */
-export function startReading(host: CraftHost, it: Item): boolean {
+/** Live state of a reading session, for the reading UI. */
+export interface ReadingState {
+  book: Item;
+  mode: ReadMode;
+  sessions: number;
+}
+export const reading: { current: ReadingState | null } = { current: null };
+/** Listeners: a session ended (UI refresh). */
+export const readSessionHooks: ((st: ReadingState) => void)[] = [];
+
+/**
+ * avatar::read: identify on first look (skim messages), check the reader, then read a session
+ * (repeating in 'until_level' mode). Returns false with a message if it can't be read.
+ */
+export function startReading(host: CraftHost, it: Item, mode: ReadMode = 'until_level'): boolean {
+  const c = host.player;
+  if (it.isBook() && !c.identifiedBooks.has(it.typeId)) {
+    c.identifiedBooks.add(it.typeId);
+    for (const l of identifyLines(c, it)) host.message(l, 'c_light_gray');
+  }
   const why = cantRead(host, it);
   if (why) {
     host.message(why, 'c_light_red');
     return false;
   }
-  const c = host.player;
+  const b = bookData(it)!;
+  if (b.intel > c.int) host.message('This book is too complex for you to easily understand.  It will take longer to read.', 'c_yellow');
   const title = cddaText(it.def.name);
-  const session = (): boolean =>
-    host.activities.start({
-      name: c.identifiedBooks.has(it.typeId) ? `reading ${title}` : `skimming ${title}`,
-      duration: timeToRead(c, it),
+  // Nothing left to train: "until you gain a level" would just be one chapter anyway.
+  if (!b.skill || c.getSkill(b.skill) >= b.level) mode = 'once';
+  const st: ReadingState = { book: it, mode, sessions: 0 };
+  const session = (): boolean => {
+    const vision = fineVisionMod(host);
+    if (vision > 1.5) host.message("It's difficult for you to see fine details right now.  Reading will take longer than usual.", 'c_yellow');
+    reading.current = st;
+    const ok = host.activities.start({
+      name: `reading ${title}`,
+      kind: 'read',
+      target: it,
+      customUi: true,
+      duration: timeToRead(c, it, vision),
       onComplete: () => {
-        if (!c.inv.has(it) && !nearby(host, it)) return;
-        if (finishSession(host, it) && !cantRead(host, it)) session();
-        else host.message('You finish reading.');
+        st.sessions++;
+        if (!c.inv.has(it) && !nearby(host, it)) {
+          reading.current = null;
+          return;
+        }
+        const more = finishSession(host, it, mode);
+        for (const h of readSessionHooks) h(st);
+        if (more && !cantRead(host, it)) session();
+        else {
+          reading.current = null;
+          host.message('You finish reading.');
+        }
       },
+      onCancel: () => void (reading.current = null),
     });
+    if (!ok) reading.current = null;
+    return ok;
+  };
   return session();
 }
 
 function nearby(host: CraftHost, it: Item): boolean {
   const p = host.player;
-  for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) if (host.map.itemsAt(Math.floor(p.x) + dx, Math.floor(p.y) + dy, p.z).includes(it)) return true;
+  for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) for (const mi of host.map.itemsAt(Math.floor(p.x) + dx, Math.floor(p.y) + dy, p.z)) if (mi === it || (typeof (mi as Item).walk === 'function' && [...(mi as Item).walk()].includes(it))) return true;
   return false;
 }
 
-/** Books the player carries or has at their feet. */
+/** Books the player carries or has within reach. */
 export function readableBooks(host: CraftHost): Item[] {
   const p = host.player;
   const out = p.inv.allItems().filter((i) => i.isBook());

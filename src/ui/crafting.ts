@@ -1,7 +1,7 @@
 import type { RecipeDef } from '../data/types';
 import {
   availableRecipes, canCraft, craftingInventory, craftTime, formatDuration, hasCraftingLight, nestedCategories, recipeName,
-  recipeProficiencies, startCraft, successChance, type CraftCheck, type CraftHost, type KnownRecipe, type NestedCategory,
+  startCraft, successChance, type CraftCheck, type CraftHost, type KnownRecipe, type NestedCategory,
 } from '../game/crafting';
 import type { CraftingInventory } from '../game/crafting_inv';
 import { requirementLines } from '../game/requirements';
@@ -252,18 +252,6 @@ export function openCraftingMenu(game: CraftHost): CraftingMenu {
     };
     if (r.skill_used) out.push(`Primary skill used: ${sk(r.skill_used, r.difficulty)}`);
     if (r.skills_required?.length) out.push(`Other skills used: ${r.skills_required.map(([s, l]) => sk(s, l)).join(', ')}`);
-    const profs = recipeProficiencies(r);
-    if (profs.length) {
-      out.push(
-        `Proficiencies used: ${profs
-          .map((p) => {
-            const name = cddaText(data.misc.proficiency?.[p.proficiency]?.name) || p.proficiency;
-            const has = player.proficiencies.has(p.proficiency);
-            return `<color_${has ? 'green' : p.required ? 'red' : 'yellow'}>${name}${p.required && !has ? ' (required)' : ''}</color>`;
-          })
-          .join(', ')}`,
-      );
-    }
     out.push(`Difficulty: <color_cyan>${r.difficulty}</color>`);
     if (r.skill_used) out.push(`Your skill level: <color_cyan>${player.getSkill(r.skill_used)}</color>`);
     out.push(`Time to complete: <color_cyan>${formatDuration(craftTime(player, r, batch))}</color>`);
@@ -274,7 +262,6 @@ export function openCraftingMenu(game: CraftHost): CraftingMenu {
     if (mult > 1) out.push(`Recipe makes: <color_cyan>${mult}</color>`);
     if (source !== 'memory') out.push(`Recipe from: <color_light_blue>${cddaText(data.items[source]?.name) || source}</color>`);
     if (!ch.light) out.push('<color_red>Lighting conditions are too poor to craft this.</color>');
-    if (ch.missingProficiencies.length) out.push(`<color_red>Missing required proficiencies: ${ch.missingProficiencies.join(', ')}</color>`);
     out.push('');
     out.push(...requirementLines(ch.req));
     if (r.byproducts?.length) {

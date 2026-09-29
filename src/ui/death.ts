@@ -7,6 +7,7 @@ import type { UiContext } from './context';
 import { achievementsOf } from '../achievements';
 import { GameClock } from '../core/time';
 import { saveHandle } from '../save/install';
+import { permadeath } from '../game/difficulty';
 import { deathLines, titledName } from '../progression/memorial';
 
 // Death: CDDA's end screen (end_screen.json "death_tombstone" over the ascii_tombstone
@@ -78,7 +79,7 @@ export function showDeathScreen(ctx: UiContext, hud: Hud, cause: string, diedAt 
   ].join('\n');
   el.innerHTML = `<div style="display:flex;gap:4ch;justify-content:center;align-items:flex-start;padding:4vh 2vw;height:100%;box-sizing:border-box;overflow:auto">
       <div class="pre">${colorize(art.join('\n'))}\n\n${c('c_light_gray', ctx.data.tombstone.last_words_label ?? 'Last Words:')} <input class="last-words" maxlength="60" style="background:#000;color:var(--c-white);border:0;border-bottom:1px solid var(--c-dark_gray);font:inherit;width:30ch"></div>
-      <div class="pre">${summary}\n\n\n${c('c_yellow', 'Type your last words if you like, then press Enter to return to the main menu.')}</div>
+      <div class="pre">${summary}\n\n\n${permadeath(game) ? '' : `${c('c_light_green', 'Permadeath is off: your last save is kept. Load it from the main menu to try again.')}\n\n`}${c('c_yellow', 'Type your last words if you like, then press Enter to return to the main menu.')}</div>
     </div>`;
   root.appendChild(el);
   requestAnimationFrame(() => (el.style.opacity = '1'));

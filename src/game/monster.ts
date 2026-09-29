@@ -2,7 +2,8 @@ import type { GameData, MonsterAttack, MonsterDef } from '../data/types';
 import { monsterName } from '../data/index';
 import { warnOnce } from '../data/warn';
 import { Rng } from '../core/rng';
-import { ACTION_SCALE, CLOCK_SCALE, SECONDS_PER_DAY } from '../core/time';
+import { ACTION_SCALE, clockScale, SECONDS_PER_DAY } from '../core/time';
+import { BALANCE } from './balance';
 import { sizeFromVolume, sizeMeleePenalty, type CreatureSize } from './combat';
 
 // A live creature instance of a CDDA MonsterDef (monster.cpp). Positions are float tiles like
@@ -36,10 +37,10 @@ let nextUid = 1;
 export const turnsToSeconds = (turns: number) => turns / ACTION_SCALE;
 /**
  * CDDA effect durations on the *player* are in turns but Character effects tick in game
- * seconds (CLOCK_SCALE per real second). A 2-turn "downed" must still last 2/ACTION_SCALE
+ * seconds (clockScale() per real second). A 2-turn "downed" must still last 2/ACTION_SCALE
  * real seconds, so scale turns into game seconds.
  */
-export const turnsToEffectSeconds = (turns: number) => (turns * CLOCK_SCALE) / ACTION_SCALE;
+export const turnsToEffectSeconds = (turns: number) => (turns * clockScale()) / ACTION_SCALE;
 
 export function monsterSize(def: MonsterDef): CreatureSize {
   return sizeFromVolume(def.volume);
@@ -176,7 +177,8 @@ export class Monster {
     this.y = y;
     this.z = z;
     this.rng = rng;
-    this.hp = type.hp;
+    this.hpScale = BALANCE.monsterResilience;
+    this.hp = this.hpMax;
     this.anger = type.aggression;
     this.morale = type.morale;
     this.aggroCharacter = (type as any).aggro_character !== false;
@@ -205,8 +207,10 @@ export class Monster {
   get id(): string {
     return this.type.id;
   }
+  /** BN MONSTER_RESILIENCE at creation (difficulty); hit points are type.hp × this. */
+  hpScale = 1;
   get hpMax(): number {
-    return this.type.hp;
+    return Math.max(1, Math.round(this.type.hp * this.hpScale));
   }
   get size(): CreatureSize {
     return monsterSize(this.type);
@@ -265,7 +269,8 @@ export class Monster {
     let cost = this.has('FLIES') ? 100 : Math.max(moveCost, 1);
     // Diggers/swimmers ignore terrain costs of their medium (simplified).
     if (this.has('SWIMS') && moveCost > 100) cost = 100;
-    let s = (this.type.speed / cost) * ACTION_SCALE;
+    // BALANCE.monsterSpeed: the difficulty's BN MONSTER_SPEED (walking only; swing rates stay BN's).
+    let s = (this.type.speed / cost) * ACTION_SCALE * BALANCE.monsterSpeed;
     if (this.hasEffect('stunned')) s *= 0.5;
     return s;
   }
@@ -335,7 +340,7 @@ export class Monster {
   polymorph(type: MonsterDef): void {
     const frac = this.hp / Math.max(1, this.hpMax);
     this.type = type;
-    this.hp = Math.max(1, Math.round(type.hp * frac));
+    this.hp = Math.max(1, Math.round(this.hpMax * frac));
     this.anger = type.aggression;
     this.morale = type.morale;
     this.initSpecials();

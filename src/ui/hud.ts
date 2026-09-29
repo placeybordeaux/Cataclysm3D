@@ -163,7 +163,8 @@ export class Hud {
 
   private renderActivity(): void {
     const a = this.ctx.game.activities.current;
-    if (!a) {
+    // Activities with their own progress UI (crafting, construction, reading: src/ui/craft2).
+    if (!a || a.spec.customUi) {
       if (this.actEl.style.display !== 'none') this.actEl.style.display = 'none';
       return;
     }

@@ -159,12 +159,24 @@ tests/               vitest unit tests (pure logic, no DOM/WebGL)
   `game.stats?.kills` gets kill counts; `renderer.viewmodel?.attack(kind)` is called on
   attacks. Rendering: `src/render/monsterView.ts` (sprites, corpses, blood decals).
 - Crafting (`crafting*.ts`, `requirements.ts`, `construction.ts`, `disassembly.ts`, `reading.ts`,
-  `fire.ts`): functions take a `CraftHost` (Game satisfies it). `CraftingInventory.gather` =
-  inventory + map items/furniture pseudo tools within 2 tiles + `fire` from a nearby `fd_fire`.
-  Knowledge lives on Character (`learnedRecipes`, `identifiedBooks`, `proficiencies`).
-  `hasCraftingLight` uses `game.lightAt`/`map.lightAt(x,y,z)` if present (>= 4 = bright enough).
-  Other systems' use_actions: `inv.useHandlers.set(type, fn)` (crafting registers `firestarter`).
-  UI + keys (`& * ( R`) + `cdda.*` helpers: `installCrafting(game, api)` in src/ui/crafting_install.ts.
+  `fire.ts`), Bright Nights rules: functions take a `CraftHost` (Game satisfies it).
+  `CraftingInventory.gather` = inventory + map items/furniture pseudo tools within 2 tiles + `fire`
+  from a nearby `fd_fire`; components are consumed or moved (`into`) through moves.ts.
+  **In-progress crafts are real items** (BN itype `craft`, vars `craft_recipe/progress/…`) holding
+  their components in `contents`: `startCraft` → `continueCraft` / `abandonCraft` (components
+  back) / `completeCraft`; `craftQueue(host)` runs several in a row. **Unfinished constructions**
+  are the same item type with `vars.con_id`, lying on the site with the materials
+  (`continueConstruction` / `cancelConstruction`). moves.ts refuses hand moves into/out of crafts.
+  Light: BN `lightSpeedMultiplier` (dark = slower; BLIND_* flags), `fineVisionMod` uses
+  `game.lightAt`. Knowledge on Character (`learnedRecipes`, `identifiedBooks`); book recipes need
+  no identification (BN). Hooks: `craftedHooks`, `craftStoppedHooks`, `constructedHooks`,
+  `readHooks`, `readSessionHooks`; activities set `kind/target/at/customUi` (ActivitySpec).
+  UI: `installCrafting(game, api, renderer)` (src/ui/crafting_install.ts) → ui2 screens in
+  src/ui/craft2 (`&` crafting browser, `*` construction list + in-world placement ghost, reading
+  card and progress bars in overlay.ts), item actions via `itemActionProviders`
+  (src/game/inventory_view.ts; `readAction`, `disassembleAction`, `craftItemActions` in
+  craft2/actions.ts), world menu "Continue construction" / "Build here…". `cdda.crafting.*`,
+  `cdda.construction.*` for automation.
 
 ### Combat depth (src/game/{techniques,martialarts,gunmods,monguns,explosion}.ts, wired by src/combatdepth.ts)
 - `meleeAttack(c, {dodge, armor, info?: TargetInfo}, rng, name, {allowSpecial, aoeTargets, forceTechnique})`
@@ -243,7 +255,14 @@ tests/               vitest unit tests (pure logic, no DOM/WebGL)
   Audio: `src/audio/vehicleAudio.ts` `EngineSounds` (running-engine loop per nearby vehicle,
   internal while driving, rate by CDDA gear, gear-shift clunks) and CDDA variant pickers.
 - Keys: `^` take controls / controls menu, `k` engine, `h` headlights, `n` horn; at the
-  controls WASD drive (S brakes then reverses), Space handbrake. `e` on a vehicle part goes
+  controls WASD drive (direct by default: W throttle with a short ramp, release coasts, S
+  brakes then reverses after a beat, `c` cruise control locks the speed; CDDA's 4-mph-step
+  cruise model is the "Driving controls" option), Space handbrake. Launch acceleration is
+  CDDA power/mass compressed toward a car (`feltAcceleration`, 0-30 mph in ~4 s); steering
+  lock narrows with speed (`maxSteerAt`, lateral accel <= 5.5 m/s^2).
+- Run-overs: `vs.creatureHooks = composeCreatureHooks([monsterCreatureHooks(ms),
+  npcCreatureHooks(game, vs)])` — NPCs take CDDA impact damage on the torso, get stunned,
+  flung and downed, and npcai `afterHit` handles death drops and anger. `e` on a vehicle part goes
   through `interactOverrides` in interact.ts (doors toggle, else a part menu: cargo get/put,
   controls, hotwire with a SCREW tool, parts list).
 - Seams: `vehicles.creatureHooks` (run-over damage/placement), `vehicles.onBash`,
@@ -252,6 +271,10 @@ tests/               vitest unit tests (pure logic, no DOM/WebGL)
   {fuel,status})`, `cdda.vehicles()`, `cdda.enterVehicle()`, `cdda.drive(throttle, steer,
   s, brake?)`, `cdda.roadTrip(proto)`, `cdda.gotoVehicle(regex, {angle, dist})`,
   `cdda.vehicleLights(on)`, `cdda.vehicleAt(dx, dy)`.
+- Mesh (vehicleMesh.ts): bonnet rows ahead of the windscreen slope from 0.9 m to 0.7 m at the
+  nose, low dark cowl/dash, thin A-pillars, faint glass (0.14), painted panels mid-tone with
+  darker tops (`panelTop`) so sunlit cars don't read as white slabs; BN wheel sizes are cm.
+  Headlights: a spot aimed ~30 m out plus four light-map beam lights out to ~30 m.
 ### NPCs, dialogue, trade, missions (src/game, wired by src/npcs.ts `installNpcs`)
 - Data: `public/data/npcs.json` (`npm run extract:npcs`, tools/extract/npcs.ts): npc templates,
   npc_class, talk_topic (merged like CDDA: responses append across definitions), mission_definition,
@@ -455,6 +478,27 @@ tests/               vitest unit tests (pure logic, no DOM/WebGL)
   discover(id), queue(), checkCraftable(), run(), export(), import(json), reset()}`. Tests:
   tests/progression.test.ts; real input: `tools/realinput.ts --only title,onboarding,newgame`.
 
+### Interaction screens (src/screens, ui2; installed by `installScreens` in main.ts)
+- Replace the curses NPC / vehicle / body-mod / achievement windows through seams those systems
+  expose: `npcScreens` (npcs.ts: dialogue, trade, missionLog, chat, pickItem), `vehicleScreens`
+  (vehicle_ui.ts: partMenu, info, controls, legacyDashboard), `autodocScreen` (mutbio.ts), key
+  re-registration (`p`, `[`, `_`), and `src/ui/achievements_ui.ts` lazy-loading
+  `src/screens/achievements.ts`. Pure rules in `src/screens/logic/*` (tests/screens.test.ts).
+- Dialogue (`dialogue.ts`): portrait, opinion chip, typewriter line (Options: text speed), answers
+  1–9/0 with trial chips (`ResponseView.trial` / `.action` / `.plain` from talk.ts), `?` shows
+  hidden answers, job-offer card, Scene/Book layouts. Pauses with the ui2 pause setting.
+- Trade (`trade.ts`): drag goods onto You give / You get; the deal is `TradeSession.commit` (one
+  moves transaction; property test tests/trade_screen.test.ts, `TRADE_SEEDS=400` soak).
+- Missions (`missions.ts`): log + Track. **Map markers**: `src/game/mapmarkers.ts`
+  (`mapMarkerProviders.push(() => MapMarker[])`, `mapMarkers()`); missions export their targets.
+- Vehicles (`vehicle.ts`): parts diagram / gauges / controls panel, cargo panel (the inventory
+  screens can take over with `cargoPanel.open = (game, v, part) => …`), driving HUD.
+- Body (`bodymods.ts`): bionics (power bar, ON/OFF), mutations, martial arts, Autodoc (odds, risks,
+  anesthetic, time under; `beginInstall` / `beginUninstall` in mutbio_ui.ts do the operation).
+- Debug: `cdda.screens.{dialogue(), trade(), autodoc(), markers(), trackMission(uid), openMissions(uid?),
+  vehicle(dx, dy), bionics(), mutations(), martialArts(), prefs}`, `cdda.openAutodoc()`. Real input:
+  `tools/realinput.ts --only talk,trade,missions,vehicle,body,autodoc,scores`.
+
 ### Combat feel layer (src/game/combatfeel.ts, wired by src/feel.ts; see docs/COMBAT_FEEL.md)
 - All feel constants live in `FEEL` (presets `FEEL_PRESETS.accessible|classic`, `setFeelDifficulty(d, overrides)`
   is the difficulty hook). The CDDA/BN math stays underneath; this layer only times and targets it.
@@ -468,6 +512,22 @@ tests/               vitest unit tests (pure logic, no DOM/WebGL)
   `SpriteHandle.setSize`, `hitFx.tracer/watchTracers`, `playerAttack.hitStop`. HUD: `src/ui/combatHud.ts`.
 - Debug: `cdda.feel`, `cdda.setFeel(d)`, `cdda.feelState()`, `cdda.recordFrames(n, dt, each)` (frame-exact
   captures for animation timing); `tools/drive.ts seq "…"` (timed real input + screenshot bursts), `xbdown/xbup`.
+
+### Difficulty & tactical pause (src/game/{difficulty,balance,pause}.ts, src/difficulty.ts, src/pause.ts; see docs/BALANCE.md)
+- `DifficultySettings` holds every balance knob (spawn/horde scale, safe radius, monster speed & resilience, item
+  spawn rate, feel, bleed, crash damage, hunger/thirst/fatigue, healing, cold, day length, pause in menus,
+  permadeath); presets `DIFFICULTY_PRESETS.accessible|classic`, Custom = anything else. `applyDifficultySettings(game,
+  preset, s)` pushes them into the spawner (`registerDifficultyTargets`), `game.map.itemSpawnRate`, `BALANCE`
+  (balance.ts: monster speed/resilience, crash damage), `setFeelDifficulty`, `game.player.balance` (per-survivor
+  needs/healing/bleed/cold multipliers), `setClockRate` (time.ts; convert real→game time with `clockScale()`, never
+  CLOCK_SCALE), `game.pauseInMenus` and ui2 `settings.pauseInInventory`. The new-game flow picks the preset
+  (progression `difficultyHooks`); save section `difficulty` (order 18) keeps the full settings per world;
+  Options > Difficulty… edits them live. `permadeath(game)` decides whether death deletes the save.
+- Tactical pause: `tacticalPauseOf(game)` = manual toggle + named holds ('menus' from ui2 inventory-type windows);
+  `game.tacticalPause` is derived from it — don't assign it directly. Key `tactical_pause` (` / Pause) also works
+  inside menus via `input.onPriorityPress`. The Esc menu always pauses (`game.paused`).
+- `tools/balance_sim.ts` (headless day-1 bot, duels, needs timelines, first night): see docs/BALANCE.md.
+  Debug: `cdda.difficulty()`, `cdda.setDifficulty(d, overrides)`, `cdda.openDifficulty()`, `cdda.tacticalPause()`.
 
 ### Extension points (prefer these over editing someone else's code)
 
@@ -566,8 +626,15 @@ Keys: `V` camera mode, `F` flashlight.
 - **Seams**: world textures take alpha (cut-out coverage) from mip 0 while colour uses the chosen
   mip (materials.ts WORLD_MAP), ceilings tuck `CEIL_TUCK` into the walls below and door leaves
   overlap their lintel: edge-to-edge geometry showed sky-coloured dotted cracks on real GPUs.
-- **Cameras**: third person becomes a chase camera while driving (`rig.suppressBob`); the mouse
-  wheel zooms top-down (`rig.topDistance` 10–60).
+- **Cameras**: the mouse wheel zooms top-down (`rig.topDistance` 10–60). While driving,
+  VehicleRenderer fills `rig.drive` (a `DriveView`: centre, heading, driver eye, length, speed,
+  roughness) every frame and V cycles the driving cameras (`rig.driveCam`, persisted in
+  localStorage `cdda3d.driveCam`, separate from the on-foot `rig.footMode`): chase (default;
+  trails the heading, pulled in by walls, looks further ahead and widens FOV with speed) ->
+  cockpit (driver eye ~1.2 m in cars, 1.3–1.45 m in vans/buses; mouse look is relative to the
+  car because `p.yaw` turns with it) -> top-down. `rig.mode` reads as the on-foot equivalent
+  (chase = third, cockpit = first). Pure math in src/render/driveCamera.ts
+  (tests/driveCamera.test.ts).
 - **Other**: `renderer.setWeather('clear'|'rain'|'storm'|'snow')`,
   `renderer.setCameraMode('first'|'third'|'top')`, `renderer.flushChunks()` (tests).
   Plain three.js objects added to `renderer.scene` are auto-patched for the MRT output.
@@ -621,7 +688,7 @@ Keys: `V` camera mode, `F` flashlight.
 - **ui2 (v2 UI toolkit)** `src/ui2/`, documented in **docs/UI2.md**: mouse-first pixel-art
   windows, drag & drop, context menus (+ `worldContextProviders` for world objects), tooltips,
   toasts, hotbar, paper doll, integer UI scaling. New and ported screens are built from it.
-  Opening a ui2 surface frees the cursor and may set `game.tacticalPause`; `?debug=ui2` is the
+  Opening a ui2 surface frees the cursor and may add a tactical-pause hold (src/game/pause.ts); `?debug=ui2` is the
   showcase; i / Tab open the inventory (`src/ui2/bn/`, on the BN item model), `o` the crosshair's
   context menu; 1…0 are hotbar slots.
 - **Key bindings** `src/ui/keys.ts`: all default keys live in `DEFAULT_BINDINGS`; systems call

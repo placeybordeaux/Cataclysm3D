@@ -59,7 +59,12 @@ export function useFirestarter(host: CraftHost, tool: Item, ua: { moves?: number
   const fuel = fuelAt(host, x, y, z);
   if (fuel <= 0 && !flammableTile(host, x, y, z) && !hasFlag(host.map.furnAt(x, y, z), 'FIRE_CONTAINER'))
     return say(false, "There's nothing to light there.");
-  const fast = ua.moves ?? 500, slow = ua.moves_slow ?? 6000;
+  // BN firestarter_actor::load: moves_slow defaults to 10 × the fast cost.
+  const fast = ua.moves ?? 100, slow = ua.moves_slow ?? fast * 10;
+  if (ua.need_sunlight) {
+    const h = host.clock.hourOfDay;
+    if (p.z < 0 || h < 8 || h >= 18) return say(false, 'You need direct sunlight to light a fire with this.');
+  }
   const base = fuel >= 100 ? fast : fuel >= 10 ? (fast + slow) / 2 : slow;
   const mod = Math.pow(0.8, Math.min(5, p.getSkill('survival')));
   const moves = Math.max(Math.min(base, Math.sqrt(1 + base / 100) * 100), base * mod);
@@ -68,7 +73,7 @@ export function useFirestarter(host: CraftHost, tool: Item, ua: { moves?: number
   const light = () => {
     if (usesCharges) tool.ammoConsume(need);
     host.map.addField(x, y, z, 'fd_fire', 1);
-    p.practice('survival', Math.floor(mod * (Math.min(10, fast / 100) + 2)), 5);
+    p.practice('survival', Math.floor(mod + fast / 100 + 2), 5);
     host.message('You successfully light a fire.', 'c_light_green');
   };
   const ok = host.activities.start({ name: 'lighting the fire', duration: seconds, onComplete: light });

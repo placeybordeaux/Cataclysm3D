@@ -40,7 +40,7 @@ export const DEFAULT_BINDINGS: Record<string, string[]> = {
   flashlight: ['F'],
   stairs_up: ['<'],
   stairs_down: ['>'],
-  crouch: ['c'],
+  crouch: ['c'], // also cruise control while driving (src/ui/vehicle_ui.ts)
   camera_mode: ['v'],
   butcher: ['B'],
   smash: ['X'], // CDDA 's' smash (taken by move back)
@@ -85,6 +85,8 @@ export const DEFAULT_BINDINGS: Record<string, string[]> = {
   hotbar_1: ['1'], hotbar_2: ['2'], hotbar_3: ['3'], hotbar_4: ['4'], hotbar_5: ['5'],
   hotbar_6: ['6'], hotbar_7: ['7'], hotbar_8: ['8'], hotbar_9: ['9'], hotbar_0: ['0'],
   world_menu: ['o'], // context menu for what's under the crosshair (RMB is guard/aim while captured)
+  // --- tactical pause (src/pause.ts): works in menus too; Space is the side-step, P the message log ---
+  tactical_pause: ['`', 'Pause'],
   // --- progression (src/progression): tips, recipes, places, unlock progress ---
   journal: ['J'],
 };
@@ -120,6 +122,8 @@ export class Keys {
    * Esc, which in a browser also releases the captured mouse.
    */
   static opening: { key: string; seq: number } | null = null;
+  /** Open key-binding screens: while > 0, keys that work inside menus (tactical pause) don't. */
+  static rebinding = 0;
   private static input: Input | null = null;
   /** The opening key for a window being created now, or null. */
   static openingKey(): string | null {
@@ -192,6 +196,12 @@ export class Keys {
   register(id: string, name: string, handler: () => void): void {
     if (!DEFAULT_BINDINGS[id]) throw new Error(`Action ${id} has no entry in DEFAULT_BINDINGS (src/ui/keys.ts)`);
     this.actions.set(id, { id, name, handler });
+  }
+
+  /** The registered action for an id (lets a system layer a context-dependent meaning over
+   *  an existing key, like C = cruise control while driving, crouch on foot). */
+  action(id: string): Action | undefined {
+    return this.actions.get(id);
   }
 
   /** For the help screen: [reachable keys, name] for every registered action. */

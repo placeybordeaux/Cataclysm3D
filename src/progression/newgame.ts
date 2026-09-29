@@ -20,7 +20,7 @@ import { profName, scenName } from '../ui/chargen_logic';
 import { defaultDensity } from '../game/density';
 import { INITIAL_VISIBILITY, revealAround } from '../ui/overmap_ui';
 import { CHUNK } from '../world/coords';
-import { DIFFICULTIES, preferredDifficulty, setPreferredDifficulty, type Difficulty } from './difficulty';
+import { DIFFICULTIES, customRulesEditor, preferredDifficulty, setPreferredDifficulty, type Difficulty } from './difficulty';
 import { findStart, moveSurvivor, SCENARIO_PLACEMENT } from './placement';
 import { buildFor, cardTitle, kitPreview, scenarioOptions, startCards, type StartCard, type StartChoice } from './starts';
 import { progressLines, unlockMet, type UnlockDef } from './unlocks';
@@ -87,8 +87,19 @@ function identityForm(ctx: UiContext, prog: ProgressionHandle, id: Identity, onE
     // A generated name follows the change; a typed one is the player's and stays.
     if (was !== id.male && prog && /^\S+ \S+$/.test(id.name)) reroll();
   });
-  const desc = h('div', { class: 'pg-desc' });
-  const drawDesc = () => (desc.textContent = DIFFICULTIES.find((d) => d.id === id.difficulty)!.desc);
+  const descText = h('span', {});
+  // Custom: a button to the rules editor (src/difficulty.ts), which opens over this panel.
+  // The editor is a legacy (curses-style) window, which sits under ui2 windows: step aside meanwhile.
+  const edit = button('Edit rules', () => {
+    const win = edit.closest<HTMLElement>('.ui2-win');
+    if (win) win.style.visibility = 'hidden';
+    customRulesEditor.open?.(() => win && (win.style.visibility = ''));
+  }, { small: true, title: 'The rules a Custom game uses' });
+  const desc = h('div', { class: 'pg-desc' }, descText, ' ', edit);
+  const drawDesc = () => {
+    descText.textContent = DIFFICULTIES.find((d) => d.id === id.difficulty)!.desc;
+    edit.style.display = id.difficulty === 'custom' && customRulesEditor.open ? '' : 'none';
+  };
   const diff = segmented<Difficulty>(DIFFICULTIES.map((d) => ({ id: d.id, label: d.name, disabled: d.unavailable })), () => id.difficulty, (v) => ((id.difficulty = v), drawDesc()));
   drawDesc();
   const titles = availableTitles(prog);

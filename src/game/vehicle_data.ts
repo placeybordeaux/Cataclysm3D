@@ -43,7 +43,7 @@ export interface VPartDef {
   /** Tanks: ml of liquid. Batteries: kJ. */
   capacity?: number;
   variants?: Record<string, { symbols: string; broken: string }>;
-  /** Wheels: item diameter/width in inches. */
+  /** Wheels: item diameter/width in cm (BN "425 mm" -> 42.5). */
   wheel?: { diameter: number; width: number };
 }
 

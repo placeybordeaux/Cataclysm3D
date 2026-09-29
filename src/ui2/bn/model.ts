@@ -37,7 +37,6 @@ export interface BnHooks {
   openContainer?(loc: string, item: ItemView): void;
   /** Examine: the full item info. */
   examine?(it: Item): void;
-  read?(it: Item): void;
   bindHotbar?(slot: number, item: ItemView): void;
   /** "Drop some…" / "Move how many…". */
   askCount?(item: ItemView, verb: string): Promise<number | null>;
@@ -62,6 +61,9 @@ export interface TakeAllResult {
 }
 
 const PART_SLOTS: BodyPartId[] = ALL_PARTS;
+
+/** Item actions that are a moment's handling (timed by perform), not an activity of their own. */
+const QUICK = new Set(['wield', 'unwield', 'wear', 'takeoff', 'eat', 'drink', 'reload', 'unload', 'drop', 'pickup', 'activate']);
 
 /** BN move cost → real seconds (100 moves = one turn; ACTION_SCALE turns per real second). */
 export function movesToSeconds(moves: number): number {
@@ -561,10 +563,6 @@ export class BnInventoryModel implements InventoryModel {
       anyPrimary = true;
     }
     for (const a of acts) {
-      if (a.id === 'read') {
-        out.push({ label: 'Read', key: 'R', primary: !anyPrimary, disabled: this.hooks.read ? false : 'Reading is started from the read menu', action: () => this.hooks.read?.(it) });
-        continue;
-      }
       if (a.id === 'unload' && liquidInside) {
         out.push({ label: `Pour out / into…`, key: 'U', time: secs(a.moves), action: () => this.hooks.liquid?.(liquidInside, L.in(it), it) });
         continue;
@@ -596,7 +594,11 @@ export class BnInventoryModel implements InventoryModel {
         }
       }
       const keys: Record<string, string> = { eat: 'E', drink: 'E', wear: 'W', takeoff: 'T', wield: 'Z', unwield: 'Z', activate: 'A', reload: 'R', drop: 'D', pickup: 'G' };
-      out.push({ label: a.label, key: keys[a.id], time: secs(a.moves), primary: !!a.primary && !a.disabled, disabled: a.disabled ?? false, danger: false, action: this.runAction(a, it) });
+      // Quick handling actions take real seconds here; the ones other systems add (reading,
+      // disassembling, continuing a craft) start activities that warp game time themselves, so
+      // they run at once and show their game time.
+      const quick = QUICK.has(a.id);
+      out.push({ label: a.label, key: keys[a.id], time: quick ? secs(a.moves) : a.moves / 100, primary: !!a.primary && !a.disabled, disabled: a.disabled ?? false, danger: false, action: quick ? this.runAction(a, it) : () => { const r = a.run(); if (!r.ok && r.msg) this.hooks.notify?.(r.msg, 'bad'); this.refresh(true); } });
     }
     // Hands: double-click puts it away.
     if (loc.kind === 'hands' && !out.some((m) => 'primary' in m && m.primary)) {

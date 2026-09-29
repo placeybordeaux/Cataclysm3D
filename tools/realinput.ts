@@ -18,6 +18,7 @@ import puppeteer, { type Page } from 'puppeteer-core';
 import { mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { startXvfb, XInput } from './lib/realinput';
+import { screenScenarios } from './realinput_screens';
 
 const argv = process.argv.slice(2);
 const opt = (n: string, d: string) => (argv.includes(n) ? argv[argv.indexOf(n) + 1] : d);
@@ -208,11 +209,13 @@ const scenarios: Scenario[] = [
     check('the crafting key gets a badge', badge >= 1, badge);
     await shot('craft_nudge');
     await x.key('ampersand');
-    s = await until((t) => t.windows.length > 0, 1500);
-    check('& opens crafting', s.windows.includes('Crafting'), s.windows);
+    s = await until((t) => t.panels.includes('Crafting'), 1500);
+    check('& opens crafting', s.panels.includes('Crafting'), s.panels);
     check('…and clears the badge', (await js<number>('cdda.progression.queue().badge')) === 0);
+    const fresh = await js<number>(`document.querySelectorAll('#ui2 .c2-row .c2-new').length`);
+    check('…with the announced recipes marked NEW', fresh >= 1, fresh);
     await x.key('ampersand');
-    await until((t) => !t.windows.length, 1500);
+    await until((t) => !t.panels.length, 1500);
     await x.key('J');
     s = await until((t) => t.panels.includes('Survival Journal'), 2000);
     check('J opens the survival journal', s.panels.includes('Survival Journal'), s.panels);
@@ -308,16 +311,38 @@ const scenarios: Scenario[] = [
     await js(`(() => { for (const id of ['granola', 'bandages', 'crowbar', 'manual_mechanics', 'rock']) cdda.giveItem(id); cdda.learnAll?.(); })()`);
     const keys: [string, string][] = [
       ['i', 'Inventory'], ['z', 'Wield what?'], ['O', 'Wear what?'], ['T', 'Take off what?'], ['E', 'Eat or drink what?'], ['u', 'Use what?'],
-      ['R', 'Read what?'], ['&', 'Crafting'], ['*', 'Construction'], ['(', 'Disassemble item:'], ['@', 'Character'], ['m', ''],
+      ['R', 'Read what?'], ['(', 'Disassemble item:'], ['@', 'Character'], ['m', ''],
       ['P', 'Messages'], ['?', 'Help'], [')', ''], ['p', ''], ['[', ''], ['_', ''], ['M', ''], ['x', 'Look Around'], ['q', 'Drop what?'],
       ['|', ''], ['$', ''], ['C', ''], ['B', ''],
     ];
     for (const [k, title] of keys) {
       const before = (await log()).length;
       await x.key(k);
-      let s = await until((t) => t.menus.length > 0, 1200);
+      let s = await until((t) => t.windows.length > 0 || t.panels.length > 0, 1200);
       const msgs = (await log()).slice(before);
-      if (!s.menus.length) {
+      const menu = await js<number>(`document.querySelectorAll('#ui2 .ui2-menu').length`);
+      if (s.panels.length) {
+        // A ui2 screen (src/screens): the same key closes it and gives the mouse back.
+        const panel = s.panels[s.panels.length - 1];
+        check(`${k} opens the ${panel} panel with a free cursor`, !s.lock, s);
+        await shot(`menu_${panel}`);
+        await x.key(k);
+        s = await until((t) => !t.panels.length && t.lock, 1500);
+        if (s.panels.length) {
+          check(`${k} closes the ${panel} panel again`, false, s.panels);
+          for (let i = 0; i < 4 && (await state()).panels.length; i++) await x.key('Escape');
+          await toGameplay();
+        } else check(`${k} closes the ${panel} panel again, mouse captured`, s.lock, s);
+        continue;
+      }
+      if (menu) {
+        // A ui2 context menu (C: talk / orders): Esc closes it.
+        check(`${k} opens a context menu`, true);
+        await x.key('Escape');
+        await toGameplay();
+        continue;
+      }
+      if (!s.windows.length) {
         // Not every key opens a window (nothing to butcher here); it must at least say something.
         check(`${k}: no window, but a message says why`, msgs.length > 0, msgs.length ? msgs.join(' / ') : 'no window and no message');
         continue;
@@ -503,14 +528,57 @@ const scenarios: Scenario[] = [
       x.layout('us');
     }
   }],
-  ['craft', 'crafting: & closes it; nested groups back out with Esc', async () => {
+  ['craft', 'ui2 crafting: & opens with a free cursor, type to search, Enter crafts, stop/continue, * construction placement', async () => {
     await toGameplay();
-    await x.key('&');
-    let s = await until((t) => t.windows.includes('Crafting'));
-    check('& opens crafting', s.windows.includes('Crafting'), s.windows);
-    await x.key('&');
-    s = await state();
-    check('& closes crafting', !s.windows.length, s.windows);
+    // Setup only: materials for a wooden spear and a half wall.
+    await js(`(() => { const p = cdda.game.player; cdda.giveItem('backpack', { wear: true }); for (const id of ['knife_folding', 'sandpaper', 'rag', 'hammer', 'stick_long']) cdda.giveItem(id); cdda.giveItem('thread', { count: 50 }); cdda.giveItem('nail', { count: 40 }); for (let i = 0; i < 10; i++) cdda.placeItem('2x4', 0, 1); p.setSkill('fabrication', 3); p.setSkill('survival', 1); cdda.addFire(-1, 1); })()`);
+    await x.key('ampersand');
+    let s = await until((t) => t.panels.includes('Crafting'), 1500);
+    check('& opens the crafting screen with a free cursor', s.panels.includes('Crafting') && !s.lock, s);
+    await sleep(200);
+    await x.type('spear');
+    await sleep(300);
+    const rows = await js<string[]>('cdda.crafting.screen()?.rows() ?? []');
+    check('typing searches the recipes', rows.includes('spear_wood'), rows);
+    await shot('crafting_screen');
+    await x.key('Return');
+    s = await until((t) => !t.panels.length && t.lock, 2000);
+    check('Enter crafts, closes the screen and re-captures the mouse', !s.panels.length && s.lock, s);
+    await sleep(1200);
+    const act = await js<string | null>('cdda.game.activities.current?.spec.name ?? null');
+    check('crafting is running with its progress bar', /crafting wooden spear/.test(act ?? '') && (await js<number>(`document.querySelectorAll('#ui2 .ui2-prog').length`)) > 0, act);
+    await x.hold('w', 300);
+    const wip = await js<{ progress: number }[]>('cdda.crafting.inProgress()');
+    check('moving stops it; the in-progress craft keeps its components and progress', wip.length === 1 && wip[0].progress > 0 && wip[0].progress < 1, wip);
+    await x.hold('s', 300);
+    await js(`cdda.addFire(0, 1)`);
+    await x.key('ampersand');
+    await until((t) => t.panels.includes('Crafting'), 1500);
+    const c = await js<{ x: number; y: number } | null>(`cdda.ui2.textRect('Continue')`);
+    if (c) await x.click(c.x, c.y);
+    s = await until((t) => !t.panels.length, 1500);
+    await sleep(9000);
+    const done = await js<number>(`cdda.game.player.inv.allItems().filter((i) => i.typeId === 'spear_wood').length`);
+    check('Continue (clicked) finishes the spear', done === 1 && !(await js<unknown[]>('cdda.crafting.inProgress()')).length, done);
+    await toGameplay();
+    // Construction: * → search → Enter places a ghost; a left click builds.
+    await x.key('asterisk');
+    s = await until((t) => t.panels.includes('Construction'), 1500);
+    check('* opens the construction screen', s.panels.includes('Construction'), s.panels);
+    await sleep(200);
+    await x.type('build wood wall');
+    await x.key('Return');
+    s = await until((t) => !t.panels.length && t.lock, 2000);
+    const ghost = await js<{ ok: boolean } | null>('cdda.construction.placement()');
+    check('Place puts a ghost on the tile in front, mouse captured', !!ghost && s.lock, ghost);
+    await shot('construction_ghost');
+    if (ghost?.ok) {
+      await x.clickHere(1);
+      await sleep(600);
+      check('left click starts building (not an attack)', /constructing/.test((await js<string | null>('cdda.game.activities.current?.spec.name ?? null')) ?? ''));
+    }
+    await x.hold('s', 200);
+    await js('cdda.construction.cancel()');
   }],
   ['rebind', 'Options > Key bindings: rebind wear to y; movement keys refused; reset', async () => {
     await toGameplay();
@@ -823,6 +891,59 @@ const scenarios: Scenario[] = [
     await sleep(1500);
     check('3 again puts it away', (await whereIs('knife_combat')).some((l) => l.startsWith('inv')), await whereIs('knife_combat'));
   }],
+  ['pause', 'tactical pause: ` freezes time but not the view, works inside menus; Classic menus run, the Esc menu pauses', async () => {
+    await toGameplay();
+    await js(`cdda.setDifficulty('accessible')`);
+    const clock = () => js<number>('cdda.game.clock.seconds');
+    await x.key('grave');
+    await sleep(300);
+    let tp = await js<{ paused: boolean; manual: boolean }>('cdda.tacticalPause()');
+    const banner = await js<string>(`document.querySelector('.tactical-pause-banner')?.style.display ?? 'missing'`);
+    check('` pauses (manual) and shows the PAUSED banner', tp.paused && tp.manual && banner === '', { tp, banner });
+    const c0 = await clock(), yaw0 = await js<number>('cdda.game.player.yaw');
+    await x.move(250, 0);
+    await sleep(800);
+    const c1 = await clock(), yaw1 = await js<number>('cdda.game.player.yaw');
+    check('…time stands still', c1 === c0, { c0, c1 });
+    check('…but the mouse still turns the view', Math.abs(yaw1 - yaw0) > 0.05, { yaw0, yaw1 });
+    await x.key('i');
+    await sleep(400);
+    await x.key('grave');
+    await sleep(200);
+    tp = await js('cdda.tacticalPause()');
+    check('` inside the inventory toggles the pause off', !tp.manual, tp);
+    await x.key('i');
+    await sleep(300);
+    // Accessible ui2 inventory holds the pause; a manual pause survives closing it.
+    await x.key('Tab');
+    await sleep(300);
+    await x.key('grave');
+    await x.key('Tab');
+    await sleep(300);
+    tp = await js('cdda.tacticalPause()');
+    check('a pause started in the ui2 inventory survives closing it', tp.paused && tp.manual, tp);
+    await x.key('grave');
+    await until((t) => t.lock, 3000);
+    // Classic: time runs in menus, the Esc menu still stops it.
+    await js(`cdda.setDifficulty('classic')`);
+    await x.key('i');
+    await sleep(300);
+    const m0 = await clock();
+    await sleep(1000);
+    const m1 = await clock();
+    check('Classic: time runs with the inventory open', m1 > m0, { m0, m1 });
+    await x.key('i');
+    await sleep(300);
+    await x.key('Escape');
+    await until((t) => t.windows.length > 0, 2000);
+    const e0 = await clock();
+    await sleep(1000);
+    const e1 = await clock();
+    const paused = await js<boolean>('cdda.game.paused');
+    check('Classic: the Esc menu stops time (game.paused, not only the lost mouse)', e1 === e0 && paused, { e0, e1, paused, windows: (await state()).windows });
+    await js(`cdda.setDifficulty('accessible')`);
+    await toGameplay();
+  }],
   ['save', 'F5 saves; leaving the page asks first; title Load/Memorial screens', async () => {
     await toGameplay();
     const before = (await log()).length;
@@ -864,6 +985,9 @@ const scenarios: Scenario[] = [
     check('Enter returns to the title without a "Leave site?" prompt', !dialogs.includes('beforeunload'), dialogs);
   }],
 ];
+
+// Interaction screens (dialogue, trade, missions, vehicles, body, Autodoc, scores): before 'death'.
+scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...screenScenarios({ page: () => page, x: () => x, js, check, shot, toGameplay, sleep }));
 
 if (argv.includes('--list') || argv.includes('--dry-run')) {
   for (const [n, what] of scenarios) console.log(`${only && !only.has(n) ? '  (skip)' : '  run   '} ${n.padEnd(11)} ${what}`);

@@ -15,7 +15,8 @@ import { createItem } from '../../game/item';
 import { has, type VehiclePart } from '../../game/vehicle';
 import { patchInteractUi } from '../../game/interact';
 import { itemInfo } from '../../ui/iteminfo';
-import { extraItemActions, itemActionHooks, type InvEntry } from '../../ui/inventory_ui';
+import { extraItemActions, type InvEntry } from '../../ui/inventory_ui';
+import { cargoPanel, openCargoPanel } from '../../screens/vehicle';
 import { registerOption } from '../../ui/options';
 import { cargoUi } from '../../ui/vehicle_ui';
 import { closeGroup } from '../window';
@@ -84,7 +85,6 @@ export function installBnInventory(game: Game, ctx: UiContext, api: DebugApi, ca
       });
     },
     examine: (it) => examineCard(itemInfo(it, game.player), it.name()),
-    read: (it) => itemActionHooks.read?.(it),
     bindHotbar: (slot, item) => hotbar.bind(slot, item),
     askCount: (item, verb) => countPrompt({ title: `${verb} how many?`, subtitle: item.name, max: item.count, initial: Math.max(1, Math.floor(item.count / 2)), icon: item.icon, ok: verb }),
     extraActions: (it, loc) => legacyExtras(ctx, it, loc),
@@ -306,6 +306,12 @@ export function installBnInventory(game: Game, ctx: UiContext, api: DebugApi, ca
       toggleFocus(`ground:${x},${y},${z}`);
     },
   });
+  // The vehicle panel's "Open the trunk": the Nearby tab for it when it's within reach.
+  cargoPanel.open = (g, v, part) => {
+    const i = classic() ? -1 : nearbyCargo(game).findIndex((c) => c.part === part);
+    if (i < 0) return openCargoPanel(g, v, part);
+    toggleFocus(`cargo:${i}`);
+  };
   cargoUi.open = (v, part) => {
     if (classic()) return false;
     const i = nearbyCargo(game).findIndex((c) => c.part === part);

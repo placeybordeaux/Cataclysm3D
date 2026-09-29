@@ -3,11 +3,13 @@ import type { Game } from '../game/game';
 import { has, type Vehicle, type VehiclePart } from '../game/vehicle';
 import type { VehicleSystem } from '../game/vehicles';
 import { LEVEL_HEIGHT } from '../world/coords';
+import { hasFlag } from '../world/registry';
 import { setupPixelTexture } from './atlas';
 import { INDOOR_SKY } from './chunkMesh';
 import { cddaColor } from './colors';
 import { GeomBuilder } from './geometry';
 import type { LightHandle } from './lights';
+import { headingFromFacing, eyeHeightFor, type DriveView } from './driveCamera';
 import { patchNormalOutput, worldMaterials } from './materials';
 import type { Renderer } from './renderer';
 import type { TileFrame } from './textureSource';
@@ -33,14 +35,25 @@ const BELT = 1.02; // top of doors, hood, fenders
 const ROOF_LO = 1.8;
 const ROOF_HI = 1.9;
 const PANEL = 0.14; // thickness of door/board shells
+// The cockpit view is built around the driver's eye (driveCamera.ts eyeHeightFor, ~1.2 m in a
+// car, EYE_FORWARD ahead of the seat's centre): a low cowl/dash under the windscreen and a
+// bonnet that slopes down to the nose keep the car to a thin band at the bottom of the view.
+const COWL = 0.9; // top of the dash/cowl under the windscreen
+const HOOD_REAR = 0.9; // bonnet height at the windscreen
+const HOOD_FRONT = 0.7; // ...and at the nose
+export const EYE_FORWARD = 0.15;
 const VIEW_RANGE = 90;
-/** Headlight beam lights: [metres ahead of the bumper, intensity, radius]. */
-const BEAM: [number, number, number][] = [[2.5, 1.1, 6], [7, 1.0, 8], [13, 0.8, 9]];
+/**
+ * Headlight beam lights: [metres ahead of the bumper, intensity, radius]. They reach ~35 m:
+ * stopping from 30 mph takes ~12 m plus ~13 m of reaction, so obstacles at a safe night speed
+ * show up before they matter (the old 3-light beam ended ~15 m out).
+ */
+const BEAM: [number, number, number][] = [[3, 1.1, 7], [10, 1.0, 9], [19, 0.9, 10], [29, 0.75, 10]];
 
 // --- procedural swatches ---------------------------------------------------------------
 
-type Swatch = 'panel' | 'dark' | 'tire' | 'fabric' | 'light' | 'floor' | 'hub' | 'grille';
-const SWATCHES: Swatch[] = ['panel', 'dark', 'tire', 'fabric', 'light', 'floor', 'hub', 'grille'];
+type Swatch = 'panel' | 'panelTop' | 'dark' | 'tire' | 'fabric' | 'light' | 'floor' | 'hub' | 'grille';
+const SWATCHES: Swatch[] = ['panel', 'panelTop', 'dark', 'tire', 'fabric', 'light', 'floor', 'hub', 'grille'];
 const SW = 32;
 
 function hash(x: number, y: number, s: number): number {
@@ -57,8 +70,15 @@ function paintSwatch(kind: Swatch, px: (x: number, y: number, v: number) => void
       let v = 200;
       switch (kind) {
         case 'panel':
-          // smooth paint, a seam every half metre and a soft highlight band
-          v = 214 + (n < 0.06 ? -10 : 0) + (y === 0 || x === 0 ? -34 : 0) + (y === 16 ? -18 : 0) + (y > 3 && y < 7 ? 12 : 0);
+          // Painted metal, sides: mid-tone (the paint tint multiplies it; at the old near-white
+          // value a sunlit car read as a flat white slab), a seam every half metre, a soft
+          // highlight band.
+          v = 170 + (n < 0.06 ? -8 : 0) + (y === 0 || x === 0 ? -30 : 0) + (y === 16 ? -16 : 0) + (y > 3 && y < 7 ? 10 : 0);
+          break;
+        case 'panelTop':
+          // Bonnet / roof / boot tops get the full sky and sun, so they're painted darker, with
+          // a faint diagonal sheen so a flat top still reads as a glossy panel, not a plane.
+          v = 132 + (n < 0.05 ? -6 : 0) + (x === 0 || y === 0 ? -24 : 0) + (Math.abs(((x + y) % 32) - 12) < 2 ? 14 : 0);
           break;
         case 'dark':
           v = 88 + Math.floor(n * 24) - (x % 8 === 0 ? 14 : 0);
@@ -228,6 +248,11 @@ export function buildVehicleGeometry(v: Vehicle, base: number): Built {
     return out;
   };
   const roofed = new Set(mountsWith((p) => has(p, 'ROOF') && p.hp > 0).map(([a, b]) => `${a},${b}`));
+  // Bonnet: half-board rows ahead of the windscreen slope from HOOD_REAR down to HOOD_FRONT.
+  const shieldRows = mountsWith((p) => has(p, 'WINDSHIELD')).map(([a]) => a);
+  const shieldX = shieldRows.length ? Math.max(...shieldRows) : Infinity;
+  const noseX = v.bounds()[2] + 0.5;
+  const hoodAt = (x: number) => HOOD_REAR + ((HOOD_FRONT - HOOD_REAR) * (x - (shieldX + 0.5))) / Math.max(0.5, noseX - (shieldX + 0.5));
   const isRoofed = (mx: number, my: number) => roofed.has(`${mx},${my}`);
 
   for (const k of v.mounts()) {
@@ -258,9 +283,12 @@ export function buildVehicleGeometry(v: Vehicle, base: number): Built {
 
     // Wheels: dark octagonal tyres sticking out of the side they're on.
     for (const w of parts.filter((p) => has(p, 'WHEEL'))) {
-      const d = w.def.wheel?.diameter ?? 16;
-      const r = Math.max(0.24, Math.min(0.7, (d * 0.0254) / 2 + 0.13));
-      const width = Math.max(0.2, Math.min(0.45, ((w.def.wheel?.width ?? 8) * 0.0254) * 1.1));
+      // BN wheel sizes are in cm (a car wheel: 42.5 x 22.5, i.e. a 17" rim); the tyre adds
+      // ~10 cm of sidewall. (Read as inches, car tyres came out 1.4 m tall and stuck up
+      // through the bonnet into the driver's view.)
+      const d = w.def.wheel?.diameter ?? 40;
+      const r = Math.max(0.2, Math.min(0.7, d / 200 + 0.1));
+      const width = Math.max(0.15, Math.min(0.45, ((w.def.wheel?.width ?? 20) / 100) * 1.1));
       const out = outer[2] ? 1 : outer[3] ? -1 : 0;
       const zc = my + out * (0.5 - width / 2 + 0.06);
       wheel(body.get(w.hp > 0 ? 0x9a9a9a : 0x4a4040), mx, y(r), zc, r, width, F.tire, F.hub);
@@ -300,18 +328,26 @@ export function buildVehicleGeometry(v: Vehicle, base: number): Built {
         if (windowed && dy !== 0) pillars(body.get(trim), base, mx, my, dx, dy, BELT, ROOF_LO, F.dark);
       }
       // A roof strip over the doorway so the cabin roof reaches the car's sides.
-      if (hasRoofNeighbour(v, mx, my, isRoofed) && !isRoofed(mx, my)) box(roof, paint, x0, ROOF_LO, z0, x1, ROOF_HI, z1, F.panel);
+      if (hasRoofNeighbour(v, mx, my, isRoofed) && !isRoofed(mx, my)) box(roof, paint, x0, ROOF_LO, z0, x1, ROOF_HI, z1, F.panel, F.panelTop);
     } else if (shield) {
-      // Cowl + dashboard, then the windscreen sloping up to the roof line.
+      // Cowl + a thin dark dash top, then the windscreen sloping up to the roof line. The cowl
+      // top is dark (it's the dashboard seen through the glass) so it frames the road instead
+      // of glaring.
       const tint = bodyPaint(shield);
-      box(body, tint, x0, FLOOR, z0, x1, BELT - 0.08, z1, F.panel);
+      body.get(tint).box(x0, y(FLOOR), z0, x1, y(COWL - 0.02), z1, 63 & ~4, F.panel, F.panelTop, base);
+      box(body, 0x26262a, x0, COWL - 0.02, z0, x1, COWL, z1, F.dark);
       if (shield.hp > 0) slantedGlass(glass, base, mx, my, F.light);
       if (outer[2] || outer[3]) aPillar(body.get(trim), base, mx, my, outer[2] ? 1 : -1, F.dark);
-      box(body, 0x303034, x0 + 0.05, BELT - 0.08, z0, x0 + 0.35, BELT + 0.02, z1, F.dark);
-    } else if (half) {
-      // Hood, fenders, rear quarters: a solid body block to belt height.
+      box(body, 0x303034, x0 + 0.05, COWL, z0 + 0.05, x0 + 0.3, COWL + 0.03, z1 - 0.05, F.dark);
+    } else if (half && mx > shieldX) {
+      // Bonnet and front wings: sloping down to the nose.
       const tint = bodyPaint(half);
-      box(body, tint, x0, FLOOR, z0, x1, BELT, z1, F.panel);
+      wedge(body.get(tint), base, x0, x1, z0, z1, FLOOR, hoodAt(x0), hoodAt(x1), F.panel, F.panelTop);
+      if (outer[0]) box(body, 0x404044, x1 - 0.02, FLOOR + 0.12, z0 + 0.12, x1 + 0.02, FLOOR + 0.42, z1 - 0.12, F.grille);
+    } else if (half) {
+      // Rear quarters (and bonnets of cars without a windscreen): a body block to belt height.
+      const tint = bodyPaint(half);
+      box(body, tint, x0, FLOOR, z0, x1, BELT, z1, F.panel, F.panelTop);
       if (outer[0]) box(body, 0x404044, x1 - 0.02, FLOOR + 0.12, z0 + 0.12, x1 + 0.02, FLOOR + 0.42, z1 - 0.12, F.grille);
       if (outer[1]) box(body, 0x404044, x0 - 0.02, FLOOR + 0.12, z0 + 0.05, x0 + 0.02, FLOOR + 0.3, z1 - 0.05, F.dark);
     } else if (obstacle) {
@@ -332,24 +368,26 @@ export function buildVehicleGeometry(v: Vehicle, base: number): Built {
 
     const ctrl = find('CONTROLS');
     if (ctrl) {
-      // Steering wheel: a dark ring-ish slab in front of the driver.
+      // Steering wheel: a dark ring-ish slab ahead of and below the driver's eye, so from the
+      // seat only its top rim peeks up at the bottom of the view.
       const g = body.get(0x222226);
-      tiltedSlab(g, base, mx + 0.32, 1.12, my, 0.36, 0.05, F.dark);
-      box(body, 0x333338, x1 - 0.1, DECK, my - 0.06, x1, 1.0, my + 0.06, F.dark);
+      tiltedSlab(g, base, mx + 0.45, 0.92, my, 0.34, 0.05, F.dark);
+      box(body, 0x333338, x1 - 0.08, DECK, my - 0.05, x1, 0.86, my + 0.05, F.dark);
     }
 
     for (const l of parts.filter((p) => has(p, 'CONE_LIGHT') || has(p, 'WIDE_CONE_LIGHT'))) {
       if (l.hp <= 0) continue;
       // Headlamps on the front face of the front row.
       const fx = outer[0] ? x1 + 0.01 : x1 - 0.2;
-      lamps.box(fx - 0.04, y(0.72), my - 0.22, fx + 0.03, y(0.88), my + 0.22, 63, F.light, F.light, base);
+      // Below the bonnet line, which drops to HOOD_FRONT at the nose.
+      lamps.box(fx - 0.04, y(0.5), my - 0.22, fx + 0.03, y(0.64), my + 0.22, 63, F.light, F.light, base);
     }
     const tail = !outer[0] && outer[1] && (half || (door && has(door, 'DOOR')) || board);
     if (tail && (outer[2] || outer[3])) {
       box(body, 0x8a1010, x0 - 0.03, 0.72, my - 0.18, x0 + 0.02, 0.88, my + 0.18, F.light);
     }
 
-    if (isRoofed(mx, my)) box(roof, bodyPaint(parts.find((p) => has(p, 'ROOF'))), x0, ROOF_LO, z0, x1, ROOF_HI, z1, F.panel);
+    if (isRoofed(mx, my)) box(roof, bodyPaint(parts.find((p) => has(p, 'ROOF'))), x0, ROOF_LO, z0, x1, ROOF_HI, z1, F.panel, F.panelTop);
   }
 
   return {
@@ -389,10 +427,12 @@ function pillars(g: GeomBuilder, base: number, mx: number, my: number, dx: numbe
 
 /** The pillar between side window and windscreen. */
 function aPillar(g: GeomBuilder, base: number, mx: number, my: number, side: number, f: TileFrame): void {
-  const z = side > 0 ? my + 0.5 - 0.1 : my - 0.5;
+  // Thin (6 cm) so it frames the windscreen from the driver's seat instead of hiding the road.
+  const w = 0.06;
+  const z = side > 0 ? my + 0.5 - w : my - 0.5;
   // stepped to follow the windscreen's slope: low at the front, full height at the back
-  g.box(mx - 0.1, base + BELT - 0.1, z, mx + 0.1, base + (BELT + ROOF_LO) / 2, z + 0.1, 63, f, f, base);
-  g.box(mx - 0.5, base + (BELT + ROOF_LO) / 2 - 0.05, z, mx - 0.1, base + ROOF_LO, z + 0.1, 63, f, f, base);
+  g.box(mx - 0.05, base + COWL - 0.05, z, mx + 0.25, base + (COWL + ROOF_LO) / 2, z + w, 63, f, f, base);
+  g.box(mx - 0.5, base + (COWL + ROOF_LO) / 2 - 0.05, z, mx - 0.05, base + ROOF_LO, z + w, 63, f, f, base);
 }
 
 function openDoor(g: GeomBuilder, base: number, mx: number, my: number, dx: number, dy: number, f: TileFrame): void {
@@ -411,13 +451,29 @@ function openDoor(g: GeomBuilder, base: number, mx: number, my: number, dx: numb
 
 /** Windscreen: a quad sloping from the cowl (front) up to the roof line (rear edge). */
 function slantedGlass(g: GeomBuilder, base: number, mx: number, my: number, f: TileFrame): void {
-  const xf = mx + 0.3, xr = mx - 0.5, h0 = base + BELT - 0.08, h1 = base + ROOF_LO;
+  const xf = mx + 0.3, xr = mx - 0.5, h0 = base + COWL, h1 = base + ROOF_LO;
   const z0 = my - 0.5, z1 = my + 0.5;
   const nx = h1 - h0, ny = xf - xr, len = Math.hypot(nx, ny);
   const n: [number, number, number] = [nx / len, ny / len, 0];
   g.quad([xf, h0, z1], [xf, h0, z0], [xr, h1, z0], [xr, h1, z1], n, [0, 0, 1, 1], f);
   // back face so it's visible from the driver's seat too
   g.quad([xf, h0, z0], [xf, h0, z1], [xr, h1, z1], [xr, h1, z0], [-n[0], -n[1], 0], [0, 0, 1, 1], f);
+}
+
+/**
+ * A body block whose top slopes along x from height `hr` (at x0) to `hf` (at x1): the bonnet.
+ * Sides are trapezoids; the top's normal tilts forward so it shades like a curved panel.
+ */
+function wedge(g: GeomBuilder, base: number, x0: number, x1: number, z0: number, z1: number, h0: number, hr: number, hf: number, side: TileFrame, top: TileFrame): void {
+  const y0 = base + h0, yr = base + hr, yf = base + hf;
+  const dx = x1 - x0, nlen = Math.hypot(hr - hf, dx);
+  const nTop: [number, number, number] = [(hr - hf) / nlen, dx / nlen, 0];
+  g.quad([x0, yr, z1], [x1, yf, z1], [x1, yf, z0], [x0, yr, z0], nTop, [x0, -z1, x1, -z0], top);
+  g.quad([x1, y0, z1], [x1, y0, z0], [x1, yf, z0], [x1, yf, z1], [1, 0, 0], [-z1, h0, -z0, hf], side);
+  g.quad([x0, y0, z0], [x0, y0, z1], [x0, yr, z1], [x0, yr, z0], [-1, 0, 0], [z0, h0, z1, hr], side);
+  g.quad([x0, y0, z1], [x1, y0, z1], [x1, yf, z1], [x0, yr, z1], [0, 0, 1], [x0, h0, x1, Math.max(hr, hf)], side);
+  g.quad([x1, y0, z0], [x0, y0, z0], [x0, yr, z0], [x1, yf, z0], [0, 0, -1], [-x1, h0, -x0, Math.max(hr, hf)], side);
+  g.quad([x0, y0, z0], [x1, y0, z0], [x1, y0, z1], [x0, y0, z1], [0, -1, 0], [x0, z0, x1, z1], side);
 }
 
 /** A slab tilted toward the driver (steering wheel). */
@@ -477,11 +533,12 @@ interface Entry {
 export class VehicleRenderer {
   readonly group = new THREE.Group();
   private entries = new Map<Vehicle, Entry>();
-  private glassMat = new THREE.MeshLambertMaterial({ color: 0x9cc4d4, transparent: true, opacity: 0.32, depthWrite: false, side: THREE.DoubleSide });
+  // Faint tint: at 0.32 opacity the windscreen hazed the whole cockpit view grey.
+  private glassMat = new THREE.MeshLambertMaterial({ color: 0x7ea4b8, transparent: true, opacity: 0.14, depthWrite: false, side: THREE.DoubleSide });
   private lampOn = new THREE.MeshBasicMaterial({ color: 0xfff2c8 });
   private lampOff = new THREE.MeshBasicMaterial({ color: 0x8a8a80 });
   /** One shadowless spot for the nearest vehicle with its headlights on. */
-  readonly headlight = new THREE.SpotLight(0xfff0d4, 0, 50, 0.5, 0.45, 1.0);
+  readonly headlight = new THREE.SpotLight(0xfff0d4, 0, 70, 0.45, 0.4, 1.0);
 
   constructor(private renderer: Renderer, private game: Game, private system: VehicleSystem) {
     this.group.name = 'vehicles';
@@ -541,10 +598,18 @@ export class VehicleRenderer {
 
   update(): void {
     const p = this.game.player;
+    const rig = this.renderer.rig;
+    const driving = this.system.driving;
+    rig.suppressBob = !!driving;
+    this.renderer.handsBusy = !!driving;
+    if (driving && driving !== this.lastDriving) {
+      // Taking the wheel: look where the car points (the cameras are relative to it from here).
+      p.yaw = headingFromFacing(driving.facing);
+      p.pitch = 0;
+    }
+    this.lastDriving = driving;
+    rig.drive = driving ? this.driveView(driving) : null;
     const top = this.renderer.cameraMode === 'top';
-    const rig = this.renderer.rig as unknown as { suppressBob?: boolean };
-    rig.suppressBob = !!this.system.driving;
-    this.renderer.handsBusy = !!this.system.driving;
     let spotFor: Vehicle | null = null, spotD = Infinity;
     const seen = new Set<Vehicle>();
     for (const v of this.system.list) {
@@ -591,13 +656,46 @@ export class VehicleRenderer {
     if (spotFor) {
       const v = spotFor;
       const [fx, fy] = this.front(v, 0.6);
-      const [tx, ty] = this.front(v, 18);
+      // Aimed at the road ~30 m out (dipped beam), strong enough to still read there.
+      const [tx, ty] = this.front(v, 30);
       const h = v.z * LEVEL_HEIGHT;
-      s.position.set(fx, h + 0.85, fy);
-      s.target.position.set(tx, h - 0.6, ty);
+      s.position.set(fx, h + 0.7, fy);
+      s.target.position.set(tx, h - 0.4, ty);
       s.target.updateMatrixWorld();
-      s.intensity = 60;
+      s.intensity = 110;
     } else s.intensity = 0;
+  }
+
+  private lastDriving: Vehicle | null = null;
+  private eyeCache = { v: null as Vehicle | null, version: -1, h: 1.2 };
+  /** mass() walks every part and item: recompute the eye height only when the vehicle changes. */
+  private eyeHeight(v: Vehicle, length: number): number {
+    const c = this.eyeCache;
+    if (c.v !== v || c.version !== v.version) Object.assign(c, { v, version: v.version, h: eyeHeightFor(length, v.mass()) });
+    return c.h;
+  }
+  private view: DriveView | null = null;
+
+  /** The camera's view of the vehicle being driven (driveCamera.ts). */
+  private driveView(v: Vehicle): DriveView {
+    const [x0, y0, x1, y1] = v.bounds();
+    const [cx, cy] = v.mountToWorld((x0 + x1) / 2, (y0 + y1) / 2);
+    const length = x1 - x0 + 1, width = y1 - y0 + 1;
+    const seat = v.driverSeat() ?? { mx: (x0 + x1) / 2, my: (y0 + y1) / 2 };
+    // Eye over the front of the seat, a little ahead of where the head would really be: the
+    // dash and bonnet then drop out of the lower edge instead of filling it.
+    const [ex, ey] = v.mountToWorld(seat.mx + EYE_FORWARD, seat.my);
+    const base = v.z * LEVEL_HEIGHT;
+    const t = this.game.map.terAt(Math.floor(cx), Math.floor(cy), v.z);
+    const rough = hasFlag(t, 'ROAD') || hasFlag(t, 'FLAT') ? 0 : 1;
+    const out = this.view ?? ({} as DriveView);
+    Object.assign(out, {
+      x: cx, y: cy, base, heading: headingFromFacing(v.facing),
+      eyeX: ex, eyeY: ey, eyeH: base + this.eyeHeight(v, length),
+      length, width, speed: v.velocity, rough,
+    });
+    this.view = out;
+    return out;
   }
 
   /** World point `ahead` metres in front of the vehicle's front row. */

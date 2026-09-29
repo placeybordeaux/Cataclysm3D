@@ -1,5 +1,5 @@
 import type { GameData, MutationDef } from '../data/types';
-import { ACTION_SCALE, CLOCK_SCALE } from '../core/time';
+import { ACTION_SCALE, clockScale } from '../core/time';
 import { isBodyPart, type BodyPartId } from './bodyparts';
 import { SLEEPINESS, THIRST, type Character } from './character';
 import { covers } from './inventory';
@@ -136,7 +136,7 @@ const ANY = 'ANY';
 /** accumulated_mutagen: one unit (int_dur_factor) = 3 days. */
 const MUTAGEN_UNIT = 3 * 86400;
 /** Turns → game seconds for effects the survivor lives through in real time (monster.ts). */
-const turnsToEffectSeconds = (turns: number) => (turns * CLOCK_SCALE) / ACTION_SCALE;
+const turnsToEffectSeconds = (turns: number) => (turns * clockScale()) / ACTION_SCALE;
 
 /** Data indices built once per GameData. */
 export class MutationIndex {

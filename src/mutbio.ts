@@ -20,6 +20,14 @@ import type { BionicStateJSON } from './game/bionics';
 // `p` bionics), CBM `A`pply self-install, Autodoc examine, sidebar power, '@' box, save
 // section 'bodymods' and window.cdda helpers. main.ts calls installMutBio() once.
 
+/**
+ * The Autodoc screen, replaceable: installScreens (src/screens/install.ts) swaps in the ui2
+ * surgery panel; the curses menu in src/ui/mutbio_ui.ts is the default.
+ */
+export const autodocScreen = {
+  open: (game: Game, mods: BodyMods, cbms: () => { item: Item; consume: () => void }[], dropItem: (it: Item) => void): void => void openAutodocMenu(game, mods, cbms, dropItem),
+};
+
 export function installMutBio(game: Game, renderer: Renderer | null, api?: DebugApi): BodyMods {
   const p = game.player;
   const mods = attachBodyMods(p, { isDay: () => game.clock.hourOfDay >= 6 && game.clock.hourOfDay < 20 });
@@ -100,7 +108,7 @@ export function installMutBio(game: Game, renderer: Renderer | null, api?: Debug
   interactOverrides.push({
     interact: (g) => {
       if (!autodocAimed() || !hasDom) return false;
-      openAutodocMenu(g, mods, () => cbmsNearby(g), drop);
+      autodocScreen.open(g, mods, () => cbmsNearby(g), drop);
       return true;
     },
     prompt: () => (autodocAimed() ? `[${game.keys.keyFor('interact')}] Use the Autodoc` : null),
@@ -121,6 +129,8 @@ export function installMutBio(game: Game, renderer: Renderer | null, api?: Debug
   });
 
   if (api) installDebug(game, api, mods);
+  /** Open the Autodoc screen as if you used one (the CBMs you carry or that lie near you). */
+  if (api) api.openAutodoc = () => autodocScreen.open(game, mods, () => cbmsNearby(game), drop);
   return mods;
 }
 

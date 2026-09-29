@@ -172,9 +172,21 @@ export function openEscMenu(ctx: UiContext, onQuit: () => void): UiWindow {
   const { game } = ctx;
   type Act = 'resume' | 'options' | 'help' | 'save' | 'savequit' | 'quit';
   const canSave = !!game.save;
+  const pausedUntilClosed = (w: UiWindow) => {
+    game.paused = true;
+    const t = setInterval(() => {
+      if (!w.closed) return;
+      clearInterval(t);
+      game.paused = wasPaused;
+    }, 100);
+  };
+  // The Esc menu always stops time, whatever the difficulty says about other menus.
+  const wasPaused = game.paused;
+  game.paused = true;
   return openMenu<Act>({
     title: 'Cataclysm: Dark Days Ahead',
     width: '40ch',
+    onClose: () => void (game.paused = wasPaused),
     entries: [
       { label: 'Resume', value: 'resume', hotkey: 'r' },
       { label: 'Options', value: 'options', hotkey: 'o' },
@@ -185,8 +197,8 @@ export function openEscMenu(ctx: UiContext, onQuit: () => void): UiWindow {
     ],
     onSelect: (a) => {
       setTimeout(async () => {
-        if (a === 'options') openOptions(ctx);
-        else if (a === 'help') openHelp(ctx);
+        // Options and Help reached from the Esc menu keep time stopped until they close.
+        if (a === 'options' || a === 'help') pausedUntilClosed(a === 'options' ? openOptions(ctx) : openHelp(ctx));
         else if (a === 'save') {
           await game.save!();
           game.message('Game saved.', 'c_light_green');

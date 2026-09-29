@@ -456,6 +456,10 @@ interface Plan {
 /** Static rules for taking `n` of `it` out of `from`. */
 function checkFrom(it: Item, from: Loc, opts: MoveOpts): MoveResult | null {
   if (opts.force) return null;
+  // An in-progress craft's components belong to it until it's finished or taken apart, and an
+  // unfinished construction stays on its site (crafting.ts / construction.ts move them).
+  if (from.kind === 'in' && from.host.isCraft()) return fail('not_allowed', `The ${it.name()} is part of the ${from.host.baseName()}.`);
+  if (it.isCraft() && it.vars.con_id !== undefined) return fail('not_allowed', `You can't move an ${it.baseName()}; continue or cancel it where it stands.`);
   if (from.kind === 'hands' && (it.hasFlag('NO_UNWIELD') || it.hasFlag('BIONIC_WEAPON'))) return fail('cant_unwield', `You cannot unwield your ${it.name()}.`);
   if (from.kind === 'worn') {
     if (it.hasFlag('INTEGRATED')) return fail('cant_take_off', `You can't take off your ${it.name()}; it's part of you.`);
@@ -505,6 +509,8 @@ function checkTo(it: Item, n: number, to: Loc, opts: MoveOpts, actor: Character 
     case 'in': {
       const h = to.host;
       if (h === it || [...it.walk()].includes(h)) return fail('inside_itself', "You can't put something inside itself.");
+      // Only crafting puts components into an in-progress craft (as a system move).
+      if (h.isCraft()) return opts.force ? { n } : fail('not_allowed', `You can't add things to the ${h.baseName()}.`);
       if (h.isContainer()) {
         const why = containerRefusal(h, it);
         if (why) return fail(why.includes('mix') ? 'mixed_load' : why.includes('water-tight') ? 'not_watertight' : 'full', why);
@@ -858,6 +864,7 @@ export function unloadItem(host: Item, to: Loc | Loc[], opts: MoveOpts & { pourL
     }
     return last;
   };
+  if (host.isCraft()) return done(fail('not_allowed', `Disassemble the ${host.baseName()} to get its components back.`));
   // Anything else holding things (item group contents-item, old saves) empties like a container.
   if (host.isContainer() || host.isHolster() || host.isBandolier() || (host.hasContents() && !host.isMagazine())) {
     if (!host.hasContents()) return done(fail('not_allowed', `The ${host.baseName()} is already empty!`));
