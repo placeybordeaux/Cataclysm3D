@@ -215,6 +215,52 @@ tests/               vitest unit tests (pure logic, no DOM/WebGL)
   self-install; `e` on an Autodoc. Save section `bodymods` (order 15). Debug: `cdda.mutate(id|cat)`,
   `cdda.mutations()`, `cdda.addVitamin(id,n)`, `cdda.installBionic(id,{surgery})`, `cdda.bionics()`,
   `cdda.givePower(kj)`, `cdda.toggleBionic(id)`, `cdda.spawnAutodoc(dx,dy)`, `cdda.giveCbm(id)`.
+### Scores & achievements (src/game/achievements.ts, src/achievements.ts, src/ui/achievements_ui.ts)
+- Data: `public/data/achievements.json` (`npm run extract:achievements`, part of `data:all`): CDDA
+  achievements + conducts, event_statistics, event_transformations, scores; loaded by the install.
+- `AchievementTracker` (UI-free, tests/achievements.test.ts) = CDDA stats_tracker + achievements_tracker:
+  `emit(type, fields, count?)` with CDDA event names/fields, `flush()` re-checks watching achievements,
+  `value(statId)`, `completion(id)`, `isHidden(a)`, `requirementLines(a)`, `achievementSupported(a)`
+  (depends only on `SUPPORTED_EVENTS`; others show as "not tracked", never unlock), `toJSON/load`.
+- `installAchievements(game, worldgen, api)` feeds it: creatureDied (kills), playerHurt, playerDied,
+  Inventory.onConsume, wrapped PlayerCombat.melee/fire, per-tile `avatar_moves` / per-OMT
+  `avatar_enters_omt`, and a 2 Hz poll of the survivor (wake-ups, skill levels, mutations/thresholds,
+  CBMs, broken limbs, healing, books, wield/wear). `begin(loaded)` (main.ts) starts tracking.
+  New game systems can report more with `achievementsOf(game)?.tracker.emit(...)`.
+- Persistence: per character in the save (section `achievements`, order 60); completed achievements
+  globally in localStorage `cdda3d.achievements` (`globalAchievements()`), which unlocks chargen's
+  scenario/profession `requirement`s. Death screen + memorial entry list the run's achievements.
+- UI: `)` scores window (ACHIEVEMENTS / CONDUCTS / SCORES / KILLS tabs), unlock toast + log message.
+  Debug: `cdda.achievements(filter?)`, `cdda.unlockAchievement(id)`, `cdda.achievementStat(id)`,
+  `cdda.achievementEvent(type, fields)`, `cdda.openAchievements()`.
+
+### Underground labs & dissection (src/game/labs.ts, src/labs.ts `installLabs`, src/game/butchery.ts)
+- Labs are CDDA 0.J+ **modular JSON labs** (upstream removed the hardcoded lab/lab_stairs/lab_finale
+  generator): overmap special `lab_mutagen_6_level` (`LAB_SPECIAL`: fenced parking + security building on
+  the surface, residential z-2/-3, cargo z-4, mutagen research z-5/-6, a -7 hallway) and the 4x4 surface
+  microlab (`MICROLAB_SPECIAL`, elevator z0 → z-2). Both are in `WILD_SPECIALS` (tools/extract/mapgen.ts)
+  and overmap.ts always places one of each in the start region (after all other specials, so older
+  placement is unchanged). `MIN_Z` is -7. Stairs line up via the JSON (zlevels' 24-tile stair search
+  covers the few offset ones); tests/labs.test.ts walks from the parking lot to z-6.
+- Machinery (UI-free, prompts via `LabUi`; `autoUi(game, picks?)` for tests): ID card readers
+  (`cardreader` examine actor: card flags, terrain_changes radius, ID_CARD_DESPAWN turrets, consume;
+  electrohack hacking = CDDA hack_level/normal_roll → alarm / nothing / unlock + broken reader), computer
+  consoles (CONSOLE furniture + `chunk.computers`: login hack Nd6 vs security+2·alerts, unlock(_disarm),
+  release(_bionics), research (lab_notes), maps, lists, shutters, elevator_on, …; failures shutdown /
+  alarm / manhacks / secubots / damage), elevators (`iexamine::elevator`: stand in the cab, powered
+  control floors, OMT rotation between floors, items/monsters ride along), gate controls (misc.gate),
+  climbing CLIMBABLE barriers (boom barriers, chain fences). IMMOBILE monsters (turrets) never move.
+- `interact.ts` `examineHandlers` (examine_action → interactions) is the hook they use; consoles come
+  through `interactionProviders`.
+- Dissection (`B` menu → Dissect): CUT_FINE tool, 6× cutting time, the monster's `dissect` harvest —
+  item-group entries (zomborg CBMs, mutagen glands) recovered per check_butcher_dissect roll (failed CBMs
+  burn out), per-drop-type harvest_skills, first-aid practice. `dissectYield`/`dissectSeconds` in
+  butchery.ts, `startDissect` in src/monsters.ts.
+- Debug: `cdda.labs()`, `cdda.labMap(special?)`, `cdda.teleportLab(z, special?)`, `cdda.faceLabLoot(z)`,
+  `cdda.labLoot(r)`, `cdda.rideElevator(z?)`, `cdda.useComputer(picks?)`, `cdda.swipeCard()`,
+  `cdda.dissect()`. Probes: `tsx tools/dev/probe_lab.ts <seed> [special] [z]` (OMTs, stairs, loot),
+  `tools/dev/probe_reach.ts <seed> [special] [keys]` (walk-in reachability).
+
 ### Seasons, foraging, farming, water (src/game/{sun,harvest,farming,water,woodcut,actualize}.ts, src/nature.ts)
 - `sun.ts` is the one sun: `sunPosition(seconds)` (CDDA calendar.cpp altitude/azimuth, Boston),
   `sunTimes(day)` → sunrise/sunset/dawn/dusk hours (≈06–18 equinox, 04:20–19:40 midsummer,

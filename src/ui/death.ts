@@ -3,6 +3,7 @@ import { c, colorize, getUiRoot } from './framework';
 import { durationText, logLine } from './format';
 import type { Hud } from './hud';
 import type { UiContext } from './context';
+import { achievementsOf } from '../achievements';
 
 // Death: CDDA's end screen (end_screen.json "death_tombstone" over the ascii_tombstone
 // picture, with name / time survived / kills stamped onto the stone), then the memorial
@@ -55,6 +56,7 @@ export function showDeathScreen(ctx: UiContext, hud: Hud, cause: string): void {
     `${c('c_light_gray', 'Distance walked:')} ${c('c_white', `${(game.stats.distanceWalked / 1000).toFixed(2)} km`)}`,
     `${c('c_light_gray', 'Items crafted:')} ${c('c_white', String(game.stats.itemsCrafted))}`,
     '',
+    ...achievementLines(ctx),
     c('c_light_gray', 'Last messages:'),
     ...lastMsgs,
   ].join('\n');
@@ -83,4 +85,11 @@ export function showDeathScreen(ctx: UiContext, hud: Hud, cause: string): void {
     }
   };
   (window as any).cdda && ((window as any).cdda.deathScreen = el);
+}
+
+/** Achievements completed during this life (CDDA lists them in the memorial file). */
+function achievementLines(ctx: UiContext): string[] {
+  const done = achievementsOf(ctx.game)?.completedThisRun() ?? [];
+  if (!done.length) return [];
+  return [c('c_light_gray', 'Achievements:'), ...done.slice(0, 10).map((a) => `  ${c('c_light_green', a.name)}`), ...(done.length > 10 ? [c('c_dark_gray', `  and ${done.length - 10} more`)] : []), ''];
 }

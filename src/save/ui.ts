@@ -119,6 +119,7 @@ function memorialDetail(e: MemorialEntry): string {
     `<color_light_gray>Kills:</color> ${e.kills}`,
     ...(kills.length ? kills : ['  <color_dark_gray>A pacifist.</color>']),
     `<color_light_gray>Distance walked:</color> ${(e.distance / 1000).toFixed(2)} km`,
+    ...(e.achievements?.length ? ['<color_light_gray>Achievements:</color>', ...e.achievements.map((n) => `  <color_light_green>${n}</color>`)] : []),
     `<color_dark_gray>Died ${new Date(e.diedAt).toLocaleString()}</color>`,
   ].join('\n')).replace(/\n/g, '<br>');
 }

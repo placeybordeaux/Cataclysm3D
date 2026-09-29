@@ -13,6 +13,10 @@ import {
 // network is continuous without either region having to generate the other.
 
 export const REGION = 96;
+/** The modular underground lab special (CDDA 0.J+ labs; see tools/extract/mapgen.ts). */
+export const LAB_SPECIAL = 'lab_mutagen_6_level';
+/** Surface microlab (elevator down to a z-2 microlab complex with CBM/mutagen rooms). */
+export const MICROLAB_SPECIAL = '4x4_microlab_surface';
 const RR = REGION * REGION;
 
 export interface City {
@@ -609,8 +613,19 @@ export class Overmap {
         this.tryPlaceWild(r, rng, def, r.cities[0], true);
         continue;
       }
+      // CDDA guarantees labs exist somewhere on each overmap, not near the player; with our
+      // smaller regions that could mean hundreds of OMTs of walking, so the start region
+      // always gets one within a short trek of the start town (CBMs/mutagen need a lab).
+      if (id === LAB_SPECIAL && start && r.cities.length) {
+        this.tryPlaceWild(r, rng, def, r.cities[0], true);
+        continue;
+      }
       for (let k = 0; k < count; k++) this.tryPlaceWild(r, rng, def, start && id === 'Evac Shelter' ? r.cities[0] : undefined);
     }
+    // Microlabs hold most of CDDA's loose CBMs; make sure the start region has one too. Done
+    // after the loop so the RNG draws (and thus placement) of everything above is unchanged.
+    const micro = this.data.specials[MICROLAB_SPECIAL];
+    if (start && r.cities.length && micro && !r.specials.some((s) => s.def === MICROLAB_SPECIAL)) this.tryPlaceWild(r, rng, micro, r.cities[0], true);
   }
 
   /** `widen`: big specials (the refugee center) search ever further from `near` until they fit. */

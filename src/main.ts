@@ -19,8 +19,10 @@ import { installMonsters } from './monsters';
 import { installNpcs } from './npcs';
 import { installMutBio } from './mutbio';
 import { installCombatDepth } from './combatdepth';
+import { installLabs } from './labs';
 import { installChunkTracking } from './save/tracking';
 import { installSave, takePendingLoad } from './save/install';
+import { installAchievements } from './achievements';
 
 // URL params (all optional): seed=<int>, gen=world|test (default world), debug=1 (render stats overlay),
 // renderer params px/grade/tex/cam/walls (see src/render/renderer.ts), debug=atlas (sprite sheet view
@@ -75,12 +77,15 @@ async function main(): Promise<void> {
   await installVehicles(game, renderer, api);
   await installNpcs(game, renderer, worldgen, monsters, api);
   installMutBio(game, renderer, api);
+  installLabs(game, worldgen, api);
   // Before installUi: the UI registers the save key only when game.save exists.
   const save = await installSave(game, { api, genKind, worldgen, monsters });
   game.events.on('gameLoaded', () => renderer.chunks.invalidateAll());
   const ui = await installUi(game, renderer, worldgen, api);
   // After the UI: wraps the reload key (clears gun jams) and adds item-menu gunmod actions.
   installCombatDepth(game, renderer, monsters, api);
+  // After installMonsters (wraps PlayerCombat for attack events) and installSave (its saveable).
+  const achievements = await installAchievements(game, worldgen, api);
 
   let last = performance.now();
   const loop = (now: number) => {
@@ -97,6 +102,7 @@ async function main(): Promise<void> {
   api.ready = true;
   if (!loaded) await ui.boot();
   save.startSession();
+  achievements.begin(loaded);
 }
 
 main().catch((e) => {

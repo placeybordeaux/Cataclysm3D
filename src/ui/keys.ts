@@ -64,6 +64,8 @@ export const DEFAULT_BINDINGS: Record<string, string[]> = {
   // --- combat depth (src/combatdepth.ts) ---
   martial_arts: ['_'], // CDDA '_' pick a martial arts style
   fire_mode: ['b'], // CDDA 'F' select_fire_mode (F is the flashlight here)
+  // --- scores (src/ui/achievements_ui.ts) ---
+  achievements: [')'], // CDDA ')' diary / achievements / scores
 };
 
 export class Keys {
