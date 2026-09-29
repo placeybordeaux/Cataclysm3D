@@ -1,14 +1,15 @@
-// Extract CDDA NPC content into public/data/npcs.json: npc templates, npc classes,
-// talk topics (merged like CDDA's json_talk_topic::load), mission definitions, factions,
-// the effect_on_conditions dialogue reaches through run_eocs, and name lists for random
-// NPCs. Snippets (<greet>, <name_b>, ...) already live in misc.json (misc.snippet).
+// Extract Bright Nights NPC content into public/data/npcs.json: npc templates, npc classes,
+// talk topics (merged like json_talk_topic::load), mission definitions, factions, the
+// effect_on_conditions dialogue reaches through run_eocs (DDA only; BN has none), and name
+// lists for random NPCs. Snippets (<greet>, <name_b>, ...) already live in misc.json.
 //
-// Usage: npm run extract:npcs -- [--cdda ~/code/Cataclysm-DDA] [--out public/data] [--dry-run]
+// Usage: npm run extract:npcs -- [--cdda ~/code/Cataclysm-BN] [--out public/data] [--dry-run]
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { defaultCddaDir, FAMILY_HOOKS, loadCddaObjects, objectIds, resolveFamily, type CddaObject } from './cdda';
+import { FAMILY_HOOKS, loadCddaObjects, objectIds, resolveFamily, type CddaObject } from './cdda';
 import { prepareObject } from './prepare';
+import { defaultGameDir } from './gamedir';
 
 function usage(): string {
   return `Usage: npm run extract:npcs -- [options]
@@ -17,13 +18,13 @@ Write public/data/npcs.json (npc templates, npc_class, talk_topic, mission_defin
 faction, referenced effect_on_condition, NPC name lists).
 
 Options:
-  --cdda <dir>   Cataclysm-DDA checkout (default: $CDDA_DIR or ~/code/Cataclysm-DDA)
+  --cdda <dir>   game checkout (default: $CDDA_DIR or ~/code/Cataclysm-BN)
   --out <dir>    output directory (default: public/data)
   --dry-run      print a summary instead of writing
   -h, --help     show this help`;
 }
 
-const args = { cdda: defaultCddaDir(), out: 'public/data', dryRun: false };
+const args = { cdda: defaultGameDir(), out: 'public/data', dryRun: false };
 const argv = process.argv.slice(2);
 for (let i = 0; i < argv.length; i++) {
   const k = argv[i];
@@ -92,9 +93,16 @@ const CLASS_KEYS = [
   'bonus_aggression', 'bonus_bravery', 'bonus_collector', 'bonus_altruism', 'skills', 'worn_override', 'carry_override',
   'weapon_override', 'shopkeeper_item_group', 'shopkeeper_price_rules', 'shopkeeper_blacklist', 'traits', 'proficiencies',
   'work_hours', 'bye_message_override', 'restock_interval',
+  // BN: CBMs the class starts with
+  'bionics',
 ];
 const classes: Record<string, CddaObject> = {};
-for (const [id, o] of resolved('npc_class')) classes[id] = pick(o, CLASS_KEYS);
+for (const [id, o] of resolved('npc_class')) {
+  const c = pick(o, CLASS_KEYS);
+  // BN writes shopkeeper_item_group as one group id; the runtime reads DDA's [{group, trust...}].
+  if (typeof c.shopkeeper_item_group === 'string') c.shopkeeper_item_group = [{ group: c.shopkeeper_item_group }];
+  classes[id] = c;
+}
 
 const missions: Record<string, CddaObject> = {};
 for (const [id, o] of resolved('mission_definition')) {
