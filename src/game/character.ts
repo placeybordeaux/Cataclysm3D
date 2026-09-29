@@ -853,22 +853,24 @@ export class Character {
   }
 
   // ---------------------------------------------------------------- dodge / hit helpers
-  /** Character::get_dodge_base: dex/2 + dodge skill. */
+  /** BN Character::get_dodge_base: dex/4 + dodge skill. */
   dodgeBase(): number {
-    return this.dex / 2 + this.getSkill('dodge');
+    return this.dex / 4 + this.getSkill('dodge');
   }
-  /** Character::get_dodge (simplified: downed/grab, speed<100, stamina logistic, encumbrance). */
+  /**
+   * BN Character::get_dodge before the per-turn dodge penalty (combat.ts characterDodge adds
+   * that): base + effect/martial-arts bonuses − leg encumbrance/20 − torso encumbrance/10
+   * (reset_stats), scaled down linearly below half stamina, a quarter off per grabber.
+   */
   dodge(): number {
-    if (this.effects.has('downed') || this.isAsleep() || this.effects.has('stunned')) return 0;
-    // Martial-arts buffs add dodge (Character::get_dodge_bonus + mabuff_dodge_bonus).
+    if (this.effects.has('downed') || this.isAsleep() || this.effects.has('stunned') || this.stamina <= 0) return 0;
     let ret = this.dodgeBase() + this.dodge_bonus + buffFlat(this, 'dodge');
-    if (this.speed < 100) ret *= this.speed / 100;
-    // get_stamina_dodge_modifier: logistic falloff below ~ half stamina.
-    const ratio = this.stamina / this.staminaMax();
-    ret *= 1 / (1 + Math.exp(-(ratio - 0.25) * 20)) * 0.5 + 0.5;
-    // Legs/torso encumbrance reduce the reaction limb score (simplified).
-    const enc = (this.inv.encumbrance('leg_l') + this.inv.encumbrance('leg_r')) / 2 + this.inv.encumbrance('torso') / 2;
-    ret *= Math.max(0.2, 1 - enc / 100);
+    ret -= (this.inv.encumbrance('leg_l') + this.inv.encumbrance('leg_r')) / 20 + this.inv.encumbrance('torso') / 10;
+    const max = this.staminaMax();
+    if (this.stamina < max / 2) ret *= (this.stamina / max) * 2;
+    // Each grabbing monster costs a quarter (the grab effect's intensity counts grabbers).
+    const grab = this.effects.get('grabbed');
+    if (grab) ret *= Math.max(0, 1 - 0.25 * Math.max(1, grab.intensity));
     return Math.max(0, ret);
   }
 

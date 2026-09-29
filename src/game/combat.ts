@@ -4,7 +4,8 @@ import { ACTION_SCALE, MELEE_SCALE } from '../core/time';
 import { ALL_PARTS, BODY_PARTS, type BodyPartId } from './bodyparts';
 import { MAX_RECOIL, type Character, type DamageResult } from './character';
 import { asArray, type Item } from './item';
-import { buffFlat, buffMult, currentStyle, maOf, triggerBuffs } from './martialarts';
+import { buffFlat, buffMult, currentStyle, isUnarmedWeapon, maOf, requirementsMet, triggerBuffs } from './martialarts';
+import { covers } from './inventory';
 import { defenseOf, sidestepDodgeRoll } from './combatfeel';
 import { aimLevel, isJammed, modSum, rollMalfunction, shotSpreadMultiplier, sightDispersion, type AimLevel } from './gunmods';
 import {
@@ -12,7 +13,8 @@ import {
   type BlockResult, type ShatterResult, type TargetInfo, type TechniqueDef, type TechniqueOutcome, type WearResult,
 } from './techniques';
 
-// Combat math, ported from CDDA melee.cpp / ranged.cpp / monster.cpp. Pure functions over a
+// Combat math, ported from CDDA melee.cpp / ranged.cpp / monster.cpp (melee: Bright Nights
+// melee.cpp, see the melee section). Pure functions over a
 // Character, Items and plain target stats; they take an Rng so results are reproducible.
 // Applying damage to monsters and spawning projectiles is the world-combat layer's job.
 
@@ -23,6 +25,11 @@ export interface RolledDamage {
   armor_penetration: number;
   /** Fraction of armor that still applies (crits lower it). */
   armor_multiplier: number;
+  /**
+   * BN damage_unit::damage_multiplier (skill, crit, buff and technique multipliers). Already
+   * folded into `amount`; armor comes off before it, so mitigation scales with it. Default 1.
+   */
+  multiplier?: number;
 }
 
 /** CDDA normal_roll(mean, stddev) (Box-Muller). */
@@ -42,21 +49,64 @@ export function normalAtLeast(mean: number, sd: number, x: number): number {
 }
 
 // ---------------------------------------------------------------- melee (player)
+//
+// Bright Nights melee.cpp. Differences from the DDA 0.F port this replaced:
+//   - to-hit = dex/4 + weapon skill/3 + melee/2 + to_hit + martial-arts hit, times
+//     max(0.25, 1 − torso encumbrance/100) (DDA subtracted enc/10); Hyperopic −2. Effect
+//     HIT mods don't touch melee accuracy (BN only uses Creature::get_hit for monsters).
+//   - weapon skill: highest physical damage type, UNARMED_WEAPON → unarmed, and nothing for
+//     bare hands or items without real melee damage (item::melee_skill).
+//   - attack cost: dex (not dex/2) off, torso + hand encumbrance on, heavy one-handable
+//     weapons swung two-handed get cost^0.975, mutation attackcost_modifier.
+//   - damage: armed bash multiplier 0.7 + 0.04 × bashing; bare hands add the unarmed skill;
+//     mutation claws/fangs per empty hand; the skill multiplier applies *after* armor
+//     (damage_unit::damage_multiplier), low stamina and broken arms scale damage down.
+//   - stamina cost: (weight/16 g + 2 × arm encumbrance + 50) × max(0.667, (30 − melee)/30) ×
+//     (0.75 + 1/(2 + str/4)), at least 50.
 
-/** Skill the weapon trains/uses; unarmed when no weapon. */
-export function weaponSkill(weapon: Item | null): string {
-  return weapon ? weapon.meleeSkill() : 'unarmed';
+/** Physical types and the skill each trains (skill_by_dt). */
+const PHYS_SKILL: Record<string, string> = { bash: 'bashing', cut: 'cutting', stab: 'stabbing' };
+
+/**
+ * item::melee_skill for the used weapon: null for bare hands and for items that aren't melee
+ * weapons (no damage type above 1), 'unarmed' for UNARMED_WEAPON items, else the skill of
+ * the highest physical damage (bash wins ties over cut, cut over stab).
+ */
+export function weaponSkill(weapon: Item | null): string | null {
+  if (!weapon) return null;
+  const dmg = weapon.def.melee_damage as Record<string, number> | undefined;
+  const types = new Set(['bash', 'cut', 'stab', ...Object.keys(dmg ?? {})]);
+  if (![...types].some((t) => weapon.meleeDamage(t) > 1)) return null;
+  if (weapon.hasFlag('UNARMED_WEAPON')) return 'unarmed';
+  let hi = 0, res: string | null = null;
+  for (const t of ['bash', 'cut', 'stab']) {
+    const v = weapon.meleeDamage(t);
+    if (v > hi) (hi = v), (res = PHYS_SKILL[t]);
+  }
+  return res;
 }
 
-/** Character::get_hit_weapon + get_hit_base (+ effect hit_mod, torso encumbrance). */
+function skillLevel(c: Character, skill: string | null): number {
+  return skill ? Math.trunc(c.getSkill(skill)) : 0;
+}
+
+/** Product of a numeric mutation field over the character's traits (mutation_value). */
+function mutationProduct(c: Character, field: string): number {
+  let r = 1;
+  for (const t of c.traits) {
+    const v = (c.traitDef(t) as Record<string, unknown> | undefined)?.[field];
+    if (typeof v === 'number') r *= v;
+  }
+  return r;
+}
+
+/** Character::get_melee_hit (without the roll). */
 export function meleeHitBase(c: Character, weapon: Item | null): number {
-  const skill = c.getSkill(weaponSkill(weapon));
-  // Martial-arts buffs add accuracy (Character::get_hit_base + mabuff_tohit_bonus).
-  let hit = c.dex / 4 + skill / 3 + c.getSkill('melee') / 2 + (weapon?.toHit() ?? 0) + c.hit_bonus + buffFlat(c, 'hit');
-  // "Your torso encumbrance throws you off-balance." (get_miss_reason weight enc/10)
-  hit -= c.inv.encumbrance('torso') / 10;
-  if (c.effects.has('downed')) hit -= 8;
-  else if (c.crouching) hit -= 2;
+  let hit = c.dex / 4 + skillLevel(c, weaponSkill(weapon)) / 3 + c.getSkill('melee') / 2 + (weapon?.toHit() ?? 0) + buffFlat(c, 'hit');
+  // "You can't hit reliably due to your farsightedness."
+  if (c.hasTrait('HYPEROPIC') && !c.inv.worn.some((w) => w.hasFlag('FIX_FARSIGHT')) && !c.hasEffect('contacts')) hit -= 2;
+  // "Your torso encumbrance throws you off-balance."
+  hit *= Math.max(0.25, 1 - c.inv.encumbrance('torso') / 100);
   return hit;
 }
 
@@ -70,24 +120,36 @@ export function meleeHitChance(c: Character, weapon: Item | null, targetDodge: n
   return normalAtLeast(meleeHitBase(c, weapon) * 5, 25, targetDodge * 5);
 }
 
+/** item::is_two_handed: ALWAYS_TWOHAND, or heavier than 4 × str (2 × for ALWAYS_TWOHAND) × 113 g. */
+export function isTwoHanded(c: Character, weapon: Item): boolean {
+  if (weapon.hasFlag('ALWAYS_TWOHAND')) return true;
+  return Math.floor(weapon.weight() / 113) > c.str * 4;
+}
+
 /**
- * Character::attack_speed (melee.cpp): moves per attack. base = attack_time/2, melee skill
- * adds base*(15-skill)/15, dex subtracts dex/2, low stamina up to doubles it. Min 25.
+ * Character::attack_cost (BN melee.cpp): moves per attack. base = attack_cost/2; torso and
+ * hand encumbrance add, exhaustion (stamina below 25%) scales those up to ×2; melee skill adds
+ * base × (15 − skill)/15; dex subtracts; martial arts scale then offset; min 25.
  */
 export function attackSpeedMoves(c: Character, weapon: Item | null): number {
-  // Unarmed: item() null reference has 0 volume/weight -> attack_time 65.
-  const attackTime = weapon ? weapon.attackTime() : 65;
-  const base = Math.floor(attackTime / 2);
-  const skillCost = Math.trunc((base * (15 - c.getSkill('melee'))) / 15);
-  const dexBonus = Math.trunc(c.dex / 2);
+  // Bare hands: the null item has no volume/weight -> attack_cost 65.
+  const attackCost = weapon ? weapon.attackTime() : 65;
+  const base = Math.trunc(attackCost / 2);
+  const melee = Math.trunc(c.getSkill('melee'));
+  const skillCost = Math.trunc((base * (15 - melee)) / 15);
+  const enc = Math.trunc(c.inv.encumbrance('torso') + Math.trunc((c.inv.encumbrance('hand_l') + c.inv.encumbrance('hand_r')) / 2));
   const staminaRatio = c.stamina / c.staminaMax();
   const staminaPenalty = 1 + Math.max((0.25 - staminaRatio) * 4, 0);
-  let cost = base * staminaPenalty + skillCost - dexBonus;
-  // Martial-arts buffs scale then offset the cost (mabuff_attack_cost_mult / _penalty).
-  cost = cost * buffMult(c, 'movecost') + buffFlat(c, 'movecost');
-  if (c.effects.has('downed')) cost *= 4;
-  else if (c.crouching) cost *= 1.5;
-  return Math.max(25, Math.trunc(cost));
+  let cost = base + enc;
+  cost = Math.trunc(cost * staminaPenalty);
+  cost += skillCost;
+  cost -= Math.trunc(c.dex);
+  // Strong enough to swing it one-handed but using both hands: easier (heavy weapons only).
+  if (weapon && attackCost > 100 && !isTwoHanded(c, weapon) && c.brokenArms() === 0) cost = Math.trunc(Math.pow(Math.max(0, cost), 0.975));
+  cost = Math.trunc(cost * buffMult(c, 'movecost'));
+  cost = Math.trunc(cost + buffFlat(c, 'movecost'));
+  cost = Math.trunc(cost * mutationProduct(c, 'attackcost_modifier'));
+  return Math.max(25, cost);
 }
 
 /** Real-time cooldown between swings: moves / 100 turns / MELEE_SCALE turns per second. */
@@ -97,8 +159,8 @@ export function attackCooldownSeconds(c: Character, weapon: Item | null): number
 
 /**
  * How a weapon's swing speed reads in real time, for the HUD and the wield warning.
- * Bands are moves per attack (fists ≈ 60, crowbar ≈ 90, sledgehammer ≈ 200, large fire
- * extinguisher ≈ 370 for an average survivor).
+ * Bands are moves per attack (fists ≈ 56, pipe ≈ 72, sledgehammer ≈ 146 for an untrained
+ * 8-dex survivor).
  */
 export function swingSpeedRating(moves: number): { label: 'fast' | 'normal' | 'slow' | 'very slow'; color: string } {
   if (moves <= 80) return { label: 'fast', color: 'c_light_green' };
@@ -117,109 +179,187 @@ export function unwieldyWarning(c: Character, it: Item): string | null {
   return null;
 }
 
-/** melee.cpp stumble(): extra moves lost on a miss with heavy/bulky weapons. */
+/** melee.cpp stumble(): extra moves lost on a miss with heavy/bulky weapons (none if Deft). */
 export function stumbleMoves(c: Character, weapon: Item | null): number {
-  if (!weapon) return 0;
+  if (!weapon || c.hasTrait('DEFT')) return 0;
   return Math.floor(weapon.volume() / 125 + weapon.weight() / (c.str * 10 + 13));
 }
 
-/** Character::get_total_melee_stamina_cost (positive number of stamina spent). */
+/** Character::get_melee_stamina_cost (positive; the swing spends at least 50). */
 export function meleeStaminaCost(c: Character, weapon: Item | null): number {
-  const base = Math.floor((weapon?.weight() ?? 0) / 16) + 50;
-  return Math.max(50, base - Math.round(c.getSkill('melee')) + (c.crouching ? 20 : 0));
+  const melee = Math.trunc(c.getSkill('melee'));
+  const weightCost = Math.floor((weapon?.weight() ?? 0) / 16);
+  const encCost = Math.round((c.inv.encumbrance('arm_l') + c.inv.encumbrance('arm_r')) * 2);
+  const deft = c.hasTrait('DEFT') ? 50 : 0;
+  const strBonus = 1 / (2 + c.str * 0.25);
+  const skillCost = Math.max(0.667, (30 - melee) / 30);
+  const cost = Math.trunc((weightCost + encCost - deft + 50) * skillCost * (0.75 + strBonus));
+  return Math.max(50, cost);
 }
 
 /** Character::crit_chance (melee.cpp). */
 export function critChance(c: Character, weapon: Item | null, rollHit: number, targetDodge: number): number {
   const lim = (p: number) => Math.max(0, Math.min(1, p));
   let weaponCrit = 0.5;
-  if (!weapon) weaponCrit = 0.5 + 0.05 * c.getSkill('unarmed');
+  if (isUnarmedWeapon(weapon)) weaponCrit = 0.5 + 0.05 * Math.trunc(c.getSkill('unarmed'));
   const th = weapon?.toHit() ?? 0;
   if (th > 0) weaponCrit = Math.max(weaponCrit, 0.5 + 0.1 * th);
   else if (th < 0) weaponCrit += 0.1 * th;
   weaponCrit = lim(weaponCrit);
   const statCrit = lim(0.25 + 0.01 * c.dex + 0.02 * c.per);
-  const sk = c.getSkill(weaponSkill(weapon)) + c.getSkill('melee') / 2.5;
+  // `int sk`: the melee share is truncated with it.
+  const sk = Math.trunc(skillLevel(c, weaponSkill(weapon)) + c.getSkill('melee') / 2.5);
   const skillCrit = lim(0.25 + sk * 0.025);
   const triple = weaponCrit * statCrit * skillCrit;
-  const maCrit = buffFlat(c, 'crit_chance') / 100;
   if (rollHit > (targetDodge * 3) / 2) {
     const double = 0.5 * (weaponCrit * statCrit + statCrit * skillCrit + weaponCrit * skillCrit - 3 * triple);
-    return triple + double + maCrit;
+    return triple + double;
   }
-  return triple + maCrit;
+  return triple;
+}
+
+/** Character::natural_attack_restricted_on: something worn over the hand blocks claws. */
+function naturalAttackRestricted(c: Character, bp: 'hand_l' | 'hand_r'): boolean {
+  return c.inv.worn.some((w) => covers(w, bp) && !w.hasFlag('ALLOWS_NATURAL_ATTACKS') && !w.hasFlag('SEMITANGIBLE') && !w.hasFlag('PERSONAL') && !w.hasFlag('AURA'));
+}
+
+/** Hooks other systems fill (mutation activation lives in src/game/mutations.ts). */
+export const meleeHooks: { mutationActive: ((c: Character, id: string) => boolean) | null; hasBionic: ((c: Character, id: string) => boolean) | null } = {
+  mutationActive: null,
+  hasBionic: null,
+};
+
+/**
+ * Per-hand unarmed bonus from mutations (bash/cut_dmg_bonus, rand_*_bonus, pierce_dmg_bonus,
+ * UNARMED_BONUS adds min(unarmed/2, 4)) and bionic razors, counted once per free hand
+ * (roll_bash/cut/stab_damage). The right hand only counts when nothing is wielded.
+ */
+function unarmedHandBonus(c: Character, weapon: Item | null, dt: 'bash' | 'cut' | 'stab', rng: Rng, average: boolean): number {
+  const leftEmpty = !naturalAttackRestricted(c, 'hand_l');
+  const rightEmpty = !naturalAttackRestricted(c, 'hand_r') && !weapon;
+  if (!leftEmpty && !rightEmpty) return 0;
+  const unarmedBonus = Math.min(Math.trunc(c.getSkill('unarmed') / 2), 4);
+  let perHand = 0;
+  for (const t of c.traits) {
+    const d = c.traitDef(t) as Record<string, unknown> | undefined;
+    if (!d) continue;
+    const flags = (d.flags as string[] | undefined) ?? [];
+    if (dt !== 'stab' && flags.includes('NEED_ACTIVE_TO_MELEE') && !meleeHooks.mutationActive?.(c, t)) continue;
+    const flat = Number(d[dt === 'bash' ? 'bash_dmg_bonus' : dt === 'cut' ? 'cut_dmg_bonus' : 'pierce_dmg_bonus'] ?? 0);
+    perHand += flat + (flags.includes('UNARMED_BONUS') && flat > 0 ? unarmedBonus : 0);
+    const rand = dt === 'stab' ? undefined : (d[dt === 'bash' ? 'rand_bash_bonus' : 'rand_cut_bonus'] as { min: number; max: number } | undefined);
+    if (rand) perHand += average ? (rand.min + rand.max) / 2 : rng.int(rand.min, rand.max);
+  }
+  if (dt !== 'bash' && meleeHooks.hasBionic?.(c, 'bio_razors')) perHand += 2;
+  return leftEmpty && rightEmpty ? perHand * 2 : perHand;
 }
 
 /**
- * roll_melee_damage_internal for bash/cut/stab, plus other damage types flat. Strength adds
- * rng(str/2, str) bash, capped by 2*str + 2*skill; skill multiplies damage; crits add
- * damage and armor penetration per type. `average` gives expected values (item info).
+ * melee::roll_all_damage: bash/cut/stab with skill multipliers and crit effects, other types
+ * flat. `multiplier` is BN's damage_multiplier: already included in `amount`, but armor
+ * applies before it (applyFlatArmor scales the mitigation by it). `average` gives expected
+ * values (item info).
  */
 export function rollMeleeDamage(c: Character, weapon: Item | null, crit: boolean, rng: Rng, average = false): RolledDamage[] {
   const out: RolledDamage[] = [];
-  const unarmed = !weapon;
-  // Unarmed blows land with whatever covers the hand (outfit::current_unarmed_weapon): claws
-  // and other integrated mutation armor add their melee damage, gloves mostly nothing.
-  const fist = unarmed ? unarmedWeapon(c) : null;
-  const types = new Set(['bash', 'cut', 'stab', ...Object.keys((weapon ?? fist)?.def.melee_damage ?? {})]);
-  for (const dt of types) {
-    let dmg = weapon ? weapon.meleeDamage(dt) : fist ? fist.meleeDamage(dt) : 0;
-    // Martial-arts buffs: flat damage then a multiplier, plus armor penetration.
-    const maArpen = buffFlat(c, 'arpen', dt);
-    if (dt !== 'bash' && dt !== 'cut' && dt !== 'stab') {
-      dmg = (dmg + buffFlat(c, 'damage', dt)) * buffMult(c, 'damage', dt);
-      if (dmg > 0) out.push({ type: dt, amount: dmg, armor_penetration: maArpen, armor_multiplier: 1 });
-      continue;
-    }
-    const skillId = unarmed ? 'unarmed' : dt === 'bash' ? 'bashing' : dt === 'cut' ? 'cutting' : 'stabbing';
-    const skill = c.getSkill(skillId);
-    let mul = 1;
-    let arpen = maArpen;
-    if (dt === 'bash') {
-      const str = c.str;
-      dmg += average ? str * 0.75 : str / 2 + rng.next() * (str / 2);
-      const cap = 2 * str + 2 * skill;
-      if (cap < dmg && weapon) mul *= (1 + cap / dmg) / 2;
-      const lowCap = Math.min(1, str / 20);
-      const min = lowCap * dmg;
-      dmg = average ? (min + dmg) * 0.5 : min + rng.next() * (dmg - min);
-    }
-    dmg = (dmg + buffFlat(c, 'damage', dt)) * buffMult(c, 'damage', dt);
-    if (dmg <= 0) continue;
-    if (dt === 'stab') mul = skill <= 5 ? 0.66 + 0.1 * skill : 0.86 + 0.06 * skill;
-    else mul *= skill < 5 ? 0.8 + 0.08 * skill : 0.96 + 0.04 * skill;
+  const unarmed = isUnarmedWeapon(weapon);
+  const push = (type: string, amount: number, arpen: number, armorMult: number, mul: number) => {
+    out.push({ type, amount: amount * mul, armor_penetration: arpen, armor_multiplier: armorMult * buffMult(c, 'target_armor_multiplier', type), multiplier: mul });
+  };
+  // Bash: strength and the bash cap.
+  {
+    const skill = Math.trunc(c.getSkill(unarmed ? 'unarmed' : 'bashing'));
+    const str = c.str;
+    let bash = unarmed ? unarmedHandBonus(c, weapon, 'bash', rng, average) : 0;
+    const statBonus = (average ? str * 0.75 : str / 2 + rng.next() * (str / 2)) + buffFlat(c, 'damage', 'bash');
+    let weapDam = (weapon?.meleeDamage('bash') ?? 0) + statBonus;
+    if (unarmed) weapDam += skill;
+    const cap = 2 * str + 2 * skill;
+    let mul = unarmed ? (skill < 5 ? 0.8 + 0.08 * skill : 0.96 + 0.04 * skill) : 0.7 + 0.04 * skill;
+    if (cap < weapDam && weapon) mul *= (1 + cap / weapDam) / 2;
+    const lowCap = Math.min(1, str / 20);
+    const min = lowCap * weapDam;
+    weapDam = average ? (min + weapDam) * 0.5 : min + rng.next() * (weapDam - min);
+    bash += weapDam;
+    mul *= buffMult(c, 'damage', 'bash');
     let armorMult = 1;
     if (crit) {
-      if (dt === 'stab') {
-        mul *= 1 + skill / 10;
-        armorMult = 1 - 0.34;
-      } else if (dt === 'cut') {
+      mul *= 1.5;
+      armorMult *= 0.5;
+    }
+    push('bash', bash, buffFlat(c, 'arpen', 'bash'), armorMult, mul);
+  }
+  // Cut: no strength.
+  {
+    let cut = buffFlat(c, 'damage', 'cut') + (weapon?.meleeDamage('cut') ?? 0);
+    if (unarmed) cut += unarmedHandBonus(c, weapon, 'cut', rng, average);
+    if (cut > 0) {
+      const skill = Math.trunc(c.getSkill('cutting'));
+      let mul = skill < 5 ? 0.8 + 0.08 * skill : 0.96 + 0.04 * skill;
+      let arpen = buffFlat(c, 'arpen', 'cut');
+      let armorMult = 1;
+      mul *= buffMult(c, 'damage', 'cut');
+      if (crit) {
         mul *= 1.25;
         arpen += 5;
         armorMult = 0.75;
-      } else {
-        mul *= 1.5;
-        armorMult = 0.5;
       }
+      push('cut', cut, arpen, armorMult, mul);
     }
-    out.push({ type: dt, amount: dmg * mul, armor_penetration: arpen, armor_multiplier: armorMult });
+  }
+  // Stab: crits scale with the skill.
+  {
+    let stab = buffFlat(c, 'damage', 'stab') + (weapon?.meleeDamage('stab') ?? 0);
+    if (unarmed) stab += unarmedHandBonus(c, weapon, 'stab', rng, average);
+    if (stab > 0) {
+      const skill = Math.trunc(c.getSkill('stabbing'));
+      let mul = skill <= 5 ? 0.66 + 0.1 * skill : 0.86 + 0.06 * skill;
+      mul *= buffMult(c, 'damage', 'stab');
+      let armorMult = 1;
+      if (crit) {
+        mul *= 1 + skill / 10;
+        armorMult *= 0.66;
+      }
+      push('stab', stab, buffFlat(c, 'arpen', 'stab'), armorMult, mul);
+    }
+  }
+  // Everything else (heat, electric, …) flat.
+  const others = new Set([...Object.keys(weapon?.def.melee_damage ?? {}), ...buffDamageTypes(c)]);
+  for (const dt of others) {
+    if (dt in PHYS_SKILL) continue;
+    const dmg = buffFlat(c, 'damage', dt) + (weapon?.meleeDamage(dt) ?? 0);
+    if (dmg <= 0) continue;
+    push(dt, dmg, buffFlat(c, 'arpen', dt), 1, buffMult(c, 'damage', dt) * (crit ? 1.5 : 1));
   }
   return out;
 }
 
-/** Outermost worn item covering the right hand (the punching surface), or null. */
-export function unarmedWeapon(c: Character): Item | null {
-  const list = c.inv.wornCovering('hand_r');
-  return list.find((it) => it.def.melee_damage && Object.keys(it.def.melee_damage).length) ?? null;
+/** Damage types some active martial-arts buff adds damage to. */
+function buffDamageTypes(c: Character): string[] {
+  const out: string[] = [];
+  for (const b of maOf(c).buffs.values()) for (const e of b.def.flat_bonuses ?? []) if (e.stat === 'damage' && e.type) out.push(e.type);
+  return out;
 }
 
-/** Flat per-type monster armor (MonsterDef.armor) applied like resistances::get_effective_resist. */
+/** damage_instance::mult_damage: scale every unit (low stamina, broken arms, polearms up close). */
+export function multDamage(units: RolledDamage[], f: number): void {
+  for (const u of units) {
+    u.amount *= f;
+    u.multiplier = (u.multiplier ?? 1) * f;
+  }
+}
+
+/**
+ * Per-type monster armor (MonsterDef.armor) like monster::absorb_hit: resist =
+ * max(armor − armor penetration, 0) × armor multiplier comes off the unit's raw amount, before
+ * its damage multiplier (so the mitigation scales with it here, where amount is multiplied).
+ */
 export function applyFlatArmor(units: RolledDamage[], armor: Record<string, number> | undefined): { type: string; amount: number }[] {
   return units.map((u) => {
     let res = armor?.[u.type] ?? 0;
     // Monsters: stab derives from cut * 0.8 when not given (damage_types.json derived_from).
     if (u.type === 'stab' && armor?.stab === undefined && armor?.cut !== undefined) res = armor.cut * 0.8;
-    const mitigation = Math.max(res - u.armor_penetration, 0) * u.armor_multiplier;
+    const mitigation = Math.max(res - u.armor_penetration, 0) * u.armor_multiplier * (u.multiplier ?? 1);
     return { type: u.type, amount: Math.max(0, u.amount - mitigation) };
   });
 }
@@ -232,19 +372,19 @@ export interface MeleeTarget {
   sizeMeleePenalty?: number;
   /** Immobile targets (turrets): +40 hit spread. */
   immobile?: boolean;
-  /** What technique conditions test; without it (legacy callers) no techniques are used. */
+  /** What technique requirements test; without it (legacy callers) no techniques are used. */
   info?: TargetInfo;
 }
 
 export interface MeleeOpts {
   /** melee_attack's allow_special: false for AoE follow-up swings (no techniques). */
   allowSpecial?: boolean;
-  /** Use this technique (block counters, debug). */
+  /** Use this technique (block/dodge counters, debug). */
   forceTechnique?: TechniqueDef;
   /** Extra AoE victims available for an aoe kind; AoE techniques need at least one. */
   aoeTargets?: (aoe: string) => number;
   reachAttack?: boolean;
-  /** Target throw resistance is 0 (downed techniques apply). Default true. */
+  /** The target can be downed (not immobile / immune). Default true. */
   downable?: boolean;
 }
 
@@ -271,10 +411,10 @@ export interface MeleeResult {
 }
 
 /**
- * One melee swing by `c` at a target (Character::melee_attack_abstract): hit roll, crit, a
- * technique chosen from the weapon and martial-art style (pick_technique) that scales damage and
- * move cost, glass shattering, weapon wear, martial-arts buff triggers (onattack/onhit/onmiss/
- * oncrit). Spends stamina and trains skills like CDDA. Technique effects on the target (stun,
+ * One melee swing by `c` at a target (BN Character::melee_attack): hit roll, crit, a
+ * technique picked from the weapon and martial-art style (pick_technique) that scales damage
+ * and move cost, glass shattering, weapon wear, martial-arts buff triggers (onattack/onhit/
+ * onmiss/oncrit). Spends stamina and trains skills. Technique effects on the target (stun,
  * downed, knockback, AoE) come back in `outcome` for the world layer.
  */
 export function meleeAttack(c: Character, target: MeleeTarget, rng: Rng, targetName = 'the target', opts: MeleeOpts = {}): MeleeResult {
@@ -287,34 +427,50 @@ export function meleeAttack(c: Character, target: MeleeTarget, rng: Rng, targetN
   const hit = spread >= 0;
   let moves = attackSpeedMoves(c, weapon);
   const staminaCost = meleeStaminaCost(c, weapon);
-  c.modStamina(-staminaCost);
   maOf(c).attacked = true;
   if (!hit) {
     const st = stumbleMoves(c, weapon);
     moves += Math.min(60, st);
     meleeTrain(c, weapon, false, rng);
-    const recovery = defensiveTechnique(c, 'miss_recovery');
+    // BN halves the cost whenever a miss-recovery technique is on hand; its message only
+    // shows when the character meets its requirements.
+    const recovery = defensiveTechnique(c, 'miss_recovery', weapon);
     let message: string;
-    if (recovery) {
-      moves = Math.trunc(moves / 2);
+    if (recovery) moves = Math.trunc(moves / 2);
+    if (recovery && requirementsMet(c, recovery, weapon)) {
       message = techniqueMessage(recovery, targetName) ?? 'You miss.';
       if (!/[.!]$/.test(message)) message += '.';
     } else message = st >= 60 ? 'You miss and stumble with the momentum.' : st >= 10 ? 'You swing wildly and miss.' : 'You miss.';
     c.msg(message);
     triggerBuffs(c, 'onmiss');
     const wear = handleMeleeWear(c, weapon, 1, rng);
+    c.modStamina(-staminaCost);
     triggerBuffs(c, 'onattack');
     return { hit, crit: false, hitSpread: spread, damage: [], total: 0, moves, cooldownSeconds: moves / 100 / MELEE_SCALE, staminaCost, message, technique: recovery, wear };
   }
-  const crit = rng.next() < critChance(c, weapon, roll, target.dodge * 5);
-  const units = rollMeleeDamage(c, weapon, crit, rng);
+  const crit = rng.next() < critChance(c, weapon, meleeHitRoll(c, weapon, rng), target.dodge * 5);
   let technique: TechniqueDef | null = null;
   let outcome: TechniqueOutcome | undefined;
   if (opts.forceTechnique) technique = opts.forceTechnique;
   else if (opts.allowSpecial !== false && target.info)
-    technique = pickTechnique(c, target.info, weapon, { crit, aoeTargets: opts.aoeTargets, reachAttack: opts.reachAttack }, rng);
+    technique = pickTechnique(c, target.info, weapon, { crit, aoeTargets: opts.aoeTargets }, rng);
+  // A force_unarmed technique (kicks) hits with the body, not the weapon.
+  const useWeapon = technique?.force_unarmed ? null : weapon;
+  const units = rollMeleeDamage(c, useWeapon, crit, rng);
+  // Two broken arms: no martial arts and feeble blows.
+  if (c.brokenArms() >= 2) {
+    technique = null;
+    multDamage(units, 0.1);
+  }
+  // Polearms (but not spears) do less damage to adjacent targets.
+  if (useWeapon?.hasFlag('POLEARM') && (useWeapon.hasFlag('REACH_ATTACK') || useWeapon.hasFlag('REACH3')) && !opts.reachAttack) multDamage(units, 0.7);
+  // Below 25% stamina damage falls linearly to half at 0.
+  if (c.stamina < c.staminaMax() / 4) multDamage(units, 0.5 + (c.stamina / c.staminaMax()) * 2);
   if (technique) {
-    const r = applyTechnique(c, technique, units, moves, rng, opts.downable !== false);
+    const r = applyTechnique(c, technique, units, moves, rng, {
+      downable: opts.downable !== false,
+      flies: !!target.info?.flags?.includes('FLIES'),
+    });
     moves = r.moves;
     outcome = r.outcome;
   }
@@ -328,10 +484,11 @@ export function meleeAttack(c: Character, target: MeleeTarget, rng: Rng, targetN
   triggerBuffs(c, 'onhit');
   const damage = applyFlatArmor(units, target.armor);
   const total = Math.floor(damage.reduce((s, d) => s + d.amount, 0));
-  meleeTrain(c, weapon, true, rng);
+  meleeTrain(c, useWeapon, true, rng);
   if (crit) triggerBuffs(c, 'oncrit');
   // A shattered weapon is gone; otherwise it may wear from the blow.
   const wear = shatter.shattered ? undefined : handleMeleeWear(c, weapon, 1, rng);
+  c.modStamina(-staminaCost);
   triggerBuffs(c, 'onattack');
   const message = `You ${crit ? 'critically ' : ''}hit ${targetName}${total > 0 ? ` for ${total} damage` : ' but do no damage'}.`;
   return {
@@ -350,11 +507,25 @@ export function hitMessage(phrase: string, dam: number, crit: boolean, npc = fal
   return crit ? `${phrase} for ${dam} damage.  Critical!` : `${phrase} for ${dam} damage.`;
 }
 
-/** melee.cpp melee_train: hits train (5..10), misses (2..5); melee gets half. */
+/**
+ * BN melee_train: hits train (5..10), misses (2..5); melee gets half. Weapon XP is split by
+ * the weapon's bash/cut/stab share; unarmed weapons (and bare hands) train unarmed.
+ */
 export function meleeTrain(c: Character, weapon: Item | null, hit: boolean, rng: Rng): void {
   const [lo, hi] = hit ? [5, 10] : [2, 5];
   c.practice('melee', Math.ceil(rng.int(lo, hi) / 2), hi);
-  c.practice(weaponSkill(weapon), rng.int(lo, hi), hi);
+  if (isUnarmedWeapon(weapon)) {
+    c.practice('unarmed', rng.int(lo, hi), hi);
+    return;
+  }
+  const cut = Math.trunc(weapon!.meleeDamage('cut'));
+  const stab = Math.trunc(weapon!.meleeDamage('stab'));
+  const bash = Math.trunc(weapon!.meleeDamage('bash'));
+  const total = Math.max(cut + stab + bash, 1);
+  for (const [skill, v] of [['cutting', cut], ['stabbing', stab], ['bashing', bash]] as const) {
+    const xp = Math.ceil((v / total) * rng.int(lo, hi));
+    if (xp > 0) c.practice(skill, xp, hi);
+  }
 }
 
 // ---------------------------------------------------------------- ranged
@@ -643,9 +814,7 @@ export function monsterMeleeAttack(
   const dodgeRoll = opts.dodgeable === false ? 0 : tryDodgeRoll(target);
   const spread = hitRoll - dodgeRoll;
   if (spread < 0) {
-    // Creature::on_dodge: dodging trains the skill, scaled by attacker skill.
-    target.practice('dodge', Math.max(1, acc * 2), acc);
-    triggerBuffs(target, 'ondodge');
+    if (opts.dodgeable !== false) onDodged(target, acc);
     const message = `${name} misses you.`;
     target.msg(message);
     return { hit: false, dodged: true, raw: [], absorbed: [], message };
@@ -679,21 +848,34 @@ export function sizeRank(size: CreatureSize): number {
 }
 
 /**
- * Character dodge_roll + on_try_dodge: dodge × 5 while a dodge is left this turn (else 0).
- * Each attempt uses one up and burns stamina (base burn 15 × 6 × (20 − dodge skill)/20)
- * unless a free dodge from a martial-arts buff covers it. During a side-step (combatfeel.ts)
- * the step already paid for it: the roll gets the side-step bonus and uses no dodge.
+ * Character::dodge_roll (BN): get_dodge × 5, where every dodge already used up this turn
+ * costs the equivalent of 2 dodge skill (dodges_left ≤ 0 → + dodges_left × 2 − 2). The roll
+ * itself spends nothing: a dodge is only used up when the attack misses (onDodged). During a
+ * side-step (combatfeel.ts) the step already paid for it: the roll gets the side-step bonus
+ * and a miss spends no dodge.
  */
 export function tryDodgeRoll(c: Character): number {
   const ma = maOf(c);
   const d = c.dodge();
   const step = c.effects.has('downed') ? null : sidestepDodgeRoll(d, defenseOf(c));
+  ma.sidestepDodge = step !== null;
   if (step !== null) return step;
-  if (ma.dodgesLeft <= 0 || d <= 0) return 0;
-  ma.dodgesLeft--;
-  if (ma.freeDodgesLeft > 0) ma.freeDodgesLeft--;
-  else c.modStamina(-Math.floor(15 * 6 * ((20 - c.getSkill('dodge')) / 20)));
-  return d * 5;
+  if (d <= 0) return 0;
+  const penalty = ma.dodgesLeft <= 0 ? ma.dodgesLeft * 2 - 2 : 0;
+  return Math.max(0, d + penalty) * 5;
+}
+
+/**
+ * Character::on_dodge: the attack missed. Uses up a dodge (unless a side-step covered it),
+ * trains dodge by the attacker's skill and fires the ondodge martial-arts buffs.
+ */
+export function onDodged(c: Character, attackerSkill: number): void {
+  const ma = maOf(c);
+  if (!ma.sidestepDodge) ma.dodgesLeft--;
+  ma.sidestepDodge = false;
+  const diff = Math.max(0, Math.trunc(attackerSkill));
+  c.practice('dodge', diff * 2, diff);
+  triggerBuffs(c, 'ondodge');
 }
 
 /** Martial-arts "armor" buffs reduce incoming damage per type (mabuff_armor_bonus). */

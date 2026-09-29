@@ -143,14 +143,17 @@ tests/               vitest unit tests (pure logic, no DOM/WebGL)
 
 ### Combat depth (src/game/{techniques,martialarts,gunmods,monguns,explosion}.ts, wired by src/combatdepth.ts)
 - `meleeAttack(c, {dodge, armor, info?: TargetInfo}, rng, name, {allowSpecial, aoeTargets, forceTechnique})`
-  picks a weapon/style technique (melee.cpp pick_technique: dummy/defensive skipped, crit_tec,
-  `condition` via a small dialogue-condition evaluator, skill/weapon requirements, weighting, AoE
-  needing victims) and returns `technique` + `outcome` (stun/down turns, knockback, aoe, disarm);
+  picks a weapon/style technique (BN melee.cpp get_valid_techniques: dummy/defensive skipped, crit_tec,
+  downed/stunned/human_target, BN ma_requirements (req_buffs, skills, weapon damage/flags/categories,
+  mutations_required, wall_adjacent via `maWorld`), weighting, AoE needing victims; no DDA dialogue
+  conditions) and returns `technique` + `outcome` (stun/down turns, knockback, aoe, disarm);
+  Rolled damage carries BN's `multiplier` (armor comes off before it: `applyFlatArmor`).
   the world layer applies it (`applyTechniqueToMonster` in playercombat.ts: monster effects +
   dash knockback; `PlayerCombat.swingAt`/`aoeVictims` for wide/spin/impale follow-ups). Messages
   use the technique text (`techniqueMessage`, `hitMessage`: "You sweep the zombie for 12 damage.").
   No `info` = no techniques (legacy callers). Glass shattering + `handleMeleeWear` happen inside.
-- Defense: `monsterMeleeAttack` uses `tryDodgeRoll` (one dodge per combat turn, stamina cost) and
+- Defense: `monsterMeleeAttack` uses `tryDodgeRoll` (BN: always rolls, each dodge already spent this
+  turn costs 2 dodge; `onDodged(c, attackerSkill)` spends it when the attack misses) and
   `blockHit` (WBLOCK_1/2/3 weapons, style arm/leg blocks, logarithmic_range(0,40,score) of physical
   damage gets through, "You block most of the damage with your baseball bat!"); NPC-vs-character
   melee uses `characterDefend`. A combat turn is `COMBAT_TURN` = 1/MELEE_SCALE real s; dodges/blocks
