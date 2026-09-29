@@ -317,8 +317,14 @@ export function applyModifier(base: unknown, mod: unknown, kind: 'relative' | 'p
   return applyNumeric(base, mod, op, quant);
 }
 
-export function applyExtend(base: unknown, ext: unknown): unknown {
-  if (base === undefined) return clone(ext);
+// members read as sets/lists whose JSON may be a single string (auto_flags_reader, get_tags)
+const SET_KEYS = new Set([
+  '', 'flags', 'material', 'species', 'categories', 'techniques', 'effects', 'ammo', 'use_action', 'weapon_category',
+  'valid_mods', 'faults', 'anger_triggers', 'fear_triggers', 'placate_triggers', 'death_function',
+]);
+
+export function applyExtend(base: unknown, ext: unknown, key = ''): unknown {
+  if (base === undefined) return SET_KEYS.has(key) || typeof ext === 'object' ? clone(ext) : undefined;
   if (Array.isArray(base)) {
     const add = Array.isArray(ext) ? ext : [ext];
     const out = [...base];
@@ -338,7 +344,9 @@ export function applyExtend(base: unknown, ext: unknown): unknown {
     return out;
   }
   if (isObj(base) && isObj(ext)) return { ...base, ...clone(ext) };
-  // scalar "extend" (e.g. extend a string field into a list)
+  // A set member written as a single string ("flags": "X") extends into a list; "extend" on
+  // a true scalar ("harvest") is ignored by BN, whose readers only look in "extend" for sets
+  if (!SET_KEYS.has(key)) return base;
   return Array.isArray(ext) ? [base, ...ext] : [base, ext];
 }
 
@@ -405,7 +413,13 @@ export function mergeInherited(parent: CddaObject | undefined, child: CddaObject
       else out[k] = applyModifier(clone(inherited), rel[k], 'relative', k);
     }
   }
-  if (isObj(child.extend)) for (const [k, e] of Object.entries(child.extend)) out[k] = applyExtend(out[k], e);
+  if (isObj(child.extend)) {
+    for (const [k, e] of Object.entries(child.extend)) {
+      const v = applyExtend(out[k], e, k);
+      if (v === undefined) delete out[k];
+      else out[k] = v;
+    }
+  }
   if (isObj(child.delete)) {
     for (const [k, d] of Object.entries(child.delete)) {
       const r = applyDelete(out[k], d);
@@ -532,6 +546,29 @@ function looksLikeInherited(r: CddaObject, pid: string, parent: CddaObject, chil
   if (r.looks_like === undefined) delete r.looks_like;
 }
 
+// Item "slots" (itype's islot_* members) an item type loads. load_definition copies the whole
+// parent itype, so slots accumulate down a copy-from chain: a GENERIC copied from a TOOL is
+// still a tool. Slot objects ("armor_data", "gun_data", ...) add slots on any type.
+export const ITEM_TYPE_SLOTS: Record<string, string[]> = {
+  GENERIC: [], TOOL: ['TOOL'], COMESTIBLE: ['COMESTIBLE'], ARMOR: ['ARMOR'], TOOL_ARMOR: ['TOOL', 'ARMOR'],
+  PET_ARMOR: ['PET_ARMOR'], GUN: ['GUN'], GUNMOD: ['GUNMOD'], AMMO: ['AMMO'], MAGAZINE: ['MAGAZINE'], BOOK: ['BOOK'],
+  CONTAINER: ['CONTAINER'], BIONIC_ITEM: ['BIONIC_ITEM'], TOOLMOD: ['TOOLMOD'], ENGINE: ['ENGINE'], WHEEL: ['WHEEL'],
+  FUEL: ['FUEL'], BATTERY: ['BATTERY'],
+};
+export const ITEM_SLOT_OBJECTS: Record<string, string> = {
+  container_data: 'CONTAINER', armor_data: 'ARMOR', pet_armor_data: 'PET_ARMOR', book_data: 'BOOK', gun_data: 'GUN',
+  bionic_data: 'BIONIC_ITEM', ammo_data: 'AMMO', seed_data: 'SEED', artifact_data: 'ARTIFACT', brewable: 'BREWABLE',
+  fuel: 'FUEL', relic_data: 'RELIC', milling: 'MILLING', gunmod_data: 'GUNMOD',
+};
+/** Slots of one raw definition (not counting inherited ones). */
+export function ownItemSlots(o: CddaObject): string[] {
+  const t = ITEM_TYPE_SLOTS[o.type];
+  if (!t) throw new Error(`item ${o.id ?? o.abstract}: unknown item type ${o.type}`);
+  return [...t, ...Object.keys(ITEM_SLOT_OBJECTS).filter((k) => isObj(o[k])).map((k) => ITEM_SLOT_OBJECTS[k])];
+}
+// legacy single-portion armor members (item_factory.cpp Item_factory::load(islot_armor&))
+const LEGACY_ARMOR_KEYS = ['covers', 'coverage', 'encumbrance', 'max_encumbrance'];
+
 export const FAMILY_HOOKS: Record<string, InheritHooks> = {
   ITEM: {
     // every item slot is read with assign() (item_factory.cpp load_basic_info & friends)
@@ -541,6 +578,27 @@ export const FAMILY_HOOKS: Record<string, InheritHooks> = {
       // its own); an abstract parent passes its looks_like on. The JSON's own value wins.
       r.looks_like = child.looks_like ?? (parentAbstract ? parent.looks_like : pid);
       if (r.looks_like === undefined) delete r.looks_like;
+      r.__slots = [...new Set([...(parent.__slots ?? []), ...ownItemSlots(parent)])];
+      // Armor portions (load(islot_armor&)): an own "armor_portion_data" replaces everything;
+      // otherwise legacy top-level members edit portion 0 of the inherited data, and changing
+      // "encumbrance" without "max_encumbrance" resets max to it ("DISGUSTING hack").
+      const own = (k: string) => k in child || (isObj(child.relative) && k in child.relative) || (isObj(child.proportional) && k in child.proportional);
+      if ('armor_portion_data' in child) {
+        for (const k of LEGACY_ARMOR_KEYS) delete r[k];
+      } else if (Array.isArray(r.armor_portion_data) && LEGACY_ARMOR_KEYS.some(own)) {
+        if (r.armor_portion_data.length !== 1) throw new Error(`item ${child.id}: legacy armor fields on an item with ${r.armor_portion_data.length} armor_portion_data entries`);
+        const p = { ...r.armor_portion_data[0] };
+        const [enc0, max0] = Array.isArray(p.encumbrance) ? p.encumbrance : [p.encumbrance ?? 0, p.encumbrance ?? 0];
+        const enc = own('encumbrance') ? r.encumbrance : enc0;
+        const max = own('max_encumbrance') ? r.max_encumbrance : enc !== enc0 ? enc : max0;
+        p.encumbrance = [enc, max];
+        if (own('coverage')) p.coverage = r.coverage;
+        if (own('covers')) p.covers = r.covers;
+        r.armor_portion_data = [p];
+        for (const k of LEGACY_ARMOR_KEYS) delete r[k];
+      } else if (own('encumbrance') && !own('max_encumbrance') && r.encumbrance !== parent.encumbrance) {
+        r.max_encumbrance = r.encumbrance;
+      }
     },
   },
   terrain: {

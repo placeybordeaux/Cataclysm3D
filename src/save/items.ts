@@ -1,5 +1,6 @@
 import type { GameData } from '../data/types';
 import { Item, type ItemJSON } from '../game/item';
+import { legacyPocketData } from '../data/bncompat';
 
 export type Warn = (msg: string) => void;
 
@@ -19,7 +20,7 @@ export function sanitizeItemJSON(data: GameData, j: ItemJSON, warn: Warn): ItemJ
     return null;
   }
   if (!j.pockets) return j;
-  const n = def.pocket_data?.length ?? 0;
+  const n = legacyPocketData(def).length; // TODO(BN inventory)
   const pockets = j.pockets.map((list, i) => {
     if (i >= n) {
       if (list.length) warn(`${j.typeId} lost pocket #${i}; ${list.length} item(s) dropped`);

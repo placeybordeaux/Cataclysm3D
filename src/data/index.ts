@@ -1,12 +1,12 @@
 // Convenience lookups over GameData. Unknown ids warn once (warn.ts) and return undefined
-// rather than throwing: CDDA data references mod-only content.
+// rather than throwing: game data may reference mod-only content.
 
 import type { Rng } from '../core/rng';
 import type { FurnitureDef, GameData, ItemDef, MonsterDef, MonsterGroupDef, RecipeDef, TerrainDef } from './types';
 import { warnOnce } from './warn';
 
 export { warnOnce, warnedIds } from './warn';
-export { expandItemGroup, possibleItems, type SpawnedItem } from './itemgroups';
+export { ammoCapacity, chargesPerVolume, defaultAmmo, expandItemGroup, possibleItems, type SpawnedItem } from './itemgroups';
 
 /** CDDA item::tname-ish: singular for n == 1, plural otherwise. */
 export function itemName(def: Pick<ItemDef, 'name' | 'name_plural'>, n = 1): string {
@@ -105,10 +105,10 @@ export interface MonsterGroupContext {
 }
 
 function entryValid(e: MonsterGroupDef['monsters'][number], ctx: MonsterGroupContext): boolean {
-  if (e.event && e.event !== 'none') return false;
   if (ctx.elapsed !== undefined) {
-    if (e.starts && ctx.elapsed < e.starts) return false;
-    if (e.ends && e.ends > 0 && ctx.elapsed >= e.ends) return false;
+    // start_of_cataclysm + starts < turn, and (ends == 0 || start + ends > turn)
+    if (e.starts !== undefined && !(ctx.elapsed > e.starts)) return false;
+    if (e.ends && ctx.elapsed >= e.ends) return false;
   }
   const conds = e.conditions ?? [];
   const tod = conds.filter((c) => c === 'DAY' || c === 'NIGHT' || c === 'DUSK' || c === 'DAWN');
@@ -119,40 +119,29 @@ function entryValid(e: MonsterGroupDef['monsters'][number], ctx: MonsterGroupCon
 }
 
 /**
- * MonsterGroupManager::GetResultFromGroup: roll 1..freq_total, walk entries subtracting
- * weights (invalid entries are skipped but still count toward the total, so they make
- * "nothing special" more likely); groups recurse per pack member. Falls back to the
- * group's default monster when nothing was picked. "mon_null" results are dropped.
+ * BN MonsterGroupManager::GetResultFromGroup (mongroup.cpp): roll 1..freq_total (default
+ * 1000), walk the *valid* entries subtracting their freq until one covers the roll; if none
+ * does, the group's default monster spawns (one of it). Pack size is only rolled when the
+ * entry's max pack is > 1. "mon_null" results are dropped. BN groups hold monsters only (no
+ * nested groups); `_recursive` is kept for old callers and ignored. (The evolve_chance
+ * upgrade rolls of GetUpgradedMonsterGroup are not modelled.)
  */
-export function pickFromMonsterGroup(data: GameData, groupId: string, rng: Rng, ctx: MonsterGroupContext = {}, recursive = false): MonsterSpawn[] {
+export function pickFromMonsterGroup(data: GameData, groupId: string, rng: Rng, ctx: MonsterGroupContext = {}, _recursive = false): MonsterSpawn[] {
   const g = data.monsterGroups[groupId];
   if (!g) {
     warnOnce('monstergroup', groupId);
     return [];
   }
-  const total = typeof g.freq_total === 'number' ? g.freq_total : g.monsters.reduce((s, m) => s + (m.event ? 0 : m.weight), 0);
-  let chance = total > 0 ? rng.int(1, total) : 0;
-  const out: MonsterSpawn[] = [];
-  let found = false;
+  let chance = rng.int(1, Math.max(1, g.freq_total));
+  let out: MonsterSpawn = { id: g.default, count: 1 };
   for (const e of g.monsters) {
     if (!entryValid(e, ctx)) continue;
-    if (e.weight < chance) {
-      chance -= e.weight;
-      continue;
+    if (e.weight >= chance) {
+      const pack = e.pack_size && e.pack_size[1] > 1 ? rng.int(e.pack_size[0], e.pack_size[1]) : 1;
+      out = { id: e.monster, count: pack };
+      break;
     }
-    const pack = e.pack_size && e.pack_size[1] > 1 ? rng.int(e.pack_size[0], e.pack_size[1]) : 1;
-    if (e.group) {
-      for (let i = 0; i < pack; i++) {
-        const sub = pickFromMonsterGroup(data, e.group, rng, ctx, true);
-        if (sub.length) found = true;
-        out.push(...sub);
-      }
-    } else if (e.monster) {
-      found = true;
-      if (e.monster !== 'mon_null') out.push({ id: e.monster, count: pack });
-    }
-    break;
+    chance -= e.weight;
   }
-  if (!recursive && !found && g.default && g.default !== 'mon_null') out.push({ id: g.default, count: 1 });
-  return out;
+  return out.id && out.id !== 'mon_null' ? [out] : [];
 }
