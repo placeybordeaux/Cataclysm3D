@@ -23,6 +23,7 @@ import { installLabs } from './labs';
 import { installChunkTracking } from './save/tracking';
 import { installSave, takePendingLoad } from './save/install';
 import { installAchievements } from './achievements';
+import { installChunkEviction } from './save/eviction';
 
 // URL params (all optional): seed=<int>, gen=world|test (default world), debug=1 (render stats overlay),
 // renderer params px/grade/tex/cam/walls (see src/render/renderer.ts), debug=atlas (sprite sheet view
@@ -81,6 +82,8 @@ async function main(): Promise<void> {
   // Before installUi: the UI registers the save key only when game.save exists.
   const save = await installSave(game, { api, genKind, worldgen, monsters });
   game.events.on('gameLoaded', () => renderer.chunks.invalidateAll());
+  // Far clean chunks are dropped (they regenerate); keep well outside the rendered radius.
+  api.eviction = installChunkEviction(game, { keepRadius: () => renderer.chunks.radius + 4 });
   const ui = await installUi(game, renderer, worldgen, api);
   // After the UI: wraps the reload key (clears gun jams) and adds item-menu gunmod actions.
   installCombatDepth(game, renderer, monsters, api);

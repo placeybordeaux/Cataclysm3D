@@ -104,6 +104,11 @@ export class WorldGenerator implements ChunkGenerator {
     this.pending.clear();
   }
 
+  forgetColumn(cx: number, cy: number): void {
+    const prefix = `${cx},${cy},`;
+    for (const k of this.pending.keys()) if (k.startsWith(prefix)) this.pending.delete(k);
+  }
+
   generate(map: GameMap, c: Chunk): void {
     this.map = map;
     // Upper levels need the level below first: roofs/tree tops and z+1 overlays come from it.

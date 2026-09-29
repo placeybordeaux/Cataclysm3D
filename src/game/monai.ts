@@ -302,6 +302,11 @@ export class MonsterSystem implements GameSystem {
     if (this.playerSees(m)) this.message(text, color);
   }
 
+  /** Fights that don't involve the survivor are narrated only up close (see npcai NARRATE_RANGE). */
+  private narrateThirdParty(m: Monster, text: string, color?: string): void {
+    if (this.distToPlayer(m) <= 20) this.messageIfSeen(m, text, color);
+  }
+
   /**
    * Make a noise through sound.ts (AI hearing via the `sound` event, the survivor's "You hear…"
    * messages, audio). `sfxId: ''` when the caller already played it.
@@ -394,10 +399,10 @@ export class MonsterSystem implements GameSystem {
       sfx.monsterHit(m);
       const dmg = res.result?.damage ?? 0;
       const part = BODY_PART_NAMES[res.bp ?? 'torso'] ?? 'body';
-      this.messageIfSeen(m, `${m.TheName()} hits ${t.name}'s ${part}.`, dmg > 0 ? undefined : 'c_light_gray');
+      this.narrateThirdParty(m, `${m.TheName()} hits ${t.name}'s ${part}.`, dmg > 0 ? undefined : 'c_light_gray');
       t.onHit(m, dmg);
     } else {
-      this.messageIfSeen(m, `${m.TheName()} misses ${t.name}.`, 'c_light_gray');
+      this.narrateThirdParty(m, `${m.TheName()} misses ${t.name}.`, 'c_light_gray');
       t.onHit(m, 0);
     }
   }
@@ -510,7 +515,9 @@ export class MonsterSystem implements GameSystem {
     const corpseType = gibbed ? 'SPLATTER' : df.corpse_type ?? 'NORMAL';
     const seen = this.playerSees(m);
     if (seen) {
-      const msg = gibbed ? `The ${monsterName(def)} is torn apart!` : (df.message ?? 'The %s dies!').replace('%s', monsterName(def));
+      // Named monsters (mission targets) die by name, as they fought: "Sean McLaughlin dies!"
+      const tmpl = gibbed ? 'The %s is torn apart!' : df.message ?? 'The %s dies!';
+      const msg = m.name ? tmpl.replace(/\b[Tt]he %s/, m.name).replace('%s', m.name) : tmpl.replace('%s', monsterName(def));
       if (msg) this.message(msg, killer === 'player' ? 'c_light_green' : undefined);
     }
     sfx.monsterDeath(def.id, m, gibbed);

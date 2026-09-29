@@ -101,6 +101,22 @@ describe('npc generation', () => {
     expect(n.getSkill('pistol')).toBeGreaterThanOrEqual(2);
   });
 
+  it('gunmen wield the gun (not a spare magazine) and it is loaded, magazine included', () => {
+    let guns = 0;
+    for (let seed = 1; seed <= 40; seed++) {
+      const n = generateNpc(data, nd, { template: 'bandit' }, seed);
+      const w = n.inv.wielded;
+      if (!w) continue;
+      expect(w.def.type, `seed ${seed}: wields ${w.typeId}`).not.toBe('MAGAZINE');
+      expect((w.def.subtypes as string[] | undefined) ?? []).not.toContain('MAGAZINE');
+      // modular guns (ammo "NULL") take their caliber from gunmods, which aren't modelled
+      if (!w.isGun() || !w.ammoTypes().some((a) => a !== 'NULL')) continue;
+      guns++;
+      expect(w.ammoRemaining(), `seed ${seed}: ${w.typeId} is empty`).toBeGreaterThan(0);
+    }
+    expect(guns).toBeGreaterThan(10);
+  });
+
   it('round-trips through toJSON/fromJSON', () => {
     const { npcs, game } = world();
     const n = npcs.spawn({ template: 'free_merchants_merchant' }, 14, 12, 0)!;
@@ -147,6 +163,21 @@ describe('dialogue math', () => {
 });
 
 describe('dialogue on real talk topics', () => {
+  it('expands punctuation snippets with an ellipsis and the default goodbye', () => {
+    const { npcs } = world(3);
+    const n = npcs.spawn({ template: 'free_merchants_merchant' }, 14, 12, 0)!;
+    const d = npcs.talkTo(n)!;
+    expect(d.parseTags('I gotta go<punc.…>')).toMatch(/^I gotta go[.…]$/);
+    expect(d.parseTags('Go<punc…!>')).toMatch(/^Go[…!]$/);
+    n.restockAt = 3 * 86400 + 8 * 3600;
+    expect(d.parseTags('Come back after <restock_time_point>.')).toBe('Come back after Spring 4, 08:00.');
+    // TALK_DONE says a CDDA <end_talking_bye> line, never a raw "<bye>" tag.
+    const bye = (d as unknown as { byeMessage(): string }).byeMessage();
+    expect(bye).not.toMatch(/[<>]/);
+    expect(bye.length).toBeGreaterThan(0);
+  });
+
+
   it('Smokes: first meeting sets u_val, then the talk menu opens', () => {
     const { npcs } = world(3);
     const n = npcs.spawn({ template: 'free_merchants_merchant' }, 14, 12, 0)!;

@@ -228,7 +228,8 @@ export interface BuildOptions {
 export function startConstruction(host: CraftHost, con: ConstructionDef, x: number, y: number, z: number, opts: BuildOptions = {}): boolean {
   const groupName = cddaText(host.data.misc.construction_group?.[con.group]?.name) || con.group;
   if (!siteOk(host, con, x, y, z)) {
-    host.message(`You can't build ${groupName} there.`, 'c_light_red');
+    // Group names are imperative phrases ('Build Fire Ring', 'Board Up Window'): 'You can't build fire ring there.'
+    host.message(`You can't ${groupName.toLowerCase()} there.`, 'c_light_red');
     return false;
   }
   const inv = constructionInventory(host);

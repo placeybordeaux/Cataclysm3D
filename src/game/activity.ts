@@ -27,6 +27,8 @@ export interface ActivitySpec {
 
 export class Activity {
   elapsed = 0;
+  /** Distractions already present when the activity started (CDDA "ignore" them for this one). */
+  readonly ignored = new Set<string>();
   constructor(readonly spec: ActivitySpec) {}
   get fraction(): number {
     return Math.min(1, this.elapsed / Math.max(1, this.spec.duration));
@@ -41,6 +43,14 @@ export class ActivityManager implements GameSystem {
    * string to interrupt, or null.
    */
   readonly dangerChecks: (() => string | null)[] = [];
+  /**
+   * CDDA player_activity::get_distractions for the survivor's own state ("You are freezing!",
+   * "You are dangerously dehydrated!"). Unlike dangerChecks they never stop an activity from
+   * starting (you must be able to craft a blanket while freezing), and one already present at
+   * the start is ignored for that activity; a new one interrupts it, so a long wait outdoors
+   * at night stops when the cold turns dangerous instead of running on until you die.
+   */
+  readonly distractionChecks: (() => string | null)[] = [];
 
   constructor(private game: Game) {}
 
@@ -52,6 +62,7 @@ export class ActivityManager implements GameSystem {
       return false;
     }
     this.current = new Activity(spec);
+    for (const r of this.distractions()) this.current.ignored.add(r);
     this.game.clock.warp = spec.warp ?? defaultWarp(spec.duration);
     return true;
   }
@@ -63,6 +74,15 @@ export class ActivityManager implements GameSystem {
     this.game.clock.warp = 1;
     this.game.message(reason, 'c_yellow');
     a.spec.onCancel?.(a.fraction, reason);
+  }
+
+  private distractions(): string[] {
+    const out: string[] = [];
+    for (const d of this.distractionChecks) {
+      const r = d();
+      if (r) out.push(r);
+    }
+    return out;
   }
 
   private danger(): string | null {
@@ -79,6 +99,8 @@ export class ActivityManager implements GameSystem {
     if (a.spec.interruptible !== false) {
       const d = this.danger();
       if (d) return this.cancel(d);
+      const fresh = this.distractions().find((r) => !a.ignored.has(r));
+      if (fresh) return this.cancel(fresh);
     }
     // Movement cancels activities, like CDDA's "You stop crafting."
     const held = this.game.input.held;

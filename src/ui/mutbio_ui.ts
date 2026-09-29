@@ -171,7 +171,7 @@ export async function installCbmFlow(game: Game, mods: BodyMods, it: Item, opts:
   const chance = bio.successChance(it.typeId, opts.autodoc);
   const q = chance >= 100 ? 'Are you sure you wish to install the selected bionic?'
     : `WARNING: ${100 - chance} percent chance of failure that may result in damage, pain, or a faulty installation!  Continue anyway?`;
-  if (!(await confirm(`${opts.autodoc ? 'Autodoc Mk. XI.  ' : ''}Install ${c('c_white', bio.name(it.typeId))}?\n${q}`))) return false;
+  if (!(await confirm(`${opts.autodoc ? 'Autodoc Mk. XI.  ' : ''}Install <color_white>${bio.name(it.typeId)}</color>?\n${q}`))) return false;
   const need = bio.anesthesiaNeeded(it.typeId);
   let awake = false;
   if (bio.needsAnesthesia()) {
@@ -253,7 +253,7 @@ export function openAutodocMenu(game: Game, mods: BodyMods, cbms: () => { item: 
 async function uninstallFlow(game: Game, mods: BodyMods, id: string, dropItem: (it: Item) => void): Promise<void> {
   const { bio } = mods;
   const chance = bio.successChance(id, true);
-  if (!(await confirm(`Uninstall ${c('c_white', bio.name(id))}?  ${chance}% chance of success.`))) return;
+  if (!(await confirm(`Uninstall <color_white>${bio.name(id)}</color>?  ${chance}% chance of success.`))) return;
   const difficulty = bio.idx.difficulty(id);
   game.activities.start({
     name: `removing ${bio.name(id)}`,
