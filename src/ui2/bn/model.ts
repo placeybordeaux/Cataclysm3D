@@ -283,6 +283,7 @@ export class BnInventoryModel implements InventoryModel {
     const l = this.resolve(loc);
     if (!l) throw new Error(`no such place: ${loc}`);
     if (l.kind === 'in' || l.kind === 'mag' || l.kind === 'mod') return l.host.baseName();
+    if (l.kind === 'ground') return this.groundWords(l.x, l.y, l.z).replace(/^On the /, '').replace(/^./, (c) => c.toUpperCase());
     return loc;
   }
 
@@ -318,11 +319,21 @@ export class BnInventoryModel implements InventoryModel {
     const p = this.view.nearby.find((n) => n.key === loc);
     if (p) return p.key.startsWith('cargo:') ? `In the ${p.label}` : /\(/.test(p.label) ? `In the ${p.label}` : p.label === 'under you' ? 'On the ground under you' : `On the ground (${p.label})`;
     const l = this.resolve(loc);
+    if (l?.kind === 'ground') return this.groundWords(l.x, l.y, l.z);
     if (l && (l.kind === 'in' || l.kind === 'mag')) {
       const on = carriedAs(this.who, l.host);
       return `In ${on ? 'your' : 'the'} ${l.host.baseName()}${l.kind === 'mag' ? ' (magazine well)' : ''}`;
     }
     return loc;
+  }
+
+  /** "On the ground under you" / "On the ground (north)" for a tile nobody listed. */
+  private groundWords(x: number, y: number, z: number): string {
+    const at = this.scope.at ?? { x, y, z };
+    const dx = Math.sign(x - at.x), dy = Math.sign(y - at.y);
+    if (!dx && !dy && z === at.z) return 'On the ground under you';
+    const dirs: Record<string, string> = { '0,-1': 'north', '1,-1': 'northeast', '1,0': 'east', '1,1': 'southeast', '0,1': 'south', '-1,1': 'southwest', '-1,0': 'west', '-1,-1': 'northwest' };
+    return `On the ground (${dirs[`${dx},${dy}`] ?? 'nearby'})`;
   }
 
   /** Is `loc` on the survivor (hands, worn, inventory, or inside something carried)? */

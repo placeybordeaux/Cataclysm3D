@@ -11,7 +11,8 @@
 //   line box — it goes through the post pass, so it's pixelated and palette-graded like the
 //   world) with its name next to the cursor; right-click opens worldMenu(); left-click runs
 //   the primary world action.
-// - Tab (action `inventory2`) toggles the placeholder inventory (mock data, clearly labelled).
+// - i / Tab toggle the inventory on the real items (src/ui2/bn); the mock one lives on in the
+//   showcase (?debug=ui2).
 
 import * as THREE from 'three';
 import type { Game } from '../game/game';
@@ -32,9 +33,8 @@ import { openContextMenu, closeMenu, menuOpen } from './menu';
 import { dragging } from './dragdrop';
 import { worldContextProviders, worldMenu, type WorldTarget } from './world';
 import { toast, toastState } from './toast';
-import { inventoryOpen, toggleInventoryScreen } from './inventory_screen';
-import { setupMockInventory, type MockSetup } from './mock/setup';
-import type { RawItems } from './mock/data';
+import { installBnInventory } from './bn/install';
+import { bnInventoryOpen } from './bn/screen';
 import { palette } from './theme';
 import type { UiScalePref } from './logic/scale';
 
@@ -75,12 +75,9 @@ export function installUi2(game: Game, renderer: Renderer, ctx: UiContext, api: 
     if (input.locked && surfacesOpen() > 0) input.releaseForMenu();
   });
 
-  let mock: MockSetup | null = null;
-  const inventory = () => {
-    mock ??= setupMockInventory(game.data.items as unknown as RawItems, 'cdda3d.ui2.hotbar.preview');
-    toggleInventoryScreen(mock.model, { worldEl: canvas, hotbar: mock.hotbar, note: 'UI2 PREVIEW: mock items, not your real inventory' });
-  };
-  game.keys.register('inventory2', 'Inventory (new UI preview)', inventory);
+  // The inventory on the player's real (BN) items: i / Tab, the action keys, the hotbar.
+  const inv = installBnInventory(game, ctx, api, canvas);
+  const inventory = () => inv.toggle();
   // Inside ui2 the game's bindings don't run; Tab closes it again from there.
   shortcut('Tab', inventory);
   game.events.on('playerDied', () => {
@@ -166,7 +163,7 @@ export function installUi2(game: Game, renderer: Renderer, ctx: UiContext, api: 
     state: () => ({
       panels: openPanels().map((p) => p.id),
       surfaces: surfacesOpen(),
-      inventory: inventoryOpen(),
+      inventory: bnInventoryOpen(),
       tacticalPause: game.tacticalPause,
       locked: input.locked,
       captured: input.captured,
@@ -187,7 +184,6 @@ export function installUi2(game: Game, renderer: Renderer, ctx: UiContext, api: 
       const r = el.getBoundingClientRect();
       return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2), w: Math.round(r.width), h: Math.round(r.height) };
     },
-    mock: () => mock,
     /** ui2 settings (pauseInInventory); call saveSettings() after changing. */
     settings,
     saveSettings,

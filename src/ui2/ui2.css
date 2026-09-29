@@ -14,7 +14,7 @@
   --shadow: drop-shadow(0 calc(var(--u) * 2) 0 rgba(0, 0, 0, .5));
 }
 #ui2 *, #ui2 *::before, #ui2 *::after { box-sizing: border-box; }
-#ui2 .ui2-layer { position: absolute; inset: 0; pointer-events: none; }
+#ui2 .ui2-layer { position: absolute; inset: 0; pointer-events: none; isolation: isolate; }
 #ui2 .ui2-layer-windows > *, #ui2 .ui2-layer-hud > *, #ui2 .ui2-layer-modal > *, #ui2 .ui2-menu { pointer-events: auto; }
 #ui2 button { font: inherit; color: inherit; }
 #ui2 ::-webkit-scrollbar { width: calc(var(--u) * 4); height: calc(var(--u) * 4); }

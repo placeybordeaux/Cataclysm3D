@@ -1,0 +1,54 @@
+/* BN inventory screens (src/ui2/bn): doll layers, list rows, nearby tabs. Same rules as ui2.css:
+   sizes in --u / metric vars, colours from --p-*. */
+
+#ui2 .bn-equip-top { display: flex; gap: calc(var(--u) * 6); align-items: flex-start; }
+#ui2 .bn-worn { flex: 1; min-width: calc(var(--fs) * 16); display: flex; flex-direction: column; gap: var(--u); }
+#ui2 .bn-worn .bn-list { max-height: calc(var(--cell) * 4.6); }
+#ui2 .bn-worn .bn-list[data-hands] { min-height: 0; }
+
+#ui2 .bn-doll { flex: none; }
+#ui2 .bn-part { position: absolute; width: var(--cell); display: flex; flex-direction: column; align-items: center; }
+#ui2 .bn-stack { position: relative; overflow: visible; }
+#ui2 .bn-stack .bn-layer { position: absolute; left: calc(var(--u) * 3); top: calc(var(--u) * 3); }
+#ui2 .bn-hands .bn-stack { border-image: var(--skin-inset-sel); }
+#ui2 .bn-part-foot { display: flex; justify-content: space-between; width: 100%; font-size: var(--fs-s); line-height: 1; margin-top: var(--u); }
+#ui2 .bn-part-name { color: var(--p-text-dim); white-space: nowrap; overflow: hidden; }
+#ui2 .bn-enc { font-size: var(--fs-s); }
+#ui2 .bn-part.drop-ok > .bn-stack { border-image: var(--skin-inset-ok); }
+#ui2 .bn-part.drop-partial > .bn-stack { border-image: var(--skin-inset-partial); }
+#ui2 .bn-part.drop-bad > .bn-stack { border-image: var(--skin-inset-bad); }
+#ui2 .bn-tip-layer { display: flex; align-items: center; gap: calc(var(--u) * 2); }
+
+#ui2 .bn-list { max-height: min(62vh, calc(var(--cell) * 9)); min-height: calc(var(--cell) * 1.5); }
+#ui2 .bn-cat { color: var(--p-accent); font-size: var(--fs-s); margin-top: calc(var(--u) * 3); border-bottom: var(--u) solid var(--p-bg-raised); }
+#ui2 .bn-cat:first-child { margin-top: 0; }
+#ui2 .bn-row { position: relative; }
+#ui2 .bn-row.drop-ok { outline: var(--u) solid var(--p-good); outline-offset: calc(var(--u) * -1); }
+#ui2 .bn-row.drop-partial { outline: var(--u) solid var(--p-warn); outline-offset: calc(var(--u) * -1); }
+#ui2 .bn-row.drop-bad { outline: var(--u) solid var(--p-danger); outline-offset: calc(var(--u) * -1); }
+#ui2 .bn-list.drop-ok { outline: var(--u) dashed var(--p-good); }
+#ui2 .bn-list.drop-partial { outline: var(--u) dashed var(--p-warn); }
+#ui2 .bn-list.drop-bad { outline: var(--u) dashed var(--p-danger); }
+#ui2 .bn-twisty, #ui2 .bn-twisty-space { flex: none; width: calc(var(--fs) * 0.9); text-align: center; }
+#ui2 .bn-twisty { background: none; border: none; padding: 0; cursor: pointer; color: var(--p-info); }
+#ui2 .bn-twisty:hover { color: var(--p-accent); }
+#ui2 .bn-fill { height: var(--u); margin-top: var(--u); width: calc(var(--fs) * 5); background: rgba(0, 0, 0, .6); }
+#ui2 .bn-fill > div { height: 100%; background: var(--p-info); }
+#ui2 .bn-fill.full > div { background: var(--p-warn); }
+#ui2 .bn-empty-inside { color: var(--p-text-dim); font-size: var(--fs-s); }
+
+#ui2 .bn-tabs .ui2-tabs { flex-wrap: wrap; }
+#ui2 .bn-source-head { display: flex; flex-direction: column; gap: var(--u); }
+#ui2 .bn-source-title { display: flex; align-items: center; justify-content: space-between; gap: calc(var(--u) * 3); color: var(--p-text-dim); font-size: var(--fs-s); }
+#ui2 .bn-result:empty { display: none; }
+#ui2 .bn-result { border-top: var(--u) solid var(--p-bg-raised); padding-top: var(--u); }
+#ui2 .ui2-hot-slot.gone { opacity: .45; }
+
+/* quick picker (z / O / E / q …) */
+#ui2 .bn-pick-row { display: flex; align-items: center; gap: calc(var(--u) * 3); padding: var(--u) calc(var(--u) * 2); cursor: pointer; }
+#ui2 .bn-pick-row .bn-pick-name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#ui2 .bn-pick-row .bn-pick-where { color: var(--p-text-dim); font-size: var(--fs-s); }
+#ui2 .bn-pick-row .bn-pick-time { color: var(--p-info); font-size: var(--fs-s); min-width: 5ch; text-align: right; }
+#ui2 .bn-pick-row.off { color: var(--p-text-dim); }
+#ui2 .bn-pick-filter { font: inherit; color: var(--p-text); background: var(--p-bg-deep); border: var(--u) solid var(--p-bevel-hi); padding: var(--u) calc(var(--u) * 2); }
+#ui2 .bn-examine { max-width: calc(var(--fs) * 36); white-space: pre-wrap; font-size: var(--fs-s); }

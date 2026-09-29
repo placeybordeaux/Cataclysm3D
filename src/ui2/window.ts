@@ -154,7 +154,6 @@ export function openPanel(opts: PanelOpts): Panel {
       if (i >= 0 && i !== open.length - 1) {
         open.splice(i, 1);
         open.push(panel);
-        L.windows.appendChild(el);
       }
       markFront();
     },
@@ -219,7 +218,13 @@ window.addEventListener('resize', () => {
 });
 
 function markFront(): void {
-  open.forEach((p, i) => p.el.classList.toggle('front', i === open.length - 1));
+  // Stacking by z-index, not by moving elements: re-appending a window inside the pointerdown
+  // that brings it forward makes Chrome drop that press's click (a button in a back window
+  // needed two clicks).
+  open.forEach((p, i) => {
+    p.el.classList.toggle('front', i === open.length - 1);
+    p.el.style.zIndex = String(i + 1);
+  });
 }
 
 function windowKeys(e: KeyboardEvent): boolean {

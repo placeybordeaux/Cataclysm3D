@@ -85,6 +85,11 @@ async function until(what: (s: State) => boolean, ms = 3000): Promise<State> {
 /** Back to plain gameplay with the mouse captured. Chrome refuses a re-lock for ~1 s after an Esc unlock. */
 async function toGameplay(): Promise<State> {
   let s = await state();
+  // ui2 windows (inventory, pickers) close with Esc too.
+  for (let i = 0; i < 6 && s.panels.length; i++) {
+    await x.key('Escape');
+    s = await state();
+  }
   for (let i = 0; i < 8 && s.windows.length; i++) {
     const n = s.windows.length;
     await x.key(i % 2 ? 'Escape' : 'Backspace');
@@ -105,6 +110,30 @@ const center = async (sel: string): Promise<[number, number] | null> =>
     const r = el.getBoundingClientRect();
     return [Math.round(r.x + Math.min(40, r.width / 2)), Math.round(r.y + r.height / 2)] as [number, number];
   }, sel);
+
+// --- inventory helpers (src/ui2/bn: cdda.inv2)
+const EQUIP = '#ui2 [data-id="inv.equip"]', CARRIED = '#ui2 [data-id="inv.carried"]', NEARBY = '#ui2 [data-id="inv.nearby"]';
+type Census = { counts: Record<string, number>; aliased: number };
+const censusNow = () => js<Census>('cdda.inv2.census()');
+const whereIs = (typeId: string) => js<string[]>(`cdda.inv2.where(${JSON.stringify(typeId)})`);
+const rectOf = (typeId: string, sel = '#ui2') => js<{ x: number; y: number; id: string; loc: string } | null>(`cdda.inv2.rectOf(${JSON.stringify(typeId)}, ${JSON.stringify(sel)})`);
+/** A real drag: press, move in steps (so the drag starts and targets see hover), release. */
+async function drag(from: [number, number], to: [number, number]): Promise<void> {
+  await x.moveTo(from[0], from[1], 2);
+  await x.buttonDown(1);
+  await x.moveTo(to[0], to[1], 14);
+  await sleep(120);
+  await x.buttonUp(1);
+  await sleep(300);
+}
+/** Census equality (item conservation); `quietOk` records only failures. */
+function sameCensus(name: string, a: Census, b: Census, quietOk = false): boolean {
+  const keys = new Set([...Object.keys(a.counts), ...Object.keys(b.counts)]);
+  const diff = [...keys].filter((k) => (a.counts[k] ?? 0) !== (b.counts[k] ?? 0)).map((k) => `${k} ${a.counts[k] ?? 0}→${b.counts[k] ?? 0}`);
+  const ok = !diff.length && !b.aliased;
+  if (!ok || !quietOk) check(name, ok, diff.join(', ') || (b.aliased ? `${b.aliased} aliased` : ''));
+  return ok;
+}
 
 /** Title → Start → Enter: the quick start (named Evacuee). Returns the state in gameplay. */
 async function quickStart(): Promise<State> {
@@ -523,39 +552,34 @@ const scenarios: Scenario[] = [
     check('wheel zooms in top-down view', mode !== 'top' || d1 !== d0, { mode, d0, d1 });
     await x.key('v');
   }],
-  ['ui2', 'ui2 preview: Tab frees the cursor (no resume hint), drag & drop, context menu, Tab re-captures', async () => {
+  ['ui2', 'ui2 inventory: Tab frees the cursor (no resume hint), drag & drop, context menu, pause, Tab re-captures', async () => {
     await toGameplay();
     type U = { surfaces: number; tacticalPause: boolean; locked: boolean; panels: string[]; menu: string[][] };
     const u = () => js<U>('cdda.ui2.state()');
-    const where = (t: string) => js<string[]>(`(() => { const o = []; cdda.ui2.mock().model.store.walk((it, loc) => it.typeId === ${JSON.stringify(t)} && o.push(loc)); return o; })()`);
+    await js(`cdda.inv2.spawn('pipe', 0, 0)`);
     await x.key('Tab');
     await sleep(500);
     let s = await state();
     let v = await u();
-    check('Tab opens the ui2 inventory with a free cursor', v.panels.includes('inv.equip') && !s.lock, { v, lock: s.lock });
+    check('Tab opens the inventory (Equipment, Inventory, Nearby) with a free cursor', ['inv.equip', 'inv.carried', 'inv.nearby'].every((p) => v.panels.includes(p)) && !s.lock, { v, lock: s.lock });
     check('…without the "click to resume" hint', !s.hint && !s.lockPaused, s);
     check('…and the tactical pause on (Accessible default)', v.tacticalPause, v);
     await shot('ui2_inventory');
-    // Drag the first ground item into the backpack with real mouse down / move / up.
-    const from = await center('[data-id="inv.ground"] .ui2-cell');
-    const to = await center('[data-id="inv.back"] .ui2-container');
-    const typeId = await js<string>(`cdda.ui2.mock().model.contents('ground')[0].typeId`);
-    await x.moveTo(from![0], from![1], 2);
-    await x.buttonDown(1);
-    await x.moveTo(to![0], to![1], 12);
-    await x.buttonUp(1);
-    await sleep(200);
-    const locs = await where(typeId);
-    check(`dragging ${typeId} from the ground into the backpack moves it`, locs.length > 0 && locs.every((l) => l.startsWith('in:')), locs);
-    // Right-click an item: context menu with timed actions; Esc closes only the menu.
-    const cell = await center('[data-id="inv.back"] .ui2-cell');
-    await x.click(cell![0], cell![1], 3);
-    await sleep(200);
+    const c0 = await censusNow();
+    const from = await rectOf('pipe', NEARBY);
+    const to = await center(`${CARRIED} .bn-list`);
+    await drag([from!.x, from!.y], to!);
+    check('dragging the pipe from the ground into the Inventory list picks it up', (await whereIs('pipe')).some((l) => l.startsWith('inv')), await whereIs('pipe'));
+    const cell = await rectOf('pipe', CARRIED);
+    await x.click(cell!.x, cell!.y, 3);
+    await sleep(250);
     v = await u();
-    check('right-click opens the item context menu', v.menu.length === 1 && v.menu[0].length > 2, v.menu);
+    check('right-click opens the item context menu with action times', v.menu.length === 1 && v.menu[0].length > 2 && v.menu[0].some((r) => /\d+(\.\d)? s/.test(r ?? '')), v.menu);
+    await shot('ui2_item_menu');
     await x.key('Escape');
     v = await u();
     check('Esc closes the menu, the windows stay', !v.menu.length && v.panels.includes('inv.equip'), v);
+    sameCensus('census unchanged after the drag', c0, await censusNow());
     await x.key('Tab');
     s = await until((t) => t.lock, 3000);
     v = await u();
@@ -568,15 +592,208 @@ const scenarios: Scenario[] = [
     const t1 = await js<number>('cdda.game.clock.seconds');
     v = await u();
     check('with Pause in inventory off, game time runs while it is open', v.surfaces > 0 && !v.tacticalPause && t1 > t0, { t0, t1, v });
+    // …and moves take their time: a progress bar, then the move.
+    const pipe = await rectOf('pipe', CARRIED);
+    await x.moveTo(pipe!.x, pipe!.y, 2);
+    await x.down('Shift');
+    await x.clickHere(1);
+    await x.up('Shift');
+    await sleep(120);
+    const bar = await js<boolean>(`!!document.querySelector('#ui2 .ui2-prog')`);
+    const still = (await whereIs('pipe')).some((l) => l.startsWith('inv'));
+    await sleep(1400);
+    check('Classic: Shift-click drop shows a progress bar and happens when it fills', bar && still && (await whereIs('pipe')).some((l) => l.startsWith('ground')), { bar, still, now: await whereIs('pipe') });
     await x.key('Tab');
+    await until((t) => !t.panels.length, 3000);
     await js('cdda.ui2.settings.pauseInInventory = true; cdda.ui2.saveSettings()');
-    const p0 = await js<number>('cdda.game.clock.seconds');
     await x.key('Tab');
+    await until((t) => t.panels.includes('Equipment'), 3000);
+    const p0 = await js<number>('cdda.game.clock.seconds');
     await sleep(1200);
     const p1 = await js<number>('cdda.game.clock.seconds');
     check('with it on (default), game time stops', p1 === p0, { p0, p1 });
     await x.key('Tab');
     await until((t) => t.lock, 3000);
+  }],
+  ['inv', 'inventory flows: wear by dropping on the doll, take off by dragging a layer off, shift-click, double-click eat, i closes', async () => {
+    await toGameplay();
+    await js(`cdda.inv2.spawn('hat_hard', 0, 0); cdda.inv2.spawn('crowbar', 0, 0); cdda.inv2.spawn('chocolate', 0, 0, { charges: 3 })`);
+    await x.key('i');
+    await until((t) => t.panels.includes('Equipment'), 3000);
+    const c0 = await censusNow();
+    let r = await rectOf('hat_hard', NEARBY);
+    await drag([r!.x, r!.y], (await center(`${EQUIP} [data-part="head"]`))!);
+    check('dropping the hard hat on the head slot wears it', (await whereIs('hat_hard')).some((l) => l.startsWith('worn')), await whereIs('hat_hard'));
+    await shot('inv_worn_hat');
+    await drag((await center(`${EQUIP} [data-part="head"] .bn-stack`))!, (await center(`${NEARBY} .bn-list`))!);
+    check('dragging it off the doll onto Nearby takes it off and puts it down', (await whereIs('hat_hard')).some((l) => l.startsWith('ground')), await whereIs('hat_hard'));
+    r = await rectOf('crowbar', NEARBY);
+    await drag([r!.x, r!.y], (await center(`${EQUIP} [data-part="hands"]`))!);
+    check('dropping the crowbar on the hands wields it', (await whereIs('crowbar')).some((l) => l === 'hands×1'), await whereIs('crowbar'));
+    r = await rectOf('chocolate', NEARBY);
+    await x.moveTo(r!.x, r!.y, 2);
+    await x.down('Shift');
+    await x.clickHere(1);
+    await x.up('Shift');
+    await sleep(300);
+    check('Shift-click on Nearby takes it (quick move)', (await whereIs('chocolate')).some((l) => l.startsWith('inv')), await whereIs('chocolate'));
+    sameCensus('census unchanged after wear / take off / wield / quick move', c0, await censusNow());
+    const before = (await censusNow()).counts.chocolate ?? 0;
+    r = await rectOf('chocolate', CARRIED);
+    await x.moveTo(r!.x, r!.y, 2);
+    await x.clickHere(1);
+    await sleep(60);
+    await x.clickHere(1);
+    await sleep(400);
+    const after = (await censusNow()).counts.chocolate ?? 0;
+    check('double-click eats one (the primary action)', after === before - 1, { before, after });
+    await shot('inv_after_eat');
+    await x.key('i');
+    const s = await until((t) => t.lock && !t.panels.length, 3000);
+    check('i closes it again and re-captures the mouse', s.lock && !s.panels.length, s);
+  }],
+  ['invbag', 'v1 duplication scenario: wield a bag, open it, unload it by hand to ground and inventory, refill, Empty: nothing duplicated or lost', async () => {
+    await toGameplay();
+    const bagKey = await js<string>(`cdda.giveItem('backpack', { wear: true }); cdda.inv2.spawn('bag_canvas', 0, 0, { contents: [['pipe', 6]] })`);
+    await x.key('Tab');
+    await until((t) => t.panels.includes('Nearby'), 3000);
+    const c0 = await censusNow();
+    const bag = await rectOf('bag_canvas', NEARBY);
+    await drag([bag!.x, bag!.y], (await center(`${EQUIP} [data-part="hands"]`))!);
+    check('the bag goes to your hands', (await whereIs('bag_canvas')).some((l) => l.startsWith('hands')), await whereIs('bag_canvas'));
+    const tw = await center(`${EQUIP} [data-hands] .bn-twisty`);
+    if (tw) await x.click(tw[0], tw[1]);
+    await sleep(300);
+    await shot('invbag_open');
+    const inBag = () => whereIs('pipe').then((l) => l.filter((w) => w.startsWith(`in:${bagKey}`)));
+    // Ctrl-click the pipes inside: "how many?" (Enter = half) → to the loot target (the ground).
+    let p = await rectOf('pipe', `${EQUIP} [data-hands]`);
+    await x.moveTo(p!.x, p!.y, 2);
+    await x.down('Control');
+    await x.clickHere(1);
+    await x.up('Control');
+    await sleep(300);
+    await shot('invbag_count_prompt');
+    await x.key('Return');
+    await sleep(400);
+    check('Ctrl-click → Enter moves half of the stack out of the bag', (await inBag()).join() === `in:${bagKey}×3`, await whereIs('pipe'));
+    sameCensus('…census unchanged', c0, await censusNow());
+    p = await rectOf('pipe', `${EQUIP} [data-hands]`);
+    await drag([p!.x, p!.y], (await center(`${CARRIED} .bn-list`))!);
+    check('dragging the rest into the Inventory list empties the bag', !(await inBag()).length, await whereIs('pipe'));
+    sameCensus('…census unchanged', c0, await censusNow());
+    await shot('invbag_emptied');
+    // Refill it by dropping the carried pipes on the bag's row, then Empty it from its menu.
+    p = await rectOf('pipe', CARRIED);
+    const bagRow = await center(`${EQUIP} [data-hands] .bn-row`);
+    await drag([p!.x, p!.y], bagRow!);
+    check('dropping pipes on the bag row puts them in', (await inBag()).length === 1, await whereIs('pipe'));
+    const bagRow2 = await center(`${EQUIP} [data-hands] .bn-row .ui2-row-name`);
+    await x.click(bagRow2![0], bagRow2![1], 3);
+    await sleep(300);
+    const menu = await js<string[][]>('cdda.ui2.state().menu');
+    await shot('invbag_menu');
+    const empty = await js<{ x: number; y: number } | null>(`(() => { const e = [...document.querySelectorAll('#ui2 .ui2-menu-row')].find((r) => /^Empty/.test(r.textContent.trim())); if (!e) return null; const r = e.getBoundingClientRect(); return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) }; })()`);
+    if (empty) await x.click(empty.x, empty.y);
+    await sleep(500);
+    check('the Empty action (right-click menu) unloads it', !(await inBag()).length, { at: await whereIs('pipe'), menu });
+    sameCensus('census unchanged after refill + Empty (the v1 bug duplicated here)', c0, await censusNow());
+    await x.key('Tab');
+    await until((t) => t.lock, 3000);
+  }],
+  ['invloot', 'looting: g opens the Nearby tab, Take all takes what fits and says what stayed and why', async () => {
+    await toGameplay();
+    await js(`cdda.inv2.spawn('pipe', 1, 0); cdda.inv2.spawn('rock', 1, 0); cdda.inv2.spawn('stepladder', 1, 0); cdda.inv2.spawn('bag_canvas', 1, 0)`);
+    await x.key('g');
+    await until((t) => t.panels.includes('Nearby'), 3000);
+    const c0 = await censusNow();
+    const tabs = await js<string[]>(`[...document.querySelectorAll('#ui2 [data-id="inv.nearby"] .ui2-tab')].map((t) => t.textContent)`);
+    check('g opens the inventory on the Nearby places', tabs.length > 0, tabs);
+    const east = await js<{ x: number; y: number } | null>(`(() => { const t = [...document.querySelectorAll('#ui2 [data-id="inv.nearby"] .ui2-tab')].find((e) => /east/i.test(e.textContent)); if (!t) return null; const r = t.getBoundingClientRect(); return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) }; })()`);
+    if (east) await x.click(east.x, east.y);
+    await sleep(250);
+    const take = await js<{ x: number; y: number } | null>('cdda.ui2.textRect("Take all")');
+    await x.click(take!.x, take!.y);
+    await sleep(400);
+    const result = await js<string>(`document.querySelector('#ui2 .bn-result')?.textContent ?? ''`);
+    check('Take all reports what it took and what stayed and why (the stepladder: no room)', /Took .*pipe/.test(result) && /stepladder.*room/i.test(result), result);
+    await shot('invloot_takeall');
+    sameCensus('census unchanged by Take all', c0, await censusNow());
+    await x.key('Tab');
+    await until((t) => t.lock, 3000);
+  }],
+  ['invliquid', 'liquids: drag a bottle of water onto a jar pours it; dropping water on the world asks before spilling', async () => {
+    await toGameplay();
+    await js(`cdda.giveItem('backpack', { wear: true }); cdda.inv2.spawn('bottle_plastic', 0, 0, { contents: [['water_clean', 2]] }); cdda.inv2.spawn('jar_glass', 0, 0)`);
+    await x.key('Tab');
+    await until((t) => t.panels.includes('Nearby'), 3000);
+    const c0 = await censusNow();
+    const b = await rectOf('bottle_plastic', NEARBY);
+    const j = await rectOf('jar_glass', NEARBY);
+    await drag([b!.x, b!.y], [j!.x, j!.y]);
+    const jarKey = (await rectOf('jar_glass', NEARBY))?.id ?? '';
+    const inJar = () => whereIs('water_clean').then((l) => l.filter((w) => w.startsWith(`in:${jarKey}`)));
+    check('dragging the bottle onto the jar pours the water in', (await inJar()).join() === `in:${jarKey}×2`, { at: await whereIs('water_clean'), jarKey });
+    sameCensus('pouring conserves', c0, await censusNow());
+    const tw = await js<{ x: number; y: number } | null>(`(() => { const row = document.querySelector('#ui2 [data-id="inv.nearby"] [data-item="${jarKey}"]'); const t = row?.querySelector('.bn-twisty'); if (!t) return null; const r = t.getBoundingClientRect(); return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) }; })()`);
+    if (tw) await x.click(tw.x, tw.y);
+    await sleep(300);
+    await shot('invliquid_jar_open');
+    let w = await rectOf('water_clean', NEARBY);
+    await drag([w!.x, w!.y], (await center(`${CARRIED} .bn-list`))!);
+    check('loose water is refused by the inventory (needs a container)', (await inJar()).length === 1, await whereIs('water_clean'));
+    w = await rectOf('water_clean', NEARBY);
+    await drag([w!.x, w!.y], (await center('canvas'))!);
+    await sleep(300);
+    const modal = await js<string>(`document.querySelector('#ui2 .ui2-layer-modal')?.textContent ?? ''`);
+    check('dropping water on the world asks before spilling it', /Spill|Pour/i.test(modal), modal);
+    await shot('invliquid_confirm');
+    const ok = await js<{ x: number; y: number } | null>(`(() => { const e = [...document.querySelectorAll('#ui2 .ui2-layer-modal button')].find((b) => /Pour it out/.test(b.textContent)); if (!e) return null; const r = e.getBoundingClientRect(); return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) }; })()`);
+    if (ok) await x.click(ok.x, ok.y);
+    await sleep(400);
+    const c1 = await censusNow();
+    check('confirmed: the water left the jar for the ground', !(await inJar()).length, await whereIs('water_clean'));
+    sameCensus('spilling conserves (it is on the ground now)', c0, c1);
+    await x.key('Tab');
+    await until((t) => t.lock, 3000);
+  }],
+  ['invkeys', 'accelerators: z / E open quick pickers; the hotbar binds by drag and 1…0 work in gameplay', async () => {
+    await toGameplay();
+    await js(`cdda.giveItem('backpack', { wear: true }); cdda.giveItem('knife_combat'); cdda.giveItem('chocolate')`);
+    await x.key('z');
+    let s = await until((t) => t.panels.includes('Wield what?'), 2000);
+    check('z opens the "Wield what?" picker', s.panels.includes('Wield what?'), s.panels);
+    await shot('invkeys_wield_picker');
+    await x.key('Escape');
+    s = await until((t) => !t.panels.length, 2000);
+    check('Esc closes it', !s.panels.length, s.panels);
+    // Hungry again (earlier scenarios fed the survivor until "Your stomach is full").
+    await js('cdda.game.player.stomach.kcal = 0; cdda.game.player.storedKcal = 5000');
+    await x.key('E');
+    s = await until((t) => t.panels.includes('Eat or drink what?'), 2000);
+    check('E opens the eat picker', s.panels.includes('Eat or drink what?'), s.panels);
+    const c0 = (await censusNow()).counts.chocolate ?? 0;
+    const row = await js<{ x: number; y: number } | null>(`(() => { const r = [...document.querySelectorAll('#ui2 .bn-pick-row')].find((e) => /chocolate/i.test(e.textContent)); if (!r) return null; const b = r.getBoundingClientRect(); return { x: Math.round(b.left + 80), y: Math.round(b.top + b.height / 2) }; })()`);
+    if (row) await x.click(row.x, row.y);
+    // Time runs again once the picker closes: eating takes its moves.
+    await sleep(2500);
+    check('clicking chocolate in it eats one', ((await censusNow()).counts.chocolate ?? 0) === c0 - 1, { c0 });
+    await toGameplay();
+    await x.key('Tab');
+    await until((t) => t.panels.includes('Inventory'), 2000);
+    const k = await rectOf('knife_combat', CARRIED);
+    await drag([k!.x, k!.y], (await center('#ui2 .ui2-hot-slot[data-slot="2"]'))!);
+    const bound = await js<string | null>(`cdda.inv2.hotbar.binding(2)?.typeId ?? null`);
+    check('dragging the knife onto hotbar slot 3 binds it', bound === 'knife_combat', bound);
+    await x.key('Tab');
+    await until((t) => t.lock, 3000);
+    await x.key('3');
+    await sleep(1500);
+    check('3 in gameplay wields it', (await whereIs('knife_combat')).some((l) => l.startsWith('hands')), await whereIs('knife_combat'));
+    await shot('invkeys_hotbar');
+    await x.key('3');
+    await sleep(1500);
+    check('3 again puts it away', (await whereIs('knife_combat')).some((l) => l.startsWith('inv')), await whereIs('knife_combat'));
   }],
   ['save', 'F5 saves; leaving the page asks first; title Load/Memorial screens', async () => {
     await toGameplay();
