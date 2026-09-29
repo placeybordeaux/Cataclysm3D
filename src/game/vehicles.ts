@@ -45,8 +45,8 @@ export interface CreatureHooks {
   mass(c: unknown): number;
   /** Apply run-over damage; return true if it died. */
   damage(c: unknown, dmg: number, v: Vehicle): boolean;
-  /** Knock the creature away (dx, dy unit direction, force mph). */
-  fling(c: unknown, dx: number, dy: number, force: number): void;
+  /** Put a flung creature down at world point (x, y) (the system picks a free spot). */
+  place(c: unknown, x: number, y: number): void;
   name(c: unknown): string;
 }
 
@@ -107,13 +107,10 @@ export class VehicleSystem implements GameSystem, MapOverlay {
         else if (typeof o.hp === 'number') o.hp -= dmg;
         return !!o.dead || (typeof o.hp === 'number' && o.hp <= 0);
       },
-      fling: (c, dx, dy, force) => {
+      place: (c, x, y) => {
         const o = c as { x?: number; y?: number };
-        if (typeof o.x === 'number' && typeof o.y === 'number') {
-          const d = Math.min(4, force / 10);
-          o.x += dx * d;
-          o.y += dy * d;
-        }
+        o.x = x;
+        o.y = y;
       },
       name: (c) => (c as { name?: string }).name ?? 'something',
     };
@@ -597,7 +594,11 @@ export class VehicleSystem implements GameSystem, MapOverlay {
     const mass = v.mass();
     const velBefore = v.velocity;
     let stopped = false;
-    for (const t of v.occupiedTiles(nf, nx, ny)) {
+    const pose = v.occupiedTiles(nf, nx, ny);
+    const poseKeys = new Set(pose.map((t) => tileKey(t.tx, t.ty, z)));
+    // Where a knocked-away body can land: off the vehicle's new footprint, walkable, empty.
+    const free = (x: number, y: number) => !poseKeys.has(tileKey(x, y, z)) && !before.has(tileKey(x, y, z)) && map.passable(x, y, z) && !this.creatureHooks.at(x, y, z);
+    for (const t of pose) {
       const k = tileKey(t.tx, t.ty, z);
       if (before.has(k)) continue;
       const part = collisionPart(v, t.mx, t.my);
@@ -625,9 +626,10 @@ export class VehicleSystem implements GameSystem, MapOverlay {
             return p.dead;
           },
           fling: (force) => {
-            const dd = Math.min(3, force / 10);
-            p.x += fdx * dd;
-            p.y += fdy * dd;
+            const spot = this.flingSpot(t.tx + 0.5, t.ty + 0.5, fdx, fdy, force, free);
+            if (!spot) return false;
+            [p.x, p.y] = spot;
+            return true;
           },
         });
         if (!res) {
@@ -640,7 +642,13 @@ export class VehicleSystem implements GameSystem, MapOverlay {
       if (c) {
         const h = this.creatureHooks;
         const res = this.hitBody(v, part, {
-          name: `the ${h.name(c)}`, mass: h.mass(c), damage: (dmg) => h.damage(c, dmg, v), fling: (force) => h.fling(c, fdx, fdy, force),
+          name: `the ${h.name(c)}`, mass: h.mass(c), damage: (dmg) => h.damage(c, dmg, v),
+          fling: (force) => {
+            const spot = this.flingSpot(t.tx + 0.5, t.ty + 0.5, fdx, fdy, force, free);
+            if (!spot) return false;
+            h.place(c, spot[0], spot[1]);
+            return true;
+          },
         });
         if (!res) {
           stopped = true;
@@ -679,7 +687,26 @@ export class VehicleSystem implements GameSystem, MapOverlay {
     return stopped;
   }
 
-  private hitBody(v: Vehicle, part: VehiclePart, target: { name: string; mass: number; damage: (dmg: number) => boolean; fling: (force: number) => void }): boolean {
+  /**
+   * CDDA fling_creature: thrown ahead at up to +-60 deg from the direction of travel, a
+   * distance growing with the impact speed; the first free landing spot wins (null = pinned
+   * against something, the vehicle has to stop).
+   */
+  private flingSpot(x: number, y: number, dx: number, dy: number, forceMph: number, free: (tx: number, ty: number) => boolean): [number, number] | null {
+    const dist = Math.max(1, Math.min(6, Math.round(forceMph / 10)));
+    const side = this.rng.oneIn(2) ? 1 : -1;
+    for (const deg of [30 * side, -30 * side, 60 * side, -60 * side, 90 * side, -90 * side]) {
+      const a = (deg * Math.PI) / 180;
+      const ux = dx * Math.cos(a) - dy * Math.sin(a), uy = dx * Math.sin(a) + dy * Math.cos(a);
+      for (let d = dist; d >= 1; d--) {
+        const px = x + ux * (d + 0.6), py = y + uy * (d + 0.6);
+        if (free(Math.floor(px), Math.floor(py))) return [Math.floor(px) + 0.5, Math.floor(py) + 0.5];
+      }
+    }
+    return null;
+  }
+
+  private hitBody(v: Vehicle, part: VehiclePart, target: { name: string; mass: number; damage: (dmg: number) => boolean; fling: (force: number) => boolean }): boolean {
     let dead = false, flung = false;
     const r = resolveCollision({
       mass: v.mass(), velocity: v.velocity, mass2: target.mass, e: 0.3, partDens: 15, body: true,
@@ -688,10 +715,7 @@ export class VehicleSystem implements GameSystem, MapOverlay {
         if (dam > 0) dead = target.damage(dam) || dead;
         // Fling when the vehicle hits hard enough (CDDA: |vel2_a| > 10 mph or momentum).
         const vmph = Math.abs(v.velocity) * MPH_PER_MS;
-        if (!dead && vmph > 5) {
-          target.fling(vmph);
-          flung = true;
-        }
+        if (!dead && vmph > 5) flung = target.fling(vmph);
         return dead || flung;
       },
     });
@@ -798,14 +822,10 @@ export function monsterCreatureHooks(ms: MonsterSystem): CreatureHooks {
       ms.hurt(m, dmg, 'player');
       return m.dead;
     },
-    fling: (c, dx, dy, force) => {
+    place: (c, x, y) => {
       const m = c as Monster;
-      // A forced move (the monster AI's dash): ~force/10 tiles, capped.
-      const dist = Math.min(5, Math.max(1, force / 10));
-      const speed = 10;
-      m.dashVx = dx * speed;
-      m.dashVy = dy * speed;
-      m.dashTime = dist / speed;
+      m.x = x;
+      m.y = y;
       m.addEffect('downed', 1);
     },
     name: (c) => (c as Monster).displayName(),

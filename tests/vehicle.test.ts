@@ -269,6 +269,8 @@ describe('collisions', () => {
     for (let i = 0; i < 30; i++) game.tick(1 / 30);
     expect(zed.hp).toBeLessThan(80);
     expect(msgs.some((m) => /rams into the zombie/.test(m))).toBe(true);
+    // flung clear of the car (or killed), never left inside its body
+    if (!zed.dead) expect(vs.at(Math.floor(zed.x), Math.floor(zed.y), 0)).toBeNull();
   });
 });
 

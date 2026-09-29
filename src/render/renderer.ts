@@ -70,6 +70,8 @@ export class Renderer {
   source: TileTextureSource;
   /** Resolves once the preferred texture source (UltiCa atlas) is active. */
   readonly ready: Promise<void>;
+  /** Hands are on something else (a steering wheel): hide the first-person viewmodel. */
+  handsBusy = false;
   /** Per-frame hooks run at the start of render() (e.g. vehicle meshes following vehicles). */
   readonly beforeRender: ((dt: number) => void)[] = [];
   private playerSprite: SpriteHandle | null = null;
@@ -314,7 +316,7 @@ export class Renderer {
     this.autoPatch();
 
     const vm = this.viewmodel!;
-    vm.enabled = this.rig.mode === 'first';
+    vm.enabled = this.rig.mode === 'first' && !this.handsBusy;
     this.muzzleT = Math.max(0, this.muzzleT - dt);
     this.muzzleLight.set(p.x, p.y, p.z);
     this.muzzleLight.intensity = this.muzzleT > 0 ? 2.5 : 0;

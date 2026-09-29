@@ -81,7 +81,7 @@ export interface VehicleDataFile {
 
 export async function loadVehicleData(base = '/data/'): Promise<VehicleDataFile> {
   const res = await fetch(base + 'vehicles.json');
-  if (!res.ok) throw new Error(`Failed to load ${base}vehicles.json: HTTP ${res.status} (run \`npx tsx tools/extract/vehicles.ts\`)`);
+  if (!res.ok) throw new Error(`Failed to load ${base}vehicles.json: HTTP ${res.status} (run \`npm run extract:vehicles\`)`);
   return res.json();
 }
 

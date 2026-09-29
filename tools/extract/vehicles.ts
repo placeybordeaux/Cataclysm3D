@@ -7,7 +7,7 @@
 // shared misc.json (which also carries `vehicle`/`vehicle_part`, but older builds of it
 // lost the inherited parts of copy-from vehicles).
 //
-// Usage: npx tsx tools/extract/vehicles.ts [--cdda DIR] [--out public/data] [--dry-run]
+// Usage: npm run extract:vehicles -- [--cdda DIR] [--out public/data] [--dry-run]
 
 import fs from 'node:fs';
 import path from 'node:path';

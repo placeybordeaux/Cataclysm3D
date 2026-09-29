@@ -131,6 +131,33 @@ tests/               vitest unit tests (pure logic, no DOM/WebGL)
   (`e`), `zlevels.ts` (`<`/`>`, falling), `rest.ts` (`|` wait, `$` sleep), `weather.ts`
   (`game.weather`), `traps.ts`, `lightitems.ts` (`F`: flashlight transform).
 
+### Vehicles (src/game/vehicle*.ts, src/render/vehicleMesh.ts, src/ui/vehicle_ui.ts)
+
+- Data: `public/data/vehicles.json` from `npm run extract:vehicles` (prototypes with CDDA's
+  copy-from "parts append" rule, slimmed vehicle parts, vehicle groups, fuel kJ/charge).
+  `misc.vehicle` predates the append fix; use vehicles.json.
+- `vehicle.ts` `Vehicle`: parts on CDDA mount points (+x forward, +y right), world pose
+  `x,y` (centre of mount 0,0) + `facing` deg (0 east, clockwise). `occupiedTiles()`,
+  `mountAtTile`, `moveCostAt/opaqueAt` (CDDA obstacle/aisle rules, open doors), mass,
+  `totalPower`, `maxVelocity` (CDDA cubic), fuel/battery, `resolveCollision` (CDDA
+  part_collision loop), `spawnVehicle` (init_state: fuel %, status -1/0/1/2, locks, wear),
+  `toJSON/fromJSON`. Pure logic, unit-tested in tests/vehicle.test.ts.
+- `vehicles.ts` `VehicleSystem` = `game.vehicles`: consumes `chunk.vehicles` requests, tile
+  index registered as a `GameMap.overlays` entry (so `map.moveCost/passable/opaque`,
+  physics and monster `Grid` see vehicles), driving physics per tick, collisions (terrain via
+  bash.ts, monsters via `monsterCreatureHooks`, the player, other vehicles), engine/horn/
+  alarm noise via `emitSound`, save section `vehicles` (order 30).
+- Keys: `^` take controls / controls menu, `k` engine, `h` headlights, `n` horn; at the
+  controls WASD drive (S brakes then reverses), Space handbrake. `e` on a vehicle part goes
+  through `interactOverrides` in interact.ts (doors toggle, else a part menu: cargo get/put,
+  controls, hotwire with a SCREW tool, parts list).
+- Seams: `vehicles.creatureHooks` (run-over damage/placement), `vehicles.onBash`,
+  `game.movementOverride` (WASD doesn't walk while driving), `renderer.beforeRender`,
+  `renderer.handsBusy`, `rig.suppressBob`. Debug: `cdda.spawnVehicle(proto, dx, dy, deg,
+  {fuel,status})`, `cdda.vehicles()`, `cdda.enterVehicle()`, `cdda.drive(throttle, steer,
+  s, brake?)`, `cdda.roadTrip(proto)`, `cdda.gotoVehicle(regex, {angle, dist})`,
+  `cdda.vehicleLights(on)`, `cdda.vehicleAt(dx, dy)`.
+
 ### Extension points (prefer these over editing someone else's code)
 
 - `game.systems.push({ name, update(game, realDt, gameDt) })` for per-tick simulation.

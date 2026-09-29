@@ -34,6 +34,8 @@ const ROOF_LO = 1.8;
 const ROOF_HI = 1.9;
 const PANEL = 0.14; // thickness of door/board shells
 const VIEW_RANGE = 90;
+/** Headlight beam lights: [metres ahead of the bumper, intensity, radius]. */
+const BEAM: [number, number, number][] = [[2.5, 1.1, 6], [7, 1.0, 8], [13, 0.8, 9]];
 
 // --- procedural swatches ---------------------------------------------------------------
 
@@ -468,7 +470,8 @@ interface Entry {
   lamps: THREE.Mesh | null;
   version: number;
   z: number;
-  light: LightHandle | null;
+  /** Headlight beam: a few dynamic lights along the cone (they feed the tile light map). */
+  beam: LightHandle[];
 }
 
 export class VehicleRenderer {
@@ -496,7 +499,7 @@ export class VehicleRenderer {
     if (!e) return;
     this.group.remove(e.obj);
     for (const m of [e.body, e.roof, e.glass, e.lamps]) m?.geometry.dispose();
-    e.light?.remove();
+    for (const l of e.beam) l.remove();
     this.entries.delete(v);
   }
 
@@ -530,7 +533,7 @@ export class VehicleRenderer {
       lamps: mk(g.lamps, v.lightsOn ? this.lampOn : this.lampOff, false),
       version: v.version,
       z: v.z,
-      light: e?.light ?? null,
+      beam: e?.beam ?? [],
     };
     this.group.add(obj);
     return next;
@@ -541,6 +544,7 @@ export class VehicleRenderer {
     const top = this.renderer.cameraMode === 'top';
     const rig = this.renderer.rig as unknown as { suppressBob?: boolean };
     rig.suppressBob = !!this.system.driving;
+    this.renderer.handsBusy = !!this.system.driving;
     let spotFor: Vehicle | null = null, spotD = Infinity;
     const seen = new Set<Vehicle>();
     for (const v of this.system.list) {
@@ -568,18 +572,18 @@ export class VehicleRenderer {
           spotFor = v;
         }
       }
-      // Pool light in front of every lit vehicle so parked cars light their patch of road.
-      if (lit && !e.light) {
-        const [fx, fy] = this.front(v, 3);
-        e.light = this.renderer.lights.add({ x: fx, y: fy, z: v.z, color: 0xfff0d0, intensity: 0.9, radius: 9, height: 0.6 });
-      } else if (!lit && e.light) {
-        e.light.remove();
-        e.light = null;
+      // The light map only knows round sources, so a headlight cone is approximated by
+      // lights stepping out along the beam, dimmer and wider with distance.
+      if (lit && !e.beam.length) {
+        e.beam = BEAM.map(([, intensity, radius]) => this.renderer.lights.add({ x: v.x, y: v.y, z: v.z, color: 0xfff0d0, intensity, radius, height: 0.5 }));
+      } else if (!lit && e.beam.length) {
+        for (const l of e.beam) l.remove();
+        e.beam = [];
       }
-      if (e.light) {
-        const [fx, fy] = this.front(v, 3);
-        e.light.set(fx, fy, v.z);
-      }
+      e.beam.forEach((l, i) => {
+        const [fx, fy] = this.front(v, BEAM[i][0]);
+        l.set(fx, fy, v.z);
+      });
     }
     for (const v of [...this.entries.keys()]) if (!seen.has(v)) this.drop(v);
 

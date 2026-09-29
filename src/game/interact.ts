@@ -36,7 +36,8 @@ export interface InteractUi {
 
 /**
  * Systems owning things that aren't terrain/furniture (vehicles: src/ui/vehicle_ui.ts) get
- * the first go at `e` and at the prompt; return false/null when not aimed at theirs.
+ * the first go at `e` and at the prompt; return false/null when not aimed at theirs
+ * (prompt '' = show no prompt at all, e.g. while driving).
  */
 export const interactOverrides: { interact(game: Game): boolean; prompt(game: Game): string | null }[] = [];
 
@@ -404,7 +405,7 @@ export function interactionPrompt(game: Game): string | null {
   if (p.dead || p.isAsleep() || game.activities.current) return null;
   for (const o of interactOverrides) {
     const text = o.prompt(game);
-    if (text) return text;
+    if (text !== null) return text || null;
   }
   const t = targetTile(game);
   const key = game.keys.keyFor('interact');

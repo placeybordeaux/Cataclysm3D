@@ -121,10 +121,11 @@ export function examineVehicle(game: Game, x: number, y: number, z: number): boo
   return true;
 }
 
-/** Prompt text for the HUD (null when not looking at a vehicle). */
+/** Prompt text for the HUD (null when not looking at a vehicle, '' = no prompt while driving). */
 export function vehicleInteractPrompt(game: Game): string | null {
   const vs = game.vehicles;
-  if (!vs || vs.driving) return null;
+  if (!vs) return null;
+  if (vs.driving) return '';
   const t = targetVehicle(game);
   if (!t) return null;
   const parts = t.v.partsAt(t.mx, t.my);
@@ -367,6 +368,11 @@ export async function installVehicles(game: Game, renderer: Renderer, api?: Debu
   // it. Without that system (tests, stripped builds) 'e' examines vehicles directly.
   interactOverrides.push({
     interact: (g) => {
+      // At the wheel, 'e' examines the vehicle you're driving (CDDA EXAMINE_VEHICLE).
+      if (vs.driving) {
+        showVehicleInfo(g, vs.driving);
+        return true;
+      }
       const t = targetVehicle(g, renderer);
       return t ? examineVehicle(g, t.x, t.y, t.z) : false;
     },
