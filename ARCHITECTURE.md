@@ -243,7 +243,14 @@ tests/               vitest unit tests (pure logic, no DOM/WebGL)
   Audio: `src/audio/vehicleAudio.ts` `EngineSounds` (running-engine loop per nearby vehicle,
   internal while driving, rate by CDDA gear, gear-shift clunks) and CDDA variant pickers.
 - Keys: `^` take controls / controls menu, `k` engine, `h` headlights, `n` horn; at the
-  controls WASD drive (S brakes then reverses), Space handbrake. `e` on a vehicle part goes
+  controls WASD drive (direct by default: W throttle with a short ramp, release coasts, S
+  brakes then reverses after a beat, `c` cruise control locks the speed; CDDA's 4-mph-step
+  cruise model is the "Driving controls" option), Space handbrake. Launch acceleration is
+  CDDA power/mass compressed toward a car (`feltAcceleration`, 0-30 mph in ~4 s); steering
+  lock narrows with speed (`maxSteerAt`, lateral accel <= 5.5 m/s^2).
+- Run-overs: `vs.creatureHooks = composeCreatureHooks([monsterCreatureHooks(ms),
+  npcCreatureHooks(game, vs)])` — NPCs take CDDA impact damage on the torso, get stunned,
+  flung and downed, and npcai `afterHit` handles death drops and anger. `e` on a vehicle part goes
   through `interactOverrides` in interact.ts (doors toggle, else a part menu: cargo get/put,
   controls, hotwire with a SCREW tool, parts list).
 - Seams: `vehicles.creatureHooks` (run-over damage/placement), `vehicles.onBash`,

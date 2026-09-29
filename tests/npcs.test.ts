@@ -554,3 +554,39 @@ describe('npc AI', () => {
     expect(game.player.hpPercent()).toBeLessThan(hp0);
   });
 });
+
+describe('vehicles and NPCs', () => {
+  it('a player-driven car runs an NPC over: damage, message, flung clear, angry or dead', async () => {
+    const { VehicleSystem, composeCreatureHooks, monsterCreatureHooks, npcCreatureHooks } = await import('../src/game/vehicles');
+    const { has } = await import('../src/game/vehicle');
+    const { game, mons, npcs, msgs } = world();
+    (game as unknown as { npcs: NpcSystem }).npcs = npcs;
+    const vs = new VehicleSystem(game, load('vehicles.json'));
+    game.systems.push(vs);
+    vs.creatureHooks = composeCreatureHooks([monsterCreatureHooks(mons), npcCreatureHooks(game, vs)]);
+    const v = vs.spawn('car', 10, 20, 0, 0, { fuel: 100, status: 2, rng: new Rng(7) })!;
+    for (const q of v.parts) if (has(q, 'OPENABLE')) q.open = false;
+    v.locked = false;
+    game.player.x = 10.5;
+    game.player.y = 20.5;
+    vs.takeControls(v);
+    vs.startEngine(v);
+    const n = npcs.spawn({ cls: 'NC_SCAVENGER' }, 20, 20, 0)!;
+    n.x = 20.5;
+    n.y = 20.5;
+    const hp0 = n.hp.torso.cur;
+    expect(n.isEnemy()).toBe(false);
+    v.velocity = 15; // ~34 mph
+    vs.scriptedInput = true;
+    vs.input = { throttle: 0, steer: 0, brake: false };
+    for (let i = 0; i < 30; i++) game.tick(1 / 30);
+    expect(msgs.some((m) => m.includes(`You hit ${n.name} with your ${v.name}!`))).toBe(true);
+    expect(n.dead || n.hp.torso.cur < hp0).toBe(true);
+    // the car went through, not stopped dead against a person
+    expect(v.x).toBeGreaterThan(20);
+    if (!n.dead) {
+      expect(vs.at(n.tileX, n.tileY, 0)).toBeNull();
+      expect(n.isEnemy()).toBe(true);
+    }
+  });
+});
