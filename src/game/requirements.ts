@@ -17,6 +17,13 @@ export interface AltEval {
   text: string;
   have: boolean;
   color: string;
+  /** What it is, for icon rows: an item id (tool/component) or a quality id. */
+  kind: 'quality' | 'tool' | 'component';
+  id: string;
+  /** Needed: components (charges for count-by-charges), tool charges (0 = just the tool), quality level. */
+  need: number;
+  /** Available: component count, tool charges (Infinity for pseudo tools), best quality level. */
+  avail: number;
 }
 
 export interface GroupEval {
@@ -75,13 +82,14 @@ function finishGroup(alts: AltEval[]): GroupEval {
 /** Check a requirement set for `batch` crafts against what's at hand. */
 export function evaluateRequirements(data: GameData, req: Partial<RequirementData>, inv: CraftingInventory, batch = 1): RequirementEval {
   const qualities = (req.qualities ?? []).map((grp) =>
-    finishGroup(grp.map((q) => ({ text: qualityText(data, q), have: inv.hasQuality(q.id, q.level, q.amount ?? 1), color: '' }))),
+    finishGroup(grp.map((q) => ({ text: qualityText(data, q), have: inv.hasQuality(q.id, q.level, q.amount ?? 1), color: '', kind: 'quality' as const, id: q.id, need: q.level, avail: inv.maxQuality(q.id) }))),
   );
   const tools = (req.tools ?? []).map((grp) =>
     finishGroup(
       grp.map((t) => {
-        const have = t.count > 0 ? inv.toolChargesOf(t.id) >= t.count * batch : inv.hasTool(t.id);
-        return { text: toolText(data, t, batch), have, color: '' };
+        const charges = t.count > 0 ? inv.toolChargesOf(t.id) : inv.hasTool(t.id) ? 1 : 0;
+        const have = t.count > 0 ? charges >= t.count * batch : charges > 0;
+        return { text: toolText(data, t, batch), have, color: '', kind: 'tool' as const, id: t.id, need: t.count > 0 ? t.count * batch : 0, avail: charges };
       }),
     ),
   );
@@ -89,7 +97,8 @@ export function evaluateRequirements(data: GameData, req: Partial<RequirementDat
     finishGroup(
       grp.map((c) => {
         const avail = inv.countOf(c.id);
-        return { text: componentText(data, c, batch, avail), have: avail >= Math.abs(c.count) * batch, color: '' };
+        const need = Math.abs(c.count) * batch;
+        return { text: componentText(data, c, batch, avail), have: avail >= need, color: '', kind: 'component' as const, id: c.id, need, avail };
       }),
     ),
   );
@@ -114,20 +123,24 @@ export function requirementLines(ev: RequirementEval, header = 'c_white'): strin
 }
 
 /**
- * Consume the first satisfiable alternative of every component group and charges of every
- * charged tool group. Returns the consumed component items (kept for refunds/disassembly).
- * Throws if something is missing: callers check evaluateRequirements first.
+ * Use the first satisfiable alternative of every component group (consumed, or moved `into`
+ * an in-progress craft / unfinished construction) and charges of every charged tool group.
+ * Returns the component items taken. Throws if something is missing: callers check
+ * evaluateRequirements first. Components of alternatives the player picked (`choice`: group
+ * index → item id) are used when available.
  */
-export function consumeRequirements(req: Partial<RequirementData>, inv: CraftingInventory, batch = 1): { items: import('./item').Item[]; used: { id: string; count: number }[] } {
+export function consumeRequirements(req: Partial<RequirementData>, inv: CraftingInventory, batch = 1, into?: import('./moves').Loc, choice?: Record<number, string>): { items: import('./item').Item[]; used: { id: string; count: number }[] } {
   const items: import('./item').Item[] = [];
   const used: { id: string; count: number }[] = [];
-  for (const grp of req.components ?? []) {
-    const alt = grp.find((c) => inv.countOf(c.id) >= Math.abs(c.count) * batch);
+  (req.components ?? []).forEach((grp, gi) => {
+    const enough = (c: RecipeComponent) => inv.countOf(c.id) >= Math.abs(c.count) * batch;
+    const picked = choice?.[gi] !== undefined ? grp.find((c) => c.id === choice[gi] && enough(c)) : undefined;
+    const alt = picked ?? grp.find(enough);
     if (!alt) throw new Error(`consumeRequirements: no component for ${grp.map((c) => c.id).join('|')}`);
     const n = Math.abs(alt.count) * batch;
-    items.push(...inv.consumeComponent(alt.id, n));
+    items.push(...inv.consumeComponent(alt.id, n, into));
     used.push({ id: alt.id, count: n });
-  }
+  });
   for (const grp of req.tools ?? []) {
     const alt = grp.find((t) => (t.count > 0 ? inv.toolChargesOf(t.id) >= t.count * batch : inv.hasTool(t.id)));
     if (!alt) throw new Error(`consumeRequirements: no tool for ${grp.map((c) => c.id).join('|')}`);

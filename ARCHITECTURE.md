@@ -159,12 +159,24 @@ tests/               vitest unit tests (pure logic, no DOM/WebGL)
   `game.stats?.kills` gets kill counts; `renderer.viewmodel?.attack(kind)` is called on
   attacks. Rendering: `src/render/monsterView.ts` (sprites, corpses, blood decals).
 - Crafting (`crafting*.ts`, `requirements.ts`, `construction.ts`, `disassembly.ts`, `reading.ts`,
-  `fire.ts`): functions take a `CraftHost` (Game satisfies it). `CraftingInventory.gather` =
-  inventory + map items/furniture pseudo tools within 2 tiles + `fire` from a nearby `fd_fire`.
-  Knowledge lives on Character (`learnedRecipes`, `identifiedBooks`, `proficiencies`).
-  `hasCraftingLight` uses `game.lightAt`/`map.lightAt(x,y,z)` if present (>= 4 = bright enough).
-  Other systems' use_actions: `inv.useHandlers.set(type, fn)` (crafting registers `firestarter`).
-  UI + keys (`& * ( R`) + `cdda.*` helpers: `installCrafting(game, api)` in src/ui/crafting_install.ts.
+  `fire.ts`), Bright Nights rules: functions take a `CraftHost` (Game satisfies it).
+  `CraftingInventory.gather` = inventory + map items/furniture pseudo tools within 2 tiles + `fire`
+  from a nearby `fd_fire`; components are consumed or moved (`into`) through moves.ts.
+  **In-progress crafts are real items** (BN itype `craft`, vars `craft_recipe/progress/…`) holding
+  their components in `contents`: `startCraft` → `continueCraft` / `abandonCraft` (components
+  back) / `completeCraft`; `craftQueue(host)` runs several in a row. **Unfinished constructions**
+  are the same item type with `vars.con_id`, lying on the site with the materials
+  (`continueConstruction` / `cancelConstruction`). moves.ts refuses hand moves into/out of crafts.
+  Light: BN `lightSpeedMultiplier` (dark = slower; BLIND_* flags), `fineVisionMod` uses
+  `game.lightAt`. Knowledge on Character (`learnedRecipes`, `identifiedBooks`); book recipes need
+  no identification (BN). Hooks: `craftedHooks`, `craftStoppedHooks`, `constructedHooks`,
+  `readHooks`, `readSessionHooks`; activities set `kind/target/at/customUi` (ActivitySpec).
+  UI: `installCrafting(game, api, renderer)` (src/ui/crafting_install.ts) → ui2 screens in
+  src/ui/craft2 (`&` crafting browser, `*` construction list + in-world placement ghost, reading
+  card and progress bars in overlay.ts), item actions via `itemActionProviders`
+  (src/game/inventory_view.ts; `readAction`, `disassembleAction`, `craftItemActions` in
+  craft2/actions.ts), world menu "Continue construction" / "Build here…". `cdda.crafting.*`,
+  `cdda.construction.*` for automation.
 
 ### Combat depth (src/game/{techniques,martialarts,gunmods,monguns,explosion}.ts, wired by src/combatdepth.ts)
 - `meleeAttack(c, {dodge, armor, info?: TargetInfo}, rng, name, {allowSpecial, aoeTargets, forceTechnique})`

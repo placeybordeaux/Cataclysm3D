@@ -108,8 +108,10 @@ container and reported for the liquid menu.
 Quantity appears only through **`spawnItem` / `spawnOnGround` / `spawnSome`** (item groups,
 crafting results, harvests, loot, debug) and disappears only through **`consumeItem`**
 (eating, crafting components, keycards, fire, butchered corpses) and `Item.ammoConsume`
-(firing, tools using charges). A crafting job holds its components between consume and
-finish (they are given back, i.e. spawned again, if it's cancelled).
+(firing, tools using charges). A craft in progress is an item (BN `craft`) whose contents are
+its components, moved there by a system move when it starts; they are consumed only when it
+finishes, and taking the craft apart moves them back out. An unfinished construction is the
+same kind of item lying on its site.
 
 ### The character's actions
 
