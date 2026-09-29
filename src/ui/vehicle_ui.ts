@@ -452,9 +452,11 @@ export async function installVehicles(game: Game, renderer: Renderer, api?: Debu
   // it. Without that system (tests, stripped builds) 'e' examines vehicles directly.
   interactOverrides.push({
     interact: (g) => {
-      // At the wheel, 'e' examines the vehicle you're driving (CDDA EXAMINE_VEHICLE).
+      // At the wheel, 'e' lets go of the controls — the one obvious way out of driving mode
+      // (the vehicle panel on '^' still has info and every control). Letting go while moving
+      // is allowed, as in CDDA; releaseControls() warns about it.
       if (vs.driving) {
-        vehicleScreens.info(g, vs.driving);
+        g.message(vs.releaseControls());
         return true;
       }
       const t = targetVehicle(g, renderer);
