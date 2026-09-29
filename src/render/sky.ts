@@ -26,11 +26,31 @@ uniform float uTime;
 uniform float uCloud;
 varying vec3 vDir;
 
-float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+// Integer hash of a lattice cell. The old fract(sin(dot(p, k)) * 43758.5) hash was the real
+// cause of the "angular slabs": sin() of a ~1e4 argument amplifies a 1-ulp difference, and
+// the GPU compiler evaluates hash(i + (1,0)) and the neighbour cell's hash(i') with
+// different rounding, so the noise jumped along every lattice line.
+float hash(vec2 p) {
+  uvec2 q = uvec2(ivec2(floor(p))) * uvec2(1597334673u, 3812015801u);
+  uint n = (q.x ^ q.y) * 1597334673u;
+  return float(n >> 8) * (1.0 / 16777215.0);
+}
 float noise(vec2 p) {
   vec2 i = floor(p), f = fract(p);
   f = f * f * (3.0 - 2.0 * f);
   return mix(mix(hash(i), hash(i + vec2(1, 0)), f.x), mix(hash(i + vec2(0, 1)), hash(i + vec2(1, 1)), f.x), f.y);
+}
+
+// fbm with each octave rotated (~37 deg) so no two share lattice axes
+float fbm(vec2 p) {
+  const mat2 R = mat2(1.28, 0.96, -0.96, 1.28);
+  float s = 0.0, a = 0.5;
+  for (int i = 0; i < 5; i++) {
+    s += a * noise(p);
+    p = R * p + 1.7;
+    a *= 0.5;
+  }
+  return s / 0.97;
 }
 
 void main() {
@@ -64,13 +84,21 @@ void main() {
     if (off > 0.2) moon *= 0.72;
     col = mix(col, moon, uNight);
   }
-  // sparse drifting cloud bands, darker at night
-  if (h > 0.02) {
-    vec2 cp = d.xz / (h + 0.15) * 1.6 + vec2(uTime * 0.01, 0.0);
-    float c = noise(cp) * 0.6 + noise(cp * 2.3) * 0.4;
-    float cover = smoothstep(0.75 - uCloud * 0.5, 0.95 - uCloud * 0.4, c);
-    vec3 cloudCol = mix(uHorizon * 1.05, uZenith * 0.6, uNight);
-    col = mix(col, cloudCol, cover * 0.6 * smoothstep(0.02, 0.2, h));
+  // Drifting clouds on a plane overhead. Value noise alone has visible lattice cells: two
+  // octaves thresholded by a steep smoothstep drew its cell edges as long straight lines,
+  // "angular slabs" across the sky. Rotated fbm with a domain warp breaks the lattice up,
+  // and a wide threshold leaves soft edges for the post pass's ordered dither to turn
+  // into pixel-art stipple. Undersides are shaded so the forms read as volumes.
+  if (h > 0.0) {
+    vec2 cp = d.xz / (h + 0.12) * 0.85 + vec2(uTime * 0.008, uTime * 0.003);
+    vec2 warp = vec2(fbm(cp * 0.7 + 3.1), fbm(cp * 0.7 + 7.7)) - 0.5;
+    float c = fbm(cp + warp * 1.3);
+    float lo = 0.6 - uCloud * 0.3;
+    float cover = smoothstep(lo, lo + 0.2, c);
+    float core = smoothstep(lo + 0.08, lo + 0.34, c);
+    vec3 lit = mix(mix(uHorizon, vec3(1.0), 0.25) * 1.08 + uSunColor * 0.12, uZenith * 0.7, uNight);
+    vec3 cloudCol = mix(lit, lit * vec3(0.8, 0.82, 0.88), core);
+    col = mix(col, cloudCol, cover * 0.8 * smoothstep(0.0, 0.18, h));
   }
   gl_FragColor = vec4(col, 1.0);
   gNormal = vec4(0.5, 0.5, 1.0, 0.0);
