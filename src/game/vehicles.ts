@@ -683,7 +683,13 @@ export class VehicleSystem implements GameSystem, MapOverlay {
       const riding = this.driving === v || before.has(tileKey(p.tileX, p.tileY, p.z));
       const [plx, ply] = riding ? v.worldToMount(p.x, p.y) : [0, 0];
       const stopped = this.collide(v, nx, ny, nf, before, riding);
-      if (stopped) break;
+      if (stopped) {
+        // Stopped dead against something: drop the cruise target. CDDA keeps it, but there the
+        // driver gets a turn to react; in real time the engine would ram the obstacle again
+        // every frame.
+        if (this.driving === v && Math.abs(v.velocity) < STOP_EPS) v.cruiseVelocity = 0;
+        break;
+      }
       const oldFacing = v.facing;
       v.x = nx;
       v.y = ny;
