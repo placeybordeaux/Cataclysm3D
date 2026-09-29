@@ -74,7 +74,7 @@ const CLASSIC: DifficultySettings = {
 const ACCESSIBLE: DifficultySettings = {
   spawnScale: 0.45, hordeScale: 0.1, safeRadius: 24, dormantSafe: true, monsterSpeed: 0.9, monsterResilience: 0.7, itemSpawnRate: 1,
   feel: 'accessible', crashDamage: 0.5, bleed: 0.5,
-  hunger: 0.75, thirst: 0.75, fatigue: 0.85, healing: 2, cold: 0.7,
+  hunger: 0.75, thirst: 0.75, fatigue: 1, healing: 2, cold: 0.7,
   dayLength: 1, pauseInMenus: true, permadeath: false,
 };
 

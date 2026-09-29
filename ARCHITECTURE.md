@@ -461,6 +461,22 @@ tests/               vitest unit tests (pure logic, no DOM/WebGL)
 - Debug: `cdda.feel`, `cdda.setFeel(d)`, `cdda.feelState()`, `cdda.recordFrames(n, dt, each)` (frame-exact
   captures for animation timing); `tools/drive.ts seq "…"` (timed real input + screenshot bursts), `xbdown/xbup`.
 
+### Difficulty & tactical pause (src/game/{difficulty,balance,pause}.ts, src/difficulty.ts, src/pause.ts; see docs/BALANCE.md)
+- `DifficultySettings` holds every balance knob (spawn/horde scale, safe radius, monster speed & resilience, item
+  spawn rate, feel, bleed, crash damage, hunger/thirst/fatigue, healing, cold, day length, pause in menus,
+  permadeath); presets `DIFFICULTY_PRESETS.accessible|classic`, Custom = anything else. `applyDifficultySettings(game,
+  preset, s)` pushes them into the spawner (`registerDifficultyTargets`), `game.map.itemSpawnRate`, `BALANCE`
+  (balance.ts: monster speed/resilience, crash damage), `setFeelDifficulty`, `game.player.balance` (per-survivor
+  needs/healing/bleed/cold multipliers), `setClockRate` (time.ts; convert real→game time with `clockScale()`, never
+  CLOCK_SCALE), `game.pauseInMenus` and ui2 `settings.pauseInInventory`. The new-game flow picks the preset
+  (progression `difficultyHooks`); save section `difficulty` (order 18) keeps the full settings per world;
+  Options > Difficulty… edits them live. `permadeath(game)` decides whether death deletes the save.
+- Tactical pause: `tacticalPauseOf(game)` = manual toggle + named holds ('menus' from ui2 inventory-type windows);
+  `game.tacticalPause` is derived from it — don't assign it directly. Key `tactical_pause` (` / Pause) also works
+  inside menus via `input.onPriorityPress`. The Esc menu always pauses (`game.paused`).
+- `tools/balance_sim.ts` (headless day-1 bot, duels, needs timelines, first night): see docs/BALANCE.md.
+  Debug: `cdda.difficulty()`, `cdda.setDifficulty(d, overrides)`, `cdda.openDifficulty()`, `cdda.tacticalPause()`.
+
 ### Extension points (prefer these over editing someone else's code)
 
 - `game.systems.push({ name, update(game, realDt, gameDt) })` for per-tick simulation.

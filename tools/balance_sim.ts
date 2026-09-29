@@ -260,9 +260,9 @@ class Newcomer {
   private repathT = 0;
   private lootT = 0;
   private target: [number, number] | null = null;
-  private stuckT = 0;
   private cornered = 0;
-  private lastPos = [0, 0];
+  private fleeT = 0;
+  private fleeGoal: [number, number] | null = null;
   private badTargets = new Set<string>();
 
   constructor(private w: World) {}
@@ -284,12 +284,21 @@ class Newcomer {
     const hurt = p.hp.torso.cur / p.hp.torso.max < 0.6 || p.hp.head.cur / p.hp.head.max < 0.6;
     const night = hour >= 21 || hour < 6;
     // --- decide
+    // With hysteresis, so it doesn't flip between running and looting at a threshold: run from
+    // two or more (or anything while hurt) until nothing is within 14 m; fight a lone one; fight
+    // back when cornered or when the thing chasing is faster than a run.
     this.cornered = Math.max(0, this.cornered - dt);
-    if (this.cornered > 0 && near.length) this.mode = 'fight';
-    else if (near.filter((m) => sys.distToPlayer(m) <= 8).length >= 2 || (hurt && near.length > 0)) {
-      if (this.mode !== 'flee') this.fledCount++;
-      this.mode = 'flee';
-    } else if (near.length > 0 && near.some((m) => sys.distToPlayer(m) <= 6)) this.mode = 'fight';
+    const close = near.filter((m) => sys.distToPlayer(m) <= 6);
+    const mid = sys.active.filter((m) => hostile(m) && m.z === p.z && sys.distToPlayer(m) <= 14);
+    const outrun = (m: Monster) => m.moveSpeed(100) < p.moveSpeed(100) * (p.canRun() ? 2 : 1) * 0.9;
+    if (this.cornered > 0 && close.length) this.mode = 'fight';
+    else if (close.length >= 2 || (hurt && close.length) || (this.mode === 'flee' && mid.length)) {
+      if (close.length && close.every((m) => !outrun(m)) && close.length === 1) this.mode = 'fight';
+      else {
+        if (this.mode !== 'flee') this.fledCount++;
+        this.mode = 'flee';
+      }
+    } else if (close.length === 1) this.mode = 'fight';
     else if (this.mode === 'fight' || this.mode === 'flee') this.mode = night ? 'home' : 'explore';
     // Night, or hurt: go home and rest (sleep heals), like a player with a scare.
     if ((night || hurt) && (this.mode === 'explore' || this.mode === 'loot')) this.mode = 'home';
@@ -297,16 +306,28 @@ class Newcomer {
     this.drinkEat();
     switch (this.mode) {
       case 'flee': {
-        // Run away from the pack's centre, preferring the shelter direction when it's away from them.
-        const cx = near.reduce((s, m) => s + m.x, 0) / near.length, cy = near.reduce((s, m) => s + m.y, 0) / near.length;
-        let ax = p.x - cx, ay = p.y - cy;
-        const hx = this.w.start.x + 0.5 - p.x, hy = this.w.start.y + 0.5 - p.y;
-        if (ax * hx + ay * hy > 0) (ax += hx * 0.3), (ay += hy * 0.3);
-        this.face(p.x + ax, p.y + ay);
-        held.add('KeyW');
-        held.add('ShiftLeft');
+        // Away from the pack along a real path (not into a wall), leaning toward the shelter.
+        // Run while they're close, walk (saving stamina) once there is a gap.
+        const pack = mid.length ? mid : near;
+        const cx = pack.reduce((s, m) => s + m.x, 0) / pack.length, cy = pack.reduce((s, m) => s + m.y, 0) / pack.length;
+        if ((this.fleeT -= dt) <= 0 || !this.fleeGoal) {
+          this.fleeT = 2;
+          let best: [number, number] | null = null, bs = -Infinity;
+          for (let a = 0; a < 16; a++) {
+            const ang = (a / 16) * Math.PI * 2;
+            const gx = Math.floor(p.x + Math.cos(ang) * 16), gy = Math.floor(p.y + Math.sin(ang) * 16);
+            if (!game.map.passable(gx, gy, p.z)) continue;
+            const away = Math.hypot(gx - cx, gy - cy) - Math.hypot(p.x - cx, p.y - cy);
+            const home = -Math.hypot(gx - this.w.start.x, gy - this.w.start.y) * 0.25;
+            if (away + home > bs) (bs = away + home), (best = [gx, gy]);
+          }
+          this.fleeGoal = best;
+        }
+        const nearest = Math.min(...pack.map((m) => sys.distToPlayer(m)));
+        if (this.fleeGoal) this.walkTo(this.fleeGoal[0], this.fleeGoal[1], dt);
+        if (nearest < 8) held.add('ShiftLeft');
         // Cornered (a wall, a grab): turn and fight for a few seconds instead of running in place.
-        if (this.stuck(dt)) this.cornered = 3;
+        if (this.stuck(dt, 'flee') && nearest < 3) this.cornered = 3;
         return;
       }
       case 'fight': {
@@ -369,12 +390,17 @@ class Newcomer {
     p.yaw = Math.atan2(x - p.x, -(y - p.y));
   }
 
-  private stuck(dt: number): boolean {
+  /** Moved less than 0.4 m over the last second (one watch per caller). */
+  private watches = new Map<string, { t: number; x: number; y: number }>();
+  private stuck(dt: number, who = 'walk'): boolean {
     const p = this.w.game.player;
-    const moved = Math.hypot(p.x - this.lastPos[0], p.y - this.lastPos[1]);
-    this.lastPos = [p.x, p.y];
-    this.stuckT = moved < 0.01 ? this.stuckT + dt : 0;
-    return this.stuckT > 1;
+    let w = this.watches.get(who);
+    if (!w) this.watches.set(who, (w = { t: 0, x: p.x, y: p.y }));
+    w.t += dt;
+    if (w.t < 1) return false;
+    const moved = Math.hypot(p.x - w.x, p.y - w.y);
+    [w.t, w.x, w.y] = [0, p.x, p.y];
+    return moved < 0.4;
   }
 
   /** Follow a door-aware A* path; opens closed doors on the way. False when unreachable. */

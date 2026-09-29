@@ -44,7 +44,11 @@ export function installTacticalPause(game: Game, api?: DebugApi): TacticalPause 
       if (!tp.paused) return;
       const key = game.keys.label('tactical_pause');
       title.textContent = 'PAUSED';
-      sub.textContent = tp.manual ? `${key} to resume · look around, open any menu` : `while this menu is open · ${key} to keep time stopped after`;
+      // A menu's own pause is small (the window says so itself); the player's pause is big.
+      sub.textContent = tp.manual ? `${key} to resume · look around, open any menu` : '';
+      sub.style.display = tp.manual ? '' : 'none';
+      title.style.fontSize = tp.manual ? '' : '13px';
+      el.style.top = tp.manual ? '9vh' : '1.2vh';
     };
     tp.onChange(draw);
     const prevChange = game.keys.onChange;
