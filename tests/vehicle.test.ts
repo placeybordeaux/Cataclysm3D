@@ -268,7 +268,9 @@ describe('cruise control (CDDA default driving)', () => {
     for (let i = 0; i < 30 * 30; i++) game.tick(1 / 30);
     // (burnt fuel lightens the car, nudging its safe speed by a hair)
     expect(Math.abs(v.cruiseVelocity - safe)).toBeLessThanOrEqual(3);
+    // A tap from just under the safe speed first snaps to it (cruise_thrust); the next goes past.
     tap(1);
+    if (v.cruiseVelocity <= safe) tap(1);
     expect(v.cruiseVelocity).toBeGreaterThan(safe);
     vs.input = { throttle: 0, steer: 0, brake: true };
     game.tick(1 / 30);
