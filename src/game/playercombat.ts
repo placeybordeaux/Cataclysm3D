@@ -1,6 +1,6 @@
 import { ACTION_SCALE } from '../core/time';
 import type { Game, GameSystem } from './game';
-import { aim, applyFlatArmor, attackCooldownSeconds, fireGun, meleeAttack, normalRoll } from './combat';
+import { aim, applyFlatArmor, attackCooldownSeconds, fireGun, meleeAttack, normalRoll, type ShotResult } from './combat';
 import type { Item } from './item';
 import type { Monster } from './monster';
 import type { MonsterSystem } from './monai';
@@ -62,6 +62,14 @@ export class PlayerCombat implements GameSystem {
   /** Shots fired so far (renderer uses it to trigger muzzle flashes). */
   shots = 0;
   viewmodel: () => ViewModelHook | undefined = () => undefined;
+  /**
+   * NPC system hooks (src/game/npcai.ts). attackGuard may veto an attack (it asks before
+   * hitting a friendly NPC); npcMelee takes the swing when an NPC is a better target than
+   * monster `m`; npcShot lets an NPC standing on the bullet's path (before `maxDist`) take it.
+   */
+  attackGuard: (() => boolean) | null = null;
+  npcMelee: ((reach: number, m: Monster | null) => boolean) | null = null;
+  npcShot: ((yaw: number, maxDist: number, shot: ShotResult) => { x: number; y: number } | null) | null = null;
   private grid: Grid;
 
   constructor(readonly game: Game, readonly sys: MonsterSystem) {
@@ -86,6 +94,7 @@ export class PlayerCombat implements GameSystem {
 
   /** LMB / debug: fire if wielding a gun, else melee. */
   attack(): void {
+    if (this.attackGuard && !this.attackGuard()) return;
     const w = this.game.player.inv.wielded;
     if (w?.isGun()) this.fire();
     else this.melee();
@@ -125,6 +134,7 @@ export class PlayerCombat implements GameSystem {
     const w = p.inv.wielded;
     const reach = w?.hasFlag('REACH_ATTACK') ? 2.2 : MELEE_REACH;
     const m = target ?? this.meleeTarget(reach);
+    if (!target && this.npcMelee?.(reach, m)) return true;
     this.viewmodel()?.attack('melee');
     const ws = weaponSound(w);
     sfx.meleeSwing(undefined, ws);
@@ -208,6 +218,11 @@ export class PlayerCombat implements GameSystem {
     const yaw = p.yaw + shot.spread * Math.cos(shot.azimuth);
     const range = Math.max(1, shot.range || 30);
     const hit = this.castRay(yaw, range);
+    const npcHit = this.npcShot?.(yaw, Math.hypot(hit.x - p.x, hit.y - p.y), shot);
+    if (npcHit) {
+      this.tracers.push({ x0: p.x, y0: p.y, x1: npcHit.x, y1: npcHit.y, z: p.z, t: 0.08 });
+      return true;
+    }
     this.tracers.push({ x0: p.x, y0: p.y, x1: hit.x, y1: hit.y, z: p.z, t: 0.08 });
     if (!hit.hit) {
       sfx.bulletHit('wall', { x: hit.x, y: hit.y, z: p.z });
