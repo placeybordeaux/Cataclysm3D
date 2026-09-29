@@ -463,7 +463,6 @@ export function installInventoryUi(ctx: UiContext): void {
   game.keys.register('takeoff', 'Take off worn item', pick('Take off what?', 'You are not wearing anything.', (e) => e.where === 'worn', 'takeoff', false));
   game.keys.register('eat', 'Eat / drink', pick('Consume item', 'You have nothing to consume.', (e) => !!inv().comestibleIn(e.item), 'eat'));
   game.keys.register('apply', 'Activate / apply item', pick('Use item', "You don't have any items you can use.", (e) => useActions(e.item.def).length > 0, 'apply'));
-  game.keys.register('read', 'Read', pick('Read what?', 'You have nothing to read.', (e) => e.item.isBook(), 'read'));
   game.keys.register('drop', 'Drop items', () => openDropMenu(ctx));
   game.keys.register('pickup', 'Pick up items nearby', () => openPickupMenu(ctx));
   game.keys.register('unload', 'Unload item', pick('Unload what?', 'You have nothing to unload.', (e) => (e.item.isGun() || e.item.isMagazine()) && e.item.ammoRemaining() > 0, 'unload', false));

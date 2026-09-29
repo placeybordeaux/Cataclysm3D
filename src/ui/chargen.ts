@@ -11,6 +11,7 @@ import {
 } from './chargen_logic';
 import { spriteImg, type UiContext } from './context';
 import { possibleItems } from '../data/itemgroups';
+import { applyProfessionKnowledge } from '../game/crafting';
 
 // New character (CDDA newcharacter.cpp), simplified to five tabs: SCENARIO, PROFESSION,
 // TRAITS, STATS, DESCRIPTION. Point pools follow CDDA's "multiple pools" rules
@@ -89,6 +90,7 @@ export function applyBuild(ctx: UiContext, b: Build): void {
   for (const t of lockedTraits(b)) p.addTrait(t);
   for (const t of b.traits) p.addTrait(t);
   for (const s of b.profession.skills ?? []) p.setSkill(s.name, s.level);
+  applyProfessionKnowledge(p, b.profession.id);
   p.recalcHp(true);
   p.stamina = p.staminaMax();
 

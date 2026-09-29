@@ -86,6 +86,13 @@ tests/               vitest unit tests (pure logic, no DOM/WebGL)
   encumbrance, armor absorption. Actions return `{ok, msg, moves, dropped?}`.
 - `combat.ts` pure CDDA melee/ranged/monster-attack math taking an Rng.
 - `player.ts` PlayerAvatar = Character + position/view. Game wires `onMessage`/`onDeath`.
+- Crafting (`crafting*.ts`, `requirements.ts`, `construction.ts`, `disassembly.ts`, `reading.ts`,
+  `fire.ts`): functions take a `CraftHost` (Game satisfies it). `CraftingInventory.gather` =
+  inventory + map items/furniture pseudo tools within 2 tiles + `fire` from a nearby `fd_fire`.
+  Knowledge lives on Character (`learnedRecipes`, `identifiedBooks`, `proficiencies`).
+  `hasCraftingLight` uses `game.lightAt`/`map.lightAt(x,y,z)` if present (>= 4 = bright enough).
+  Other systems' use_actions: `inv.useHandlers.set(type, fn)` (crafting registers `firestarter`).
+  UI + keys (`& * ( R`) + `cdda.*` helpers: `installCrafting(game, api)` in src/ui/crafting_install.ts.
 
 ### Extension points (prefer these over editing someone else's code)
 

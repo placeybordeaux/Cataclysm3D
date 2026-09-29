@@ -10,6 +10,7 @@ import { installDebugApi } from './debug';
 import { initUi } from './ui/framework';
 import { installUi } from './ui/index';
 import { installAudio } from './audio/install';
+import { installCrafting } from './ui/crafting_install';
 
 // URL params (all optional): seed=<int>, gen=world|test (default world), debug=1 (render stats overlay),
 // renderer params px/grade/tex/cam/walls (see src/render/renderer.ts), debug=atlas (sprite sheet view
@@ -47,6 +48,7 @@ async function main(): Promise<void> {
   const api = installDebugApi(game, renderer);
   if (worldgen) installWorldgenDebug(api, game, worldgen);
   installAudio(game, api);
+  installCrafting(game, api);
   const ui = await installUi(game, renderer, worldgen, api);
 
   let last = performance.now();

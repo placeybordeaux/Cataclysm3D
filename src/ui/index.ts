@@ -3,10 +3,11 @@ import type { Renderer } from '../render/renderer';
 import type { WorldGenerator } from '../world/worldgen';
 import type { DebugApi } from '../debug';
 import { createItem } from '../game/item';
+import { startReading } from '../game/reading';
 import { getUiRoot } from './framework';
 import { Hud, hud } from './hud';
 import { loadUiData, type UiContext } from './context';
-import { installInventoryUi, carriedEntries, nearbyEntries, openPickupMenu, openDropMenu, openItemPicker, showItemInfo } from './inventory_ui';
+import { itemActionHooks, installInventoryUi, carriedEntries, nearbyEntries, openPickupMenu, openDropMenu, openItemPicker, showItemInfo } from './inventory_ui';
 import { openCharacterSheet } from './charsheet';
 import { openHelp } from './help';
 import { cameraLookAt, describeHit, openLookMode } from './look';
@@ -39,6 +40,7 @@ export async function installUi(game: Game, renderer: Renderer, worldgen: WorldG
 
   game.lookAt = (maxDist) => cameraLookAt(ctx, maxDist);
   installInventoryUi(ctx);
+  itemActionHooks.read = (it) => void startReading(game, it);
   game.keys.register('character', 'View character sheet', () => void openCharacterSheet(ctx));
   game.keys.register('help', 'Help', () => void openHelp(ctx));
   game.keys.register('map', 'View map', () => void openOvermap(ctx));

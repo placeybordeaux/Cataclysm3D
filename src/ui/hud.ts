@@ -2,7 +2,7 @@ import type { Game } from '../game/game';
 import { BODY_PARTS, MAIN_PARTS } from '../game/bodyparts';
 import { colorize, c, cssColor } from './framework';
 import {
-  hpBar, hungerColor, logLine, MessageLog, moraleFace, painColor, sleepinessColor, staminaBar, tempColor, thirstColor,
+  durationText, hpBar, hungerColor, logLine, MessageLog, moraleFace, painColor, sleepinessColor, staminaBar, tempColor, thirstColor,
 } from './format';
 import { omtLabel, playerOmt, type UiContext } from './context';
 
@@ -146,7 +146,7 @@ export class Hud {
     const W = 20;
     const n = Math.round(a.fraction * W);
     this.actEl.style.display = '';
-    this.actEl.innerHTML = `${c('c_white', a.spec.name)}  ${c('c_dark_gray', '[')}${c('c_light_green', '#'.repeat(n))}${c('c_dark_gray', '-'.repeat(W - n) + ']')} ${c('c_white', `${Math.floor(a.fraction * 100)}%`)}`;
+    this.actEl.innerHTML = `${c('c_white', a.spec.name)}  ${c('c_dark_gray', '[')}${c('c_light_green', '#'.repeat(n))}${c('c_dark_gray', '-'.repeat(W - n) + ']')} ${c('c_white', `${Math.floor(a.fraction * 100)}%`)}  ${c('c_light_gray', `${durationText(Math.max(0, a.spec.duration - a.elapsed))} left`)}`;
   }
 
   renderLog(): void {
