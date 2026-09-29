@@ -1,4 +1,4 @@
-import { nearClamp } from './monsterView';
+import { meleeAimLift, nearClamp } from './monsterView';
 import type { Game, GameSystem } from '../game/game';
 import type { Npc } from '../game/npc';
 import type { NpcSystem } from '../game/npcai';
@@ -136,10 +136,14 @@ export class NpcView implements GameSystem {
       } else if (outfitCheck) this.refresh(n, v);
       const bob = n.moving ? Math.abs(Math.sin(n.walkPhase * Math.PI)) * 0.06 : 0;
       // Point-blank: draw as if at NEAR_CLAMP (see monsterView.ts nearClamp).
-      const near = nearClamp(this.renderer.rig.camera.position, n.x, n.y, n.z * LEVEL_HEIGHT);
-      v.h.set(n.x, n.y, n.z + (bob * near.scale + near.lift) / LEVEL_HEIGHT);
-      v.h.setVisible(Math.abs(n.z - p.z) <= 1);
+      // ...and raised to meet the crosshair at arm's length (monsterView.ts meleeAimLift)
+      const cam = this.renderer.rig.camera.position;
       const downed = n.effects.has('downed') || n.isAsleep();
+      const foot = n.z * LEVEL_HEIGHT + (this.renderer.groundAt?.(n.x, n.y, n.z) ?? 0);
+      const aim = downed || this.renderer.cameraMode !== 'first' ? 0 : meleeAimLift(Math.hypot(n.x - cam.x, n.y - cam.z), cam.y - foot, HEIGHT);
+      const near = nearClamp(cam, n.x, n.y, foot + aim);
+      v.h.set(n.x, n.y, n.z + (bob * near.scale + aim + near.lift) / LEVEL_HEIGHT);
+      v.h.setVisible(Math.abs(n.z - p.z) <= 1);
       v.h.setFrame(v.frame, HEIGHT * (downed ? 0.5 : 1) * near.scale);
     }
     // Bodies: fall over, then stay while the corpse item lies there.
