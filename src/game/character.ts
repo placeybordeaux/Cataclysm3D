@@ -42,6 +42,20 @@ export const MAX_RECOIL = 3000;
 /** Game seconds between CDDA's 5-minute needs updates. */
 const FIVE_MINUTES = 300;
 
+/** "torso", "torso and arms", "head, torso and legs": pairs of limbs collapse to the plural. */
+export function partList(parts: MainPartId[]): string {
+  const names: string[] = [];
+  for (const p of parts) {
+    const pair = p.endsWith('_l') || p.endsWith('_r');
+    const other = pair ? (p.slice(0, -1) + (p.endsWith('_l') ? 'r' : 'l')) as MainPartId : null;
+    if (other && parts.includes(other)) {
+      const plural = p.startsWith('arm') ? 'arms' : 'legs';
+      if (!names.includes(plural)) names.push(plural);
+    } else names.push(BODY_PARTS[p].name);
+  }
+  return names.length <= 1 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+}
+
 /** body_parts.json fire_warmth_bonus per main part (hands/feet folded into arms/legs), °C. */
 const FIRE_WARMTH_BONUS: Record<MainPartId, number> = { head: 0.3, torso: 0.3, arm_l: 1.2, arm_r: 1.2, leg_l: 0.6, leg_r: 0.6 };
 
@@ -894,6 +908,8 @@ export class Character {
     const k = 1 - Math.exp(-0.002 * dt);
     const waterproof = (p: MainPartId) => this.inv.wornCovering(p).some((it) => it.hasFlag('WATERPROOF') || it.hasFlag('RAINPROOF'));
     const asleep = this.isAsleep();
+    // Parts crossing the same threshold together get one message ("your torso and arms").
+    const warn = { numb: [] as MainPartId[], veryCold: [] as MainPartId[], chilly: [] as MainPartId[] };
     for (const p of MAIN_PARTS) {
       const before = this.bodyTemp[p];
       this.bodyTemp[p] += (this.bodyTempTarget(p) - before) * k;
@@ -904,11 +920,10 @@ export class Character {
       const hot = t > BODYTEMP.SCORCHING ? 3 : t > BODYTEMP.VERY_HOT ? 2 : t > BODYTEMP.HOT ? 1 : 0;
       this.setTempEffect('cold', p, cold);
       this.setTempEffect('hot', p, hot);
-      const name = BODY_PARTS[p].name;
       if (!asleep) {
-        if (before > BODYTEMP.FREEZING && t <= BODYTEMP.FREEZING) this.msg(`You feel your ${name} beginning to go numb from the cold!`, 'c_red');
-        else if (before > BODYTEMP.VERY_COLD && t <= BODYTEMP.VERY_COLD) this.msg(`You feel your ${name} getting very cold.`, 'c_yellow');
-        else if (before > BODYTEMP.COLD && t <= BODYTEMP.COLD) this.msg(`You feel your ${name} getting chilly.`, 'c_yellow');
+        if (before > BODYTEMP.FREEZING && t <= BODYTEMP.FREEZING) warn.numb.push(p);
+        else if (before > BODYTEMP.VERY_COLD && t <= BODYTEMP.VERY_COLD) warn.veryCold.push(p);
+        else if (before > BODYTEMP.COLD && t <= BODYTEMP.COLD) warn.chilly.push(p);
       }
       // CDDA: shivering keeps you from sleeping once your torso is very cold, unless you're
       // dead tired. We also count the head: we have no separate mouth/eyes/hands/feet, so a
@@ -919,6 +934,9 @@ export class Character {
         this.wakeUp();
       }
     }
+    if (warn.numb.length) this.msg(`You feel your ${partList(warn.numb)} beginning to go numb from the cold!`, 'c_red');
+    if (warn.veryCold.length) this.msg(`You feel your ${partList(warn.veryCold)} getting very cold.`, 'c_yellow');
+    if (warn.chilly.length) this.msg(`You feel your ${partList(warn.chilly)} getting chilly.`, 'c_yellow');
   }
   private setTempEffect(id: 'cold' | 'hot', p: MainPartId, intensity: number): void {
     const e = this.effects.get(id, p);

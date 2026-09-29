@@ -622,6 +622,8 @@ export class Item implements MapItem {
     if (this.isContainer()) {
       const inner = this.containerPockets().flatMap((p) => p.contents);
       if (inner.length === 1) s += ` > ${inner[0].name()}`;
+      // One stack of identical things reads like CDDA: "small cardboard box > borax powder (399)".
+      else if (inner.length > 1 && inner.every((i) => i.stacksWith(inner[0]))) s += ` > ${inner[0].name(inner.length)} (${inner.length})`;
       else if (inner.length > 1) s += ` > ${inner.length} items`;
     }
     return s;

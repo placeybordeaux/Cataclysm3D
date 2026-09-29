@@ -140,6 +140,13 @@ export function placeDropped(ctx: UiContext, items: Item[] | undefined): void {
   for (const it of items) ctx.game.map.addItem(p.tileX, p.tileY, p.z, it);
 }
 
+/** Menu text for a use_action: its menu_text, else a readable name for the action type. */
+function useActionLabel(ua: { type: string; menu_text?: unknown }): string {
+  if (typeof ua.menu_text === 'string' && ua.menu_text) return ua.menu_text;
+  const names: Record<string, string> = { firestarter: 'Start a fire', transform: 'Turn on', heal: 'Heal', consume_drug: 'Take' };
+  return names[ua.type] ?? ua.type.replace(/_/g, ' ');
+}
+
 /** Apply the bookkeeping every inventory action needs (map removal, dropped items). */
 function finish(ctx: UiContext, e: InvEntry, r: ActionResult, tookItem: boolean): ActionResult {
   if (r.ok && e.where === 'ground' && e.pos && (tookItem || r.usedUp)) ctx.game.map.removeItem(e.pos.x, e.pos.y, e.pos.z, e.item);
@@ -165,8 +172,19 @@ export function doAction(ctx: UiContext, action: ItemAction, e: InvEntry): Actio
       return finish(ctx, e, inv.takeOff(it), false);
     case 'eat':
       return finish(ctx, e, inv.consume(it), false);
-    case 'apply':
+    case 'apply': {
+      const acts = useActions(it.def);
+      if (acts.length > 1) {
+        // CDDA's activate submenu: "Light up" / "Start a fire" for a refillable lighter.
+        openMenu({
+          title: it.name(),
+          entries: acts.map((ua, i) => ({ label: c('c_white', useActionLabel(ua)), value: i })),
+          onSelect: (i) => void finish(ctx, e, inv.use(it, undefined, i), false),
+        });
+        return null;
+      }
       return finish(ctx, e, inv.use(it), false);
+    }
     case 'reload':
       return finish(ctx, e, inv.reload(it), false);
     case 'unload':

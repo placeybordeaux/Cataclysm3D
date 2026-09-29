@@ -508,10 +508,12 @@ export class Inventory {
    * Activate/use an item: heal (bandages, disinfectant), transform (flashlight on/off),
    * consume_drug (pills). `bp` targets medical items; otherwise the worst wound is chosen.
    */
-  use(it: Item, bp?: BodyPartId): ActionResult {
+  use(it: Item, bp?: BodyPartId, actionIndex = 0): ActionResult {
     const acts = useActions(it.def);
     if (acts.length === 0) return this.say(false, `You can't do anything interesting with your ${it.name()}.`);
-    const ua = acts[0];
+    // Items with several use_actions (a refillable lighter lights up *or* starts a fire): the
+    // UI asks which; the first is the default.
+    const ua = acts[Math.min(actionIndex, acts.length - 1)];
     switch (ua.type) {
       case 'heal':
         return this.useHeal(it, ua, bp);
@@ -520,7 +522,7 @@ export class Inventory {
       case 'consume_drug':
         return this.consume(it);
       default: {
-        for (const a of acts) {
+        for (const a of [ua, ...acts]) {
           const h = this.useHandlers.get(a.type);
           if (h) return h(it, a);
         }

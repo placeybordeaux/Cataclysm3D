@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { GameData } from '../src/data/types';
-import { BODYTEMP, Character, localWindchill, logarithmicRange } from '../src/game/character';
+import { BODYTEMP, Character, localWindchill, logarithmicRange, partList } from '../src/game/character';
 import { createItem, fromSpawned } from '../src/game/item';
 
 const dir = path.join(__dirname, '../public/data');
@@ -28,6 +28,16 @@ const hpLost = (c: Character) => Object.values(c.hp).reduce((a, h) => a + h.max 
 const SURVIVOR_CLOTHES = ['longshirt', 'jeans', 'socks', 'sneakers', 'boxer_shorts'];
 
 describe('CDDA body temperature', () => {
+  it('threshold messages group parts', () => {
+    expect(partList(['torso'])).toBe('torso');
+    expect(partList(['torso', 'arm_l', 'arm_r'])).toBe('torso and arms');
+    expect(partList(['head', 'arm_l', 'leg_l', 'leg_r'])).toBe('head, left arm and legs');
+    const { c, log } = survivor([]);
+    c.env = { temperature: 0, wind: 0, precipitation: false };
+    pass(c, 3600);
+    expect(log.filter((m) => /getting chilly/.test(m)).length).toBeLessThanOrEqual(2);
+  });
+
   it('helpers match cata_utility / weather.cpp', () => {
     expect(logarithmicRange(31, 43, 37)).toBeCloseTo(0.5, 5);
     expect(logarithmicRange(31, 43, 20)).toBe(1);
