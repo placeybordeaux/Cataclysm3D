@@ -30,7 +30,7 @@ import { registerOption } from '../ui/options';
 import { profile as browserProfile, type CounterStat, type Profile, type SetId } from './profile';
 import { available, newlyEarned, validateCatalogue, type Catalogue, type UnlockDef, type UnlockEnv } from './unlocks';
 import { NUDGES, NudgeQueue, craftableDiff, newRecipes, reachSignature, recipeNudgeText } from './discovery';
-import { SCENARIO_PLACEMENT } from './placement';
+import { SCENARIO_PLACEMENT, startClearVictims, type StartClearCandidate } from './placement';
 import { applyDifficulty, DEFAULT_DIFFICULTY, type Difficulty } from './difficulty';
 import { CraftBadge, nudgeToast, unlockToast, withKeys } from './ui';
 import { openJournal } from './journal';
@@ -356,9 +356,9 @@ export async function installProgression(
   let clearUntil = 0;
   const CLEAR_RADIUS = 10;
   const clearStart = () => {
-    const sys = (game as unknown as { monsters?: { all: { x: number; y: number; z: number; dead: boolean; attitude(): string }[]; remove(m: unknown): void } }).monsters;
+    const sys = (game as unknown as { monsters?: { all: StartClearCandidate[]; remove(m: unknown): void } }).monsters;
     if (!sys) return;
-    for (const m of sys.all) if (!m.dead && m.attitude() === 'attack' && within(m.x, m.y, m.z, CLEAR_RADIUS)) sys.remove(m);
+    for (const m of startClearVictims(sys.all, game.player, CLEAR_RADIUS)) sys.remove(m);
   };
 
   // ------------------------------------------------------------------ tick

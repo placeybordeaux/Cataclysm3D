@@ -303,6 +303,7 @@ function installDebug(api: DebugApi, game: Game, sys: MonsterSystem, spawner: Sp
   /** Spawn a monster at (dx, dy) tiles from the player (x east, y south). Returns its uid. */
   api.spawnMonster = (id: string, dx = 0, dy = -5, opts: { friendly?: boolean } = {}) => {
     const m = sys.spawnById(id, p().x + dx, p().y + dy, p().z, opts);
+    if (m) m.scripted = true;
     return m ? m.uid : null;
   };
   api.monsters = (all = false) =>

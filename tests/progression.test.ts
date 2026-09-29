@@ -8,7 +8,7 @@ import {
   available, newlyEarned, nextUp, progressLines, reqMet, statGoal, unlockMet, validateCatalogue, type Catalogue, type KnownIds, type UnlockEnv,
 } from '../src/progression/unlocks';
 import { craftableDiff, NUDGES, NudgeQueue, reachSignature, recipeNudgeText } from '../src/progression/discovery';
-import { SCENARIO_PLACEMENT } from '../src/progression/placement';
+import { SCENARIO_PLACEMENT, startClearVictims } from '../src/progression/placement';
 import { buildFor, kitPreview, professionDef, scenarioOptions, startCards } from '../src/progression/starts';
 import { DEFAULT_BINDINGS } from '../src/ui/keys';
 
@@ -326,5 +326,21 @@ describe('starts', () => {
     rec.add('scen_missed');
     expect(scenarioOptions(data, cat, evac, (id) => rec.has(id), false).map((s) => s.id).sort()).toEqual(['evacuee', 'missed', 'wilderness']);
     expect(startCards(data, cat, () => false, true).every((c) => c.available)).toBe(true);
+  });
+});
+
+describe('fresh-start clearing', () => {
+  const mon = (o: { x: number; y: number; z?: number; scripted?: boolean; dead?: boolean; att?: string }) => ({
+    x: o.x, y: o.y, z: o.z ?? 0, dead: !!o.dead, scripted: o.scripted, attitude: () => o.att ?? 'attack',
+  });
+  it('removes nearby hostiles from mapgen/spawner but never a scripted (debug API) spawn', () => {
+    const p = { x: 0, y: 0, z: 0 };
+    const wild = mon({ x: 0, y: -3 });
+    const placed = mon({ x: 0, y: -3, scripted: true });
+    const far = mon({ x: 0, y: -30 });
+    const below = mon({ x: 1, y: 1, z: -1 });
+    const calm = mon({ x: 2, y: 0, att: 'ignore' });
+    const gone = mon({ x: 1, y: 0, dead: true });
+    expect(startClearVictims([wild, placed, far, below, calm, gone], p, 10)).toEqual([wild]);
   });
 });

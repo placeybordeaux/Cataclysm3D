@@ -127,6 +127,11 @@ export class Monster {
    * are "unloaded" and deaf, as in CDDA.
    */
   horde = false;
+  /**
+   * Put there on purpose by a script or the debug API (cdda.spawnMonster), not by mapgen or the
+   * spawner. The fresh-start clearing (progression startClearVictims) leaves these alone.
+   */
+  scripted = false;
   dead = false;
   /** Current path (tile centres) toward goal and bookkeeping for re-planning. */
   path: [number, number][] = [];

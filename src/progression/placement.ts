@@ -64,6 +64,22 @@ function freeTile(map: GameMap, ox: number, oy: number, indoors: boolean): { x: 
  * for 'shelter' (stay put). Throws when the world has nowhere fitting: the caller shows
  * that rather than silently starting somewhere else.
  */
+/** What progression's fresh-start clearing may look at on a monster. */
+export interface StartClearCandidate {
+  x: number; y: number; z: number; dead: boolean; scripted?: boolean;
+  attitude(): string;
+}
+
+/**
+ * Hostiles to remove from around a fresh start: mapgen/spawner monsters within `radius` of
+ * the survivor. Monsters a script or the debug API placed on purpose stay: the clearing runs
+ * for a second after the start, and silently deleting a monster a test just spawned there made
+ * "kill a zombie" checks fail with nothing to fight.
+ */
+export function startClearVictims<M extends StartClearCandidate>(all: readonly M[], p: { x: number; y: number; z: number }, radius: number): M[] {
+  return all.filter((m) => !m.dead && !m.scripted && m.attitude() === 'attack' && m.z === p.z && Math.hypot(m.x - p.x, m.y - p.y) <= radius);
+}
+
 export function findStart(host: PlacementHost, placement: Placement, origin: { x: number; y: number }): Spot | null {
   const { map, overmap: ov } = host;
   if (placement === 'shelter') return null;
