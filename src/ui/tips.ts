@@ -45,7 +45,7 @@ export function startHints(): string[] {
     `Move with ${c('c_yellow', 'WASD')} and the mouse.  Hold ${c('c_yellow', 'Shift')} to run: ${c('c_light_green', 'you can outrun most zombies')}, but running burns stamina.  ${key('crouch')} crouches.`,
     `${c('c_light_red', 'Zombies hear you.')}  Smashing things, shouting and above all ${c('c_light_red', 'gunfire')} carry a long way and pull in everything nearby.  A quiet weapon keeps you alive longer.`,
     `${c('c_yellow', 'Left mouse')} attacks.  Heavy, awkward things make poor weapons: the time between swings is shown next to your weapon (${c('c_light_gray', 'Wield:')} in the sidebar).  ${key('wield')} wields, ${key('inventory')} opens your inventory, ${key('craft')} crafts.`,
-    `No weapon?  ${c('c_white', 'Sticks')} and ${c('c_white', 'rocks')} lie in the woods around the shelter, and smashing (${key('smash')}) a young tree gives ${c('c_white', 'long sticks')}.  With anything sharp, a long stick becomes a ${c('c_white', 'long pointy stick')} (${key('craft')}).`,
+    `No weapon?  ${c('c_white', 'Sticks')} and ${c('c_white', 'rocks')} lie in the woods around the shelter, and smashing (${key('smash')}) a young tree gives ${c('c_white', 'long sticks')}.  With a cutting tool (a knife, or a ${c('c_white', 'sharp rock')} knapped from a flaking rock), a long stick becomes a ${c('c_white', 'long pointy stick')} (${key('craft')}).`,
     `Don't fight against the odds.  There's no shame in running to survive.  ${key('help')} lists every key; ${key('menu')} pauses the game.`,
   ];
 }

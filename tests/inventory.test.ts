@@ -212,6 +212,20 @@ describe('reloading (9mm handgun)', () => {
     expect(c.inv.countOf('9mm')).toBe(15 + 5);
   });
 
+  it('empty gun + empty magazine + loose rounds: one reload fills and inserts the magazine', () => {
+    const { c } = survivor();
+    c.inv.wear(createItem(data, 'backpack'));
+    const gun = createItem(data, 'glock_19');
+    c.inv.wield(gun);
+    c.inv.pickUp(createItem(data, 'glockmag'));
+    c.inv.pickUp(createItem(data, '9mm', { count: 20 }));
+    const r = c.inv.reload();
+    expect(r.ok).toBe(true);
+    expect(gun.ammoRemaining()).toBe(15);
+    expect(c.inv.countOf('9mm')).toBe(15 + 5);
+    expect(r.moves).toBeGreaterThan(153);
+  });
+
   it('prefers the fullest spare magazine and stashes the old one', () => {
     const { c } = survivor();
     c.inv.wear(createItem(data, 'backpack'));

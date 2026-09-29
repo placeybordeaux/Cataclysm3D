@@ -313,11 +313,14 @@ function controlsMenu(game: Game): void {
   openMenu<Act>({ title: `${v.name} controls`, width: 'min(50ch, 90vw)', entries, onSelect: (fn) => void setTimeout(fn, 0) });
 }
 
-/** Dashboard line under the crosshair while driving. */
+/**
+ * Dashboard while driving, in the bottom-right corner: across the middle of the screen it hid
+ * the road ahead, and the message log owns the bottom-left.
+ */
 function dashboard(game: Game): HTMLElement {
   const el = document.createElement('div');
-  el.style.cssText = 'position:fixed;left:3vw;right:3vw;margin:0 auto;width:fit-content;bottom:26vh;background:rgba(0,0,0,.72);padding:3px 10px;' +
-    `font:16px Terminus,monospace;color:${cssColor('c_light_gray')};pointer-events:none;text-align:center;z-index:5;display:none`;
+  el.style.cssText = 'position:fixed;right:.5em;bottom:.5em;max-width:43vw;background:rgba(0,0,0,.72);padding:3px 10px;' +
+    `font-family:var(--ui-font);font-size:var(--ui-size);color:${cssColor('c_light_gray')};pointer-events:none;text-align:right;z-index:5;display:none`;
   getUiRoot().appendChild(el);
   let last = '';
   const update = () => {

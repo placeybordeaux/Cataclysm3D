@@ -1,7 +1,7 @@
 import type { Item } from '../game/item';
 import { unloadContainer } from './liquid_ui';
 import type { ActionResult } from '../game/inventory';
-import { useActions } from '../game/inventory';
+import { qualityUsages, useActions } from '../game/inventory';
 import { patchInteractUi } from '../game/interact';
 import { c, openMenu, openWindow, type MenuEntry, type UiWindow } from './framework';
 import { fit, kg, liters } from './format';
@@ -146,7 +146,9 @@ export function placeDropped(ctx: UiContext, items: Item[] | undefined): void {
 /** Menu text for a use_action: its menu_text, else a readable name for the action type. */
 function useActionLabel(ua: { type: string; menu_text?: unknown }): string {
   if (typeof ua.menu_text === 'string' && ua.menu_text) return ua.menu_text;
-  const names: Record<string, string> = { firestarter: 'Start a fire', transform: 'Turn on', heal: 'Heal', consume_drug: 'Take' };
+  const names: Record<string, string> = {
+    firestarter: 'Start a fire', transform: 'Turn on', heal: 'Heal', consume_drug: 'Take',
+  };
   return names[ua.type] ?? ua.type.replace(/_/g, ' ');
 }
 
@@ -176,17 +178,23 @@ export function doAction(ctx: UiContext, action: ItemAction, e: InvEntry): Actio
     case 'eat':
       return finish(ctx, e, inv.consume(it), false);
     case 'apply': {
-      const acts = useActions(it.def);
+      // Tool-quality usages (a shovel's till / dig) share one handler with its own menu of
+      // what's possible here, so they're one entry; listing each would ask twice.
+      const qTypes = new Set(qualityUsages.map((u) => u.type));
+      let quality = false;
+      const acts = useActions(it.def)
+        .map((ua, i) => ({ ua, i }))
+        .filter(({ ua }) => !qTypes.has(ua.type) || (!quality && (quality = true)));
       if (acts.length > 1) {
         // CDDA's activate submenu: "Light up" / "Start a fire" for a refillable lighter.
         openMenu({
           title: it.name(),
-          entries: acts.map((ua, i) => ({ label: c('c_white', useActionLabel(ua)), value: i })),
+          entries: acts.map(({ ua, i }) => ({ label: c('c_white', qTypes.has(ua.type) ? `Use your ${it.baseName()}` : useActionLabel(ua)), value: i })),
           onSelect: (i) => void finish(ctx, e, inv.use(it, undefined, i), false),
         });
         return null;
       }
-      return finish(ctx, e, inv.use(it), false);
+      return finish(ctx, e, inv.use(it, undefined, acts[0]?.i), false);
     }
     case 'reload':
       return finish(ctx, e, inv.reload(it), false);
@@ -300,7 +308,11 @@ export interface PickOpts {
 
 export function openItemPicker(ctx: UiContext, opts: PickOpts): UiWindow | null {
   const build = (): MenuEntry<InvEntry>[] => {
-    const list = stackEntries([...carriedEntries(ctx), ...(opts.includeNearby ? nearbyEntries(ctx) : [])].filter(opts.filter));
+    const kept = [...carriedEntries(ctx), ...(opts.includeNearby ? nearbyEntries(ctx) : [])].filter(opts.filter);
+    // Contents whose container was filtered out (coins when the wallet can't be applied) stand
+    // on their own; otherwise they'd be drawn as "> 2 dimes" under whatever item came before.
+    const shown = new Set(kept.map((e) => e.item));
+    const list = stackEntries(kept.map((e) => (e.depth > 0 && e.parent && !shown.has(e.parent) ? { ...e, depth: 0 } : e)));
     // Group each top-level entry with the nested items listed right after it, then order
     // groups CDDA-style: wielded, worn, pocket contents by category sort_rank, nearby.
     const groups: InvEntry[][] = [];
@@ -535,7 +547,12 @@ export function pickUpRows(ctx: UiContext, chosen: MultiRow[]): void {
       continue;
     }
     for (const it of whole) {
-      if (!inv.pickUp(it).ok) return; // CDDA stops at the first thing that doesn't fit
+      // CDDA's pickup asks "[W]ear it?" for clothes that don't fit a pocket; wearing is the
+      // useful answer (the evac shelter's emergency jacket). Anything else that doesn't fit is
+      // skipped and the rest of the selection is still taken.
+      const wearInstead = !inv.canStash(it) && it.isArmor() && inv.canWear(it).ok;
+      const ok = wearInstead ? inv.wear(it).ok : inv.pickUp(it).ok;
+      if (!ok) break;
       map.removeItem(pos.x, pos.y, pos.z, it);
     }
   }

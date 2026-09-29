@@ -149,6 +149,8 @@ export function openOvermap(ctx: UiContext): UiWindow | null {
   const cellH = probe.getBoundingClientRect().height || 16;
   probe.remove();
 
+  const refugee = refugeeCenterOmt(wg, playerOmt(ctx));
+
   function render(): void {
     const cols = Math.max(20, Math.floor(mapEl.clientWidth / cellW));
     const rows = Math.max(10, Math.floor(mapEl.clientHeight / cellH));
@@ -174,6 +176,13 @@ export function openOvermap(ctx: UiContext): UiWindow | null {
       const r = Math.floor((city.y - oy) / zoom), col = Math.floor((city.x - ox) / zoom);
       if (r < 0 || r >= rows || col < 0 || col >= cols) continue;
       labels += `<div class="pre" style="position:absolute;left:${(col + 0.5) * cellW}px;top:${r * cellH}px;transform:translateX(-50%);color:var(--c-white);background:#000;padding:0 .2em">${city.name.replace(/</g, '&lt;')}</div>`;
+    }
+    // The refugee center is marked from the start (src/npcs.ts); name it so the evacuee
+    // knows what the walled compound is.
+    if (refugee && cz === 0 && game.overmapSeen.has(seenKey(refugee.x, refugee.y, 0))) {
+      const r = Math.floor((refugee.y - oy) / zoom), col = Math.floor((refugee.x - ox) / zoom);
+      if (r >= 0 && r < rows && col >= 0 && col < cols)
+        labels += `<div class="pre" style="position:absolute;left:${(col + 0.5) * cellW}px;top:${r * cellH}px;transform:translateX(-50%);color:var(--c-light_cyan);background:#000;padding:0 .2em">Refugee Center</div>`;
     }
     const pr = Math.floor((pl.y - oy) / zoom), pc = Math.floor((pl.x - ox) / zoom);
     const cr = Math.floor((cy - oy) / zoom), cc = Math.floor((cx - ox) / zoom);
@@ -214,4 +223,17 @@ export function openOvermap(ctx: UiContext): UiWindow | null {
   requestAnimationFrame(render);
   render();
   return w;
+}
+
+/** Centre OMT of the evac_center special (the refugee center), or null if none is near. */
+function refugeeCenterOmt(wg: NonNullable<UiContext['worldgen']>, from: { x: number; y: number }): { x: number; y: number } | null {
+  const sp = wg.overmap.findSpecial('evac_center', from, 3);
+  if (!sp) return null;
+  let n = 0, sx = 0, sy = 0;
+  for (let dy = -18; dy <= 18; dy++)
+    for (let dx = -18; dx <= 18; dx++) {
+      if (!/^(refctr|evac_center)/.test(wg.overmap.omtAt(sp.x + dx, sp.y + dy, 0).id)) continue;
+      (n++, (sx += sp.x + dx), (sy += sp.y + dy));
+    }
+  return n ? { x: Math.round(sx / n), y: Math.round(sy / n) } : null;
 }

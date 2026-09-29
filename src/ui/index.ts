@@ -97,7 +97,10 @@ export async function installUi(game: Game, renderer: Renderer, worldgen: WorldG
     if (dead) return;
     dead = true;
     // A beat so the killing blow and "You die…" register before the screen fades in.
-    setTimeout(() => showDeathScreen(ctx, h, e.cause), 1200);
+    // The world keeps ticking during that beat; report the moment of death (the memorial
+    // entry, written right away, uses it too).
+    const at = game.clock.seconds;
+    setTimeout(() => showDeathScreen(ctx, h, e.cause, at), 1200);
   });
 
   // --- automation helpers (window.cdda)

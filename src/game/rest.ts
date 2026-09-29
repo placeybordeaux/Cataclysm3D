@@ -189,6 +189,7 @@ function startSleepActivity(game: Game): boolean {
   const p = game.player;
   let sinceCheck = 1800; // check immediately
   let awakeFor = 0;
+  let slept = false;
   const ok = game.activities.start({
     name: SLEEP_ACTIVITY,
     duration: 24 * SECONDS_PER_HOUR,
@@ -202,10 +203,13 @@ function startSleepActivity(game: Game): boolean {
       }
       if (p.isAsleep()) {
         awakeFor = 0;
+        slept = true;
         return;
       }
       if (!p.hasEffect('lying_down') && awakeFor > 0) {
-        // Woke up (rested, noise, attack) or gave up trying.
+        // Woke up (rested, noise, attack: those say so themselves) or lying_down ran out
+        // without ever dropping off, which would otherwise end the activity in silence.
+        if (!slept) game.message("You try to sleep, but you just can't.", 'c_yellow');
         if (a) a.elapsed = a.spec.duration;
         return;
       }

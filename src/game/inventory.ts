@@ -758,6 +758,13 @@ export class Inventory {
         .filter((m) => m !== cur && m.isMagazine() && target.acceptsMagazine(m))
         .sort((a, b) => b.ammoRemaining() - a.ammoRemaining());
       const best = mags[0];
+      // An empty gun and only empty magazines: fill one from loose rounds first, so one `r`
+      // leaves the gun loaded instead of holding an empty magazine.
+      let fillCost = 0;
+      if (best && best.ammoRemaining() === 0 && !cur?.ammoRemaining()) {
+        const { loaded, ammo } = this.fillFromLoose(best);
+        if (loaded && ammo) fillCost = this.reloadCost(best, ammo, loaded);
+      }
       if (best && best.ammoRemaining() > (cur?.ammoRemaining() ?? -1)) {
         const dropped: Item[] = [];
         this.remove(best);
@@ -766,7 +773,7 @@ export class Inventory {
           if (this.stash(cur)) dropped.push(cur);
         }
         well.insert(best);
-        return this.say(true, `You reload the ${target.baseName()}.`, this.reloadCost(target, best, 1), dropped.length ? { dropped } : {});
+        return this.say(true, `You reload the ${target.baseName()}.`, fillCost + this.reloadCost(target, best, 1), dropped.length ? { dropped } : {});
       }
       if (cur && cur.ammoRemaining() < cur.ammoCapacity()) return this.reloadMagazine(cur);
       if (cur) return this.say(false, `The ${target.baseName()} is already fully loaded!`);

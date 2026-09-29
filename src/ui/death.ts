@@ -4,6 +4,7 @@ import { durationText, logLine } from './format';
 import type { Hud } from './hud';
 import type { UiContext } from './context';
 import { achievementsOf } from '../achievements';
+import { GameClock } from '../core/time';
 
 // Death: CDDA's end screen (end_screen.json "death_tombstone" over the ascii_tombstone
 // picture, with name / time survived / kills stamped onto the stone), then the memorial
@@ -20,17 +21,28 @@ export function stampTombstone(picture: string[], info: [[number, number], strin
     const row = rows[y];
     if (row === undefined || /<color_/.test(row)) continue;
     const plain = text.replace(/<\/?color[^>]*>/g, '');
-    const padded = row.padEnd(x + plain.length);
-    rows[y] = padded.slice(0, x) + text + padded.slice(x + plain.length);
+    let stamp = text;
+    let at = x;
+    // Keep long untagged values ("Survived: 1 hour and 57 minutes") inside the stone: slide
+    // left to end before the right border, and clip only if even that doesn't fit.
+    const border = row.trimEnd().length - 1;
+    if (plain === text && border > x && x + plain.length > border - 1) {
+      at = Math.max(1, border - 1 - plain.length);
+      stamp = plain.slice(0, border - 1 - at);
+    }
+    const len = stamp === text ? plain.length : stamp.length;
+    const padded = row.padEnd(at + len);
+    rows[y] = padded.slice(0, at) + stamp + padded.slice(at + len);
   }
   return rows;
 }
 
-export function showDeathScreen(ctx: UiContext, hud: Hud, cause: string): void {
+export function showDeathScreen(ctx: UiContext, hud: Hud, cause: string, diedAt = ctx.game.clock.seconds): void {
   const { game } = ctx;
   const p = game.player;
   sfx.playerDeath(!p.male);
-  const survived = durationText(game.clock.seconds - game.stats.startSeconds);
+  const survived = durationText(diedAt - game.stats.startSeconds);
+  const deathClock = Object.assign(new GameClock(), { seconds: diedAt });
   const kills = game.stats.totalKills();
   const vars = { u_name: p.name, time_survived: survived, total_kills: String(kills) };
   const art = stampTombstone(ctx.data.tombstone.picture, ctx.data.tombstone.added_info, vars);
@@ -47,7 +59,7 @@ export function showDeathScreen(ctx: UiContext, hud: Hud, cause: string): void {
     c('c_light_red', 'In memory of ') + c('c_white', p.name),
     '',
     `${c('c_light_gray', 'Cause of death:')} ${c('c_red', cause)}`,
-    `${c('c_light_gray', 'Survived:')} ${c('c_white', survived)}  ${c('c_dark_gray', `(${game.clock.format()})`)}`,
+    `${c('c_light_gray', 'Survived:')} ${c('c_white', survived)}  ${c('c_dark_gray', `(${deathClock.format()})`)}`,
     ctx.build ? `${c('c_light_gray', 'Profession:')} ${c('c_white', ctx.build.profession)}   ${c('c_light_gray', 'Scenario:')} ${c('c_white', ctx.build.scenario)}` : '',
     '',
     `${c('c_light_gray', 'Kills:')} ${c('c_white', String(kills))}`,

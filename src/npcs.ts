@@ -216,11 +216,6 @@ function spawnMapgenNpc(sys: NpcSystem, template: string, x: number, y: number, 
   return n;
 }
 
-/**
- * A few survivors roam the towns (CDDA's overmap NPCs): mostly scavengers of the common
- * classes, some of whom walk up to talk or carry a job, and the odd bandit gang member
- * who attacks on sight (never right next to the evac shelter).
- */
 /** Add the refugee center's OMTs (evac_center special) to the overmap memory. */
 export function revealRefugeeCenter(game: Game, wg: WorldGenerator, from: { x: number; y: number }): { x: number; y: number } | null {
   const sp = wg.overmap.findSpecial('evac_center', from, 3);
@@ -235,6 +230,11 @@ export function revealRefugeeCenter(game: Game, wg: WorldGenerator, from: { x: n
   return n ? { x: Math.round(sx / n), y: Math.round(sy / n) } : null;
 }
 
+/**
+ * A few survivors roam the towns (CDDA's overmap NPCs): mostly scavengers of the common
+ * classes, some of whom walk up to talk or carry a job, and the odd bandit gang member
+ * who attacks on sight (never right next to the evac shelter).
+ */
 function randomSurvivor(sys: NpcSystem, wg: WorldGenerator, c: Chunk, start: { x: number; y: number }): void {
   const o = wg.overmap.omtAt(c.cx, c.cy, 0);
   const inCity = !!o.special?.city || (o.type === 'road' && !!wg.overmap.closestCity(c.cx, c.cy, 0));

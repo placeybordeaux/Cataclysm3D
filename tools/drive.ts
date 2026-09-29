@@ -111,7 +111,12 @@ const http = createHttp(async (req, res) => {
       out = p;
     } else if (what === 'key') {
       // "Shift+e" presses with a modifier; plain tokens are key names ("i", "Escape", "Enter").
-      for (const tok of body.trim().split(/\s+/).filter(Boolean)) {
+      // "ArrowDown*12" repeats a token.
+      const toks = body.trim().split(/\s+/).filter(Boolean).flatMap((t) => {
+        const m = /^(.+)\*(\d+)$/.exec(t);
+        return m ? Array(Number(m[2])).fill(m[1]) : [t];
+      });
+      for (const tok of toks) {
         const parts = tok.split('+');
         const key = parts.pop()!;
         for (const m of parts) await page.keyboard.down(m as never);

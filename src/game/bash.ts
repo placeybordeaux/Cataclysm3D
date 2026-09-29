@@ -261,6 +261,9 @@ export function playerSmash(game: Game, target: TargetTile | null = targetTile(g
     if (p.getSkill('melee') === 0 && p.rng.oneIn(4)) p.practice('melee', 1);
     if (res.success) game.message(`You smash the ${res.target}!`);
     else if (!res.canBash) game.message(`You don't seem to be damaging the ${res.target}.`, 'c_light_gray');
+    // CDDA logs the fail sound ("whack!") on every blow that doesn't break it, so a tree that
+    // takes five hits still tells you something is happening.
+    else if (res.sound) game.message(res.sound, 'c_light_gray');
   }
   return res;
 }

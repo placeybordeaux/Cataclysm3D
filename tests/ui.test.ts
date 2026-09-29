@@ -185,6 +185,15 @@ describe('death screen', () => {
     expect(out[2]).toBe('|        |');
     expect(out[3]).toBe(pic[3]);
   });
+  it('slides a long value left so it stays inside the stone, clipping only if it must', () => {
+    const pic = ['|              |', '|              |'];
+    const out = stampTombstone(pic, [[[6, 0], 'Kills: <k>'], [[6, 1], '<t>']], { k: '12345', t: 'a very long survival time' });
+    expect(out[0]).toBe('| Kills: 12345 |');
+    expect(out[0].length).toBe(pic[0].length);
+    expect(out[0].endsWith('|')).toBe(true);
+    expect(out[1].length).toBe(pic[1].length);
+    expect(out[1].endsWith('|')).toBe(true);
+  });
 });
 
 describe('GameStats', () => {

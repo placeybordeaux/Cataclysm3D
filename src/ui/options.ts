@@ -15,6 +15,7 @@ export interface GameOptions {
   mouseSensitivity: number;
   px: number;
   grade: GradeMode;
+  camera: (typeof CAMERA_MODES)[number];
 }
 
 function loadStored(): Partial<GameOptions> {
@@ -43,6 +44,7 @@ export function applyStoredOptions(ctx: UiContext): void {
     ctx.renderer.resize();
   }
   if (o.grade && !params.get('grade')) pipe.options.grade = o.grade;
+  if (o.camera && CAMERA_MODES.includes(o.camera) && !params.get('cam')) ctx.renderer.setCameraMode(o.camera);
 }
 
 export interface Opt {
@@ -98,7 +100,10 @@ export function openOptions(ctx: UiContext): UiWindow {
   opts.push({
     name: 'Camera',
     value: () => renderer.cameraMode,
-    change: (d) => renderer.setCameraMode(cycle(CAMERA_MODES, renderer.cameraMode, d)),
+    change: (d) => {
+      renderer.setCameraMode(cycle(CAMERA_MODES, renderer.cameraMode, d));
+      store({ camera: renderer.cameraMode });
+    },
     desc: 'First person, over the shoulder, or CDDA-style top-down (also V in game).',
   });
   opts.push(...extraOptions);
