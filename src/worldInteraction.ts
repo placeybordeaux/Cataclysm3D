@@ -54,6 +54,12 @@ export function installWorldInteraction(game: Game, renderer: Renderer, api: Deb
 
   game.keys.register('interact', 'Examine / open / close / use', () => void interact(game));
   game.keys.register('smash', 'Smash', () => void playerSmash(game));
+  // Crouching: slower and quieter, and zombies see you from less far (monai sightRangeToPlayer).
+  game.keys.register('crouch', 'Crouch / stand up', () => {
+    const p = game.player;
+    p.crouching = !p.crouching;
+    game.message(p.crouching ? 'You crouch.' : 'You stand up.', 'c_light_gray');
+  });
   game.keys.register('flashlight', 'Toggle light (flashlight, lantern)', () => void toggleLight(game));
   game.keys.register('sleep', 'Sleep', () => {
     const p = game.player;

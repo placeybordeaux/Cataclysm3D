@@ -144,7 +144,7 @@ export async function installNpcs(game: Game, renderer: Renderer | null, worldge
   hud.addPromptProvider(() => {
     const n = npcUnderCrosshair();
     if (!n || n.isEnemy()) return null;
-    return `[e] Talk to ${n.displayName()}`;
+    return `[${game.keys.keyFor('interact')}] Talk to ${n.displayName()}`;
   });
 
   // ---------------------------------------------------------------- keys

@@ -10,6 +10,9 @@ import {
 } from '../src/ui/chargen_logic';
 import { stampTombstone } from '../src/ui/death';
 import { GameStats } from '../src/game/stats';
+import { DEFAULT_BINDINGS } from '../src/ui/keys';
+import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { join } from 'node:path';
 
 describe('CDDA bars (output.cpp get_bar / get_hp_bar)', () => {
   it('full HP is five green pipes', () => {
@@ -196,5 +199,23 @@ describe('GameStats', () => {
     t.load(s.toJSON());
     expect(t.kills).toEqual({ mon_zombie: 2, mon_zombie_dog: 1 });
     expect(t.distanceWalked).toBe(12.5);
+  });
+});
+
+describe('key bindings (src/ui/keys.ts is the single source)', () => {
+  const walk = (d: string): string[] => readdirSync(d).flatMap((f) => (statSync(join(d, f)).isDirectory() ? walk(join(d, f)) : f.endsWith('.ts') ? [join(d, f)] : []));
+  const src = walk(join(__dirname, '..', 'src')).map((f) => readFileSync(f, 'utf8')).join('\n');
+  it('no key is bound twice, and none collides with movement (WASD, Space, Shift)', () => {
+    const seen = new Map<string, string>();
+    for (const [id, keys] of Object.entries(DEFAULT_BINDINGS)) {
+      for (const k of keys) {
+        expect(seen.get(k), `${k}: ${id} vs ${seen.get(k)}`).toBeUndefined();
+        seen.set(k, id);
+        expect(['w', 'a', 's', 'd', ' ', 'Shift'], `${id} uses a movement key`).not.toContain(k);
+      }
+    }
+  });
+  it('every binding in the table is registered by some system (so ? help lists exactly the table)', () => {
+    for (const id of Object.keys(DEFAULT_BINDINGS)) expect(src.includes(`keys.register('${id}'`), id).toBe(true);
   });
 });

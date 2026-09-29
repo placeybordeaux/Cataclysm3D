@@ -150,8 +150,6 @@ export class Renderer {
       : Promise.resolve();
 
     game.keys.register('camera_mode', 'Cycle camera (first person / shoulder / top-down)', () => this.setCameraMode(this.rig.cycle()));
-    // Placeholder until the flashlight item drives it (items/interaction own that).
-    game.keys.register('flashlight', 'Toggle flashlight', () => this.toggleFlashlight());
     game.input.onPress((e) => {
       if (o.debug && e.code === 'F6') {
         const modes: GradeMode[] = ['palette', 'smooth', 'off'];
