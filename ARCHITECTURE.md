@@ -259,6 +259,10 @@ tests/               vitest unit tests (pure logic, no DOM/WebGL)
   {fuel,status})`, `cdda.vehicles()`, `cdda.enterVehicle()`, `cdda.drive(throttle, steer,
   s, brake?)`, `cdda.roadTrip(proto)`, `cdda.gotoVehicle(regex, {angle, dist})`,
   `cdda.vehicleLights(on)`, `cdda.vehicleAt(dx, dy)`.
+- Mesh (vehicleMesh.ts): bonnet rows ahead of the windscreen slope from 0.9 m to 0.7 m at the
+  nose, low dark cowl/dash, thin A-pillars, faint glass (0.14), painted panels mid-tone with
+  darker tops (`panelTop`) so sunlit cars don't read as white slabs; BN wheel sizes are cm.
+  Headlights: a spot aimed ~30 m out plus four light-map beam lights out to ~30 m.
 ### NPCs, dialogue, trade, missions (src/game, wired by src/npcs.ts `installNpcs`)
 - Data: `public/data/npcs.json` (`npm run extract:npcs`, tools/extract/npcs.ts): npc templates,
   npc_class, talk_topic (merged like CDDA: responses append across definitions), mission_definition,
@@ -573,8 +577,15 @@ Keys: `V` camera mode, `F` flashlight.
 - **Seams**: world textures take alpha (cut-out coverage) from mip 0 while colour uses the chosen
   mip (materials.ts WORLD_MAP), ceilings tuck `CEIL_TUCK` into the walls below and door leaves
   overlap their lintel: edge-to-edge geometry showed sky-coloured dotted cracks on real GPUs.
-- **Cameras**: third person becomes a chase camera while driving (`rig.suppressBob`); the mouse
-  wheel zooms top-down (`rig.topDistance` 10–60).
+- **Cameras**: the mouse wheel zooms top-down (`rig.topDistance` 10–60). While driving,
+  VehicleRenderer fills `rig.drive` (a `DriveView`: centre, heading, driver eye, length, speed,
+  roughness) every frame and V cycles the driving cameras (`rig.driveCam`, persisted in
+  localStorage `cdda3d.driveCam`, separate from the on-foot `rig.footMode`): chase (default;
+  trails the heading, pulled in by walls, looks further ahead and widens FOV with speed) ->
+  cockpit (driver eye ~1.2 m in cars, 1.3–1.45 m in vans/buses; mouse look is relative to the
+  car because `p.yaw` turns with it) -> top-down. `rig.mode` reads as the on-foot equivalent
+  (chase = third, cockpit = first). Pure math in src/render/driveCamera.ts
+  (tests/driveCamera.test.ts).
 - **Other**: `renderer.setWeather('clear'|'rain'|'storm'|'snow')`,
   `renderer.setCameraMode('first'|'third'|'top')`, `renderer.flushChunks()` (tests).
   Plain three.js objects added to `renderer.scene` are auto-patched for the MRT output.
