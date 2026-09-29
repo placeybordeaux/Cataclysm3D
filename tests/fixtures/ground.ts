@@ -13,6 +13,11 @@ export class FakeGround implements Ground {
     if (!this.tiles.has(k)) this.tiles.set(k, []);
     this.tiles.get(k)!.push(it);
   }
+  insertItemAt(x: number, y: number, z: number, index: number, it: MapItem): void {
+    const k = `${x},${y},${z}`;
+    if (!this.tiles.has(k)) this.tiles.set(k, []);
+    this.tiles.get(k)!.splice(index, 0, it);
+  }
   removeItem(x: number, y: number, z: number, it: MapItem): boolean {
     const l = this.tiles.get(`${x},${y},${z}`);
     const i = l ? l.indexOf(it) : -1;

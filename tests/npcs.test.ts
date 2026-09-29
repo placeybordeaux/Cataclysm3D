@@ -14,7 +14,8 @@ import { generateNpc, rollClassSkills, rollDistribution, type NpcData } from '..
 import { Rng } from '../src/core/rng';
 import { Dialogue, parseDuration } from '../src/game/talk';
 import { evalMath, type MathHost } from '../src/game/talkmath';
-import { createItem, fromSpawned } from '../src/game/item';
+import { createItem, fromSpawned, inNewContainer } from '../src/game/item';
+import { census, L } from '../src/game/moves';
 import { expandItemGroup } from '../src/data/itemgroups';
 import { TradeSession, adjustedPrice, priceAdjustment, tradingPrice } from '../src/game/trade';
 
@@ -430,6 +431,25 @@ describe('trade', () => {
     } else {
       expect(s.canAccept().ok).toBe(false);
     }
+  });
+
+  it('selling a wielded bag hands over the bag with its contents, once (v1 sold the contents twice)', () => {
+    const { npcs, game } = world();
+    const n = npcs.spawn({ cls: 'NC_SCAVENGER' }, 14, 12, 0)!;
+    new Dialogue(npcs, n).effect('follow'); // friends swap freely
+    const p = game.player;
+    const bag = inNewContainer(data, createItem(data, '9mm', { count: 40 }), 'bag_canvas').container;
+    expect(p.inv.wield(bag, null).ok).toBe(true);
+    const scope = [L.hands(p), L.worn(p), L.inv(p), L.hands(n), L.worn(n), L.inv(n), L.stock(n), L.ground(game.map, p.tileX, p.tileY, p.z)];
+    const before = census(scope).counts;
+    const s = new TradeSession(data, nd, p, n);
+    // the rounds are inside the bag, not separate goods
+    expect(s.yours.filter((e) => e.item.typeId === '9mm')).toEqual([]);
+    s.toggle(s.yours.find((e) => e.item === bag)!);
+    expect(s.commit()).toBe(true);
+    expect(p.inv.wielded).toBeNull();
+    expect(census(scope).counts).toEqual(before);
+    expect(census(scope).aliased).toEqual([]);
   });
 
   it('refuses a lopsided deal, followers trade freely', () => {

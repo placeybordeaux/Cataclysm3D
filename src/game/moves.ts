@@ -28,6 +28,8 @@ export interface Ground {
   itemsAt(x: number, y: number, z: number): readonly MapItem[];
   addItem(x: number, y: number, z: number, item: MapItem): void;
   removeItem(x: number, y: number, z: number, item: MapItem): boolean;
+  /** Optional: re-insert at a list position, so an undone move restores the tile's order too. */
+  insertItemAt?(x: number, y: number, z: number, index: number, item: MapItem): void;
   furnAt?(x: number, y: number, z: number): { id: string; name?: unknown; max_volume?: number; flags?: string[] };
 }
 /** A vehicle CARGO part (src/game/vehicle.ts VehiclePart satisfies it). */
@@ -240,8 +242,9 @@ function rawDetach(loc: Loc, it: Item, log: Undo[]): void {
       return arr(loc.host._gunmods);
     case 'ground': {
       const { map, x, y, z } = loc;
+      const i = map.itemsAt(x, y, z).indexOf(it);
       if (!map.removeItem(x, y, z, it)) throw new Error(`moves: ${it.typeId} not on the ground at ${x},${y},${z}`);
-      record(log, () => map.addItem(x, y, z, it));
+      record(log, () => (map.insertItemAt ? map.insertItemAt(x, y, z, i, it) : map.addItem(x, y, z, it)));
       return;
     }
     case 'cargo':
@@ -916,6 +919,18 @@ export function* walkLocs(locs: Loc[]): Generator<{ item: Item; loc: Loc }> {
   for (const l of locs) yield* visit(l);
 }
 
+const unsealedFrom = new WeakMap<object, Map<string, string>>();
+/** An opened can counts as the can it was (unseals_into changes the type, not the quantity). */
+function sealedOriginal(it: Item): string {
+  let m = unsealedFrom.get(it.data);
+  if (!m) {
+    m = new Map();
+    for (const d of Object.values(it.data.items)) if (d.container_data?.unseals_into) m.set(d.container_data.unseals_into, d.id);
+    unsealedFrom.set(it.data, m);
+  }
+  return m.get(it.typeId) ?? it.typeId;
+}
+
 /**
  * Quantity per item type (charges-aware; integral-magazine rounds count as their ammo type)
  * across `locs`, and every item object seen more than once (aliasing = duplication). The
@@ -929,7 +944,7 @@ export function census(locs: Loc[]): { counts: Map<string, number>; aliased: Ite
   for (const { item } of walkLocs(locs)) {
     if (seen.has(item)) aliased.push(item);
     seen.add(item);
-    add(item.typeId, item.count());
+    add(sealedOriginal(item), item.count());
     if (!item.countByCharges && item.ammoId && item.charges > 0) add(item.ammoId, item.charges);
   }
   return { counts, aliased };
