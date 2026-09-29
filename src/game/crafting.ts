@@ -186,7 +186,8 @@ export function nestedCategories(data: GameData): NestedCategory[] {
 // ------------------------------------------------------------------ checks
 export function recipeName(data: GameData, r: RecipeDef): string {
   const n = cddaText(r.name as unknown);
-  if (n) return n;
+  // CDDA recipe names like "%s in jar" put the result's name in the %s.
+  if (n) return n.includes('%s') ? n.replace('%s', itemDisplayName(data, r.result)) : n;
   return itemDisplayName(data, r.result);
 }
 

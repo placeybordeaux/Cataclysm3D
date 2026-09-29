@@ -97,7 +97,7 @@ export function openAchievements(game: Game, h: AchievementsHandle): void {
     title: 'Scores',
     width: 'min(90ch, 94vw)',
     height: '80vh',
-    footer: `${c('c_light_green', '<Tab>')} next tab  ${c('c_light_green', 'Up/Down')} scroll  ${c('c_light_green', 'Esc')} close`,
+    footer: `${c('c_light_green', 'Tab')} next tab  ${c('c_light_green', '↑↓')} scroll`,
     onKey: (e) => {
       if (e.key === 'Tab' || e.key === 'ArrowRight' || e.key === 'l') tab = (tab + 1) % TABS.length;
       else if (e.key === 'ArrowLeft' || e.key === 'h') tab = (tab + TABS.length - 1) % TABS.length;

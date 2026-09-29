@@ -170,7 +170,7 @@ export class Hud {
     const W = 20;
     const n = Math.round(a.fraction * W);
     this.actEl.style.display = '';
-    this.actEl.innerHTML = `${c('c_white', a.spec.name)}  ${c('c_dark_gray', '[')}${c('c_light_green', '#'.repeat(n))}${c('c_dark_gray', '-'.repeat(W - n) + ']')} ${c('c_white', `${Math.floor(a.fraction * 100)}%`)}  ${c('c_light_gray', `${durationText(Math.max(0, a.spec.duration - a.elapsed))} left`)}`;
+    this.actEl.innerHTML = `${c('c_white', a.spec.name)}  ${c('c_dark_gray', '[')}${c('c_light_green', '#'.repeat(n))}${c('c_dark_gray', '-'.repeat(W - n) + ']')} ${c('c_white', `${Math.floor(a.fraction * 100)}%`)}  ${c('c_light_gray', `${durationText(Math.max(0, a.spec.duration - a.elapsed))} left`)}  ${c('c_dark_gray', '(move to stop)')}`;
   }
 
   renderLog(): void {

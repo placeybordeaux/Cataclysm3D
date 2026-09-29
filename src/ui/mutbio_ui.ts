@@ -55,7 +55,7 @@ export function openMutationsMenu(game: Game, mods: BodyMods): UiWindow {
     width: 'min(96ch, 94vw)',
     detailPane: true,
     entries: entries(),
-    footer: `${c('c_light_green', 'letter')} activate/deactivate · ${c('c_light_green', 'Esc')} close`,
+    footer: `${c('c_light_green', 'letter')} activate/deactivate`,
     onSelect: (id) => {
       game.message(mut.toggle(id));
       m.refresh(entries());
@@ -96,7 +96,7 @@ export function openBionicsMenu(game: Game, mods: BodyMods): UiWindow {
     width: 'min(120ch, 96vw)',
     detailPane: true,
     entries: entries(),
-    footer: `${c('c_light_green', 'letter')} activate/deactivate · ${c('c_light_green', 'Esc')} close`,
+    footer: `${c('c_light_green', 'letter')} activate/deactivate`,
     onSelect: (id) => {
       bio.toggle(id);
       m.refresh(entries());
@@ -171,13 +171,13 @@ export async function installCbmFlow(game: Game, mods: BodyMods, it: Item, opts:
   const chance = bio.successChance(it.typeId, opts.autodoc);
   const q = chance >= 100 ? 'Are you sure you wish to install the selected bionic?'
     : `WARNING: ${100 - chance} percent chance of failure that may result in damage, pain, or a faulty installation!  Continue anyway?`;
-  if (!(await confirm(`${opts.autodoc ? 'Autodoc Mk. XI.  ' : ''}Install <color_white>${bio.name(it.typeId)}</color>?\n${q}`))) return false;
+  if (!(await confirm(`${opts.autodoc ? 'Autodoc Mk. XI.  ' : ''}Install <color_white>${bio.name(it.typeId)}</color>?\n${q}`, { destructive: true }))) return false;
   const need = bio.anesthesiaNeeded(it.typeId);
   let awake = false;
   if (bio.needsAnesthesia()) {
     if (bio.anesthesiaAvailable() >= need) bio.consumeAnesthesia(need);
     else {
-      awake = await confirm(`You don't have enough anesthetic to perform the installation (${need} needed in an anesthesia kit).\n<color_light_red>Operate without anesthesia?</color>  You will feel every cut.`);
+      awake = await confirm(`You don't have enough anesthetic to perform the installation (${need} needed in an anesthesia kit).\n<color_light_red>Operate without anesthesia?</color>  You will feel every cut.`, { destructive: true });
       if (!awake) return false;
     }
   }
@@ -253,7 +253,7 @@ export function openAutodocMenu(game: Game, mods: BodyMods, cbms: () => { item: 
 async function uninstallFlow(game: Game, mods: BodyMods, id: string, dropItem: (it: Item) => void): Promise<void> {
   const { bio } = mods;
   const chance = bio.successChance(id, true);
-  if (!(await confirm(`Uninstall <color_white>${bio.name(id)}</color>?  ${chance}% chance of success.`))) return;
+  if (!(await confirm(`Uninstall <color_white>${bio.name(id)}</color>?  ${chance}% chance of success.`, { destructive: true }))) return;
   const difficulty = bio.idx.difficulty(id);
   game.activities.start({
     name: `removing ${bio.name(id)}`,

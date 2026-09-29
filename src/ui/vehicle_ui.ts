@@ -219,7 +219,7 @@ function showVehicleInfo(game: Game, v: Vehicle): void {
       lines.push(`${c('c_dark_gray', `(${mx},${my})`)} ${ps.map(partLine).join(', ')}`);
     }
   void vs;
-  const w = openWindow({ title: 'Vehicle', width: 'min(110ch, 96vw)', height: '80vh', footer: `${c('c_light_green', 'Esc')} close` });
+  const w = openWindow({ title: 'Vehicle', width: 'min(110ch, 96vw)', height: '80vh' });
   w.body.style.whiteSpace = 'normal';
   w.body.innerHTML = lines.join('<br>');
 }
@@ -324,7 +324,8 @@ function dashboard(game: Game): HTMLElement {
   getUiRoot().appendChild(el);
   let last = '';
   const update = () => {
-    const v = game.vehicles?.driving;
+    // Not over the death screen (dying at the wheel left the dashboard on the tombstone).
+    const v = game.player.dead ? null : game.vehicles?.driving;
     const html = v ? dashHtml(game, v) : '';
     if (html !== last) {
       el.innerHTML = html;
@@ -364,7 +365,7 @@ function dashHtml(game: Game, v: Vehicle): string {
     v.fuelCapacity('battery') ? gauge('battery') : '',
     v.lightsOn ? c('c_yellow', 'lights') : '',
     v.validWheelConfig() ? '' : c('c_red', 'WHEELS'),
-    c('c_dark_gray', `${cruising ? '[W/S]±4 mph [Space]stop ' : ''}[${game.keys.keyFor('vehicle_engine')}]engine [${game.keys.keyFor('vehicle_headlights')}]lights [${game.keys.keyFor('vehicle_horn')}]horn [${game.keys.keyFor('control_vehicle')}]menu`),
+    c('c_dark_gray', `${cruising ? `[${game.keys.movementKeys()[0]}/${game.keys.movementKeys()[2]}]±4 mph [Space]stop ` : ''}[${game.keys.keyFor('vehicle_engine')}]engine [${game.keys.keyFor('vehicle_headlights')}]lights [${game.keys.keyFor('vehicle_horn')}]horn [${game.keys.keyFor('control_vehicle')}]menu`),
   ].filter(Boolean);
   return parts.join('  ');
 }

@@ -88,7 +88,9 @@ export function openLookMode(ctx: UiContext): UiWindow {
     title: 'Look Around',
     anchor: 'left',
     width: 'min(56ch, 44vw)',
-    footer: `${c('c_light_green', '←→↑↓')}/${c('c_light_green', 'hjkl')} turn  ${c('c_light_green', 'Esc')}/${c('c_light_green', 'x')} done`,
+    footer: `${c('c_light_green', 'mouse')}/${c('c_light_green', '←→↑↓')}/${c('c_light_green', 'hjkl')} turn`,
+    closeLabel: 'done',
+    mouseLook: true,
     onKey: (e) => {
       const k = e.key;
       if (k === 'ArrowLeft' || k === 'h') p.yaw -= STEP;

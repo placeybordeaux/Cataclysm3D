@@ -232,22 +232,26 @@ export function showItemInfo(ctx: UiContext, it: Item): UiWindow {
 /** Guns and magazines, and tools that take one (a flashlight's battery) or hold ammo. */
 const reloadable = (it: Item): boolean => it.isGun() || it.isMagazine() || !!it.magazineWell() || it.magazinePockets().length > 0;
 
-/** Actions that make sense for an item, CDDA item-action-menu hotkeys. */
-function actionsFor(e: InvEntry): { action: ItemAction; key: string; label: string; ok: boolean }[] {
+/**
+ * Actions that make sense for an item. Hotkeys are the game's own keys for the same action
+ * (wear is O here, like outside the menu), so what a player learns in one place works in the
+ * other; `key` maps an action id to its key, falling back to CDDA's letter.
+ */
+function actionsFor(e: InvEntry, key: (id: string, cdda: string) => string): { action: ItemAction; key: string; label: string; ok: boolean }[] {
   const it = e.item;
   const worn = e.where === 'worn';
   const out = [
-    { action: 'apply' as const, key: 'a', label: 'Activate', ok: useActions(it.def).length > 0 },
-    { action: 'read' as const, key: 'R', label: 'Read', ok: it.isBook() },
-    { action: 'eat' as const, key: 'E', label: 'Eat', ok: !!it.isComestible() || it.containerPockets().some((p) => p.contents.some((c) => c.isComestible())) },
-    { action: 'wear' as const, key: 'W', label: 'Wear', ok: it.isArmor() && !worn },
-    { action: 'wield' as const, key: 'w', label: e.where === 'wielded' ? 'Put away' : 'Wield', ok: true },
-    { action: 'throw' as const, key: 't', label: 'Throw', ok: e.where !== 'worn' },
-    { action: 'takeoff' as const, key: 'T', label: 'Take off', ok: worn },
-    { action: 'drop' as const, key: 'd', label: 'Drop', ok: e.where !== 'ground' },
-    { action: 'unload' as const, key: 'U', label: 'Unload', ok: reloadable(it) || it.containerPockets().some((p) => p.contents.length > 0) },
-    { action: 'reload' as const, key: 'r', label: 'Reload', ok: reloadable(it) },
-    { action: 'examine' as const, key: 'x', label: 'Examine', ok: true },
+    { action: 'apply' as const, key: key('apply', 'a'), label: 'Activate', ok: useActions(it.def).length > 0 },
+    { action: 'read' as const, key: key('read', 'R'), label: 'Read', ok: it.isBook() },
+    { action: 'eat' as const, key: key('eat', 'E'), label: 'Eat', ok: !!it.isComestible() || it.containerPockets().some((p) => p.contents.some((c) => c.isComestible())) },
+    { action: 'wear' as const, key: key('wear', 'W'), label: 'Wear', ok: it.isArmor() && !worn },
+    { action: 'wield' as const, key: key('wield', 'w'), label: e.where === 'wielded' ? 'Put away' : 'Wield', ok: true },
+    { action: 'throw' as const, key: key('throw', 't'), label: 'Throw', ok: e.where !== 'worn' },
+    { action: 'takeoff' as const, key: key('takeoff', 'T'), label: 'Take off', ok: worn },
+    { action: 'drop' as const, key: key('drop', 'd'), label: 'Drop', ok: e.where !== 'ground' },
+    { action: 'unload' as const, key: key('unload', 'U'), label: 'Unload', ok: reloadable(it) || it.containerPockets().some((p) => p.contents.length > 0) },
+    { action: 'reload' as const, key: key('reload', 'r'), label: 'Reload', ok: reloadable(it) },
+    { action: 'examine' as const, key: key('look', 'x'), label: 'Examine', ok: true },
   ];
   if (it.isComestible() && it.isLiquid()) out[2].label = 'Drink';
   return out;
@@ -264,7 +268,14 @@ export const extraItemActions: ExtraItemAction[] = [];
 
 /** CDDA's item action menu: the item's info plus a list of what you can do with it. */
 export function openItemMenu(ctx: UiContext, e: InvEntry, onDone?: () => void): UiWindow {
-  const acts = actionsFor(e);
+  const keys = ctx.game.keys;
+  const used = new Set(extraItemActions.map((x) => x.key));
+  const acts = actionsFor(e, (id, cdda) => {
+    const k = keys.keyFor(id);
+    const pick = k.length === 1 && k !== '?' && !used.has(k) ? k : cdda;
+    used.add(pick);
+    return pick;
+  });
   const detail = () => `${spriteImg(ctx.renderer, e.item.typeId, 'icon-big')}${itemInfo(e.item, ctx.game.player)}`;
   const extra = extraItemActions.filter((x) => x.ok(e));
   return openMenu<ItemAction | ExtraItemAction>({
@@ -433,7 +444,7 @@ export function openMultiSelect(ctx: UiContext, title: string, rows: MultiRow[],
         win.setFooter(footer());
         return true;
       }
-      if (e.key === 'Backspace') {
+      if (e.key === 'Backspace' && digits) {
         digits = digits.slice(0, -1);
         win.setFooter(footer());
         return true;

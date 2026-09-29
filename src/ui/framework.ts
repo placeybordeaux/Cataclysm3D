@@ -179,6 +179,12 @@ export function openWindow(opts: WindowOpts): UiWindow {
   let closed = false;
   const handler = (e: KeyboardEvent): boolean => {
     if (opts.onKey && opts.onKey(e) === true) return true;
+    // Arrow keys the window doesn't use scroll its body (character sheet at 960×540, item info).
+    const scroll = { ArrowDown: 40, ArrowUp: -40, PageDown: body.clientHeight, PageUp: -body.clientHeight }[e.key];
+    if (scroll !== undefined) {
+      body.scrollTop += scroll;
+      return true;
+    }
     // Held keys repeat: without this, holding i (or Esc) would flicker the window shut and open.
     if (e.repeat) return true;
     if (e.key === 'Escape' || e.key === 'Backspace' || (openKey !== null && e.key === openKey)) {

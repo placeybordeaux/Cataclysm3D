@@ -1,4 +1,5 @@
 import { sfx } from '../audio/sfx';
+import { reloadPage } from '../core/unload';
 import { c, colorize, getUiRoot } from './framework';
 import { durationText, logLine } from './format';
 import type { Hud } from './hud';
@@ -75,28 +76,32 @@ export function showDeathScreen(ctx: UiContext, hud: Hud, cause: string, diedAt 
   ].join('\n');
   el.innerHTML = `<div style="display:flex;gap:4ch;justify-content:center;align-items:flex-start;padding:4vh 2vw;height:100%;box-sizing:border-box;overflow:auto">
       <div class="pre">${colorize(art.join('\n'))}\n\n${c('c_light_gray', ctx.data.tombstone.last_words_label ?? 'Last Words:')} <input class="last-words" maxlength="60" style="background:#000;color:var(--c-white);border:0;border-bottom:1px solid var(--c-dark_gray);font:inherit;width:30ch"></div>
-      <div class="pre">${summary}\n\n\n${c('c_yellow', 'Press Enter to return to the main menu.')}</div>
+      <div class="pre">${summary}\n\n\n${c('c_yellow', 'Type your last words if you like, then press Enter to return to the main menu.')}</div>
     </div>`;
   root.appendChild(el);
   requestAnimationFrame(() => (el.style.opacity = '1'));
   hud.setVisible(false);
   const input = el.querySelector('.last-words') as HTMLInputElement;
+  // Typing goes straight into the last words (they used to need a click first).
+  setTimeout(() => input.focus(), 1600);
   const release = game.input.capture((e) => {
     if (e.key === 'Enter') {
       release();
       // CDDA returns to the main menu; a fresh page load is our main menu with a new world.
-      location.reload();
+      reloadPage();
     }
     return true;
   });
   input.onkeydown = (e) => {
     e.stopPropagation();
+    // A movement key still held from the fight would auto-repeat into the field.
+    if (e.repeat) return e.preventDefault();
     if (e.key === 'Enter') {
       release();
       const words = input.value.trim();
       const saved = words ? saveHandle(game)?.manager.setLastWords(words) : undefined;
       // Reload once the memorial entry has them (or right away if saving isn't available).
-      void Promise.resolve(saved).catch(() => {}).finally(() => location.reload());
+      void Promise.resolve(saved).catch(() => {}).finally(() => reloadPage());
     }
   };
   (window as any).cdda && ((window as any).cdda.deathScreen = el);

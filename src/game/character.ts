@@ -1101,7 +1101,7 @@ export class Character {
         this.sleepDeprivation = Math.min(SLEEP_DEPRIVATION.MASSIVE, this.sleepDeprivation + roll * 5);
       }
       if (!wasTired && this.sleepiness > SLEEPINESS.DEAD_TIRED && !this.effects.has('lying_down'))
-        this.msg("You're feeling tired.  Press $ to lie down for sleep.", 'c_yellow');
+        this.msg("You're feeling tired.  Press <keybind:sleep> to lie down for sleep.", 'c_yellow');
     } else {
       // calc_sleep_recovery_rate: 1 + accelerated 1/(25 - intensity), minus cold parts and pain.
       const sleep = this.effects.get('sleep')!;

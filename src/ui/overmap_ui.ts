@@ -110,25 +110,26 @@ export function openOvermap(ctx: UiContext): UiWindow | null {
     title: 'Overmap',
     width: '96vw',
     height: '92vh',
-    footer: `${c('c_light_green', 'arrows/WASD/hjkl')} scroll  ${c('c_light_green', '+ -')} zoom  ${c('c_light_green', '< >')} level  ${c('c_light_green', '.')} center on you  ${c('c_light_green', 'Esc/m')} close`,
+    footer: `${c('c_light_green', `arrows/${ctx.game.keys.movementKeys()}/hjkl`)} scroll  ${c('c_light_green', '+ -')} zoom  ${c('c_light_green', '< >')} level  ${c('c_light_green', '.')} center on you`,
     onKey: (e) => {
       const k = e.key;
+      // WASD by physical key (ZQSD on AZERTY), like walking; hjkl by letter, like CDDA.
+      const code = e.code;
       const step = zoom * (e.shiftKey ? 8 : 1);
-      if (k === 'ArrowUp' || k === 'w' || k === 'k') cy -= step;
-      else if (k === 'ArrowDown' || k === 's' || k === 'j') cy += step;
-      else if (k === 'ArrowLeft' || k === 'a' || k === 'h') cx -= step;
-      else if (k === 'ArrowRight' || k === 'd' || k === 'l') cx += step;
-      else if (k === 'W' || k === 'K') cy -= step * 8;
-      else if (k === 'S' || k === 'J') cy += step * 8;
-      else if (k === 'A' || k === 'H') cx -= step * 8;
-      else if (k === 'D' || k === 'L') cx += step * 8;
+      if (k === 'ArrowUp' || code === 'KeyW' || k === 'k') cy -= step;
+      else if (k === 'ArrowDown' || code === 'KeyS' || k === 'j') cy += step;
+      else if (k === 'ArrowLeft' || code === 'KeyA' || k === 'h') cx -= step;
+      else if (k === 'ArrowRight' || code === 'KeyD' || k === 'l') cx += step;
+      else if (k === 'K') cy -= step * 8;
+      else if (k === 'J') cy += step * 8;
+      else if (k === 'H') cx -= step * 8;
+      else if (k === 'L') cx += step * 8;
       else if (k === '+' || k === '=') zoom = Math.max(1, zoom / 2);
       else if (k === '-' || k === '_') zoom = Math.min(8, zoom * 2);
       else if (k === '<') cz = Math.min(5, cz + 1);
       else if (k === '>') cz = Math.max(-3, cz - 1);
       else if (k === '.' || k === 'Enter') ({ x: cx, y: cy, z: cz } = playerOmt(ctx));
-      else if (k === 'm') w.close();
-      else return false;
+      else return false; // the opening key (m), Esc, Bksp close via the framework
       render();
       return true;
     },

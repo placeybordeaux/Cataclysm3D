@@ -1,5 +1,6 @@
 import { c, colorize, openMenu, type UiWindow } from './framework';
 import type { UiContext } from './context';
+import { keyLabel } from './keymap';
 
 // '?' help: CDDA's help menu (data/core/help.json topics) with two topics of our own in
 // front: the key bindings (from game.keys.list(): every registered action, and only those)
@@ -24,27 +25,31 @@ The world ended.  Most people turned into shambling, hungry things, and the rest
 
 When you die, and you will, the game shows what you accomplished.  Then you start again, a little wiser.`;
 
-const MOVEMENT: [string, string][] = [
-  ['W A S D', 'Move (forward / left / back / right)'],
-  ['Mouse', 'Look around (click the view to capture the mouse)'],
-  ['Shift', 'Run (uses stamina)'],
-  ['LMB', 'Attack / fire'],
-  ['RMB', 'Aim'],
-];
-
-function keyName(k: string): string {
-  if (k === 'Escape') return 'Esc';
-  if (k === ' ') return 'Space';
-  return k;
-}
+const keyName = keyLabel;
 
 function keybindingsText(ctx: UiContext): string {
+  const keys = ctx.game.keys;
+  const wasd = keys.movementKeys().split('').join(' ');
   const rows: string[] = [];
+  const row = (k: string, n: string, col = 'c_yellow') => rows.push(`${c(col, k.padEnd(10))} ${esc(n)}`);
   rows.push(c('c_light_blue', 'MOVEMENT'));
-  for (const [k, n] of MOVEMENT) rows.push(`${c('c_yellow', k.padEnd(10))} ${esc(n)}`);
-  rows.push('', c('c_light_blue', 'ACTIONS'));
-  const listed = ctx.game.keys.list();
-  for (const [keys, name] of listed.sort((a, b) => a[1].localeCompare(b[1]))) rows.push(`${c('c_yellow', keys.map(keyName).join(' ').padEnd(10))} ${esc(name)}`);
+  row(wasd, 'Move (forward / left / back / right)');
+  row('Mouse', 'Look around (click the view to capture the mouse)');
+  row('Shift', 'Run (uses stamina)');
+  row('LMB', 'Attack / fire');
+  row('RMB', 'Aim (hold)');
+  row('Wheel', 'Zoom (top-down camera)');
+  rows.push('', c('c_light_blue', 'MENUS'));
+  row('↑↓ PgUp/Dn', 'Move the highlight (j k where they are not hotkeys)');
+  row('letter', 'Pick the entry with that hotkey');
+  row('Enter', 'Select');
+  row('Bksp', 'Close (the key that opened a menu also closes it)');
+  row('Esc', 'Close; in gameplay opens the pause menu');
+  rows.push(c('c_dark_gray', `Outside fullscreen the browser frees the mouse on Esc; click the view or press any key to take it back. ${keyName(keys.keyFor('fullscreen'))} fullscreen keeps it captured.`));
+  rows.push('', c('c_light_blue', 'ACTIONS') + c('c_dark_gray', '  (rebind in Options > Key bindings)'));
+  const listed = keys.list();
+  for (const [ks, name] of listed.sort((a, b) => a[1].localeCompare(b[1])))
+    row(ks.length ? ks.map(keyName).join(' ') : 'unbound', name, ks.length ? 'c_yellow' : 'c_red');
   return rows.join('\n');
 }
 
@@ -74,7 +79,7 @@ export function openHelp(ctx: UiContext): UiWindow {
     width: 'min(130ch, 96vw)',
     height: '90vh',
     detailPane: true,
-    footer: `${c('c_light_green', '↑↓')} topic  ${c('c_light_green', 'Esc')} close`,
+    footer: `${c('c_light_green', '↑↓')} topic`,
     entries,
     onSelect: () => false,
   });

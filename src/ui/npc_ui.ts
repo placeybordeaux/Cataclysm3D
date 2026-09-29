@@ -8,7 +8,7 @@ import { TradeSession, type TradeEntry } from '../game/trade';
 import type { Item } from '../game/item';
 import { npcLayers } from '../render/npcView';
 import { atlasOf } from './context';
-import { c, colorize, openMenu, openWindow, confirm, prompt, type UiWindow } from './framework';
+import { c, colorize, hoverMoved, openMenu, openWindow, confirm, prompt, type UiWindow } from './framework';
 import { sfx } from '../audio/sfx';
 import { CHUNK } from '../world/coords';
 import { emitSound } from '../game/sound';
@@ -71,10 +71,13 @@ export function openDialogue(ctx: NpcUiCtx, d: Dialogue, onClose?: () => void): 
     title: `Dialogue: ${n.displayName()}`,
     width: 'min(96vw, 110ch)',
     height: '82vh',
-    footer: `${c('c_light_green', 'a-z')} respond  ${c('c_light_green', '↑↓/Enter')} select  ${c('c_light_green', '?')} show unavailable  ${c('c_light_green', 'Esc')} leave`,
+    footer: `${c('c_light_green', 'a-z')} respond  ${c('c_light_green', '↑↓/Enter')} select  ${c('c_light_green', '?')} show unavailable`,
+    closeLabel: 'leave',
+    // e (talk) and C (chat) open this, but letters answer here.
+    closeOnOpenKey: false,
     onKey: (e) => {
       const v = d.view();
-      if (e.key === 'Escape') {
+      if (e.key === 'Escape' || e.key === 'Backspace') {
         finish();
         return true;
       }
@@ -173,8 +176,8 @@ export function openDialogue(ctx: NpcUiCtx, d: Dialogue, onClose?: () => void): 
     resp.querySelectorAll<HTMLElement>('.menu-entry').forEach((el) => {
       const i = Number(el.dataset.i);
       el.onclick = () => pick(i);
-      el.onmouseenter = () => {
-        if (sel !== i) (sel = i), render();
+      el.onmousemove = (ev) => {
+        if (hoverMoved(ev) && sel !== i) (sel = i), render();
       };
     });
   }
@@ -206,7 +209,8 @@ export function openTrade(ctx: NpcUiCtx, n: Npc, cost = 0, onDone?: (traded: boo
     title: `Trade with ${n.displayName()}`,
     width: 'min(98vw, 130ch)',
     height: '84vh',
-    footer: `${c('c_light_green', 'Tab/←→')} switch side  ${c('c_light_green', 'a-Z')} mark  ${c('c_light_green', 'Space')} mark selected  ${c('c_light_green', '+ -')} amount  ${c('c_light_green', '< >')} page  ${c('c_light_green', '/')} filter  ${c('c_light_green', 'Enter')} trade  ${c('c_light_green', 'Esc')} cancel`,
+    footer: `${c('c_light_green', 'Tab/←→')} switch side  ${c('c_light_green', 'a-Z')} mark  ${c('c_light_green', 'Space')} mark selected  ${c('c_light_green', '+ -')} amount  ${c('c_light_green', '< >')} page  ${c('c_light_green', '/')} filter  ${c('c_light_green', 'Enter')} trade`,
+    closeLabel: 'cancel',
     onKey: (e) => {
       const list = view(side);
       const at = (k: number) => Math.max(0, Math.min(list.length - 1, k));
@@ -236,7 +240,7 @@ export function openTrade(ctx: NpcUiCtx, n: Npc, cost = 0, onDone?: (traded: boo
       } else if (e.key === 'Enter') {
         doTrade();
         return true;
-      } else if (e.key === 'Escape') {
+      } else if (e.key === 'Escape' || e.key === 'Backspace') {
         win.close();
         return true;
       } else {
@@ -349,7 +353,7 @@ export function openMissionLog(ctx: NpcUiCtx): UiWindow {
     title: 'Missions',
     width: 'min(92vw, 100ch)',
     height: '70vh',
-    footer: `${c('c_light_green', 'Tab/←→')} switch tab  ${c('c_light_green', 'Esc')} close`,
+    footer: `${c('c_light_green', 'Tab/←→')} switch tab`,
     onKey: (e) => {
       if (e.key === 'Tab' || e.key === 'ArrowRight') tab = (tab + 1) % 3;
       else if (e.key === 'ArrowLeft') tab = (tab + 2) % 3;
@@ -434,7 +438,7 @@ export function openChatMenu(ctx: NpcUiCtx, talk: (n: Npc) => void): void {
 
 /** CDDA query_yn before attacking someone who isn't hostile. */
 export function confirmAttackNpc(n: Npc, yes: () => void): void {
-  void confirm(`Really attack ${n.name}?  ${n.isAlly() ? 'They are your ally!' : 'They are not hostile.'}`).then((ok) => ok && yes());
+  void confirm(`Really attack ${n.name}?  ${n.isAlly() ? 'They are your ally!' : 'They are not hostile.'}`, { destructive: true }).then((ok) => ok && yes());
 }
 
 /** npc_gets_item: pick one of your items. */

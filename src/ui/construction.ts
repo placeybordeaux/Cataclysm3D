@@ -48,7 +48,7 @@ export function openConstructionMenu(game: CraftHost): ConstructionMenu {
     title: 'Construction',
     width: 'min(112ch, 96vw)',
     height: '84vh',
-    footer: `${c('c_light_green', 'Tab')}/${c('c_light_green', 'S-Tab')} category  ${c('c_light_green', '/')} search  ${c('c_light_green', 'Enter')} build  ${c('c_light_green', 'Esc')} close`,
+    footer: `${c('c_light_green', 'Tab')}/${c('c_light_green', 'S-Tab')} category  ${c('c_light_green', '/')} search  ${c('c_light_green', 'Enter')} build`,
     onKey: (e) => {
       const k = e.key;
       if (k === 'ArrowDown' || k === 'j') move(1);
@@ -58,10 +58,10 @@ export function openConstructionMenu(game: CraftHost): ConstructionMenu {
       else if (k === 'Tab' || k === 'ArrowRight' || k === 'ArrowLeft') setTab(tab + (e.shiftKey || k === 'ArrowLeft' ? -1 : 1));
       else if (k === '/') void askFilter();
       else if (k === 'Enter') choose();
-      else if (k === 'Escape' && filter) {
+      else if ((k === 'Escape' || k === 'Backspace') && filter) {
         filter = '';
         render();
-      } else if (k === 'Escape') return false;
+      } else return false; // unhandled: the framework closes on * / Esc / Bksp
       return true;
     },
   });

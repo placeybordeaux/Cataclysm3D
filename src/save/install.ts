@@ -1,4 +1,5 @@
 import type { Game } from '../game/game';
+import { reloadPage } from '../core/unload';
 import type { DebugApi } from '../debug';
 import type { MonsterSystem } from '../game/monai';
 import type { Spawner } from '../game/spawner';
@@ -85,7 +86,7 @@ export function openMemorialFor(game: Game): void {
 /** Quit to the title screen without the unload save (the Esc menu warns progress is lost). */
 export function quitToTitle(game: Game): void {
   handles.get(game)?.endSession();
-  location.reload();
+  reloadPage();
 }
 
 export async function installSave(
@@ -151,7 +152,7 @@ export async function installSave(
     } catch (e) {
       console.error(e);
       // Half-loaded: nothing sane to keep playing. Explain, then start over.
-      void showLoadError(mgr, file.meta.slot, e instanceof SaveError ? e.message : `Unexpected error: ${(e as Error).message}`).then(() => location.reload());
+      void showLoadError(mgr, file.meta.slot, e instanceof SaveError ? e.message : `Unexpected error: ${(e as Error).message}`).then(() => reloadPage());
       return false;
     }
   };
@@ -168,7 +169,7 @@ export async function installSave(
     if (file.world.seed === game.seed && file.world.gen === opts.genKind) return applyFile(file);
     mgr.active = false;
     sessionStorage.setItem(PENDING_KEY, slot);
-    location.reload();
+    reloadPage();
     // The page is going away; never resolve so callers don't resume the old game meanwhile.
     return new Promise<boolean>(() => {});
   };

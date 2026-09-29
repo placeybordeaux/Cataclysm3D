@@ -86,7 +86,7 @@ export function openCharacterSheet(ctx: UiContext): UiWindow {
   const prof = ctx.build ? ` | Profession: ${c('c_light_gray', ctx.build.profession)} | Scenario: ${c('c_light_gray', ctx.build.scenario)}` : '';
   const header = `Name: ${c('c_white', p.name)} | Gender: ${c('c_light_gray', p.male ? 'Male' : 'Female')}${prof}`;
 
-  const w = openWindow({ title: 'Character', width: 'min(132ch, 97vw)', height: '92vh', footer: `${c('c_light_green', 'Esc')} close` });
+  const w = openWindow({ title: 'Character', width: 'min(132ch, 97vw)', height: '92vh', footer: `${c('c_light_green', '↑↓')} scroll` });
   w.body.style.whiteSpace = 'normal';
   w.body.innerHTML = `<div class="pre" style="margin-bottom:4px">${header}</div>
     <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px">

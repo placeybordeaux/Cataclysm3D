@@ -168,17 +168,21 @@ export function openCharGen(ctx: UiContext): Promise<Build | null> {
       title: 'New Character',
       width: '96vw',
       height: '92vh',
+      closeLabel: null, // the footer inside the body explains Esc (back a tab)
       onKey: (e) => {
         const k = e.key;
         flash = '';
-        if (k === 'Escape') {
+        if (e.repeat && k !== 'ArrowDown' && k !== 'ArrowUp' && k !== 'ArrowLeft' && k !== 'ArrowRight') return true;
+        if (k === 'Escape' || k === 'Backspace') {
           if (tab > 0) tab--;
-          else void confirm('Return to the main menu?').then((y) => y && (done = true, w.close()));
+          else void confirm('Return to the main menu?  <color_light_red>This character will be discarded.</color>', { destructive: true }).then((y) => y && (done = true, w.close()));
           render();
           return true;
         }
         if (k === 'Tab' || k === '>') tab = e.shiftKey && k === 'Tab' ? Math.max(0, tab - 1) : Math.min(TABS.length - 1, tab + 1);
         else if (k === '<') tab = Math.max(0, tab - 1);
+        // Play now from any tab (CDDA needs a trip to the last tab; new players get lost there).
+        else if (k === 'F') void finish();
         else if (!onTabKey(e)) return false;
         render();
         return true;
@@ -329,7 +333,7 @@ export function openCharGen(ctx: UiContext): Promise<Build | null> {
     function render() {
       // Rows that fit the list pane: window is 92vh, lines ~1.15 x 16px, minus tabs/footer.
       const H = Math.max(8, Math.floor((window.innerHeight * 0.92) / 18.4) - 8);
-      const tabs = TABS.map((t, i) => `<span class="tab${i === tab ? ' on' : ''}">${t}</span>`).join(' ');
+      const tabs = TABS.map((t, i) => `<span class="tab${i === tab ? ' on' : ''}" data-tab="${i}" style="cursor:pointer">${t}</span>`).join(' ');
       let left = '', right = '';
       const T = TABS[tab];
       if (T === 'SCENARIO') {
@@ -400,7 +404,14 @@ export function openCharGen(ctx: UiContext): Promise<Build | null> {
           <div class="wrap" style="border-left:1px solid var(--c-dark_gray);padding-left:8px;overflow:auto">${right}</div>
         </div>
         <div class="pre" style="min-height:1.2em">${flash}</div>
-        <div class="pre" style="color:var(--c-dark_gray)">${c('c_light_green', 'Tab')}/${c('c_light_green', '<>')} switch tab  ${c('c_light_green', '↑↓')} move  ${c('c_light_green', 'Enter')} ${T === 'STATS' ? 'use ←→' : T === 'DESCRIPTION' ? 'finish' : 'select'}  ${c('c_light_green', 'Esc')} back</div>`;
+        <div class="pre" style="color:var(--c-dark_gray)">${c('c_light_green', 'Tab')}/${c('c_light_green', '<>')} switch tab  ${c('c_light_green', '↑↓')} move  ${c('c_light_green', 'Enter')} ${T === 'STATS' ? 'use ←→' : T === 'DESCRIPTION' ? 'finish' : 'select'}  ${c('c_light_green', 'F')} finish &amp; play  ${c('c_light_green', 'Esc')}/${c('c_light_green', 'Bksp')} ${tab > 0 ? 'previous tab' : 'main menu'}</div>`;
+      w.body.querySelectorAll<HTMLElement>('.tab[data-tab]').forEach((t) => {
+        t.onclick = () => {
+          tab = Number(t.dataset.tab);
+          flash = '';
+          render();
+        };
+      });
       w.body.querySelectorAll<HTMLElement>('.menu-entry[data-i]').forEach((row) => {
         row.onclick = () => {
           sel[tab] = Number(row.dataset.i);
