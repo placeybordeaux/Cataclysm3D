@@ -75,27 +75,6 @@ export class MonsterView implements GameSystem {
       const v = this.views.get(m);
       if (v && v.typeId !== m.type.id) this.refresh(m, v);
     });
-    this.installHurtFlash();
-  }
-
-  /**
-   * Red screen flash when the survivor is hit. A stop-gap until the HUD owns hit feedback
-   * (it can read the same 'playerHurt' event and remove this).
-   */
-  private installHurtFlash(): void {
-    if (typeof document === 'undefined') return;
-    const el = document.createElement('div');
-    el.style.cssText = 'position:fixed;inset:0;pointer-events:none;z-index:5;opacity:0;transition:opacity .35s ease-out;' +
-      'background:radial-gradient(ellipse at center, rgba(160,0,0,0) 45%, rgba(170,0,0,.85) 100%)';
-    document.body.appendChild(el);
-    this.game.events.on('playerHurt', (e) => {
-      if (e.amount <= 0) return;
-      el.style.transition = 'none';
-      el.style.opacity = String(Math.min(0.9, 0.35 + e.amount / 20));
-      void el.offsetWidth;
-      el.style.transition = 'opacity .35s ease-out';
-      el.style.opacity = '0';
-    });
   }
 
   /** Sprite frame + height for a monster type (atlas sprite, looks_like chain, glyph fallback). */

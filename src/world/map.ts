@@ -117,6 +117,12 @@ export class GameMap {
   itemFactory: ((spawn: ItemSpawn) => MapItem[]) | null = null;
   /** Hooks for systems that must react to spawns during generation (monsters, vehicles). */
   onChunkGenerated: ((chunk: Chunk) => void)[] = [];
+  /**
+   * Asked by generators before writing a late z-level overlay (mapgen of `sourceKey` spilling
+   * into an already existing chunk). Save/load uses it to avoid re-applying an overlay to a
+   * chunk restored from a save that already contains it. Null = always apply.
+   */
+  overlayFilter: ((target: Chunk, sourceKey: string) => boolean) | null = null;
 
   constructor(readonly seed: number) {}
 
@@ -145,6 +151,11 @@ export class GameMap {
   /** Used by save/load to restore an authoritative chunk without regenerating. */
   putChunk(c: Chunk): void {
     this.chunks.set(chunkKey(c.cx, c.cy, c.z), c);
+  }
+
+  /** Forget every chunk (loading a save into a running game); they regenerate on demand. */
+  clearChunks(): void {
+    this.chunks.clear();
   }
 
   private at(x: number, y: number, z: number): [Chunk, number] | null {

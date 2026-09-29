@@ -466,3 +466,60 @@ export function paintFire(seed: number): Img {
   img.rect(1, 14, 12, 2, H(0x2e1e12));
   return img;
 }
+
+/** Liquid/debris splat for floor decals (blood, bile, acid...), 16x16. */
+export function paintSplat(seed: number, color: number): Img {
+  const rng = new Rng(seed);
+  const img = new Img(16, 16);
+  const base = H(color), dark = shade(base, 0.7), lite = shade(base, 1.15).map((v) => Math.min(255, v)) as RGB;
+  const blobs: [number, number, number][] = [[8, 8, 3 + rng.int(0, 2)]];
+  for (let i = 0; i < 5; i++) blobs.push([rng.int(3, 12), rng.int(3, 12), rng.int(1, 3)]);
+  for (let y = 0; y < 16; y++)
+    for (let x = 0; x < 16; x++) {
+      let v = 0;
+      for (const [bx, by, br] of blobs) v = Math.max(v, 1 - Math.hypot(x - bx, y - by) / br);
+      if (v <= 0) continue;
+      img.set(x, y, v > 0.6 ? lite : v > 0.25 ? base : dark);
+    }
+  return img;
+}
+
+/** Soft cloud puff for smoke/gas billboards (drawn with dithered opacity), 16x16. */
+export function paintCloud(seed: number, color: number): Img {
+  const rng = new Rng(seed);
+  const img = new Img(16, 16);
+  const base = H(color), dark = shade(base, 0.8);
+  const blobs: [number, number, number][] = [[8, 9, 5], [5, 8, 3], [11, 8, 3], [8, 5, 3]];
+  for (let y = 0; y < 16; y++)
+    for (let x = 0; x < 16; x++) {
+      let v = 0;
+      for (const [bx, by, br] of blobs) v = Math.max(v, 1 - Math.hypot(x - bx, y - by) / (br + rng.next() * 0.8));
+      if (v <= 0) continue;
+      img.set(x, y, v > 0.4 ? base : dark);
+    }
+  return img;
+}
+
+/** Grass tuft billboard (ground clutter), 12x10, a few blades in the season's greens. */
+export function paintTuft(seed: number, season: string, tall: boolean): Img {
+  const rng = new Rng(seed);
+  const h = tall ? 16 : 10;
+  const img = new Img(12, h);
+  const g: Ramp = season === 'autumn'
+    ? ramp(0x3a2c14, 0x5a4420, 0x7a5a2a, 0x94743a)
+    : season === 'winter'
+      ? ramp(0x2e2a22, 0x423c30, 0x564e3e, 0x6a604c)
+      : ramp(0x1c2c12, 0x2c4418, 0x3e5a22, 0x587430);
+  const blades = 5 + rng.int(0, 3);
+  for (let b = 0; b < blades; b++) {
+    let x = 2 + rng.int(0, 7);
+    const len = Math.floor(h * (0.45 + rng.next() * 0.55));
+    const lean = rng.next() < 0.5 ? -1 : 1;
+    for (let i = 0; i < len; i++) {
+      const y = h - 1 - i;
+      if (i > 2 && rng.oneIn(3)) x += lean;
+      img.set(x, y, g[i < 2 ? 1 : i < len - 2 ? 2 : 3]);
+    }
+  }
+  return img;
+}

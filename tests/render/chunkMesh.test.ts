@@ -31,6 +31,7 @@ describe('terrainShape', () => {
     expect(shape('t_water_sh')).toBe('liquid');
     expect(shape('t_water_dp')).toBe('liquid');
     expect(shape('t_open_air')).toBe('none');
+    expect(shape('t_treetop')).toBe('none');
     expect(shape('t_stairs_up')).toBe('stairs_up');
     expect(shape('t_stairs_down')).toBe('stairs_down');
   });

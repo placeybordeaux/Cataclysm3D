@@ -66,6 +66,14 @@ function damageSlot(game: Game, x: number, y: number, z: number): { map: Map<num
   return { map: m, i: localOf(y) * CHUNK + localOf(x) };
 }
 
+/** Per-chunk accumulated bash damage (local tile index -> damage), for save/load. */
+export function chunkMapDamage(c: Chunk): Map<number, number> | undefined {
+  return mapDamage.get(c);
+}
+export function setChunkMapDamage(c: Chunk, m: Map<number, number>): void {
+  mapDamage.set(c, m);
+}
+
 /** Accumulated bash damage on a tile (CDDA get_map_damage). */
 export function getMapDamage(game: Game, x: number, y: number, z: number): number {
   const s = damageSlot(game, x, y, z);

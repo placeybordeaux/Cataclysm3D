@@ -2,7 +2,8 @@ import * as THREE from 'three';
 import type { GameData } from '../data/types';
 import { hashString } from '../core/rng';
 import { hexToRgb, cddaColor } from './colors';
-import { Img, paintFire, paintFurniture, paintPlayer, paintSurface, paintTree, patternFor, type Pattern } from './pixelArt';
+import { Img, paintCloud, paintFire, paintFurniture, paintPlayer, paintSplat, paintSurface, paintTree, paintTuft, patternFor, type Pattern } from './pixelArt';
+import { fieldStyle } from './tileKinds';
 import type { SurfaceFace, SurfaceQuery, TileFrame, TileTextureSource } from './textureSource';
 
 // Temporary TileTextureSource: paints pixel-art stand-ins on demand and packs them into
@@ -84,6 +85,20 @@ export class ProceduralTextureSource implements TileTextureSource {
   sprite(name: string): TileFrame {
     if (name === 'player') return this.frame('sp:player', paintPlayer);
     if (name === 'fire') return this.frame('sp:fire', () => paintFire(7));
+    // ground clutter: tuft:<variant>:<season>[:tall]
+    if (name.startsWith('tuft:')) {
+      const [, v, season, tall] = name.split(':');
+      return this.frame(`sp:${name}`, () => paintTuft(Number(v) * 7919 + 13, season, tall === 'tall'));
+    }
+    // fields: fd_<type>[_int<n>], painted by category
+    if (name.startsWith('fd_')) {
+      const type = name.replace(/_int\d$/, '');
+      const st = fieldStyle(type);
+      if (st.kind === 'fire') return this.sprite('fire');
+      if (st.kind === 'decal') return this.frame(`fd:${name}`, () => paintSplat(hashString(name), st.color));
+      if (st.kind === 'cloud') return this.frame(`fd:${name}`, () => paintCloud(hashString(name), st.color));
+      return this.unknown(name);
+    }
     throw new Error(`ProceduralTextureSource: no sprite named "${name}"`);
   }
 

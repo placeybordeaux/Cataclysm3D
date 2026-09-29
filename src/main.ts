@@ -14,6 +14,8 @@ import { installCrafting } from './ui/crafting_install';
 import { installWorldInteraction } from './worldInteraction';
 import { lightAt } from './game/vision';
 import { installMonsters } from './monsters';
+import { installChunkTracking } from './save/tracking';
+import { installSave, takePendingLoad } from './save/install';
 
 // URL params (all optional): seed=<int>, gen=world|test (default world), debug=1 (render stats overlay),
 // renderer params px/grade/tex/cam/walls (see src/render/renderer.ts), debug=atlas (sprite sheet view
@@ -25,19 +27,24 @@ async function main(): Promise<void> {
     const { runAtlasDebug } = await import('./render/atlasDebug');
     return runAtlasDebug(document.getElementById('view') as HTMLCanvasElement);
   }
-  const seed = Number(params.get('seed') ?? Math.floor(Math.random() * 2 ** 31));
-  const genKind = params.get('gen') ?? 'world';
+  // A save chosen on the previous page (title screen Load) decides the world to build.
+  const pending = await takePendingLoad();
+  const seed = pending?.file ? pending.file.world.seed : Number(params.get('seed') ?? Math.floor(Math.random() * 2 ** 31));
+  const genKind = pending?.file ? pending.file.world.gen : params.get('gen') ?? 'world';
   if (genKind !== 'world' && genKind !== 'test') throw new Error(`unknown gen=${genKind} (expected world or test)`);
   const canvas = document.getElementById('view') as HTMLCanvasElement;
   const [data, worldgenData] = await Promise.all([loadGameData(), genKind === 'world' ? loadWorldgenData() : null]);
   const input = new Input(canvas);
   initUi(document.getElementById('ui') as HTMLElement, input);
   const game = new Game(data, seed, input);
+  // Before any chunk generates: saves store only chunks that differ from their generated state.
+  installChunkTracking(game);
   let worldgen: WorldGenerator | null = null;
   if (worldgenData) {
     worldgen = new WorldGenerator(seed, worldgenData, data);
     game.map.generator = worldgen;
     // CDDA's default scenario: wake up inside an evacuation shelter near a town.
+    // (A loaded save puts the player back where they were instead.)
     const start = worldgen.findStartLocation('shelter', game.map);
     game.player.x = start.x + 0.5;
     game.player.y = start.y + 0.5;
@@ -55,7 +62,10 @@ async function main(): Promise<void> {
   installWorldInteraction(game, renderer, api);
   // Crafting/reading probe `game.lightAt` for "too dark" checks; back it with real vision light.
   (game as unknown as { lightAt: (x: number, y: number, z: number) => number }).lightAt = (x, y, z) => lightAt(game, x, y, z);
-  installMonsters(game, renderer, worldgen, api);
+  const monsters = installMonsters(game, renderer, worldgen, api);
+  // Before installUi: the UI registers the save key only when game.save exists.
+  const save = await installSave(game, { api, genKind, worldgen, monsters });
+  game.events.on('gameLoaded', () => renderer.chunks.invalidateAll());
   const ui = await installUi(game, renderer, worldgen, api);
 
   let last = performance.now();
@@ -67,9 +77,12 @@ async function main(): Promise<void> {
     requestAnimationFrame(loop);
   };
   requestAnimationFrame(loop);
+  // Title screen / character creation (skipped with ?skipmenu=1 and under automation),
+  // unless the previous page asked to load a save.
+  const loaded = pending ? await save.applyPending(pending) : false;
   api.ready = true;
-  // Title screen / character creation (skipped with ?skipmenu=1 and under automation).
-  await ui.boot();
+  if (!loaded) await ui.boot();
+  save.startSession();
 }
 
 main().catch((e) => {
