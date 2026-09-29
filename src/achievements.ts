@@ -293,6 +293,7 @@ export async function installAchievements(game: Game, worldgen: WorldGenerator |
       snap = take();
       // Old saves (and fresh characters) need the avatar id every "avatar_*" statistic keys on.
       if (tracker.value('avatar_id') === '') {
+        tracker.emit('game_start', { avatar_id: AV });
         tracker.emit('game_avatar_new', { avatar_id: AV, is_new_game: !loaded, is_debug: false });
         enterOmt(snap.omt);
       }

@@ -89,7 +89,8 @@ export interface WorldQueries {
 
 /** Event types this port feeds (src/achievements_install.ts). Anything else is untracked. */
 export const SUPPORTED_EVENTS = new Set([
-  'game_avatar_new', 'game_avatar_death', 'character_kills_monster', 'character_kills_character',
+  // game_start: BN's avatar_id statistic reads it (DDA uses game_avatar_new).
+  'game_start', 'game_avatar_new', 'game_avatar_death', 'character_kills_monster', 'character_kills_character',
   'character_takes_damage', 'character_heals_damage', 'character_wakes_up', 'avatar_moves', 'avatar_enters_omt',
   'gains_skill_level', 'gains_mutation', 'crosses_mutation_threshold', 'installs_cbm', 'installs_faulty_cbm',
   'broken_bone', 'reads_book', 'character_wields_item', 'character_wears_item', 'character_consumes_item',

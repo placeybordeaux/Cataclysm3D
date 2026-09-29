@@ -1,13 +1,14 @@
-// Extract CDDA's achievement system data (achievement, conduct, event_statistic,
+// Extract Bright Nights' achievement system data (achievement, conduct, event_statistic,
 // event_transformation, score) into public/data/achievements.json. Kept apart from the main
 // extractor (which ignores these types) so misc.json doesn't churn and the runtime can load
 // the file lazily.
 //
-// Usage: npm run extract:achievements -- [--cdda ~/code/Cataclysm-DDA] [--out public/data] [--dry-run]
+// Usage: npm run extract:achievements -- [--cdda ~/code/Cataclysm-BN] [--out public/data] [--dry-run]
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { defaultCddaDir, loadCddaObjects } from './cdda';
+import { loadCddaObjects } from './cdda';
+import { defaultGameDir } from './gamedir';
 
 function usage(): string {
   return `Usage: npm run extract:achievements -- [options]
@@ -16,13 +17,13 @@ Write public/data/achievements.json (achievements, conducts, event statistics, e
 transformations, scores).
 
 Options:
-  --cdda <dir>   Cataclysm-DDA checkout (default: $CDDA_DIR or ~/code/Cataclysm-DDA)
+  --cdda <dir>   game checkout (default: $CDDA_DIR or ~/code/Cataclysm-BN)
   --out <dir>    output directory (default: public/data)
   --dry-run      print a summary instead of writing
   -h, --help     show this help`;
 }
 
-const args = { cdda: defaultCddaDir(), out: 'public/data', dryRun: false };
+const args = { cdda: defaultGameDir(), out: 'public/data', dryRun: false };
 const argv = process.argv.slice(2);
 for (let i = 0; i < argv.length; i++) {
   const k = argv[i];
