@@ -89,11 +89,9 @@ export function openEscMenu(ctx: UiContext, onQuit: () => void): Panel {
   const p = game.player;
   const day = Math.floor((game.clock.seconds - game.stats.startSeconds) / 86400) + 1;
   panel.body.append(col, h('div', { class: 'esc-info', text: `${p.name} · day ${day} · ${game.clock.format()}` }));
-  // Centre it (it has no remembered position worth keeping).
-  requestAnimationFrame(() => {
-    const r = panel.el.getBoundingClientRect();
-    panel.moveTo((innerWidth - r.width) / 2, (innerHeight - r.height) / 2.4);
-  });
+  // Centre it once its buttons are in (openScreen centred the empty window).
+  const r = panel.el.getBoundingClientRect();
+  panel.moveTo((innerWidth - r.width) / 2, (innerHeight - r.height) / 2.4);
   select(0);
   return panel;
 }

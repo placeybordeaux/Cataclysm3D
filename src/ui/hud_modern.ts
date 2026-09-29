@@ -47,8 +47,11 @@ export interface BannerSpec {
 export interface HudPrefs {
   /** CDDA-style sidebar instead of the modern clusters. */
   detailed: boolean;
-  /** Keep the HUD inside a centred 16:9 area on wide screens. */
-  narrow: boolean;
+  /**
+   * HUD area: 'full' uses the screen corners, '16:9' keeps it in a centred 16:9 area, 'auto'
+   * does that only on ultrawide screens (wider than 2.1:1), where corners are out of sight.
+   */
+  width: 'auto' | 'full' | '16:9';
 }
 
 const PREFS_KEY = 'cdda3d.hud';
@@ -56,9 +59,10 @@ const PREFS_KEY = 'cdda3d.hud';
 export function loadHudPrefs(): HudPrefs {
   try {
     const j = JSON.parse(localStorage.getItem(PREFS_KEY) ?? '{}') as Partial<HudPrefs>;
-    return { detailed: !!j.detailed, narrow: !!j.narrow };
+    const width = j.width === 'full' || j.width === '16:9' ? j.width : 'auto';
+    return { detailed: !!j.detailed, width };
   } catch {
-    return { detailed: false, narrow: false };
+    return { detailed: false, width: 'auto' };
   }
 }
 export function saveHudPrefs(p: HudPrefs): void {
@@ -195,8 +199,10 @@ export class ModernHud {
   /** HUD area insets: full width, or a centred 16:9 area on screens wider than that. */
   private layout(): void {
     const w = window.innerWidth, hgt = window.innerHeight;
-    const inset = this.prefs.narrow ? Math.max(0, Math.floor((w - (hgt * 16) / 9) / 2)) : 0;
-    this.el.style.setProperty('--hud-x', `${inset}px`);
+    const narrow = this.prefs.width === '16:9' || (this.prefs.width === 'auto' && w / hgt > 2.1);
+    const inset = narrow ? Math.max(0, Math.floor((w - (hgt * 16) / 9) / 2)) : 0;
+    // On the ui2 root so toasts (and anything else anchored to a side) can follow it.
+    ui2Layers().root.style.setProperty('--hud-x', `${inset}px`);
   }
 
   setVisible(v: boolean): void {

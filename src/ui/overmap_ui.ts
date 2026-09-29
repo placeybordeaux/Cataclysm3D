@@ -107,8 +107,6 @@ export function openOvermap(ctx: UiContext): Panel | null {
     pauses: true,
     width: '96vw',
     height: '92vh',
-    x: 0,
-    y: 0,
     legend: [['drag', 'pan'], ['wheel', 'zoom'], ['right-click', 'note / destination'], ['< >', 'level'], ['.', 'you']],
     onKey: (e) => {
       const k = e.key, code = e.code;

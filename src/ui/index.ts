@@ -58,9 +58,12 @@ export async function installUi(game: Game, renderer: Renderer, worldgen: WorldG
   });
   registerOption({
     name: 'HUD width',
-    desc: 'Full: the HUD uses the screen corners. 16:9: on ultrawide screens it stays in a centred 16:9 area, closer to where you look.',
-    value: () => (h.modern.prefs.narrow ? '16:9' : 'Full'),
-    change: () => h.modern.setPrefs({ narrow: !h.modern.prefs.narrow }),
+    desc: 'Full: the HUD uses the screen corners. 16:9: it stays in a centred 16:9 area, closer to where you look. Auto: 16:9 on ultrawide screens only.',
+    value: () => ({ auto: 'Auto', full: 'Full', '16:9': '16:9' })[h.modern.prefs.width],
+    change: (d) => {
+      const order = ['auto', 'full', '16:9'] as const;
+      h.modern.setPrefs({ width: order[(order.indexOf(h.modern.prefs.width) + d + 3) % 3] });
+    },
   });
   installTipsOption();
   installLiquidUi();

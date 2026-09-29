@@ -5,6 +5,7 @@
 
 import type { Game } from '../game/game';
 import { h, openPanel, type Panel, type PanelOpts } from '../ui2';
+import { rememberedPosition } from '../ui2/window';
 import './screens2.css';
 
 export interface ScreenOpts extends Omit<PanelOpts, 'onKey' | 'footer'> {
@@ -48,6 +49,12 @@ export function openScreen(game: Game | null, o: ScreenOpts): Panel {
     },
   });
   panel.el.classList.add('ui2-cdda', 'scr');
+  // Status screens open centred (the ui2 default cascades from the top-left), unless the
+  // player moved the window before: then it's where they left it.
+  if (!rememberedPosition(o.id) && o.x === undefined) {
+    const r = panel.el.getBoundingClientRect();
+    panel.moveTo((innerWidth - r.width) / 2, Math.max(0, (innerHeight - r.height) / 2.2));
+  }
   return panel;
 }
 

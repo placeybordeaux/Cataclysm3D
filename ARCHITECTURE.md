@@ -662,7 +662,7 @@ Keys: `V` camera mode, `F` flashlight.
   providers' lines go under it), message feed (click → log), stamina, activity. **Status banner
   slot**: `hud.setBanner(id, {text, sub?, tone?} | null)` (top centre, under the compass: PAUSED,
   SLEEPING…). Options: "HUD style" (Modern / Detailed = the CDDA sidebar restyled), "HUD width"
-  (Full / centred 16:9 for ultrawide). Bottom centre is left for the hotbar.
+  (Auto = centred 16:9 on screens wider than 2.1:1, the ui2 root var `--hud-x`; Full; 16:9). Bottom centre is left for the hotbar.
 - **Status screens on ui2** (`src/ui/screen2.ts` `openScreen(game, {action, …})`: a ui2 panel that
   closes on its opening key / Bksp / Esc): character `@` (charsheet.ts, tabs; `charsheetSections`
   still adds boxes), map `m` (overmap_ui.ts: UltiCa overmap sprites, drag/wheel, notes and a

@@ -14,7 +14,9 @@
   --c-white: var(--p-text-bright); --c-light_gray: var(--p-text); --c-dark_gray: var(--p-text-dim);
 }
 
-#ui2 .ui2-layer-hud > .hud2 { position: absolute; inset: 0; pointer-events: none; --hud-x: 0px; --edge: calc(var(--u) * 6); }
+#ui2 .ui2-layer-hud > .hud2 { position: absolute; inset: 0; pointer-events: none; --edge: calc(var(--u) * 6); }
+#ui2 { --hud-x: 0px; }
+#ui2 .ui2-toasts { left: calc(var(--hud-x) + var(--u) * 6); }
 #ui2 .hud2 * { pointer-events: none; }
 #ui2 .hud2 .px-icon { image-rendering: pixelated; display: block; flex: none; }
 #ui2 .hud2-plate {
