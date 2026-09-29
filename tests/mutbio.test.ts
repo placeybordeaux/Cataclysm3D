@@ -1,4 +1,4 @@
-// Mutations and bionics against the real extracted CDDA data.
+// Mutations and bionics against the real extracted Bright Nights data.
 import fs from 'node:fs';
 import path from 'node:path';
 import { beforeAll, describe, expect, it } from 'vitest';
@@ -71,116 +71,183 @@ function checkConsistency(traits: Set<string>, base: Set<string>): string[] {
   return problems;
 }
 
-describe('mutagen and vitamins', () => {
-  // TODO(BN): written for DDA data/behaviour; fails on Bright Nights core data (AssertionError: expected +0 to be 225 // Object.is equality). Port with its system.
-  it.skip('drinking lizard mutagen adds its primer and catalyst vitamins (consume_drug vitamins)', () => {
-    const { c, mut, log } = survivor();
-    const r = c.inv.consume(dose('mutagen_lizard'), null);
-    expect(r.ok).toBe(true);
-    expect(mut.vitamin('mutagen_lizard')).toBe(225);
-    expect(mut.vitamin('mutagen')).toBe(125);
-    expect(log.join(' ')).toContain('You drink the');
-    // Catalyst over 100 → mutagen sickness (vitamin excess effect).
-    expect(c.hasEffect('mutagen')).toBe(true);
+const catOf = (id: string): string[] => mutDef(id)?.category ?? [];
+/** Traits in `cat` plus everything a trait of `cat` needs on its way (BN mutate_towards walks prerequisites of any category). */
+function inCategoryTree(cat: string): Set<string> {
+  const out = new Set<string>();
+  const walk = (id: string) => {
+    if (out.has(id)) return;
+    out.add(id);
+    const d = mutDef(id);
+    for (const p of [...(d?.prereqs ?? []), ...(d?.prereqs2 ?? [])]) walk(p);
+  };
+  for (const [id, d] of Object.entries(data.misc.mutation as Record<string, any>)) if ((d.category ?? []).includes(cat)) walk(id);
+  return out;
+}
+
+describe('mutagen (BN mutagen_actor / mutagen_iv_actor)', () => {
+  it('drinking lizard mutagen mutates towards LIZARD, says the category message and costs nutrition', () => {
+    let gainedAny = 0;
+    const tree = inCategoryTree('LIZARD');
+    for (const seed of [1, 2, 3, 4, 5, 6]) {
+      const { c, mut, log } = survivor(seed);
+      const kcal = c.storedKcal, thirst = c.thirst, tired = c.sleepiness;
+      // The use action alone (drinking also quenches: that part is the item model's).
+      mut.useMutagen(dose('mutagen_lizard'), { type: 'mutagen', mutation_category: 'LIZARD' });
+      // mutation_category LIZARD mutagen_message.
+      expect(log.join(' ')).toContain('For a heartbeat, your blood cools down.');
+      // mutagen_hunger/thirst/fatigue defaults 10/10/5 per mutation (one: not is_strong);
+      // mod_stored_nutr(10) = round(10 × 2500 / 288) = 87 kcal.
+      expect(kcal - c.storedKcal).toBe(87);
+      expect(c.thirst - thirst).toBe(10);
+      expect(c.sleepiness - tired).toBe(5);
+      const gained = [...c.traits].filter((t) => !mut.isBase(t));
+      for (const t of gained) expect(tree.has(t), `${t} is on a LIZARD path`).toBe(true);
+      if (gained.length) gainedAny++;
+    }
+    expect(gainedAny).toBeGreaterThan(3);
+    // Drinking runs the use action (BN Character::eat invokes it).
+    const { c, log } = survivor(1);
+    expect(c.inv.consume(dose('mutagen_lizard'), null).ok).toBe(true);
+    expect(log.join(' ')).toContain('For a heartbeat, your blood cools down.');
   });
 
-  // TODO(BN): written for DDA data/behaviour; fails on Bright Nights core data (AssertionError: expected true to be false // Object.is equality). Port with its system.
-  it.skip('injected catalyst needs a syringe', () => {
-    const { c, mut } = survivor();
-    const r = c.inv.consume(dose('iv_mutagen'), null);
+  it('serums need a syringe (comestible tool) and give several mutations', () => {
+    const { c, mut, log } = survivor(4);
+    const r = c.inv.consume(dose('iv_mutagen_lizard'), null);
     expect(r.ok).toBe(false);
-    expect(r.msg).toMatch(/syringe/);
+    expect(r.msg).toBe('You need a syringe to consume that!');
     c.inv.giveNew(createItem(data, 'syringe'));
-    expect(c.inv.consume(dose('iv_mutagen'), null).ok).toBe(true);
-    expect(mut.vitamin('mutagen')).toBeGreaterThanOrEqual(750);
+    const kcal = c.storedKcal;
+    expect(c.inv.consume(dose('iv_mutagen_lizard'), null).ok).toBe(true);
+    expect(log.join(' ')).toContain('Your blood cools down.  The feeling is… different.');
+    // iv_min_mutations 1 + up to 2 more (each unless one_in(3)); iv_hunger 10 → 100 kcal each.
+    const spent = kcal - c.storedKcal;
+    expect([100, 200, 300]).toContain(spent);
+    expect([...c.traits].filter((t) => !mut.isBase(t)).length).toBeGreaterThan(0);
   });
 
-  // TODO(BN): written for DDA data/behaviour; fails on Bright Nights core data (AssertionError: expected +0 to be 200 // Object.is equality). Port with its system.
-  it.skip('mutagenic slurry decays into catalyst, every primer and toxin (decays_into)', () => {
-    const { c, mut } = survivor();
-    mut.vitaminMod('mutagenic_slurry', 25);
-    pass(c, (dt) => mut.update(dt), 60, 1);
-    expect(mut.vitamin('mutagenic_slurry')).toBe(0);
-    expect(mut.vitamin('mutagen')).toBe(25 * 8 - 0);
-    expect(mut.vitamin('mutagen_lizard')).toBe(25);
-    expect(mut.vitamin('mutant_toxin')).toBe(50);
-  });
-
-  // TODO(BN): written for DDA data/behaviour; fails on Bright Nights core data (AssertionError: seed 1: You put on your backpack. | You put on your jeans. | You drink your lizard m). Port with its system.
-  it.skip('several doses of lizard mutagen produce valid LIZARD mutations respecting prereqs and cancels', () => {
+  it('several doses produce valid LIZARD mutations respecting prereqs and cancels', () => {
+    const tree = inCategoryTree('LIZARD');
     for (const seed of [1, 2, 3, 4, 5]) {
       const { c, mut, log } = survivor(seed);
-      for (let i = 0; i < 4; i++) expect(c.inv.consume(dose('mutagen_lizard'), null).ok).toBe(true);
-      pass(c, (dt) => mut.update(dt), 4 * 86400, 60);
-      const gained = [...c.traits].filter((t) => !mut.isBase(t) && t !== 'CHANGING');
+      for (let i = 0; i < 6; i++) expect(c.inv.consume(dose('mutagen_lizard'), null).ok).toBe(true);
+      const gained = [...c.traits].filter((t) => !mut.isBase(t));
       expect(gained.length, `seed ${seed}: ${log.join(' | ')}`).toBeGreaterThan(0);
+      expect(gained.some((t) => catOf(t).includes('LIZARD'))).toBe(true);
       for (const t of gained) {
-        const cats: string[] = mutDef(t)?.category ?? [];
-        expect(cats, `${t} should be a lizard mutation`).toContain('LIZARD');
+        expect(tree.has(t), `${t} should be on a LIZARD path`).toBe(true);
         expect(mutDef(t).valid).not.toBe(false);
       }
       expect(checkConsistency(c.traits, mut.base), `seed ${seed}`).toEqual([]);
       expect(log.some((l) => /You gain a mutation called|mutation turns into/.test(l))).toBe(true);
-      // The primer paid for it.
-      expect(mut.vitamin('mutagen_lizard')).toBeLessThan(900);
     }
   });
 
-  it('without catalyst there is no CHANGING, primer alone does nothing', () => {
-    const { c, mut } = survivor();
-    mut.vitaminMod('mutagen_lizard', 1000);
-    pass(c, (dt) => mut.update(dt), 2 * 86400, 60);
-    expect(c.hasTrait('CHANGING')).toBe(false);
+  it('category-less mutagen spends accumulated mutagen (BALANCED_MUTATIONS)', () => {
+    const { c, mut, log } = survivor(3);
+    expect(mut.idx.balanced).toBe(true);
+    // A new game starts with 27 days, capped at the effect's 22 day maximum.
+    mut.startGame();
+    expect(c.effects.get('accumulated_mutagen')!.duration).toBe(22 * 86400);
+    // Without drinking anything nothing happens.
+    pass(c, (dt) => mut.update(dt), 86400, 600);
+    expect([...c.traits].filter((t) => !mut.isBase(t))).toEqual([]);
+    expect(c.inv.consume(dose('mutagen'), null).ok).toBe(true);
+    // 22 d / 3 d per mutation: seven changes at once (some upgrade earlier ones), the
+    // remainder by roll_remainder.
+    const changes = log.filter((l) => /You gain a mutation called|mutation turns into/.test(l)).length;
+    expect(changes).toBeGreaterThanOrEqual(7);
+    expect([...c.traits].filter((t) => !mut.isBase(t)).length).toBeGreaterThanOrEqual(3);
+    expect((c.effects.get('accumulated_mutagen')?.duration ?? 0) / 86400).toBeLessThan(3);
+    expect(checkConsistency(c.traits, mut.base)).toEqual([]);
+  });
+
+  it('without accumulated mutagen a weak generic dose only accumulates', () => {
+    const { c, mut } = survivor(5);
+    // is_weak (mutagenic flesh) adds nothing; plain mutagen adds 2 days, mutating once only after 3.
+    mut.useMutagen(dose('mutagen'), { type: 'mutagen', is_weak: true });
+    expect(c.effects.get('accumulated_mutagen')).toBeUndefined();
     expect([...c.traits].filter((t) => !mut.isBase(t))).toEqual([]);
   });
 
-  // TODO(BN): written for DDA data/behaviour; fails on Bright Nights core data (AssertionError: expected false to be true // Object.is equality). Port with its system.
-  it.skip('mutate towards a deep trait walks its prerequisite chain (SCALES via SKIN_PEELING/SPARSE_SCALES)', () => {
+  it('mutate towards a deep trait walks its prerequisite chain (SCALES via SKIN_ROUGH) and armors', () => {
     const { c, mut } = survivor();
     let n = 0;
-    while (!c.hasTrait('SCALES') && n++ < 10) mut.mutateTowards('SCALES', 'LIZARD', false);
+    while (!c.hasTrait('SCALES') && n++ < 10) mut.mutateTowards('SCALES');
     expect(c.hasTrait('SCALES')).toBe(true);
-    // SPARSE_SCALES changes_to SCALES: replaced, not kept.
-    expect(c.hasTrait('SPARSE_SCALES')).toBe(false);
+    // SKIN_ROUGH changes_to SCALES: replaced, not kept.
+    expect(c.hasTrait('SKIN_ROUGH')).toBe(false);
     expect(checkConsistency(c.traits, mut.base)).toEqual([]);
-    // Integrated armor is worn and protects.
-    expect(c.inv.worn.some((w) => w.typeId === 'integrated_scales')).toBe(true);
+    // "armor": [{"parts": "ALL", "physical": 3}] — stab uses cut armor.
+    expect(mut.armor('torso', 'cut')).toBe(3);
+    expect(mut.armor('hand_l', 'stab')).toBe(3);
+    expect(mut.armor('torso', 'heat')).toBe(0);
+    const out = c.inv.absorbHit('torso', [{ type: 'bash', amount: 10 }], new Rng(1));
+    expect(out[0].amount).toBeLessThanOrEqual(7);
   });
 
-  // TODO(BN): written for DDA data/behaviour; fails on Bright Nights core data (AssertionError: expected false to be true // Object.is equality). Port with its system.
-  it.skip('crosses the threshold once the category level and primer are high enough', () => {
+  it('crosses the LIZARD threshold with an IV serum once it is the primary category above 50', () => {
     const { c, mut, log } = survivor(9);
-    const lizard = (data.misc.mutation_category as any).LIZARD;
-    // Grow a lot of lizard mutations without vitamins.
-    for (let i = 0; i < 80; i++) mut.mutateCategory('LIZARD', false, true);
-    expect(mut.categoryLevels().get('LIZARD') ?? 0).toBeGreaterThanOrEqual(30);
-    mut.vitaminMod(lizard.vitamin, 2500);
+    for (let i = 0; i < 80; i++) mut.mutateCategory('LIZARD');
+    const levels = mut.categoryLevels();
+    expect(mut.highestCategory(levels)).toBe('LIZARD');
+    expect(levels.get('LIZARD')!).toBeGreaterThan(50);
+    // Post-threshold LIZARD mutations (threshreq → threshold_tier 1) strain before crossing.
+    // THICK_SCALES: threshreq THRESH_LIZARD (tier 1), prereq SCALES.
+    const post = { id: 'THICK_SCALES' };
+    let n = 0;
+    while (!c.hasTrait('SCALES') && n++ < 10) mut.mutateTowards('SCALES');
+    expect(mut.mutateTowards(post.id)).toBe(false);
+    expect(log.join(' ')).toContain('yearning to be free');
     let crossed = false;
-    for (let i = 0; i < 50 && !crossed; i++) crossed = mut.tryCrossingThreshold('LIZARD');
+    for (let i = 0; i < 50 && !crossed; i++) crossed = mut.testCrossingThreshold('LIZARD', 1);
     expect(crossed).toBe(true);
     expect(c.hasTrait('THRESH_LIZARD')).toBe(true);
+    expect(mut.threshTier).toBe(1);
     expect(mut.thresholdCategory()).toBe('LIZARD');
     expect(log.join(' ')).toContain('FREE!');
-    // Only once.
-    expect(mut.tryCrossingThreshold('LIZARD')).toBe(false);
+    // Only once, and no other category's threshold afterwards.
+    expect(mut.testCrossingThreshold('LIZARD', 1)).toBe(false);
+    expect(mut.testCrossingThreshold('BEAST', 1)).toBe(false);
+    expect(mut.mutateTowards(post.id)).toBe(true);
+    expect(c.hasTrait(post.id)).toBe(true);
   });
 
-  // TODO(BN): written for DDA data/behaviour; fails on Bright Nights core data (AssertionError: expected false to be true // Object.is equality). Port with its system.
-  it.skip('purifier (HUMAN dummies) removes mutations step by step', () => {
+  it('a threshold needs the category to be primary and strong', () => {
+    const { c, mut, log } = survivor(2);
+    mut.mutateTowards('SCALES');
+    for (let i = 0; i < 20; i++) expect(mut.testCrossingThreshold('LIZARD')).toBe(false);
+    expect(c.hasTrait('THRESH_LIZARD')).toBe(false);
+    expect(log.join(' ')).not.toContain('FREE!');
+  });
+
+  it('purifier removes one to four mutations, never innate traits', () => {
     const { c, mut, log } = survivor();
-    let n = 0;
-    while (!c.hasTrait('FUR') && n++ < 10) mut.mutateTowards('FUR', 'URSINE', false);
-    expect(c.hasTrait('FUR')).toBe(true);
-    expect(c.inv.worn.some((w) => w.typeId === 'integrated_fur')).toBe(true);
-    mut.vitaminMod('mutagen_human', 2000);
-    for (let i = 0; i < 30 && [...c.traits].some((t) => /FUR|HIRSUTE/.test(t)); i++) mut.mutate(0, true);
-    expect([...c.traits].filter((t) => /FUR/.test(t))).toEqual([]);
-    expect(c.inv.worn.some((w) => w.typeId === 'integrated_fur')).toBe(false);
-    expect(log.some((l) => /Your Furry mutation turns into|You lose your/.test(l))).toBe(true);
+    c.addTrait('NIGHTVISION');
+    mut.syncBase();
+    for (const t of ['SCALES', 'LIZ_EYE', 'CLAWS']) {
+      let n = 0;
+      while (!c.hasTrait(t) && n++ < 10) mut.mutateTowards(t);
+    }
+    const before = [...c.traits].filter((t) => !mut.isBase(t));
+    expect(before.length).toBe(3);
+    expect(c.inv.consume(dose('purifier'), null).ok).toBe(true);
+    const after = [...c.traits].filter((t) => !mut.isBase(t));
+    expect(after.length).toBeLessThan(before.length);
+    expect(c.hasTrait('NIGHTVISION')).toBe(true);
+    expect(log.some((l) => /You lose your .* mutation\.|mutation turns into/.test(l))).toBe(true);
   });
 
-  // TODO(BN): written for DDA data/behaviour; fails on Bright Nights core data (AssertionError: expected 'You put on your backpack. You put on …' to contain 'is destroyed!'). Port with its system.
-  it.skip('restricts_gear: hooves destroy boots and then block wearing them; a muzzle pushes off a mask', () => {
+  it('mutagen aversion refuses the dose and keeps it', () => {
+    const { c, mut } = survivor();
+    mut.setMutation('MUTAGEN_AVOID');
+    const r = c.inv.consume(dose('mutagen_lizard'), null);
+    expect(r.ok).toBe(false);
+    expect(r.msg).toMatch(/You're not drinking that chemical stuff/);
+  });
+
+  it('restricts_gear: hooves push boots off and then block wearing them; a muzzle pushes off a mask', () => {
     const { c, mut, log } = survivor();
     const dropped: Item[] = [];
     mut.onDropItem = (it) => dropped.push(it);
@@ -188,7 +255,8 @@ describe('mutagen and vitamins', () => {
     expect(c.inv.wear(boots, null).ok).toBe(true);
     mut.setMutation('HOOVES');
     expect(c.inv.worn.includes(boots)).toBe(false);
-    expect(log.join(' ')).toContain('is destroyed!');
+    expect(dropped).toContain(boots);
+    expect(log.join(' ')).toContain('Your pair of boots is pushed off!'.replace('pair of boots', boots.name()));
     const r = c.inv.wear(createItem(data, 'boots'), null);
     expect(r.ok).toBe(false);
     expect(r.msg).toMatch(/Hooves mutation prevents you from wearing/);
@@ -197,34 +265,42 @@ describe('mutagen and vitamins', () => {
     mut.setMutation('MUZZLE');
     expect(c.inv.worn.includes(mask)).toBe(false);
     expect(dropped).toContain(mask);
-    expect(log.join(' ')).toContain('is pushed off!');
   });
 
-  // TODO(BN): written for DDA data/behaviour; fails on Bright Nights core data (AssertionError: expected 0 to be greater than 0). Port with its system.
-  it.skip('claws make unarmed attacks cut; night vision lowers the vision threshold', () => {
+  it('claws make unarmed attacks cut (cut_dmg_bonus); night vision comes from night_vision_range', () => {
     const { c, mut } = survivor();
     const rng = new Rng(3);
-    const cutBefore = rollMeleeDamage(c, null, false, rng, true).find((d) => d.type === 'cut')?.amount ?? 0;
+    const cut = () => rollMeleeDamage(c, null, false, rng, true).find((d) => d.type === 'cut')?.amount ?? 0;
+    expect(cut()).toBe(0);
     let n = 0;
-    while (!c.hasTrait('CLAWS') && n++ < 10) mut.mutateTowards('CLAWS', 'BEAST', false);
-    const cutAfter = rollMeleeDamage(c, null, false, rng, true).find((d) => d.type === 'cut')?.amount ?? 0;
-    expect(cutBefore).toBe(0);
-    expect(cutAfter).toBeGreaterThan(0);
+    while (!c.hasTrait('CLAWS') && n++ < 10) mut.mutateTowards('CLAWS');
+    expect(c.hasTrait('CLAWS')).toBe(true);
+    expect(cut()).toBeGreaterThan(0);
+    expect(mut.nightVisionRange()).toBe(0);
     mut.setMutation('NIGHTVISION');
     expect(mut.nightVisionRange()).toBe(2);
   });
 
-  // TODO(BN): written for DDA data/behaviour; fails on Bright Nights core data (AssertionError: expected +0 to be 300 // Object.is equality). Port with its system.
-  it.skip('saves and restores vitamins and powered mutations', () => {
+  it('saves and restores powered mutations and the threshold tier', () => {
     const a = survivor();
-    a.mut.vitaminMod('mutagen', 300);
-    a.mut.setMutation('NIGHTVISION');
+    a.mut.setMutation('THRESH_LIZARD');
+    a.mut.threshTier = 1;
+    a.mut.threshCategory = 'LIZARD';
+    const active = Object.values(data.misc.mutation as Record<string, any>).find((d) => d.active && !d.transform)!;
+    a.mut.setMutation(active.id);
+    a.mut.powered.add(active.id);
     const j = JSON.parse(JSON.stringify(a.mut.toJSON()));
     const b = survivor();
-    b.c.traits.add('NIGHTVISION');
+    b.c.traits.add('THRESH_LIZARD');
+    b.c.traits.add(active.id);
     b.mut.load(j);
-    expect(b.mut.vitamin('mutagen')).toBe(300);
-    expect(b.mut.isPowered('NIGHTVISION')).toBe(true);
+    expect(b.mut.isPowered(active.id)).toBe(true);
+    expect(b.mut.threshTier).toBe(1);
+    expect(b.mut.thresholdCategory()).toBe('LIZARD');
+    // v1 (DDA) saves carried vitamins and CHANGING timers: they load without them.
+    const old = survivor();
+    old.mut.load({ vitamins: { mutagen: 300 }, powered: [], base: [], time: 5 } as never);
+    expect(old.mut.threshTier).toBe(0);
   });
 });
 
@@ -237,59 +313,75 @@ describe('bionics', () => {
     expect(bionicSuccessChance(c, false, 1)).toBe(41);
     // skill == 4 × difficulty → 50%
     expect(bionicManipCos(8, 2)).toBe(50);
+    // Autodoc install program: skill level override 10 → pl 120.
+    expect(bionicsPlSkill(c, true, 10)).toBe(120);
     c.setSkill('electronics', 8);
     c.setSkill('firstaid', 8);
     c.setSkill('mechanics', 8);
     expect(bionicSuccessChance(c, false, 1)).toBeGreaterThan(80);
   });
 
-  it('installation outcomes match the success chance; failures have CDDA consequences', () => {
+  it('BN always installs the CBM; failed rolls add complications at the success rate', () => {
     const N = 1500;
-    let ok = 0;
+    let clean = 0;
     const fails: Record<number, number> = {};
     let chance = 0;
     for (let i = 0; i < N; i++) {
       const { bio, c } = survivor(1000 + i);
+      const hp = c.hp.torso.cur;
       const r = bio.install('bio_power_storage');
       chance = r.chance;
-      if (r.ok) {
-        ok++;
-        expect(bio.has('bio_power_storage')).toBe(true);
-      } else {
+      expect(r.ok).toBe(true);
+      expect(bio.has('bio_power_storage')).toBe(true);
+      expect(bio.maxPower()).toBeGreaterThanOrEqual(r.faulty ? 0 : 100 - (r.failType! >= 4 ? 100 : 0));
+      if (r.success > 0) clean++;
+      else {
         fails[r.failType!] = (fails[r.failType!] ?? 0) + 1;
-        if (r.failType! >= 2 && r.failType! <= 3) expect(r.faulty && bio.has(r.faulty)).toBeTruthy();
-        if (r.failType === 1) expect(c.pain).toBeGreaterThan(0);
+        // Power storage occupies no body part: complications hurt the torso.
+        if (r.failType! <= 3) expect(c.hp.torso.cur).toBeLessThan(hp);
+        if (r.faulty) expect(bio.has(r.faulty)).toBe(true);
       }
     }
     expect(chance).toBe(41);
-    expect(ok / N).toBeGreaterThan(0.41 - 0.04);
-    expect(ok / N).toBeLessThan(0.41 + 0.04);
+    expect(clean / N).toBeGreaterThan(0.41 - 0.04);
+    expect(clean / N).toBeLessThan(0.41 + 0.04);
     expect(Object.keys(fails).length).toBeGreaterThan(1);
   });
 
-  // TODO(BN): written for DDA data/behaviour; fails on Bright Nights core data (AssertionError: expected 'CBM is already installed.' to match /Not enough space/). Port with its system.
-  it.skip('installation checks slots, duplicates and requirements', () => {
+  it('installation checks duplicates and prerequisites; no slot limit unless CBM_SLOTS_ENABLED', () => {
     const { bio } = survivor();
+    expect(bio.idx.slotsEnabled).toBe(false);
     bio.add('bio_flashlight');
     expect(bio.installBlocker('bio_flashlight')).toBe('CBM is already installed.');
     expect(bio.installBlocker('bio_power_storage')).toBeNull();
-    // Power storage allows dupes; the torso has 84 slots at 2 each.
+    // Power storage is MULTIINSTALL; 100 kJ each.
     for (let i = 0; i < 42; i++) bio.add('bio_power_storage');
     expect(bio.maxPower()).toBe(4200);
-    expect(bio.installBlocker('bio_power_storage')).toMatch(/Not enough space/);
+    expect(bio.installBlocker('bio_power_storage')).toBeNull();
+    const withReq = [...bio.idx.defs.values()].find((d) => d.required_bionics?.length);
+    if (withReq) expect(bio.installBlocker(withReq.id)).toMatch(/requires prior installation/);
   });
 
-  // TODO(BN): written for DDA data/behaviour; fails on Bright Nights core data (AssertionError: expected 2.1321833187926131e-13 to be close to 8.199499999999999, received differenc). Port with its system.
-  it.skip('power drains while a toggled bionic is on, and it powers down when empty', () => {
+  it('self-installation is off (MANUAL_BIONIC_INSTALLATION); an Autodoc needs 42 anesthetic per difficulty', () => {
+    const { bio } = survivor();
+    expect(bio.idx.manualInstall).toBe(false);
+    // requirement "anesthetic" (3 kit charges) × difficulty × 2 × 7.
+    expect(bio.anesthesiaNeeded('bio_flashlight')).toBe(3 * 2 * 2 * 7);
+    expect(bio.needsAnesthesia()).toBe(true);
+    bio.add('bio_painkiller');
+    expect(bio.needsAnesthesia()).toBe(false);
+  });
+
+  it('power drains while a toggled bionic is on, and it powers down when empty', () => {
     const { bio, c, log } = survivor();
     bio.add('bio_power_storage');
     bio.add('bio_flashlight');
-    bio.modPower(10);
+    bio.modPower(50);
     expect(bio.activate('bio_flashlight')).toBe(true);
     expect(bio.isActive('bio_flashlight')).toBe(true);
     pass(c, (dt) => bio.update(dt), 3600, 60);
-    // act 0.5 J + 0.5 J/s for an hour = 1.8005 kJ
-    expect(bio.power).toBeCloseTo(10 - 0.0005 - 1.8, 3);
+    // act 8 J, then 8 J per turn after the first (charge_timer starts at charge_time 1).
+    expect(bio.power).toBeCloseTo(50 - 0.008 - 3599 * 0.008, 3);
     bio.power = 0.001;
     pass(c, (dt) => bio.update(dt), 60, 60);
     expect(bio.isActive('bio_flashlight')).toBe(false);
@@ -300,9 +392,10 @@ describe('bionics', () => {
     const { bio, c } = survivor();
     bio.add('bio_power_storage');
     bio.add('bio_metabolics');
-    bio.activate('bio_metabolics');
+    expect(bio.activate('bio_metabolics')).toBe(true);
     const kcal = c.storedKcal;
     pass(c, (dt) => bio.update(dt), 60, 1);
+    // 1 kcal → 4.184 kJ × 0.25 per turn.
     expect(bio.power).toBeGreaterThan(10);
     expect(c.storedKcal).toBeLessThan(kcal);
     const r = survivor();
@@ -312,21 +405,19 @@ describe('bionics', () => {
     expect(r.bio.power).toBeCloseTo(100 * 0.00625, 5);
   });
 
-  // TODO(BN): written for DDA data/behaviour; fails on Bright Nights core data (AssertionError: expected 8 to be 5 // Object.is equality). Port with its system.
-  it.skip('enchantments: Muscle Augmentation gives +2 Str powered, -3 unpowered', () => {
+  it('stat_bonus: Muscle Augmentation is a permanent +2 Str; Power Overload -3 above 75%', () => {
     const { bio, c } = survivor();
-    bio.add('bio_power_storage');
     bio.add('bio_str_enhancer');
     c.resetStats();
-    expect(c.str).toBe(c.str_base - 3);
-    bio.modPower(50);
-    bio.activate('bio_str_enhancer');
-    c.resetStats();
     expect(c.str).toBe(c.str_base + 2);
+    bio.add('bio_power_storage');
+    bio.add('bio_power_weakness');
+    bio.modPower(80);
+    c.resetStats();
+    expect(c.str).toBe(c.str_base + 2 - 3);
   });
 
-  // TODO(BN): written for DDA data/behaviour; fails on Bright Nights core data (AssertionError: expected 'knife_combat' to be 'bio_claws_weapon' // Object.is equality). Port with its system.
-  it.skip('bionic claws are wielded while active and cannot be dropped', () => {
+  it('bionic claws are wielded while active and cannot be dropped', () => {
     const { bio, c } = survivor();
     bio.add('bio_power_storage');
     bio.add('bio_claws');
@@ -340,22 +431,27 @@ describe('bionics', () => {
     expect(c.inv.wielded).toBeNull();
   });
 
-  // TODO(BN): written for DDA data/behaviour; fails on Bright Nights core data (AssertionError: expected 10 to be less than or equal to 7). Port with its system.
-  it.skip('subdermal armor reduces damage under the clothes', () => {
+  it('alloy plating reduces damage under the clothes (cut_protec 6)', () => {
     const { bio, c } = survivor();
     bio.add('bio_armor_torso');
+    expect(bio.armor('torso', 'cut')).toBe(6);
+    expect(bio.armor('torso', 'stab')).toBe(6);
+    expect(bio.armor('torso', 'bullet')).toBe(5);
     const out = c.inv.absorbHit('torso', [{ type: 'cut', amount: 10 }], new Rng(1));
-    expect(out[0].amount).toBeLessThanOrEqual(7);
+    expect(out[0].amount).toBeLessThanOrEqual(4);
   });
 
-  // TODO(BN): written for DDA data/behaviour; fails on Bright Nights core data (AssertionError: expected false to be true // Object.is equality). Port with its system.
-  it.skip('bio_tools satisfies crafting tool qualities', () => {
+  it('bio_tools (fake_item toolset, INITIALLY_ACTIVATE) satisfies crafting tool qualities while on', () => {
     const { bio, c } = survivor();
     expect(CraftingInventory.gather(data, c, null, null).hasQuality('SCREW', 1)).toBe(false);
+    bio.add('bio_power_storage');
     bio.add('bio_tools');
+    expect(bio.isActive('bio_tools')).toBe(true);
     expect(CraftingInventory.gather(data, c, null, null).hasQuality('SCREW', 1)).toBe(true);
     expect(CraftingInventory.gather(data, c, null, null).hasQuality('WRENCH', 1)).toBe(true);
     expect(c.inv.hasQuality('PRY', 1)).toBe(true);
+    bio.deactivate('bio_tools');
+    expect(c.inv.hasQuality('PRY', 1)).toBe(false);
   });
 });
 
@@ -363,8 +459,7 @@ describe('bionics in a game', () => {
   function stubInput(): any {
     return { held: new Set<string>(), captured: false, onPress() {}, capture: () => () => {}, consumeMouse: () => [0, 0], consumeClicks: () => [] };
   }
-  // TODO(BN): written for DDA data/behaviour; fails on Bright Nights core data (AssertionError: expected +0 to be 60 // Object.is equality). Port with its system.
-  it.skip('bio_flashlight toggles the player light (directional beam, LUMINATION 60)', () => {
+  it('bio_flashlight toggles the player light (LUMINATION max 300 while active)', () => {
     const game = new Game(data, 3, stubInput());
     game.map.generator = new TestGenerator();
     const mods = installMutBio(game, null);
@@ -373,15 +468,13 @@ describe('bionics in a game', () => {
     mods.bio.modPower(20);
     expect(playerLight(game)).toBe(0);
     mods.bio.toggle('bio_flashlight');
-    expect(playerLight(game)).toBe(60);
-    const s = playerLightState(game);
-    expect(s.on && s.directional).toBe(true);
+    expect(playerLight(game)).toBe(300);
+    expect(playerLightState(game).on).toBe(true);
     mods.bio.toggle('bio_flashlight');
     expect(playerLight(game)).toBe(0);
   });
 
-  // TODO(BN): written for DDA data/behaviour; fails on Bright Nights core data (AssertionError: expected 3.5 to be less than 2.5). Port with its system.
-  it.skip('bionic night vision lowers the vision threshold', () => {
+  it('bionic night vision (NIGHT_VISION max 10) lowers the vision threshold', () => {
     const game = new Game(data, 3, stubInput());
     game.map.generator = new TestGenerator();
     const mods = installMutBio(game, null);
@@ -390,6 +483,7 @@ describe('bionics in a game', () => {
     mods.bio.add('bio_night_vision');
     mods.bio.modPower(20);
     mods.bio.toggle('bio_night_vision');
+    expect(mods.bio.nightVisionRange()).toBe(10);
     expect(visionThreshold(game, 1)).toBeLessThan(2.5);
   });
 });

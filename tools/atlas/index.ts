@@ -1,38 +1,36 @@
-// Compile the UltiCa tileset (CDDA "compositing" source form: one PNG per sprite + JSON tile
-// entries, see ~/code/Cataclysm-DDA/doc/TILESET.md) into GPU-friendly atlas pages plus
-// public/atlas/atlas.json (format documented in src/render/atlasTypes.ts).
+// Compile a UltiCa tileset into GPU-friendly atlas pages plus public/atlas/atlas.json (format
+// documented in src/render/atlasTypes.ts). Two readers feed the same packer:
+//   compiled.ts  tile_config.json + sheet PNGs (default: BN's gfx/UltimateCataclysm)
+//   source.ts    CDDA "compositing" source form (per-sprite PNGs + tile_info.json), v1's input
 //
-// Semantics follow ~/code/Cataclysm-DDA/tools/gfx_tools/compose.py (run with --use-all):
-//  - tile_info.json lists sheets; sheet "foo.png" of WxH reads directory pngs_foo_WxH/.
-//  - Sheets are walked in tile_info order, files sorted; a sprite name (PNG stem) is global.
-//    Non-filler sheets win over filler sheets; the first definition of a PNG name wins.
-//  - Tile entries are converted main sheets first, then filler sheets; the first entry to
-//    define an id wins (later duplicates are dropped, as compose.py does).
-//  - With use-all (default), PNGs no entry references become tiles named after themselves.
-// Offsets: CDDA applies the offset of the sheet that holds the tile *entry*, not of the sheet
-// holding the PNG; frames therefore carry the entry sheet's offset.
-//
-// Usage: npm run atlas -- [--dry-run] [--tileset-dir DIR] [--out DIR] [--page-size N]
-//                         [--exclude a,b] [--no-use-all]
+// Usage: npm run atlas -- [--dry-run] [--tileset-dir DIR] [--source-form] [--fill-from DIR]
+//                         [--out DIR] [--page-size N] [--exclude a,b] [--no-use-all]
 
 import { PNG } from 'pngjs';
 import { createHash } from 'node:crypto';
-import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync, rmSync } from 'node:fs';
-import { join, relative, resolve, basename } from 'node:path';
-import type { AtlasFrame, AtlasIndex, AtlasPage, SubtileDef, TileDef, VariantList } from '../../src/render/atlasTypes';
-import { MULTITILE_KEYS } from '../../src/render/atlasTypes';
+import { mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
+import type { AtlasFrame, AtlasIndex, AtlasPage, SubtileDef, SubtileKey, TileDef, VariantList } from '../../src/render/atlasTypes';
+import { compileCompiled, isCompiled } from './compiled';
+import { type Compiled, type Img, GLYPH_COLUMNS } from './frontend';
+import { compileSource } from './source';
 
 const argv = process.argv.slice(2);
 if (argv.includes('--help') || argv.includes('-h')) {
   console.log(`atlas: compile the UltiCa tileset into public/atlas/
-  --tileset-dir DIR  tileset source (default $TILESET_DIR or
-                     /home/peter/code/CDDA-3d/vendor/tilesets/gfx/UltimateCataclysm)
+  --tileset-dir DIR  tileset directory (default $TILESET_DIR or
+                     ~/code/Cataclysm-BN/gfx/UltimateCataclysm)
+  --source-form      read DIR as the CDDA compositing *source* form (tile_info.json + pngs_*
+                     directories, e.g. /home/peter/code/CDDA-3d/vendor/tilesets/gfx/UltimateCataclysm);
+                     otherwise DIR must hold a compiled tile_config.json
   --out DIR          output directory (default public/atlas)
   --page-size N      atlas page size, power of two (default 4096)
-  --exclude a,b      top-level sub-directories of every sheet dir to skip
-                     (default: none; e.g. overmap,mods to drop overmap / mod-only sprites)
-  --no-use-all       don't turn unreferenced PNGs into tiles named after the PNG
+  --fill-from DIR    also read DIR (a compositing *source* tileset, e.g. v1's DDA UltiCa in
+                     /home/peter/code/CDDA-3d/vendor/tilesets/gfx/UltimateCataclysm) and add
+                     the tiles whose ids the main tileset lacks (off by default: mixes UltiCa
+                     revisions, grows the atlas)
+  --exclude a,b      (source form) top-level sub-directories of every sheet dir to skip
+  --no-use-all       (source form) don't turn unreferenced PNGs into tiles named after the PNG
   --dry-run          compile and report, but write nothing`);
   process.exit(0);
 }
@@ -41,302 +39,86 @@ function arg(name: string): string | undefined {
   return i >= 0 ? argv[i + 1] : undefined;
 }
 const DRY = argv.includes('--dry-run');
-const USE_ALL = !argv.includes('--no-use-all');
+const SOURCE_FORM = argv.includes('--source-form');
 const SRC = resolve(
-  arg('--tileset-dir') ?? process.env.TILESET_DIR ?? '/home/peter/code/CDDA-3d/vendor/tilesets/gfx/UltimateCataclysm',
+  arg('--tileset-dir') ?? process.env.TILESET_DIR ?? join(process.env.HOME ?? '', 'code/Cataclysm-BN/gfx/UltimateCataclysm'),
 );
 const OUT = resolve(arg('--out') ?? 'public/atlas');
 const PAGE = Number(arg('--page-size') ?? 4096);
-const EXCLUDE = new Set((arg('--exclude') ?? '').split(',').filter(Boolean));
 const PAD = 1;
 if (!Number.isInteger(Math.log2(PAGE))) throw new Error(`--page-size must be a power of two, got ${PAGE}`);
-if (!existsSync(join(SRC, 'tile_info.json'))) throw new Error(`no tile_info.json in ${SRC}`);
-
-// ---------------------------------------------------------------- read sheets & entries
-
-interface Sheet {
-  name: string;
-  w: number;
-  h: number;
-  ox: number;
-  oy: number;
-  filler: boolean;
-  dir: string;
-}
-interface Png {
-  name: string;
-  path: string;
-  sheet: Sheet;
-}
-type RawLayer = string | (string | { weight?: number; sprite?: string | string[] })[];
-interface RawEntry {
-  id?: string | string[];
-  fg?: RawLayer;
-  bg?: RawLayer;
-  multitile?: boolean;
-  rotates?: boolean;
-  animated?: boolean;
-  height_3d?: number;
-  additional_tiles?: RawEntry[];
-}
+if (!SOURCE_FORM && !isCompiled(SRC))
+  throw new Error(`${SRC} has no tile_config.json; pass --source-form for a tile_info.json source tileset`);
+if (!SOURCE_FORM && (arg('--exclude') || argv.includes('--no-use-all')))
+  throw new Error('--exclude / --no-use-all only apply to --source-form');
 
 const problems: Record<string, string[]> = {};
-function problem(kind: string, msg: string): void {
-  (problems[kind] ??= []).push(msg);
-}
+const problem = (kind: string, msg: string) => void (problems[kind] ??= []).push(msg);
 
-const info = JSON.parse(readFileSync(join(SRC, 'tile_info.json'), 'utf8')) as Record<string, any>[];
-const base = info[0];
-const TILE_W: number = base.width ?? 16;
-const TILE_H: number = base.height ?? 16;
-if (TILE_W !== TILE_H) throw new Error(`non-square tiles (${TILE_W}x${TILE_H}) not supported`);
+const t0 = Date.now();
+const compiled: Compiled = SOURCE_FORM
+  ? compileSource(
+      SRC,
+      { exclude: new Set((arg('--exclude') ?? '').split(',').filter(Boolean)), useAll: !argv.includes('--no-use-all') },
+      problem,
+    )
+  : compileCompiled(SRC, problem);
+const TILE_W = compiled.tileSize;
 
-const sheets: Sheet[] = [];
-let fallbackFile: string | undefined;
-for (const conf of info.slice(1)) {
-  const name = Object.keys(conf)[0];
-  const spec = conf[name] ?? {};
-  if (spec.fallback) {
-    fallbackFile = name;
-    continue;
-  }
-  const w = spec.sprite_width ?? TILE_W;
-  const h = spec.sprite_height ?? TILE_H;
-  const dir = join(SRC, `pngs_${name.split('.png')[0]}_${w}x${h}`);
-  if (!existsSync(dir)) {
-    problem('missing sheet dir', dir);
-    continue;
-  }
-  sheets.push({ name, w, h, ox: spec.sprite_offset_x ?? 0, oy: spec.sprite_offset_y ?? 0, filler: !!spec.filler, dir });
-}
-// compose.py processes main sheets before fillers regardless of tile_info order.
-const ordered = [...sheets.filter((s) => !s.filler), ...sheets.filter((s) => s.filler)];
-
-const pngs = new Map<string, Png>();
-const entries: { sheet: Sheet; entry: RawEntry; file: string }[] = [];
-let excludedPngs = 0;
-
-// Same traversal order as compose.py: directories sorted by full path, files sorted by name.
-function walk(sheet: Sheet): void {
-  const dirs: string[] = [];
-  const rec = (d: string) => {
-    dirs.push(d);
-    for (const e of readdirSync(d)) {
-      const p = join(d, e);
-      if (!statSync(p).isDirectory()) continue;
-      const rel = relative(sheet.dir, p);
-      if (!rel.includes('/') && EXCLUDE.has(rel)) {
-        excludedPngs += countPngs(p);
-        continue;
-      }
-      if (existsSync(join(p, '.scratch'))) continue;
-      rec(p);
-    }
-  };
-  rec(sheet.dir);
-  dirs.sort();
-  for (const d of dirs) {
-    const files = readdirSync(d)
-      .filter((f) => !statSync(join(d, f)).isDirectory())
-      .sort();
-    for (const f of files) {
-      const p = join(d, f);
-      // compose.py matches on suffixes == ['.png'], i.e. "a.b.png" is ignored.
-      if (/^[^.]+\.png$/.test(f)) {
-        const stem = f.slice(0, -4);
-        const prev = pngs.get(stem);
-        if (prev) {
-          if (!sheet.filler) problem('duplicate png name', `${stem}: ${p} (kept ${prev.path})`);
-          continue;
+const FILL = arg('--fill-from');
+if (FILL) {
+  // Only ids the main tileset doesn't define (subtiles live inside their TileDef). Frames are
+  // appended, so the filler's sprite indices shift by the main tileset's frame count.
+  const extra = compileSource(resolve(FILL), { exclude: new Set(), useAll: false }, (k, m) => problem(`fill: ${k}`, m));
+  if (extra.tileSize !== TILE_W) throw new Error(`--fill-from tile size ${extra.tileSize} != ${TILE_W}`);
+  const base = compiled.frames.length;
+  const used = new Map<number, number>();
+  const remap = (vl: VariantList | undefined): VariantList | undefined =>
+    vl?.map((v) => ({
+      weight: v.weight,
+      sprites: v.sprites.map((f) => {
+        let n = used.get(f);
+        if (n === undefined) {
+          n = base + used.size;
+          used.set(f, n);
+          compiled.frames.push({ ...extra.frames[f], key: `fill:${extra.frames[f].key}` });
         }
-        pngs.set(stem, { name: stem, path: p, sheet });
-      } else if (/^[^.]+\.json$/.test(f)) {
-        let data: unknown;
-        try {
-          data = JSON.parse(readFileSync(p, 'utf8'));
-        } catch (e) {
-          throw new Error(`bad JSON in ${p}: ${e}`);
-        }
-        for (const entry of Array.isArray(data) ? data : [data]) entries.push({ sheet, entry: entry as RawEntry, file: p });
+        return n;
+      }),
+    }));
+  let added = 0;
+  for (const [id, def] of Object.entries(extra.tiles)) {
+    if (compiled.tiles[id]) continue;
+    const out: TileDef = { ...def, fg: remap(def.fg), bg: remap(def.bg) };
+    if (!out.fg) delete out.fg;
+    if (!out.bg) delete out.bg;
+    if (def.multitile) {
+      out.multitile = {};
+      for (const [k, sub] of Object.entries(def.multitile)) {
+        const s2: SubtileDef = { ...sub, fg: remap(sub!.fg), bg: remap(sub!.bg) };
+        if (!s2.fg) delete s2.fg;
+        if (!s2.bg) delete s2.bg;
+        out.multitile[k as SubtileKey] = s2;
       }
     }
+    compiled.tiles[id] = out;
+    added++;
   }
-}
-function countPngs(d: string): number {
-  let n = 0;
-  for (const e of readdirSync(d)) {
-    const p = join(d, e);
-    if (statSync(p).isDirectory()) n += countPngs(p);
-    else if (e.endsWith('.png')) n++;
-  }
-  return n;
-}
-for (const s of ordered) walk(s);
-
-// ---------------------------------------------------------------- convert entries
-
-// Every distinct (PNG, offset) pair that ends up referenced gets one frame; frame ids are
-// assigned lazily. The offset is the one of the sheet holding the tile *entry* (that's what
-// CDDA draws with), so a PNG referenced from a sheet with other offsets gets a second frame
-// sharing the same packed pixels.
-const frameOfPng = new Map<string, number>();
-const framePngs: { png: Png; ox: number; oy: number }[] = [];
-const referenced = new Set<string>();
-let crossSheetRefs = 0;
-
-function spriteIndex(name: string, entrySheet: Sheet, ctx: string): number | undefined {
-  if (!name) return undefined;
-  const png = pngs.get(name);
-  if (!png) {
-    problem('missing png', `${name} (${ctx})`);
-    return undefined;
-  }
-  referenced.add(name);
-  if (png.sheet.ox !== entrySheet.ox || png.sheet.oy !== entrySheet.oy) crossSheetRefs++;
-  const key = `${name}|${entrySheet.ox},${entrySheet.oy}`;
-  let idx = frameOfPng.get(key);
-  if (idx === undefined) {
-    idx = framePngs.length;
-    framePngs.push({ png, ox: entrySheet.ox, oy: entrySheet.oy });
-    frameOfPng.set(key, idx);
-  }
-  return idx;
-}
-
-function convertLayer(layer: RawLayer | undefined, sheet: Sheet, ctx: string): VariantList | undefined {
-  if (layer === undefined || layer === '' || (Array.isArray(layer) && layer.length === 0)) return undefined;
-  const out: VariantList = [];
-  if (typeof layer === 'string') {
-    const i = spriteIndex(layer, sheet, ctx);
-    if (i !== undefined) out.push({ weight: 1, sprites: [i] });
-  } else if (layer.every((p) => typeof p === 'string')) {
-    // A plain list of names is one variant holding pre-drawn rotations.
-    const sprites = (layer as string[]).map((n) => spriteIndex(n, sheet, ctx)).filter((i): i is number => i !== undefined);
-    if (sprites.length) out.push({ weight: 1, sprites });
-  } else {
-    for (const part of layer) {
-      if (typeof part === 'string') {
-        problem('mixed variant list', ctx);
-        const i = spriteIndex(part, sheet, ctx);
-        if (i !== undefined) out.push({ weight: 1, sprites: [i] });
-        continue;
-      }
-      const names = Array.isArray(part.sprite) ? part.sprite : [part.sprite ?? ''];
-      const sprites = names.map((n) => spriteIndex(n, sheet, ctx)).filter((i): i is number => i !== undefined);
-      if (!sprites.length) continue;
-      if (![1, 2, 4].includes(sprites.length)) problem('bad rotation count', `${ctx}: ${sprites.length}`);
-      const weight = part.weight ?? 1;
-      if (weight < 0) throw new Error(`negative weight in ${ctx}`);
-      out.push({ weight, sprites });
-    }
-  }
-  return out.length ? out : undefined;
-}
-
-const tiles: Record<string, TileDef> = {};
-const processedIds = new Set<string>();
-let dupIds = 0;
-
-for (const { sheet, entry, file } of entries) {
-  const ids = entry.id === undefined ? [] : Array.isArray(entry.id) ? entry.id : [entry.id];
-  const ctx = `${relative(SRC, file)} ${ids[0] ?? '?'}`;
-  if (!ids.length || (!entry.fg && !entry.bg)) {
-    problem('empty entry', ctx);
-    continue;
-  }
-  const fresh = ids.filter((id) => {
-    if (processedIds.has(id)) {
-      dupIds++;
-      if (!sheet.filler) problem('duplicate id', `${id} in ${relative(SRC, file)}`);
-      return false;
-    }
-    return true;
-  });
-  // Convert even if every id was a duplicate so PNG references are counted like compose.py.
-  const def: TileDef = {};
-  const fg = convertLayer(entry.fg, sheet, ctx);
-  const bg = convertLayer(entry.bg, sheet, ctx);
-  if (fg) def.fg = fg;
-  if (bg) def.bg = bg;
-  const multi = entry.multitile === true;
-  if (entry.rotates ?? multi) def.rotates = true;
-  if (entry.animated) def.animated = true;
-  if (entry.height_3d) def.height3d = entry.height_3d;
-  if (multi) {
-    def.multitile = {};
-    for (const sub of entry.additional_tiles ?? []) {
-      const key = sub.id as string;
-      if (!(MULTITILE_KEYS as readonly string[]).includes(key)) {
-        problem('unknown subtile', `${ctx}: ${key}`);
-        continue;
-      }
-      const s: SubtileDef = {};
-      const sfg = convertLayer(sub.fg, sheet, `${ctx}_${key}`);
-      const sbg = convertLayer(sub.bg, sheet, `${ctx}_${key}`);
-      if (sfg) s.fg = sfg;
-      if (sbg) s.bg = sbg;
-      if (sub.animated) s.animated = true;
-      if (!sfg && !sbg) continue;
-      def.multitile[key as keyof typeof def.multitile] = s;
-      for (const id of ids) processedIds.add(`${id}_${key}`);
-    }
-  } else if (entry.additional_tiles?.length) {
-    problem('additional_tiles without multitile', ctx);
-  }
-  for (const id of fresh) {
-    processedIds.add(id);
-    if (def.fg || def.bg) tiles[id] = def;
-  }
-}
-
-let useAllTiles = 0;
-if (USE_ALL) {
-  // Main-sheet PNGs first, then fillers, matching compose.py's two passes.
-  const all = [...pngs.values()];
-  for (const filler of [false, true]) {
-    for (const png of all) {
-      if (png.sheet.filler !== filler || referenced.has(png.name) || processedIds.has(png.name)) continue;
-      const i = spriteIndex(png.name, png.sheet, 'use-all')!;
-      tiles[png.name] = { fg: [{ weight: 1, sprites: [i] }] };
-      processedIds.add(png.name);
-      useAllTiles++;
-    }
-  }
+  compiled.report.push(`fill-from   ${FILL}: +${added} tile ids, +${used.size} frames`);
 }
 
 // ---------------------------------------------------------------- load & dedupe pixels
 
-interface Img {
-  w: number;
-  h: number;
-  data: Buffer;
-}
-function readPng(path: string): Img {
-  let p: PNG;
-  try {
-    p = PNG.sync.read(readFileSync(path));
-  } catch (e) {
-    // A handful of tileset PNGs have stray chunk data libpng tolerates but pngjs rejects;
-    // let ImageMagick (in shell.nix) re-encode them.
-    problem('png re-encoded via imagemagick', `${relative(SRC, path)}: ${(e as Error).message}`);
-    p = PNG.sync.read(execFileSync('magick', [path, 'PNG32:-'], { maxBuffer: 1 << 26 }));
-  }
-  return { w: p.width, h: p.height, data: p.data };
-}
-
-// Identical pixels share one packed rect (offsets live on frames, not rects). PNGs are read
-// once even when several frames (offset variants) reference them.
+// Identical pixels share one packed rect (offsets live on frames, not rects). Each source is
+// loaded once even when several frames (offset variants) reference it.
 const uniq: { img: Img; frames: number[] }[] = [];
 const byHash = new Map<string, number>();
-const rectOfPng = new Map<string, number>();
-const t0 = Date.now();
-for (let f = 0; f < framePngs.length; f++) {
-  const { png } = framePngs[f];
-  let u = rectOfPng.get(png.name);
+const rectOfKey = new Map<string, number>();
+for (let f = 0; f < compiled.frames.length; f++) {
+  const src = compiled.frames[f];
+  let u = rectOfKey.get(src.key);
   if (u === undefined) {
-    const img = readPng(png.path);
-    if (img.w !== png.sheet.w || img.h !== png.sheet.h)
-      problem('wrong sprite size', `${relative(SRC, png.path)} is ${img.w}x${img.h}, sheet wants ${png.sheet.w}x${png.sheet.h}`);
+    const img = src.load();
     const key = createHash('sha1').update(img.data).update(`${img.w},${img.h}`).digest('hex');
     u = byHash.get(key);
     if (u === undefined) {
@@ -344,7 +126,7 @@ for (let f = 0; f < framePngs.length; f++) {
       byHash.set(key, u);
       uniq.push({ img, frames: [] });
     }
-    rectOfPng.set(png.name, u);
+    rectOfKey.set(src.key, u);
   }
   uniq[u].frames.push(f);
 }
@@ -384,11 +166,11 @@ const pages: AtlasPage[] = pageUsedH.map((used, i) => {
   return { file: `atlas_${i}.png`, w: PAGE, h: Math.min(PAGE, Math.max(h, 64)) };
 });
 
-const frames: AtlasFrame[] = new Array(framePngs.length);
+const frames: AtlasFrame[] = new Array(compiled.frames.length);
 for (let u = 0; u < uniq.length; u++) {
   const { img } = uniq[u];
   for (const f of uniq[u].frames) {
-    const { ox, oy } = framePngs[f];
+    const { ox, oy } = compiled.frames[f];
     frames[f] = { page: placed[u].page, x: placed[u].x, y: placed[u].y, w: img.w, h: img.h, ox, oy };
   }
 }
@@ -396,38 +178,15 @@ for (let u = 0; u < uniq.length; u++) {
 // ---------------------------------------------------------------- report
 
 const mb = (n: number) => (n / 1048576).toFixed(1);
-console.log(`tileset     ${SRC}`);
-console.log(`sheets      ${ordered.map((s) => basename(s.dir)).join(' ')}`);
-console.log(`excluded    ${[...EXCLUDE].join(',') || '-'} (${excludedPngs} pngs skipped)`);
-console.log(`pngs        ${pngs.size} found, ${framePngs.length} referenced, ${uniq.length} unique after dedupe (${((Date.now() - t0) / 1000).toFixed(1)}s)`);
-console.log(`tiles       ${Object.keys(tiles).length} ids (${useAllTiles} from --use-all), ${dupIds} duplicate ids dropped`);
-console.log(`cross-sheet ${crossSheetRefs} references to a PNG from a sheet with other offsets (own frame each)`);
+console.log(`tileset     ${SRC} (${SOURCE_FORM ? 'source form' : 'compiled'})`);
+for (const line of compiled.report) console.log(line);
+console.log(`frames      ${frames.length} referenced, ${uniq.length} unique rects after dedupe (${((Date.now() - t0) / 1000).toFixed(1)}s)`);
 console.log(`pages       ${pages.map((p) => `${p.w}x${p.h}`).join(' ')}`);
 for (const [k, v] of Object.entries(problems)) {
   console.log(`  ! ${k}: ${v.length}${v.length ? `  e.g. ${v.slice(0, 3).join(' | ')}` : ''}`);
 }
 
-// ---------------------------------------------------------------- glyphs (ASCII fallback)
-
-// fallback.png holds 16 colour blocks of 256 CP437 glyphs (compose.py FALLBACK "ascii" table);
-// block 1 (offset 256) is bold WHITE: white fill, black outline, so it can be tinted at runtime.
-const GLYPH_COLUMNS = 16;
-function buildGlyphs(): PNG {
-  if (!fallbackFile) throw new Error('tile_info.json has no fallback sheet');
-  const fb = readPng(join(SRC, fallbackFile));
-  const cell = TILE_W;
-  const across = Math.floor(fb.w / cell);
-  const out = new PNG({ width: GLYPH_COLUMNS * cell, height: (256 / GLYPH_COLUMNS) * cell });
-  for (let g = 0; g < 256; g++) {
-    const src = 256 + g;
-    const sx = (src % across) * cell, sy = Math.floor(src / across) * cell;
-    const dx = (g % GLYPH_COLUMNS) * cell, dy = Math.floor(g / GLYPH_COLUMNS) * cell;
-    for (let yy = 0; yy < cell; yy++)
-      fb.data.copy(out.data, ((dy + yy) * out.width + dx) * 4, ((sy + yy) * fb.w + sx) * 4, ((sy + yy) * fb.w + sx + cell) * 4);
-  }
-  return out;
-}
-
+const glyphImg = compiled.glyphs();
 if (DRY) {
   console.log('dry run: nothing written');
   process.exit(0);
@@ -467,21 +226,22 @@ for (let p = 0; p < pages.length; p++) {
   console.log(`wrote ${pages[p].file} ${pages[p].w}x${pages[p].h} ${mb(buf.length)} MB`);
 }
 
-const glyphBuf = PNG.sync.write(buildGlyphs(), { colorType: 6, deflateLevel: 9 });
+const glyphPng = new PNG({ width: glyphImg.w, height: glyphImg.h });
+glyphImg.data.copy(glyphPng.data);
+const glyphBuf = PNG.sync.write(glyphPng, { colorType: 6, deflateLevel: 9 });
 writeFileSync(join(OUT, 'glyphs.png'), glyphBuf);
 totalBytes += glyphBuf.length;
 
-const layeringPath = join(SRC, 'layering.json');
 const index: AtlasIndex = {
   version: 1,
-  tileset: basename(SRC),
+  tileset: compiled.tileset,
   tileSize: TILE_W,
   pages,
   padding: PAD,
   frames,
-  tiles: Object.fromEntries(Object.keys(tiles).sort().map((k) => [k, tiles[k]])),
+  tiles: Object.fromEntries(Object.keys(compiled.tiles).sort().map((k) => [k, compiled.tiles[k]])),
   glyphs: { file: 'glyphs.png', cell: TILE_W, columns: GLYPH_COLUMNS, codepage: 'cp437' },
-  layering: existsSync(layeringPath) ? JSON.parse(readFileSync(layeringPath, 'utf8')) : undefined,
+  layering: compiled.layering,
 };
 const json = JSON.stringify(index);
 writeFileSync(join(OUT, 'atlas.json'), json);

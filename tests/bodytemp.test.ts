@@ -1,10 +1,11 @@
-// Body temperature against real CDDA items (public/data): Character::update_bodytemp's
-// convergent temperatures, the shivering wake-up, and bedding/fire warmth.
+// Body temperature against real Bright Nights items (public/data): update_bodytemp_bps'
+// convergent temperatures, wake_if_hypothermia, and bedding/fire warmth.
 import fs from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { GameData } from '../src/data/types';
 import { BODYTEMP, Character, localWindchill, logarithmicRange, partList } from '../src/game/character';
+import { BODY_PARTS, type BodyPartId } from '../src/game/bodyparts';
 import { createItem, fromSpawned } from '../src/game/item';
 
 const dir = path.join(__dirname, '../public/data');
@@ -27,7 +28,7 @@ const pass = (c: Character, s: number, step = 30) => {
 const hpLost = (c: Character) => Object.values(c.hp).reduce((a, h) => a + h.max - h.cur, 0);
 const SURVIVOR_CLOTHES = ['longshirt', 'jeans', 'socks', 'sneakers', 'boxer_shorts'];
 
-describe('CDDA body temperature', () => {
+describe('BN body temperature', () => {
   it('threshold messages group parts', () => {
     expect(partList(['torso'])).toBe('torso');
     expect(partList(['torso', 'arm_l', 'arm_r'])).toBe('torso and arms');
@@ -41,8 +42,11 @@ describe('CDDA body temperature', () => {
   it('helpers match cata_utility / weather.cpp', () => {
     expect(logarithmicRange(31, 43, 37)).toBeCloseTo(0.5, 5);
     expect(logarithmicRange(31, 43, 20)).toBe(1);
-    expect(localWindchill(-5, 70, 1)).toBe(0);
-    expect(localWindchill(-5, 70, 10)).toBeLessThan(-4);
+    // get_local_windchill (°F delta, ceil): below 70 °F a lerp from the 30 °F cold model
+    // (wind floored at 3 mph, so still air still chills) to the 70 °F apparent-temperature model
+    expect(localWindchill(-5, 70, 1)).toBe(-3);
+    expect(localWindchill(-5, 70, 10)).toBe(-9);
+    expect(localWindchill(30, 50, 0)).toBe(6);
   });
 
   it('a clothed survivor awake in a 0 °C shelter is at worst chilly and takes no damage', () => {
@@ -53,9 +57,10 @@ describe('CDDA body temperature', () => {
     expect(hpLost(c)).toBe(0);
   });
 
-  it('sleeping at -4 °C without bedding: shivering wakes you before the cold hurts much', () => {
+  it('sleeping at -4 °C in everyday clothes: a torso at BODYTEMP_COLD shivers you awake', () => {
     const { c, log } = survivor(SURVIVOR_CLOTHES);
     c.env = { temperature: -4, wind: 0, precipitation: false, bedding: -4 };
+    c.sleepiness = 300;
     c.fallAsleep();
     pass(c, 3600);
     expect(c.isAsleep()).toBe(false);
@@ -63,26 +68,19 @@ describe('CDDA body temperature', () => {
     expect(hpLost(c)).toBeLessThan(5);
   });
 
-  // TODO(BN): written for DDA data/behaviour; fails on Bright Nights core data (AssertionError: expected 43 to be greater than 50.4). Port with its system.
-  it.skip('even dead tired, you wake up hurting from the cold instead of freezing to death asleep', () => {
+  it('even dead tired, the cold wakes you (BN has no exhaustion exception)', () => {
     const { c, log } = survivor([]);
     c.env = { temperature: -4, wind: 0, precipitation: false, bedding: -4 };
-    c.sleepiness = 400; // dead tired: CDDA would let you sleep on through the shivering
+    c.sleepiness = 500;
     c.fallAsleep();
-    // The player keeps lying back down all night (rest.ts rolls to fall asleep every 30 min).
-    let awake = 0;
-    for (let t = 0; t < 8 * 3600; t += 30) {
-      c.update(30);
-      if (!c.isAsleep() && (awake += 30) >= 1800) (awake = 0), c.fallAsleep();
-    }
+    pass(c, 3600);
+    expect(c.isAsleep()).toBe(false);
+    expect(log).toContain('Your shivering prevents you from sleeping.');
     expect(c.dead).toBe(false);
-    expect(c.hp.head.cur).toBeGreaterThan(c.hp.head.max * 0.6);
-    expect(log.some((m) => /shivering violently/.test(m))).toBe(true);
   });
 
-  // TODO(BN): written for DDA data/behaviour; fails on Bright Nights core data (AssertionError: expected 33.471375237412055 to be greater than 34). Port with its system.
-  it.skip('the shelter kit (emergency jacket + blanket) lets you sleep through a -4 °C night', () => {
-    const { c } = survivor([...SURVIVOR_CLOTHES, 'jacket_evac', 'emer_blanket']);
+  it('a blanket worn over your clothes lets you sleep through a -4 °C night', () => {
+    const { c } = survivor([...SURVIVOR_CLOTHES, 'blanket']);
     c.env = { temperature: -4, wind: 0, precipitation: false, bedding: -4 };
     c.sleepiness = 350;
     c.fallAsleep();
@@ -100,12 +98,27 @@ describe('CDDA body temperature', () => {
     a.sleepiness = b.sleepiness = 350;
     a.fallAsleep(); b.fallAsleep();
     pass(a, 3600); pass(b, 3600);
-    expect(b.bodyTemp.head).toBeGreaterThan(a.bodyTemp.head + 3);
+    // bedding only pulls you toward BODYTEMP_NORM (adjust_bp_conv_for_bonus_warmth); the bare
+    // floor's -4 °C is never applied as a chill
+    expect(a.bodyTemp.head).toBeCloseTo(34, 0);
+    expect(b.bodyTemp.head).toBeGreaterThan(a.bodyTemp.head + 2.5);
+    expect(b.bodyTemp.head).toBeLessThanOrEqual(BODYTEMP.NORM + 0.1);
     const f = naked(), g = naked();
     f.env = { temperature: 0, wind: 0, precipitation: false };
     g.env = { temperature: 0 + (6 * 4 / 1) * 5 / 9, wind: 0, precipitation: false, bestFire: 2 };
     pass(f, 3600); pass(g, 3600);
     expect(g.bodyTemp.torso).toBeGreaterThan(f.bodyTemp.torso + 2);
+  });
+
+  it('body parts match BN body_parts.json (hit sizes, drench capacity)', () => {
+    const bps = data.misc.body_part as Record<string, { hit_size: number; hit_size_relative?: number[]; hit_difficulty: number; drench_capacity: number }>;
+    for (const [id, bp] of Object.entries(BODY_PARTS)) {
+      const d = bps[id as BodyPartId];
+      expect(bp.hit_size, id).toBe(d.hit_size);
+      expect(bp.hit_size_relative, id).toEqual(d.hit_size_relative ?? [0, 0, 0]);
+      expect(bp.hit_difficulty, id).toBe(d.hit_difficulty);
+      expect(bp.drench_capacity, id).toBe(d.drench_capacity);
+    }
   });
 
   it('liquids overflowing their default container fill more containers', () => {

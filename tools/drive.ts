@@ -19,6 +19,8 @@
 //   xkey "i Escape Shift+w &"   xhold "w 1500"   xdown/xup "Shift"   xtype "text"
 //   xmove "200 0" (relative)    xclick "480 270 [1|3]"   xhere "[1|3]" (click in place)
 //   xwheel "up 3"               layout "fr"  (setxkbmap; "us" back)
+//   xmoveto "480 270 [steps]"   absolute move in page coords (steps > 1 = a visible drag path)
+//   xmdown / xmup "[1|3]"       press / release a mouse button where the pointer is (drag & drop)
 //   xtab "1500"                 switch to a new tab for N ms and back (focus loss)
 //   state                       lock/focus/fullscreen/open windows/player — a quick look
 //
@@ -180,6 +182,9 @@ const http = createHttp(async (req, res) => {
       else if (what === 'xmove') await xin.move(Number(a[0]), Number(a[1] ?? 0));
       else if (what === 'xclick') await xin.click(Number(a[0]), Number(a[1]), Number(a[2] ?? 1));
       else if (what === 'xhere') await xin.clickHere(Number(a[0] || 1));
+      else if (what === 'xmoveto') await xin.moveTo(Number(a[0]), Number(a[1]), Number(a[2] ?? 1));
+      else if (what === 'xmdown') await xin.buttonDown(Number(a[0] || 1));
+      else if (what === 'xmup') await xin.buttonUp(Number(a[0] || 1));
       else if (what === 'xbdown') await xin.buttonDown(Number(a[0] || 1));
       else if (what === 'xbup') await xin.buttonUp(Number(a[0] || 1));
       else if (what === 'xwheel') await xin.wheel(a[0] as 'up' | 'down', Number(a[1] ?? 1));

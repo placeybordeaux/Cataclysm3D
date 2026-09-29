@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { Rng } from '../src/core/rng';
 import { Character } from '../src/game/character';
 import {
-  aim, attackCooldownSeconds, attackSpeedMoves, critChance, dispersionFromSkill, fireGun, gunDispersion, gunRecoil, maxDispersionMoa,
+  aim, applyFlatArmor, attackCooldownSeconds, attackSpeedMoves, critChance, dispersionFromSkill, fireGun, gunDispersion, gunRecoil, maxDispersionMoa,
   meleeAttack, meleeHitBase, meleeHitChance, monsterCanAttackHigh, monsterMeleeAttack, normalAtLeast, rollMeleeDamage, selectBodyPart,
   sizeFromVolume, swingSpeedRating, unwieldyWarning, weaponDispersionSources,
 } from '../src/game/combat';
@@ -44,25 +44,34 @@ describe('weapon speed legibility', () => {
   });
 });
 
-describe('melee: attack speed (melee.cpp Character::attack_speed)', () => {
-  it('pipe at 8 dex, no skill: 40 + 40*15/15 - 4 = 76 moves', () => {
+describe('melee: attack speed (BN melee.cpp Character::attack_cost)', () => {
+  it('pipe at 8 dex, no skill: 40 + 40*15/15 - 8 dex = 72 moves', () => {
     const c = survivor();
     const pipe = createItem(data, 'pipe');
-    expect(attackSpeedMoves(c, pipe)).toBe(76);
-    expect(attackCooldownSeconds(c, pipe)).toBeCloseTo(76 / 100 / 2);
+    expect(attackSpeedMoves(c, pipe)).toBe(72);
+    expect(attackCooldownSeconds(c, pipe)).toBeCloseTo(72 / 100 / 2);
   });
 
-  it('unarmed: attack_time 65 -> 32 + 32 - 4 = 60; melee 10 -> 32 + 10 - 4', () => {
+  it('unarmed: attack_cost 65 -> 32 + 32 - 8 = 56; melee 10 -> 32 + 10 - 8', () => {
     const c = survivor();
-    expect(attackSpeedMoves(c, null)).toBe(60);
+    expect(attackSpeedMoves(c, null)).toBe(56);
     c.setSkill('melee', 10);
-    expect(attackSpeedMoves(c, null)).toBe(38);
+    expect(attackSpeedMoves(c, null)).toBe(34);
   });
 
   it('exhaustion doubles the base cost at 0 stamina', () => {
     const c = survivor();
     c.stamina = 0;
-    expect(attackSpeedMoves(c, createItem(data, 'pipe'))).toBe(40 * 2 + 40 - 4);
+    expect(attackSpeedMoves(c, createItem(data, 'pipe'))).toBe(40 * 2 + 40 - 8);
+  });
+
+  it('torso encumbrance slows the swing', () => {
+    const c = survivor();
+    c.inv.wear(createItem(data, 'hoodie'), null);
+    c.inv.wear(createItem(data, 'jacket_leather'), null);
+    const enc = c.inv.encumbrance('torso');
+    expect(enc).toBeGreaterThan(0);
+    expect(attackSpeedMoves(c, createItem(data, 'pipe'))).toBe(72 + enc);
   });
 });
 
@@ -73,11 +82,11 @@ describe('melee: to-hit and crits', () => {
     c.setSkill('bashing', 3);
     c.setSkill('melee', 2);
     expect(meleeHitBase(c, createItem(data, 'pipe'))).toBe(2 + 1 + 1);
-    // torso encumbrance 20 -> -2
+    // BN: torso encumbrance 20 scales accuracy by 1 - 20/100 (DDA subtracted enc/10)
     const d = survivor();
     d.inv.wear(createItem(data, 'hoodie'), null);
     d.inv.wear(createItem(data, 'jacket_leather'), null);
-    expect(meleeHitBase(d, null)).toBe(2 - 2);
+    expect(meleeHitBase(d, null)).toBeCloseTo(2 * 0.8);
   });
 
   it('hit chance vs an undodging zombie matches normal(10, 25) >= 0', () => {
@@ -108,12 +117,28 @@ describe('melee: to-hit and crits', () => {
 });
 
 describe('melee: damage (roll_melee_damage_internal)', () => {
-  it('pipe average: (10 + 0.75*8 str) with low cap 0.4, x0.8 at skill 0 = 8.96 bash', () => {
+  it('pipe average: (10 + 0.75*8 str) with low cap 0.4, x0.7 armed at bashing 0 = 7.84 bash', () => {
     const c = survivor();
     const d = rollMeleeDamage(c, createItem(data, 'pipe'), false, new Rng(1), true);
     expect(d).toHaveLength(1);
     expect(d[0].type).toBe('bash');
-    expect(d[0].amount).toBeCloseTo(8.96);
+    expect(d[0].amount).toBeCloseTo(7.84);
+    expect(d[0].multiplier).toBeCloseTo(0.7);
+  });
+
+  it('bare hands add the unarmed skill to the blow and use the unarmed multiplier', () => {
+    const c = survivor();
+    c.setSkill('unarmed', 5);
+    // (0 + 6 str + 5 skill) with low cap 0.4 → avg 7.7, x(0.96 + 0.2)
+    const d = rollMeleeDamage(c, null, false, new Rng(1), true).find((u) => u.type === 'bash')!;
+    expect(d.amount).toBeCloseTo(((0.4 * 11 + 11) / 2) * 1.16);
+  });
+
+  it('armor comes off before the skill multiplier (damage_unit::damage_multiplier)', () => {
+    const c = survivor();
+    const units = rollMeleeDamage(c, createItem(data, 'pipe'), false, new Rng(1), true);
+    // raw 11.2 − armor 2 = 9.2, × 0.7
+    expect(applyFlatArmor(units, { bash: 2 })[0].amount).toBeCloseTo((11.2 - 2) * 0.7);
   });
 
   it('stab skill multiplier 0.66 at skill 0; crits multiply by 1 + skill/10 and ignore 34% armor', () => {
@@ -198,9 +223,9 @@ describe('ranged', () => {
 });
 
 describe('monsters vs the survivor', () => {
-  it('zombie accuracy normal(4*5, 25) vs dodge (8/2)*5: about half the attacks land', () => {
+  it('zombie accuracy normal(4*5, 25) vs BN dodge (8/4)*5: about two in three attacks land', () => {
     const c = survivor();
-    expect(c.dodge()).toBeCloseTo(4, 1);
+    expect(c.dodge()).toBeCloseTo(2, 1);
     const rng = new Rng(6);
     let hits = 0;
     const N = 3000;
@@ -213,24 +238,28 @@ describe('monsters vs the survivor', () => {
       c.stamina = c.staminaMax();
       if (monsterMeleeAttack(zombie, c, rng).hit) hits++;
     }
-    expect(hits / N).toBeGreaterThan(0.45);
-    expect(hits / N).toBeLessThan(0.56);
+    const expected = normalAtLeast(20, 25, 10);
+    expect(hits / N).toBeGreaterThan(expected - 0.03);
+    expect(hits / N).toBeLessThan(expected + 0.03);
   });
 
-  it('hits land on body parts by hit_size (anatomy::select_body_part)', () => {
+  it('hits land on body parts by BN hit_size_relative (anatomy::select_body_part)', () => {
     const rng = new Rng(8);
     const counts: Record<string, number> = {};
     for (let i = 0; i < 20000; i++) {
       const bp = selectBodyPart(rng);
       counts[bp] = (counts[bp] ?? 0) + 1;
     }
-    // total hit_size 100: torso 36, each arm/leg 13, head 4
-    expect(counts.torso / 20000).toBeCloseTo(0.36, 1);
-    expect(counts.arm_l / 20000).toBeCloseTo(0.13, 1);
-    expect(counts.head / 20000).toBeCloseTo(0.04, 1);
+    // same size, BN body_parts.json hit_size_relative[1]: torso 33.33, arms 20, legs 12,
+    // head 2.33, eyes 0.33 (total 100); hands, feet and mouth are never picked
+    expect(counts.torso / 20000).toBeCloseTo(0.3333, 1);
+    expect(counts.arm_l / 20000).toBeCloseTo(0.2, 1);
+    expect(counts.leg_r / 20000).toBeCloseTo(0.12, 1);
+    expect(counts.head / 20000).toBeCloseTo(0.0233, 1);
+    expect(counts.hand_l ?? 0).toBe(0);
   });
 
-  it("small monsters can't reach high: no head/torso-less upper hits, legs x3", () => {
+  it("smaller attackers can't reach the head and mostly hit legs (hit_size_relative[0])", () => {
     const rng = new Rng(8);
     for (let i = 0; i < 2000; i++) expect(['head', 'eyes', 'mouth']).not.toContain(selectBodyPart(rng, { canAttackHigh: false }));
     expect(sizeFromVolume(62500)).toBe('medium');

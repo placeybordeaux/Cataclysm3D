@@ -101,14 +101,27 @@ describe('real data: items', () => {
     expect(gun.ammoRemaining()).toBe(14);
   });
 
-  // TODO(BN): written for DDA data/behaviour; fails on Bright Nights core data (AssertionError: expected 'You reduce the bleeding, but it\'s no…' to contain 'You stop the bleeding.). Port with its system.
-  it.skip('bandages stop bleeding; aspirin is a painkiller', () => {
+  it('BN effect_type rules: adrenaline hides pain and wears off into its comedown (effects_on_remove)', () => {
+    const { c } = survivor();
+    c.pain = 30;
+    c.addEffect('adrenaline', 60);
+    expect(c.perceivedPain()).toBe(0);
+    for (let i = 0; i < 61; i++) c.update(1);
+    expect(c.hasEffect('adrenaline')).toBe(false);
+    expect(c.hasEffect('adrenaline_comedown')).toBe(true);
+    expect(c.perceivedPain()).toBeGreaterThan(0);
+  });
+
+  it('bandages stop bleeding (heal_actor bleed 0.9); aspirin is a painkiller', () => {
     const { c } = survivor();
     c.addEffect('bleed', 600, { bp: 'leg_r' });
     c.applyDamage('leg_r', 10);
     const r = c.inv.use(createItem(data, 'bandages'), undefined, 0, null);
     expect(r.msg).toContain('You stop the bleeding.');
-    expect(c.hasEffect('bandaged', 'leg_r')).toBe(true);
+    expect(r.moves).toBe(300);
+    expect(c.hasEffect('bleed')).toBe(false);
+    // bandages_power 4 + 0.25 x first aid 0 -> intensity 4 (6 h each)
+    expect(c.effects.get('bandaged', 'leg_r')!.intensity).toBe(4);
     c.pain = 10;
     c.inv.consume(createItem(data, 'aspirin'), null);
     for (let i = 0; i < 240; i++) c.update(1);
@@ -125,10 +138,9 @@ describe('real data: items', () => {
     expect(fl.active).toBe(true);
   });
 
-  // TODO(BN): written for DDA data/behaviour; fails on Bright Nights core data (AssertionError: expected 84 to be 100 // Object.is equality). Port with its system.
-  it.skip('real traits and damage adjectives', () => {
+  it('real traits and damage adjectives', () => {
     const { c } = survivor();
-    c.addTrait('TOUGH');
+    c.addTrait('TOUGH'); // BN hp_modifier 0.2: trunc(84 x 1.2)
     expect(c.hp.torso.max).toBe(100);
     const jacket = createItem(data, 'jacket_leather');
     jacket.damage = 1000;

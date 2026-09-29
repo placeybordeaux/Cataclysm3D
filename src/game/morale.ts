@@ -1,6 +1,8 @@
-// Morale (CDDA morale.cpp player_morale, simplified: no temper multipliers or mutation
-// hooks). Each morale type is one point with bonus, cap, duration and decay start; the
-// level combines points as sqrt(sum of positive squares) - sqrt(sum of negative squares).
+// Morale (BN morale.cpp player_morale, simplified: no stylish/constrained/masochist hooks).
+// Each morale type is one point with bonus, cap, duration and decay start; the level
+// combines points as sqrt(sum of positive squares) - sqrt(sum of negative squares), after
+// the temper multipliers: an Optimist's permanent morale_perm_optimist point makes good
+// morale count 1.2x and bad 0.8x, Bad Temper the reverse (get_temper_mult).
 
 export interface MoralePoint {
   type: string;
@@ -80,10 +82,31 @@ export class Morale {
     this.points = this.points.filter((p) => !((p.duration !== 0 && p.age >= p.duration) || p.bonus === 0));
   }
 
+  /** player_morale::get_temper_mult */
+  temperMult(): { good: number; bad: number } {
+    let good = 1, bad = 1;
+    if (this.has('morale_perm_optimist')) (good *= 1.2), (bad *= 0.8);
+    if (this.has('morale_perm_badtemper')) (good *= 0.8), (bad *= 1.2);
+    return { good, bad };
+  }
+
+  /** player_morale::set_permanent: a permanent point of exactly `bonus` (0 removes it). */
+  setPermanent(type: string, bonus: number): void {
+    const p = this.points.find((m) => m.type === type && m.itemType === undefined);
+    if (bonus === 0) {
+      if (p) this.remove(type);
+      return;
+    }
+    if (p) (p.bonus = bonus), (p.duration = 0), (p.age = 0);
+    else this.points.push({ type, bonus, duration: 0, decayStart: 0, age: 0 });
+  }
+
   level(): number {
+    const mult = this.temperMult();
     let pos = 0, neg = 0;
     for (const p of this.points) {
-      const b = Morale.netBonus(p);
+      const raw = Morale.netBonus(p);
+      const b = Math.trunc(raw * (raw >= 0 ? mult.good : mult.bad));
       if (b > 0) pos += b * b;
       else neg += b * b;
     }

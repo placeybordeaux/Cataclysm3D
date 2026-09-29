@@ -287,16 +287,15 @@ describe('guard and side-step map onto CDDA block / dodge', () => {
     expect(combat.sidestep('Space')).toBe(false); // cooldown
   });
 
-  // TODO(BN): BN zombies use the hardcoded GRAB attack, not DDA's 'grab' actor; port with monster attacks.
-  it.skip('a parried grab never takes hold and staggers the grabber', () => {
+  it('a parried grab never takes hold and staggers the grabber (BN mattack::grab)', () => {
     const { game, sys } = world();
     tough(game);
     game.player.inv.wield(createItem(data, 'bat'), null);
     const z = sys.spawnById('mon_zombie', 12.5, 11.4, 0)!;
-    for (const s of z.specials) s.cooldown = s.def.id === 'grab' ? 0 : 999;
+    for (const s of z.specials) s.cooldown = s.def.id === 'GRAB' ? 0 : 999;
     z.type = { ...z.type, melee_skill: 20 }; // make sure it connects
     step(game, 0.05);
-    expect(z.windup?.special?.def.id).toBe('grab');
+    expect(z.windup?.special?.def.id).toBe('GRAB');
     // Raise the guard (RMB with a melee weapon) just before it lands.
     step(game, z.windup!.t - 0.1);
     (game.input as unknown as { mouseButtons: number }).mouseButtons = 4;

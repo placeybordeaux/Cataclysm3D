@@ -417,12 +417,12 @@ describe('wait & sleep', () => {
     expect(log.indexOf("It's cold.  Find warmer clothes, or build a fire.")).toBeGreaterThan(log.indexOf('Your shivering prevents you from sleeping.'));
   });
 
-  // TODO(BN): written for DDA data/behaviour; fails on Bright Nights core data (AssertionError: expected 253 to be less than 100). Port with its system.
-  it.skip('a tired survivor falls asleep in bed and wakes rested', () => {
+  it('a tired survivor falls asleep in bed and wakes rested', () => {
     const { game, log } = makeGame();
     installRest(game);
     place(game, 10, 10);
-    game.player.sleepiness = 500;
+    // Tired but not so tired that BN's 10-hour night ends before fatigue reaches 25.
+    game.player.sleepiness = 250;
     expect(goToSleep(game)).toBe(true);
     expect(log).toContain('This is a comfortable place to sleep.');
     let slept = false;
@@ -432,7 +432,8 @@ describe('wait & sleep', () => {
     }
     expect(slept).toBe(true);
     expect(game.player.isAsleep()).toBe(false);
-    expect(game.player.sleepiness).toBeLessThan(100);
+    expect(game.player.sleepiness).toBeLessThan(25);
+    expect(log).toContain('You feel well rested.');
   });
 });
 

@@ -107,6 +107,16 @@ export class XInput {
     await sleep(30);
     this.x('click', String(button));
   }
+  /** Move the pointer to page coordinates (absolute), in `steps` hops so drags see motion. */
+  async moveTo(x: number, y: number, steps = 1): Promise<void> {
+    const [tx, ty] = await this.screenXY(x, y);
+    const cur = execFileSync('xdotool', ['getmouselocation', '--shell'], { encoding: 'utf8' });
+    const cx = Number(/X=(\d+)/.exec(cur)?.[1] ?? tx), cy = Number(/Y=(\d+)/.exec(cur)?.[1] ?? ty);
+    for (let i = 1; i <= steps; i++) {
+      this.x('mousemove', String(Math.round(cx + ((tx - cx) * i) / steps)), String(Math.round(cy + ((ty - cy) * i) / steps)));
+      await sleep(16);
+    }
+  }
   /** Click wherever the pointer is (e.g. while locked: an attack). */
   async clickHere(button = 1): Promise<void> {
     this.x('click', String(button));

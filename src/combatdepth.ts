@@ -3,14 +3,15 @@ import type { Renderer } from './render/renderer';
 import type { DebugApi } from './debug';
 import type { MonstersHandle } from './monsters';
 import type { Character } from './game/character';
-import { createItem, defaultLoad, type Item } from './game/item';
+import { createItem, defaultLoad, loadAmmo, type Item } from './game/item';
 import { L, spawnOnGround } from './game/moves';
-import { aimState } from './game/combat';
+import { aimState, meleeHooks } from './game/combat';
+import { bodyMods } from './game/bodymods';
 import {
-  activeBuffSummary, autolearnStyles, currentStyle, learnStyle, maOf, selectStyle, styleBuffs, styleDef, styleWeaponValid,
+  activeBuffSummary, autolearnStyles, currentStyle, learnStyle, maOf, maWorld, selectStyle, styleBuffs, styleDef, styleWeaponValid,
   traitStyleChoices, BUFF_TRIGGERS, type MartialArtDef, type MartialArtsJSON,
 } from './game/martialarts';
-import { availableTechniques, combatHooks, pickTechnique, techniqueDef, type TechniqueDef } from './game/techniques';
+import { availableTechniques, blockHooks, combatHooks, pickTechnique, techniqueDef, type TechniqueDef } from './game/techniques';
 import {
   clearJam, currentMode, cycleMode, gunModes, gunmodCompatible, gunmodSkillShortfall, installGunmod, installSeconds, isGunmod, isJammed,
   modLocations, removableReason, removeGunmod,
@@ -41,6 +42,18 @@ export function installCombatDepth(game: Game, renderer: Renderer | null, monste
   combatHooks.onBlock = (who) => {
     if (who === p) renderer?.viewmodel?.block();
   };
+  // BN melee needs a little of the world: wall_adjacent techniques (map::is_wall_adjacent:
+  // any impassable neighbour), powered mutations (NEED_ACTIVE_TO_MELEE claws) and bionics
+  // (razors, arm/leg-armor blocks).
+  maWorld.wallAdjacent = (who) => {
+    const pos = who as unknown as { x: number; y: number; z: number };
+    const x = Math.floor(pos.x), y = Math.floor(pos.y);
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) if ((dx || dy) && !game.map.passable(x + dx, y + dy, pos.z)) return true;
+    return false;
+  };
+  meleeHooks.mutationActive = (who, id) => bodyMods(who)?.mut.isPowered(id) ?? false;
+  meleeHooks.hasBionic = (who, id) => bodyMods(who)?.bio.has(id) ?? false;
+  blockHooks.hasBionic = meleeHooks.hasBionic;
   combat.hooks = {
     ignite: (x, y, z) => void ignite(game, x, y, z, 1),
     addField: (x, y, z, type, n) => {
@@ -196,7 +209,7 @@ function styleDetail(game: Game, st: MartialArtDef): string {
   const w = p.inv.wielded;
   if (w && !styleWeaponValid(st, w)) out.push(`<div style="color:${cssColor('c_yellow')}">Can't be used with your ${w.baseName()}.</div>`);
   const weapons = [...(st.weapon_category ?? []).map((cat) => (game.data.misc?.weapon_category?.[cat]?.name as string | undefined) ?? cat)];
-  if (st.allow_all_weapons) out.push(`<div style="color:${cssColor('c_light_gray')}">Usable with any weapon.</div>`);
+  if (st.allow_melee) out.push(`<div style="color:${cssColor('c_light_gray')}">Usable with any weapon.</div>`);
   else if (weapons.length) out.push(`<div style="color:${cssColor('c_light_gray')}">Weapons: ${weapons.join(', ')}</div>`);
   const buffs: string[] = [];
   for (const t of BUFF_TRIGGERS) for (const b of styleBuffs(game.data, st, t)) buffs.push(`${c('c_light_green', b.name)} ${c('c_dark_gray', `(${t === 'static' ? 'passive' : t})`)}`);
@@ -388,7 +401,9 @@ function installDebug(api: DebugApi, game: Game, monsters: MonstersHandle): void
   api.installGunmod = (a: string, b?: string) => {
     const modId = b ?? a;
     if (b) {
-      const gun = createItem(game.data, a, gun0(game, a) ? { ammo: 'default' } : {});
+      const gun = createItem(game.data, a);
+      const ammo = defaultLoad(gun);
+      if (ammo) loadAmmo(gun, ammo);
       p().inv.wield(gun, null);
     }
     const gun = p().inv.wielded;
@@ -406,8 +421,3 @@ function installDebug(api: DebugApi, game: Game, monsters: MonstersHandle): void
   };
 }
 
-
-/** Does a fresh `id` gun take ammo at all (so the debug helper can load it)? */
-function gun0(game: Game, id: string): boolean {
-  return !!defaultLoad(createItem(game.data, id));
-}

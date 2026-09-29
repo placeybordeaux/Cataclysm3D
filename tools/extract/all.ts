@@ -23,10 +23,11 @@ const OUT = 'public/data';
 function usage(): string {
   return `Usage: npm run data:all -- [options]
 
-Regenerate all of public/data from CDDA JSON (${STEPS.map((s) => s.name).join(' -> ')}).
+Regenerate all of public/data from the game JSON (${STEPS.map((s) => s.name).join(' -> ')}).
 
 Options:
-  --cdda <dir>     Cataclysm-DDA checkout (passed to every extractor)
+  --cdda <dir>     game checkout passed to every extractor (world extractors default to
+                   ~/code/Cataclysm-BN)
   --only <a,b>     run only these steps (still in dependency order)
   --dry-run        run the extractors in dry-run mode (nothing written)
   -h, --help       show this help`;

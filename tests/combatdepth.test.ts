@@ -11,7 +11,7 @@ import type { Chunk, ChunkGenerator, GameMap } from '../src/world/map';
 import { Character } from '../src/game/character';
 import { MonsterSystem } from '../src/game/monai';
 import { PlayerCombat, applyTechniqueToMonster, monsterTargetInfo } from '../src/game/playercombat';
-import { aimState, fireGun, gunDispersion, meleeAttack, monsterMeleeAttack, tryDodgeRoll } from '../src/game/combat';
+import { aimState, fireGun, gunDispersion, meleeAttack, monsterMeleeAttack, onDodged, tryDodgeRoll } from '../src/game/combat';
 import { createItem, Item } from '../src/game/item';
 import { L, spawnItem } from '../src/game/moves';
 import {
@@ -19,7 +19,7 @@ import {
   techniqueDef, techniqueMessage, type TargetInfo,
 } from '../src/game/techniques';
 import {
-  buffFlat, COMBAT_TURN, currentStyle, learnStyle, maOf, refreshDefenses, selectStyle, tickMartialArts, triggerBuffs,
+  buffFlat, COMBAT_TURN, currentStyle, flatBonus, learnStyle, maOf, refreshDefenses, selectStyle, tickMartialArts, triggerBuffs,
 } from '../src/game/martialarts';
 import {
   aimLevel, aimThresholds, currentMode, cycleMode, gunModes, gunmodCompatible, installGunmod, isJammed, removeGunmod, sightDispersion,
@@ -78,57 +78,71 @@ function world(seed = 7): { game: Game; sys: MonsterSystem; combat: PlayerCombat
   return { game, sys, combat, msgs };
 }
 
-describe('weapon techniques (pick_technique / evaluate_technique)', () => {
-  // TODO(BN): written for DDA data/behaviour; fails on Bright Nights core data (AssertionError: expected undefined to be 'RAPID' // Object.is equality). Port with its system.
-  it.skip('a katana offers RAPID on normal hits; a baseball bat only has its crit-only BRUTAL', () => {
+describe('weapon techniques (BN get_valid_techniques / pick_technique)', () => {
+  it('a katana offers RAPID on every normal hit; a baseball bat has no attack technique at all', () => {
     const { c } = survivor();
-    c.setSkill('melee', 3);
     const katana = createItem(data, 'katana');
     const bat = createItem(data, 'bat');
     const rng = new Rng(1);
     expect(availableTechniques(c, katana).map((t) => t.id)).toEqual(['RAPID', 'WBLOCK_2']);
-    // WBLOCK_2 is a dummy (blocking only), so a normal katana hit always picks RAPID.
+    // WBLOCK_2 is a dummy (blocking only); BN's RAPID needs no skill, so an untrained survivor
+    // with "No style" (allow_melee) always gets it on a normal hit, never on a crit.
     for (let i = 0; i < 20; i++) expect(pickTechnique(c, zombieInfo(), katana, { crit: false }, rng)?.id).toBe('RAPID');
+    expect(pickTechnique(c, zombieInfo(), katana, { crit: true }, rng)).toBeNull();
     expect(pickTechnique(c, zombieInfo(), bat, { crit: false }, rng)).toBeNull();
-    expect(pickTechnique(c, zombieInfo(), bat, { crit: true }, rng)?.id).toBe('BRUTAL');
-    // RAPID: half the moves, 66% damage.
+    expect(pickTechnique(c, zombieInfo(), bat, { crit: true }, rng)).toBeNull();
+    // RAPID: 75% move cost, damage unchanged.
     const units = [{ type: 'cut', amount: 30, armor_penetration: 0, armor_multiplier: 1 }];
     const r = applyTechnique(c, techniqueDef(data, 'RAPID')!, units, 100, rng);
-    expect(r.moves).toBe(50);
-    expect(units[0].amount).toBeCloseTo(19.8);
+    expect(r.moves).toBe(75);
+    expect(units[0].amount).toBe(30);
     expect(techniqueMessage(techniqueDef(data, 'RAPID')!, 'the zombie')).toBe('You quickly strike the zombie');
   });
 
-  // TODO(BN): written for DDA data/behaviour; fails on Bright Nights core data (AssertionError: expected undefined to be 'RAPID' // Object.is equality). Port with its system.
-  it.skip('skill requirements and conditions gate techniques (RAPID needs melee 2; BRUTAL not on stunned/huge targets)', () => {
+  it('target gating: SWEEP skips a downed target, BRUTAL is crit-only, stunned_target and req_buffs', () => {
     const { c } = survivor();
     const rng = new Rng(2);
-    const katana = createItem(data, 'katana');
-    expect(pickTechnique(c, zombieInfo(), katana, { crit: false }, rng)).toBeNull();
-    c.setSkill('melee', 2);
-    expect(pickTechnique(c, zombieInfo(), katana, { crit: false }, rng)?.id).toBe('RAPID');
-    const bat = createItem(data, 'bat');
-    expect(pickTechnique(c, { ...zombieInfo(), hasEffect: (id) => id === 'stunned' }, bat, { crit: true }, rng)).toBeNull();
-    expect(pickTechnique(c, { ...zombieInfo(), size: 5 }, bat, { crit: true }, rng)).toBeNull();
+    const axe = createItem(data, 'battleaxe');
+    const downed = { ...zombieInfo(), hasEffect: (id: string) => id === 'downed' };
+    for (let i = 0; i < 10; i++) expect(pickTechnique(c, zombieInfo(), axe, { crit: false }, rng)?.id).toBe('SWEEP');
+    expect(pickTechnique(c, downed, axe, { crit: false }, rng)).toBeNull();
+    expect(pickTechnique(c, zombieInfo(), axe, { crit: true }, rng)?.id).toBe('BRUTAL');
+    // Viper Kung Fu: the Viper Strike needs a stunned target, the Viper Bite the dodge buff.
+    learnStyle(c, 'style_venom_snake', true);
+    selectStyle(c, 'style_venom_snake', true);
+    c.setSkill('unarmed', 5);
+    const stunned = { ...zombieInfo(), hasEffect: (id: string) => id === 'stunned' };
+    const seen = (t: TargetInfo, crit: boolean) => {
+      const s = new Set<string>();
+      for (let i = 0; i < 60; i++) s.add(pickTechnique(c, t, null, { crit }, rng)?.id ?? 'none');
+      return s;
+    };
+    expect(seen(zombieInfo(), false).has('tec_venom_snake_strike')).toBe(false);
+    expect(seen(stunned, false).has('tec_venom_snake_strike')).toBe(true);
+    expect(seen(zombieInfo(), true).has('tec_venom_snake_bite')).toBe(false);
+    triggerBuffs(c, 'ondodge');
+    expect(maOf(c).buffs.has('buff_venom_snake_ondodge1')).toBe(true);
+    expect(seen(zombieInfo(), true).has('tec_venom_snake_bite')).toBe(true);
   });
 
-  // TODO(BN): written for DDA data/behaviour; fails on Bright Nights core data (AssertionError: expected false to be true // Object.is equality). Port with its system.
-  it.skip('crit-only AoE: WIDE needs a crit and an extra victim; SWEEP downs a humanoid on normal hits', () => {
+  it('AoE: WIDE needs a victim beside the target, SPIN two; the sledgehammer mixes WIDE and SWEEP', () => {
     const { c } = survivor();
-    c.setSkill('melee', 3);
-    const axe = createItem(data, 'battleaxe');
+    const sledge = createItem(data, 'hammer_sledge');
     const rng = new Rng(4);
     const ids = (crit: boolean, aoe: number) => {
       const seen = new Set<string>();
-      for (let i = 0; i < 60; i++) seen.add(pickTechnique(c, zombieInfo(), axe, { crit, aoeTargets: () => aoe }, rng)?.id ?? 'none');
+      for (let i = 0; i < 60; i++) seen.add(pickTechnique(c, zombieInfo(), sledge, { crit, aoeTargets: () => aoe }, rng)?.id ?? 'none');
       return seen;
     };
-    expect(ids(false, 2).has('WIDE')).toBe(false);
-    expect(ids(false, 0).has('SWEEP')).toBe(true);
-    expect(ids(true, 0).has('WIDE')).toBe(false);
-    expect(ids(true, 2).has('WIDE')).toBe(true);
-    // Flying targets can't be swept.
-    expect(pickTechnique(c, { ...zombieInfo(), flags: ['FLIES'] }, axe, { crit: false }, rng)?.id).not.toBe('SWEEP');
+    expect(ids(false, 0)).toEqual(new Set(['SWEEP']));
+    expect(ids(false, 1)).toEqual(new Set(['SWEEP', 'WIDE']));
+    expect(ids(true, 1)).toEqual(new Set(['BRUTAL']));
+    const lajatang = createItem(data, 'lajatang');
+    const spin = (n: number) => pickTechnique(c, zombieInfo(), lajatang, { crit: false, aoeTargets: () => n }, rng)?.id;
+    for (let i = 0; i < 20; i++) expect(spin(1)).not.toBe('SPIN');
+    let saw = false;
+    for (let i = 0; i < 40; i++) saw ||= spin(2) === 'SPIN';
+    expect(saw).toBe(true);
   });
 
   it('BRUTAL stuns and knocks a zombie back; SWEEP downs it (+3 bash)', () => {
@@ -152,11 +166,10 @@ describe('weapon techniques (pick_technique / evaluate_technique)', () => {
     expect(sweepUnits[0].amount).toBe(13);
   });
 
-  // TODO(BN): written for DDA data/behaviour; fails on Bright Nights core data (AssertionError: expected false to be true // Object.is equality). Port with its system.
-  it.skip('in the world: a battleaxe wide-arc crit hits the zombies beside the target too', () => {
+  it('in the world: a sledgehammer wide arc hits the zombies beside the target too', () => {
     const { game, sys, combat, msgs } = world();
     const p = game.player;
-    p.inv.wield(createItem(data, 'battleaxe'), null);
+    p.inv.wield(createItem(data, 'hammer_sledge'), null);
     p.str_base = 14;
     p.dex_base = 20;
     p.per_base = 20;
@@ -214,27 +227,41 @@ describe('blocking and dodging (block_hit, dodges_left)', () => {
     expect(logarithmicRange(0, 40, 8 + 6 + 8)).toBeLessThan(logarithmicRange(0, 40, 17));
   });
 
-  it('unarmed arm blocks need the style arm_block level and move the hit to an arm', () => {
+  it('bare hands: arms go up with score 1 until the style arm_block level, then str + melee + unarmed', () => {
     const { c } = survivor();
     c.setSkill('melee', 5);
     refreshDefenses(c);
     const rng = new Rng(8);
-    // No style: arm_block 1 → unarmed 0 can't.
-    expect(blockHit(c, [{ type: 'bash', amount: 10 }], 'torso', 3, rng).blocked).toBe(false);
+    // No style: arm_block 1 → unarmed 0 can't limb-block, but BN still raises an arm (score 1).
+    const weak = [{ type: 'bash', amount: 10 }];
+    const b0 = blockHit(c, weak, 'torso', 3, rng);
+    expect(b0.blocked).toBe(true);
+    expect(weak[0].amount).toBeCloseTo(10 * logarithmicRange(0, 40, 1));
     c.setSkill('unarmed', 1);
     refreshDefenses(c);
-    const b = blockHit(c, [{ type: 'bash', amount: 10 }], 'torso', 3, rng);
+    // The healthiest arm takes it.
+    c.hp.arm_l.cur -= 5;
+    const units = [{ type: 'bash', amount: 10 }];
+    const b = blockHit(c, units, 'torso', 3, rng);
     expect(b.blocked).toBe(true);
-    expect(['arm_l', 'arm_r']).toContain(b.bp);
+    expect(b.bp).toBe('arm_r');
+    expect(units[0].amount).toBeCloseTo(10 * logarithmicRange(0, 40, c.str + 5 + 1));
   });
 
-  it('one dodge per turn: a second attack in the same turn gets no dodge roll', () => {
+  it('BN dodges: every dodge used up this turn costs 2 dodge on the next roll; a new turn resets', () => {
     const { c } = survivor();
+    c.setSkill('dodge', 6);
     refreshDefenses(c);
-    expect(tryDodgeRoll(c)).toBeGreaterThan(0);
-    expect(tryDodgeRoll(c)).toBe(0);
+    const d = c.dodge();
+    expect(tryDodgeRoll(c)).toBeCloseTo(d * 5);
+    onDodged(c, 0);
+    expect(tryDodgeRoll(c)).toBeCloseTo((d - 2) * 5);
+    onDodged(c, 0);
+    expect(tryDodgeRoll(c)).toBeCloseTo((d - 4) * 5);
+    // A hit doesn't use a dodge up.
+    expect(tryDodgeRoll(c)).toBeCloseTo((d - 4) * 5);
     tickMartialArts(c, COMBAT_TURN + 0.01);
-    expect(tryDodgeRoll(c)).toBeGreaterThan(0);
+    expect(tryDodgeRoll(c)).toBeCloseTo(d * 5);
   });
 
   it('monster attacks are blocked by a skilled survivor with a weapon', () => {
@@ -275,28 +302,34 @@ describe('martial arts', () => {
     expect(buffFlat(c, 'hit')).toBe(0);
   });
 
-  // TODO(BN): written for DDA data/behaviour; fails on Bright Nights core data (AssertionError: expected undefined to be 1 // Object.is equality). Port with its system.
-  it.skip('Brawling onpause buff stacks twice (+1 hit each) while standing still, then expires', () => {
+  it('Snake Kung Fu onpause buff stacks to 3 while standing still; to-hit ignores stacks, arpen does not', () => {
     const { c } = survivor();
-    c.setSkill('melee', 1);
-    learnStyle(c, 'style_brawling', true);
-    selectStyle(c, 'style_brawling', true);
+    c.setSkill('unarmed', 1);
+    learnStyle(c, 'style_snake', true);
+    selectStyle(c, 'style_snake', true);
+    const onpause = () => maOf(c).buffs.get('buff_snake_onpause');
     tickMartialArts(c, COMBAT_TURN);
-    expect(maOf(c).buffs.get('buff_brawling_onpause')?.stacks).toBe(1);
+    expect(onpause()?.stacks).toBe(1);
     tickMartialArts(c, COMBAT_TURN);
     tickMartialArts(c, COMBAT_TURN);
-    expect(maOf(c).buffs.get('buff_brawling_onpause')?.stacks).toBe(2);
-    expect(buffFlat(c, 'hit')).toBe(2);
-    // Moving every turn stops the onpause buff from being refreshed.
-    for (let i = 0; i < 4; i++) {
+    tickMartialArts(c, COMBAT_TURN);
+    expect(onpause()?.stacks).toBe(3);
+    // Character::mabuff_tohit_bonus doesn't multiply by the intensity; arpen does.
+    const staticHit = flatBonus(c, maOf(c).buffs.get('buff_snake_static')?.def.flat_bonuses, 'hit');
+    expect(buffFlat(c, 'hit') - staticHit).toBe(1);
+    expect(buffFlat(c, 'arpen', 'bash')).toBeCloseTo(3 * 0.5 * c.per);
+    // Moving: no refresh, it loses a stack and then runs out (1 turn).
+    maOf(c).moved = true;
+    tickMartialArts(c, COMBAT_TURN);
+    expect(onpause()?.stacks ?? 0).toBeLessThan(3);
+    for (let i = 0; i < 3; i++) {
       maOf(c).moved = true;
       tickMartialArts(c, COMBAT_TURN);
     }
-    expect(maOf(c).buffs.has('buff_brawling_onpause')).toBe(false);
+    expect(onpause()).toBeUndefined();
   });
 
-  // TODO(BN): written for DDA data/behaviour; fails on Bright Nights core data (AssertionError: expected 3 to be 2 // Object.is equality). Port with its system.
-  it.skip('Karate onhit buff (unarmed 3): +1 dodge and +1 block attempt next turn, cheaper swings', () => {
+  it('Karate onhit buff (unarmed 3): +1 dodge and +2 blocks next turn, blocks soak half of Str', () => {
     const { c } = survivor();
     c.setSkill('unarmed', 3);
     learnStyle(c, 'style_karate', true);
@@ -304,11 +337,14 @@ describe('martial arts', () => {
     triggerBuffs(c, 'onhit');
     refreshDefenses(c);
     expect(maOf(c).dodgesLeft).toBe(2);
-    expect(maOf(c).blocksLeft).toBe(2);
-    const before = meleeAttack(c, { dodge: 0 }, new Rng(1)).moves;
-    maOf(c).buffs.clear();
-    const after = meleeAttack(c, { dodge: 0 }, new Rng(1)).moves;
-    expect(before).toBeLessThan(after);
+    expect(maOf(c).blocksLeft).toBe(3);
+    expect(buffFlat(c, 'block')).toBeCloseTo(0.5 * c.str);
+    // It lasts 2 turns.
+    tickMartialArts(c, COMBAT_TURN);
+    expect(maOf(c).buffs.has('buff_karate_onhit')).toBe(true);
+    tickMartialArts(c, COMBAT_TURN);
+    tickMartialArts(c, COMBAT_TURN);
+    expect(maOf(c).buffs.has('buff_karate_onhit')).toBe(false);
   });
 });
 
@@ -482,15 +518,20 @@ describe('monster guns (gun_actor)', () => {
   };
 
   // TODO(BN): written for DDA data/behaviour; fails on Bright Nights core data (AssertionError: expected -1 to be greater than 1). Port with its system.
-  it.skip('a turret announces its target lock, then fires from its starting_ammo', () => {
+  it('a turret announces its target lock, then fires from its starting_ammo', () => {
     const { game, sys, msgs } = world(11);
     const t = sys.spawnById('mon_turret', 12.5, 6.5, 0)!;
     tick(game, 6);
     const lock = msgs.findIndex((m) => m === 'The improvised MP5 turret says "Hostile detected."');
-    const fire = msgs.findIndex((m) => m === 'The improvised MP5 turret fires its H&K MP5A2 submachine gun!');
+    const fire = msgs.findIndex((m) => m === 'The improvised MP5 turret fires its H&K MP5A4!');
     expect(lock).toBeGreaterThanOrEqual(0);
     expect(fire).toBeGreaterThan(lock);
     expect(monGunState(t).ammo['9mm']).toBeLessThan(30);
+    // BN: no_crits caps severity at ×1.1 — a 31-damage 9mm round never exceeds 35.
+    for (const m of msgs) {
+      const d = /You were hit in the .* for (\d+) damage/.exec(m);
+      if (d) expect(Number(d[1])).toBeLessThanOrEqual(35);
+    }
   });
 
   it('out of range the turret holds fire; with no ammo left it only clicks', () => {

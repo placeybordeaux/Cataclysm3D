@@ -26,6 +26,7 @@ import type { LogEntry } from './format';
 import { installFullscreen } from './fullscreen';
 import { armUnloadGuard, disarmUnloadGuard } from '../core/unload';
 import { closeAllWindows } from './framework';
+import { installUi2 } from '../ui2/install';
 
 // Wires the whole UI into the game: HUD, key bindings for every screen, the trackers the
 // screens need (distance walked, overmap exploration, kills), the death screen, and the
@@ -182,6 +183,7 @@ export async function installUi(game: Game, renderer: Renderer, worldgen: WorldG
     window.dispatchEvent(new KeyboardEvent('keyup', { key, code: code ?? (key.length === 1 ? `Key${key.toUpperCase()}` : key) }));
   };
 
+  installUi2(game, renderer, ctx, api);
   return {
     ctx,
     hud: h,

@@ -57,6 +57,8 @@ export interface WeatherState extends WeatherPoint {
   /** subtracted from every sound's volume */
   soundAttn: number;
   sightPenalty: number;
+  /** BN weather_type sun_intensity: none | light | normal | high (body-temperature sunlight warmth). */
+  sunIntensity: 'none' | 'light' | 'normal' | 'high';
   /** set by cdda.setWeather / forceWeather; null = generated */
   forced: string | null;
 }
@@ -228,6 +230,7 @@ export function makeWeatherState(data: GameData, id: string, w: WeatherPoint, fo
     lightModifier: t.light_modifier ?? 0,
     soundAttn: t.sound_attn ?? 0,
     sightPenalty: t.sight_penalty ?? 1,
+    sunIntensity: ((t as { sun_intensity?: string }).sun_intensity as WeatherState['sunIntensity']) ?? 'normal',
   };
 }
 
@@ -377,9 +380,11 @@ export function installWeather(game: Game, hooks: WeatherHooks = {}): void {
       p.env.temperature = (p.z < 0 ? DEFAULT_WEATHER_GEN.base_temperature : w.temperature) + st.radiant;
       p.env.wind = outside ? w.windpower * 1.609 : 0;
       p.env.humidity = w.humidity;
-      // incident_sun_irradiance, roughly: sin(altitude), dimmed by overcast weather.
+      // Body-temperature sunlight (weather::is_in_sunlight): outside by day under at least a
+      // "light" sun_intensity, +1 °C, +2 °C in a "high" sun (update_bodytemp sunlight_warmth).
       const alt = sunAltitude(g.clock);
-      p.env.sun = outside && alt > 0 ? Math.sin((alt * Math.PI) / 180) * Math.max(0.1, Math.min(1, 1 + w.lightModifier / 40)) : 0;
+      const sunny = outside && alt > 0 && isDay(g.clock) && w.sunIntensity !== 'none';
+      p.env.sun = sunny ? (w.sunIntensity === 'high' ? 2 : 1) : 0;
       p.env.precipitation = outside && w.rains && w.precip !== 'none';
       // Thunder: a rumble roughly every few game minutes in thunderstorms.
       if (w.id === 'thunder' || w.id === 'lightning') {

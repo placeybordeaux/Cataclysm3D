@@ -355,12 +355,16 @@ describe('far chunk eviction', () => {
 });
 
 describe('actualized chunks stay clean', () => {
-  // TODO(BN): written for DDA data/behaviour; fails on Bright Nights core data (AssertionError: expected null not to be null). Port with its system.
-  it.skip('mapgen food rotting over the days does not make an untouched chunk dirty or saved', () => {
+  it('mapgen food rotting over the days does not make an untouched chunk dirty or saved', () => {
     const W = build(4242, 'world');
     installNature(W.game, null);
     const { game, tracker } = W;
     const p = game.player;
+    // BN's evac shelter can sit up to 15 OMTs out of town (in the woods for this seed); the
+    // kitchens with perishable food are in the nearest town.
+    const town = W.worldgen!.overmap.closestCity(Math.floor(p.x / CHUNK), Math.floor(p.y / CHUNK))!;
+    p.x = town.x * CHUNK + 12.5;
+    p.y = town.y * CHUNK + 12.5;
     const pcx = Math.floor(p.x / CHUNK), pcy = Math.floor(p.y / CHUNK);
     let food: { c: Chunk; it: Item } | null = null;
     for (let dy = -3; dy <= 3 && !food; dy++)
