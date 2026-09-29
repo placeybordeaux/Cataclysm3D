@@ -32,6 +32,16 @@ function survivor(): { c: Character; log: string[] } {
 }
 
 describe('real data: items', () => {
+  it('a liquid spawned with "container-item" goes in that container, not in its default one first', () => {
+    // spice.json: { "item": "ketchup", "charges": 32, "container-item": "condiment_bottle_sealed" }
+    const [bottle, ...rest] = fromSpawned(data, { id: 'condiment_bottle_sealed', count: 1, contents: [{ id: 'ketchup', count: 1, charges: 32 }] });
+    expect(rest).toEqual([]);
+    expect(bottle.allContents().map((c) => `${c.typeId}x${c.charges}`)).toEqual(['ketchupx32']);
+    // ... while a loose liquid in a bag still gets bottled
+    const [bag] = fromSpawned(data, { id: 'bag_plastic', count: 1, contents: [{ id: 'water_clean', count: 1, charges: 2 }] });
+    expect(bag.allContents().map((c) => c.typeId)).toEqual(['bottle_plastic']);
+  });
+
   it('bows, crossbows and flamethrowers make their own shot sounds (ranged.cpp gun_noise)', () => {
     expect(createItem(data, 'crossbow').gunNoise().sound).toBe('thonk!');
     expect(createItem(data, 'compbow').gunNoise().sound).toBe('whizz!');

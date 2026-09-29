@@ -37,7 +37,10 @@ export class Input {
     canvas.addEventListener('mousedown', (e) => {
       if (this.captureStack.length) return;
       if (document.pointerLockElement !== canvas) {
-        canvas.requestPointerLock?.();
+        // Chrome returns a promise that rejects when the lock is refused (clicked again too
+        // soon after Esc, document not focused); that's routine, not an uncaught error.
+        const req = canvas.requestPointerLock?.() as unknown as Promise<void> | undefined;
+        req?.catch?.(() => {});
         return;
       }
       this.mouseButtons |= 1 << e.button;

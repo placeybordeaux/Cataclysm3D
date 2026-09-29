@@ -862,7 +862,7 @@ export function createItem(data: GameData, id: string, opts: CreateItemOpts = {}
  * default_magazine when nothing was placed in the well. Loose liquids are put into their
  * default container like CDDA does when spawning on the map.
  */
-export function fromSpawned(data: GameData, s: SpawnedItem): Item[] {
+export function fromSpawned(data: GameData, s: SpawnedItem, inContainer = false): Item[] {
   const def = data.items[s.id];
   if (!def) {
     warnOnce('item', s.id);
@@ -874,7 +874,9 @@ export function fromSpawned(data: GameData, s: SpawnedItem): Item[] {
     const it = new Item(data, def);
     if (variant) it.vars.variant = variant;
     it.charges = (s.charges ?? defaultCharges(def)) * Math.max(1, s.count);
-    if (it.isLiquid() && def.container && data.items[def.container]) {
+    // Liquids spawned inside an explicit container ("container-item": ketchup in its sealed
+    // bottle) go straight into it; only loose ones get their default container.
+    if (!inContainer && it.isLiquid() && def.container && data.items[def.container]) {
       // Like item::in_its_container with overflow: more liquid than one container holds
       // fills more containers instead of leaving a loose puddle in a cupboard.
       let left: Item | null = it;
@@ -894,9 +896,16 @@ export function fromSpawned(data: GameData, s: SpawnedItem): Item[] {
     if (variant) it.vars.variant = variant;
     if (it.hasFlag('SPAWN_ACTIVE')) it.active = true;
     // One placement pass for all contents (a garbage bag rolls ~150 separate entries).
-    const contents = (s.contents ?? []).flatMap((cs) => fromSpawned(data, cs));
-    for (const c of placeContents(it, contents))
-      warnOnce('fit', `${c.typeId}>${it.typeId}`, `fromSpawned: ${c.typeId} does not fit in ${it.typeId}`);
+    const contents = (s.contents ?? []).flatMap((cs) => fromSpawned(data, cs, true));
+    let left = placeContents(it, contents);
+    // A liquid that couldn't go in loose (a bag, a box) gets its own default container.
+    const bottled = left.filter((c) => c.isLiquid() && c.def.container && data.items[c.def.container]);
+    if (bottled.length) {
+      left = left.filter((c) => !bottled.includes(c));
+      const wrapped = bottled.flatMap((c) => fromSpawned(data, { id: c.typeId, count: 1, charges: c.charges }));
+      left.push(...placeContents(it, wrapped));
+    }
+    for (const c of left) warnOnce('fit', `${c.typeId}>${it.typeId}`, `fromSpawned: ${c.typeId} does not fit in ${it.typeId}`);
     if (s.charges !== undefined && s.charges > 0) {
       if ((def.max_charges ?? 0) > 0 && !it.magazineWell() && it.magazinePockets().length === 0) it.charges = Math.min(s.charges, def.max_charges!);
       else {
