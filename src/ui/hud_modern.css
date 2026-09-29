@@ -1,0 +1,166 @@
+/* Modern HUD (src/ui/hud_modern.ts) on the ui2 HUD layer. Sizes in ui2 metrics (--u, --fs);
+   pixel icons at --hud-k CSS px per art pixel (a whole number of device pixels at every scale).
+   The HUD area is the viewport minus --hud-x on each side (Options > HUD width). */
+
+#ui2 { --hud-k: calc(var(--u) * 2); --body-k: calc(var(--u) * 2); }
+#ui2[data-scale='2'] { --hud-k: calc(var(--u) * 1.5); --body-k: calc(var(--u) * 2); }
+#ui2[data-scale='3'] { --hud-k: calc(var(--u) * 5 / 3); --body-k: calc(var(--u) * 4 / 3); }
+
+/* CDDA colour tags inside ui2 screens: the raw curses colours are remapped to palette tones. */
+#ui2 .ui2-cdda {
+  --c-red: var(--p-bad); --c-light_red: var(--p-bad); --c-green: var(--p-good); --c-light_green: var(--p-good);
+  --c-yellow: var(--p-warn); --c-brown: var(--p-warn); --c-cyan: var(--p-info); --c-light_cyan: var(--p-info);
+  --c-blue: var(--p-info); --c-light_blue: var(--p-info); --c-magenta: var(--p-magic); --c-pink: var(--p-magic);
+  --c-white: var(--p-text-bright); --c-light_gray: var(--p-text); --c-dark_gray: var(--p-text-dim);
+}
+
+#ui2 .ui2-layer-hud > .hud2 { position: absolute; inset: 0; pointer-events: none; --edge: calc(var(--u) * 6); }
+#ui2 { --hud-x: 0px; }
+#ui2 .ui2-toasts { left: calc(var(--hud-x) + var(--u) * 6); }
+#ui2 .hud2 * { pointer-events: none; }
+#ui2 .hud2 .px-icon { image-rendering: pixelated; display: block; flex: none; }
+#ui2 .hud2-plate {
+  background: rgba(9, 10, 15, .62); border: var(--u) solid rgba(0, 0, 0, .6);
+  box-shadow: inset 0 0 0 var(--u) rgba(255, 255, 255, .04); padding: var(--u) calc(var(--u) * 3);
+}
+#ui2 .hud2 .tone-text { color: var(--p-text); } #ui2 .hud2 .tone-bright { color: var(--p-text-bright); }
+/* Tooltip-bearing bits take the pointer while the cursor is free (it's locked otherwise). */
+body.ui2-cursor-free #ui2 .hud2 .hud2-need, body.ui2-cursor-free #ui2 .hud2 .hud2-chip, body.ui2-cursor-free #ui2 .hud2 .hud2-body-hit,
+body.ui2-cursor-free #ui2 .hud2 .hud2-body-wrap, body.ui2-cursor-free #ui2 .hud2 .hud2-feed, body.ui2-cursor-free #ui2 .hud2 .hud2-danger,
+body.ui2-cursor-free #ui2 .hud2 .hud2-weapon, body.ui2-cursor-free #ui2 .hud2 .hud2-light-wrap, body.ui2-cursor-free #ui2 .hud2 .hud2-weather { pointer-events: auto; }
+body.ui2-cursor-free #ui2 .hud2 .hud2-feed { cursor: pointer; }
+@keyframes hud2-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
+@keyframes hud2-bob { 0%, 100% { translate: 0 0; } 50% { translate: 0 calc(var(--u) * -1); } }
+
+/* ---- top centre: compass ---- */
+#ui2 .hud2-top { position: absolute; left: 50%; top: calc(var(--u) * 4); transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: calc(var(--u) * 3); }
+#ui2 .hud2-compass { display: flex; align-items: center; gap: calc(var(--u) * 3); }
+#ui2 .hud2-strip-wrap {
+  position: relative; width: min(calc(var(--fs) * 26), 46vw); height: calc(var(--fs) * 1.5);
+  background: linear-gradient(90deg, transparent, rgba(9, 10, 15, .55) 12%, rgba(9, 10, 15, .55) 88%, transparent);
+  border-bottom: var(--u) solid rgba(255, 255, 255, .12); overflow: hidden;
+}
+#ui2 .hud2-strip { position: absolute; inset: 0; }
+#ui2 .hud2-strip > span { position: absolute; left: 0; top: 0; white-space: nowrap; line-height: 1; }
+#ui2 .hud2-strip-mid { position: absolute; left: 50%; bottom: 0; width: var(--u); height: calc(var(--u) * 4); background: var(--p-accent); transform: translateX(-50%); }
+#ui2 .hud2-card { font-size: var(--fs-s); color: var(--p-text-dim); margin-left: calc(var(--fs-s) * -.5); top: calc(var(--u) * 3) !important; }
+#ui2 .hud2-card.main { color: var(--p-text-bright); font-size: var(--fs); margin-left: calc(var(--fs) * -.25); top: var(--u) !important; }
+#ui2 .hud2-tick { width: var(--u); height: calc(var(--u) * 3); background: rgba(255, 255, 255, .28); top: auto !important; bottom: 0; }
+#ui2 .hud2-pip { width: calc(var(--u) * 3); height: calc(var(--u) * 5); margin-left: calc(var(--u) * -1.5); background: var(--p-danger); top: auto !important; bottom: calc(var(--u) * 2); box-shadow: 0 0 0 var(--u) rgba(0, 0, 0, .6); }
+#ui2 .hud2-pip.near { height: calc(var(--u) * 8); animation: hud2-pulse .8s steps(2) infinite; }
+#ui2 .hud2-pip.edge { background: none; box-shadow: none; color: var(--p-bad); width: auto; height: auto; font-size: var(--fs); margin-left: 0; bottom: 0; }
+#ui2 .hud2-pip.edge[style*='translateX(0px)'] { margin-left: 0; }
+#ui2 .hud2-poi { font-size: var(--fs-s); color: var(--p-accent); transform-origin: left; margin-left: calc(var(--fs-s) * -.35); top: auto !important; bottom: calc(var(--u) * 2); text-shadow: var(--u) var(--u) 0 #000; }
+#ui2 .hud2-poi.ref { color: var(--p-info); }
+#ui2 .hud2-poi.mission { color: var(--p-magic); }
+#ui2 .hud2-poi.edge { opacity: .7; }
+#ui2 .hud2-poi.ahead { translate: -50% 0; margin-left: 0; bottom: auto; top: calc(var(--fs) * 1.5 + var(--u) * 2) !important; background: rgba(9, 10, 15, .6); padding: 0 calc(var(--u) * 2); }
+#ui2 .hud2-strip-wrap { overflow: visible; }
+#ui2 .hud2-danger { display: flex; align-items: center; gap: calc(var(--u) * 2); min-width: calc(var(--fs) * 5); justify-content: flex-end; font-size: var(--fs-s); }
+#ui2 .hud2-danger[data-level='safe'] { opacity: .55; }
+#ui2 .hud2-danger[data-level='aware'] .hud2-danger-text { color: var(--p-warn); }
+#ui2 .hud2-danger[data-level='near'] .hud2-danger-text, #ui2 .hud2-danger[data-level='grabbed'] .hud2-danger-text { color: var(--p-bad); }
+#ui2 .hud2-danger[data-level='near'], #ui2 .hud2-danger[data-level='grabbed'] { animation: hud2-pulse 1s steps(2) infinite; }
+#ui2 .hud2-danger-text { text-shadow: var(--u) var(--u) 0 #000; white-space: nowrap; }
+#ui2 .hud2-banners { display: flex; flex-direction: column; align-items: center; gap: calc(var(--u) * 2); }
+#ui2 .hud2-banner {
+  text-align: center; padding: var(--u) calc(var(--u) * 8); border: var(--b3) solid transparent; border-image: var(--skin-tip);
+  --tone: var(--p-warn); color: var(--tone);
+}
+#ui2 .hud2-banner.tone-bad { --tone: var(--p-bad); } #ui2 .hud2-banner.tone-info { --tone: var(--p-info); }
+#ui2 .hud2-banner.tone-good { --tone: var(--p-good); } #ui2 .hud2-banner.tone-accent { --tone: var(--p-accent); }
+#ui2 .hud2-banner-text { font-size: var(--fs-l); letter-spacing: .15em; }
+#ui2 .hud2-banner.small { padding: 0 calc(var(--u) * 4); border-width: var(--u); }
+#ui2 .hud2-banner.small .hud2-banner-text { font-size: var(--fs-s); letter-spacing: .1em; }
+#ui2 .hud2-banner-sub { font-size: var(--fs-s); color: var(--p-text-dim); }
+
+/* ---- top right: clock ---- */
+#ui2 .hud2-clock { position: absolute; right: calc(var(--hud-x) + var(--edge)); top: calc(var(--u) * 4); display: flex; flex-direction: column; gap: var(--u); align-items: flex-end; max-width: calc(var(--fs) * 18); }
+#ui2 .hud2-clock-row { display: flex; align-items: center; gap: calc(var(--u) * 3); }
+#ui2 .hud2-time { color: var(--p-text-bright); font-size: var(--fs-l); }
+#ui2 .hud2-weather, #ui2 .hud2-light-wrap { display: flex; align-items: center; gap: calc(var(--u) * 2); font-size: var(--fs-s); }
+#ui2 .hud2-light { display: inline-flex; gap: var(--u); align-items: flex-end; }
+#ui2 .hud2-light i { display: block; width: calc(var(--u) * 2); height: calc(var(--u) * 5); background: rgba(255, 255, 255, .15); }
+#ui2 .hud2-light i:nth-child(2) { height: calc(var(--u) * 6); } #ui2 .hud2-light i:nth-child(3) { height: calc(var(--u) * 7); } #ui2 .hud2-light i:nth-child(4) { height: calc(var(--u) * 8); }
+#ui2 .hud2-light i.on { background: var(--p-accent); }
+#ui2 .hud2-place { font-size: var(--fs-s); color: var(--p-text); text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+
+/* ---- bottom left: feed + vitals ---- */
+#ui2 .hud2-bl { position: absolute; left: calc(var(--hud-x) + var(--edge)); bottom: var(--edge); display: flex; flex-direction: column; gap: calc(var(--u) * 4); align-items: flex-start; max-width: min(calc(var(--fs) * 30), 44vw); }
+#ui2 .hud2-feed { display: flex; flex-direction: column; gap: 0; max-width: 100%; }
+#ui2 .hud2-msg {
+  font-size: var(--fs-s); line-height: 1.3; padding: 0 calc(var(--u) * 3); background: rgba(9, 10, 15, .58);
+  text-shadow: var(--u) var(--u) 0 rgba(0, 0, 0, .9); color: var(--p-text); border-left: var(--u) solid transparent;
+  transition: opacity .4s steps(4);
+}
+#ui2 .hud2-msg:last-child { font-size: var(--fs); }
+#ui2 .hud2-msg.tone-bad { border-left-color: var(--p-danger); } #ui2 .hud2-msg.tone-good { border-left-color: var(--p-good); }
+#ui2 .hud2-msg.tone-warn { border-left-color: var(--p-warn); } #ui2 .hud2-msg.tone-info { border-left-color: var(--p-info); }
+#ui2 .hud2-msg.tone-magic { border-left-color: var(--p-magic); }
+#ui2 .hud2-vitals { display: flex; align-items: flex-end; gap: calc(var(--u) * 3); }
+#ui2 .hud2-body-wrap { position: relative; padding: calc(var(--u) * 2); }
+#ui2 .hud2-body { display: block; width: calc(19 * var(--body-k)); height: calc(36 * var(--body-k)); image-rendering: pixelated; }
+#ui2 .hud2-body-hits { position: absolute; inset: calc(var(--u) * 2); }
+#ui2 .hud2-body-hit { position: absolute; }
+#ui2 .hud2-vitals.bleeding .hud2-body-wrap { box-shadow: inset 0 0 0 var(--u) rgba(200, 40, 30, .7); }
+#ui2 .hud2-vcol { display: flex; flex-direction: column; gap: calc(var(--u) * 2); align-items: flex-start; }
+#ui2 .hud2-needs { display: flex; flex-wrap: wrap; gap: calc(var(--u) * 2); align-items: center; }
+#ui2 .hud2-need { display: flex; align-items: center; gap: calc(var(--u) * 2); padding: var(--u); border-radius: 0; }
+#ui2 .hud2-need[data-level='0'] { opacity: .5; }
+#ui2 .hud2-need[data-level='0'].good { opacity: .75; }
+#ui2 .hud2-need[data-level='1'], #ui2 .hud2-need[data-level='2'], #ui2 .hud2-need[data-level='3'] { background: rgba(9, 10, 15, .62); padding-right: calc(var(--u) * 3); }
+#ui2 .hud2-need[data-level='2'] .px-icon { animation: hud2-bob 1.6s steps(2) infinite; }
+#ui2 .hud2-need[data-level='3'] { animation: hud2-pulse 1.2s steps(3) infinite; box-shadow: inset 0 0 0 var(--u) var(--p-danger); }
+#ui2 .hud2-need-label { font-size: var(--fs-s); text-shadow: var(--u) var(--u) 0 #000; white-space: nowrap; }
+#ui2 .hud2-need-label:empty { display: none; }
+#ui2 .hud2-need[data-level='1'] .hud2-need-label { color: var(--p-warn); }
+#ui2 .hud2-need[data-level='2'] .hud2-need-label, #ui2 .hud2-need[data-level='3'] .hud2-need-label { color: var(--p-bad); }
+#ui2 .hud2-effects { display: flex; flex-wrap: wrap; gap: calc(var(--u) * 2); max-width: calc(var(--fs) * 24); }
+#ui2 .hud2-effects:empty { display: none; }
+#ui2 .hud2-chip { font-size: var(--fs-s); line-height: 1.2; padding: 0 calc(var(--u) * 2); background: rgba(9, 10, 15, .62); border-left: calc(var(--u) * 2) solid currentColor; text-shadow: var(--u) var(--u) 0 #000; }
+#ui2 .hud2-tip { display: flex; flex-direction: column; gap: var(--u); max-width: calc(var(--fs) * 20); }
+#ui2 .hud2-tip-title { font-size: var(--fs); }
+#ui2 .hud2-partline { display: flex; justify-content: space-between; gap: calc(var(--u) * 8); font-size: var(--fs-s); }
+
+/* ---- bottom right: weapon ---- */
+#ui2 .hud2-weapon { position: absolute; right: calc(var(--hud-x) + var(--edge)); bottom: var(--edge); display: flex; flex-direction: column; gap: var(--u); max-width: min(calc(var(--fs) * 18), 34vw); }
+#ui2 .hud2-weapon-main { display: flex; align-items: center; gap: calc(var(--u) * 3); }
+#ui2 .hud2-weapon-text { min-width: 0; }
+#ui2 .hud2-weapon-name { color: var(--p-text-bright); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#ui2 .hud2-extra { color: var(--p-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ---- bottom centre: stamina (above the hotbar row) + activity ---- */
+#ui2 .hud2-stamina {
+  position: absolute; left: 50%; bottom: calc(var(--cell) + var(--u) * 24); transform: translateX(-50%); width: min(calc(var(--fs) * 12), 30vw);
+  display: flex; flex-direction: column; align-items: center; gap: var(--u); opacity: 0; transition: opacity .3s steps(3);
+}
+#ui2 .hud2-stamina.on { opacity: 1; }
+#ui2 .hud2-stam-text { font-size: var(--fs-s); color: var(--p-text); text-shadow: var(--u) var(--u) 0 #000; }
+#ui2 .hud2-stam-track { width: 100%; height: calc(var(--u) * 3); background: rgba(9, 10, 15, .7); border: var(--u) solid rgba(0, 0, 0, .7); }
+#ui2 .hud2-stam-fill { height: 100%; background: var(--p-info); }
+#ui2 .hud2-stamina[data-level='warn'] .hud2-stam-fill { background: var(--p-warn); }
+#ui2 .hud2-stamina[data-level='bad'] .hud2-stam-fill { background: var(--p-danger); }
+#ui2 .hud2-stamina[data-level='bad'] .hud2-stam-text { color: var(--p-bad); }
+#ui2 .hud2-activity {
+  position: absolute; left: 50%; bottom: calc(var(--cell) + var(--u) * 44); transform: translateX(-50%); width: min(calc(var(--fs) * 18), 60vw);
+  display: flex; flex-direction: column; gap: var(--u); border: var(--b3) solid transparent; border-image: var(--skin-tip); padding: var(--u) calc(var(--u) * 3) calc(var(--u) * 2);
+}
+#ui2 .hud2-act-top { display: flex; justify-content: space-between; gap: calc(var(--u) * 4); font-size: var(--fs-s); }
+#ui2 .hud2-act-bar { height: calc(var(--u) * 5); }
+#ui2 .hud2-act-hint { text-align: center; }
+
+/* ---- detailed HUD: the CDDA sidebar, restyled ---- */
+#ui2 .hud2-side {
+  display: none; position: absolute; top: calc(var(--u) * 4); right: calc(var(--hud-x) + var(--edge));
+  font-size: var(--fs-s); line-height: 1.25; white-space: pre; padding: calc(var(--u) * 2) calc(var(--u) * 4);
+  border: var(--b3) solid transparent; border-image: var(--skin-tip);
+}
+#ui2 .hud2.detailed .hud2-side { display: block; }
+#ui2 .hud2.detailed .hud2-clock, #ui2 .hud2.detailed .hud2-vitals, #ui2 .hud2.detailed .hud2-weapon { display: none; }
+
+/* The legacy HUD pieces the modern HUD replaces. */
+#ui .hud-log, #ui .hud-activity { display: none !important; }
+
+/* Driving: the driving HUD (src/screens) owns the bottom-right corner; keep it in the HUD area. */
+#ui2 .hud2.driving .hud2-weapon { display: none; }
+#ui2 .ui2-layer-hud > .ix-drivehud { right: calc(var(--hud-x) + var(--u) * 6); }

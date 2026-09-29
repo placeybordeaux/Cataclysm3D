@@ -168,6 +168,7 @@ duration; queue of 6, least important dropped first (`TOAST_RULES` in `logic/toa
 **Dialogs** — `confirmModal({title, body, ok, cancel, danger, icon}) → Promise<boolean>` (danger:
 Y confirms, Enter doesn't). `countPrompt({title, subtitle, max, initial, icon, ok}) →
 Promise<number | null>` (slider, field, 1 / Half / All, wheel, arrows, PgUp/PgDn).
+`textPrompt({title, label, initial, placeholder, ok}) → Promise<string | null>` (one-line field: map notes).
 
 **Progress** — `startProgress({label, seconds?, anchor?: () => {x, y} | null, hint?, onDone?}) →
 {set(frac, right?), finish(), cancel()}`.
@@ -179,7 +180,12 @@ many you carry; drag between slots to swap, drag off to unbind.
 **Paper doll** — `paperDollView(model, slots: {id, label, loc, col, row, verb?}[])`; `col/row` are
 in cell units (fractions allowed).
 
-**World** — `worldContextProviders`, `worldMenu(target)`, `WorldTarget` (above).
+**World** — `worldContextProviders`, `worldMenu(target)`, `WorldTarget` (above). In the game
+(`src/ui2/install.ts`): `targetFromHit(game, rayHit)`, `worldHoverListeners` (told when the object under
+the free cursor changes; the look card uses it).
+
+**Pause** — `openPanel({pauses: 'always'})` / `acquireSurface({pauses: 'always'})` stop game time whatever
+"Pause in inventory" says (Esc menu, options, help, look); `pauses: true` follows the setting.
 
 **Layout math** (`logic/layout.ts`, pure) — `clampRect`, `placePopup`, `arrangeRow` (a screen's
 windows side by side, wrapping), `cascade`, `gridColumns`, `paperDollLayout`.

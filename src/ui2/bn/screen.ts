@@ -74,7 +74,9 @@ export function openBnInventory(env: ListEnv, o: ScreenOpts = {}): void {
   };
   refreshBars();
   cleanups.push(m.onChange(refreshBars));
-  const pauseNote = h('div', { class: 'ui2-dim ui2-small', text: settings.pauseInInventory ? '⏸ Time is paused while the inventory is open' : '▶ Time keeps running: actions take their time (Classic)' });
+  const pauseNote = h('div', { class: 'ui2-dim ui2-small' },
+    h('div', { text: settings.pauseInInventory ? '⏸ Time is paused while the inventory is open' : '▶ Time keeps running: actions take their time (Classic)' }),
+    h('div', { text: `${o.closeKeys?.filter((k) => k !== 'Backspace').map((k) => (k === 'Tab' ? 'Tab' : k)).join(' / ') || 'i'} / Esc: close` }));
   const equip = openPanel({
     ...base,
     id: 'inv.equip',

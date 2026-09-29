@@ -1,15 +1,17 @@
 import { getAudioEngine } from '../audio/sfx';
 import type { GradeMode } from '../render/post';
 import { CAMERA_MODES } from '../render/camera';
-import { c, openMenu, type MenuEntry, type UiWindow } from './framework';
+import { c } from './framework';
+import { h, scrollList, type Panel } from '../ui2';
+import { openScreen } from './screen2';
 import type { UiContext } from './context';
 import type { MenuCursor } from '../core/input';
 import { isFullscreen, toggleFullscreen } from './fullscreen';
 import { openKeybindings } from './keybind_ui';
 
-// Options screen (CDDA's options menu, reduced to what this port has): mouse sensitivity,
-// render resolution (low-res target height), colour grading, camera and audio volumes.
-// ←/→ change the highlighted value. Game options persist in localStorage; audio settings
+// Options screen (CDDA's options menu, reduced to what this port has; a ui2 window): mouse
+// sensitivity, render resolution (low-res target height), colour grading, camera, HUD and audio.
+// ←/→ or the ‹ › buttons change the highlighted value; Enter / double-click steps it. Game options persist in localStorage; audio settings
 // persist themselves (src/audio/audio.ts).
 
 const STORAGE_KEY = 'cdda3d.options';
@@ -75,7 +77,7 @@ export function registerOption(o: Opt): void {
   extraOptions.push(o);
 }
 
-export function openOptions(ctx: UiContext): UiWindow {
+export function openOptions(ctx: UiContext): Panel {
   const { game, renderer } = ctx;
   const pipe = renderer.pipeline;
   const opts: Opt[] = [];
@@ -88,7 +90,7 @@ export function openOptions(ctx: UiContext): UiWindow {
   opts.push({
     name: 'Fullscreen',
     value: () => (isFullscreen() ? 'on' : 'off'),
-    change: () => void toggleFullscreen(game).then(() => win.refresh(entries())),
+    change: () => void toggleFullscreen(game).then(() => list.setItems(opts)),
     desc: `Also ${game.keys.label('fullscreen')} in game. In fullscreen Esc opens and closes menus without freeing the mouse (hold Esc to leave fullscreen).`,
   });
   opts.push({
@@ -179,33 +181,54 @@ export function openOptions(ctx: UiContext): UiWindow {
     opts.push({ name: 'Audio', value: () => c('c_dark_gray', 'unavailable'), change: () => {}, desc: 'The audio engine is not running.' });
   }
 
-  const entries = (): MenuEntry<Opt>[] =>
-    opts.map((o) => ({
-      label: `${o.name.padEnd(22)} ${c('c_dark_gray', '<')} ${c('c_yellow', o.value().padEnd(10))} ${c('c_dark_gray', '>')}`,
-      value: o,
-      detail: () => o.desc,
-    }));
-  const win = openMenu<Opt>({
-    title: 'Options',
-    width: 'min(90ch, 92vw)',
-    detailPane: true,
-    footer: `${c('c_light_green', '←→')}/${c('c_light_green', 'Enter')} change`,
-    closeLabel: 'done',
-    entries: entries(),
-    onKey: (e, cur) => {
-      if (!cur) return false;
-      if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
-        cur.change(e.key === 'ArrowLeft' ? -1 : 1);
-        win.refresh(entries());
-        return true;
-      }
-      return false;
+  // Values may carry CDDA colour tags (c('c_light_red', '2 unbound')): shown as HTML.
+  let sel = 0;
+  const desc = h('div', { class: 'op-desc', attrs: { 'data-testid': 'options-desc' } });
+  const change = (o: Opt, d: -1 | 1) => {
+    o.change(d);
+    list.setItems(opts);
+    describe(o);
+  };
+  const describe = (o: Opt | undefined) => {
+    if (o) desc.textContent = o.desc;
+  };
+  const list = scrollList<Opt>({
+    items: opts,
+    render: (o) => {
+      const val = h('span', { html: o.value() || '›' });
+      const left = h('button', { class: 'op-arrow', text: '‹', title: 'Previous' });
+      const right = h('button', { class: 'op-arrow', text: '›', title: 'Next' });
+      left.addEventListener('click', (e) => (e.stopPropagation(), list.select(opts.indexOf(o)), change(o, -1)));
+      right.addEventListener('click', (e) => (e.stopPropagation(), list.select(opts.indexOf(o)), change(o, 1)));
+      return h('div', { class: 'op-row', data: { name: o.name } }, h('span', { text: o.name }), h('span', { class: 'op-val' }, left, val, right));
     },
     onSelect: (o) => {
-      o.change(1);
-      win.refresh(entries());
+      sel = opts.indexOf(o);
+      describe(o);
+    },
+    onActivate: (o) => change(o, 1),
+  });
+  list.el.classList.add('op-list');
+  const win = openScreen(game, {
+    id: 'scr.options',
+    title: 'Options',
+    group: 'scr.options',
+    pauses: 'always',
+    width: 'min(calc(var(--fs) * 34), 94vw)',
+    height: 'min(calc(var(--fs) * 32), 90vh)',
+    closeLabel: 'done',
+    legend: [['↑↓', 'choose'], ['← → / Enter / click', 'change']],
+    onKey: (e) => {
+      const o = opts[sel];
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') return list.select(sel + (e.key === 'ArrowDown' ? 1 : -1)), true;
+      if (!o) return false;
+      if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') return change(o, e.key === 'ArrowLeft' ? -1 : 1), true;
+      if (e.key === 'Enter') return change(o, 1), true;
       return false;
     },
   });
+  win.body.append(list.el, desc);
+  win.body.style.overflow = 'hidden';
+  list.select(0);
   return win;
 }

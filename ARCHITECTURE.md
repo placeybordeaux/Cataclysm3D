@@ -723,6 +723,21 @@ Keys: `V` camera mode, `F` flashlight.
 - **HUD** `src/ui/hud.ts`: `hud.setPrompt('[e] Open door' | null)` (sticky) or
   `hud.addPromptProvider(game => text | null)` (per frame, first non-null wins; returns an
   unregister fn). `hud.safeMode = {text, color}`. The HUD also draws the activity bar.
+  v2: the modern HUD (`src/ui/hud_modern.ts` on the ui2 HUD layer; rules in `hud_logic.ts`, pixel
+  icons + body silhouette in `pixelart.ts`): body per-part HP with bleeding/bandage/broken marks,
+  need icons that light up with advice tooltips, effect chips, compass strip (hostiles in sight,
+  destination, refugee centre) + danger light, clock/weather/light, weapon/ammo (sidebar
+  providers' lines go under it), message feed (click → log), stamina, activity. **Status banner
+  slot**: `hud.setBanner(id, {text, sub?, tone?} | null)` (top centre, under the compass: PAUSED,
+  SLEEPING…). Options: "HUD style" (Modern / Detailed = the CDDA sidebar restyled), "HUD width"
+  (Auto = centred 16:9 on screens wider than 2.1:1, the ui2 root var `--hud-x`; Full; 16:9). Bottom centre is left for the hotbar.
+- **Status screens on ui2** (`src/ui/screen2.ts` `openScreen(game, {action, …})`: a ui2 panel that
+  closes on its opening key / Bksp / Esc): character `@` (charsheet.ts, tabs; `charsheetSections`
+  still adds boxes), map `m` (overmap_ui.ts: UltiCa overmap sprites, drag/wheel, notes and a
+  destination in `mapmarks.ts`, save section `mapnotes`), look `x` / hover (look.ts: world-anchored
+  card; `worldHoverListeners` in ui2/install.ts), help `?`, options + key bindings, Esc menu and
+  message log (escmenu.ts), death screen. Esc menu/options/help/look use `pauses: 'always'` (time
+  stops regardless of the inventory-pause setting); character/map/log follow it (`pauses: true`).
 - **Stats** `game.stats` (src/game/stats.ts): `addKill(monId)` (auto-counted from
   `creatureDied` events whose `killer === game.player`; don't double count), `itemsCrafted`,
   `distanceWalked` (tracked by the UI), for the memorial screen.

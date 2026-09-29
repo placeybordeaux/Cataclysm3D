@@ -2,7 +2,8 @@
    ui2 metrics/palette (docs/UI2.md): sizes in --u, colours --p-*, skins for borders. */
 
 #ui2 .pg-badge {
-  position: absolute; right: calc(var(--u) * 8); bottom: calc(var(--u) * 40);
+  /* Above the HUD weapon panel (src/ui/hud_modern.ts, bottom right). */
+  position: absolute; right: calc(var(--u) * 8); bottom: calc(var(--u) * 12 + var(--lh) * 4);
   display: flex; align-items: center; gap: calc(var(--u) * 3); pointer-events: none !important;
   padding: var(--u) calc(var(--u) * 4); border: var(--b3) solid transparent; border-image: var(--skin-tip);
   color: var(--p-magic); font-size: var(--fs-s); animation: pg-pulse 1.6s steps(4) 3;
