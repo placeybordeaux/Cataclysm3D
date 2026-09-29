@@ -11,6 +11,8 @@ import {
 } from './chargen_logic';
 import { spriteImg, type UiContext } from './context';
 import { applyProfessionKnowledge } from '../game/crafting';
+import { globalAchievements } from '../game/achievements';
+import { achievementsOf } from '../achievements';
 
 // New character (CDDA newcharacter.cpp), simplified to five tabs: SCENARIO, PROFESSION,
 // TRAITS, STATS, DESCRIPTION. Point pools follow CDDA's "multiple pools" rules
@@ -189,7 +191,7 @@ export function openCharGen(ctx: UiContext): Promise<Build | null> {
         case 'SCENARIO':
           if (k === 'Enter') {
             const s = scenarios[sel[0]];
-            if (s.requirement) return (flash = c('c_light_red', 'This scenario is locked: it requires an achievement.')), true;
+            if (lockedBy(s)) return (flash = c('c_light_red', `This scenario is locked: it requires the achievement "${achName(ctx, lockedBy(s)!)}".`)), true;
             b.scenario = s;
             for (const t of s.forbidden_traits ?? []) b.traits.delete(t);
             b.profession = profs()[0];
@@ -200,7 +202,7 @@ export function openCharGen(ctx: UiContext): Promise<Build | null> {
         case 'PROFESSION':
           if (k === 'Enter') {
             const pr = profs()[sel[1]];
-            if (pr.requirement) return (flash = c('c_light_red', 'This profession is locked: it requires an achievement.')), true;
+            if (lockedBy(pr)) return (flash = c('c_light_red', `This profession is locked: it requires the achievement "${achName(ctx, lockedBy(pr)!)}".`)), true;
             b.profession = pr;
             for (const t of pr.traits ?? []) b.traits.delete(t);
             return true;
@@ -311,22 +313,22 @@ export function openCharGen(ctx: UiContext): Promise<Build | null> {
       const T = TABS[tab];
       if (T === 'SCENARIO') {
         const rows = scenarios.map((s) => ({
-          label: `${s === b.scenario ? c('c_light_green', '*') : ' '} ${c(s.requirement ? 'c_dark_gray' : 'c_light_gray', fit(scenName(s, b.male), 30))} ${c('c_dark_gray', String(s.points ?? 0).padStart(3))}`,
+          label: `${s === b.scenario ? c('c_light_green', '*') : ' '} ${c(lockedBy(s) ? 'c_dark_gray' : 'c_light_gray', fit(scenName(s, b.male), 30))} ${c('c_dark_gray', String(s.points ?? 0).padStart(3))}`,
         }));
         left = listHtml(rows, sel[0], H);
         const s = scenarios[sel[0]];
-        right = `${c('c_white', scenName(s, b.male))}  ${c('c_light_gray', `(${s.points ?? 0} points)`)}\n\n${colorize(text(s.description, b.male))}\n\n${c('c_light_gray', 'Start location:')} ${c('c_white', s.start_name || '?')}${s.id !== 'evacuee' ? c('c_dark_gray', '\n(this port starts every scenario in the evac shelter for now)') : ''}${s.forced_traits?.length ? `\n\n${c('c_light_gray', 'Forced traits:')} ${s.forced_traits.map((t) => c('c_yellow', text(defs[t]?.name) || t)).join(', ')}` : ''}${s.requirement ? `\n\n${c('c_red', 'Locked: requires an achievement.')}` : ''}`;
+        right = `${c('c_white', scenName(s, b.male))}  ${c('c_light_gray', `(${s.points ?? 0} points)`)}\n\n${colorize(text(s.description, b.male))}\n\n${c('c_light_gray', 'Start location:')} ${c('c_white', s.start_name || '?')}${s.id !== 'evacuee' ? c('c_dark_gray', '\n(this port starts every scenario in the evac shelter for now)') : ''}${s.forced_traits?.length ? `\n\n${c('c_light_gray', 'Forced traits:')} ${s.forced_traits.map((t) => c('c_yellow', text(defs[t]?.name) || t)).join(', ')}` : ''}${requirementText(ctx, s)}`;
       } else if (T === 'PROFESSION') {
         const ps = profs();
         const rows = ps.map((p) => ({
-          label: `${p === b.profession ? c('c_light_green', '*') : ' '} ${c(p.requirement ? 'c_dark_gray' : 'c_light_gray', fit(profName(p, b.male), 30))} ${c('c_dark_gray', String(p.points ?? 0).padStart(3))}`,
+          label: `${p === b.profession ? c('c_light_green', '*') : ' '} ${c(lockedBy(p) ? 'c_dark_gray' : 'c_light_gray', fit(profName(p, b.male), 30))} ${c('c_dark_gray', String(p.points ?? 0).padStart(3))}`,
         }));
         left = listHtml(rows, sel[1], H);
         const p = ps[sel[1]];
         const skills = (p.skills ?? []).map((s) => `${c('c_light_gray', ctx.game.player.skillName(s.name))} ${c('c_white', String(s.level))}`);
         const traits = (p.traits ?? []).map((t) => c('c_yellow', text(defs[t]?.name) || t));
         const items = itemsOf(p, b.male);
-        right = `${c('c_white', profName(p, b.male))}  ${c('c_light_gray', `(${p.points ?? 0} points)`)}\n\n${colorize(text(p.description, b.male))}\n\n${c('c_light_blue', 'Profession skills:')}\n${skills.join('\n') || c('c_dark_gray', 'None')}\n${traits.length ? `\n${c('c_light_blue', 'Profession traits:')}\n${traits.join('\n')}\n` : ''}\n${c('c_light_blue', 'Profession items:')}\n${items.join('\n') || c('c_dark_gray', 'None')}${p.requirement ? `\n\n${c('c_red', 'Locked: requires an achievement.')}` : ''}`;
+        right = `${c('c_white', profName(p, b.male))}  ${c('c_light_gray', `(${p.points ?? 0} points)`)}\n\n${colorize(text(p.description, b.male))}\n\n${c('c_light_blue', 'Profession skills:')}\n${skills.join('\n') || c('c_dark_gray', 'None')}\n${traits.length ? `\n${c('c_light_blue', 'Profession traits:')}\n${traits.join('\n')}\n` : ''}\n${c('c_light_blue', 'Profession items:')}\n${items.join('\n') || c('c_dark_gray', 'None')}${requirementText(ctx, p)}`;
       } else if (T === 'TRAITS') {
         const locked = lockedTraits(b);
         const rows = traitRows.map(({ def, header }) => {
@@ -392,4 +394,22 @@ export function openCharGen(ctx: UiContext): Promise<Build | null> {
       key: (key: string) => (onTabKey(new KeyboardEvent('keydown', { key })), render()),
     });
   });
+}
+
+/**
+ * CDDA meta-progression (profession::can_pick): a scenario/profession "requirement" (one
+ * achievement id, or a list that must all be completed) unlocks it once any character has
+ * completed it. Returns the first missing achievement, or null when unlocked.
+ */
+function lockedBy(x: { requirement?: string | string[] }): string | null {
+  const reqs = x.requirement === undefined ? [] : Array.isArray(x.requirement) ? x.requirement : [x.requirement];
+  return reqs.find((r) => !globalAchievements().has(r)) ?? null;
+}
+function achName(ctx: UiContext, id: string): string {
+  return achievementsOf(ctx.game)?.data.achievements[id]?.name ?? id;
+}
+function requirementText(ctx: UiContext, x: { requirement?: string | string[] }): string {
+  if (!x.requirement) return '';
+  const names = (Array.isArray(x.requirement) ? x.requirement : [x.requirement]).map((r) => `"${achName(ctx, r)}"`).join(', ');
+  return lockedBy(x) ? `\n\n${c('c_red', `Locked: requires the achievement ${names}.`)}` : `\n\n${c('c_light_green', `Unlocked by the achievement ${names}.`)}`;
 }

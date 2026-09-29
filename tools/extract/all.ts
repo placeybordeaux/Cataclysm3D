@@ -16,6 +16,7 @@ const STEPS: { name: string; script: string }[] = [
   { name: 'mapgen', script: 'tools/extract/mapgen.ts' },
   { name: 'vehicles', script: 'tools/extract/vehicles.ts' },
   { name: 'ui', script: 'tools/extract/ui.ts' },
+  { name: 'achievements', script: 'tools/extract/achievements.ts' },
 ];
 const OUT = 'public/data';
 

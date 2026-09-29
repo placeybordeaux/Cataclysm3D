@@ -215,6 +215,25 @@ tests/               vitest unit tests (pure logic, no DOM/WebGL)
   self-install; `e` on an Autodoc. Save section `bodymods` (order 15). Debug: `cdda.mutate(id|cat)`,
   `cdda.mutations()`, `cdda.addVitamin(id,n)`, `cdda.installBionic(id,{surgery})`, `cdda.bionics()`,
   `cdda.givePower(kj)`, `cdda.toggleBionic(id)`, `cdda.spawnAutodoc(dx,dy)`, `cdda.giveCbm(id)`.
+### Scores & achievements (src/game/achievements.ts, src/achievements.ts, src/ui/achievements_ui.ts)
+- Data: `public/data/achievements.json` (`npm run extract:achievements`, part of `data:all`): CDDA
+  achievements + conducts, event_statistics, event_transformations, scores; loaded by the install.
+- `AchievementTracker` (UI-free, tests/achievements.test.ts) = CDDA stats_tracker + achievements_tracker:
+  `emit(type, fields, count?)` with CDDA event names/fields, `flush()` re-checks watching achievements,
+  `value(statId)`, `completion(id)`, `isHidden(a)`, `requirementLines(a)`, `achievementSupported(a)`
+  (depends only on `SUPPORTED_EVENTS`; others show as "not tracked", never unlock), `toJSON/load`.
+- `installAchievements(game, worldgen, api)` feeds it: creatureDied (kills), playerHurt, playerDied,
+  Inventory.onConsume, wrapped PlayerCombat.melee/fire, per-tile `avatar_moves` / per-OMT
+  `avatar_enters_omt`, and a 2 Hz poll of the survivor (wake-ups, skill levels, mutations/thresholds,
+  CBMs, broken limbs, healing, books, wield/wear). `begin(loaded)` (main.ts) starts tracking.
+  New game systems can report more with `achievementsOf(game)?.tracker.emit(...)`.
+- Persistence: per character in the save (section `achievements`, order 60); completed achievements
+  globally in localStorage `cdda3d.achievements` (`globalAchievements()`), which unlocks chargen's
+  scenario/profession `requirement`s. Death screen + memorial entry list the run's achievements.
+- UI: `)` scores window (ACHIEVEMENTS / CONDUCTS / SCORES / KILLS tabs), unlock toast + log message.
+  Debug: `cdda.achievements(filter?)`, `cdda.unlockAchievement(id)`, `cdda.achievementStat(id)`,
+  `cdda.achievementEvent(type, fields)`, `cdda.openAchievements()`.
+
 ### Seasons, foraging, farming, water (src/game/{sun,harvest,farming,water,woodcut,actualize}.ts, src/nature.ts)
 - `sun.ts` is the one sun: `sunPosition(seconds)` (CDDA calendar.cpp altitude/azimuth, Boston),
   `sunTimes(day)` → sunrise/sunset/dawn/dusk hours (≈06–18 equinox, 04:20–19:40 midsummer,
