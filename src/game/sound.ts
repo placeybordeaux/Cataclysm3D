@@ -48,12 +48,26 @@ interface SoundState {
   sounds: WorldSound[];
   rng: Rng;
   lastMsg: Map<string, number>;
+  /** Noises the survivor was told about (for the HUD's compass marks), newest last. */
+  heard: HeardNoise[];
+}
+
+/** A noise the survivor heard and got a message for (see recentHeard()). */
+export interface HeardNoise {
+  x: number;
+  y: number;
+  z: number;
+  /** Volume at the survivor's ear (CDDA units, ~ tiles of range left). */
+  volume: number;
+  description: string;
+  /** Sound-clock seconds. */
+  t: number;
 }
 
 const states = new WeakMap<Game, SoundState>();
 function state(game: Game): SoundState {
   let s = states.get(game);
-  if (!s) states.set(game, (s = { now: 0, nextId: 1, sounds: [], rng: new Rng(game.seed ^ 0x50d), lastMsg: new Map() }));
+  if (!s) states.set(game, (s = { now: 0, nextId: 1, sounds: [], rng: new Rng(game.seed ^ 0x50d), lastMsg: new Map(), heard: [] }));
   return s;
 }
 
@@ -116,6 +130,12 @@ export function soundsHeardAt(game: Game, x: number, y: number, z: number, heari
   return out.sort((a, b) => b.volume - a.volume);
 }
 
+/** Noises the survivor heard (with a message) in the last `maxAge` real seconds, oldest first. */
+export function recentHeard(game: Game, maxAge = 2.5): (HeardNoise & { age: number })[] {
+  const st = state(game);
+  return st.heard.filter((h) => st.now - h.t <= maxAge).map((h) => ({ ...h, age: st.now - h.t }));
+}
+
 /** Make a noise. Emits the `sound` event, remembers it for monsters, and lets the player hear it. */
 export function emitSound(
   game: Game, pos: { x: number; y: number; z: number }, volume: number, description: string, opts: SoundOpts = {},
@@ -142,6 +162,37 @@ export function directionName(dx: number, dy: number, dz = 0): string {
 }
 
 const trimPunct = (s: string) => s.replace(/[.!?\s]+$/, '');
+
+/**
+ * A CDDA sound description as the object of "You hear …": onomatopoeia ("thump!", "Smack!",
+ * "BOOM!") becomes "a thump" / "a boom"; phrases ("a loud crash!", "the engine starting") keep
+ * their words without the trailing punctuation.
+ */
+export function noisePhrase(desc: string): string {
+  const d = trimPunct(desc.trim());
+  if (!d) return 'a noise';
+  if (/^[A-Za-z-]+$/.test(d) && !/^(a|an|the|some)$/i.test(d)) {
+    const w = d.toLowerCase();
+    return `${/^[aeiou]/.test(w) ? 'an' : 'a'} ${w}`;
+  }
+  return d;
+}
+
+/**
+ * "You hear a thump to the north, 12 m away." Playtest: "You hear thump! ×21" while nothing
+ * visible happened, with no way to tell where. Every heard noise now says where it came from.
+ */
+export function hearingLine(desc: string, dx: number, dy: number, dz: number): string {
+  const what = noisePhrase(desc);
+  const floor = dz > 0 ? (dz === 1 ? 'one floor up' : `${dz} floors up`) : dz < 0 ? (dz === -1 ? 'one floor down' : `${-dz} floors down`) : '';
+  if (dx === 0 && dy === 0) return `You hear ${what} ${dz > 0 ? 'above you' : dz < 0 ? 'below you' : 'right here'}.`;
+  const d = Math.round(Math.hypot(dx, dy));
+  const where = d <= 2 ? 'right next to you' : `${d} m away`;
+  return `You hear ${what} to the ${directionName(dx, dy)}, ${where}${floor ? `, ${floor}` : ''}.`;
+}
+
+/** Seconds a repeat of the same noise from the same direction stays out of the log. */
+export const NOISE_REPEAT_QUIET = 6;
 
 /** describe_sound(): which categories get a log line (from the player's own tile vs elsewhere). */
 function describes(cat: SoundCategory, fromPlayer: boolean, rng: Rng): boolean {
@@ -183,14 +234,16 @@ function playerHears(game: Game, s: WorldSound, ambient: boolean): void {
 
   if (ambient || !describes(s.category, atPlayer, st.rng)) return;
   const desc = s.description || 'a noise';
-  let text: string;
-  if (atPlayer) text = `From your position you hear ${desc}`;
-  else if (playerCanSee(game, s.x, s.y, s.z)) text = `You hear ${desc}`;
-  else text = `From the ${directionName(s.x - me.x, s.y - me.y, s.z - me.z)} you hear ${desc}`;
-  // Collapse spam from repeated identical noises (a zombie pounding a door).
-  const key = `${text}@${tileKey(s.x, s.y, s.z)}`;
+  const text = atPlayer ? `From your position you hear ${trimPunct(desc)}.` : hearingLine(desc, s.x - me.x, s.y - me.y, s.z - me.z);
+  if (!atPlayer) {
+    st.heard.push({ x: s.x, y: s.y, z: s.z, volume: heard, description: desc, t: st.now });
+    if (st.heard.length > 32) st.heard.splice(0, st.heard.length - 32);
+  }
+  // Collapse repeats: the same noise from the same direction (a zombie pounding a door, or
+  // walking along a fence) is told once per NOISE_REPEAT_QUIET seconds, not on every blow.
+  const key = `${desc}@${atPlayer ? 'here' : directionName(s.x - me.x, s.y - me.y, s.z - me.z)}`;
   const last = st.lastMsg.get(key);
-  if (last !== undefined && st.now - last < 1.5) return;
+  if (last !== undefined && st.now - last < NOISE_REPEAT_QUIET) return;
   st.lastMsg.set(key, st.now);
   if (st.lastMsg.size > 200) st.lastMsg.clear();
   game.message(text, s.category === 'combat' || s.category === 'alarm' ? 'c_light_red' : undefined);

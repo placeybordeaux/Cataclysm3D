@@ -21,6 +21,7 @@ import type { Game } from '../game/game';
 import { MAIN_PARTS, BODY_PARTS, type MainPartId } from '../game/bodyparts';
 import type { MonsterSystem } from '../game/monai';
 import { lightAt } from '../game/vision';
+import { recentHeard } from '../game/sound';
 import { attackCooldownSeconds, attackSpeedMoves, swingSpeedRating } from '../game/combat';
 import { currentMode } from '../game/gunmods';
 import { h, ui2Layers, attachTooltip, palette, iconEl } from '../ui2';
@@ -84,6 +85,9 @@ const TONE_HEX = (t: PartTone): string =>
   ({ good: palette.good, ok: '#a9b86a', warn: palette.warn, bad: palette.danger, broken: '#3a2a2a' })[t];
 
 /** Effects the HUD shows elsewhere (temperature need, body silhouette) or that are noise. */
+/** How long a heard noise stays marked on the compass strip (real seconds). */
+const NOISE_MARK_SECONDS = 2.5;
+
 const EFFECT_SKIP = new Set(['hungry', 'thirsty', 'tired', 'cold', 'hot', 'bandaged', 'disinfected', 'frostbite', 'wet', 'lying_down', 'sleep']);
 
 export class ModernHud {
@@ -273,6 +277,8 @@ export class ModernHud {
       if (el.textContent !== text) el.textContent = text;
       el.style.transform = `translateX(${Math.round(x * W)}px)`;
       el.style.display = '';
+      // Pooled elements change kind between frames: only noise marks fade.
+      if (el.style.opacity) el.style.opacity = '';
       extra?.(el);
     };
     // Ticks every 15°, labels at the 8 compass points.
@@ -294,6 +300,22 @@ export class ModernHud {
       dists.push(d);
       const s = stripPos(relativeAngle(bearing(p.x, p.y, m.x, m.y), p.yaw), FOV);
       put(`hud2-pip hostile${d <= 6 ? ' near' : ''}${s.clamped ? ' edge' : ''}`, s.x, s.clamped ? (s.x < 0.5 ? '◂' : '▸') : '');
+    }
+    // Noises you just heard (the "You hear a thump to the north" lines): a brief amber mark
+    // on the strip, taller for loud ones, fading out. One per direction and description.
+    const seenNoise = new Set<string>();
+    for (const nz of recentHeard(g, NOISE_MARK_SECONDS).reverse()) {
+      if (nz.z !== p.z && Math.abs(nz.z - p.z) > 1) continue;
+      const raw = stripPos(relativeAngle(bearing(p.x, p.y, nz.x + 0.5, nz.y + 0.5), p.yaw), FOV);
+      // The strip's ends fade out: a noise out there shows as an arrow at the edge instead.
+      const s = raw.x < 0.1 || raw.x > 0.9 ? { x: raw.x < 0.5 ? 0.04 : 0.95, clamped: true } : raw;
+      const k = `${nz.description}@${Math.round(s.x * 40)}`;
+      if (seenNoise.has(k) || seenNoise.size >= 6) continue;
+      seenNoise.add(k);
+      put(`hud2-pip sound${nz.volume >= 20 ? ' loud' : ''}${s.clamped ? ' edge' : ''}`, s.x, s.clamped ? (s.x < 0.5 ? '◂' : '▸') : '', (el) => {
+        el.style.opacity = String(Math.max(0.15, 1 - nz.age / NOISE_MARK_SECONDS));
+        el.title = `${nz.description.replace(/[.!\s]+$/, '')} (${Math.round(Math.hypot(nz.x + 0.5 - p.x, nz.y + 0.5 - p.y))} m)`;
+      });
     }
     this.dangerNames = list.slice(0, 6).map((m) => `${m.displayName()} (${Math.round(Math.hypot(m.x - p.x, m.y - p.y))} m)`);
     // Destination and the refugee centre: diamonds with the distance under them.

@@ -11,7 +11,7 @@ import type { GameData } from '../src/data/types';
 import { Game } from '../src/game/game';
 import { TestGenerator } from '../src/world/testgen';
 import { createItem } from '../src/game/item';
-import { emitSound, heardVolume, installSound, recentSounds, soundDistance, soundsHeardAt, directionName, footstepVolume } from '../src/game/sound';
+import { emitSound, hearingLine, heardVolume, installSound, noisePhrase, NOISE_REPEAT_QUIET, recentHeard, recentSounds, soundDistance, soundsHeardAt, directionName, footstepVolume } from '../src/game/sound';
 import { bresenham, creatureCanSee, lightAt, lineOfSight, monsterSightRange, naturalLight, playerCanSee, sunLight } from '../src/game/vision';
 import { bash, getMapDamage, smashAbility } from '../src/game/bash';
 import { closeDoor, interactionsAt, openDoor, interactionPrompt } from '../src/game/interact';
@@ -91,18 +91,44 @@ describe('sound', () => {
     place(game, 9, 16);
     game.player.yaw = 0;
     emitSound(game, { x: 30, y: 16, z: 0 }, 60, 'a loud crash!');
-    expect(log.some((l) => /[Yy]ou hear a loud crash!/.test(l))).toBe(true);
+    expect(log.some((l) => /You hear a loud crash to the east, 21 m away/.test(l))).toBe(true);
     // Inside the closed house, the noise comes from the other house to the east.
     place(game, 6, 11);
     log.length = 0;
     emitSound(game, { x: 30, y: 11, z: 0 }, 60, 'a scream');
-    expect(log).toContain('From the east you hear a scream');
+    expect(log).toContain('You hear a scream to the east, 24 m away.');
     expect(directionName(1, -1)).toBe('northeast');
     game.player.fallAsleep();
     expect(game.player.isAsleep()).toBe(true);
     emitSound(game, { x: 8, y: 8, z: 0 }, 80, 'BOOM!');
     expect(game.player.isAsleep()).toBe(false);
     expect(log).toContain('Something is making noise.');
+  });
+
+  it('noise lines say what, which way and how far; repeats from one direction are told once (QA: "You hear thump! x21")', () => {
+    expect(noisePhrase('thump!')).toBe('a thump');
+    expect(noisePhrase('BOOM!')).toBe('a boom');
+    expect(noisePhrase('a loud crash!')).toBe('a loud crash');
+    expect(noisePhrase('WHOOP WHOOP')).toBe('WHOOP WHOOP');
+    expect(hearingLine('thump!', 0, -12, 0)).toBe('You hear a thump to the north, 12 m away.');
+    expect(hearingLine('Smack!', 1, 1, 0)).toBe('You hear a smack to the southeast, right next to you.');
+    expect(hearingLine('thump!', 0, 0, 1)).toBe('You hear a thump above you.');
+    expect(hearingLine('thump!', 5, 0, -1)).toBe('You hear a thump to the east, 5 m away, one floor down.');
+
+    const { game, log } = makeGame();
+    installSound(game);
+    place(game, 9, 16);
+    log.length = 0;
+    // A zombie bashing a door to the east, once a second for 20 s.
+    for (let i = 0; i < 20; i++) {
+      emitSound(game, { x: 30, y: 16, z: 0 }, 60, 'thump!');
+      for (let k = 0; k < 10; k++) game.tick(0.1);
+    }
+    const thumps = log.filter((l) => /thump/.test(l));
+    expect(thumps[0]).toBe('You hear a thump to the east, 21 m away.');
+    expect(thumps.length).toBeLessThanOrEqual(Math.ceil(20 / NOISE_REPEAT_QUIET));
+    // The HUD's compass marks: heard noises are remembered briefly with where they came from.
+    expect(recentHeard(game).at(-1)).toMatchObject({ x: 30, y: 16, description: 'thump!' });
   });
 });
 

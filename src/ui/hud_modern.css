@@ -50,6 +50,9 @@ body.ui2-cursor-free #ui2 .hud2 .hud2-feed { cursor: pointer; }
 #ui2 .hud2-pip.near { height: calc(var(--u) * 8); animation: hud2-pulse .8s steps(2) infinite; }
 #ui2 .hud2-pip.edge { background: none; box-shadow: none; color: var(--p-bad); width: auto; height: auto; font-size: var(--fs); margin-left: 0; bottom: 0; }
 #ui2 .hud2-pip.edge[style*='translateX(0px)'] { margin-left: 0; }
+#ui2 .hud2-pip.sound { background: var(--p-warn); height: calc(var(--u) * 3); width: calc(var(--u) * 5); margin-left: calc(var(--u) * -2.5); bottom: calc(var(--u) * 9); transition: opacity .2s linear; }
+#ui2 .hud2-pip.sound.loud { height: calc(var(--u) * 5); width: calc(var(--u) * 7); margin-left: calc(var(--u) * -3.5); }
+#ui2 .hud2-pip.sound.edge { background: none; box-shadow: none; color: var(--p-warn); width: auto; height: auto; margin-left: 0; bottom: calc(var(--u) * 6); }
 #ui2 .hud2-poi { font-size: var(--fs-s); color: var(--p-accent); transform-origin: left; margin-left: calc(var(--fs-s) * -.35); top: auto !important; bottom: calc(var(--u) * 2); text-shadow: var(--u) var(--u) 0 #000; }
 #ui2 .hud2-poi.ref { color: var(--p-info); }
 #ui2 .hud2-poi.mission { color: var(--p-magic); }

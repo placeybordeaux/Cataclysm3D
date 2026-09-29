@@ -4,6 +4,7 @@ import type { BodyPartId } from './game/bodyparts';
 import { MAIN_PARTS } from './game/bodyparts';
 import { createItem, inNewContainer } from './game/item';
 import { installRenderDebug } from './render/renderDebug';
+import { emitSound } from './game/sound';
 
 // window.cdda is the automation surface used by tools/shot.ts and by agents testing
 // features headlessly. Anything a test needs to set up (spawn, teleport, time) belongs here.
@@ -113,4 +114,6 @@ function installCharacterHelpers(api: DebugApi, game: Game): void {
   api.hurt = (bp: BodyPartId, amount: number, type = 'bash') => p().takeHit(bp, [{ type, amount }]);
   api.addEffect = (id: string, seconds: number, bp?: BodyPartId) => p().addEffect(id, seconds, { bp }).name();
   api.setSkill = (id: string, level: number) => p().setSkill(id, level);
+  /** A noise `volume` loud at (dx, dy) tiles from the survivor (monsters hear it, the log says where). */
+  api.noise = (dx: number, dy: number, volume = 40, desc = 'thump!') => emitSound(game, { x: p().tileX + dx, y: p().tileY + dy, z: p().z }, volume, desc).id;
 }
