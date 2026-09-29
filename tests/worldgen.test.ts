@@ -91,6 +91,20 @@ describe('world generator', () => {
     expect(differs).toBe(true);
   });
 
+  it('does not depend on exploration order', () => {
+    const a = world(8), b = world(8);
+    // b explores two other regions first
+    b.map.chunk(REGION * 2 + 5, 7, 0);
+    b.map.chunk(-REGION + 3, REGION + 9, 0);
+    const sa = a.gen.findStartLocation('shelter', a.map), sb = b.gen.findStartLocation('shelter', b.map);
+    expect(sb).toEqual(sa);
+    for (let dx = -3; dx <= 3; dx++) {
+      const ca = a.map.chunk(sa.omx + dx, sa.omy - 4, 0)!, cb = b.map.chunk(sa.omx + dx, sa.omy - 4, 0)!;
+      expect(Array.from(cb.ter)).toEqual(Array.from(ca.ter));
+      expect(Array.from(cb.furn)).toEqual(Array.from(ca.furn));
+    }
+  });
+
   it('starts the player on a passable tile inside the shelter', () => {
     const { map, gen } = world(11);
     const s = gen.findStartLocation('shelter', map);

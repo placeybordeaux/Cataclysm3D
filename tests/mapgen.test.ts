@@ -17,8 +17,12 @@ function makeEnv(wg: WorldgenData): MapgenEnv {
     seed: 1, data: wg, stats,
     terrainFlags: (id) => game.terrain[id]?.flags,
     furnitureKnown: (id) => !!game.furniture[id],
+    furnitureFlags: (id) => game.furniture[id]?.flags,
+    terFurnTransform: (id) => game.misc.ter_furn_transform?.[id],
     furnitureBashTo: () => undefined,
+    terrainBashTo: (id) => game.terrain[id]?.bash?.ter_set,
     expandItems: () => [],
+    snippets: (cat) => game.misc.snippet?.[cat],
     runPredecessor: () => {},
   };
 }

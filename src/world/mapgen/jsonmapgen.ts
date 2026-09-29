@@ -103,9 +103,16 @@ export interface MapgenEnv {
   /** undefined = unknown terrain id */
   terrainFlags(id: string): readonly string[] | undefined;
   furnitureKnown(id: string): boolean;
+  furnitureFlags(id: string): readonly string[] | undefined;
+  /** CDDA ter_furn_transform definition by id (misc.ter_furn_transform) */
+  terFurnTransform(id: string): any;
   /** furniture id that bashing `id` leaves behind ('' = nothing), for ransacked vending machines */
   furnitureBashTo(id: string): string | undefined;
+  /** terrain id that bashing `id` leaves behind (undefined = unbashable) */
+  terrainBashTo(id: string): string | undefined;
   expandItems(ref: unknown, rng: Rng): SpawnedItem[];
+  /** CDDA snippet category -> texts (misc.snippet) */
+  snippets(category: string): readonly unknown[] | undefined;
   /** Run another OMT type's mapgen into `levels` (predecessor_mapgen support). */
   runPredecessor(type: string, dat: MapgenDat, levels: Levels): void;
 }
@@ -181,7 +188,8 @@ export class MapgenCompiler {
           if (ch === undefined) continue;
           const pieces = symbols.get(ch);
           if (pieces && pieces.length) cells[y * size + x] = pieces;
-          else if (ch !== ' ' && ch !== '.') this.stats.unknownId('symbol', ch);
+          // symbols defined only as t_null/f_null are legitimate "leave as is" markers
+          else if (!pieces && ch !== ' ' && ch !== '.') this.stats.unknownId('symbol', ch);
         }
       }
     }
@@ -440,6 +448,17 @@ export class MapgenRunner {
           case 'radiation':
             buf.radiation.set(i, s.amount ? rollR(s.amount, rng) : 0);
             break;
+          case 'bash': {
+            // one guaranteed bash: furniture first, else terrain, per their bash results
+            const f = buf.furn[i];
+            const fb = f ? this.env.furnitureBashTo(f) : undefined;
+            if (f && fb !== undefined) buf.furn[i] = fb;
+            else {
+              const tb = this.env.terrainBashTo(buf.ter[i]);
+              if (tb) buf.ter[i] = tb;
+            }
+            break;
+          }
           case 'variable':
           case 'creature_remove':
             break;
@@ -721,10 +740,52 @@ export class MapgenRunner {
         buf.zones.push({ type, faction, x0: xr.a, y0: yr.a, x1: xr.b, y1: yr.b });
         return;
       }
+      case 'ter_furn_transforms': {
+        const id = evalValue(d.transform, dat.params, rng);
+        if (!id) return;
+        const tf = env.terFurnTransform(id);
+        if (!tf) return env.stats.unknownId('ter_furn_transform', id);
+        // CDDA applies the transform to every tile of the x/y range
+        for (let y = yr.a; y <= yr.b; y++)
+          for (let x = xr.a; x <= xr.b; x++) if (MapBuffer.inb(x, y)) this.transformTile(tf, buf, MapBuffer.idx(x, y), rng);
+        return;
+      }
       case 'variables':
         return;
       default:
         env.stats.unsupportedFeature(p.kind);
+    }
+  }
+
+  /** One ter_furn_transform on one tile: terrain, furniture, trap and field rules independently. */
+  private transformTile(tf: any, buf: MapBuffer, i: number, rng: Rng): void {
+    const env = this.env;
+    const pick = (rules: any[] | undefined, cur: string, flags: readonly string[] | undefined, validKey: string): string | undefined => {
+      for (const r of rules ?? []) {
+        const valid = (r[validKey] as string[] | undefined)?.includes(cur) || (r.valid_flags as string[] | undefined)?.some((f) => flags?.includes(f));
+        if (!valid) continue;
+        const res = Array.isArray(r.result) ? weightedPick(rng, parseWeighted(r.result)) : r.result;
+        return typeof res === 'string' ? res : undefined;
+      }
+      return undefined;
+    };
+    const t = pick(tf.terrain, buf.ter[i], env.terrainFlags(buf.ter[i]), 'valid_terrain');
+    if (t && t !== 't_null' && this.knownTer(t)) buf.ter[i] = t;
+    if (buf.furn[i]) {
+      const f = pick(tf.furniture, buf.furn[i], env.furnitureFlags(buf.furn[i]), 'valid_furniture');
+      if (f !== undefined) buf.furn[i] = f === 'f_null' ? '' : this.knownFurn(f) ? f : buf.furn[i];
+    }
+    const tr = buf.traps.get(i);
+    if (tr) {
+      const n = pick(tf.trap, tr, undefined, 'valid_trap');
+      if (n !== undefined) n === 'tr_null' ? buf.traps.delete(i) : buf.traps.set(i, n);
+    }
+    const fl = buf.fields.get(i);
+    if (fl && tf.field) {
+      buf.fields.set(i, fl.flatMap((f) => {
+        const n = pick(tf.field, f.type, undefined, 'valid_field');
+        return n === undefined ? [f] : n === 'fd_null' ? [] : [{ ...f, type: n }];
+      }));
     }
   }
 
@@ -800,12 +861,27 @@ export class MapgenRunner {
     return true;
   }
 
-  private expandText(text: string, dat: MapgenDat): string {
-    return text
+  /**
+   * CDDA SNIPPET.expand + replace_city_tag: "<snippet:cat>" (our marker for a sign/graffiti
+   * "snippet" field) and any "<tag>" naming a snippet category are replaced by a random
+   * entry; name tags use data/names.
+   */
+  private expandText(text: string, dat: MapgenDat, depth = 0): string {
+    const rng = dat.rng;
+    const pickSnippet = (cat: string): string | undefined => {
+      const list = this.env.snippets(cat);
+      if (!list || list.length === 0) return undefined;
+      const e: any = rng.pick(list);
+      return typeof e === 'string' ? e : e?.text ?? undefined;
+    };
+    let out = text
+      .replace(/<snippet:([^>]+)>/g, (_, cat: string) => pickSnippet(cat) ?? '')
       .replace(/<city>/g, dat.cityName)
-      .replace(/<given_name>/g, () => dat.rng.pick(dat.names.given))
-      .replace(/<family_name>/g, () => dat.rng.pick(dat.names.family))
-      .replace(/<full_name>/g, () => `${dat.rng.pick(dat.names.given)} ${dat.rng.pick(dat.names.family)}`);
+      .replace(/<given_name>/g, () => rng.pick(dat.names.given))
+      .replace(/<family_name>/g, () => rng.pick(dat.names.family))
+      .replace(/<full_name>/g, () => `${rng.pick(dat.names.given)} ${rng.pick(dat.names.family)}`);
+    out = out.replace(/<[a-z_A-Z0-9]+>/g, (tag) => pickSnippet(tag) ?? tag);
+    return depth < 3 && /<[^>]+>/.test(out) && out !== text ? this.expandText(out, dat, depth + 1) : out;
   }
 }
 

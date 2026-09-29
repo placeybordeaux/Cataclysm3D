@@ -54,6 +54,11 @@ export class WorldGenerator implements ChunkGenerator {
       stats: this.stats,
       terrainFlags: (id) => this.terrainFlags(id),
       furnitureKnown: (id) => !!this.map?.furniture.has(id) || this.furnMigration.has(id),
+      furnitureFlags: (id) => {
+        const n = this.map?.furniture.tryIndex(this.furnMigration.get(id) ?? id);
+        return n === undefined ? undefined : this.map!.furniture.get(n).flags;
+      },
+      terFurnTransform: (id) => game.misc?.ter_furn_transform?.[id],
       furnitureBashTo: (id) => {
         const m = this.map;
         const n = m?.furniture.tryIndex(id);
@@ -61,6 +66,12 @@ export class WorldGenerator implements ChunkGenerator {
         const f = m.furniture.get(n).bash?.furn_set;
         return f === undefined ? '' : f === 'f_null' ? '' : f;
       },
+      terrainBashTo: (id) => {
+        const m = this.map;
+        const n = m?.terrain.tryIndex(this.terMigration.get(id)?.ter ?? id);
+        return m && n !== undefined ? m.terrain.get(n).bash?.ter_set : undefined;
+      },
+      snippets: (cat) => game.misc?.snippet?.[cat],
       expandItems: (ref, rng) => expandItemGroup(this.game, ref as any, rng),
       runPredecessor: (type, dat, levels) => {
         const ref = { type, rot: 0, line: -1 };
@@ -136,6 +147,23 @@ export class WorldGenerator implements ChunkGenerator {
     if (count <= 0) return;
     const X = c.cx * CHUNK, Y = c.cy * CHUNK;
     c.spawns.push({ kind: 'group', id: s.group, x: X + 12, y: Y + 12, z: c.z, area: [X, Y, X + CHUNK - 1, Y + CHUNK - 1], count });
+  }
+
+  /**
+   * Generate one OMT type in isolation (fields all around, no special) and return the raw
+   * buffer. For debugging and data coverage runs; does not touch the map.
+   */
+  previewOmt(map: GameMap, type: string, rot = 0, seed = 1): { buf: MapBuffer; source: string } {
+    this.map = map;
+    const defs = this.wg.overmap.terrains;
+    const ref = { type, rot, line: defs[type]?.flags.includes('LINEAR') ? 15 : -1 };
+    const omt: OmtInfo = { ...ref, id: type };
+    const dat = this.makeDat(1_000_000 + seed, 1_000_000, 0, omt);
+    const d: MapgenDat = { ...dat, omtAt: () => ({ type: 'field', rot: 0, line: -1 }), cityName: 'Preview' };
+    const levels: Levels = new Map([[0, new MapBuffer('t_region_groundcover')]]);
+    const source = this.generateInto(d, levels);
+    resolveRegional(levels.get(0)!, this.wg.overmap.region, d.rng, (id) => this.stats.unknownId('region', id));
+    return { buf: levels.get(0)!, source };
   }
 
   private makeDat(x: number, y: number, z: number, omt: OmtInfo): MapgenDat {

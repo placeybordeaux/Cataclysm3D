@@ -73,7 +73,6 @@ export class Overmap {
   private types: string[] = [];
   private typeIdx = new Map<string, number>();
   private specialsByUid = new Map<number, SpecialInstance>();
-  private nextUid = 1;
   private landNoise: Noise2D;
   private thickNoise: Noise2D;
   private lakeNoise: Noise2D;
@@ -450,7 +449,11 @@ export class Overmap {
   }
 
   private placeSpecial(r: Region, def: SpecialDef, ox: number, oy: number, rot: number, city?: City): SpecialInstance {
-    const inst: SpecialInstance = { uid: this.nextUid++, def: def.id, x: r.x0 + ox, y: r.y0 + oy, rot, city, args: new Map() };
+    // uid must not depend on region generation order: it seeds overmap_special-scoped
+    // mapgen parameters, so it has to be the same whichever way the player explored.
+    let uid = hashSeed(this.seed, r.rx, r.ry, r.specials.length, 31) & 0x7fffffff || 1;
+    while (this.specialsByUid.has(uid)) uid = (uid + 1) & 0x7fffffff || 1;
+    const inst: SpecialInstance = { uid, def: def.id, x: r.x0 + ox, y: r.y0 + oy, rot, city, args: new Map() };
     this.specialsByUid.set(inst.uid, inst);
     r.specials.push(inst);
     for (const o of def.overmaps) {

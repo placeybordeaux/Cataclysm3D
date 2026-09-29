@@ -12,6 +12,8 @@
 //   --png file     render a top-down colour map (terrain/furniture colours) to a PNG
 //   --around x,y   OMT centre for --png (default: start shelter); --radius R OMTs (default 4)
 //   --z Z          z-level for --png (default 0)
+//   --coverage     run every om_terrain mapgen in the data once and report unsupported
+//                  features / unknown ids across all of it
 //   --quiet        don't print per-feature warnings
 
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -70,6 +72,22 @@ if (n) {
       }
   times.sort((a, b) => a - b);
   console.log(JSON.stringify({ ...gen.stats.summary(), p50: times[times.length >> 1]?.toFixed(2), p95: times[Math.floor(times.length * 0.95)]?.toFixed(2) }, null, 2));
+}
+
+if (argv.includes('--coverage')) {
+  const ids = Object.keys(wg.mapgen.omt);
+  const a = performance.now();
+  for (const id of ids) {
+    const oid = id.replace(/_(straight|curved|end|tee|four_way)$/, '');
+    try {
+      gen.previewOmt(map, wg.overmap.terrains[oid] ? oid : id, 0, 1);
+    } catch (e) {
+      console.log(`!! ${id}: ${(e as Error).message}`);
+    }
+  }
+  const s = gen.stats.summary();
+  console.log(`coverage: ${ids.length} om_terrain mapgens in ${(performance.now() - a).toFixed(0)} ms`);
+  console.log(JSON.stringify({ topUnsupported: s.topUnsupported, topUnknownIds: s.topUnknownIds }, null, 2));
 }
 
 const png = get('--png');
