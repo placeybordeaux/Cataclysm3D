@@ -1,0 +1,83 @@
+/* Progression screens (src/progression): crafting badge, start cards, journal. Built on the
+   ui2 metrics/palette (docs/UI2.md): sizes in --u, colours --p-*, skins for borders. */
+
+#ui2 .pg-badge {
+  position: absolute; right: calc(var(--u) * 8); bottom: calc(var(--u) * 40);
+  display: flex; align-items: center; gap: calc(var(--u) * 3); pointer-events: none !important;
+  padding: var(--u) calc(var(--u) * 4); border: var(--b3) solid transparent; border-image: var(--skin-tip);
+  color: var(--p-magic); font-size: var(--fs-s); animation: pg-pulse 1.6s steps(4) 3;
+}
+#ui2 .pg-badge kbd, #ui2 .pg-key {
+  font: inherit; color: var(--p-accent); background: var(--p-bg-deep); border: var(--u) solid var(--p-bevel-hi);
+  padding: 0 calc(var(--u) * 2);
+}
+@keyframes pg-pulse { 50% { translate: 0 calc(var(--u) * -2); } }
+
+/* ---- quick start / new game ---- */
+#ui2 .pg-form { display: grid; grid-template-columns: auto 1fr; gap: calc(var(--u) * 3) calc(var(--u) * 5); align-items: center; }
+#ui2 .pg-label { color: var(--p-text-dim); font-size: var(--fs-s); }
+#ui2 .pg-row { display: flex; gap: calc(var(--u) * 2); align-items: center; flex-wrap: wrap; }
+#ui2 .pg-row > .pg-input { flex: 1; width: auto; min-width: calc(var(--fs) * 10); }
+#ui2 .pg-input {
+  font: inherit; color: var(--p-text); background: var(--p-bg-deep); min-width: 0; width: 100%;
+  border: var(--u) solid var(--p-bevel-hi); padding: var(--u) calc(var(--u) * 3); outline: none; user-select: text;
+}
+#ui2 .pg-input:focus { border-color: var(--p-accent); }
+#ui2 .pg-seg { display: inline-flex; gap: var(--u); }
+#ui2 .pg-seg .ui2-btn.on { border-image: var(--skin-inset-sel); color: var(--p-accent); }
+#ui2 .pg-desc { color: var(--p-text-dim); font-size: var(--fs-s); max-width: calc(var(--fs) * 26); }
+#ui2 .pg-actions { display: flex; justify-content: flex-end; gap: calc(var(--u) * 3); margin-top: calc(var(--u) * 2); }
+
+#ui2 .pg-picker { display: flex; gap: calc(var(--u) * 5); min-height: 0; flex: 1; }
+#ui2 .pg-cards {
+  flex: 1.4; min-width: 0; overflow: auto; display: grid; align-content: start;
+  grid-template-columns: repeat(auto-fill, minmax(calc(var(--fs) * 11), 1fr)); gap: calc(var(--u) * 3); padding: var(--u);
+}
+#ui2 .pg-card {
+  display: flex; flex-direction: column; gap: var(--u); padding: calc(var(--u) * 3); cursor: pointer; text-align: left;
+  border: var(--b3) solid transparent; border-image: var(--skin-inset); background: none; color: var(--p-text); min-height: calc(var(--icon) * 2.6);
+}
+#ui2 .pg-card:hover { border-image: var(--skin-inset-hover); }
+#ui2 .pg-card.selected { border-image: var(--skin-inset-sel); }
+#ui2 .pg-card.locked { color: var(--p-text-dim); }
+#ui2 .pg-card.locked .ui2-icon { filter: grayscale(1) brightness(.75); }
+#ui2 .pg-card-head { display: flex; align-items: center; gap: calc(var(--u) * 3); }
+#ui2 .pg-card-name { color: var(--p-accent); line-height: 1.1; }
+#ui2 .pg-card.locked .pg-card-name { color: var(--p-text-dim); }
+#ui2 .pg-card-scen { font-size: var(--fs-s); color: var(--p-info); }
+#ui2 .pg-card-pitch { font-size: var(--fs-s); color: var(--p-text-dim); }
+#ui2 .pg-card-lock { font-size: var(--fs-s); color: var(--p-warn); }
+#ui2 .pg-new { color: var(--p-good); font-size: var(--fs-s); }
+#ui2 .pg-detail { flex: 1; min-width: calc(var(--fs) * 18); display: flex; flex-direction: column; gap: calc(var(--u) * 2); min-height: 0; }
+#ui2 .pg-detail-scroll { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: calc(var(--u) * 3); padding-right: calc(var(--u) * 2); }
+#ui2 .pg-detail-title { font-size: var(--fs-l); color: var(--p-accent); }
+#ui2 .pg-kit { display: flex; flex-wrap: wrap; gap: var(--u); }
+#ui2 .pg-kit > span { position: relative; }
+#ui2 .pg-kit .pg-count { position: absolute; right: 0; bottom: 0; font-size: var(--fs-s); color: var(--p-text); text-shadow: 0 var(--u) 0 #000; }
+#ui2 .pg-skills { font-size: var(--fs-s); color: var(--p-good); }
+#ui2 .pg-trade { font-size: var(--fs-s); color: var(--p-warn); }
+
+/* ---- progress bars (journal unlocks, death screen) ---- */
+#ui2 .pg-prog { font-size: var(--fs-s); display: grid; grid-template-columns: 1fr auto; gap: 0 calc(var(--u) * 3); align-items: center; }
+#ui2 .pg-prog-bar { grid-column: 1 / -1; height: calc(var(--u) * 3); background: var(--p-bg-deep); border: var(--u) solid var(--p-outline); }
+#ui2 .pg-prog-bar > div { height: 100%; background: var(--p-accent); }
+#ui2 .pg-prog.done .pg-prog-bar > div { background: var(--p-good); }
+
+/* ---- journal ---- */
+#ui2 .pg-journal { display: flex; flex-direction: column; gap: calc(var(--u) * 3); min-height: 0; flex: 1; }
+#ui2 .pg-jlist { overflow: auto; display: flex; flex-direction: column; gap: calc(var(--u) * 3); padding-right: calc(var(--u) * 2); min-height: 0; flex: 1; }
+#ui2 .pg-entry { display: flex; flex-direction: column; gap: var(--u); padding: calc(var(--u) * 2) calc(var(--u) * 3); border-left: var(--u) solid var(--p-magic); background: var(--p-bg-deep); }
+#ui2 .pg-entry.warn { border-left-color: var(--p-warn); }
+#ui2 .pg-entry.locked { border-left-color: var(--p-outline); }
+#ui2 .pg-entry.got { border-left-color: var(--p-good); }
+#ui2 .pg-entry-title { color: var(--p-accent); }
+#ui2 .pg-entry-body { color: var(--p-text); font-size: var(--fs-s); }
+#ui2 .pg-entry-meta { color: var(--p-text-dim); font-size: var(--fs-s); }
+#ui2 .pg-undiscovered { color: var(--p-text-dim); font-size: var(--fs-s); }
+#ui2 .pg-stat-grid { display: grid; grid-template-columns: 1fr auto; gap: var(--u) calc(var(--u) * 6); font-size: var(--fs-s); }
+#ui2 .pg-stat-grid > :nth-child(even) { color: var(--p-accent); text-align: right; }
+/* list view of the start picker (toggle in its title bar) */
+#ui2 .pg-cards.list { grid-template-columns: 1fr; gap: var(--u); }
+#ui2 .pg-cards.list .pg-card { min-height: 0; flex-direction: row; align-items: center; gap: calc(var(--u) * 4); padding: var(--u) calc(var(--u) * 3); }
+#ui2 .pg-cards.list .pg-card-head { flex: 0 0 calc(var(--fs) * 14); }
+#ui2 .pg-cards.list .pg-card-pitch, #ui2 .pg-cards.list .pg-card-lock { flex: 1; }

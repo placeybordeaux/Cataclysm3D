@@ -466,6 +466,12 @@ interface CraftInProgress {
  * Start crafting `r`: check, consume components and tool charges, then run the activity.
  * Returns immediately; the result appears when the activity completes.
  */
+/**
+ * Called after a craft finishes and its results were handed out (progression: lifetime
+ * crafted counts, "you could craft" nudges skip recipes already made). Listeners must not throw.
+ */
+export const craftedHooks: ((r: RecipeDef, batch: number) => void)[] = [];
+
 export function startCraft(host: CraftHost, r: RecipeDef, opts: CraftOptions = {}): CraftResult {
   const c = host.player;
   const batch = Math.max(1, Math.floor(opts.batch ?? 1));
@@ -489,6 +495,7 @@ export function startCraft(host: CraftHost, r: RecipeDef, opts: CraftOptions = {
     const results = createResults(host.data, r, batch);
     const byproducts = createByproducts(host.data, r, batch, c.rng);
     giveOrDrop(host, [...results, ...byproducts], craftingInventory(host));
+    for (const hk of craftedHooks) hk(r, batch);
     if (fromMemory) host.message(`You craft ${name} from memory.`);
     else {
       host.message(`You craft ${name} using a reference.`);
