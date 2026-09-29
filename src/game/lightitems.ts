@@ -51,5 +51,8 @@ export function toggleLight(game: Game): boolean {
     game.message("You don't have a light source.", 'c_light_gray');
     return false;
   }
-  return game.player.inv.use(target).ok;
+  // A smartphone's first use_action is the e-book reader; the light is its `transform`
+  // ("Turn on flashlight"), so aim for that action explicitly.
+  const idx = useActions(target.def).findIndex((u) => u.type === 'transform');
+  return game.player.inv.use(target, undefined, Math.max(0, idx)).ok;
 }
