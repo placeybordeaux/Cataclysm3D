@@ -13,7 +13,31 @@ The pause lives in `src/game/pause.ts` and `src/pause.ts`. The measurements come
 
 ## The presets
 
-<!-- PRESET_TABLE -->
+| Group | Rule | Accessible | Classic |
+|---|---|---|---|
+| Monsters & world | Zombies in buildings | 45% | 75% |
+| Monsters & world | City hordes | 10% | 20% |
+| Monsters & world | Safe radius | 32 m | 10 m |
+| Monsters & world | Safe radius: corpses too | yes | no |
+| Monsters & world | Monster speed | 90% | 100% |
+| Monsters & world | Monster toughness | 70% | 100% |
+| Monsters & world | Item spawn rate | 100% | 100% |
+| Combat | Combat timing | forgiving | tight |
+| Combat | Damage you take | 70% | 100% |
+| Combat | Bleeding | 50% | 100% |
+| Combat | Crash damage | 50% | 100% |
+| Survival | Hunger rate | 75% | 100% |
+| Survival | Thirst rate | 75% | 100% |
+| Survival | Tiredness rate | 100% | 100% |
+| Survival | Healing rate | 200% | 100% |
+| Survival | Cold | 70% | 100% |
+| Time | Day length | 60 min | 60 min |
+| Time | Pause in menus | yes | no |
+| Death | Permadeath | no | yes |
+
+(`tsx tools/balance_sim.ts --presets` prints this table from the code.) "Zombie density" (BN
+SPAWN_DENSITY, 0.5×/1×/2×) stays a separate world option on top of these. The Custom editor
+also offers values between and beyond the two presets.
 
 Every knob is in the Options > Difficulty… screen. There, Accessible and Classic show their values.
 Change any value and the world becomes Custom. In the new-game panel, **Custom → Edit rules**
@@ -83,7 +107,23 @@ game hour, so a night's sleep takes about 16 s. Crafting, reading and waiting wa
 2–8 real s. Needs follow the game clock. So the question "does the player starve during a
 1-hour session?" is the same as asking what happens in one BN day.
 
-<!-- NEEDS_TABLE -->
+Needs for a survivor who never eats or drinks, sleeping 23:00–07:00, from 08:00 on day 1
+(`--scenario needs`). Times are game time, with real minutes of play in brackets (sleep counted
+at its warped speed):
+
+| milestone | Classic | Accessible | Classic with day length 90 min |
+|---|---|---|---|
+| Hungry | day 1 19:06 (28 real min) | day 1 22:42 (37 real min) | day 1 19:06 (42 real min) |
+| Very hungry | day 2 07:06 (38 real min) | day 2 14:42 (57 real min) | day 2 07:06 (57 real min) |
+| Thirsty | day 1 18:06 (25 real min) | day 1 20:06 (30 real min) | day 1 18:06 (38 real min) |
+| Very thirsty | day 2 04:06 (38 real min) | day 2 08:48 (42 real min) | day 2 04:06 (56 real min) |
+| Dehydrated | day 3 00:06 (78 real min) | day 3 11:30 (89 real min) | day 3 00:06 (117 real min) |
+| Parched | day 3 10:06 (86 real min) | day 4 01:18 (118 real min) | day 3 10:06 (128 real min) |
+| Tired | day 2 22:54 (78 real min) | day 2 22:54 (78 real min) | day 2 22:54 (116 real min) |
+| Dead tired | not in 3 days | not in 3 days | not in 3 days |
+
+"Tired" appears only on day 2 because this scripted sleeper goes to bed at 23:00, before the
+16 hours awake that make you Tired.
 
 Reading the table:
 - **Within the first half hour something changes.** You get Thirsty at about 25 min (Classic) or
@@ -124,11 +164,72 @@ doors, and sleep. Every run is deterministic per seed.
 records. `--from runs.jsonl` prints the tables again without simulating. `--trace` prints the
 bot's state and the game log every second.
 
-<!-- DAY1_TABLE -->
+#### Day 1 with the scripted newcomer (20 seeds each, 08:00 day 1 → 08:00 day 2)
 
-<!-- DUEL_TABLE -->
+| configuration | died on day 1 | first sighting (median) | first contact ≤3 m (median, p25–p75) | never met one | hostiles ≤40 m of the start at spawn (median, max) | most within 6 m at once (median / max) | kills (median) | HP lost (median) |
+|---|---|---|---|---|---|---|---|---|
+| **Before**: the numbers v2 shipped with (Classic spawns and needs, forgiving feel)* (`--preset classic --set feel=accessible`) | 12 (60 %): torso ×9, infection ×2, head ×1 | 1.3 min | 2.2 min (2.0–3.5) | 3 | 0, 4 | 2 / 9 | 1 | 211 |
+| **Classic** | 12 (60 %): torso ×11, infection ×1 | 1.3 min | 2.3 min (1.8–3.5) | 3 | 0, 4 | 2 / 11 | 0.5 | 202 |
+| **Accessible** | 3 (15 %): torso ×2, infection ×1 | 1.8 min | 2.6 min (2.0–3.9) | 4 | 0, 0 | 3 / 8 | 2.5 | 73 |
 
-<!-- COLD_TABLE -->
+\* Run with the current bot and the walking-speed fix. The first bot version (it ran in place against walls and flipped between fleeing and looting)
+combined with the old walking speed gave Classic 17/20 deaths (85 %) and a first Accessible draft
+10–12/20. Those runs led to fixes 1 and 2 below and to a better bot. They measured the bot as much
+as the game, so the table uses the current bot throughout.
+
+What the numbers say:
+- **Contact.** The first zombie comes within 3 m after a median of 2.6 min of real time on
+  Accessible (half of the seeds between 2.0 and 3.9 min). That is inside the 2–4 min target.
+  Classic's safe radius lets something be near the door on some seeds (the coyote pack: 7 s).
+  On 4 of 20 seeds the shelter is in open fields with no houses in reach, and the bot meets
+  nothing all day.
+- **Crowding.** On Accessible there are no hostiles within 40 m of the shelter when the world
+  spawns. The bot usually faces at most 3 at once, and those are the ones it ran from. The
+  maximum is 8, when it dragged a street horde around.
+- **Deaths.** The Accessible deaths are the bot's worst habits: it pulls a horde into a chase
+  until stamina runs out, and it never treats a bite, so one bite became a fatal infection on
+  day 2. A human on Accessible also has the parry window, the side-step bonus, doors, and
+  tactical pause to think. Pushing further (damage taken 50 %, building zombies 35 %, hordes
+  5 %) didn't change the bot's death rate (4/20). The remaining deaths are about behaviour,
+  not numbers, so Accessible stops where it is and stays closer to BN.
+- **Classic** stays tense. More than half the naive runs die on day 1, as a Bright Nights
+  veteran would expect from an Evacuee who fights everything with bare hands.
+
+#### Melee on open ground (`--scenario duel`, 10 seeds per row)
+
+The survivor walks in and swings whenever the weapon is ready. It never guards, parries or
+side-steps. Zombies are `mon_zombie` (BN: 80 HP, melee skill 4, 3d3, grab + bite):
+
+| weapon | zombies | Classic: won / died | Classic: fight s, HP lost | Accessible: won / died | Accessible: fight s, HP lost |
+|---|---|---|---|---|---|
+| fists | 1 | 10 / 0 | 14 s, 48 | 10 / 0 | 11 s, 14 |
+| fists | 2 | 9 / 1 | 24 s, 115 | 10 / 0 | 17 s, 49 |
+| chef knife | 1 | 10 / 0 | 6 s, 19 | 10 / 0 | 5 s, 6 |
+| chef knife | 2 | 10 / 0 | 11 s, 55 | 10 / 0 | 8 s, 15 |
+| pipe | 2 | 10 / 0 | 15 s, 74 | 10 / 0 | 10 s, 23 |
+| crowbar | 2 | 10 / 0 | 16 s, 75 | 10 / 0 | 10 s, 19 |
+| baseball bat | 2 | 10 / 0 | 10 s, 34 | 10 / 0 | 7 s, 12 |
+
+In both presets a single zombie on open ground is never a threat. Two are dangerous bare-handed
+in Classic. What kills on day 1 is being caught by more than that, cornered, or chased until
+out of stamina.
+
+#### First night in the shelter
+
+The survivor wears the starting kit, stays inside the shelter and sleeps on the floor at 22:00.
+The scenario would take a blanket from the shelter if one lay within 10 tiles, but none of the
+10 seeds had one (`--scenario cold`, monsters removed):
+
+| preset | runs | coldest air °C (median) | lowest body °C (median / min) | worst feeling (count) | cold wake-ups (median) | died |
+|---|---|---|---|---|---|---|
+| Classic | 10 | −4.3 | 32.1 / 30.6 | Chilly 9, Very cold! 1 | 7 | 1 |
+| Accessible | 10 | −4.3 | 33.6 / 32.6 | Chilly 8, Comfortable 2 | 0 | 0 |
+
+The Classic death (seed 7, −10.6 °C) is BN's `cold` effect. At "Very cold" it does 1 HP every
+~200 turns to the cold part, and here that part was the head. Spending 5 hours asleep with a
+very cold head killed the survivor. Veterans find a blanket or build a fire, and the game's
+survival hints say so ("It's cold. Find warmer clothes, or build a fire."). Accessible's 70 %
+cold keeps the body above 32.5 °C on the same nights, with no shivering wake-ups.
 
 ### Findings that changed code (not only numbers)
 
