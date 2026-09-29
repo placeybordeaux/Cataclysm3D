@@ -64,7 +64,7 @@ export function screenScenarios(c: ScreensCtx): Scenario[] {
   return [
     ['talk', 'dialogue: e talks, cursor freed + paused, typewriter skips, 1-9 answer, Esc leaves', async () => {
       await reset();
-      await js(`cdda.godMode?.(true); cdda.ui2.settings.pauseInInventory = true; cdda.ui2.saveSettings(); cdda.screens.prefs.speed = 'slow'`);
+      await js(`cdda.ui2.settings.pauseInInventory = true; cdda.ui2.saveSettings(); cdda.screens.prefs.speed = 'slow'`);
       await js(`(() => { const uid = cdda.spawnNpc('NC_SCAVENGER', 0, -2, { attitude: 'NULL' }); cdda.faceNpc(uid); cdda.game.player.pitch = -0.05; return uid; })()`);
       await sleep(600);
       await c.x().key('e');
@@ -215,7 +215,7 @@ export function screenScenarios(c: ScreensCtx): Scenario[] {
     }],
     ['autodoc', 'Autodoc: e on it, odds + risks shown, Operate asks once, the operation starts', async () => {
       await reset();
-      await js(`(() => { const p = cdda.game.player; while (cdda.vehicleAt(0, 0) || cdda.vehicleAt(0, -1)) p.x += 3; cdda.spawnAutodoc(0, -1); p.yaw = 0; p.pitch = -0.6; cdda.giveCbm('bio_flashlight'); cdda.installBionic('bio_painkiller'); })()`);
+      await js(`(() => { const p = cdda.game.player; while (cdda.vehicleAt(0, 0) || cdda.vehicleAt(0, -1)) p.x += 3; cdda.spawnAutodoc(0, -1); p.yaw = 0; p.pitch = -0.6; cdda.giveCbm('bio_ears'); cdda.installBionic('bio_painkiller'); })()`);
       await sleep(400);
       await c.x().key('e');
       let v = await waitPanel('autodoc');
