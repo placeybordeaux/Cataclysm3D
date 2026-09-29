@@ -1,4 +1,5 @@
 import type { GameData, RecipeDef, RequirementData } from '../data/types';
+import { autoStoreLiquid } from './liquid';
 import { expandItemGroup } from '../data/itemgroups';
 import type { GameMap } from '../world/map';
 import type { GameClock } from '../core/time';
@@ -392,10 +393,22 @@ export function createByproducts(data: GameData, r: RecipeDef, batch: number, rn
  * then nearby), others stashed, wielded if hands are free, else dropped at their feet.
  * (CDDA's spawn_items / liquid_handler, simplified.)
  */
+/**
+ * What to do with a crafted liquid that no carried closed container took (CDDA
+ * liquid_handler's "drink / pour into / pour out" menu). Set by the UI (src/ui/liquid_ui.ts);
+ * null = decide without asking (tests, headless): fill any container around, then the ground.
+ */
+export const liquidHooks: { handle: ((host: CraftHost, liquid: Item) => void) | null } = { handle: null };
+
 export function giveOrDrop(host: CraftHost, items: Item[], inv?: CraftingInventory): void {
   const p = host.player;
   const tx = Math.floor(p.x), ty = Math.floor(p.y);
   for (const it of items) {
+    if (it.isLiquid() && liquidHooks.handle) {
+      const left = autoStoreLiquid(host, it);
+      if (left) liquidHooks.handle(host, left);
+      continue;
+    }
     if (it.isLiquid()) {
       // Closed containers (bottles, jugs) before open ones (pots) so boiled water doesn't
       // end up in the cooking pot.

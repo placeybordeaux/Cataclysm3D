@@ -16,6 +16,7 @@ import { showDeathScreen } from './death';
 import { openEscMenu, openMessageLog, showMainMenu } from './menus';
 import { applyStoredOptions, openOptions } from './options';
 import { installTipsOption, openHints } from './tips';
+import { installLiquidUi } from './liquid_ui';
 import { applyBuild, defaultBuild, openCharGen } from './chargen';
 import { registerSaveable } from '../save/registry';
 import { quitToTitle } from '../save/install';
@@ -42,6 +43,7 @@ export async function installUi(game: Game, renderer: Renderer, worldgen: WorldG
   const h = new Hud(ctx, getUiRoot());
   applyStoredOptions(ctx);
   installTipsOption();
+  installLiquidUi();
 
   game.lookAt = (maxDist) => cameraLookAt(ctx, maxDist);
   installInventoryUi(ctx);

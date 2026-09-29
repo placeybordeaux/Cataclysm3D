@@ -1,4 +1,5 @@
 import type { Item } from '../game/item';
+import { unloadContainer } from './liquid_ui';
 import type { ActionResult } from '../game/inventory';
 import { useActions } from '../game/inventory';
 import { patchInteractUi } from '../game/interact';
@@ -188,6 +189,11 @@ export function doAction(ctx: UiContext, action: ItemAction, e: InvEntry): Actio
     case 'reload':
       return finish(ctx, e, inv.reload(it), false);
     case 'unload':
+      // Containers (a pot of boiled water, a bag of chips): CDDA's unload empties them.
+      if (!it.isGun() && !it.isMagazine()) {
+        unloadContainer(ctx.game, it);
+        return null;
+      }
       return finish(ctx, e, inv.unload(it), false);
     case 'drop': {
       if (e.where === 'ground') return null;
@@ -226,7 +232,7 @@ function actionsFor(e: InvEntry): { action: ItemAction; key: string; label: stri
     { action: 'throw' as const, key: 't', label: 'Throw', ok: e.where !== 'worn' },
     { action: 'takeoff' as const, key: 'T', label: 'Take off', ok: worn },
     { action: 'drop' as const, key: 'd', label: 'Drop', ok: e.where !== 'ground' },
-    { action: 'unload' as const, key: 'U', label: 'Unload', ok: it.isGun() || it.isMagazine() },
+    { action: 'unload' as const, key: 'U', label: 'Unload', ok: it.isGun() || it.isMagazine() || it.containerPockets().some((p) => p.contents.length > 0) },
     { action: 'reload' as const, key: 'r', label: 'Reload', ok: it.isGun() || it.isMagazine() },
     { action: 'examine' as const, key: 'x', label: 'Examine', ok: true },
   ];
