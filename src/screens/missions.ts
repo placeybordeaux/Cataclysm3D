@@ -8,7 +8,7 @@ import type { NpcSystem } from '../game/npcai';
 import type { Renderer } from '../render/renderer';
 import type { MissionInstance } from '../game/missions';
 import { button, h, openPanel, tabs, type Panel } from '../ui2';
-import { chip, hours, markup, portrait, section } from './common';
+import { centreFirstTime, chip, hours, markup, portrait, section } from './common';
 import { missionEntry, valueText, type MissionEntry } from './logic/missions';
 
 export interface MissionsCtx {
@@ -56,6 +56,7 @@ export function openMissionsPanel(ctx: MissionsCtx, focusUid?: number): Panel {
     },
   });
   panel.el.classList.add('ix-missions-win');
+  centreFirstTime(panel);
 
   const t = tabs(
     [
@@ -130,12 +131,13 @@ export function openMissionsPanel(ctx: MissionsCtx, focusUid?: number): Panel {
       m.status === 'active' && e.target
         ? h('div', { class: 'ix-mtarget' },
             h('span', { class: 'ix-big-arrow', text: e.target.arrow }),
-            h('div', {}, h('div', { text: e.target.text }), h('div', { class: 'ui2-dim ui2-small', text: e.target.omts ? 'Marked on your map.' : 'The target is around you.' })),
+            h('div', {}, h('div', { text: e.target.text }), h('div', { class: 'ui2-dim ui2-small', text: e.target.omts ? (missionTracking.uid === m.uid ? 'Tracked: shown on your map.' : 'Track it to follow it on your map.') : 'The target is around you.' })),
             button(missionTracking.uid === m.uid ? 'Stop tracking' : 'Track', () => toggleTrack(m.uid), { small: true, key: 'T' }))
         : null,
       m.status === 'active' && e.hoursLeft !== null ? h('div', { class: `ix-mdeadline tone-${e.deadlineTone}`, text: `Deadline: ${hours(e.hoursLeft)} left` }) : null,
-      e.description ? section('Briefing') : null,
-      e.description ? h('div', { class: 'ix-mdesc' }, markup(e.description)) : null,
+      // CONDITION goals read their description as the objective: don't say it twice.
+      e.description && e.description !== e.goal ? section('Briefing') : null,
+      e.description && e.description !== e.goal ? h('div', { class: 'ix-mdesc' }, markup(e.description)) : null,
       m.status === 'active' && giver ? h('div', { class: 'ui2-dim ui2-small', text: `Report back to ${giver.displayName()} when it's done.` }) : null,
     ];
     detail.replaceChildren(...parts.filter((x): x is HTMLElement => !!x));

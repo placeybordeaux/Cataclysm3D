@@ -149,7 +149,7 @@ export function openDialoguePanel(ctx: TalkCtx, d: Dialogue, onClose?: () => voi
       h(
         'div',
         { class: 'ix-dlg-id' },
-        h('div', { class: 'ix-dlg-name', text: n.displayName() }),
+        h('div', { class: 'ix-dlg-name', text: n.name }),
         job ? h('div', { class: 'ix-dlg-job', text: job }) : null,
         h('div', { class: 'ix-dlg-tags' }, chip(factionName(sys, n), 'info'), opChip),
         h('div', { class: 'ix-dlg-wield' }, h('span', { class: 'ui2-dim', text: 'Holding ' }), h('span', { text: w ? plain(w.name()) : 'nothing' })),
@@ -209,6 +209,8 @@ export function openDialoguePanel(ctx: TalkCtx, d: Dialogue, onClose?: () => voi
         if (t.data.length !== take) t.data = typing!.full[i].slice(0, take);
         left -= take;
       });
+      // Follow the text as it grows (a long line would otherwise type below the fold).
+      history.scrollTop = history.scrollHeight;
       if (left > 0 || visibleCount(typing.sched, performance.now() - typing.start) >= typing.sched.length) return stopTyping();
       typing.raf = requestAnimationFrame(tick);
     };

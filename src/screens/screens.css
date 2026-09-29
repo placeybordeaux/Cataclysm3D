@@ -30,7 +30,7 @@
 
 /* ---- dialogue ---- */
 #ui2 .ix-dlg-win .ui2-body.ix-dlg-body { padding: calc(var(--u) * 3); overflow: hidden; }
-#ui2 .ix-dlg-win.ix-dlg-scene { width: min(calc(var(--fs) * 60), 96vw); height: min(46vh, calc(var(--fs) * 22)); }
+#ui2 .ix-dlg-win.ix-dlg-scene { width: min(calc(var(--fs) * 60), 96vw); height: auto; max-height: min(62vh, calc(var(--fs) * 30)); }
 #ui2 .ix-dlg-win.ix-dlg-book { width: min(calc(var(--fs) * 48), 94vw); height: min(86vh, calc(var(--fs) * 38)); }
 #ui2 .ix-dlg { display: flex; gap: calc(var(--u) * 5); min-height: 0; flex: 1; }
 #ui2 .ix-dlg.layout-book { flex-direction: column; gap: calc(var(--u) * 3); }
@@ -59,7 +59,9 @@
 #ui2 .ix-said.typing::after { content: '▌'; color: var(--p-accent); animation: ix-blink .5s steps(1) infinite; }
 @keyframes ix-blink { 50% { opacity: 0; } }
 #ui2 .ix-dlg-answers { display: flex; flex-direction: column; gap: var(--u); flex: none; max-height: 55%; overflow-y: auto; padding-right: var(--u); }
-#ui2 .layout-scene .ix-dlg-answers { max-height: 58%; }
+/* Scene: a short history strip (scroll for more), the answers take what they need. */
+#ui2 .layout-scene .ix-dlg-history { flex: 0 1 auto; min-height: calc(var(--fs) * 4); max-height: calc(var(--fs) * 10); }
+#ui2 .layout-scene .ix-dlg-answers { flex: 0 1 auto; max-height: none; min-height: 0; }
 #ui2 .ix-resp {
   display: flex; align-items: flex-start; gap: calc(var(--u) * 3); text-align: left; cursor: pointer; width: 100%;
   padding: var(--u) calc(var(--u) * 3); background: none; border: var(--u) solid transparent; border-left: calc(var(--u) * 2) solid transparent; color: var(--p-text);
@@ -148,12 +150,13 @@
 #ui2 .ix-mdesc, #ui2 .ix-bdesc { font-size: var(--fs-s); color: var(--p-text); line-height: 1.35; white-space: pre-wrap; }
 
 /* ---- vehicle ---- */
+#ui2 .ix-veh-win { max-height: min(86vh, calc(var(--fs) * 36)); }
 #ui2 .ix-veh-body { overflow: hidden; }
 #ui2 .ix-veh { display: flex; gap: calc(var(--u) * 6); min-height: 0; flex: 1; }
 #ui2 .ix-veh-left { display: flex; flex-direction: column; align-items: center; gap: calc(var(--u) * 2); overflow: auto; flex: none; max-width: 48%; }
 #ui2 .ix-veh-front { font-size: var(--fs-s); color: var(--p-text-dim); }
 #ui2 .ix-veh-diagram {
-  --vc: calc(var(--fs) * 1.6);
+  --vc: calc(var(--fs) * 2);
   display: grid; grid-template-columns: repeat(var(--cols), var(--vc)); grid-template-rows: repeat(var(--rows), var(--vc)); gap: var(--u);
   padding: calc(var(--u) * 3); background: var(--p-bg-deep); border: var(--u) solid var(--p-outline);
 }
@@ -191,7 +194,7 @@
 #ui2 .ix-dh-mph.tone-info { color: var(--p-text-bright); }
 #ui2 .ix-dh-unit { color: var(--p-text-dim); }
 #ui2 .ix-dh-cruise { margin-left: auto; font-size: var(--fs-s); color: var(--p-good); }
-#ui2 .ix-dh-bar { position: relative; height: calc(var(--u) * 6); background: var(--p-bg-deep); border: var(--u) solid var(--p-outline); }
+#ui2 .ix-dh-bar { position: relative; height: calc(var(--u) * 6); background: var(--p-bg-deep); border: var(--u) solid var(--p-bevel-hi); margin-top: calc(var(--u) * 3); }
 #ui2 .ix-dh-fill { position: absolute; left: 0; top: 0; bottom: 0; }
 #ui2 .ix-dh-safe { position: absolute; top: calc(var(--u) * -2); bottom: calc(var(--u) * -2); width: var(--u); background: var(--p-warn); }
 #ui2 .ix-dh-target { position: absolute; top: calc(var(--u) * -4); width: 0; height: 0; margin-left: calc(var(--u) * -3); border: calc(var(--u) * 3) solid transparent; border-top-color: var(--p-good); }
@@ -219,6 +222,7 @@
 #ui2 .ix-switch:hover { border-color: var(--p-accent); }
 #ui2 .ix-switch.locked { opacity: .6; }
 #ui2 .ix-bdetail { overflow-y: auto; min-height: 0; display: flex; flex-direction: column; gap: calc(var(--u) * 3); padding-right: calc(var(--u) * 2); }
+#ui2 .ix-bdetail > .ui2-btn { align-self: flex-start; }
 #ui2 .ix-bcard-head { display: flex; gap: calc(var(--u) * 4); align-items: center; }
 #ui2 .ix-facts { display: grid; grid-template-columns: auto 1fr; gap: var(--u) calc(var(--u) * 5); font-size: var(--fs-s); }
 #ui2 .ix-mut-head, #ui2 .ix-ma-head { display: flex; flex-wrap: wrap; gap: calc(var(--u) * 2) calc(var(--u) * 5); align-items: center; }

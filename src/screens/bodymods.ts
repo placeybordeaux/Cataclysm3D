@@ -12,7 +12,7 @@ import { cddaText } from '../game/units';
 import { currentStyle, learnStyle, maOf, selectStyle, styleBuffs, styleDef, styleWeaponValid, traitStyleChoices, BUFF_TRIGGERS, type MartialArtDef } from '../game/martialarts';
 import { techniqueDef } from '../game/techniques';
 import { attachTooltip, button, confirmModal, h, iconEl, openPanel, tabs, type IconRef, type Panel, type Tone } from '../ui2';
-import { chip, markup, meter, plain, section } from './common';
+import { centreFirstTime, chip, markup, meter, plain, section } from './common';
 import { operationTime, surgeryPlan } from './logic/surgery';
 import { beginInstall, beginUninstall } from '../ui/mutbio_ui';
 
@@ -78,6 +78,7 @@ function listPanel(o: ListPanelOpts): ListPanelHandle {
     onClose: () => timer && clearInterval(timer),
   });
   panel.el.classList.add('ix-body-win');
+  centreFirstTime(panel);
   const head = h('div', { class: 'ix-bhead' });
   const list = h('div', { class: 'ix-blist', attrs: { 'data-testid': `${o.id}-list` } });
   const detail = h('div', { class: 'ix-bdetail', attrs: { 'data-testid': `${o.id}-detail` } });
@@ -117,6 +118,9 @@ function listPanel(o: ListPanelOpts): ListPanelHandle {
   draw();
   return { panel, select: (id) => ((sel = id), draw()), redraw: draw };
 }
+
+/** A CBM's item sprite, else UltiCa's generic bionic (few CBMs have their own). */
+const cbmIcon = (id: string): IconRef => ({ typeId: id, looksLike: 'bionic_general', symbol: ':', color: 'yellow' });
 
 const partName = (bp: string) => (isBodyPart(bp) ? BODY_PARTS[bp].name : bp);
 /** CDDA-style energy: "0.5 J", "25 J", "2 kJ". */
@@ -158,7 +162,7 @@ export function openBionicsPanel(game: Game, mods: BodyMods): ListPanelHandle {
           return {
             id: b.id,
             group: act ? 'Active' : 'Passive',
-            icon: { typeId: b.id, symbol: '⌂', color: 'light_blue' },
+            icon: cbmIcon(b.id),
             name: bio.name(b.id),
             tone: faulty ? 'bad' : b.powered ? 'good' : undefined,
             chips,
@@ -181,7 +185,7 @@ function bionicCard(mods: BodyMods, id: string): HTMLElement[] {
   if (!d) return [h('div', { text: id })];
   const b = bio.bionics.find((x) => x.id === id);
   const out: HTMLElement[] = [
-    h('div', { class: 'ix-bcard-head' }, iconEl({ typeId: id, symbol: '⌂', color: 'light_blue' }, 'grid'), h('div', {}, h('div', { class: 'ix-dlg-name', text: bio.name(id) }),
+    h('div', { class: 'ix-bcard-head' }, iconEl(cbmIcon(id), 'grid'), h('div', {}, h('div', { class: 'ix-dlg-name', text: bio.name(id) }),
       h('div', { class: 'ix-dlg-tags' }, b && bio.activatable(b) ? chip(b.powered ? 'On' : 'Off', b.powered ? 'good' : 'dim') : chip('Passive', 'dim'), d.flags?.includes('BIONIC_FAULTY') ? chip('Faulty: have it removed', 'bad') : null))),
     h('div', { class: 'ix-bdesc' }, markup(cddaText(d.description) || '')),
   ];
@@ -237,7 +241,8 @@ export function openMutationsPanel(game: Game, mods: BodyMods): ListPanelHandle 
           return {
             id,
             group: d?.active ? 'Active' : mut.isBase(id) ? 'Traits' : 'Mutations',
-            icon: { typeId: `overlay_male_mutation_${id}`, symbol: pts > 0 ? '+' : pts < 0 ? '-' : '~', color: pts > 0 ? 'light_green' : pts < 0 ? 'light_red' : 'yellow' },
+            // A glyph by effect, not UltiCa's body overlays: those are whole figures and read as noise here.
+            icon: { typeId: `mutation-glyph:${id}`, symbol: pts > 0 ? '+' : pts < 0 ? '-' : '~', color: pts > 0 ? 'light_green' : pts < 0 ? 'light_red' : 'yellow' },
             name: mut.name(id),
             tone: (pts > 0 ? 'good' : pts < 0 ? 'bad' : undefined) as Tone | undefined,
             chips: cats.slice(0, 1).map((c) => chip(catName(c), 'magic')),
@@ -384,6 +389,7 @@ export function openAutodocPanel(game: Game, mods: BodyMods, cbms: () => { item:
     },
   });
   panel.el.classList.add('ix-autodoc-win');
+  centreFirstTime(panel);
   const t = tabs([{ id: 'install', label: 'Install a CBM' }, { id: 'remove', label: 'Remove a bionic' }], tab, (id) => {
     tab = id as typeof tab;
     sel = null;
@@ -424,7 +430,7 @@ export function openAutodocPanel(game: Game, mods: BodyMods, cbms: () => { item:
             const chance = e.item ? surgeryPlan(bio, e.item, (id) => p.traitName(id)).chance : bio.successChance(e.id, true);
             const blocked = e.item ? surgeryPlan(bio, e.item, (id) => p.traitName(id)).blocker : null;
             const row = h('div', { class: `ix-brow${e.id === sel ? ' selected' : ''}`, data: { id: e.id } },
-              iconEl({ typeId: e.item?.typeId ?? e.id, symbol: '⌂', color: 'light_blue' }, 'row'),
+              iconEl(cbmIcon(e.item?.typeId ?? e.id), 'row'),
               h('span', { class: `ix-brow-name${blocked ? ' ui2-dim' : ''}`, text: e.name }),
               h('span', { class: 'ix-brow-chips' }, blocked ? chip("can't", 'bad', blocked) : chip(`${chance}%`, chance >= 75 ? 'good' : chance >= 40 ? 'warn' : 'bad', 'Chance the operation goes without complications')));
             row.addEventListener('click', () => ((sel = e.id), draw()));
@@ -440,7 +446,7 @@ export function openAutodocPanel(game: Game, mods: BodyMods, cbms: () => { item:
   function installCard(it: Item): HTMLElement[] {
     const plan = surgeryPlan(bio, it, (id) => p.traitName(id));
     const out: HTMLElement[] = [
-      h('div', { class: 'ix-bcard-head' }, iconEl({ typeId: it.typeId, symbol: '⌂', color: 'light_blue' }, 'grid'), h('div', {}, h('div', { class: 'ix-dlg-name', text: plan.name }), h('div', { class: 'ui2-dim ui2-small', text: `Difficulty ${plan.difficulty}` }))),
+      h('div', { class: 'ix-bcard-head' }, iconEl(cbmIcon(it.typeId), 'grid'), h('div', {}, h('div', { class: 'ix-dlg-name', text: plan.name }), h('div', { class: 'ui2-dim ui2-small', text: `Difficulty ${plan.difficulty}` }))),
       h('div', { class: 'ix-odds' },
         meter('Success', plan.chance / 100, `${plan.chance}%`, plan.chanceTone, { cls: 'ix-odds-meter', title: 'BN: the Autodoc always installs; a failed roll means complications' }),
         h('div', { class: `ix-odds-risk tone-${plan.chanceTone}`, text: plan.chance >= 100 ? 'No risk of complications.' : `${100 - plan.chance}% chance of complications.` })),
@@ -467,7 +473,7 @@ export function openAutodocPanel(game: Game, mods: BodyMods, cbms: () => { item:
     const chance = bio.successChance(id, true);
     const tone: Tone = chance >= 75 ? 'good' : chance >= 40 ? 'warn' : 'bad';
     return [
-      h('div', { class: 'ix-bcard-head' }, iconEl({ typeId: id, symbol: '⌂', color: 'light_blue' }, 'grid'), h('div', { class: 'ix-dlg-name', text: bio.name(id) })),
+      h('div', { class: 'ix-bcard-head' }, iconEl(cbmIcon(id), 'grid'), h('div', { class: 'ix-dlg-name', text: bio.name(id) })),
       h('div', { class: 'ix-odds' }, meter('Success', chance / 100, `${chance}%`, tone, { cls: 'ix-odds-meter' })),
       factGrid([['Time under', operationTime(Math.max(1, bio.idx.difficulty(id)) * 20 * 60)], ['On success', 'The used module is set down next to you (not sterile).'], ['On failure', 'It stays in; you are hurt (pain).']]),
       button('Begin the removal', () => void begin(), { tone: 'accent', key: 'Enter' }),

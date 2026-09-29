@@ -455,6 +455,27 @@ tests/               vitest unit tests (pure logic, no DOM/WebGL)
   discover(id), queue(), checkCraftable(), run(), export(), import(json), reset()}`. Tests:
   tests/progression.test.ts; real input: `tools/realinput.ts --only title,onboarding,newgame`.
 
+### Interaction screens (src/screens, ui2; installed by `installScreens` in main.ts)
+- Replace the curses NPC / vehicle / body-mod / achievement windows through seams those systems
+  expose: `npcScreens` (npcs.ts: dialogue, trade, missionLog, chat, pickItem), `vehicleScreens`
+  (vehicle_ui.ts: partMenu, info, controls, legacyDashboard), `autodocScreen` (mutbio.ts), key
+  re-registration (`p`, `[`, `_`), and `src/ui/achievements_ui.ts` lazy-loading
+  `src/screens/achievements.ts`. Pure rules in `src/screens/logic/*` (tests/screens.test.ts).
+- Dialogue (`dialogue.ts`): portrait, opinion chip, typewriter line (Options: text speed), answers
+  1–9/0 with trial chips (`ResponseView.trial` / `.action` / `.plain` from talk.ts), `?` shows
+  hidden answers, job-offer card, Scene/Book layouts. Pauses with the ui2 pause setting.
+- Trade (`trade.ts`): drag goods onto You give / You get; the deal is `TradeSession.commit` (one
+  moves transaction; property test tests/trade_screen.test.ts, `TRADE_SEEDS=400` soak).
+- Missions (`missions.ts`): log + Track. **Map markers**: `src/game/mapmarkers.ts`
+  (`mapMarkerProviders.push(() => MapMarker[])`, `mapMarkers()`); missions export their targets.
+- Vehicles (`vehicle.ts`): parts diagram / gauges / controls panel, cargo panel (the inventory
+  screens can take over with `cargoPanel.open = (game, v, part) => …`), driving HUD.
+- Body (`bodymods.ts`): bionics (power bar, ON/OFF), mutations, martial arts, Autodoc (odds, risks,
+  anesthetic, time under; `beginInstall` / `beginUninstall` in mutbio_ui.ts do the operation).
+- Debug: `cdda.screens.{dialogue(), trade(), autodoc(), markers(), trackMission(uid), openMissions(uid?),
+  vehicle(dx, dy), bionics(), mutations(), martialArts(), prefs}`, `cdda.openAutodoc()`. Real input:
+  `tools/realinput.ts --only talk,trade,missions,vehicle,body,autodoc,scores`.
+
 ### Combat feel layer (src/game/combatfeel.ts, wired by src/feel.ts; see docs/COMBAT_FEEL.md)
 - All feel constants live in `FEEL` (presets `FEEL_PRESETS.accessible|classic`, `setFeelDifficulty(d, overrides)`
   is the difficulty hook). The CDDA/BN math stays underneath; this layer only times and targets it.

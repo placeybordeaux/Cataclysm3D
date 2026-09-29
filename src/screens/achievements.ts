@@ -4,6 +4,7 @@ import type { AchievementsHandle } from '../achievements';
 import { h, iconEl, openPanel, tabs, toast, type Panel } from '../ui2';
 import { progressRow } from '../progression/newgame';
 import { durationText } from '../ui/format';
+import { centreFirstTime } from './common';
 
 // BN scores_ui (`)`), in the look of the Survival Journal (src/progression/journal.ts): tabs
 // Achievements / Conducts / Scores / Kills, each achievement an entry card (green edge when
@@ -66,7 +67,7 @@ export function openAchievements(game: Game, ah: AchievementsHandle): Panel {
     footer: `←→ tabs · ↑↓ scroll · ${game.keys.keyFor('achievements')} / Esc close`,
     onKey: (e) => {
       if (e.key === game.keys.keyFor('achievements') && !e.repeat) return panel.close(), true;
-      const order: Tab[] = ['achievements', 'conducts', 'scores', 'kills'];
+      const order: Tab[] = (['achievements', 'conducts', 'scores', 'kills'] as Tab[]).filter((x) => x !== 'conducts' || all(true).length);
       const i = order.indexOf(tb.active as Tab);
       if (e.key === 'ArrowRight' || e.key === 'Tab') return tb.set(order[(i + 1) % order.length]), true;
       if (e.key === 'ArrowLeft') return tb.set(order[(i + order.length - 1) % order.length]), true;
@@ -79,16 +80,18 @@ export function openAchievements(game: Game, ah: AchievementsHandle): Panel {
   const tb = tabs(
     [
       { id: 'achievements', label: 'Achievements', badge: `${done(false)}/${all(false).length}` },
-      { id: 'conducts', label: 'Conducts', badge: `${done(true)}/${all(true).length}` },
+      // BN ships no conducts: no empty tab for them.
+      ...(all(true).length ? [{ id: 'conducts', label: 'Conducts', badge: `${done(true)}/${all(true).length}` }] : []),
       { id: 'scores', label: 'Scores' },
       { id: 'kills', label: 'Kills', badge: kills ? String(kills) : undefined },
     ],
-    lastTab,
+    lastTab === 'conducts' && !all(true).length ? 'achievements' : lastTab,
     (id) => {
       lastTab = id as Tab;
       draw();
     },
   );
+  centreFirstTime(panel);
   const head = h('div', { class: 'pg-entry-meta' });
   const list = h('div', { class: 'pg-jlist', attrs: { 'data-testid': 'achievements-list' } });
   panel.body.append(h('div', { class: 'pg-journal' }, head, tb.el, list));

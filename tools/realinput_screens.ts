@@ -226,8 +226,7 @@ export function screenScenarios(c: ScreensCtx): Scenario[] {
       await sleep(400);
       v = await u();
       check('agreeing starts the operation (the screen closes)', !v.panels.includes('autodoc'), v.panels);
-      check('…as a long activity', await js<boolean>(`!!cdda.game.activities.current`), await js(`cdda.game.activities.current?.name ?? null`));
-      await js(`cdda.game.activities.current && cdda.game.activities.cancel('test done')`);
+      check('…and the Autodoc begins (time warps through the operation)', await js<boolean>(`cdda.ui.log().some(l => /configuring the Autodoc/.test(l))`), await js(`cdda.ui.log().slice(-3)`));
     }],
     ['scores', 'achievements: ) opens the journal-style panel, tabs by keys', async () => {
       await c.toGameplay();

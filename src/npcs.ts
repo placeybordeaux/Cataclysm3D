@@ -375,7 +375,8 @@ function installDebug(api: DebugApi, game: Game, sys: NpcSystem, wg: WorldGenera
         bx0 = Math.min(bx0, sp.x + dx), by0 = Math.min(by0, sp.y + dy), bx1 = Math.max(bx1, sp.x + dx), by1 = Math.max(by1, sp.y + dy);
       }
     if (bx0 === Infinity) (bx0 = bx1 = sp.x), (by0 = by1 = sp.y);
-    const merchant = sys.npcs.find((n) => n.templateId === 'free_merchants_merchant');
+    // BN's refugee center merchant is evac_merchant; DDA's was free_merchants_merchant.
+    const merchant = sys.npcs.find((n) => n.templateId === 'evac_merchant' || n.templateId === 'free_merchants_merchant');
     const anchor = where === 'merchant' ? merchant : where === 'lobby' ? sys.npcs.find((n) => n.templateId === 'refugee_beggar1') ?? merchant : null;
     let x: number, y: number;
     if (anchor) {

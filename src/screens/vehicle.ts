@@ -18,7 +18,7 @@ import {
   attachTooltip, button, capacityBar, flashNote, fmtVolume, h, iconEl, itemTooltip, makeDraggable, openPanel, registerDropTarget, ui2Layers,
   type DragPayload, type Panel,
 } from '../ui2';
-import { chip, itemView, meter, section } from './common';
+import { centreFirstTime, chip, itemView, meter, section } from './common';
 import { conditionWord, driveReadout, fuelGauges, healthTone, listOrder, partHealth, vehicleDiagram } from './logic/vehicle';
 import { hotwire, takeControls } from '../ui/vehicle_ui';
 
@@ -52,7 +52,7 @@ export function openVehiclePanel(game: Game, v: Vehicle, focus?: { mx: number; m
     group: 'vehicle',
     pauses: true,
     width: 'min(calc(var(--fs) * 58), 95vw)',
-    height: 'min(86vh, calc(var(--fs) * 36))',
+    // Height follows the content (a bicycle is small), capped by the CSS max-height.
     footer: 'Click a square to inspect it · arrows move · Enter: its main action · Esc close',
     onKey,
     onClose: () => {
@@ -61,6 +61,7 @@ export function openVehiclePanel(game: Game, v: Vehicle, focus?: { mx: number; m
     },
   });
   panel.el.classList.add('ix-veh-win');
+  centreFirstTime(panel);
   const diagram = h('div', { class: 'ix-veh-diagram', attrs: { 'data-testid': 'vehicle-diagram' } });
   const legend = h('div', { class: 'ix-veh-legend' }, chip('intact', 'good'), chip('worn', 'warn'), chip('damaged', 'bad'), chip('broken', 'dim'));
   const side = h('div', { class: 'ix-veh-side' });
@@ -220,6 +221,7 @@ export function openCargoPanel(game: Game, v: Vehicle, part: VehiclePart): Panel
     footer: 'Drag between the lists · click moves the whole stack · wheel while dragging: amount · Esc close',
     onClose: () => unregs.forEach((u) => u()),
   });
+  centreFirstTime(panel);
   const cap = capacityBar('Volume', fmtVolume);
   const cargoList = h('div', { class: 'ix-tlist', attrs: { 'data-testid': 'cargo-list' } });
   const invList = h('div', { class: 'ix-tlist', attrs: { 'data-testid': 'cargo-inv' } });

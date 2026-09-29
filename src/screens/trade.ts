@@ -18,7 +18,7 @@ import {
   attachTooltip, button, countPrompt, flashNote, h, iconEl, itemTooltip, makeDraggable, openContextMenu, openPanel, registerDropTarget, toast,
   type DragPayload, type DropVerdict, type MenuItem, type Panel,
 } from '../ui2';
-import { chip, itemView, portrait } from './common';
+import { centreFirstTime, chip, itemView, portrait } from './common';
 import { balanceMeter, money, reaction } from './logic/trade';
 import { sfx } from '../audio/sfx';
 
@@ -61,6 +61,7 @@ export function openTradePanel(ctx: TradeCtx, n: Npc, cost = 0, onDone?: (traded
     },
   });
   panel.el.classList.add('ix-trade-win');
+  centreFirstTime(panel);
 
   // ---------------------------------------------------------------- layout
   const colYours = h('div', { class: 'ix-tcol yours' });
@@ -75,7 +76,7 @@ export function openTradePanel(ctx: TradeCtx, n: Npc, cost = 0, onDone?: (traded
   const table = h(
     'div',
     { class: 'ix-table' },
-    h('div', { class: 'ix-who-mini' }, portrait(game, ctx.renderer, n, 1), h('div', {}, h('div', { class: 'ix-dlg-name', text: n.displayName() }), reactEl)),
+    h('div', { class: 'ix-who-mini' }, portrait(game, ctx.renderer, n, 1), h('div', {}, h('div', { class: 'ix-dlg-name', text: n.name }), reactEl)),
     h('div', { class: 'ix-zone-title', text: 'You give' }), giveZone,
     meterEl,
     h('div', { class: 'ix-zone-title', text: 'You get' }), getZone,
@@ -107,7 +108,13 @@ export function openTradePanel(ctx: TradeCtx, n: Npc, cost = 0, onDone?: (traded
     const src = side === 'yours' || side === 'give' ? s.yours : s.theirs;
     if (side === 'give' || side === 'get') return src.filter((e) => e.count > 0);
     const f = filters[side].toLowerCase();
-    return src.filter((e) => e.count < e.max && (!f || e.item.name().toLowerCase().includes(f)));
+    // Grouped by where the goods are (one header per group), the session's order within.
+    const rank = (e: TradeEntry) => ['stock', 'npc', 'carried', 'worn', 'wielded'].indexOf(e.source);
+    return src
+      .filter((e) => e.count < e.max && (!f || e.item.name().toLowerCase().includes(f)))
+      .map((e, i) => [e, i] as const)
+      .sort((a, b) => rank(a[0]) - rank(b[0]) || a[1] - b[1])
+      .map(([e]) => e);
   };
 
   function row(e: TradeEntry, side: Side, i: number): HTMLElement {
@@ -121,7 +128,7 @@ export function openTradePanel(ctx: TradeCtx, n: Npc, cost = 0, onDone?: (traded
       'div',
       { class: `ix-trow${sel ? ' selected' : ''}`, data: { side, i: String(i) } },
       iconEl(view.icon, 'row'),
-      h('span', { class: 'ix-trow-name' }, h('span', { text: view.name }), !e.item.countByCharges && units > 1 ? h('span', { class: 'ui2-row-count', text: ` ×${units}` }) : null),
+      h('span', { class: 'ix-trow-name' }, h('span', { text: e.item.countByCharges ? e.item.baseName(1) : view.name }), units > 1 ? h('span', { class: 'ui2-row-count', text: ` ×${units}` }) : null),
       h('span', { class: 'ix-trow-price' }, h('span', { text: money(value) }), each && !onTable ? h('span', { class: 'ui2-dim', text: ` (${money(e.price / e.max)} ea)` }) : null),
     );
     if (e.source === 'worn' || e.source === 'wielded') el.append(chip(e.source === 'worn' ? 'worn' : 'held', 'dim'));
@@ -225,6 +232,7 @@ export function openTradePanel(ctx: TradeCtx, n: Npc, cost = 0, onDone?: (traded
         h('div', { class: 'ix-bal-mid' }),
         h('div', { class: `ix-bal-needle tone-${m.tone}`, style: { left: pct(m.needle) } }),
       ),
+      h('div', { class: 'ix-bal-labels ui2-small' }, h('span', { text: `◂ ${n.name} comes out ahead` }), h('span', { text: 'you come out ahead ▸' })),
       h('div', { class: `ix-bal-text tone-${m.tone}`, text: m.text + (cost > 0 ? `  (includes ${money(cost)} you owe for the service)` : '') }),
     );
     reactEl.className = `ix-react mood-${r.mood} tone-${r.tone}`;

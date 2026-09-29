@@ -8,7 +8,7 @@ import type { Npc } from '../game/npc';
 import type { Renderer } from '../render/renderer';
 import { atlasOf } from '../ui/context';
 import { portraitCanvas } from '../ui/npc_ui';
-import { h, type ItemView, type Tone } from '../ui2';
+import { h, rememberedPosition, type ItemView, type Panel, type Tone } from '../ui2';
 
 /** CDDA colour names → ui2 tones (the palette is graded; raw CDDA colours would clash). */
 const TONE_OF: Record<string, Tone | 'bright'> = {
@@ -102,8 +102,8 @@ export function portrait(game: Game, renderer: Renderer | null, n: Npc, k = 2): 
   // Drawn 1:1 and scaled in CSS by an integer multiple of the UI pixel, so it stays crisp.
   const cv = renderer ? portraitCanvas(atlasOf(renderer), n, (id) => game.data.items[id]?.looks_like as string | undefined, 1) : null;
   if (cv) {
-    cv.style.width = `calc(${cv.width}px * var(--u) * ${k})`;
-    cv.style.height = `calc(${cv.height}px * var(--u) * ${k})`;
+    cv.style.width = `calc(${cv.width} * var(--u) * ${k})`;
+    cv.style.height = `calc(${cv.height} * var(--u) * ${k})`;
     well.append(cv);
   } else well.append(h('span', { class: 'ix-portrait-glyph', text: '@' }));
   return well;
@@ -114,4 +114,17 @@ export function hours(h: number): string {
   if (h < 1) return `${Math.max(1, Math.round(h * 60))} min`;
   if (h < 48) return `${Math.floor(h)} h${Math.round((h % 1) * 60) ? ` ${Math.round((h % 1) * 60)} min` : ''}`;
   return `${Math.round(h / 24)} days`;
+}
+
+/**
+ * Centre a panel the first time it opens (until the player moves it: then its remembered
+ * spot wins). The ui2 default cascade from the top-left put big screens under the toasts.
+ */
+export function centreFirstTime(panel: Panel): Panel {
+  if (rememberedPosition(panel.id)) return panel;
+  requestAnimationFrame(() => {
+    const r = panel.el.getBoundingClientRect();
+    panel.moveTo((window.innerWidth - r.width) / 2, Math.max(8, (window.innerHeight - r.height) / 2.2));
+  });
+  return panel;
 }

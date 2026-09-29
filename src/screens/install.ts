@@ -12,7 +12,7 @@ import { npcScreens } from '../npcs';
 import type { MissionInstance } from '../game/missions';
 import { mapMarkerProviders, mapMarkers } from '../game/mapmarkers';
 import { registerOption } from '../ui/options';
-import { toast } from '../ui2';
+import { toast, worldContextProviders } from '../ui2';
 import { dialoguePrefs, openDialoguePanel, type DialogueHandle } from './dialogue';
 import { openTradePanel, type TradeHandle } from './trade';
 import { missionTracking, openMissionsPanel } from './missions';
@@ -22,7 +22,8 @@ import type { TextSpeed } from './logic/typewriter';
 import type { BodyMods } from '../game/bodymods';
 import { vehicleScreens } from '../ui/vehicle_ui';
 import { autodocScreen } from '../mutbio';
-import { driveHud, openVehiclePanel } from './vehicle';
+import { driveHud, openCargoPanel, openVehiclePanel, cargoPanel } from './vehicle';
+import { has } from '../game/vehicle';
 import { openAutodocPanel, openBionicsPanel, openMartialArtsPanel, openMutationsPanel, type AutodocHandle } from './bodymods';
 
 export interface ScreensDeps {
@@ -103,6 +104,23 @@ export function installScreens(game: Game, renderer: Renderer, deps: ScreensDeps
     if (v) openVehiclePanel(g, v);
   };
   vehicleScreens.legacyDashboard = false;
+  // Right-click (free cursor) or the world-menu key on a vehicle: the whole panel is one entry
+  // away even where `e` means "open this door".
+  worldContextProviders.push((t) => {
+    const o = t.kind === 'vehicle' ? game.vehicles?.at(t.x, t.y, t.z) : null;
+    if (!o) return [];
+    const parts = o.v.partsAt(o.mx, o.my);
+    const door = parts.find((q) => has(q, 'OPENABLE'));
+    const cargo = parts.find((q) => has(q, 'CARGO'));
+    const covered = !!door && !door.open && !!cargo && !has(cargo, 'CARGO_PASSABLE');
+    const near = Math.hypot(t.x + 0.5 - game.player.x, t.y + 0.5 - game.player.y) <= 2.5;
+    const far = near ? undefined : 'Too far away';
+    return [
+      { label: `Examine the ${o.v.name}`, primary: !door, time: 0, action: () => void openVehiclePanel(game, o.v, { mx: o.mx, my: o.my }) },
+      ...(door ? [{ label: `${door.open ? 'Close' : 'Open'} the ${door.def.name}`, primary: true, time: 1, disabled: far, action: () => game.message(game.vehicles!.toggleDoor(o.v, o.mx, o.my) ?? '') }] : []),
+      ...(cargo ? [{ label: `Look in the ${cargo.def.name} (${cargo.items.length})`, disabled: far ?? (covered ? `The ${door!.def.name} is closed` : undefined), action: () => void (cargoPanel.open ?? openCargoPanel)(game, o.v, cargo) }] : []),
+    ];
+  });
   const hud = driveHud(game);
   renderer.beforeRender.push(() => hud.update());
 
