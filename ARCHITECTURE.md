@@ -203,6 +203,34 @@ tests/               vitest unit tests (pure logic, no DOM/WebGL)
   self-install; `e` on an Autodoc. Save section `bodymods` (order 15). Debug: `cdda.mutate(id|cat)`,
   `cdda.mutations()`, `cdda.addVitamin(id,n)`, `cdda.installBionic(id,{surgery})`, `cdda.bionics()`,
   `cdda.givePower(kj)`, `cdda.toggleBionic(id)`, `cdda.spawnAutodoc(dx,dy)`, `cdda.giveCbm(id)`.
+### Seasons, foraging, farming, water (src/game/{sun,harvest,farming,water,woodcut,actualize}.ts, src/nature.ts)
+- `sun.ts` is the one sun: `sunPosition(seconds)` (CDDA calendar.cpp altitude/azimuth, Boston),
+  `sunTimes(day)` → sunrise/sunset/dawn/dusk hours (≈06–18 equinox, 04:20–19:40 midsummer,
+  07:25–16:35 midwinter), `seasonAt(seconds)`. vision.ts and the renderer sky (`SkyState.update(hour,
+  {sunrise, sunset, altitude, azimuth, season})`: keyframes remapped to the real day + seasonal tints)
+  both use it. Chunk meshes/decor rebuild on `clock.season` change; the atlas `_season_<s>` tiles give
+  snow cover, bare/autumn trees.
+- `e` on nature tiles comes from `interactionProviders` (interact.ts hook): harvest_by_season
+  (`harvest.ts`, misc.harvest rolls, `transforms_into` harvested variants), underbrush foraging
+  (forage_<season> groups), planting in `t_dirtmound`/planters, crop examine/fertilize/harvest
+  (`farming.ts`: seed item hidden on the tile, `vars.planted` = birthday, stage = f(age)), fill
+  containers from water, fish, chop trees/trunks with an axe.
+- Tool-quality usages (`qualityUsages` in inventory.ts, tool_qualities.json `usages`): AXE → CHOP_TREE /
+  CHOP_LOGS / LUMBER, SAW_W 2 → LUMBER, DIG → MAKEMOUND / DIG (pit via construction), FISHING_ROD →
+  FISH_ROD; `a` on the tool offers what's possible where you stand.
+- `actualize.ts` `Actualizer` (like CDDA map::actualize): chunks within 3 of the player are brought up to
+  date every 10 game minutes — HARVESTED terrain regrows next season, crops grow, map items rot by the
+  hourly outdoor temperature (+3 °C indoors; unpowered fridges don't help; mapgen food ages from day 0).
+  Save section `nature` (per-chunk stamps). `natureOf(game).actualizer.sweep()` forces it.
+- `water.ts`: `fillableContainers/fillContainer`, fishing (`startFishing`: CDDA per-turn 1/600000 odds from
+  fish populations of FISHABLE monsters in the connected water, else hidden GROUP_FISH fish; catches are
+  corpses to butcher), swimming (`updateSwimming`: wet, "Dive into the water?" with items that would
+  be ruined, sink when swim_speed ≥ 500 or winded, oxygen 30+2·str, drowning damage);
+  `renderer.rig.eyeOffset` puts the camera at the water line.
+- Debug: `cdda.setSeason(s, day?)`, `cdda.season()`, `cdda.sunTimes(day?)`, `cdda.plant(seed, dx?, dy?)`,
+  `cdda.growPlants(days)`, `cdda.forage()`, `cdda.findHarvest(re)`, `cdda.harvest(x, y)`,
+  `cdda.fish(seconds, {run})`, `cdda.chopTree(instant)`, `cdda.findOpenGround(n)`, `cdda.dive(x, y)`,
+  `cdda.swim()`, `cdda.actualize()`, `cdda.natureInteractions(x, y)`, `cdda.fillable()`.
 
 ### Extension points (prefer these over editing someone else's code)
 

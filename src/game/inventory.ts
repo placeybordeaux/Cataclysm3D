@@ -35,12 +35,23 @@ export interface InventoryJSON {
   worn: ItemJSON[];
 }
 
-/** Normalized use_action list: strings become { type }. */
+/**
+ * Tool-quality usages (tool_qualities.json `usages`: an AXE 1 tool can CHOP_TREE, a DIG 1
+ * tool can MAKEMOUND...). Registered by the system that handles them (src/game/nature.ts),
+ * so an item only becomes "activatable" for usages somebody implements.
+ */
+export const qualityUsages: { quality: string; level: number; type: string }[] = [];
+
+/** Normalized use_action list: strings become { type }; then usages granted by qualities. */
 export function useActions(def: ItemDef): { type: string; [k: string]: any }[] {
   const raw = def.use_action;
-  if (!raw) return [];
-  const list = Array.isArray(raw) ? raw : [raw];
-  return list.map((u) => (typeof u === 'string' ? { type: u } : (u as { type: string })));
+  const list = raw ? (Array.isArray(raw) ? raw : [raw]) : [];
+  const out = list.map((u) => (typeof u === 'string' ? { type: u } : (u as { type: string })));
+  if (qualityUsages.length && def.qualities?.length) {
+    for (const [q, lvl] of def.qualities as [string, number][])
+      for (const u of qualityUsages) if (u.quality === q && lvl >= u.level && !out.some((o) => o.type === u.type)) out.push({ type: u.type });
+  }
+  return out;
 }
 
 /** material ids of an item (CDDA allows ["steel"] or [{type, portion}]). */

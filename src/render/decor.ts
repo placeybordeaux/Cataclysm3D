@@ -98,7 +98,9 @@ export class DecorLayer {
         if (!kind || c.furn[li] !== 0 || c.items.has(li)) continue;
         const seed = pointSeed(x * 3 + 1, y * 7 + 2) >>> 0;
         // lawns get sparse tufts; long/tall grass is dense
-        const n = kind === 1 ? [0, 1, 1, 2][seed & 3] : kind === 2 ? 2 + (seed & 1) : 3 + (seed & 1);
+        let n = kind === 1 ? [0, 1, 1, 2][seed & 3] : kind === 2 ? 2 + (seed & 1) : 3 + (seed & 1);
+        // under snow only the taller dead stalks poke through
+        if (this.season === 'winter') n = kind === 1 ? 0 : Math.ceil(n / 3);
         for (let k = 0; k < n; k++) {
           const s = (seed >>> (k * 5)) ^ (k * 0x9e3779b9);
           const jx = ((s & 255) / 255) * 0.8 + 0.1, jy = (((s >>> 8) & 255) / 255) * 0.8 + 0.1;

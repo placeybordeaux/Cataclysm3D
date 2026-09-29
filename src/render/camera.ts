@@ -27,6 +27,8 @@ export class CameraRig {
   thirdDistance = 2.6;
   /** Systems that carry the player without walking (driving) switch the head-bob off. */
   suppressBob = false;
+  /** Added to the eye height (metres): swimming puts the head at the water line (src/nature.ts). */
+  eyeOffset = 0;
   private bobPhase = 0;
   private bobAmp = 0;
   private lastX = NaN;
@@ -45,7 +47,7 @@ export class CameraRig {
   update(dt: number, p: PlayerAvatar, map: GameMap, aspect: number, lowResHeight: number): void {
     const cam = this.camera;
     cam.aspect = aspect;
-    const eyeH = p.crouching ? EYE_CROUCH : EYE;
+    const eyeH = (p.crouching ? EYE_CROUCH : EYE) + this.eyeOffset;
     const base = p.z * LEVEL_HEIGHT;
 
     // head-bob amplitude follows actual ground speed (so bumping a wall doesn't bob)
