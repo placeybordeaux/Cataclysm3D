@@ -40,7 +40,8 @@ function tracker(specials?: Record<string, string>) {
   t.startSeconds = () => 0;
   const done: string[] = [];
   t.onCompleted = (a) => done.push(a.id);
-  t.emit('game_avatar_new', { avatar_id: 'avatar', is_new_game: true, is_debug: false });
+  // BN event::game_start carries the avatar id every "avatar_*" statistic keys on.
+  t.emit('game_start', { avatar_id: 'avatar' });
   t.flush();
   const kill = (mon: string, n = 1) => {
     for (let i = 0; i < n; i++) t.emit('character_kills_monster', { killer: 'avatar', victim_type: mon });
@@ -49,11 +50,16 @@ function tracker(specials?: Record<string, string>) {
   return { t, done, kill, at: (s: number) => void (now = s) };
 }
 
-describe('achievements (CDDA achievements.json semantics)', () => {
-  it('counts zombie kills through avatar_kills_monster -> species transformations', () => {
+describe('achievements (BN achievements.json semantics)', () => {
+  it('is the Bright Nights set: 95 achievements, no conducts', () => {
+    expect(Object.keys(ach.achievements).length).toBe(95);
+    expect(Object.values(ach.achievements).some((a) => a.conduct)).toBe(false);
+  });
+
+  it('counts zombie kills (species transformation + kill_requirements)', () => {
     const { t, done, kill } = tracker();
     kill('mon_dog');
-    expect(t.value('num_avatar_monster_kills')).toBe(1);
+    expect(t.value('num_avatar_kills')).toBe(1);
     expect(t.value('num_avatar_zombie_kills')).toBe(0);
     expect(done).not.toContain('achievement_kill_zombie');
     kill('mon_zombie');
@@ -68,15 +74,14 @@ describe('achievements (CDDA achievements.json semantics)', () => {
 
   it('kill-count achievements unlock at their target and hidden_by reveals the next tier', () => {
     const { t, done, kill } = tracker();
-    const k100 = ach.achievements.achievement_kill_100_monsters;
+    const k100 = ach.achievements.achievement_kill_monsters_100;
     expect(t.isHidden(k100)).toBe(true);
     kill('mon_zombie', 9);
-    expect(done).not.toContain('achievement_kill_10_monsters');
-    kill('mon_zombie');
-    expect(done).toContain('achievement_kill_10_monsters');
+    expect(done).not.toContain('achievement_kill_monsters_10');
+    kill('mon_dog');
+    expect(done).toContain('achievement_kill_monsters_10');
     expect(t.isHidden(k100)).toBe(false);
-    expect(t.requirementLines(k100)[0]?.text).toMatch(/^10\/100 /);
-    expect(t.isHidden(ach.achievements.achievement_kill_1000_monsters)).toBe(true);
+    expect(t.completion('achievement_kill_monsters_100')).toBe('pending');
   });
 
   it('time_constraint <=: a kill in the first minute completes, a later one fails', () => {
@@ -91,13 +96,13 @@ describe('achievements (CDDA achievements.json semantics)', () => {
     expect(b.done).not.toContain('achievement_kill_in_first_minute');
   });
 
-  it('survive a day: needs a wake-up after 16 hours (time_constraint >=)', () => {
+  it('survive a day: a wake-up once a day has passed (time_constraint >=)', () => {
     const { t, done, at } = tracker();
     at(10 * 3600);
     t.emit('character_wakes_up', { character: 'avatar' });
     t.flush();
     expect(t.completion('achievement_survive_one_day')).toBe('pending');
-    at(17 * 3600);
+    at(25 * 3600);
     t.emit('character_wakes_up', { character: 'avatar' });
     t.flush();
     expect(done).toContain('achievement_survive_one_day');
@@ -105,40 +110,40 @@ describe('achievements (CDDA achievements.json semantics)', () => {
     expect(t.completion('achievement_survive_7_days')).toBe('pending');
   });
 
-  it('conducts never complete, and fail once broken', () => {
-    const { t, done, kill } = tracker();
-    const pacifist = ach.achievements.conduct_zero_kills;
-    expect(pacifist.conduct).toBe(true);
+  it('Pacifist fails with the first kill (kill_requirements <= 0 can only fail)', () => {
+    const { t, kill } = tracker();
     t.emit('character_wakes_up', { character: 'avatar' });
     t.flush();
-    expect(t.completion('conduct_zero_kills')).toBe('pending');
+    expect(t.completion('achievement_kill_pacifist')).toBe('pending');
     kill('mon_zombie');
-    expect(t.completion('conduct_zero_kills')).toBe('failed');
-    expect(done).not.toContain('conduct_zero_kills');
-    // "Merciful" is hidden by Pacifist until Pacifist fails
-    expect(t.isHidden(ach.achievements.conduct_zero_character_kills)).toBe(false);
+    expect(t.completion('achievement_kill_pacifist')).toBe('failed');
   });
 
-  it('movement statistics: z extremes, running, and entering an overmap special', () => {
-    const { t, done } = tracker({ '5,5,0': 'evac_center' });
+  it('movement statistics: z extremes and running', () => {
+    const { t } = tracker();
     t.emit('avatar_moves', { mount: '', terrain: 't_floor', movement_mode: 'run', underwater: false, z: 0 }, 5);
     t.emit('avatar_moves', { mount: '', terrain: 't_stairs_up', movement_mode: 'walk', underwater: false, z: -3 });
     t.flush();
     expect(t.value('num_moves_ran')).toBe(5);
     expect(t.value('num_moves_walked')).toBe(1);
     expect(t.value('min_move_z')).toBe(-3);
-    t.emit('avatar_enters_omt', { pos: '5,5,0', oter_id: 'evac_center_1' });
+  });
+
+  it('mutation thresholds and skills (skill_requirements)', () => {
+    const { t, done } = tracker();
+    t.emit('crosses_mutation_threshold', { character: 'avatar', category: 'LIZARD' });
     t.flush();
-    expect(t.value('last_overmap_special_avatar_entered')).toBe('evac_center');
-    const home = Object.values(ach.achievements).find((a) => a.requirements.some((r) => Array.isArray(r.target) && r.target[1] === 'evac_center'))!;
-    expect(done).toContain(home.id);
+    const lizard = Object.values(ach.achievements).find((a) => a.requirements.some((r) => r.event_statistic === 'num_avatar_mutation_threshold_lizard'))!;
+    expect(done).toContain(lizard.id);
+    const skill = Object.values(ach.achievements).find((a) => a.skill_requirements?.some((s) => s.skill === 'melee'))!;
+    expect(t.achievementSupported(skill)).toBe(true);
   });
 
   it('marks achievements fed by events this port never emits as unsupported', () => {
     const { t } = tracker();
-    const plane = Object.values(ach.achievements).find((a) => a.requirements.some((r) => r.event_statistic === 'num_moves_acft_ctrl_direct'))!;
-    expect(t.achievementSupported(plane)).toBe(false);
-    expect(t.achievementSupported(ach.achievements.achievement_kill_zombie)).toBe(true);
+    const supported = Object.values(ach.achievements).filter((a) => t.achievementSupported(a));
+    expect(supported.length).toBe(Object.keys(ach.achievements).length);
+    expect(t.achievementSupported({ id: 'x', name: 'x', requirements: [{ event_statistic: 'avatar_num_headshots', is: '>=', target: 1 }] })).toBe(false);
   });
 
   it('round-trips through JSON (save/load)', () => {
@@ -182,13 +187,13 @@ describe('achievements install (game events -> CDDA events)', () => {
     game.events.emit('creatureDied', { creature: { type: { id: 'mon_zombie' } }, killer: game.player });
     game.tick(1 / 30);
     expect(h.tracker.completion('achievement_kill_zombie')).toBe('completed');
-    expect(msgs.some((m) => m.includes('One down, billions to go'))).toBe(true);
+    expect(msgs.some((m) => m.includes('One Down, Billions to Go'))).toBe(true);
     game.player.x += 1;
     game.tick(1 / 30);
     expect(h.tracker.value('num_moves')).toBeGreaterThanOrEqual(1);
     game.player.setSkill('melee', 4);
     for (let i = 0; i < 20; i++) game.tick(1 / 30);
-    expect(h.tracker.value('num_gains_melee_level_4')).toBe(1);
+    expect(h.tracker.value('num_gains_melee')).toBeGreaterThanOrEqual(1);
     expect(h.completedThisRun().map((a) => a.id)).toContain('achievement_kill_zombie');
   });
 });

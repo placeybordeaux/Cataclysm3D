@@ -16,7 +16,7 @@ Write public/data/achievements.json (achievements, conducts, event statistics, e
 transformations, scores).
 
 Options:
-  --cdda <dir>   Cataclysm-DDA checkout (default: $CDDA_DIR or ~/code/Cataclysm-DDA)
+  --cdda <dir>   Cataclysm checkout (default: $CDDA_DIR or ~/code/Cataclysm-BN)
   --out <dir>    output directory (default: public/data)
   --dry-run      print a summary instead of writing
   -h, --help     show this help`;
