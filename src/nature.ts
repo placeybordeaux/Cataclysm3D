@@ -205,6 +205,9 @@ export function installNature(game: Game, renderer: Renderer | null, api?: Debug
     },
   });
 
+  // An evicted chunk regenerates in its day-0 state, so its rot/regrowth clock restarts too.
+  game.map.onChunkEvicted.push((c) => actualizer.stamps.delete(`${c.cx},${c.cy},${c.z}`));
+
   registerSaveable(game, 'nature', {
     save: () => ({ stamps: actualizer.toJSON() }),
     load: (d: { stamps?: Record<string, [number, number]> }) => actualizer.load(d.stamps ?? {}),

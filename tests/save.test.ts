@@ -22,6 +22,7 @@ import { SaveManager } from '../src/save/manager';
 import { MemoryBackend, type SyncStorage } from '../src/save/storage';
 import { registerSaveable } from '../src/save/registry';
 import { installChunkTracking, type ChunkTracker } from '../src/save/tracking';
+import { ChunkEvictor } from '../src/save/eviction';
 import { loadNodeData } from '../tools/lib/node_data';
 
 const { game: data, wg } = loadNodeData();
@@ -310,6 +311,45 @@ describe('world generator determinism after load', () => {
     const diff = [...before.keys()].filter((k) => before.get(k) !== after.get(k));
     expect(diff).toEqual([]);
     expect(living(B.sys).length).toBe(monsA);
+  }, 60_000);
+});
+
+describe('far chunk eviction', () => {
+  it('drops far clean columns, keeps dirty ones, regenerates identically without respawning monsters', () => {
+    const W = build(4242, 'world');
+    const { game, tracker } = W;
+    const p = game.player;
+    const pcx = Math.floor(p.x / CHUNK), pcy = Math.floor(p.y / CHUNK);
+    const keys: [number, number, number][] = [];
+    for (let z = -1; z <= 1; z++) for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) keys.push([pcx + dx, pcy + dy, z]);
+    for (const [x, y, z] of keys) game.map.chunk(x, y, z);
+    const sig = (c: Chunk) =>
+      [...c.ter].join(',') + '|' + [...c.furn].join(',') + '|' + [...c.items].sort((a, b) => a[0] - b[0]).map(([k, l]) => `${k}:${names(l).sort().join('+')}`).join(' ');
+    const before = new Map(keys.map(([x, y, z]) => [chunkKey(x, y, z), sig(game.map.chunk(x, y, z)!)]));
+    // One column (z=1 only) gets a player change: the whole column must stay.
+    game.map.addItem((pcx + 2) * CHUNK + 1, (pcy + 2) * CHUNK + 1, 1, createItem(data, 'rock'));
+    const monsBefore = living(W.sys).length;
+
+    // Walk far away: everything generated so far is out of range.
+    p.x += 40 * CHUNK;
+    const ev = new ChunkEvictor(game, tracker, { keepRadius: () => 1 });
+    ev.scan();
+    for (let z = -1; z <= 1; z++) expect(game.map.hasChunk(pcx + 2, pcy + 2, z)).toBe(true);
+    expect(game.map.hasChunk(pcx, pcy, 0)).toBe(false);
+    expect(game.map.hasChunk(pcx, pcy, 1)).toBe(false);
+    expect(ev.stats.evicted).toBeGreaterThan(40);
+
+    // Come back: regenerated (in another order) exactly as before, and no second set of monsters.
+    p.x -= 40 * CHUNK;
+    for (const [x, y, z] of [...keys].reverse()) game.map.chunk(x, y, z);
+    const diff = keys.map(([x, y, z]) => chunkKey(x, y, z)).filter((k) => {
+      if (k === chunkKey(pcx + 2, pcy + 2, 1)) return false;
+      const [x, y, z] = k.split(',').map(Number);
+      return before.get(k) !== sig(game.map.chunk(x, y, z)!);
+    });
+    expect(diff).toEqual([]);
+    expect(living(W.sys).length).toBe(monsBefore);
+    expect(ev.stats.regenerated).toBe(ev.stats.evicted);
   }, 60_000);
 });
 

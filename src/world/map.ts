@@ -134,6 +134,11 @@ export interface MapOverlay {
 export interface ChunkGenerator {
   /** Fill a freshly allocated chunk. Must be deterministic for (seed, cx, cy, z). */
   generate(map: GameMap, chunk: Chunk): void;
+  /**
+   * The whole column (cx, cy) was evicted: drop any state queued for it (z-level overlays
+   * waiting for a level that doesn't exist yet), because regenerating the column queues it again.
+   */
+  forgetColumn?(cx: number, cy: number): void;
 }
 
 export class GameMap {
@@ -147,6 +152,8 @@ export class GameMap {
   onChunkGenerated: ((chunk: Chunk) => void)[] = [];
   /** Tile occupants consulted by moveCost/opaque (the vehicle system registers one). */
   overlays: MapOverlay[] = [];
+  /** Called after a chunk was dropped by evictChunk (per-chunk state kept elsewhere can go too). */
+  onChunkEvicted: ((chunk: Chunk) => void)[] = [];
   /**
    * Asked by generators before writing a late z-level overlay (mapgen of `sourceKey` spilling
    * into an already existing chunk). Save/load uses it to avoid re-applying an overlay to a
@@ -181,6 +188,17 @@ export class GameMap {
   /** Used by save/load to restore an authoritative chunk without regenerating. */
   putChunk(c: Chunk): void {
     this.chunks.set(chunkKey(c.cx, c.cy, c.z), c);
+  }
+
+  /**
+   * Drop a chunk from memory; the next access regenerates it. Only safe for chunks identical to
+   * what the generator produces (see src/save/eviction.ts, which decides what is evictable).
+   */
+  evictChunk(c: Chunk): void {
+    const key = chunkKey(c.cx, c.cy, c.z);
+    if (this.chunks.get(key) !== c) return;
+    this.chunks.delete(key);
+    for (const fn of this.onChunkEvicted) fn(c);
   }
 
   /** Forget every chunk (loading a save into a running game); they regenerate on demand. */

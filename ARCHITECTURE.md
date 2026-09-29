@@ -249,6 +249,10 @@ tests/               vitest unit tests (pure logic, no DOM/WebGL)
   (like bash.ts map damage) must be saved by its owner. Saves are gzip JSON in IndexedDB,
   one slot per character; death deletes the save and adds a memorial entry.
   `cdda.save.{save,list,load,queueLoad,stats,memorial}`; `npm run shot -- … --reload`.
+  **Chunk eviction** (src/save/eviction.ts): clean (non-dirty) chunk columns farther than render
+  radius + 4 are dropped and regenerate on return; their keys join `tracker.priorGenerated`, so
+  spawner/NPC/vehicle placement skip them. Per-chunk state kept outside the chunk that must reset
+  with it: `map.onChunkEvicted.push(c => …)`. Stats: `cdda.eviction.stats`.
 - `input.onPress(e => …)` for global keys, `input.capture(handler)` for modal menus.
 - Audio: call `sfx.meleeHit(...)`, `sfx.gunshot(...)`, `sfx.door(...)`… from `src/audio/sfx.ts`
   (no-ops without audio), or put `sfxId`/`sfxVariant` (CDDA sound_effect id/variant) on
