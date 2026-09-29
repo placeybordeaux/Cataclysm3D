@@ -6,8 +6,8 @@ How `public/data/*.json` describes Cataclysm: Bright Nights (BN) content after
 ships no JSON docs); file and function names below point into it.
 
 Status: the core data (terrain, furniture, items, item groups, monsters, monster groups,
-recipes, misc) is BN. The item/inventory runtime (`src/game/item.ts`, `inventory.ts`) is
-still the DDA pocket model, kept alive by `src/data/bncompat.ts` (TODO(BN inventory)).
+recipes, misc) is BN, and so is the item/inventory runtime (`src/game/item.ts`, `moves.ts`,
+`inventory.ts`; docs/INVENTORY_MODEL.md).
 Gameplay tests that encode DDA behaviour are `it.skip`ped with `TODO(BN)` notes
 (`grep -rn "TODO(BN)" tests`). Ported to BN rules since: the Character (calorie store, thirst,
 stamina, pain, body temperature, effects, healing), mutations (mutagen actors, accumulated
@@ -249,14 +249,10 @@ has disassembly-only recipes. `misc.nested_category` holds BN nested recipe menu
 
 ## 8. What downstream systems must change (DDA → BN)
 
-- **Inventory / items (next agent).** Replace pockets with §3–§4: flat inventory checked
-  against worn `storage`; containers hold one stack (`container_data`); liquids need sealed
-  containers when carried; holsters/bandoliers from `holster`/`bandolier`; magazines inserted
-  into guns/tools, integral charges otherwise; non-rigid volume and encumbrance growth; all
-  comestibles count by charges. Delete `src/data/bncompat.ts`. Saves: `ItemJSON.pockets` has
-  no BN meaning.
-- **Item groups at runtime.** `fromSpawned` must honour the new `SpawnedItem` fields
-  (`damage` ×1000 scale, `active`, FIT flag, gun → magazine → ammo nesting).
+- **Inventory / items: done** (docs/INVENTORY_MODEL.md). Pre-BN saves' `ItemJSON.pockets` are
+  migrated by src/save/items.ts (worn clothes' pocket contents move to the flat inventory).
+- **Item groups at runtime: done.** `fromSpawned` honours `damage`, `active`, `flags` (FIT,
+  custom flags), `snippet`, and gun → magazine → ammo nesting.
 - **Crafting.** No proficiencies, no practice recipes, no recipe variants or steps, no
   `byproduct_group`; `time` is seconds; `autolearn` is already expanded to skill levels;
   `book_learn` pairs; `contained`/`container`; `result_mult`; charges on results;

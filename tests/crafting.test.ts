@@ -157,8 +157,7 @@ describe('crafting inventory sources', () => {
     expect(carried(h, 'pointy_stick_long')).toHaveLength(1);
   });
 
-  // TODO(BN): written for DDA data/behaviour; fails on Bright Nights core data (AssertionError: expected 'plastic bottle' to be 'plastic bottle > clean water (2)' // Object.is equa). Port with its system.
-  it.skip('boiling water: fire comes from a nearby fd_fire, BOIL from a pot; clean water fills the bottle', () => {
+  it('boiling water: fire comes from a nearby fd_fire, BOIL from a pot; clean water fills the bottle', () => {
     const h = world();
     const r = findRecipe(data, 'water_clean')!;
     give(h, 'pot');
@@ -170,7 +169,7 @@ describe('crafting inventory sources', () => {
     startCraft(h, r, { batch: 2 });
     h.finish();
     const bottle = carried(h, 'bottle_plastic')[0];
-    expect(bottle.name()).toBe('plastic bottle > clean water (2)');
+    expect(bottle.name()).toBe('clean water (plastic bottle) (2/2)');
     expect(carried(h, 'water')).toHaveLength(0);
   });
 });

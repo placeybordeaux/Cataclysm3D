@@ -15,7 +15,7 @@ import { Rng } from '../src/core/rng';
 import { Dialogue, parseDuration } from '../src/game/talk';
 import { evalMath, type MathHost } from '../src/game/talkmath';
 import { createItem, fromSpawned, inNewContainer } from '../src/game/item';
-import { census, L } from '../src/game/moves';
+import { census, L, spawnItem } from '../src/game/moves';
 import { expandItemGroup } from '../src/data/itemgroups';
 import { TradeSession, adjustedPrice, priceAdjustment, tradingPrice } from '../src/game/trade';
 
@@ -372,21 +372,18 @@ describe('trade', () => {
     expect(priceAdjustment(9)).toBeCloseTo(priceAdjustment(5), 5);
   });
 
-  // TODO(BN): written for DDA data/behaviour; fails on Bright Nights core data (TypeError: Cannot read properties of undefined (reading 'typeId')). Port with its system.
-  it.skip('prices a box of ammo by its rounds and names its variant', () => {
+  it('prices a container by its contents too', () => {
     const { npcs, game } = world();
     const n = npcs.spawn({ template: 'evac_merchant' }, 14, 12, 0)!;
     const p = game.player;
-    const [box] = expandItemGroup(data, 'boxed_77x58', new Rng(1)).flatMap((sp) => fromSpawned(data, sp));
-    expect(box.typeId).toBe('45_ammo_box_50');
-    expect(box.name()).toMatch(/^7\.7x58mm Arisaka ammo box/);
-    const rounds = box.allContents()[0];
+    const box = inNewContainer(data, createItem(data, '9mm', { count: 20 }), 'bag_canvas').container;
+    const rounds = box.contents[0];
     expect(rounds.charges).toBe(20);
     const boxOnly = adjustedPrice(data, nd, n, p, box, 1, true);
     const price = tradingPrice(data, nd, n, p, box, true);
     expect(price).toBe(boxOnly + adjustedPrice(data, nd, n, p, rounds, rounds.charges, true));
     expect(price).toBeGreaterThan(0);
-    n.stock.push(box);
+    spawnItem(box, L.stock(n));
     const row = new TradeSession(data, nd, p, n).theirs.find((e) => e.item === box)!;
     expect(row.price).toBe(price);
   });
