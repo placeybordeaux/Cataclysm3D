@@ -25,6 +25,7 @@ export function installMutBio(game: Game, renderer: Renderer | null, api?: Debug
   const { mut, bio } = mods;
   const drop = (it: Item) => game.map.addItem(p.tileX, p.tileY, p.z, it);
   mut.onDropItem = drop;
+  bio.nearbyItems = () => itemsNear(game, 2);
 
   // ---- simulation
   let lastX = p.x, lastY = p.y;
@@ -133,6 +134,15 @@ function cbmsNearby(game: Game): { item: Item; consume: () => void }[] {
         if (mi instanceof Item && isCbm(mi)) out.push({ item: mi, consume: () => game.map.removeItem(x, y, p.z, mi) });
       }
     }
+  return out;
+}
+
+/** Map items within `r` tiles of the survivor (the Autodoc's supplies). */
+function itemsNear(game: Game, r: number): Item[] {
+  const p = game.player;
+  const out: Item[] = [];
+  for (let dy = -r; dy <= r; dy++)
+    for (let dx = -r; dx <= r; dx++) for (const mi of game.map.itemsAt(p.tileX + dx, p.tileY + dy, p.z)) if (mi instanceof Item) out.push(mi);
   return out;
 }
 

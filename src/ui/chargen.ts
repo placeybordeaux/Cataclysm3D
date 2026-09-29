@@ -177,6 +177,17 @@ function startPets(game: UiContext['game'], b: Build): void {
   }
 }
 
+/** BN profession CBMs and pets for the detail pane (newcharacter.cpp profession tab). */
+function profExtras(ctx: UiContext, p: ProfessionDef): string {
+  const misc = ctx.game.data.misc ?? {};
+  const cbms = ((p as { CBMs?: string[] }).CBMs ?? []).map((id) => cddaText((misc.bionic?.[id] as { name?: unknown } | undefined)?.name) || id);
+  const pets = ((p as { pets?: { name: string; amount?: number }[] }).pets ?? []).map((pet) => `${pet.amount ?? 1} × ${cddaText(ctx.game.data.monsters[pet.name]?.name) || pet.name}`);
+  let out = '';
+  if (cbms.length) out += `\n\n${c('c_light_blue', 'Profession bionics:')}\n${cbms.map(esc).join('\n')}`;
+  if (pets.length) out += `\n\n${c('c_light_blue', 'Profession pets:')}\n${pets.map(esc).join('\n')}`;
+  return out;
+}
+
 /** Opens character creation; resolves with the build, or null if the player backed out. */
 export function openCharGen(ctx: UiContext): Promise<Build | null> {
   return new Promise((resolve) => {
@@ -385,7 +396,7 @@ export function openCharGen(ctx: UiContext): Promise<Build | null> {
         const skills = (p.skills ?? []).map((s) => `${c('c_light_gray', ctx.game.player.skillName(s.name))} ${c('c_white', String(s.level))}`);
         const traits = (p.traits ?? []).map((t) => c('c_yellow', text(defs[t]?.name) || t));
         const items = itemsOf(p, b.male);
-        right = `${c('c_white', profName(p, b.male))}  ${c('c_light_gray', `(${p.points ?? 0} points)`)}\n\n${colorize(text(p.description, b.male))}\n\n${c('c_light_blue', 'Profession skills:')}\n${skills.join('\n') || c('c_dark_gray', 'None')}\n${traits.length ? `\n${c('c_light_blue', 'Profession traits:')}\n${traits.join('\n')}\n` : ''}\n${c('c_light_blue', 'Profession items:')}\n${items.join('\n') || c('c_dark_gray', 'None')}${requirementText(ctx, p)}`;
+        right = `${c('c_white', profName(p, b.male))}  ${c('c_light_gray', `(${p.points ?? 0} points)`)}\n\n${colorize(text(p.description, b.male))}\n\n${c('c_light_blue', 'Profession skills:')}\n${skills.join('\n') || c('c_dark_gray', 'None')}\n${traits.length ? `\n${c('c_light_blue', 'Profession traits:')}\n${traits.join('\n')}\n` : ''}\n${c('c_light_blue', 'Profession items:')}\n${items.join('\n') || c('c_dark_gray', 'None')}${profExtras(ctx, p)}${requirementText(ctx, p)}`;
       } else if (T === 'TRAITS') {
         const locked = lockedTraits(b);
         const rows = traitRows.map(({ def, header }) => {

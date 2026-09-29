@@ -242,7 +242,7 @@ export function openAutodocMenu(game: Game, mods: BodyMods, cbms: () => { item: 
           entries: list.map((e) => {
             const blocker = bio.installBlocker(e.item);
             return {
-              label: `${c(blocker ? 'c_dark_gray' : 'c_white', e.item.name())} ${c('c_light_gray', `(${bio.successChance(e.item.typeId, true)}% success)`)}`,
+              label: `${c(blocker ? 'c_dark_gray' : 'c_white', e.item.name())} ${c('c_light_gray', `(${100 - bio.successChance(e.item.typeId, true, e.item.def.installation_data && game.player.inv.allItems().some((x) => x.typeId === e.item.def.installation_data) ? 10 : -1)}% complications)`)}`,
               value: e,
               detail: () => `${colorize(cddaText(e.item.def.description) || '')}${blocker ? `\n\n${c('c_red', blocker)}` : ''}\n\n${c('c_dark_gray', `Difficulty ${bio.idx.difficulty(e.item.typeId)}; anesthetic needed: ${bio.needsAnesthesia() ? bio.anesthesiaNeeded(e.item.typeId) : 0}`)}`,
             };

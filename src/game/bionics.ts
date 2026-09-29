@@ -274,10 +274,18 @@ export class BionicState {
     const per = this.idx.anesthesiaPerUnit[0]?.count ?? 3;
     return per * this.idx.difficulty(itemId) * 2 * 7;
   }
-  /** Anesthetic charges carried in anesthesia kits. */
+  /**
+   * Items next to the patient that count as the crafting inventory (BN has_enough_anesthesia
+   * reads crafting_inventory: carried + nearby). Set by the installer; tests leave it null.
+   */
+  nearbyItems: (() => Item[]) | null = null;
+  private anesthesiaKits(): Item[] {
+    return [...this.c.inv.allItems(), ...(this.nearbyItems?.() ?? [])].filter((it) => it.qualityLevel('ANESTHESIA') > 0);
+  }
+  /** Anesthetic charges in anesthesia kits carried or at hand. */
   anesthesiaAvailable(): number {
     let n = 0;
-    for (const it of this.c.inv.allItems()) if (it.qualityLevel('ANESTHESIA') > 0) n += it.ammoRemaining();
+    for (const it of this.anesthesiaKits()) n += it.ammoRemaining();
     return n;
   }
   /** cbm_needs_anesthesia: Sensory Dulling or pain immunity make it unnecessary. */
@@ -285,9 +293,8 @@ export class BionicState {
     return !this.has('bio_painkiller') && !this.c.hasTrait('NOPAIN') && !this.c.hasTrait('DEBUG_BIONICS');
   }
   consumeAnesthesia(n: number): void {
-    for (const it of this.c.inv.allItems()) {
+    for (const it of this.anesthesiaKits()) {
       if (n <= 0) return;
-      if (it.qualityLevel('ANESTHESIA') <= 0) continue;
       n -= it.ammoConsume(Math.min(n, it.ammoRemaining()));
     }
   }
