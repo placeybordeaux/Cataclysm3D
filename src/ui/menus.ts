@@ -7,6 +7,7 @@ import type { Hud } from './hud';
 import type { UiContext } from './context';
 import { logLine } from './format';
 import { openMemorialFor } from '../save/install';
+import { maybeShowStartHints, randomTip } from './tips';
 
 // Title screen (CDDA main_menu.cpp look: the ASCII logo from data/title/en.title over a
 // slowly turning, darkened view of the world, and a horizontal menu bar with highlighted
@@ -35,6 +36,8 @@ export function showMainMenu(ctx: UiContext, hud: Hud): Promise<void> {
     root.appendChild(el);
     let sel = 0;
     let busy = false;
+    // CDDA main_menu.cpp shows a random "tip of the day" under the menu.
+    const tip = randomTip(ctx);
     let raf = 0;
     let last = performance.now();
     const p = game.player;
@@ -71,6 +74,7 @@ export function showMainMenu(ctx: UiContext, hud: Hud): Promise<void> {
           applyBuild(ctx, build);
           close();
           game.message(`${build.name}, you wake up in the evac shelter.  Press ? for help.`, 'c_light_gray');
+          void maybeShowStartHints(ctx);
         },
       },
       {
@@ -133,6 +137,7 @@ export function showMainMenu(ctx: UiContext, hud: Hud): Promise<void> {
           <div class="pre" style="color:var(--c-light_gray);text-shadow:1px 1px 0 #000">${c('c_dark_gray', 'a real-time 3D port of')} ${c('c_white', 'Cataclysm: Dark Days Ahead')}</div>
           <div class="pre cdda-box" style="padding:.3em 1em">${bar}</div>
           <div class="pre" style="color:var(--c-dark_gray)">${c('c_light_green', '←→')} select  ${c('c_light_green', 'Enter')} confirm  or press the highlighted letter</div>
+          ${tip ? `<div style="max-width:70ch;text-align:center;color:var(--c-light_gray);text-shadow:1px 1px 0 #000">${c('c_light_cyan', 'Tip of the day:')} ${c('c_light_gray', tip)}</div>` : ''}
         </div>`;
       el.querySelectorAll<HTMLElement>('.mm-item').forEach((it) => {
         const i = Number(it.dataset.i);

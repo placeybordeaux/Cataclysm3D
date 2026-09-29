@@ -20,6 +20,22 @@ export type AttackKind = 'melee' | 'fire' | 'throw';
 export interface ViewmodelItem {
   typeId: string;
   isGun?(): boolean;
+  /** CDDA size data (Item.def): drives how much of the screen the held item covers. */
+  def?: { longest_side?: number; volume?: number };
+}
+
+/**
+ * Longest on-screen extent of a held item as a fraction of the low-res height: a knife is
+ * small, a bat or spear reaches across, and bulky things (a fire extinguisher's squat
+ * sprite) are held lower and smaller so they don't blot out the view.
+ * `aspect` = short/long side of the cropped sprite.
+ */
+export function heldItemExtent(def: ViewmodelItem['def'], aspect: number): number {
+  const vol = def?.volume ?? 500;
+  const len = def?.longest_side ?? Math.cbrt(vol) * 1.5;
+  let f = Math.max(0.18, Math.min(0.38, 0.22 + 0.12 * Math.log2(Math.max(1, len) / 30)));
+  if (aspect > 0.45) f *= 0.8;
+  return f;
 }
 
 const VERT = /* glsl */ `
@@ -326,7 +342,8 @@ export class Viewmodel {
     // Items are scaled so they read at a similar size whatever their sprite footprint; the
     // hand keeps its own (usually smaller) integer pixel size.
     const hs = Viewmodel.handScale(lowH);
-    const is = Math.max(hs, Math.min(9, Math.round((lowH * 0.4) / Math.max(crop.width, crop.height))));
+    const extent = heldItemExtent(item.def, Math.min(crop.width, crop.height) / Math.max(crop.width, crop.height));
+    const is = Math.max(hs, Math.min(9, Math.round((lowH * extent) / Math.max(crop.width, crop.height))));
     const item2 = upscale(crop, is);
     const hand = upscale(handCanvas(40), hs);
     const G = { x: gx * is + Math.floor(is / 2), y: gy * is + Math.floor(is / 2) };

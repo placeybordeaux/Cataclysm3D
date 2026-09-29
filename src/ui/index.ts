@@ -15,6 +15,7 @@ import { INITIAL_VISIBILITY, openOvermap, overmapSeenTracker, revealAround } fro
 import { showDeathScreen } from './death';
 import { openEscMenu, openMessageLog, showMainMenu } from './menus';
 import { applyStoredOptions, openOptions } from './options';
+import { installTipsOption, openHints } from './tips';
 import { applyBuild, defaultBuild, openCharGen } from './chargen';
 import { registerSaveable } from '../save/registry';
 import { quitToTitle } from '../save/install';
@@ -40,6 +41,7 @@ export async function installUi(game: Game, renderer: Renderer, worldgen: WorldG
   const ctx: UiContext = { game, renderer, worldgen, data };
   const h = new Hud(ctx, getUiRoot());
   applyStoredOptions(ctx);
+  installTipsOption();
 
   game.lookAt = (maxDist) => cameraLookAt(ctx, maxDist);
   installInventoryUi(ctx);
@@ -109,6 +111,7 @@ export async function installUi(game: Game, renderer: Renderer, worldgen: WorldG
         look: () => openLookMode(ctx),
         messages: () => openMessageLog(ctx, h),
         options: () => openOptions(ctx),
+        hints: () => openHints(ctx),
         escmenu: () => openEscMenu(ctx, () => quitToTitle(game)),
         pickup: () => openPickupMenu(ctx),
         drop: () => openDropMenu(ctx),

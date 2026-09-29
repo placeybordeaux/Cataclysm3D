@@ -4,8 +4,9 @@ import { Character } from '../src/game/character';
 import {
   aim, attackCooldownSeconds, attackSpeedMoves, critChance, dispersionFromSkill, fireGun, gunDispersion, gunRecoil, maxDispersionMoa,
   meleeAttack, meleeHitBase, meleeHitChance, monsterCanAttackHigh, monsterMeleeAttack, normalAtLeast, rollMeleeDamage, selectBodyPart,
-  sizeFromVolume, weaponDispersionSources,
+  sizeFromVolume, swingSpeedRating, unwieldyWarning, weaponDispersionSources,
 } from '../src/game/combat';
+import { heldItemExtent } from '../src/render/viewmodel';
 import { createItem } from '../src/game/item';
 import { makeData } from './fixtures/gamedata';
 
@@ -15,6 +16,31 @@ const zombie = data.monsters.mon_zombie;
 function survivor(): Character {
   return new Character(data, { seed: 11 });
 }
+
+describe('weapon speed legibility', () => {
+  it('rates swing speed in bands and warns when wielding something awkward', () => {
+    expect(swingSpeedRating(60).label).toBe('fast');
+    expect(swingSpeedRating(100).label).toBe('normal');
+    expect(swingSpeedRating(150).label).toBe('slow');
+    expect(swingSpeedRating(370).label).toBe('very slow');
+    const c = survivor();
+    expect(unwieldyWarning(c, createItem(data, 'pipe'))).toBeNull();
+    const heavy = createItem(data, 'pipe');
+    heavy.def = { ...heavy.def, id: 'extinguisher', name: 'large fire extinguisher', volume: 20000, weight: 7030 };
+    expect(unwieldyWarning(c, heavy)).toBe('The large fire extinguisher is very unwieldy, attacks will be slow.');
+    expect(c.inv.wield(heavy).ok).toBe(true);
+  });
+
+  it('held items cover the screen by size: knives small, long things capped, bulky ones shrunk', () => {
+    const knife = heldItemExtent({ longest_side: 20, volume: 150 }, 0.2);
+    const bat = heldItemExtent({ longest_side: 86, volume: 1750 }, 0.15);
+    const spear = heldItemExtent({ longest_side: 260, volume: 5000 }, 0.05);
+    const extinguisher = heldItemExtent({ longest_side: 50, volume: 20000 }, 0.6);
+    expect(knife).toBeLessThan(bat);
+    expect(spear).toBeLessThanOrEqual(0.38);
+    expect(extinguisher).toBeLessThan(bat);
+  });
+});
 
 describe('melee: attack speed (melee.cpp Character::attack_speed)', () => {
   it('pipe at 8 dex, no skill: 40 + 40*15/15 - 4 = 76 moves', () => {

@@ -4,6 +4,7 @@ import { BODY_PARTS, isBodyPart, MAIN_PARTS, type BodyPartId, type MainPartId } 
 import type { Character } from './character';
 import { asArray, Item, type ItemJSON, type Pocket } from './item';
 import { cddaText, toSeconds } from './units';
+import { unwieldyWarning } from './combat';
 
 // Wielded/worn items and everything carried in their pockets (CDDA Character inventory +
 // outfit, simplified). Nothing is carried "loose": like modern CDDA, items live in the
@@ -272,7 +273,11 @@ export class Inventory {
     this.wielded = it;
     // item::on_wield_cost, simplified: base 100 + volume penalty.
     const moves = 100 + Math.min(200, Math.floor(it.volume() / 20));
-    return this.say(true, `You wield your ${it.name()}.`, moves, dropped.length ? { dropped } : {});
+    const res = this.say(true, `You wield your ${it.name()}.`, moves, dropped.length ? { dropped } : {});
+    // Real time leaves no turn to reconsider a bad weapon, so say so up front.
+    const warn = unwieldyWarning(this.owner, it);
+    if (warn) this.owner.msg(warn, 'c_yellow');
+    return res;
   }
 
   unwield(): ActionResult {

@@ -85,6 +85,28 @@ export function attackCooldownSeconds(c: Character, weapon: Item | null): number
   return attackSpeedMoves(c, weapon) / 100 / MELEE_SCALE;
 }
 
+/**
+ * How a weapon's swing speed reads in real time, for the HUD and the wield warning.
+ * Bands are moves per attack (fists ≈ 60, crowbar ≈ 90, sledgehammer ≈ 200, large fire
+ * extinguisher ≈ 370 for an average survivor).
+ */
+export function swingSpeedRating(moves: number): { label: 'fast' | 'normal' | 'slow' | 'very slow'; color: string } {
+  if (moves <= 80) return { label: 'fast', color: 'c_light_green' };
+  if (moves <= 130) return { label: 'normal', color: 'c_white' };
+  if (moves <= 180) return { label: 'slow', color: 'c_yellow' };
+  return { label: 'very slow', color: 'c_light_red' };
+}
+
+/** The warning shown when wielding something awkward to swing, or null. */
+export function unwieldyWarning(c: Character, it: Item): string | null {
+  if (it.isGun()) return null;
+  const r = swingSpeedRating(attackSpeedMoves(c, it));
+  const name = it.baseName();
+  if (r.label === 'very slow') return `The ${name} is very unwieldy, attacks will be slow.`;
+  if (r.label === 'slow') return `The ${name} is unwieldy, attacks will be a bit slow.`;
+  return null;
+}
+
 /** melee.cpp stumble(): extra moves lost on a miss with heavy/bulky weapons. */
 export function stumbleMoves(c: Character, weapon: Item | null): number {
   if (!weapon) return 0;

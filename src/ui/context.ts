@@ -15,6 +15,8 @@ export interface UiData {
   names: NameLists;
   help: { name: string; messages: string[] }[];
   moodFaces: MoodFace[];
+  /** CDDA "tip" snippets (data/core/tips.json): tip of the day / hints popup. */
+  tips?: string[];
 }
 
 export interface UiContext {

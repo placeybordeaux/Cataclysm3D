@@ -11,7 +11,7 @@ import { defaultCddaDir } from './cdda';
 function usage(): string {
   return `Usage: npm run extract:ui -- [options]
 
-Write public/data/ui.json (title art, tombstone art, name lists, help topics, mood faces).
+Write public/data/ui.json (title art, tombstone art, name lists, help topics, mood faces, tips).
 
 Options:
   --cdda <dir>   Cataclysm-DDA checkout (default: $CDDA_DIR or ~/code/Cataclysm-DDA)
@@ -71,15 +71,24 @@ const help = (readJson('data/core/help.json') as any[])
 const moodFaces = (readJson('data/json/mood_faces.json') as any[]).find((o) => o.id === 'DEFAULT')?.values;
 if (!moodFaces) throw new Error('DEFAULT mood_face missing');
 
+// data/core/tips.json: the "tip" snippets CDDA shows on the loading screen and under the
+// main menu ("tip of the day").
+const tips = (readJson('data/core/tips.json') as any[])
+  .filter((o) => o.type === 'snippet' && o.category === 'tip')
+  .flatMap((o) => (o.text as any[]).map((t) => (typeof t === 'string' ? t : t.text ?? t.str ?? '')))
+  .filter(Boolean) as string[];
+if (tips.length < 20) throw new Error(`only ${tips.length} tips in data/core/tips.json`);
+
 const out = {
   title,
   tombstone: { picture: tombArt.picture as string[], added_info: tombScreen.added_info, last_words_label: tombScreen.last_words_label },
   names,
   help,
   moodFaces,
+  tips,
 };
 
-const summary = `title ${title.length} lines, tombstone ${out.tombstone.picture.length} lines, names ${Object.entries(names).map(([k, v]) => `${k}:${v.length}`).join(' ')}, help ${help.length} topics`;
+const summary = `title ${title.length} lines, tombstone ${out.tombstone.picture.length} lines, names ${Object.entries(names).map(([k, v]) => `${k}:${v.length}`).join(' ')}, help ${help.length} topics, tips ${tips.length}`;
 if (args.dryRun) console.log(`[dry-run] would write ${path.join(args.out, 'ui.json')}: ${summary}`);
 else {
   fs.writeFileSync(path.join(args.out, 'ui.json'), JSON.stringify(out));
