@@ -1,0 +1,5039 @@
+{
+ "version": 1,
+ "sources": [
+  {
+   "name": "CC-Sounds (CDDA soundpack) by Fris0uman et al.",
+   "url": "https://github.com/Fris0uman/CDDA-Soundpacks",
+   "license": "CC-BY-SA 4.0 pack; files CC0 / CC-BY, see CREDITS.md"
+  },
+  {
+   "name": "Music by CO.AG (CDDA music pack, remastered by SkyBreach)",
+   "url": "https://github.com/Fris0uman/CDDA-Music-Packs",
+   "license": "CC-BY-SA 4.0 pack; used with the composer's permission"
+  }
+ ],
+ "effects": [
+  {
+   "id": "clean_up_at_end",
+   "variants": [
+    "death_m",
+    "death_f"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/clean_up_at_end/death.ogg"
+   ]
+  },
+  {
+   "id": "close_door",
+   "variants": [
+    "t_chaingate_c"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/close_door/door_fence/close_door_fence.ogg"
+   ]
+  },
+  {
+   "id": "close_door",
+   "variants": [
+    "t_door_o",
+    "t_door_red_o",
+    "t_door_white_o",
+    "t_door_gray_o",
+    "t_door_green_o",
+    "t_door_lab_o",
+    "t_door_o_peep",
+    "t_rdoor_o"
+   ],
+   "volume": 70,
+   "files": [
+    "sfx/close_door/door_wood/close_door.ogg"
+   ]
+  },
+  {
+   "id": "close_door",
+   "variants": [
+    "f_gunsafe_o",
+    "f_safe_o"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/close_door/gun_safe/close_safe.ogg"
+   ]
+  },
+  {
+   "id": "close_door",
+   "variants": [
+    "t_window_open",
+    "t_window_no_curtains_open"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/close_door/window/close_window.ogg"
+   ]
+  },
+  {
+   "id": "deal_damage",
+   "variants": [
+    "hurt_f"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/deal_damage/hurt_f/hurt_f_1.ogg",
+    "sfx/deal_damage/hurt_f/hurt_f_2.ogg",
+    "sfx/deal_damage/hurt_f/hurt_f_3.ogg",
+    "sfx/deal_damage/hurt_f/hurt_f_4.ogg",
+    "sfx/deal_damage/hurt_f/hurt_f_5.ogg"
+   ]
+  },
+  {
+   "id": "deal_damage",
+   "variants": [
+    "hurt_m"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/deal_damage/hurt_m/hurt_m_1.ogg",
+    "sfx/deal_damage/hurt_m/hurt_m_2.ogg",
+    "sfx/deal_damage/hurt_m/hurt_m_3.ogg",
+    "sfx/deal_damage/hurt_m/hurt_m_4.ogg"
+   ]
+  },
+  {
+   "id": "environment",
+   "variants": [
+    "alarm"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/environment/ambient/alarm.ogg"
+   ]
+  },
+  {
+   "id": "environment",
+   "variants": [
+    "church_bells"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/environment/ambient/church_bells.ogg"
+   ]
+  },
+  {
+   "id": "environment",
+   "variants": [
+    "indoors"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/environment/ambient/indoors.ogg"
+   ],
+   "indoors": true
+  },
+  {
+   "id": "environment",
+   "variants": [
+    "police_siren"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/environment/ambient/police_siren.ogg"
+   ]
+  },
+  {
+   "id": "environment",
+   "variants": [
+    "underground"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/environment/ambient/underground.ogg"
+   ],
+   "indoors": true
+  },
+  {
+   "id": "environment",
+   "variants": [
+    "indoors_rain"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/environment/weather/indoors_rain.ogg"
+   ],
+   "indoors": true
+  },
+  {
+   "id": "environment",
+   "variants": [
+    "nighttime"
+   ],
+   "volume": 50,
+   "files": [
+    "sfx/environment/weather/night/clear_night_3.ogg"
+   ],
+   "indoors": false
+  },
+  {
+   "id": "environment",
+   "variants": [
+    "WEATHER_CLEAR"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/environment/weather/night/clear_night_2.ogg"
+   ],
+   "season": "spring",
+   "indoors": false,
+   "night": true
+  },
+  {
+   "id": "environment",
+   "variants": [
+    "WEATHER_CLEAR"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/environment/weather/night/clear_night_3.ogg"
+   ],
+   "season": "summer",
+   "indoors": false,
+   "night": true
+  },
+  {
+   "id": "environment",
+   "variants": [
+    "WEATHER_CLEAR"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/environment/weather/night/clear_night_1.ogg"
+   ],
+   "season": "winter",
+   "indoors": false,
+   "night": true
+  },
+  {
+   "id": "environment",
+   "variants": [
+    "WEATHER_CLEAR"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/environment/weather/night/clear_night_1.ogg"
+   ],
+   "season": "autumn",
+   "indoors": false,
+   "night": true
+  },
+  {
+   "id": "environment",
+   "variants": [
+    "WEATHER_CLOUDY"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/environment/weather/night/cloudy_night.ogg"
+   ],
+   "season": "spring",
+   "indoors": false,
+   "night": true
+  },
+  {
+   "id": "environment",
+   "variants": [
+    "WEATHER_CLOUDY"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/environment/weather/night/cloudy_night.ogg"
+   ],
+   "season": "autumn",
+   "indoors": false,
+   "night": true
+  },
+  {
+   "id": "environment",
+   "variants": [
+    "WEATHER_CLOUDY"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/environment/weather/night/cloudy_night.ogg"
+   ],
+   "season": "winter",
+   "indoors": false,
+   "night": true
+  },
+  {
+   "id": "environment",
+   "variants": [
+    "WEATHER_CLOUDY"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/environment/weather/night/cloudy_night.ogg"
+   ],
+   "season": "summer",
+   "indoors": false,
+   "night": true
+  },
+  {
+   "id": "environment",
+   "variants": [
+    "WEATHER_RAINY"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/environment/weather/night/night_rain.ogg"
+   ],
+   "indoors": false,
+   "night": true
+  },
+  {
+   "id": "environment",
+   "variants": [
+    "WEATHER_SUNNY"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/environment/weather/night/clear_night_2.ogg"
+   ],
+   "season": "spring",
+   "indoors": false,
+   "night": true
+  },
+  {
+   "id": "environment",
+   "variants": [
+    "WEATHER_SUNNY"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/environment/weather/night/clear_night_1.ogg"
+   ],
+   "season": "autumn",
+   "indoors": false,
+   "night": true
+  },
+  {
+   "id": "environment",
+   "variants": [
+    "WEATHER_SUNNY"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/environment/weather/night/clear_night_1.ogg"
+   ],
+   "season": "winter",
+   "indoors": false,
+   "night": true
+  },
+  {
+   "id": "environment",
+   "variants": [
+    "WEATHER_SUNNY"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/environment/weather/night/clear_night_3.ogg"
+   ],
+   "season": "summer",
+   "indoors": false,
+   "night": true
+  },
+  {
+   "id": "environment",
+   "variants": [
+    "thunder_far"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/environment/weather/thunder_far.ogg"
+   ]
+  },
+  {
+   "id": "environment",
+   "variants": [
+    "thunder_near"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/environment/weather/thunder_near.ogg"
+   ]
+  },
+  {
+   "id": "environment",
+   "variants": [
+    "WEATHER_CLEAR"
+   ],
+   "volume": 60,
+   "files": [
+    "sfx/environment/weather/weather_clear/weather_clear_spring.ogg"
+   ],
+   "season": "spring",
+   "indoors": false,
+   "night": false
+  },
+  {
+   "id": "environment",
+   "variants": [
+    "WEATHER_CLEAR"
+   ],
+   "volume": 60,
+   "files": [
+    "sfx/environment/weather/weather_clear/weather_clear_summer.ogg"
+   ],
+   "season": "summer",
+   "indoors": false,
+   "night": false
+  },
+  {
+   "id": "environment",
+   "variants": [
+    "WEATHER_CLEAR"
+   ],
+   "volume": 60,
+   "files": [
+    "sfx/environment/weather/weather_clear/weather_clear_winter.ogg"
+   ],
+   "season": "winter",
+   "indoors": false,
+   "night": false
+  },
+  {
+   "id": "environment",
+   "variants": [
+    "WEATHER_CLEAR"
+   ],
+   "volume": 60,
+   "files": [
+    "sfx/environment/weather/weather_clear/weather_clear_autumn.ogg"
+   ],
+   "season": "autumn",
+   "indoors": false,
+   "night": false
+  },
+  {
+   "id": "environment",
+   "variants": [
+    "WEATHER_CLOUDY"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/environment/weather/weather_cloudy/weather_cloudy_spring.ogg"
+   ],
+   "season": "spring",
+   "indoors": false,
+   "night": false
+  },
+  {
+   "id": "environment",
+   "variants": [
+    "WEATHER_CLOUDY"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/environment/weather/weather_cloudy/weather_cloudy_autumn.ogg"
+   ],
+   "season": "autumn",
+   "indoors": false,
+   "night": false
+  },
+  {
+   "id": "environment",
+   "variants": [
+    "WEATHER_CLOUDY"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/environment/weather/weather_cloudy/weather_cloudy_winter.ogg"
+   ],
+   "season": "winter",
+   "indoors": false,
+   "night": false
+  },
+  {
+   "id": "environment",
+   "variants": [
+    "WEATHER_CLOUDY"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/environment/weather/weather_cloudy/weather_cloudy_summer.ogg"
+   ],
+   "season": "summer",
+   "indoors": false,
+   "night": false
+  },
+  {
+   "id": "environment",
+   "variants": [
+    "WEATHER_DRIZZLE"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/environment/weather/drizzle.ogg"
+   ],
+   "indoors": false
+  },
+  {
+   "id": "environment",
+   "variants": [
+    "WEATHER_FLURRIES"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/environment/weather/flurries.ogg"
+   ],
+   "indoors": false
+  },
+  {
+   "id": "environment",
+   "variants": [
+    "WEATHER_PORTAL_STORM"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/environment/weather/weather_portal_storm/weather_portal_storm.ogg"
+   ]
+  },
+  {
+   "id": "environment",
+   "variants": [
+    "WEATHER_RAINSTORM"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/environment/weather/WEATHER_RAINSTORM.ogg"
+   ],
+   "indoors": false
+  },
+  {
+   "id": "environment",
+   "variants": [
+    "WEATHER_RAINSTORM"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/environment/weather/WEATHER_RAINSTORM_inside.ogg"
+   ],
+   "indoors": true
+  },
+  {
+   "id": "environment",
+   "variants": [
+    "WEATHER_RAINY"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/environment/weather/heavyrain.ogg"
+   ],
+   "indoors": false
+  },
+  {
+   "id": "environment",
+   "variants": [
+    "WEATHER_SNOW"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/environment/weather/snowing.ogg"
+   ],
+   "indoors": false
+  },
+  {
+   "id": "environment",
+   "variants": [
+    "WEATHER_SNOWSTORM"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/environment/weather/WEATHER_SNOWSTORM.ogg"
+   ],
+   "indoors": false
+  },
+  {
+   "id": "environment",
+   "variants": [
+    "WEATHER_SUNNY"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/environment/weather/weather_sunny/weather_sunny_spring.ogg"
+   ],
+   "season": "spring",
+   "indoors": false,
+   "night": false
+  },
+  {
+   "id": "environment",
+   "variants": [
+    "WEATHER_SUNNY"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/environment/weather/weather_sunny/weather_sunny_autumn.ogg"
+   ],
+   "season": "autumn",
+   "indoors": false,
+   "night": false
+  },
+  {
+   "id": "environment",
+   "variants": [
+    "WEATHER_SUNNY"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/environment/weather/weather_sunny/weather_sunny_winter.ogg"
+   ],
+   "season": "winter",
+   "indoors": false,
+   "night": false
+  },
+  {
+   "id": "environment",
+   "variants": [
+    "WEATHER_SUNNY"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/environment/weather/weather_sunny/weather_sunny_summer.ogg"
+   ],
+   "season": "summer",
+   "indoors": false,
+   "night": false
+  },
+  {
+   "id": "environment",
+   "variants": [
+    "WEATHER_THUNDER"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/environment/weather/thunderstorm.ogg"
+   ],
+   "indoors": false
+  },
+  {
+   "id": "explosion",
+   "variants": [
+    "default"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/explosion/default/explosion_default_1.ogg",
+    "sfx/explosion/default/explosion_default_2.ogg"
+   ]
+  },
+  {
+   "id": "explosion",
+   "variants": [
+    "huge"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/explosion/huge/explosion_huge_1.ogg",
+    "sfx/explosion/huge/explosion_huge_2.ogg"
+   ]
+  },
+  {
+   "id": "explosion",
+   "variants": [
+    "small"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/explosion/small/explosion_small.ogg"
+   ]
+  },
+  {
+   "id": "fire",
+   "variants": [
+    "ignition"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/fire/ignition.ogg"
+   ]
+  },
+  {
+   "id": "fire_gun",
+   "variants": [
+    "bullet_crossbow",
+    "compositecrossbow",
+    "compcrossbow",
+    "huge_crossbow",
+    "hand_crossbow",
+    "rep_crossbow",
+    "crossbow",
+    "wristrocket",
+    "sling",
+    "slingshot",
+    "staff_sling",
+    "compositebow",
+    "reflexbow",
+    "compgreatbow",
+    "compbow",
+    "compbow_high",
+    "compbow_low",
+    "longbow",
+    "recurbow",
+    "reflexrecurvebow",
+    "shortbow",
+    "selfbow",
+    "takedown_recurbow",
+    "woodgreatbow",
+    "doublespeargun",
+    "minispeargun",
+    "speargun"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/fire_gun/bows/bow_1.ogg"
+   ]
+  },
+  {
+   "id": "fire_gun",
+   "variants": [
+    "brass_eject"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/fire_gun/brass_eject.ogg",
+    "sfx/fire_gun/brass_eject_1.ogg"
+   ]
+  },
+  {
+   "id": "fire_gun",
+   "variants": [
+    "empty"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/fire_gun/empty.ogg",
+    "sfx/fire_gun/empty_1.ogg"
+   ]
+  },
+  {
+   "id": "fire_gun",
+   "variants": [
+    "default"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/fire_gun/generic/genericgun_1.ogg"
+   ]
+  },
+  {
+   "id": "fire_gun",
+   "variants": [
+    "m1911-460",
+    "af2011a1_38super",
+    "90two",
+    "90two40",
+    "feral_m9",
+    "m9",
+    "px4",
+    "px4_40",
+    "mauser_c96",
+    "hi_power_40",
+    "hi_power_9mm",
+    "m1911_10",
+    "glock_29",
+    "cz75",
+    "witness_10",
+    "fn1910",
+    "fn57",
+    "glock_17",
+    "glock_18c",
+    "glock_19",
+    "glock_22",
+    "glock_31",
+    "glock_20",
+    "glock_21",
+    "hptc9",
+    "hptcf380",
+    "hptjcp",
+    "hptjhp",
+    "j22",
+    "p50",
+    "kp32",
+    "kp3at",
+    "kpf9",
+    "ksub2000",
+    "p08",
+    "m17",
+    "m18",
+    "m1911",
+    "m1911a1_38super",
+    "mac_10",
+    "mac_11",
+    "makarov",
+    "walther_ppq_45",
+    "mauser_m714",
+    "rm103a_pistol",
+    "needlepistol",
+    "rugerlcp",
+    "ruger_57",
+    "sw_22",
+    "sig_mosquito",
+    "p226_357sig",
+    "p226_9mm",
+    "p320_357sig",
+    "p220_10",
+    "sig_40",
+    "sp2022",
+    "sig_p230",
+    "skorpion_61",
+    "skorpion_82",
+    "taurus_spectrum",
+    "tec9",
+    "pressin",
+    "tokarev",
+    "usp_9mm",
+    "usp_45",
+    "uzi",
+    "walther_ccp",
+    "walther_p22",
+    "walther_p38",
+    "walther_ppk",
+    "walther_ppq_40",
+    "walther_ppq_9mm",
+    "xd_10",
+    "pistol_flintlock",
+    "sw_610",
+    "colt_army",
+    "colt_navy",
+    "surv_six_shooter",
+    "lemat_revolver",
+    "bfr",
+    "mr73",
+    "ruger_lcr_22",
+    "ruger_lcr_38",
+    "ruger_redhawk",
+    "sw_619",
+    "sw629",
+    "model_10_revolver",
+    "raging_bull",
+    "raging_judge",
+    "colt_saa",
+    "ar_pistol",
+    "bond_410",
+    "cop_38",
+    "surv_hand_cannon",
+    "2_shot_special"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/fire_gun/handguns/handgun_1.ogg"
+   ]
+  },
+  {
+   "id": "fire_gun",
+   "variants": [
+    "laser_rifle",
+    "plasma_rifle",
+    "gatling_mech_laser",
+    "coilgun",
+    "yrax_deterrent_laser",
+    "hm12",
+    "v29_turret",
+    "plasma_gun",
+    "recon_mech_laser",
+    "gatling_mech_laser_single",
+    "recon_mech_laser_single",
+    "v29",
+    "yrax_deterrent_laser",
+    "bio_laser_gun",
+    "emp_gun"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/fire_gun/laserguns/lasergun_1.ogg"
+   ]
+  },
+  {
+   "id": "fire_gun",
+   "variants": [
+    "pseudo_m203",
+    "m320",
+    "mark19",
+    "mgl",
+    "rm802",
+    "triple_launcher_simple",
+    "launcher_simple",
+    "airspeargun"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/fire_gun/launchers/launcher_1.ogg"
+   ]
+  },
+  {
+   "id": "fire_gun",
+   "variants": [
+    "m240",
+    "m249",
+    "m249_semi",
+    "m2browning",
+    "m2browning_sawn",
+    "m60",
+    "m60_semi",
+    "rm298",
+    "rm614_lmg",
+    "bigun",
+    "m134"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/fire_gun/machineguns/machinegun_1.ogg"
+   ]
+  },
+  {
+   "id": "fire_gun",
+   "variants": [
+    "acid_sniper"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/fire_gun/monster_guns/acid_sniper_1.ogg",
+    "sfx/fire_gun/monster_guns/acid_sniper_2.ogg",
+    "sfx/fire_gun/monster_guns/acid_sniper_3.ogg",
+    "sfx/fire_gun/monster_guns/acid_sniper_4.ogg"
+   ]
+  },
+  {
+   "id": "fire_gun",
+   "variants": [
+    "gene_sting_gun"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/fire_gun/monster_guns/gene_sting_gun_1.ogg",
+    "sfx/fire_gun/monster_guns/gene_sting_gun_2.ogg",
+    "sfx/fire_gun/monster_guns/gene_sting_gun_3.ogg"
+   ]
+  },
+  {
+   "id": "fire_gun",
+   "variants": [
+    "modular_ar15",
+    "lever_shotgun",
+    "ar_pistol",
+    "plr16",
+    "fs2000",
+    "modular_m27_assault_rifle",
+    "scar_l",
+    "hk_g36",
+    "m249",
+    "m249_semi",
+    "modular_m4_carbine",
+    "modular_m16a4",
+    "modular_m16_auto_rifle",
+    "m231pfw",
+    "oa93",
+    "ruger_mini",
+    "sig_assault_rifle",
+    "steyr_aug",
+    "ak556",
+    "minidraco556",
+    "mdrx",
+    "bren2_556",
+    "cz600",
+    "rdb_223",
+    "acr_300blk",
+    "iwi_tavor_x95_300blk",
+    "sig_mcx_rattler_sbr"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/fire_gun/rifles/automatic_rifle/indoor_gunfire/556_auto_rifle_shot_01.ogg",
+    "sfx/fire_gun/rifles/automatic_rifle/indoor_gunfire/556_auto_rifle_shot_02.ogg",
+    "sfx/fire_gun/rifles/automatic_rifle/indoor_gunfire/556_auto_rifle_shot_03.ogg"
+   ],
+   "indoors": true
+  },
+  {
+   "id": "fire_gun",
+   "variants": [
+    "modular_ar15",
+    "lever_shotgun",
+    "ar_pistol",
+    "plr16",
+    "fs2000",
+    "modular_m27_assault_rifle",
+    "scar_l",
+    "hk_g36",
+    "m249",
+    "m249_semi",
+    "modular_m4_carbine",
+    "modular_m16a4",
+    "modular_m16_auto_rifle",
+    "m231pfw",
+    "oa93",
+    "ruger_mini",
+    "sig_assault_rifle",
+    "steyr_aug",
+    "ak556",
+    "minidraco556",
+    "mdrx",
+    "bren2_556",
+    "cz600",
+    "rdb_223",
+    "acr_300blk",
+    "iwi_tavor_x95_300blk",
+    "sig_mcx_rattler_sbr"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/fire_gun/rifles/automatic_rifle/outdoor_gunfire/556_auto_rifle_shot_01.ogg",
+    "sfx/fire_gun/rifles/automatic_rifle/outdoor_gunfire/556_auto_rifle_shot_02.ogg",
+    "sfx/fire_gun/rifles/automatic_rifle/outdoor_gunfire/556_auto_rifle_shot_03.ogg"
+   ],
+   "indoors": false
+  },
+  {
+   "id": "fire_gun",
+   "variants": [
+    "ak308",
+    "aksemi",
+    "ak74",
+    "ak47",
+    "american_180",
+    "ar10",
+    "bt_apc9k",
+    "hk_mp5_10_semi",
+    "bbgun",
+    "arx160",
+    "m1918",
+    "calico",
+    "fn_ps90",
+    "colt_ro635",
+    "cx4",
+    "pamd68",
+    "fn_p90",
+    "fn_fal",
+    "scar_h",
+    "TDI_10",
+    "TDI",
+    "hk_g3",
+    "hk_mp5",
+    "hk_mp5k",
+    "hk_mp5sd",
+    "hk_mp7",
+    "briefcase_smg",
+    "hk_usc45",
+    "hk417_13",
+    "robofac_gun",
+    "kord",
+    "smg_40",
+    "smg_45",
+    "smg_9mm",
+    "m1carbine",
+    "m11",
+    "m110a1",
+    "m14ebr",
+    "draco",
+    "mk47",
+    "mp18",
+    "mp40",
+    "pamd68mountable",
+    "ppsh",
+    "hk_mp5_semi_pistol",
+    "rm2000_smg",
+    "needlegun",
+    "rm228",
+    "rm51_assault_rifle",
+    "rm88_battle_rifle",
+    "pamd68rubik",
+    "ruger_1022",
+    "mp40semi",
+    "sten",
+    "tommygun",
+    "hk_ump45",
+    "vz58_p",
+    "vz58ts",
+    "carbine_flintlock",
+    "rifle_flintlock",
+    "longrifle_flintlock",
+    "carbine_flintlock_double",
+    "bh_m89",
+    "sharps",
+    "as50",
+    "m107a1",
+    "remington700_270",
+    "combination_gun",
+    "trex_gun",
+    "pamd71z",
+    "henry_big_boy",
+    "garand",
+    "m1903",
+    "m1a",
+    "m2carbine",
+    "m2010",
+    "M24",
+    "1895sbl",
+    "marlin_9a",
+    "tac50",
+    "mosin91_30",
+    "mosin44",
+    "remington_700",
+    "rm11b_sniper_rifle",
+    "savage_111f",
+    "bfg50",
+    "sks",
+    "obrez",
+    "weatherby_5",
+    "win70",
+    "browning_blr",
+    "colt_lightning",
+    "rifle_22",
+    "rifle_38",
+    "rifle_40",
+    "rifle_44",
+    "rifle_45",
+    "rifle_9mm",
+    "deagle_44",
+    "sw_500"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/fire_gun/rifles/rifle_1.ogg"
+   ]
+  },
+  {
+   "id": "fire_gun",
+   "variants": [
+    "atgm_launcher",
+    "surv_rocket_launcher",
+    "hk_g80",
+    "m202_flash",
+    "m3_carlgustav",
+    "RPG",
+    "LAW",
+    "AT4",
+    "firework_cannon",
+    "m4_carlgustav",
+    "m79",
+    "cannon_3in_ordnance"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/fire_gun/rockets/rocket_1.ogg"
+   ]
+  },
+  {
+   "id": "fire_gun",
+   "variants": [
+    "ksg",
+    "mossberg_500",
+    "remington_870",
+    "ashot",
+    "streetsweeper",
+    "bio_shotgun_gun",
+    "winchester_1887",
+    "remington_870_breacher",
+    "shotgun_d",
+    "slamfire_shotgun_d",
+    "pipe_double_shotgun",
+    "tavor_12",
+    "mossberg_930",
+    "lever_shotgun",
+    "ksg-25",
+    "moss_brownie",
+    "pipe_shotgun",
+    "mossberg_590",
+    "remington_870_express",
+    "winchester_1897",
+    "rm120c",
+    "revolver_shotgun",
+    "shotgun_s",
+    "slamfire_shotgun",
+    "shotgun_410",
+    "saiga_12",
+    "m26_mass_standalone",
+    "rm20",
+    "saiga_410",
+    "blunderbuss",
+    "bigun"
+   ],
+   "volume": 60,
+   "files": [
+    "sfx/fire_gun/shotguns/shotgun_1.ogg"
+   ]
+  },
+  {
+   "id": "humming",
+   "variants": [
+    "electric"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/humming/electric.ogg"
+   ]
+  },
+  {
+   "id": "humming",
+   "variants": [
+    "machinery"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/humming/machinery.ogg"
+   ]
+  },
+  {
+   "id": "melee_attack",
+   "variants": [
+    "monster_melee_hit"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/melee_attack/monster_melee_hit/monster_melee_hit_1.ogg",
+    "sfx/melee_attack/monster_melee_hit/monster_melee_hit_2.ogg",
+    "sfx/melee_attack/monster_melee_hit/monster_melee_hit_3.ogg",
+    "sfx/melee_attack/monster_melee_hit/monster_melee_hit_4.ogg"
+   ]
+  },
+  {
+   "id": "melee_hit_flesh",
+   "variants": [
+    "big_bash"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/melee_hit_flesh/big_bash/big_bash_flesh_1.ogg",
+    "sfx/melee_hit_flesh/big_bash/big_bash_flesh_2.ogg"
+   ]
+  },
+  {
+   "id": "melee_hit_flesh",
+   "variants": [
+    "big_cutting"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/melee_hit_flesh/big_cutting/big_cutting_flesh_1.ogg",
+    "sfx/melee_hit_flesh/big_cutting/big_cutting_flesh_2.ogg"
+   ]
+  },
+  {
+   "id": "melee_hit_flesh",
+   "variants": [
+    "big_stabbing"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/melee_hit_flesh/big_stabbing/big_stabbing_flesh_1.ogg",
+    "sfx/melee_hit_flesh/big_stabbing/big_stabbing_flesh_2.ogg",
+    "sfx/melee_hit_flesh/big_stabbing/big_stabbing_flesh_3.ogg"
+   ]
+  },
+  {
+   "id": "melee_hit_flesh",
+   "variants": [
+    "default"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/melee_hit_flesh/default/unarmed_hit_flesh_1.ogg",
+    "sfx/melee_hit_flesh/default/unarmed_hit_flesh_2.ogg",
+    "sfx/melee_hit_flesh/default/unarmed_hit_flesh_3.ogg",
+    "sfx/melee_hit_flesh/default/unarmed_hit_flesh_4.ogg",
+    "sfx/melee_hit_flesh/default/unarmed_hit_flesh_5.ogg"
+   ]
+  },
+  {
+   "id": "melee_hit_flesh",
+   "variants": [
+    "small_bash"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/melee_hit_flesh/small_bash/small_bash_flesh_1.ogg",
+    "sfx/melee_hit_flesh/small_bash/small_bash_flesh_2.ogg",
+    "sfx/melee_hit_flesh/small_bash/small_bash_flesh_3.ogg",
+    "sfx/melee_hit_flesh/small_bash/small_bash_flesh_4.ogg"
+   ]
+  },
+  {
+   "id": "melee_hit_flesh",
+   "variants": [
+    "small_cutting"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/melee_hit_flesh/small_cutting/small_cutting_flesh_1.ogg",
+    "sfx/melee_hit_flesh/small_cutting/small_cutting_flesh_2.ogg",
+    "sfx/melee_hit_flesh/small_cutting/small_cutting_flesh_3.ogg"
+   ]
+  },
+  {
+   "id": "melee_hit_flesh",
+   "variants": [
+    "small_stabbing"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/melee_hit_flesh/small_stabbing/small_stabbing_flesh_1.ogg",
+    "sfx/melee_hit_flesh/small_stabbing/small_stabbing_flesh_2.ogg",
+    "sfx/melee_hit_flesh/small_stabbing/small_stabbing_flesh_3.ogg",
+    "sfx/melee_hit_flesh/small_stabbing/small_stabbing_flesh_4.ogg",
+    "sfx/melee_hit_flesh/small_stabbing/small_stabbing_flesh_5.ogg",
+    "sfx/melee_hit_flesh/small_stabbing/small_stabbing_flesh_6.ogg"
+   ]
+  },
+  {
+   "id": "melee_swing",
+   "variants": [
+    "big_bash"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/melee_swing/big_bash/big_bash_swing_1.ogg"
+   ]
+  },
+  {
+   "id": "melee_swing",
+   "variants": [
+    "big_cutting"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/melee_swing/big_cutting/big_cutting_swing_1.ogg"
+   ]
+  },
+  {
+   "id": "melee_swing",
+   "variants": [
+    "big_stabbing"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/melee_swing/big_stabbing/big_stabbing_swing_1.ogg"
+   ]
+  },
+  {
+   "id": "melee_swing",
+   "variants": [
+    "default"
+   ],
+   "volume": 110,
+   "files": [
+    "sfx/melee_swing/default/unarmed_swing_1.ogg",
+    "sfx/melee_swing/default/unarmed_swing_2.ogg",
+    "sfx/melee_swing/default/unarmed_swing_3.ogg",
+    "sfx/melee_swing/default/unarmed_swing_4.ogg",
+    "sfx/melee_swing/default/unarmed_swing_5.ogg"
+   ]
+  },
+  {
+   "id": "melee_swing",
+   "variants": [
+    "small_bash"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/melee_swing/small_bash/small_bash_swing_1.ogg",
+    "sfx/melee_swing/small_bash/small_bash_swing_2.ogg",
+    "sfx/melee_swing/small_bash/small_bash_swing_3.ogg",
+    "sfx/melee_swing/small_bash/small_bash_swing_4.ogg",
+    "sfx/melee_swing/small_bash/small_bash_swing_5.ogg",
+    "sfx/melee_swing/small_bash/small_bash_swing_6.ogg",
+    "sfx/melee_swing/small_bash/small_bash_swing_7.ogg"
+   ]
+  },
+  {
+   "id": "melee_swing",
+   "variants": [
+    "small_cutting"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/melee_swing/small_cutting/small_cutting_swing_1.ogg",
+    "sfx/melee_swing/small_cutting/small_cutting_swing_2.ogg",
+    "sfx/melee_swing/small_cutting/small_cutting_swing_3.ogg",
+    "sfx/melee_swing/small_cutting/small_cutting_swing_4.ogg",
+    "sfx/melee_swing/small_cutting/small_cutting_swing_5.ogg",
+    "sfx/melee_swing/small_cutting/small_cutting_swing_6.ogg"
+   ]
+  },
+  {
+   "id": "melee_swing",
+   "variants": [
+    "small_stabbing"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/melee_swing/small_stabbing/small_stabbing_swing_1.ogg",
+    "sfx/melee_swing/small_stabbing/small_stabbing_swing_2.ogg",
+    "sfx/melee_swing/small_stabbing/small_stabbing_swing_3.ogg",
+    "sfx/melee_swing/small_stabbing/small_stabbing_swing_4.ogg"
+   ]
+  },
+  {
+   "id": "menu_error",
+   "variants": [
+    "default"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/menu_error/menu_error.ogg"
+   ]
+  },
+  {
+   "id": "menu_move",
+   "variants": [
+    "default"
+   ],
+   "volume": 50,
+   "files": [
+    "sfx/menu_move/menu_move.ogg"
+   ]
+  },
+  {
+   "id": "mon_bite",
+   "variants": [
+    "bite_hit"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/mon_bite/bite_hit/bite_hit_1.ogg",
+    "sfx/mon_bite/bite_hit/bite_hit_2.ogg",
+    "sfx/mon_bite/bite_hit/bite_hit_3.ogg",
+    "sfx/mon_bite/bite_hit/bite_hit_4.ogg",
+    "sfx/mon_bite/bite_hit/bite_hit_5.ogg"
+   ]
+  },
+  {
+   "id": "mon_bite",
+   "variants": [
+    "bite_miss"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/mon_bite/bite_miss/bite_miss_1.ogg",
+    "sfx/mon_bite/bite_miss/bite_miss_2.ogg",
+    "sfx/mon_bite/bite_miss/bite_miss_3.ogg",
+    "sfx/mon_bite/bite_miss/bite_miss_4.ogg",
+    "sfx/mon_bite/bite_miss/bite_miss_5.ogg"
+   ]
+  },
+  {
+   "id": "mon_death",
+   "variants": [
+    "zombie_death"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/mon_death/zombie_death/zombie_death_1.ogg",
+    "sfx/mon_death/zombie_death/zombie_death_2.ogg",
+    "sfx/mon_death/zombie_death/zombie_death_3.ogg",
+    "sfx/mon_death/zombie_death/zombie_death_4.ogg"
+   ]
+  },
+  {
+   "id": "mon_gibbed",
+   "variants": [
+    "zombie_gibbed"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/mon_death/zombie_gibbed/zombie_gibbed_1.ogg",
+    "sfx/mon_death/zombie_gibbed/zombie_gibbed_2.ogg"
+   ]
+  },
+  {
+   "id": "open_door",
+   "variants": [
+    "t_chaingate_c"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/open_door/door_fence/open_door_fence.ogg"
+   ]
+  },
+  {
+   "id": "open_door",
+   "variants": [
+    "t_door_metal_c"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/open_door/door_metal/open_door_metal.ogg"
+   ]
+  },
+  {
+   "id": "open_door",
+   "variants": [
+    "t_door_c",
+    "t_door_elocked",
+    "t_door_elocked_peep",
+    "t_door_elocked_alarm",
+    "t_door_lab_c",
+    "t_door_white_c",
+    "t_door_gray_c",
+    "t_door_red_c",
+    "t_door_green_c",
+    "t_door_c_peep",
+    "t_door_c_peep",
+    "t_door_locked",
+    "t_door_locked_peep",
+    "t_door_locked_alarm",
+    "t_rdoor_c"
+   ],
+   "volume": 80,
+   "files": [
+    "sfx/open_door/door_wood/open_door.ogg"
+   ]
+  },
+  {
+   "id": "open_door",
+   "variants": [
+    "f_gunsafe_c",
+    "f_safe_c"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/open_door/gun_safe/open_safe.ogg"
+   ]
+  },
+  {
+   "id": "open_door",
+   "variants": [
+    "t_window_domestic",
+    "t_window_no_curtains"
+   ],
+   "volume": 70,
+   "files": [
+    "sfx/open_door/window/open_window.ogg"
+   ]
+  },
+  {
+   "id": "plmove",
+   "variants": [
+    "clear_obstacle"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/plmove/clear_obstacle/clear_obstacle_3.ogg",
+    "sfx/plmove/clear_obstacle/clear_obstacle_2.ogg"
+   ]
+  },
+  {
+   "id": "plmove",
+   "variants": [
+    "fatigue_m_low",
+    "fatigue_f_low"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/plmove/fatigue/fatigue_low.ogg"
+   ]
+  },
+  {
+   "id": "plmove",
+   "variants": [
+    "fatigue_m_med",
+    "fatigue_f_med"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/plmove/fatigue/fatigue_med.ogg"
+   ]
+  },
+  {
+   "id": "plmove",
+   "variants": [
+    "fatigue_m_high",
+    "fatigue_f_high"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/plmove/fatigue/fatigue_high.ogg"
+   ]
+  },
+  {
+   "id": "plmove",
+   "variants": [
+    "walk_dirt"
+   ],
+   "volume": 50,
+   "files": [
+    "sfx/plmove/walk_dirt_1.ogg",
+    "sfx/plmove/walk_dirt_2.ogg",
+    "sfx/plmove/walk_dirt_3.ogg",
+    "sfx/plmove/walk_dirt_4.ogg",
+    "sfx/plmove/walk_dirt_5.ogg",
+    "sfx/plmove/walk_dirt_6.ogg"
+   ]
+  },
+  {
+   "id": "plmove",
+   "variants": [
+    "walk_tarmac"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/plmove/walk_t_concrete_1.ogg",
+    "sfx/plmove/walk_t_concrete_3.ogg",
+    "sfx/plmove/walk_t_concrete_2.ogg",
+    "sfx/plmove/walk_t_concrete_4.ogg",
+    "sfx/plmove/walk_t_concrete_5.ogg",
+    "sfx/plmove/walk_t_concrete_6.ogg",
+    "sfx/plmove/walk_t_concrete_7.ogg",
+    "sfx/plmove/walk_t_concrete_8.ogg",
+    "sfx/plmove/walk_t_concrete_10.ogg"
+   ]
+  },
+  {
+   "id": "plmove",
+   "variants": [
+    "walk_barefoot"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/plmove/walk_barefoot_1.ogg",
+    "sfx/plmove/walk_barefoot_3.ogg",
+    "sfx/plmove/walk_barefoot_2.ogg",
+    "sfx/plmove/walk_barefoot_4.ogg",
+    "sfx/plmove/walk_barefoot_5.ogg",
+    "sfx/plmove/walk_barefoot_6.ogg",
+    "sfx/plmove/walk_barefoot_7.ogg",
+    "sfx/plmove/walk_barefoot_8.ogg",
+    "sfx/plmove/walk_barefoot_9.ogg",
+    "sfx/plmove/walk_barefoot_10.ogg"
+   ]
+  },
+  {
+   "id": "plmove",
+   "variants": [
+    "walk_water"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/plmove/walk_water_1.ogg",
+    "sfx/plmove/walk_water_3.ogg",
+    "sfx/plmove/walk_water_2.ogg",
+    "sfx/plmove/walk_water_4.ogg",
+    "sfx/plmove/walk_water_5.ogg",
+    "sfx/plmove/walk_water_6.ogg",
+    "sfx/plmove/walk_water_7.ogg",
+    "sfx/plmove/walk_water_8.ogg",
+    "sfx/plmove/walk_water_9.ogg",
+    "sfx/plmove/walk_water_10.ogg"
+   ]
+  },
+  {
+   "id": "plmove",
+   "variants": [
+    "t_water_sh",
+    "t_water_sh_underground",
+    "t_water_murky",
+    "t_water_sh_murky_underground",
+    "t_water_moving_sh",
+    "t_water_moving_sh_underground",
+    "t_swater_sh",
+    "t_swater_sh_underground",
+    "t_water_pool_shallow",
+    "t_water_pool_shallow_outdoors"
+   ],
+   "volume": 50,
+   "files": [
+    "sfx/plmove/walk_t_water_sh_1.ogg",
+    "sfx/plmove/walk_t_water_sh_2.ogg",
+    "sfx/plmove/walk_t_water_sh_3.ogg",
+    "sfx/plmove/walk_t_water_sh_4.ogg",
+    "sfx/plmove/walk_t_water_sh_5.ogg",
+    "sfx/plmove/walk_t_water_sh_6.ogg"
+   ]
+  },
+  {
+   "id": "plmove",
+   "variants": [
+    "t_rock_floor"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/plmove/walk_t_rock_floor_1.ogg",
+    "sfx/plmove/walk_t_rock_floor_2.ogg",
+    "sfx/plmove/walk_t_rock_floor_3.ogg",
+    "sfx/plmove/walk_t_rock_floor_4.ogg"
+   ]
+  },
+  {
+   "id": "plmove",
+   "variants": [
+    "t_railroad_rubble"
+   ],
+   "volume": 50,
+   "files": [
+    "sfx/plmove/walk_t_gravel_1.ogg",
+    "sfx/plmove/walk_t_gravel_2.ogg",
+    "sfx/plmove/walk_t_gravel_3.ogg",
+    "sfx/plmove/walk_t_gravel_4.ogg",
+    "sfx/plmove/walk_t_gravel_5.ogg",
+    "sfx/plmove/walk_t_gravel_6.ogg",
+    "sfx/plmove/walk_t_gravel_7.ogg",
+    "sfx/plmove/walk_t_gravel_8.ogg",
+    "sfx/plmove/walk_t_gravel_9.ogg",
+    "sfx/plmove/walk_t_gravel_10.ogg"
+   ]
+  },
+  {
+   "id": "plmove",
+   "variants": [
+    "walk_grass"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/plmove/walk_grass/walk_grass_1.ogg",
+    "sfx/plmove/walk_grass/walk_grass_2.ogg",
+    "sfx/plmove/walk_grass/walk_grass_3.ogg",
+    "sfx/plmove/walk_grass/walk_grass_4.ogg",
+    "sfx/plmove/walk_grass/walk_grass_5.ogg",
+    "sfx/plmove/walk_grass/walk_grass_6.ogg"
+   ]
+  },
+  {
+   "id": "plmove",
+   "variants": [
+    "walk_metal",
+    "t_metal_floor_olight",
+    "t_metal_floor",
+    "t_scrap_floor",
+    "t_junk_floor",
+    "t_metal_floor_no_roof",
+    "t_bridge",
+    "t_metal_dock",
+    "t_metal_dock_deep",
+    "t_metal_pontoon_dp",
+    "t_bulkhead_floor",
+    "t_bulkhead_roof"
+   ],
+   "volume": 50,
+   "files": [
+    "sfx/plmove/walk_metal/walk_metal_1.ogg",
+    "sfx/plmove/walk_metal/walk_metal_2.ogg",
+    "sfx/plmove/walk_metal/walk_metal_3.ogg",
+    "sfx/plmove/walk_metal/walk_metal_4.ogg",
+    "sfx/plmove/walk_metal/walk_metal_5.ogg"
+   ]
+  },
+  {
+   "id": "plmove",
+   "variants": [
+    "t_carpet_base",
+    "t_carpet_red",
+    "t_carpet_yellow",
+    "t_carpet_green",
+    "t_carpet_base_concrete",
+    "t_carpet_concrete_red",
+    "t_carpet_concrete_yellow",
+    "t_carpet_concrete_green",
+    "t_carpet_concrete_purple",
+    "t_carpet_base_metal",
+    "t_carpet_metal_red",
+    "t_carpet_metal_yellow",
+    "t_carpet_metal_green",
+    "t_carpet_metal_purple"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/plmove/walk_t_carpet/walk_t_carpet_1.ogg",
+    "sfx/plmove/walk_t_carpet/walk_t_carpet_2.ogg",
+    "sfx/plmove/walk_t_carpet/walk_t_carpet_3.ogg",
+    "sfx/plmove/walk_t_carpet/walk_t_carpet_4.ogg",
+    "sfx/plmove/walk_t_carpet/walk_t_carpet_5.ogg",
+    "sfx/plmove/walk_t_carpet/walk_t_carpet_6.ogg",
+    "sfx/plmove/walk_t_carpet/walk_t_carpet_7.ogg",
+    "sfx/plmove/walk_t_carpet/walk_t_carpet_8.ogg"
+   ]
+  },
+  {
+   "id": "plmove",
+   "variants": [
+    "t_floor",
+    "t_floor_olight",
+    "t_floor_primitive",
+    "t_floor_waxed",
+    "t_floor_waxed_y"
+   ],
+   "volume": 30,
+   "files": [
+    "sfx/plmove/walk_t_floor/walk_t_floor_1.ogg",
+    "sfx/plmove/walk_t_floor/walk_t_floor_2.ogg",
+    "sfx/plmove/walk_t_floor/walk_t_floor_3.ogg",
+    "sfx/plmove/walk_t_floor/walk_t_floor_4.ogg",
+    "sfx/plmove/walk_t_floor/walk_t_floor_5.ogg",
+    "sfx/plmove/walk_t_floor/walk_t_floor_6.ogg"
+   ]
+  },
+  {
+   "id": "plmove",
+   "variants": [
+    "t_grass_long",
+    "t_grass_tall",
+    "t_grass_dead",
+    "t_fern",
+    "t_fern_harvested"
+   ],
+   "volume": 110,
+   "files": [
+    "sfx/plmove/walk_t_grass_long/walk_t_grass_long_1.ogg",
+    "sfx/plmove/walk_t_grass_long/walk_t_grass_long_2.ogg",
+    "sfx/plmove/walk_t_grass_long/walk_t_grass_long_3.ogg",
+    "sfx/plmove/walk_t_grass_long/walk_t_grass_long_4.ogg",
+    "sfx/plmove/walk_t_grass_long/walk_t_grass_long_5.ogg",
+    "sfx/plmove/walk_t_grass_long/walk_t_grass_long_6.ogg",
+    "sfx/plmove/walk_t_grass_long/walk_t_grass_long_7.ogg",
+    "sfx/plmove/walk_t_grass_long/walk_t_grass_long_8.ogg",
+    "sfx/plmove/walk_t_grass_long/walk_t_grass_long_9.ogg",
+    "sfx/plmove/walk_t_grass_long/walk_t_grass_long_10.ogg"
+   ]
+  },
+  {
+   "id": "radio",
+   "variants": [
+    "inaudible_chatter"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/radio/inaudible_chatter.ogg",
+    "sfx/radio/inaudible_chatter_1.ogg",
+    "sfx/radio/inaudible_chatter_2.ogg",
+    "sfx/radio/inaudible_chatter_3.ogg",
+    "sfx/radio/inaudible_chatter_4.ogg",
+    "sfx/radio/inaudible_chatter_5.ogg"
+   ]
+  },
+  {
+   "id": "radio",
+   "variants": [
+    "static"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/radio/static.ogg"
+   ]
+  },
+  {
+   "id": "reload",
+   "variants": [
+    "default"
+   ],
+   "volume": 45,
+   "files": [
+    "sfx/reload/default.ogg"
+   ]
+  },
+  {
+   "id": "reload",
+   "variants": [
+    "tac50",
+    "cz600",
+    "m2010",
+    "ruger_pr",
+    "steyr_scout",
+    "tac338",
+    "mrad_smr",
+    "axmc",
+    "ruger_arr"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/reload/mag_fed_bolt_action_rifle/bolt_action_rifle_load_01.ogg",
+    "sfx/reload/mag_fed_bolt_action_rifle/bolt_action_rifle_load_02.ogg",
+    "sfx/reload/mag_fed_bolt_action_rifle/bolt_action_rifle_load_03.ogg",
+    "sfx/reload/mag_fed_bolt_action_rifle/bolt_action_rifle_load_04.ogg"
+   ]
+  },
+  {
+   "id": "reload",
+   "variants": [
+    "sig_p230",
+    "walther_ppk",
+    "kp32",
+    "kp3at",
+    "fn1910",
+    "rugerlcp",
+    "hptcf380",
+    "taurus_spectrum",
+    "sig_mosquito",
+    "sw_22",
+    "j22",
+    "walther_p22",
+    "makarov",
+    "kpf9",
+    "cp33",
+    "ruger_mk4"
+   ],
+   "volume": 60,
+   "files": [
+    "sfx/reload/pocket_pistol/pocket_pistol_load_01.ogg",
+    "sfx/reload/pocket_pistol/pocket_pistol_load_02.ogg",
+    "sfx/reload/pocket_pistol/pocket_pistol_load_03.ogg",
+    "sfx/reload/pocket_pistol/pocket_pistol_load_04.ogg"
+   ]
+  },
+  {
+   "id": "reload",
+   "variants": [
+    "lever_shotgun",
+    "ksg",
+    "ksg-25",
+    "mossberg_500",
+    "mossberg_590",
+    "mossberg_930",
+    "remington_870",
+    "remington_870_breacher",
+    "remington_870_express",
+    "tavor_12",
+    "winchester_1887",
+    "winchester_1897",
+    "masterkey",
+    "masterkey_mod",
+    "benelli_sa",
+    "benelli_tsa"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/reload/tube_fed_shotgun/shell_load_01.ogg",
+    "sfx/reload/tube_fed_shotgun/shell_load_02.ogg",
+    "sfx/reload/tube_fed_shotgun/shell_load_03.ogg",
+    "sfx/reload/tube_fed_shotgun/shell_load_04.ogg"
+   ]
+  },
+  {
+   "id": "smash",
+   "variants": [
+    "glass"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/smash/smash_glass.ogg"
+   ]
+  },
+  {
+   "id": "smash_fail",
+   "variants": [
+    "t_brick_wall",
+    "t_brick_wall_halfway",
+    "t_adobe_brick_wall_halfway",
+    "t_adobe_brick_wall",
+    "f_pallet_brick",
+    "f_pallet_brick_adobe",
+    "t_brick_wall",
+    "t_brick_wall_halfway",
+    "t_adobe_brick_wall_halfway",
+    "t_adobe_brick_wall",
+    "f_pallet_brick",
+    "f_chimney",
+    "f_rubble",
+    "f_brick_stack_short",
+    "f_brick_stack_mid",
+    "f_brick_stack_tall",
+    "f_adobe_stack_short",
+    "f_adobe_stack_mid",
+    "f_adobe_stack_tall",
+    "t_embrasure_brick",
+    "t_brick_roof",
+    "t_embrasure_adobe_brick",
+    "t_brick_floor",
+    "t_brick_oven_base",
+    "t_brick_oven_struct",
+    "t_brick_oven"
+   ],
+   "volume": 80,
+   "files": [
+    "sfx/smash_fail/brick/smash_fail_brick.ogg",
+    "sfx/smash_fail/brick/smash_fail_brick_1.ogg",
+    "sfx/smash_fail/brick/smash_fail_brick_2.ogg",
+    "sfx/smash_fail/brick/smash_fail_brick_3.ogg",
+    "sfx/smash_fail/brick/smash_fail_brick_4.ogg"
+   ]
+  },
+  {
+   "id": "smash_fail",
+   "variants": [
+    "f_bathtub",
+    "f_shower",
+    "f_sink",
+    "f_toilet"
+   ],
+   "volume": 80,
+   "files": [
+    "sfx/smash_fail/ceramic/smash_fail_ceramic.ogg"
+   ]
+  },
+  {
+   "id": "smash_fail",
+   "variants": [
+    "t_chaingate_l",
+    "t_chaingate_c",
+    "t_chaingate_o",
+    "t_chainfence",
+    "t_chickenwire_fence",
+    "t_screened_porch_wall",
+    "t_quietfarm_border_fence"
+   ],
+   "volume": 50,
+   "files": [
+    "sfx/smash_fail/chain_link/smash_fail_chain_link.ogg",
+    "sfx/smash_fail/chain_link/smash_fail_chain_link_1.ogg",
+    "sfx/smash_fail/chain_link/smash_fail_chain_link_2.ogg"
+   ]
+  },
+  {
+   "id": "smash_fail",
+   "variants": [
+    "t_pavement_bg_dp",
+    "t_pavement_y_bg_dp",
+    "t_sidewalk_bg_dp",
+    "t_concrete_dock_deep_pile",
+    "t_concrete_wall",
+    "t_secretdoor_concrete_c",
+    "t_secretdoor_concrete_o",
+    "t_embrasure_sconc",
+    "t_embrasure_strconcrete",
+    "t_concrete_roof",
+    "t_concrete_railing",
+    "t_thconc_floor",
+    "t_thconc_y",
+    "t_thconc_r",
+    "t_thconc_warning",
+    "t_strconc_floor",
+    "t_strconc_floor_glimmer",
+    "t_strconc_floor_halfway",
+    "t_rock_floor",
+    "t_marble_floor",
+    "t_floor_warped",
+    "t_sidewalk",
+    "t_strconc_floor_no_roof",
+    "t_concrete",
+    "t_concrete_y",
+    "t_pavement_hw_air",
+    "t_pavement_y_hw_air",
+    "t_sidewalk_hw_air",
+    "t_lake_bed_concrete",
+    "t_lake_bed_concrete_yellow",
+    "t_flat_roof",
+    "t_concrete_wall_b",
+    "t_concrete_wall_g",
+    "t_concrete_wall_r",
+    "t_concrete_wall_w",
+    "t_concrete_wall_p",
+    "t_concrete_wall_P",
+    "t_concrete_wall_y",
+    "t_concrete_wall_orange",
+    "t_concrete_wall_gray",
+    "t_concrete_wall_brown",
+    "t_concrete_wall_cyan",
+    "t_concrete_wall_black",
+    "t_strconc_wall_b",
+    "t_strconc_wall_g",
+    "t_strconc_wall_r",
+    "t_strconc_wall_w",
+    "t_strconc_wall_p",
+    "t_strconc_wall_p",
+    "t_strconc_wall_y",
+    "t_strconc_wall_orange",
+    "t_strconc_wall_gray",
+    "t_strconc_wall_brown",
+    "t_strconc_wall_cyan",
+    "t_strconc_wall_black",
+    "t_sconc_wall_b",
+    "t_sconc_wall_g",
+    "t_sconc_wall_r",
+    "t_sconc_wall_w",
+    "t_sconc_wall_p",
+    "t_sconc_wall_P",
+    "t_sconc_wall_y",
+    "t_sconc_wall_orange",
+    "t_sconc_wall_gray",
+    "t_sconc_wall_brown",
+    "t_sconc_wall_cyan",
+    "t_sconc_wall_black",
+    "t_brick_wall_halfway",
+    "t_rock_wall",
+    "t_rock_wall_half",
+    "t_rock_smooth",
+    "t_concrete_wall",
+    "t_concrete_wall_rope",
+    "t_sconc_wall",
+    "t_sconc_wall_halfway",
+    "t_strconc_wall",
+    "t_strconc_wall_halfway",
+    "t_rock",
+    "t_rock_red",
+    "t_rock_green",
+    "t_rock_blue",
+    "t_little_column",
+    "t_column",
+    "t_bollard",
+    "t_drystone_wall",
+    "t_drystone_wall_half",
+    "t_pillar",
+    "t_concrete_ramp_down_high",
+    "t_concrete_ramp_down_low",
+    "t_concrete_ramp_up_high",
+    "t_concrete_ramp_up_low"
+   ],
+   "volume": 80,
+   "files": [
+    "sfx/smash_fail/concrete/smash_fail_concrete.ogg",
+    "sfx/smash_fail/concrete/smash_fail_concrete_1.ogg",
+    "sfx/smash_fail/concrete/smash_fail_concrete_2.ogg",
+    "sfx/smash_fail/concrete/smash_fail_concrete_3.ogg",
+    "sfx/smash_fail/concrete/smash_fail_concrete_4.ogg"
+   ]
+  },
+  {
+   "id": "smash_fail",
+   "variants": [
+    "t_door_c",
+    "t_door_locked",
+    "t_door_locked_interior",
+    "t_door_locked_peep",
+    "t_door_locked_alarm",
+    "t_rdoor_c",
+    "t_door_boarded",
+    "t_door_c_peep",
+    "t_door_b",
+    "t_door_boarded_damaged",
+    "t_door_boarded_damaged",
+    "t_door_red_c",
+    "t_door_b_peep",
+    "t_door_boarded_damaged_peep",
+    "t_door_gray_c",
+    "t_door_boarded_peep",
+    "t_door_green_c",
+    "t_door_makeshift_c",
+    "t_door_white_c",
+    "t_door_lab_c",
+    "t_door_white_b",
+    "t_door_gray_b",
+    "t_door_red_b",
+    "t_door_green_b",
+    "t_door_lab_b",
+    "t_rdoor_c",
+    "t_rdoor_b",
+    "t_rdoor_boarded",
+    "t_rdoor_boarded_damaged"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/smash_fail/door_wood/door_smash_fail_1.ogg",
+    "sfx/smash_fail/door_wood/door_smash_fail_2.ogg",
+    "sfx/smash_fail/door_wood/door_smash_fail_3.ogg",
+    "sfx/smash_fail/door_wood/door_smash_fail_4.ogg",
+    "sfx/smash_fail/door_wood/door_smash_fail_5.ogg"
+   ]
+  },
+  {
+   "id": "smash_fail",
+   "variants": [
+    "f_glass_fridge",
+    "f_bigmirror",
+    "f_gazing_ball",
+    "f_styling_station",
+    "f_glass_cabinet",
+    "f_displaycase",
+    "f_displaycase_o",
+    "f_displaycase_b",
+    "f_board_map",
+    "f_board_map_o",
+    "f_fireman_cabinet",
+    "f_fireman_cabinet_o",
+    "f_glass_mound_short",
+    "f_glass_mound_mid",
+    "f_glass_mound_tall",
+    "f_firefly_terrarium",
+    "f_vending_c",
+    "f_glassedbody_1",
+    "f_glassedbody_2",
+    "f_glassedbody_3",
+    "f_glassedbody_4",
+    "f_glassedbody_5",
+    "f_glassedbody_6",
+    "f_glassedbody_7",
+    "f_glassedbody_8",
+    "f_glassedbody_9",
+    "f_glassedbody_10",
+    "f_glassedbody_11",
+    "f_vitrified_bed",
+    "f_vitrified_bathtub",
+    "f_vitrified_dresser",
+    "f_vitrified_fridge",
+    "f_vitrified_armchair",
+    "f_vitrified_chair",
+    "f_vitrified_desk",
+    "f_vitrified_locker",
+    "f_vitrified_oven",
+    "f_vitrified_mailbox",
+    "f_vitrified_rack",
+    "f_vitrified_sink",
+    "f_vitrified_toilet",
+    "f_vitrified_cupboard",
+    "f_vitrified_planter",
+    "f_vitrified_flower",
+    "f_vitrified_bench",
+    "f_vitrified_washer",
+    "f_vitrified_dryer",
+    "f_vitrified_bookcase",
+    "f_vitrified_counter",
+    "f_vitrified_table",
+    "f_vitrified_birdbath",
+    "f_vitrified_shower",
+    "f_vitrified_water_heater",
+    "f_vitrified_fireplace",
+    "f_vitrified_firering",
+    "f_vitrified_floor_lamp",
+    "f_vitrified_box",
+    "f_vitrified_sofa",
+    "f_vitrified_dishwasher",
+    "f_vitrified_doll",
+    "f_vitrified_bookcase_talker",
+    "t_door_glass_red_c",
+    "t_door_glass_green_c",
+    "t_door_glass_white_c",
+    "t_door_glass_gray_c",
+    "t_door_glass_red_o",
+    "t_door_glass_green_o",
+    "t_door_glass_white_o",
+    "t_door_glass_gray_o",
+    "t_door_glass_c",
+    "t_door_glass_lab_c",
+    "t_door_glass_o",
+    "t_door_glass_lab_o",
+    "t_door_glass_frosted_c",
+    "t_door_glass_frosted_lab_c",
+    "t_door_glass_frosted_o",
+    "t_door_glass_frosted_lab_o",
+    "t_glass_railing",
+    "t_thconc_y_olight",
+    "t_thconc_floor_olight",
+    "t_floor_olight",
+    "t_dirtfloor_olight",
+    "t_metal_floor_olight",
+    "t_strconc_floor_olight",
+    "t_linoleum_gray_floor_olight",
+    "t_linoleum_whitefloor_olight",
+    "t_glassed_sand",
+    "t_vat",
+    "t_nether_glass_floor",
+    "t_nether_glass_floor_clairvoyance",
+    "t_nether_glass_floor_basalt",
+    "t_nether_glass_wall",
+    "t_glass_roof",
+    "t_pit_glass",
+    "t_wall_glass",
+    "t_wall_glass_alarm",
+    "t_vitrified_dirt",
+    "t_vitrified_grass",
+    "t_vitrified_floor",
+    "t_vitrified_tile",
+    "t_vitrified_wall",
+    "t_vitrified_edge",
+    "t_vitrified_door",
+    "t_vitrified_chickenwire_fence",
+    "t_vitrified_fence_barbed",
+    "t_vitrified_wall_glass",
+    "t_vitrified_sand",
+    "t_vitrified_curtains",
+    "t_vitrified_window_frame",
+    "t_vitrified_fence_post",
+    "t_vitrified_water_pump",
+    "t_vitrified_bars",
+    "t_vitrified_column",
+    "t_vitrified_pool",
+    "t_tree_apple_vitrified",
+    "t_vitrified_tree",
+    "t_vitrified_bush",
+    "t_vitrified_stairs_down",
+    "t_vitrified_stairs_up",
+    "t_vitrified_downspout",
+    "t_vitrified_roof",
+    "t_vitrified_gutter_drop",
+    "t_vitrified_pool_talker",
+    "t_vitrified_soil_talker"
+   ],
+   "volume": 80,
+   "files": [
+    "sfx/smash_fail/glass/smash_fail_glass.ogg",
+    "sfx/smash_fail/glass/smash_fail_glass_1.ogg",
+    "sfx/smash_fail/glass/smash_fail_glass_2.ogg"
+   ]
+  },
+  {
+   "id": "smash_fail",
+   "variants": [
+    "t_laminated_glass",
+    "t_ballistic_glass",
+    "t_reinforced_glass",
+    "t_reinforced_glass_shutter",
+    "t_reinforced_glass_shutter_open",
+    "t_laminated_door_glass_c",
+    "t_laminated_door_glass_o",
+    "t_ballistic_door_glass_c",
+    "t_ballistic_door_glass_o",
+    "t_reinforced_door_glass_c",
+    "t_reinforced_door_glass_lab_c",
+    "t_reinforced_door_glass_o",
+    "t_reinforced_door_glass_lab_o"
+   ],
+   "volume": 80,
+   "files": [
+    "sfx/smash_fail/glass/smash_fail_glass_reinforced.ogg",
+    "sfx/smash_fail/glass/smash_fail_glass_reinforced_1.ogg"
+   ]
+  },
+  {
+   "id": "smash_fail",
+   "variants": [
+    "f_scrap_antenna",
+    "f_exodii_signpost",
+    "f_exodii_botrack",
+    "f_exodii_lamp",
+    "f_exodii_printer_large",
+    "f_exodii_generator_1",
+    "f_exodii_generator_2",
+    "f_exodii_generator_3",
+    "f_exodii_generator_4",
+    "f_exodii_charger",
+    "f_exodii_charger_cheap",
+    "f_exodii_portal_tower",
+    "f_exodii_portal_enclosure",
+    "f_exodii_locator_antenna",
+    "f_air_conditioner",
+    "f_air_filter",
+    "f_dishwasher",
+    "f_dryer",
+    "f_fridge",
+    "f_freezer",
+    "f_home_furnace",
+    "f_washer",
+    "f_oven",
+    "f_gas_oven",
+    "f_gas_oven_microwave_combo",
+    "f_bellows",
+    "f_drophammer",
+    "f_shredder",
+    "f_server",
+    "f_satellite",
+    "f_hd_compressor_unit",
+    "f_bigmirror_b",
+    "f_shackle",
+    "f_rotary_clothesline",
+    "f_floor_lamp",
+    "f_vent_cold_air2_stream",
+    "f_vent_cold_air2_stream",
+    "f_vent_cold_air2_stream",
+    "f_vent_hot_air2_stream",
+    "f_vent_hot_air2_stream",
+    "f_vent_toxic_leak",
+    "f_vent_toxic_leak",
+    "f_vent_rad_leak",
+    "f_woodstove",
+    "f_brazier",
+    "f_hobo_stove",
+    "f_portable_stove",
+    "f_55gal_firebarrel",
+    "f_30gal_firebarrel",
+    "f_chemical_mixer",
+    "f_generator_broken",
+    "f_compact_ASRG_containment",
+    "f_machinery_heavy",
+    "f_machinery_old",
+    "f_machinery_electronic",
+    "f_robotic_arm",
+    "f_capacitor",
+    "f_control_station",
+    "f_nuclear_fuel_cell",
+    "f_active_backup_generator",
+    "f_autoclave",
+    "f_autoclave_full",
+    "f_sample_freezer",
+    "f_lab_bench",
+    "f_fume_hood",
+    "f_shaker",
+    "f_eyewash",
+    "f_IV_pole",
+    "f_HPLC",
+    "f_GC",
+    "f_MS",
+    "f_NMR",
+    "f_electron_microscope",
+    "f_CTscan",
+    "f_MRI",
+    "f_scan_bed",
+    "f_anesthetic",
+    "f_dialysis",
+    "f_ventilator",
+    "f_centrifuge",
+    "f_water_heater",
+    "f_water_heater_family",
+    "f_water_purifier",
+    "f_exercise",
+    "f_ball_mach",
+    "f_target",
+    "f_arcade_machine",
+    "f_pinball_machine",
+    "f_ergometer",
+    "f_ergometer_mechanical",
+    "f_treadmill",
+    "f_treadmill_mechanical",
+    "f_small_satellite_dish",
+    "f_TV_antenna",
+    "f_roof_turbine_vent",
+    "f_camp_chair",
+    "f_metal_bench",
+    "f_barstool",
+    "f_triple_bunkbed",
+    "f_gunsafe_o",
+    "f_gunsafe_c",
+    "f_gunsafe_ml",
+    "f_gunsafe_mj",
+    "f_gun_safe_el",
+    "f_locker",
+    "f_mailbox",
+    "f_clothing_rail",
+    "f_rack",
+    "f_rack_l",
+    "f_safe_c",
+    "f_safe_l",
+    "f_safe_o",
+    "f_metal_trashcan",
+    "f_filing_cabinet",
+    "f_utility_shelf",
+    "f_warehouse_shelf",
+    "f_fireman_cabinet",
+    "f_fireman_cabinet_o",
+    "f_fireman_cabinet_b",
+    "f_standing_tank",
+    "f_storage_tank",
+    "f_gas_tank",
+    "f_gas_tank_smashed",
+    "f_diesel_tank",
+    "f_diesel_tank_smashed",
+    "f_dumpster",
+    "f_butter_churn",
+    "f_metal_crate_r",
+    "f_metal_crate_c",
+    "f_metal_crate_o",
+    "f_foot_locker",
+    "f_foot_locker_aluminum",
+    "f_432gal_drum_rubber",
+    "f_workbench",
+    "f_tourist_table",
+    "f_metal_table",
+    "f_wreckage",
+    "f_street_light",
+    "f_traffic_light",
+    "f_bike_rack",
+    "f_flagpole",
+    "f_scrap_bridge",
+    "f_rebar_stack_short",
+    "f_rebar_stack_mid",
+    "f_rebar_stack_tall",
+    "f_pipe_stack_short",
+    "f_pipe_stack_mid",
+    "f_pipe_stack_tall",
+    "f_anvil",
+    "f_anvil_heavy",
+    "f_anvil_crude",
+    "f_still",
+    "f_kiln_metal_empty",
+    "f_kiln_metal_full",
+    "f_arcfurnace_empty",
+    "f_arcfurnace_full",
+    "f_metal_smoking_rack",
+    "f_metal_smoking_rack_active",
+    "f_aluminum_stepladder",
+    "f_arc_furnace",
+    "f_beverly_shear",
+    "f_drill_press",
+    "f_tablesaw",
+    "f_mitresaw",
+    "f_bandsaw",
+    "f_router",
+    "f_planer",
+    "f_jointer",
+    "f_catalytic_cracking_reactor",
+    "f_hydraulic_press",
+    "f_heavy_lathe",
+    "f_air_compressor",
+    "f_manual_tire_changer",
+    "f_metal_butcher_rack",
+    "f_hanging_meathook",
+    "f_aut_gas_console_o"
+   ],
+   "volume": 60,
+   "files": [
+    "sfx/smash_fail/metal/smash_fail_metal.ogg",
+    "sfx/smash_fail/metal/smash_fail_metal_1.ogg",
+    "sfx/smash_fail/metal/smash_fail_metal_2.ogg",
+    "sfx/smash_fail/metal/smash_fail_metal_3.ogg",
+    "sfx/smash_fail/metal/smash_fail_metal_4.ogg"
+   ]
+  },
+  {
+   "id": "smash_fail",
+   "variants": [
+    "f_chair_folding",
+    "f_recycle_bin",
+    "f_trashcan",
+    "f_utility_shelf",
+    "t_plastic_window",
+    "t_plastic_window_open",
+    "t_plastic_window_with_curtain",
+    "t_plastic_window_with_curtain_open_window_closed",
+    "t_plastic_window_with_curtain_open",
+    "t_reinforced_plastic_window",
+    "t_reinforced_plastic_window_open",
+    "t_reinforced_plastic_window_with_curtain",
+    "t_reinforced_plastic_window_with_curtain_open_window_closed",
+    "t_reinforced_plastic_window_with_curtain_open"
+   ],
+   "volume": 80,
+   "files": [
+    "sfx/smash_fail/plastic/smash_fail_plastic.ogg",
+    "sfx/smash_fail/plastic/smash_fail_plastic_1.ogg",
+    "sfx/smash_fail/plastic/smash_fail_plastic_2.ogg"
+   ]
+  },
+  {
+   "id": "smash_fail",
+   "variants": [
+    "t_wall",
+    "t_wall_half",
+    "t_ponywall",
+    "t_wall_r",
+    "t_wall_w",
+    "t_wall_b",
+    "t_wall_g",
+    "t_wall_y",
+    "t_wall_P",
+    "t_wall_p",
+    "t_wall_orange",
+    "t_wall_gray",
+    "t_wall_brown",
+    "t_wall_cyan",
+    "t_wall_black",
+    "t_wood_wall_b",
+    "t_wood_wall_g",
+    "t_wood_wall_r",
+    "t_wood_wall_w",
+    "t_wood_wall_p",
+    "t_wood_wall_P",
+    "t_wood_wall_y",
+    "t_wood_wall_orange",
+    "t_wood_wall_gray",
+    "t_wood_wall_brown",
+    "t_wood_wall_cyan",
+    "t_wood_wall_black"
+   ],
+   "volume": 50,
+   "files": [
+    "sfx/smash_fail/t_wall/smash_fail_wall.ogg"
+   ]
+  },
+  {
+   "id": "smash_fail",
+   "variants": [
+    "f_bench",
+    "f_bench_wooden",
+    "f_bench_park",
+    "f_barstool",
+    "f_chair_plywood",
+    "f_chair_black",
+    "f_chair_white",
+    "f_stool",
+    "f_chair",
+    "f_bookcase",
+    "f_entertainment_center",
+    "f_coffin_c",
+    "f_coffin_o",
+    "f_crate_c",
+    "f_crate_o",
+    "f_dresser",
+    "f_rack_wood",
+    "f_rack_coat",
+    "f_wardrobe",
+    "f_wood_keg",
+    "f_chest",
+    "f_pallet_belted",
+    "f_pallet_belted_open",
+    "f_counter",
+    "f_cupboard",
+    "f_counter_gate_c",
+    "f_counter_gate_o",
+    "f_desk",
+    "f_table",
+    "f_coffee_table"
+   ],
+   "volume": 60,
+   "files": [
+    "sfx/smash_fail/wood_furn/smash_fail_wood.ogg",
+    "sfx/smash_fail/wood_furn/smash_fail_wood_1.ogg",
+    "sfx/smash_fail/wood_furn/smash_fail_wood_2.ogg",
+    "sfx/smash_fail/wood_furn/smash_fail_wood_3.ogg",
+    "sfx/smash_fail/wood_furn/smash_fail_wood_4.ogg"
+   ]
+  },
+  {
+   "id": "smash_success",
+   "variants": [
+    "t_brick_wall",
+    "t_brick_wall_halfway",
+    "t_adobe_brick_wall_halfway",
+    "t_adobe_brick_wall",
+    "f_pallet_brick",
+    "f_pallet_brick_adobe",
+    "t_brick_wall",
+    "t_brick_wall_halfway",
+    "t_adobe_brick_wall_halfway",
+    "t_adobe_brick_wall",
+    "f_pallet_brick",
+    "f_chimney",
+    "f_rubble",
+    "f_brick_stack_short",
+    "f_brick_stack_mid",
+    "f_brick_stack_tall",
+    "f_adobe_stack_short",
+    "f_adobe_stack_mid",
+    "f_adobe_stack_tall",
+    "t_embrasure_brick",
+    "t_brick_roof",
+    "t_embrasure_adobe_brick",
+    "t_brick_floor",
+    "t_brick_oven_base",
+    "t_brick_oven_struct",
+    "t_brick_oven"
+   ],
+   "volume": 80,
+   "files": [
+    "sfx/smash_success/brick/smash_success_brick.ogg"
+   ]
+  },
+  {
+   "id": "smash_success",
+   "variants": [
+    "f_bathtub",
+    "f_shower",
+    "f_sink",
+    "f_toilet"
+   ],
+   "volume": 80,
+   "files": [
+    "sfx/smash_success/ceramic/smash_success_ceramic.ogg",
+    "sfx/smash_success/ceramic/smash_success_ceramic_1.ogg",
+    "sfx/smash_success/ceramic/smash_success_ceramic_2.ogg",
+    "sfx/smash_success/ceramic/smash_success_ceramic_3.ogg",
+    "sfx/smash_success/ceramic/smash_success_ceramic_4.ogg"
+   ]
+  },
+  {
+   "id": "smash_success",
+   "variants": [
+    "t_chaingate_l",
+    "t_chaingate_c",
+    "t_chaingate_o",
+    "t_chainfence",
+    "t_chickenwire_fence",
+    "t_screened_porch_wall",
+    "t_quietfarm_border_fence"
+   ],
+   "volume": 50,
+   "files": [
+    "sfx/smash_success/chain_link/smash_success_chain_link.ogg"
+   ]
+  },
+  {
+   "id": "smash_success",
+   "variants": [
+    "t_pavement_bg_dp",
+    "t_pavement_y_bg_dp",
+    "t_sidewalk_bg_dp",
+    "t_concrete_dock_deep_pile",
+    "t_concrete_wall",
+    "t_secretdoor_concrete_c",
+    "t_secretdoor_concrete_o",
+    "t_embrasure_sconc",
+    "t_embrasure_strconcrete",
+    "t_concrete_roof",
+    "t_concrete_railing",
+    "t_thconc_floor",
+    "t_thconc_y",
+    "t_thconc_r",
+    "t_thconc_warning",
+    "t_strconc_floor",
+    "t_strconc_floor_glimmer",
+    "t_strconc_floor_halfway",
+    "t_rock_floor",
+    "t_marble_floor",
+    "t_floor_warped",
+    "t_sidewalk",
+    "t_strconc_floor_no_roof",
+    "t_concrete",
+    "t_concrete_y",
+    "t_pavement_hw_air",
+    "t_pavement_y_hw_air",
+    "t_sidewalk_hw_air",
+    "t_lake_bed_concrete",
+    "t_lake_bed_concrete_yellow",
+    "t_flat_roof",
+    "t_concrete_wall_b",
+    "t_concrete_wall_g",
+    "t_concrete_wall_r",
+    "t_concrete_wall_w",
+    "t_concrete_wall_p",
+    "t_concrete_wall_P",
+    "t_concrete_wall_y",
+    "t_concrete_wall_orange",
+    "t_concrete_wall_gray",
+    "t_concrete_wall_brown",
+    "t_concrete_wall_cyan",
+    "t_concrete_wall_black",
+    "t_strconc_wall_b",
+    "t_strconc_wall_g",
+    "t_strconc_wall_r",
+    "t_strconc_wall_w",
+    "t_strconc_wall_p",
+    "t_strconc_wall_p",
+    "t_strconc_wall_y",
+    "t_strconc_wall_orange",
+    "t_strconc_wall_gray",
+    "t_strconc_wall_brown",
+    "t_strconc_wall_cyan",
+    "t_strconc_wall_black",
+    "t_sconc_wall_b",
+    "t_sconc_wall_g",
+    "t_sconc_wall_r",
+    "t_sconc_wall_w",
+    "t_sconc_wall_p",
+    "t_sconc_wall_P",
+    "t_sconc_wall_y",
+    "t_sconc_wall_orange",
+    "t_sconc_wall_gray",
+    "t_sconc_wall_brown",
+    "t_sconc_wall_cyan",
+    "t_sconc_wall_black",
+    "t_brick_wall_halfway",
+    "t_rock_wall",
+    "t_rock_wall_half",
+    "t_rock_smooth",
+    "t_concrete_wall",
+    "t_concrete_wall_rope",
+    "t_sconc_wall",
+    "t_sconc_wall_halfway",
+    "t_strconc_wall",
+    "t_strconc_wall_halfway",
+    "t_rock",
+    "t_rock_red",
+    "t_rock_green",
+    "t_rock_blue",
+    "t_little_column",
+    "t_column",
+    "t_bollard",
+    "t_drystone_wall",
+    "t_drystone_wall_half",
+    "t_pillar",
+    "t_concrete_ramp_down_high",
+    "t_concrete_ramp_down_low",
+    "t_concrete_ramp_up_high",
+    "t_concrete_ramp_up_low"
+   ],
+   "volume": 80,
+   "files": [
+    "sfx/smash_success/concrete/smash_success_concrete.ogg"
+   ]
+  },
+  {
+   "id": "smash_success",
+   "variants": [
+    "t_door_c",
+    "t_door_locked",
+    "t_door_locked_interior",
+    "t_door_locked_peep",
+    "t_door_locked_alarm",
+    "t_rdoor_c",
+    "t_door_boarded",
+    "t_door_c_peep",
+    "t_door_b",
+    "t_door_boarded_damaged",
+    "t_door_boarded_damaged",
+    "t_door_red_c",
+    "t_door_b_peep",
+    "t_door_boarded_damaged_peep",
+    "t_door_gray_c",
+    "t_door_boarded_peep",
+    "t_door_green_c",
+    "t_door_makeshift_c",
+    "t_door_white_c",
+    "t_door_lab_c",
+    "t_door_white_b",
+    "t_door_gray_b",
+    "t_door_red_b",
+    "t_door_green_b",
+    "t_door_lab_b",
+    "t_rdoor_c",
+    "t_rdoor_b",
+    "t_rdoor_boarded",
+    "t_rdoor_boarded_damaged"
+   ],
+   "volume": 60,
+   "files": [
+    "sfx/smash_success/door_wood/door_smash_success.ogg"
+   ]
+  },
+  {
+   "id": "smash_success",
+   "variants": [
+    "f_glass_fridge",
+    "f_bigmirror",
+    "f_gazing_ball",
+    "f_styling_station",
+    "f_glass_cabinet",
+    "f_displaycase",
+    "f_displaycase_o",
+    "f_displaycase_b",
+    "f_board_map",
+    "f_board_map_o",
+    "f_fireman_cabinet",
+    "f_fireman_cabinet_o",
+    "f_glass_mound_short",
+    "f_glass_mound_mid",
+    "f_glass_mound_tall",
+    "f_firefly_terrarium",
+    "f_vending_c",
+    "f_glassedbody_1",
+    "f_glassedbody_2",
+    "f_glassedbody_3",
+    "f_glassedbody_4",
+    "f_glassedbody_5",
+    "f_glassedbody_6",
+    "f_glassedbody_7",
+    "f_glassedbody_8",
+    "f_glassedbody_9",
+    "f_glassedbody_10",
+    "f_glassedbody_11",
+    "f_vitrified_bed",
+    "f_vitrified_bathtub",
+    "f_vitrified_dresser",
+    "f_vitrified_fridge",
+    "f_vitrified_armchair",
+    "f_vitrified_chair",
+    "f_vitrified_desk",
+    "f_vitrified_locker",
+    "f_vitrified_oven",
+    "f_vitrified_mailbox",
+    "f_vitrified_rack",
+    "f_vitrified_sink",
+    "f_vitrified_toilet",
+    "f_vitrified_cupboard",
+    "f_vitrified_planter",
+    "f_vitrified_flower",
+    "f_vitrified_bench",
+    "f_vitrified_washer",
+    "f_vitrified_dryer",
+    "f_vitrified_bookcase",
+    "f_vitrified_counter",
+    "f_vitrified_table",
+    "f_vitrified_birdbath",
+    "f_vitrified_shower",
+    "f_vitrified_water_heater",
+    "f_vitrified_fireplace",
+    "f_vitrified_firering",
+    "f_vitrified_floor_lamp",
+    "f_vitrified_box",
+    "f_vitrified_sofa",
+    "f_vitrified_dishwasher",
+    "f_vitrified_doll",
+    "f_vitrified_bookcase_talker",
+    "t_door_glass_red_c",
+    "t_door_glass_green_c",
+    "t_door_glass_white_c",
+    "t_door_glass_gray_c",
+    "t_door_glass_red_o",
+    "t_door_glass_green_o",
+    "t_door_glass_white_o",
+    "t_door_glass_gray_o",
+    "t_door_glass_c",
+    "t_door_glass_lab_c",
+    "t_door_glass_o",
+    "t_door_glass_lab_o",
+    "t_door_glass_frosted_c",
+    "t_door_glass_frosted_lab_c",
+    "t_door_glass_frosted_o",
+    "t_door_glass_frosted_lab_o",
+    "t_glass_railing",
+    "t_thconc_y_olight",
+    "t_thconc_floor_olight",
+    "t_floor_olight",
+    "t_dirtfloor_olight",
+    "t_metal_floor_olight",
+    "t_strconc_floor_olight",
+    "t_linoleum_gray_floor_olight",
+    "t_linoleum_whitefloor_olight",
+    "t_glassed_sand",
+    "t_vat",
+    "t_nether_glass_floor",
+    "t_nether_glass_floor_clairvoyance",
+    "t_nether_glass_floor_basalt",
+    "t_nether_glass_wall",
+    "t_glass_roof",
+    "t_pit_glass",
+    "t_wall_glass",
+    "t_wall_glass_alarm",
+    "t_vitrified_dirt",
+    "t_vitrified_grass",
+    "t_vitrified_floor",
+    "t_vitrified_tile",
+    "t_vitrified_wall",
+    "t_vitrified_edge",
+    "t_vitrified_door",
+    "t_vitrified_chickenwire_fence",
+    "t_vitrified_fence_barbed",
+    "t_vitrified_wall_glass",
+    "t_vitrified_sand",
+    "t_vitrified_curtains",
+    "t_vitrified_window_frame",
+    "t_vitrified_fence_post",
+    "t_vitrified_water_pump",
+    "t_vitrified_bars",
+    "t_vitrified_column",
+    "t_vitrified_pool",
+    "t_tree_apple_vitrified",
+    "t_vitrified_tree",
+    "t_vitrified_bush",
+    "t_vitrified_stairs_down",
+    "t_vitrified_stairs_up",
+    "t_vitrified_downspout",
+    "t_vitrified_roof",
+    "t_vitrified_gutter_drop",
+    "t_vitrified_pool_talker",
+    "t_vitrified_soil_talker"
+   ],
+   "volume": 60,
+   "files": [
+    "sfx/smash_success/glass/smash_success_glass.ogg",
+    "sfx/smash_success/glass/smash_success_glass_1.ogg",
+    "sfx/smash_success/glass/smash_success_glass_2.ogg"
+   ]
+  },
+  {
+   "id": "smash_success",
+   "variants": [
+    "t_laminated_glass",
+    "t_ballistic_glass",
+    "t_reinforced_glass",
+    "t_reinforced_glass_shutter",
+    "t_reinforced_glass_shutter_open",
+    "t_laminated_door_glass_c",
+    "t_laminated_door_glass_o",
+    "t_ballistic_door_glass_c",
+    "t_ballistic_door_glass_o",
+    "t_reinforced_door_glass_c",
+    "t_reinforced_door_glass_lab_c",
+    "t_reinforced_door_glass_o",
+    "t_reinforced_door_glass_lab_o"
+   ],
+   "volume": 80,
+   "files": [
+    "sfx/smash_success/glass/smash_success_glass_reinforced.ogg",
+    "sfx/smash_success/glass/smash_success_glass_reinforced_1.ogg"
+   ]
+  },
+  {
+   "id": "smash_success",
+   "variants": [
+    "hit_vehicle"
+   ],
+   "volume": 30,
+   "files": [
+    "sfx/smash_success/hit_vehicle/hit_vehicle1.ogg",
+    "sfx/smash_success/hit_vehicle/hit_vehicle2.ogg",
+    "sfx/smash_success/hit_vehicle/hit_vehicle3.ogg",
+    "sfx/smash_success/hit_vehicle/hit_vehicle4.ogg"
+   ]
+  },
+  {
+   "id": "smash_success",
+   "variants": [
+    "f_scrap_antenna",
+    "f_exodii_signpost",
+    "f_exodii_botrack",
+    "f_exodii_lamp",
+    "f_exodii_printer_large",
+    "f_exodii_generator_1",
+    "f_exodii_generator_2",
+    "f_exodii_generator_3",
+    "f_exodii_generator_4",
+    "f_exodii_charger",
+    "f_exodii_charger_cheap",
+    "f_exodii_portal_tower",
+    "f_exodii_portal_enclosure",
+    "f_exodii_locator_antenna",
+    "f_air_conditioner",
+    "f_air_filter",
+    "f_dishwasher",
+    "f_dryer",
+    "f_fridge",
+    "f_freezer",
+    "f_home_furnace",
+    "f_washer",
+    "f_oven",
+    "f_gas_oven",
+    "f_gas_oven_microwave_combo",
+    "f_bellows",
+    "f_drophammer",
+    "f_shredder",
+    "f_server",
+    "f_satellite",
+    "f_hd_compressor_unit",
+    "f_bigmirror_b",
+    "f_shackle",
+    "f_rotary_clothesline",
+    "f_floor_lamp",
+    "f_vent_cold_air2_stream",
+    "f_vent_cold_air2_stream",
+    "f_vent_cold_air2_stream",
+    "f_vent_hot_air2_stream",
+    "f_vent_hot_air2_stream",
+    "f_vent_toxic_leak",
+    "f_vent_toxic_leak",
+    "f_vent_rad_leak",
+    "f_woodstove",
+    "f_brazier",
+    "f_hobo_stove",
+    "f_portable_stove",
+    "f_55gal_firebarrel",
+    "f_30gal_firebarrel",
+    "f_chemical_mixer",
+    "f_generator_broken",
+    "f_compact_ASRG_containment",
+    "f_machinery_heavy",
+    "f_machinery_old",
+    "f_machinery_electronic",
+    "f_robotic_arm",
+    "f_capacitor",
+    "f_control_station",
+    "f_nuclear_fuel_cell",
+    "f_active_backup_generator",
+    "f_autoclave",
+    "f_autoclave_full",
+    "f_sample_freezer",
+    "f_lab_bench",
+    "f_fume_hood",
+    "f_shaker",
+    "f_eyewash",
+    "f_IV_pole",
+    "f_HPLC",
+    "f_GC",
+    "f_MS",
+    "f_NMR",
+    "f_electron_microscope",
+    "f_CTscan",
+    "f_MRI",
+    "f_scan_bed",
+    "f_anesthetic",
+    "f_dialysis",
+    "f_ventilator",
+    "f_centrifuge",
+    "f_water_heater",
+    "f_water_heater_family",
+    "f_water_purifier",
+    "f_exercise",
+    "f_ball_mach",
+    "f_target",
+    "f_arcade_machine",
+    "f_pinball_machine",
+    "f_ergometer",
+    "f_ergometer_mechanical",
+    "f_treadmill",
+    "f_treadmill_mechanical",
+    "f_small_satellite_dish",
+    "f_TV_antenna",
+    "f_roof_turbine_vent",
+    "f_camp_chair",
+    "f_metal_bench",
+    "f_barstool",
+    "f_triple_bunkbed",
+    "f_gunsafe_o",
+    "f_gunsafe_c",
+    "f_gunsafe_ml",
+    "f_gunsafe_mj",
+    "f_gun_safe_el",
+    "f_locker",
+    "f_mailbox",
+    "f_clothing_rail",
+    "f_rack",
+    "f_rack_l",
+    "f_safe_c",
+    "f_safe_l",
+    "f_safe_o",
+    "f_metal_trashcan",
+    "f_filing_cabinet",
+    "f_utility_shelf",
+    "f_warehouse_shelf",
+    "f_fireman_cabinet",
+    "f_fireman_cabinet_o",
+    "f_fireman_cabinet_b",
+    "f_standing_tank",
+    "f_storage_tank",
+    "f_gas_tank",
+    "f_gas_tank_smashed",
+    "f_diesel_tank",
+    "f_diesel_tank_smashed",
+    "f_dumpster",
+    "f_butter_churn",
+    "f_metal_crate_r",
+    "f_metal_crate_c",
+    "f_metal_crate_o",
+    "f_foot_locker",
+    "f_foot_locker_aluminum",
+    "f_432gal_drum_rubber",
+    "f_workbench",
+    "f_tourist_table",
+    "f_metal_table",
+    "f_wreckage",
+    "f_street_light",
+    "f_traffic_light",
+    "f_bike_rack",
+    "f_flagpole",
+    "f_scrap_bridge",
+    "f_rebar_stack_short",
+    "f_rebar_stack_mid",
+    "f_rebar_stack_tall",
+    "f_pipe_stack_short",
+    "f_pipe_stack_mid",
+    "f_pipe_stack_tall",
+    "f_anvil",
+    "f_anvil_heavy",
+    "f_anvil_crude",
+    "f_still",
+    "f_kiln_metal_empty",
+    "f_kiln_metal_full",
+    "f_arcfurnace_empty",
+    "f_arcfurnace_full",
+    "f_metal_smoking_rack",
+    "f_metal_smoking_rack_active",
+    "f_aluminum_stepladder",
+    "f_arc_furnace",
+    "f_beverly_shear",
+    "f_drill_press",
+    "f_tablesaw",
+    "f_mitresaw",
+    "f_bandsaw",
+    "f_router",
+    "f_planer",
+    "f_jointer",
+    "f_catalytic_cracking_reactor",
+    "f_hydraulic_press",
+    "f_heavy_lathe",
+    "f_air_compressor",
+    "f_manual_tire_changer",
+    "f_metal_butcher_rack",
+    "f_hanging_meathook",
+    "f_aut_gas_console_o"
+   ],
+   "volume": 60,
+   "files": [
+    "sfx/smash_success/metal/smash_success_metal.ogg",
+    "sfx/smash_success/metal/smash_success_metal_1.ogg"
+   ]
+  },
+  {
+   "id": "smash_success",
+   "variants": [
+    "f_chair_folding",
+    "f_recycle_bin",
+    "f_trashcan",
+    "f_utility_shelf",
+    "t_plastic_window",
+    "t_plastic_window_open",
+    "t_plastic_window_with_curtain",
+    "t_plastic_window_with_curtain_open_window_closed",
+    "t_plastic_window_with_curtain_open",
+    "t_reinforced_plastic_window",
+    "t_reinforced_plastic_window_open",
+    "t_reinforced_plastic_window_with_curtain",
+    "t_reinforced_plastic_window_with_curtain_open_window_closed",
+    "t_reinforced_plastic_window_with_curtain_open"
+   ],
+   "volume": 80,
+   "files": [
+    "sfx/smash_success/plastic/smash_success_plastic.ogg",
+    "sfx/smash_success/plastic/smash_success_plastic_1.ogg",
+    "sfx/smash_success/plastic/smash_success_plastic_2.ogg"
+   ]
+  },
+  {
+   "id": "smash_success",
+   "variants": [
+    "t_window_frame"
+   ],
+   "volume": 50,
+   "files": [
+    "sfx/smash_success/window/window_frame_smash_success.ogg"
+   ]
+  },
+  {
+   "id": "smash_success",
+   "variants": [
+    "t_curtains",
+    "t_window_domestic",
+    "t_window",
+    "t_window_bars_alarm",
+    "t_window_alarm",
+    "t_window_domestic_taped",
+    "t_window_bars",
+    "t_window_stained_blue",
+    "t_window_stained_green",
+    "t_window_stained_red",
+    "t_window_no_curtains",
+    "t_window_open",
+    "t_window_no_curtains_open",
+    "t_window_taped",
+    "t_window_no_curtains_taped",
+    "t_window_alarm_taped",
+    "t_window_bars_curtains",
+    "t_window_bars_domestic"
+   ],
+   "volume": 50,
+   "files": [
+    "sfx/smash_success/window/window_smash_success.ogg"
+   ]
+  },
+  {
+   "id": "smash_success",
+   "variants": [
+    "t_window_boarded",
+    "t_window_reinforced",
+    "t_window_enhanced"
+   ],
+   "volume": 50,
+   "files": [
+    "sfx/smash_success/window/window_boarded_smash_success.ogg"
+   ]
+  },
+  {
+   "id": "smash_success",
+   "variants": [
+    "t_window_boarded_noglass",
+    "t_window_reinforced_noglass",
+    "t_window_enhanced_noglass"
+   ],
+   "volume": 75,
+   "files": [
+    "sfx/smash_success/window/wood_smash_success.ogg"
+   ]
+  },
+  {
+   "id": "smash_success",
+   "variants": [
+    "f_bench",
+    "f_bench_wooden",
+    "f_bench_park",
+    "f_barstool",
+    "f_chair_plywood",
+    "f_chair_black",
+    "f_chair_white",
+    "f_stool",
+    "f_chair",
+    "f_bookcase",
+    "f_entertainment_center",
+    "f_coffin_c",
+    "f_coffin_o",
+    "f_crate_c",
+    "f_crate_o",
+    "f_dresser",
+    "f_rack_wood",
+    "f_rack_coat",
+    "f_wardrobe",
+    "f_wood_keg",
+    "f_chest",
+    "f_pallet_belted",
+    "f_pallet_belted_open",
+    "f_counter",
+    "f_cupboard",
+    "f_counter_gate_c",
+    "f_counter_gate_o",
+    "f_desk",
+    "f_table",
+    "f_coffee_table"
+   ],
+   "volume": 60,
+   "files": [
+    "sfx/smash_success/wood_furn/smash_success_wood.ogg"
+   ]
+  },
+  {
+   "id": "speech",
+   "variants": [
+    "mon_feral_human_pipe",
+    "mon_feral_sapien_spear",
+    "mon_chud",
+    "mon_feral_human_crowbar",
+    "mon_feral_human_axe",
+    "mon_feral_human_tool",
+    "mon_feral_labsecurity_flashlight",
+    "mon_feral_prepper_mace",
+    "mon_feral_prepper_knife",
+    "mon_feral_survivalist",
+    "mon_feral_militia",
+    "mon_feral_soldier",
+    "mon_feral_swimmer_kickboard",
+    "mon_feral_sailor_wrench",
+    "mon_feral_sailor_axe",
+    "mon_feral_sailor_mop",
+    "mon_feral_sailor_lug_wrench",
+    "mon_feral_marine_bayonet",
+    "mon_feral_officer",
+    "mon_feral_cop",
+    "mon_feral_prisoner"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/speech/ferals/female_scream_1.ogg",
+    "sfx/speech/ferals/female_scream_2.ogg",
+    "sfx/speech/ferals/male_scream_1.ogg",
+    "sfx/speech/ferals/male_scream_2.ogg",
+    "sfx/speech/ferals/creepy_laugh.ogg",
+    "sfx/speech/ferals/female_anguish_heavy_breathing_1.ogg",
+    "sfx/speech/ferals/female_anguish_heavy_breathing_2.ogg",
+    "sfx/speech/ferals/female_mad_whisper_1.ogg",
+    "sfx/speech/ferals/female_mad_whisper_2.ogg",
+    "sfx/speech/ferals/male_heavy_breathing_1.ogg",
+    "sfx/speech/ferals/male_mumbling_1.ogg",
+    "sfx/speech/ferals/male_mumbling_2.ogg",
+    "sfx/speech/ferals/male_scared_heavy_breathing_1.ogg",
+    "sfx/speech/ferals/male_scared_heavy_breathing_2.ogg",
+    "sfx/speech/ferals/old_man_hesitant_ranbling.ogg",
+    "sfx/speech/ferals/die_scream_1.ogg"
+   ]
+  },
+  {
+   "id": "speech",
+   "variants": [
+    "mon_zombie",
+    "mon_beekeeper",
+    "mon_zombie_armored",
+    "mon_zombie_bruiser",
+    "mon_zombie_cop",
+    "mon_zombie_crawler",
+    "mon_zombie_fat",
+    "mon_zombie_fireman",
+    "mon_zombie_hazmat",
+    "mon_zombie_rot",
+    "mon_zombie_swat",
+    "mon_zombie_tough",
+    "mon_zombie_resort_dancer",
+    "mon_zombie_resort_bouncer",
+    "mon_zombie_resort_staff",
+    "mon_zombie_rust",
+    "mon_zombie_shell",
+    "mon_zombie_plated",
+    "mon_zombie_urchin",
+    "mon_zombie_hammer_hands",
+    "mon_zombie_scientist",
+    "mon_zombie_labsecurity",
+    "mon_zombie_medical",
+    "mon_zombie_medical_brute",
+    "mon_zombie_medical_regenerating",
+    "mon_zombie_biter",
+    "mon_zombie_bruiser",
+    "mon_zombie_brute",
+    "mon_zombie_brute_grappler",
+    "mon_zombie_grabber",
+    "mon_zombie_grappler",
+    "mon_zombie_mancroc",
+    "mon_zombie_runner",
+    "mon_zombie_regenerating",
+    "mon_zombie_regenerating_hunter",
+    "mon_zombie_regenerating_final",
+    "mon_zombie_skull",
+    "mon_zombie_swimmer_base",
+    "mon_zombie_swimmer",
+    "mon_zombie_technician",
+    "mon_zombie_miner",
+    "mon_zombie_thorny",
+    "mon_zombie_reenactor",
+    "mon_zombie_fursuit",
+    "mon_zombie_prisoner",
+    "mon_zombie_prisoner_brute",
+    "mon_zombie_prisoner_fat",
+    "mon_zombie_prisoner_tough",
+    "mon_zombie_soldier",
+    "mon_zombie_kevlar_0",
+    "mon_zombie_kevlar_1",
+    "mon_zombie_military_pilot",
+    "mon_zombie_milbase_personnel",
+    "mon_zombie_sailor",
+    "mon_zombie_officer",
+    "mon_zombie_marine",
+    "mon_zombie_armored",
+    "mon_zombie_survivor",
+    "mon_zombie_survivor_no_weakpoints",
+    "mon_zombie_paramilitary",
+    "mon_zombie_lashing",
+    "mon_zombie_tentacle",
+    "mon_zombie_winged",
+    "mon_zombie_brute_winged"
+   ],
+   "volume": 50,
+   "files": [
+    "sfx/speech/zombie/speech_zombie_groan.ogg",
+    "sfx/speech/zombie/speech_zombie_groan_1.ogg",
+    "sfx/speech/zombie/speech_zombie_groan_2.ogg",
+    "sfx/speech/zombie/speech_zombie_groan_3.ogg",
+    "sfx/speech/zombie/speech_zombie_groan_4.ogg"
+   ]
+  },
+  {
+   "id": "tool",
+   "variants": [
+    "pickaxe"
+   ],
+   "volume": 50,
+   "files": [
+    "sfx/tool/pickaxe_1.ogg",
+    "sfx/tool/pickaxe_2.ogg",
+    "sfx/tool/pickaxe_3.ogg"
+   ]
+  },
+  {
+   "id": "tool",
+   "variants": [
+    "camera_shutter"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/tool/camera_shutter_1.ogg"
+   ]
+  },
+  {
+   "id": "tool",
+   "variants": [
+    "oxytorch"
+   ],
+   "volume": 60,
+   "files": [
+    "sfx/tool/oxytorch_1.ogg"
+   ]
+  },
+  {
+   "id": "tool",
+   "variants": [
+    "shovel"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/tool/shovel_1.ogg"
+   ]
+  },
+  {
+   "id": "tool",
+   "variants": [
+    "axe"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/tool/axe_1.ogg"
+   ]
+  },
+  {
+   "id": "tool",
+   "variants": [
+    "hacksaw"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/tool/hacksaw_1.ogg"
+   ]
+  },
+  {
+   "id": "tool",
+   "variants": [
+    "geiger_low"
+   ],
+   "volume": 100,
+   "files": [
+    "sfx/tool/geiger_low.ogg"
+   ]
+  },
+  {
+   "id": "tool",
+   "variants": [
+    "geiger_medium"
+   ],
+   "volume": 80,
+   "files": [
+    "sfx/tool/geiger_medium.ogg"
+   ]
+  },
+  {
+   "id": "tool",
+   "variants": [
+    "geiger_high"
+   ],
+   "volume": 60,
+   "files": [
+    "sfx/tool/geiger_high.ogg"
+   ]
+  }
+ ],
+ "playlists": [
+  {
+   "id": "title",
+   "shuffle": true,
+   "files": [
+    {
+     "file": "music/CO.AG_Cataclysm.ogg",
+     "volume": 70
+    },
+    {
+     "file": "music/CO.AG_TheOnesWhoNeverRest.ogg",
+     "volume": 75
+    },
+    {
+     "file": "music/CO.AG_RedTears.ogg",
+     "volume": 80
+    },
+    {
+     "file": "music/CO.AG_Omen.ogg",
+     "volume": 75
+    },
+    {
+     "file": "music/CO.AG_EncountersWithTheSlenderman.ogg",
+     "volume": 75
+    },
+    {
+     "file": "music/CO.AG_AmongTheColdStones.ogg",
+     "volume": 75
+    }
+   ]
+  }
+ ],
+ "files": {
+  "music/CO.AG_AmongTheColdStones.ogg": {
+   "bytes": 1063544,
+   "duration": 126.387
+  },
+  "music/CO.AG_Cataclysm.ogg": {
+   "bytes": 2674136,
+   "duration": 341.222
+  },
+  "music/CO.AG_EncountersWithTheSlenderman.ogg": {
+   "bytes": 1372849,
+   "duration": 153.295
+  },
+  "music/CO.AG_Omen.ogg": {
+   "bytes": 2240063,
+   "duration": 281.239
+  },
+  "music/CO.AG_RedTears.ogg": {
+   "bytes": 2324968,
+   "duration": 298.62
+  },
+  "music/CO.AG_TheOnesWhoNeverRest.ogg": {
+   "bytes": 1490458,
+   "duration": 156.524
+  },
+  "sfx/clean_up_at_end/death.ogg": {
+   "bytes": 24898,
+   "duration": 5.116
+  },
+  "sfx/close_door/door_fence/close_door_fence.ogg": {
+   "bytes": 2723,
+   "duration": 0.533
+  },
+  "sfx/close_door/door_wood/close_door.ogg": {
+   "bytes": 2212,
+   "duration": 0.43
+  },
+  "sfx/close_door/gun_safe/close_safe.ogg": {
+   "bytes": 3194,
+   "duration": 0.628
+  },
+  "sfx/close_door/window/close_window.ogg": {
+   "bytes": 3611,
+   "duration": 0.727
+  },
+  "sfx/deal_damage/hurt_f/hurt_f_1.ogg": {
+   "bytes": 2722,
+   "duration": 0.506
+  },
+  "sfx/deal_damage/hurt_f/hurt_f_2.ogg": {
+   "bytes": 3299,
+   "duration": 0.608
+  },
+  "sfx/deal_damage/hurt_f/hurt_f_3.ogg": {
+   "bytes": 3219,
+   "duration": 0.552
+  },
+  "sfx/deal_damage/hurt_f/hurt_f_4.ogg": {
+   "bytes": 2368,
+   "duration": 0.413
+  },
+  "sfx/deal_damage/hurt_f/hurt_f_5.ogg": {
+   "bytes": 2325,
+   "duration": 0.417
+  },
+  "sfx/deal_damage/hurt_m/hurt_m_1.ogg": {
+   "bytes": 2409,
+   "duration": 0.429
+  },
+  "sfx/deal_damage/hurt_m/hurt_m_2.ogg": {
+   "bytes": 2265,
+   "duration": 0.401
+  },
+  "sfx/deal_damage/hurt_m/hurt_m_3.ogg": {
+   "bytes": 1275,
+   "duration": 0.2
+  },
+  "sfx/deal_damage/hurt_m/hurt_m_4.ogg": {
+   "bytes": 2034,
+   "duration": 0.352
+  },
+  "sfx/environment/ambient/alarm.ogg": {
+   "bytes": 9173,
+   "duration": 1.798
+  },
+  "sfx/environment/ambient/church_bells.ogg": {
+   "bytes": 65019,
+   "duration": 9.933
+  },
+  "sfx/environment/ambient/indoors.ogg": {
+   "bytes": 126765,
+   "duration": 30.066
+  },
+  "sfx/environment/ambient/police_siren.ogg": {
+   "bytes": 12357,
+   "duration": 2.273
+  },
+  "sfx/environment/ambient/underground.ogg": {
+   "bytes": 160360,
+   "duration": 34.792
+  },
+  "sfx/environment/weather/drizzle.ogg": {
+   "bytes": 132107,
+   "duration": 29.964
+  },
+  "sfx/environment/weather/flurries.ogg": {
+   "bytes": 158475,
+   "duration": 35.133
+  },
+  "sfx/environment/weather/heavyrain.ogg": {
+   "bytes": 135553,
+   "duration": 30.05
+  },
+  "sfx/environment/weather/indoors_rain.ogg": {
+   "bytes": 128191,
+   "duration": 28.538
+  },
+  "sfx/environment/weather/night/clear_night_1.ogg": {
+   "bytes": 224260,
+   "duration": 51.236
+  },
+  "sfx/environment/weather/night/clear_night_2.ogg": {
+   "bytes": 137282,
+   "duration": 29.846
+  },
+  "sfx/environment/weather/night/clear_night_3.ogg": {
+   "bytes": 139085,
+   "duration": 30.258
+  },
+  "sfx/environment/weather/night/cloudy_night.ogg": {
+   "bytes": 88673,
+   "duration": 19.99
+  },
+  "sfx/environment/weather/night/night_rain.ogg": {
+   "bytes": 110792,
+   "duration": 25.033
+  },
+  "sfx/environment/weather/snowing.ogg": {
+   "bytes": 134928,
+   "duration": 30.1
+  },
+  "sfx/environment/weather/thunder_far.ogg": {
+   "bytes": 48595,
+   "duration": 10.838
+  },
+  "sfx/environment/weather/thunder_near.ogg": {
+   "bytes": 58959,
+   "duration": 14.008
+  },
+  "sfx/environment/weather/thunderstorm.ogg": {
+   "bytes": 226009,
+   "duration": 50.09
+  },
+  "sfx/environment/weather/weather_clear/weather_clear_autumn.ogg": {
+   "bytes": 139353,
+   "duration": 30.232
+  },
+  "sfx/environment/weather/weather_clear/weather_clear_spring.ogg": {
+   "bytes": 212501,
+   "duration": 46.944
+  },
+  "sfx/environment/weather/weather_clear/weather_clear_summer.ogg": {
+   "bytes": 134298,
+   "duration": 29.959
+  },
+  "sfx/environment/weather/weather_clear/weather_clear_winter.ogg": {
+   "bytes": 136771,
+   "duration": 30.415
+  },
+  "sfx/environment/weather/weather_cloudy/weather_cloudy_autumn.ogg": {
+   "bytes": 112423,
+   "duration": 24.724
+  },
+  "sfx/environment/weather/weather_cloudy/weather_cloudy_spring.ogg": {
+   "bytes": 133523,
+   "duration": 29.391
+  },
+  "sfx/environment/weather/weather_cloudy/weather_cloudy_summer.ogg": {
+   "bytes": 45532,
+   "duration": 9.791
+  },
+  "sfx/environment/weather/weather_cloudy/weather_cloudy_winter.ogg": {
+   "bytes": 135562,
+   "duration": 30.238
+  },
+  "sfx/environment/weather/weather_portal_storm/weather_portal_storm.ogg": {
+   "bytes": 182628,
+   "duration": 39.504
+  },
+  "sfx/environment/weather/WEATHER_RAINSTORM_inside.ogg": {
+   "bytes": 134943,
+   "duration": 30.599
+  },
+  "sfx/environment/weather/WEATHER_RAINSTORM.ogg": {
+   "bytes": 67817,
+   "duration": 14.859
+  },
+  "sfx/environment/weather/WEATHER_SNOWSTORM.ogg": {
+   "bytes": 128257,
+   "duration": 28.514
+  },
+  "sfx/environment/weather/weather_sunny/weather_sunny_autumn.ogg": {
+   "bytes": 65374,
+   "duration": 14.612
+  },
+  "sfx/environment/weather/weather_sunny/weather_sunny_spring.ogg": {
+   "bytes": 136579,
+   "duration": 29.922
+  },
+  "sfx/environment/weather/weather_sunny/weather_sunny_summer.ogg": {
+   "bytes": 135322,
+   "duration": 30.05
+  },
+  "sfx/environment/weather/weather_sunny/weather_sunny_winter.ogg": {
+   "bytes": 133314,
+   "duration": 29.933
+  },
+  "sfx/explosion/default/explosion_default_1.ogg": {
+   "bytes": 4551,
+   "duration": 0.98
+  },
+  "sfx/explosion/default/explosion_default_2.ogg": {
+   "bytes": 4690,
+   "duration": 0.971
+  },
+  "sfx/explosion/huge/explosion_huge_1.ogg": {
+   "bytes": 27608,
+   "duration": 6.266
+  },
+  "sfx/explosion/huge/explosion_huge_2.ogg": {
+   "bytes": 12375,
+   "duration": 2.862
+  },
+  "sfx/explosion/small/explosion_small.ogg": {
+   "bytes": 2428,
+   "duration": 0.419
+  },
+  "sfx/fire_gun/bows/bow_1.ogg": {
+   "bytes": 2378,
+   "duration": 0.511
+  },
+  "sfx/fire_gun/brass_eject_1.ogg": {
+   "bytes": 7511,
+   "duration": 1.818
+  },
+  "sfx/fire_gun/brass_eject.ogg": {
+   "bytes": 5081,
+   "duration": 0.925
+  },
+  "sfx/fire_gun/empty_1.ogg": {
+   "bytes": 1009,
+   "duration": 0.177
+  },
+  "sfx/fire_gun/empty.ogg": {
+   "bytes": 1854,
+   "duration": 0.388
+  },
+  "sfx/fire_gun/generic/genericgun_1.ogg": {
+   "bytes": 5519,
+   "duration": 1.173
+  },
+  "sfx/fire_gun/handguns/handgun_1.ogg": {
+   "bytes": 8429,
+   "duration": 1.743
+  },
+  "sfx/fire_gun/laserguns/lasergun_1.ogg": {
+   "bytes": 2485,
+   "duration": 0.485
+  },
+  "sfx/fire_gun/launchers/launcher_1.ogg": {
+   "bytes": 2176,
+   "duration": 0.442
+  },
+  "sfx/fire_gun/machineguns/machinegun_1.ogg": {
+   "bytes": 7591,
+   "duration": 1.737
+  },
+  "sfx/fire_gun/monster_guns/acid_sniper_1.ogg": {
+   "bytes": 1976,
+   "duration": 0.363
+  },
+  "sfx/fire_gun/monster_guns/acid_sniper_2.ogg": {
+   "bytes": 1766,
+   "duration": 0.317
+  },
+  "sfx/fire_gun/monster_guns/acid_sniper_3.ogg": {
+   "bytes": 2310,
+   "duration": 0.398
+  },
+  "sfx/fire_gun/monster_guns/acid_sniper_4.ogg": {
+   "bytes": 2751,
+   "duration": 0.467
+  },
+  "sfx/fire_gun/monster_guns/gene_sting_gun_1.ogg": {
+   "bytes": 1857,
+   "duration": 0.344
+  },
+  "sfx/fire_gun/monster_guns/gene_sting_gun_2.ogg": {
+   "bytes": 1942,
+   "duration": 0.35
+  },
+  "sfx/fire_gun/monster_guns/gene_sting_gun_3.ogg": {
+   "bytes": 1930,
+   "duration": 0.344
+  },
+  "sfx/fire_gun/rifles/automatic_rifle/indoor_gunfire/556_auto_rifle_shot_01.ogg": {
+   "bytes": 2466,
+   "duration": 0.481
+  },
+  "sfx/fire_gun/rifles/automatic_rifle/indoor_gunfire/556_auto_rifle_shot_02.ogg": {
+   "bytes": 3272,
+   "duration": 0.584
+  },
+  "sfx/fire_gun/rifles/automatic_rifle/indoor_gunfire/556_auto_rifle_shot_03.ogg": {
+   "bytes": 2568,
+   "duration": 0.503
+  },
+  "sfx/fire_gun/rifles/automatic_rifle/outdoor_gunfire/556_auto_rifle_shot_01.ogg": {
+   "bytes": 3172,
+   "duration": 0.64
+  },
+  "sfx/fire_gun/rifles/automatic_rifle/outdoor_gunfire/556_auto_rifle_shot_02.ogg": {
+   "bytes": 3943,
+   "duration": 0.812
+  },
+  "sfx/fire_gun/rifles/automatic_rifle/outdoor_gunfire/556_auto_rifle_shot_03.ogg": {
+   "bytes": 4708,
+   "duration": 1.028
+  },
+  "sfx/fire_gun/rifles/rifle_1.ogg": {
+   "bytes": 2582,
+   "duration": 0.497
+  },
+  "sfx/fire_gun/rockets/rocket_1.ogg": {
+   "bytes": 13022,
+   "duration": 3.061
+  },
+  "sfx/fire_gun/shotguns/shotgun_1.ogg": {
+   "bytes": 9666,
+   "duration": 2.007
+  },
+  "sfx/fire/ignition.ogg": {
+   "bytes": 8666,
+   "duration": 1.788
+  },
+  "sfx/humming/electric.ogg": {
+   "bytes": 5692,
+   "duration": 1.032
+  },
+  "sfx/humming/machinery.ogg": {
+   "bytes": 5067,
+   "duration": 1.005
+  },
+  "sfx/melee_attack/monster_melee_hit/monster_melee_hit_1.ogg": {
+   "bytes": 1970,
+   "duration": 0.385
+  },
+  "sfx/melee_attack/monster_melee_hit/monster_melee_hit_2.ogg": {
+   "bytes": 3062,
+   "duration": 0.564
+  },
+  "sfx/melee_attack/monster_melee_hit/monster_melee_hit_3.ogg": {
+   "bytes": 2421,
+   "duration": 0.541
+  },
+  "sfx/melee_attack/monster_melee_hit/monster_melee_hit_4.ogg": {
+   "bytes": 2905,
+   "duration": 0.608
+  },
+  "sfx/melee_hit_flesh/big_bash/big_bash_flesh_1.ogg": {
+   "bytes": 3733,
+   "duration": 0.757
+  },
+  "sfx/melee_hit_flesh/big_bash/big_bash_flesh_2.ogg": {
+   "bytes": 3077,
+   "duration": 0.603
+  },
+  "sfx/melee_hit_flesh/big_cutting/big_cutting_flesh_1.ogg": {
+   "bytes": 3299,
+   "duration": 0.63
+  },
+  "sfx/melee_hit_flesh/big_cutting/big_cutting_flesh_2.ogg": {
+   "bytes": 1914,
+   "duration": 0.357
+  },
+  "sfx/melee_hit_flesh/big_stabbing/big_stabbing_flesh_1.ogg": {
+   "bytes": 3261,
+   "duration": 0.625
+  },
+  "sfx/melee_hit_flesh/big_stabbing/big_stabbing_flesh_2.ogg": {
+   "bytes": 2362,
+   "duration": 0.463
+  },
+  "sfx/melee_hit_flesh/big_stabbing/big_stabbing_flesh_3.ogg": {
+   "bytes": 3721,
+   "duration": 0.78
+  },
+  "sfx/melee_hit_flesh/default/unarmed_hit_flesh_1.ogg": {
+   "bytes": 2988,
+   "duration": 0.601
+  },
+  "sfx/melee_hit_flesh/default/unarmed_hit_flesh_2.ogg": {
+   "bytes": 1865,
+   "duration": 0.357
+  },
+  "sfx/melee_hit_flesh/default/unarmed_hit_flesh_3.ogg": {
+   "bytes": 1233,
+   "duration": 0.21
+  },
+  "sfx/melee_hit_flesh/default/unarmed_hit_flesh_4.ogg": {
+   "bytes": 1533,
+   "duration": 0.284
+  },
+  "sfx/melee_hit_flesh/default/unarmed_hit_flesh_5.ogg": {
+   "bytes": 1046,
+   "duration": 0.169
+  },
+  "sfx/melee_hit_flesh/small_bash/small_bash_flesh_1.ogg": {
+   "bytes": 2204,
+   "duration": 0.405
+  },
+  "sfx/melee_hit_flesh/small_bash/small_bash_flesh_2.ogg": {
+   "bytes": 1373,
+   "duration": 0.246
+  },
+  "sfx/melee_hit_flesh/small_bash/small_bash_flesh_3.ogg": {
+   "bytes": 1037,
+   "duration": 0.174
+  },
+  "sfx/melee_hit_flesh/small_bash/small_bash_flesh_4.ogg": {
+   "bytes": 1217,
+   "duration": 0.206
+  },
+  "sfx/melee_hit_flesh/small_cutting/small_cutting_flesh_1.ogg": {
+   "bytes": 2260,
+   "duration": 0.428
+  },
+  "sfx/melee_hit_flesh/small_cutting/small_cutting_flesh_2.ogg": {
+   "bytes": 1897,
+   "duration": 0.36
+  },
+  "sfx/melee_hit_flesh/small_cutting/small_cutting_flesh_3.ogg": {
+   "bytes": 2360,
+   "duration": 0.459
+  },
+  "sfx/melee_hit_flesh/small_stabbing/small_stabbing_flesh_1.ogg": {
+   "bytes": 1561,
+   "duration": 0.304
+  },
+  "sfx/melee_hit_flesh/small_stabbing/small_stabbing_flesh_2.ogg": {
+   "bytes": 1518,
+   "duration": 0.285
+  },
+  "sfx/melee_hit_flesh/small_stabbing/small_stabbing_flesh_3.ogg": {
+   "bytes": 1352,
+   "duration": 0.26
+  },
+  "sfx/melee_hit_flesh/small_stabbing/small_stabbing_flesh_4.ogg": {
+   "bytes": 1295,
+   "duration": 0.251
+  },
+  "sfx/melee_hit_flesh/small_stabbing/small_stabbing_flesh_5.ogg": {
+   "bytes": 1547,
+   "duration": 0.295
+  },
+  "sfx/melee_hit_flesh/small_stabbing/small_stabbing_flesh_6.ogg": {
+   "bytes": 1792,
+   "duration": 0.343
+  },
+  "sfx/melee_swing/big_bash/big_bash_swing_1.ogg": {
+   "bytes": 1557,
+   "duration": 0.284
+  },
+  "sfx/melee_swing/big_cutting/big_cutting_swing_1.ogg": {
+   "bytes": 1323,
+   "duration": 0.239
+  },
+  "sfx/melee_swing/big_stabbing/big_stabbing_swing_1.ogg": {
+   "bytes": 1551,
+   "duration": 0.274
+  },
+  "sfx/melee_swing/default/unarmed_swing_1.ogg": {
+   "bytes": 923,
+   "duration": 0.162
+  },
+  "sfx/melee_swing/default/unarmed_swing_2.ogg": {
+   "bytes": 701,
+   "duration": 0.103
+  },
+  "sfx/melee_swing/default/unarmed_swing_3.ogg": {
+   "bytes": 665,
+   "duration": 0.098
+  },
+  "sfx/melee_swing/default/unarmed_swing_4.ogg": {
+   "bytes": 728,
+   "duration": 0.116
+  },
+  "sfx/melee_swing/default/unarmed_swing_5.ogg": {
+   "bytes": 634,
+   "duration": 0.085
+  },
+  "sfx/melee_swing/small_bash/small_bash_swing_1.ogg": {
+   "bytes": 2078,
+   "duration": 0.414
+  },
+  "sfx/melee_swing/small_bash/small_bash_swing_2.ogg": {
+   "bytes": 1952,
+   "duration": 0.374
+  },
+  "sfx/melee_swing/small_bash/small_bash_swing_3.ogg": {
+   "bytes": 1543,
+   "duration": 0.293
+  },
+  "sfx/melee_swing/small_bash/small_bash_swing_4.ogg": {
+   "bytes": 1502,
+   "duration": 0.289
+  },
+  "sfx/melee_swing/small_bash/small_bash_swing_5.ogg": {
+   "bytes": 1448,
+   "duration": 0.271
+  },
+  "sfx/melee_swing/small_bash/small_bash_swing_6.ogg": {
+   "bytes": 1448,
+   "duration": 0.266
+  },
+  "sfx/melee_swing/small_bash/small_bash_swing_7.ogg": {
+   "bytes": 1510,
+   "duration": 0.301
+  },
+  "sfx/melee_swing/small_cutting/small_cutting_swing_1.ogg": {
+   "bytes": 2119,
+   "duration": 0.224
+  },
+  "sfx/melee_swing/small_cutting/small_cutting_swing_2.ogg": {
+   "bytes": 1987,
+   "duration": 0.236
+  },
+  "sfx/melee_swing/small_cutting/small_cutting_swing_3.ogg": {
+   "bytes": 1588,
+   "duration": 0.228
+  },
+  "sfx/melee_swing/small_cutting/small_cutting_swing_4.ogg": {
+   "bytes": 2058,
+   "duration": 0.24
+  },
+  "sfx/melee_swing/small_cutting/small_cutting_swing_5.ogg": {
+   "bytes": 1447,
+   "duration": 0.212
+  },
+  "sfx/melee_swing/small_cutting/small_cutting_swing_6.ogg": {
+   "bytes": 918,
+   "duration": 0.119
+  },
+  "sfx/melee_swing/small_stabbing/small_stabbing_swing_1.ogg": {
+   "bytes": 1192,
+   "duration": 0.209
+  },
+  "sfx/melee_swing/small_stabbing/small_stabbing_swing_2.ogg": {
+   "bytes": 1144,
+   "duration": 0.191
+  },
+  "sfx/melee_swing/small_stabbing/small_stabbing_swing_3.ogg": {
+   "bytes": 1132,
+   "duration": 0.197
+  },
+  "sfx/melee_swing/small_stabbing/small_stabbing_swing_4.ogg": {
+   "bytes": 1283,
+   "duration": 0.224
+  },
+  "sfx/menu_error/menu_error.ogg": {
+   "bytes": 6958,
+   "duration": 1.304
+  },
+  "sfx/menu_move/menu_move.ogg": {
+   "bytes": 861,
+   "duration": 0.145
+  },
+  "sfx/mon_bite/bite_hit/bite_hit_1.ogg": {
+   "bytes": 3661,
+   "duration": 0.727
+  },
+  "sfx/mon_bite/bite_hit/bite_hit_2.ogg": {
+   "bytes": 2990,
+   "duration": 0.559
+  },
+  "sfx/mon_bite/bite_hit/bite_hit_3.ogg": {
+   "bytes": 3213,
+   "duration": 0.631
+  },
+  "sfx/mon_bite/bite_hit/bite_hit_4.ogg": {
+   "bytes": 3239,
+   "duration": 0.639
+  },
+  "sfx/mon_bite/bite_hit/bite_hit_5.ogg": {
+   "bytes": 3581,
+   "duration": 0.703
+  },
+  "sfx/mon_bite/bite_miss/bite_miss_1.ogg": {
+   "bytes": 1549,
+   "duration": 0.289
+  },
+  "sfx/mon_bite/bite_miss/bite_miss_2.ogg": {
+   "bytes": 2221,
+   "duration": 0.462
+  },
+  "sfx/mon_bite/bite_miss/bite_miss_3.ogg": {
+   "bytes": 2125,
+   "duration": 0.415
+  },
+  "sfx/mon_bite/bite_miss/bite_miss_4.ogg": {
+   "bytes": 1569,
+   "duration": 0.285
+  },
+  "sfx/mon_bite/bite_miss/bite_miss_5.ogg": {
+   "bytes": 1783,
+   "duration": 0.344
+  },
+  "sfx/mon_death/zombie_death/zombie_death_1.ogg": {
+   "bytes": 4049,
+   "duration": 0.796
+  },
+  "sfx/mon_death/zombie_death/zombie_death_2.ogg": {
+   "bytes": 5083,
+   "duration": 0.967
+  },
+  "sfx/mon_death/zombie_death/zombie_death_3.ogg": {
+   "bytes": 2766,
+   "duration": 0.506
+  },
+  "sfx/mon_death/zombie_death/zombie_death_4.ogg": {
+   "bytes": 3562,
+   "duration": 0.699
+  },
+  "sfx/mon_death/zombie_gibbed/zombie_gibbed_1.ogg": {
+   "bytes": 5879,
+   "duration": 1.193
+  },
+  "sfx/mon_death/zombie_gibbed/zombie_gibbed_2.ogg": {
+   "bytes": 7781,
+   "duration": 1.374
+  },
+  "sfx/open_door/door_fence/open_door_fence.ogg": {
+   "bytes": 2899,
+   "duration": 0.56
+  },
+  "sfx/open_door/door_metal/open_door_metal.ogg": {
+   "bytes": 2885,
+   "duration": 0.584
+  },
+  "sfx/open_door/door_wood/open_door.ogg": {
+   "bytes": 2189,
+   "duration": 0.405
+  },
+  "sfx/open_door/gun_safe/open_safe.ogg": {
+   "bytes": 7603,
+   "duration": 1.708
+  },
+  "sfx/open_door/window/open_window.ogg": {
+   "bytes": 908,
+   "duration": 0.158
+  },
+  "sfx/plmove/clear_obstacle/clear_obstacle_2.ogg": {
+   "bytes": 2118,
+   "duration": 0.408
+  },
+  "sfx/plmove/clear_obstacle/clear_obstacle_3.ogg": {
+   "bytes": 2164,
+   "duration": 0.429
+  },
+  "sfx/plmove/fatigue/fatigue_high.ogg": {
+   "bytes": 15893,
+   "duration": 3.322
+  },
+  "sfx/plmove/fatigue/fatigue_low.ogg": {
+   "bytes": 34402,
+   "duration": 8.943
+  },
+  "sfx/plmove/fatigue/fatigue_med.ogg": {
+   "bytes": 15523,
+   "duration": 3.535
+  },
+  "sfx/plmove/walk_barefoot_1.ogg": {
+   "bytes": 1338,
+   "duration": 0.267
+  },
+  "sfx/plmove/walk_barefoot_10.ogg": {
+   "bytes": 1543,
+   "duration": 0.306
+  },
+  "sfx/plmove/walk_barefoot_2.ogg": {
+   "bytes": 1288,
+   "duration": 0.258
+  },
+  "sfx/plmove/walk_barefoot_3.ogg": {
+   "bytes": 1203,
+   "duration": 0.237
+  },
+  "sfx/plmove/walk_barefoot_4.ogg": {
+   "bytes": 1320,
+   "duration": 0.267
+  },
+  "sfx/plmove/walk_barefoot_5.ogg": {
+   "bytes": 1223,
+   "duration": 0.237
+  },
+  "sfx/plmove/walk_barefoot_6.ogg": {
+   "bytes": 1336,
+   "duration": 0.266
+  },
+  "sfx/plmove/walk_barefoot_7.ogg": {
+   "bytes": 1342,
+   "duration": 0.276
+  },
+  "sfx/plmove/walk_barefoot_8.ogg": {
+   "bytes": 1218,
+   "duration": 0.258
+  },
+  "sfx/plmove/walk_barefoot_9.ogg": {
+   "bytes": 1684,
+   "duration": 0.348
+  },
+  "sfx/plmove/walk_dirt_1.ogg": {
+   "bytes": 1980,
+   "duration": 0.405
+  },
+  "sfx/plmove/walk_dirt_2.ogg": {
+   "bytes": 1813,
+   "duration": 0.381
+  },
+  "sfx/plmove/walk_dirt_3.ogg": {
+   "bytes": 1753,
+   "duration": 0.381
+  },
+  "sfx/plmove/walk_dirt_4.ogg": {
+   "bytes": 1800,
+   "duration": 0.381
+  },
+  "sfx/plmove/walk_dirt_5.ogg": {
+   "bytes": 1782,
+   "duration": 0.381
+  },
+  "sfx/plmove/walk_dirt_6.ogg": {
+   "bytes": 1774,
+   "duration": 0.381
+  },
+  "sfx/plmove/walk_grass/walk_grass_1.ogg": {
+   "bytes": 4283,
+   "duration": 0.959
+  },
+  "sfx/plmove/walk_grass/walk_grass_2.ogg": {
+   "bytes": 3621,
+   "duration": 0.832
+  },
+  "sfx/plmove/walk_grass/walk_grass_3.ogg": {
+   "bytes": 1831,
+   "duration": 0.42
+  },
+  "sfx/plmove/walk_grass/walk_grass_4.ogg": {
+   "bytes": 2447,
+   "duration": 0.577
+  },
+  "sfx/plmove/walk_grass/walk_grass_5.ogg": {
+   "bytes": 1831,
+   "duration": 0.42
+  },
+  "sfx/plmove/walk_grass/walk_grass_6.ogg": {
+   "bytes": 2180,
+   "duration": 0.508
+  },
+  "sfx/plmove/walk_metal/walk_metal_1.ogg": {
+   "bytes": 1866,
+   "duration": 0.37
+  },
+  "sfx/plmove/walk_metal/walk_metal_2.ogg": {
+   "bytes": 1579,
+   "duration": 0.317
+  },
+  "sfx/plmove/walk_metal/walk_metal_3.ogg": {
+   "bytes": 1524,
+   "duration": 0.313
+  },
+  "sfx/plmove/walk_metal/walk_metal_4.ogg": {
+   "bytes": 1508,
+   "duration": 0.312
+  },
+  "sfx/plmove/walk_metal/walk_metal_5.ogg": {
+   "bytes": 1887,
+   "duration": 0.37
+  },
+  "sfx/plmove/walk_t_carpet/walk_t_carpet_1.ogg": {
+   "bytes": 1054,
+   "duration": 0.198
+  },
+  "sfx/plmove/walk_t_carpet/walk_t_carpet_2.ogg": {
+   "bytes": 1257,
+   "duration": 0.257
+  },
+  "sfx/plmove/walk_t_carpet/walk_t_carpet_3.ogg": {
+   "bytes": 1252,
+   "duration": 0.256
+  },
+  "sfx/plmove/walk_t_carpet/walk_t_carpet_4.ogg": {
+   "bytes": 1283,
+   "duration": 0.257
+  },
+  "sfx/plmove/walk_t_carpet/walk_t_carpet_5.ogg": {
+   "bytes": 1760,
+   "duration": 0.357
+  },
+  "sfx/plmove/walk_t_carpet/walk_t_carpet_6.ogg": {
+   "bytes": 1634,
+   "duration": 0.332
+  },
+  "sfx/plmove/walk_t_carpet/walk_t_carpet_7.ogg": {
+   "bytes": 1914,
+   "duration": 0.405
+  },
+  "sfx/plmove/walk_t_carpet/walk_t_carpet_8.ogg": {
+   "bytes": 1326,
+   "duration": 0.257
+  },
+  "sfx/plmove/walk_t_concrete_1.ogg": {
+   "bytes": 4004,
+   "duration": 0.857
+  },
+  "sfx/plmove/walk_t_concrete_10.ogg": {
+   "bytes": 3391,
+   "duration": 0.728
+  },
+  "sfx/plmove/walk_t_concrete_2.ogg": {
+   "bytes": 3583,
+   "duration": 0.746
+  },
+  "sfx/plmove/walk_t_concrete_3.ogg": {
+   "bytes": 2862,
+   "duration": 0.598
+  },
+  "sfx/plmove/walk_t_concrete_4.ogg": {
+   "bytes": 4310,
+   "duration": 0.931
+  },
+  "sfx/plmove/walk_t_concrete_5.ogg": {
+   "bytes": 3273,
+   "duration": 0.691
+  },
+  "sfx/plmove/walk_t_concrete_6.ogg": {
+   "bytes": 3899,
+   "duration": 0.839
+  },
+  "sfx/plmove/walk_t_concrete_7.ogg": {
+   "bytes": 3684,
+   "duration": 0.765
+  },
+  "sfx/plmove/walk_t_concrete_8.ogg": {
+   "bytes": 3334,
+   "duration": 0.709
+  },
+  "sfx/plmove/walk_t_floor/walk_t_floor_1.ogg": {
+   "bytes": 1408,
+   "duration": 0.285
+  },
+  "sfx/plmove/walk_t_floor/walk_t_floor_2.ogg": {
+   "bytes": 2983,
+   "duration": 0.663
+  },
+  "sfx/plmove/walk_t_floor/walk_t_floor_3.ogg": {
+   "bytes": 3058,
+   "duration": 0.641
+  },
+  "sfx/plmove/walk_t_floor/walk_t_floor_4.ogg": {
+   "bytes": 3368,
+   "duration": 0.792
+  },
+  "sfx/plmove/walk_t_floor/walk_t_floor_5.ogg": {
+   "bytes": 3315,
+   "duration": 0.774
+  },
+  "sfx/plmove/walk_t_floor/walk_t_floor_6.ogg": {
+   "bytes": 2938,
+   "duration": 0.631
+  },
+  "sfx/plmove/walk_t_grass_long/walk_t_grass_long_1.ogg": {
+   "bytes": 3017,
+   "duration": 0.612
+  },
+  "sfx/plmove/walk_t_grass_long/walk_t_grass_long_10.ogg": {
+   "bytes": 2283,
+   "duration": 0.452
+  },
+  "sfx/plmove/walk_t_grass_long/walk_t_grass_long_2.ogg": {
+   "bytes": 1979,
+   "duration": 0.388
+  },
+  "sfx/plmove/walk_t_grass_long/walk_t_grass_long_3.ogg": {
+   "bytes": 2381,
+   "duration": 0.481
+  },
+  "sfx/plmove/walk_t_grass_long/walk_t_grass_long_4.ogg": {
+   "bytes": 3545,
+   "duration": 0.724
+  },
+  "sfx/plmove/walk_t_grass_long/walk_t_grass_long_5.ogg": {
+   "bytes": 2732,
+   "duration": 0.552
+  },
+  "sfx/plmove/walk_t_grass_long/walk_t_grass_long_6.ogg": {
+   "bytes": 2479,
+   "duration": 0.5
+  },
+  "sfx/plmove/walk_t_grass_long/walk_t_grass_long_7.ogg": {
+   "bytes": 2797,
+   "duration": 0.582
+  },
+  "sfx/plmove/walk_t_grass_long/walk_t_grass_long_8.ogg": {
+   "bytes": 1733,
+   "duration": 0.35
+  },
+  "sfx/plmove/walk_t_grass_long/walk_t_grass_long_9.ogg": {
+   "bytes": 2428,
+   "duration": 0.485
+  },
+  "sfx/plmove/walk_t_gravel_1.ogg": {
+   "bytes": 3550,
+   "duration": 0.694
+  },
+  "sfx/plmove/walk_t_gravel_10.ogg": {
+   "bytes": 3440,
+   "duration": 0.578
+  },
+  "sfx/plmove/walk_t_gravel_2.ogg": {
+   "bytes": 3069,
+   "duration": 0.694
+  },
+  "sfx/plmove/walk_t_gravel_3.ogg": {
+   "bytes": 2858,
+   "duration": 0.694
+  },
+  "sfx/plmove/walk_t_gravel_4.ogg": {
+   "bytes": 4407,
+   "duration": 0.694
+  },
+  "sfx/plmove/walk_t_gravel_5.ogg": {
+   "bytes": 4525,
+   "duration": 0.717
+  },
+  "sfx/plmove/walk_t_gravel_6.ogg": {
+   "bytes": 2444,
+   "duration": 0.486
+  },
+  "sfx/plmove/walk_t_gravel_7.ogg": {
+   "bytes": 3100,
+   "duration": 0.486
+  },
+  "sfx/plmove/walk_t_gravel_8.ogg": {
+   "bytes": 2829,
+   "duration": 0.578
+  },
+  "sfx/plmove/walk_t_gravel_9.ogg": {
+   "bytes": 2333,
+   "duration": 0.486
+  },
+  "sfx/plmove/walk_t_rock_floor_1.ogg": {
+   "bytes": 2269,
+   "duration": 0.473
+  },
+  "sfx/plmove/walk_t_rock_floor_2.ogg": {
+   "bytes": 2157,
+   "duration": 0.475
+  },
+  "sfx/plmove/walk_t_rock_floor_3.ogg": {
+   "bytes": 1850,
+   "duration": 0.417
+  },
+  "sfx/plmove/walk_t_rock_floor_4.ogg": {
+   "bytes": 2268,
+   "duration": 0.473
+  },
+  "sfx/plmove/walk_t_water_sh_1.ogg": {
+   "bytes": 1361,
+   "duration": 0.25
+  },
+  "sfx/plmove/walk_t_water_sh_2.ogg": {
+   "bytes": 4597,
+   "duration": 0.991
+  },
+  "sfx/plmove/walk_t_water_sh_3.ogg": {
+   "bytes": 3762,
+   "duration": 0.895
+  },
+  "sfx/plmove/walk_t_water_sh_4.ogg": {
+   "bytes": 3902,
+   "duration": 0.923
+  },
+  "sfx/plmove/walk_t_water_sh_5.ogg": {
+   "bytes": 4105,
+   "duration": 0.839
+  },
+  "sfx/plmove/walk_t_water_sh_6.ogg": {
+   "bytes": 4442,
+   "duration": 0.833
+  },
+  "sfx/plmove/walk_water_1.ogg": {
+   "bytes": 2318,
+   "duration": 0.446
+  },
+  "sfx/plmove/walk_water_10.ogg": {
+   "bytes": 3093,
+   "duration": 0.622
+  },
+  "sfx/plmove/walk_water_2.ogg": {
+   "bytes": 2048,
+   "duration": 0.386
+  },
+  "sfx/plmove/walk_water_3.ogg": {
+   "bytes": 1724,
+   "duration": 0.323
+  },
+  "sfx/plmove/walk_water_4.ogg": {
+   "bytes": 2599,
+   "duration": 0.506
+  },
+  "sfx/plmove/walk_water_5.ogg": {
+   "bytes": 2551,
+   "duration": 0.499
+  },
+  "sfx/plmove/walk_water_6.ogg": {
+   "bytes": 3053,
+   "duration": 0.622
+  },
+  "sfx/plmove/walk_water_7.ogg": {
+   "bytes": 2505,
+   "duration": 0.499
+  },
+  "sfx/plmove/walk_water_8.ogg": {
+   "bytes": 3058,
+   "duration": 0.622
+  },
+  "sfx/plmove/walk_water_9.ogg": {
+   "bytes": 3126,
+   "duration": 0.622
+  },
+  "sfx/radio/inaudible_chatter_1.ogg": {
+   "bytes": 4976,
+   "duration": 0.941
+  },
+  "sfx/radio/inaudible_chatter_2.ogg": {
+   "bytes": 4967,
+   "duration": 0.941
+  },
+  "sfx/radio/inaudible_chatter_3.ogg": {
+   "bytes": 5010,
+   "duration": 0.941
+  },
+  "sfx/radio/inaudible_chatter_4.ogg": {
+   "bytes": 4986,
+   "duration": 0.941
+  },
+  "sfx/radio/inaudible_chatter_5.ogg": {
+   "bytes": 5155,
+   "duration": 0.947
+  },
+  "sfx/radio/inaudible_chatter.ogg": {
+   "bytes": 9697,
+   "duration": 1.876
+  },
+  "sfx/radio/static.ogg": {
+   "bytes": 5031,
+   "duration": 1.012
+  },
+  "sfx/reload/default.ogg": {
+   "bytes": 10491,
+   "duration": 2.624
+  },
+  "sfx/reload/mag_fed_bolt_action_rifle/bolt_action_rifle_load_01.ogg": {
+   "bytes": 14844,
+   "duration": 3.124
+  },
+  "sfx/reload/mag_fed_bolt_action_rifle/bolt_action_rifle_load_02.ogg": {
+   "bytes": 15251,
+   "duration": 2.932
+  },
+  "sfx/reload/mag_fed_bolt_action_rifle/bolt_action_rifle_load_03.ogg": {
+   "bytes": 18535,
+   "duration": 3.713
+  },
+  "sfx/reload/mag_fed_bolt_action_rifle/bolt_action_rifle_load_04.ogg": {
+   "bytes": 13861,
+   "duration": 2.886
+  },
+  "sfx/reload/pocket_pistol/pocket_pistol_load_01.ogg": {
+   "bytes": 5860,
+   "duration": 1.037
+  },
+  "sfx/reload/pocket_pistol/pocket_pistol_load_02.ogg": {
+   "bytes": 7041,
+   "duration": 1.231
+  },
+  "sfx/reload/pocket_pistol/pocket_pistol_load_03.ogg": {
+   "bytes": 9586,
+   "duration": 1.842
+  },
+  "sfx/reload/pocket_pistol/pocket_pistol_load_04.ogg": {
+   "bytes": 7039,
+   "duration": 1.394
+  },
+  "sfx/reload/tube_fed_shotgun/shell_load_01.ogg": {
+   "bytes": 3910,
+   "duration": 0.669
+  },
+  "sfx/reload/tube_fed_shotgun/shell_load_02.ogg": {
+   "bytes": 3765,
+   "duration": 0.737
+  },
+  "sfx/reload/tube_fed_shotgun/shell_load_03.ogg": {
+   "bytes": 5761,
+   "duration": 0.962
+  },
+  "sfx/reload/tube_fed_shotgun/shell_load_04.ogg": {
+   "bytes": 5044,
+   "duration": 0.977
+  },
+  "sfx/smash_fail/brick/smash_fail_brick_1.ogg": {
+   "bytes": 1675,
+   "duration": 0.306
+  },
+  "sfx/smash_fail/brick/smash_fail_brick_2.ogg": {
+   "bytes": 1520,
+   "duration": 0.299
+  },
+  "sfx/smash_fail/brick/smash_fail_brick_3.ogg": {
+   "bytes": 1084,
+   "duration": 0.186
+  },
+  "sfx/smash_fail/brick/smash_fail_brick_4.ogg": {
+   "bytes": 1024,
+   "duration": 0.171
+  },
+  "sfx/smash_fail/brick/smash_fail_brick.ogg": {
+   "bytes": 1253,
+   "duration": 0.226
+  },
+  "sfx/smash_fail/ceramic/smash_fail_ceramic.ogg": {
+   "bytes": 1856,
+   "duration": 0.35
+  },
+  "sfx/smash_fail/chain_link/smash_fail_chain_link_1.ogg": {
+   "bytes": 5025,
+   "duration": 1.033
+  },
+  "sfx/smash_fail/chain_link/smash_fail_chain_link_2.ogg": {
+   "bytes": 7015,
+   "duration": 1.619
+  },
+  "sfx/smash_fail/chain_link/smash_fail_chain_link.ogg": {
+   "bytes": 5691,
+   "duration": 1.217
+  },
+  "sfx/smash_fail/concrete/smash_fail_concrete_1.ogg": {
+   "bytes": 437,
+   "duration": 0.056
+  },
+  "sfx/smash_fail/concrete/smash_fail_concrete_2.ogg": {
+   "bytes": 696,
+   "duration": 0.117
+  },
+  "sfx/smash_fail/concrete/smash_fail_concrete_3.ogg": {
+   "bytes": 921,
+   "duration": 0.149
+  },
+  "sfx/smash_fail/concrete/smash_fail_concrete_4.ogg": {
+   "bytes": 798,
+   "duration": 0.137
+  },
+  "sfx/smash_fail/concrete/smash_fail_concrete.ogg": {
+   "bytes": 1192,
+   "duration": 0.219
+  },
+  "sfx/smash_fail/door_wood/door_smash_fail_1.ogg": {
+   "bytes": 2186,
+   "duration": 0.418
+  },
+  "sfx/smash_fail/door_wood/door_smash_fail_2.ogg": {
+   "bytes": 2171,
+   "duration": 0.412
+  },
+  "sfx/smash_fail/door_wood/door_smash_fail_3.ogg": {
+   "bytes": 2344,
+   "duration": 0.446
+  },
+  "sfx/smash_fail/door_wood/door_smash_fail_4.ogg": {
+   "bytes": 2474,
+   "duration": 0.488
+  },
+  "sfx/smash_fail/door_wood/door_smash_fail_5.ogg": {
+   "bytes": 2282,
+   "duration": 0.451
+  },
+  "sfx/smash_fail/glass/smash_fail_glass_1.ogg": {
+   "bytes": 814,
+   "duration": 0.118
+  },
+  "sfx/smash_fail/glass/smash_fail_glass_2.ogg": {
+   "bytes": 2167,
+   "duration": 0.458
+  },
+  "sfx/smash_fail/glass/smash_fail_glass_reinforced_1.ogg": {
+   "bytes": 1412,
+   "duration": 0.246
+  },
+  "sfx/smash_fail/glass/smash_fail_glass_reinforced.ogg": {
+   "bytes": 2720,
+   "duration": 0.603
+  },
+  "sfx/smash_fail/glass/smash_fail_glass.ogg": {
+   "bytes": 1421,
+   "duration": 0.253
+  },
+  "sfx/smash_fail/metal/smash_fail_metal_1.ogg": {
+   "bytes": 4473,
+   "duration": 0.819
+  },
+  "sfx/smash_fail/metal/smash_fail_metal_2.ogg": {
+   "bytes": 3863,
+   "duration": 0.703
+  },
+  "sfx/smash_fail/metal/smash_fail_metal_3.ogg": {
+   "bytes": 6003,
+   "duration": 1.051
+  },
+  "sfx/smash_fail/metal/smash_fail_metal_4.ogg": {
+   "bytes": 5153,
+   "duration": 0.92
+  },
+  "sfx/smash_fail/metal/smash_fail_metal.ogg": {
+   "bytes": 3788,
+   "duration": 0.736
+  },
+  "sfx/smash_fail/plastic/smash_fail_plastic_1.ogg": {
+   "bytes": 795,
+   "duration": 0.141
+  },
+  "sfx/smash_fail/plastic/smash_fail_plastic_2.ogg": {
+   "bytes": 1223,
+   "duration": 0.235
+  },
+  "sfx/smash_fail/plastic/smash_fail_plastic.ogg": {
+   "bytes": 936,
+   "duration": 0.175
+  },
+  "sfx/smash_fail/t_wall/smash_fail_wall.ogg": {
+   "bytes": 1748,
+   "duration": 0.306
+  },
+  "sfx/smash_fail/wood_furn/smash_fail_wood_1.ogg": {
+   "bytes": 4771,
+   "duration": 1.125
+  },
+  "sfx/smash_fail/wood_furn/smash_fail_wood_2.ogg": {
+   "bytes": 4121,
+   "duration": 0.826
+  },
+  "sfx/smash_fail/wood_furn/smash_fail_wood_3.ogg": {
+   "bytes": 3736,
+   "duration": 0.791
+  },
+  "sfx/smash_fail/wood_furn/smash_fail_wood_4.ogg": {
+   "bytes": 3455,
+   "duration": 0.733
+  },
+  "sfx/smash_fail/wood_furn/smash_fail_wood.ogg": {
+   "bytes": 5168,
+   "duration": 1.096
+  },
+  "sfx/smash_success/brick/smash_success_brick.ogg": {
+   "bytes": 4767,
+   "duration": 0.938
+  },
+  "sfx/smash_success/ceramic/smash_success_ceramic_1.ogg": {
+   "bytes": 4106,
+   "duration": 0.866
+  },
+  "sfx/smash_success/ceramic/smash_success_ceramic_2.ogg": {
+   "bytes": 4330,
+   "duration": 0.831
+  },
+  "sfx/smash_success/ceramic/smash_success_ceramic_3.ogg": {
+   "bytes": 5477,
+   "duration": 1.054
+  },
+  "sfx/smash_success/ceramic/smash_success_ceramic_4.ogg": {
+   "bytes": 3875,
+   "duration": 0.716
+  },
+  "sfx/smash_success/ceramic/smash_success_ceramic.ogg": {
+   "bytes": 5076,
+   "duration": 1.049
+  },
+  "sfx/smash_success/chain_link/smash_success_chain_link.ogg": {
+   "bytes": 3507,
+   "duration": 0.676
+  },
+  "sfx/smash_success/concrete/smash_success_concrete.ogg": {
+   "bytes": 5397,
+   "duration": 1.078
+  },
+  "sfx/smash_success/door_wood/door_smash_success.ogg": {
+   "bytes": 3258,
+   "duration": 0.632
+  },
+  "sfx/smash_success/glass/smash_success_glass_1.ogg": {
+   "bytes": 5913,
+   "duration": 1.204
+  },
+  "sfx/smash_success/glass/smash_success_glass_2.ogg": {
+   "bytes": 3636,
+   "duration": 0.717
+  },
+  "sfx/smash_success/glass/smash_success_glass_reinforced_1.ogg": {
+   "bytes": 5727,
+   "duration": 1.119
+  },
+  "sfx/smash_success/glass/smash_success_glass_reinforced.ogg": {
+   "bytes": 9548,
+   "duration": 1.965
+  },
+  "sfx/smash_success/glass/smash_success_glass.ogg": {
+   "bytes": 5535,
+   "duration": 1.124
+  },
+  "sfx/smash_success/hit_vehicle/hit_vehicle1.ogg": {
+   "bytes": 3451,
+   "duration": 0.695
+  },
+  "sfx/smash_success/hit_vehicle/hit_vehicle2.ogg": {
+   "bytes": 2822,
+   "duration": 0.556
+  },
+  "sfx/smash_success/hit_vehicle/hit_vehicle3.ogg": {
+   "bytes": 3580,
+   "duration": 0.699
+  },
+  "sfx/smash_success/hit_vehicle/hit_vehicle4.ogg": {
+   "bytes": 2504,
+   "duration": 0.49
+  },
+  "sfx/smash_success/metal/smash_success_metal_1.ogg": {
+   "bytes": 5318,
+   "duration": 1.113
+  },
+  "sfx/smash_success/metal/smash_success_metal.ogg": {
+   "bytes": 3649,
+   "duration": 0.721
+  },
+  "sfx/smash_success/plastic/smash_success_plastic_1.ogg": {
+   "bytes": 3601,
+   "duration": 0.647
+  },
+  "sfx/smash_success/plastic/smash_success_plastic_2.ogg": {
+   "bytes": 2436,
+   "duration": 0.465
+  },
+  "sfx/smash_success/plastic/smash_success_plastic.ogg": {
+   "bytes": 1269,
+   "duration": 0.221
+  },
+  "sfx/smash_success/window/window_boarded_smash_success.ogg": {
+   "bytes": 5959,
+   "duration": 1.275
+  },
+  "sfx/smash_success/window/window_frame_smash_success.ogg": {
+   "bytes": 2694,
+   "duration": 0.552
+  },
+  "sfx/smash_success/window/window_smash_success.ogg": {
+   "bytes": 6394,
+   "duration": 1.282
+  },
+  "sfx/smash_success/window/wood_smash_success.ogg": {
+   "bytes": 4753,
+   "duration": 1.013
+  },
+  "sfx/smash_success/wood_furn/smash_success_wood.ogg": {
+   "bytes": 3869,
+   "duration": 0.754
+  },
+  "sfx/smash/smash_glass.ogg": {
+   "bytes": 2346,
+   "duration": 0.39
+  },
+  "sfx/speech/ferals/creepy_laugh.ogg": {
+   "bytes": 3287,
+   "duration": 0.813
+  },
+  "sfx/speech/ferals/die_scream_1.ogg": {
+   "bytes": 2717,
+   "duration": 0.496
+  },
+  "sfx/speech/ferals/female_anguish_heavy_breathing_1.ogg": {
+   "bytes": 4738,
+   "duration": 0.934
+  },
+  "sfx/speech/ferals/female_anguish_heavy_breathing_2.ogg": {
+   "bytes": 6501,
+   "duration": 1.268
+  },
+  "sfx/speech/ferals/female_mad_whisper_1.ogg": {
+   "bytes": 9659,
+   "duration": 2.037
+  },
+  "sfx/speech/ferals/female_mad_whisper_2.ogg": {
+   "bytes": 4017,
+   "duration": 0.815
+  },
+  "sfx/speech/ferals/female_scream_1.ogg": {
+   "bytes": 6212,
+   "duration": 1.107
+  },
+  "sfx/speech/ferals/female_scream_2.ogg": {
+   "bytes": 6244,
+   "duration": 1.122
+  },
+  "sfx/speech/ferals/male_heavy_breathing_1.ogg": {
+   "bytes": 7141,
+   "duration": 1.623
+  },
+  "sfx/speech/ferals/male_mumbling_1.ogg": {
+   "bytes": 3756,
+   "duration": 0.758
+  },
+  "sfx/speech/ferals/male_mumbling_2.ogg": {
+   "bytes": 4453,
+   "duration": 0.852
+  },
+  "sfx/speech/ferals/male_scared_heavy_breathing_1.ogg": {
+   "bytes": 3168,
+   "duration": 0.64
+  },
+  "sfx/speech/ferals/male_scared_heavy_breathing_2.ogg": {
+   "bytes": 3588,
+   "duration": 0.73
+  },
+  "sfx/speech/ferals/male_scream_1.ogg": {
+   "bytes": 9156,
+   "duration": 1.65
+  },
+  "sfx/speech/ferals/male_scream_2.ogg": {
+   "bytes": 9144,
+   "duration": 1.665
+  },
+  "sfx/speech/ferals/old_man_hesitant_ranbling.ogg": {
+   "bytes": 6258,
+   "duration": 1.231
+  },
+  "sfx/speech/zombie/speech_zombie_groan_1.ogg": {
+   "bytes": 4170,
+   "duration": 0.81
+  },
+  "sfx/speech/zombie/speech_zombie_groan_2.ogg": {
+   "bytes": 4393,
+   "duration": 0.844
+  },
+  "sfx/speech/zombie/speech_zombie_groan_3.ogg": {
+   "bytes": 2709,
+   "duration": 0.557
+  },
+  "sfx/speech/zombie/speech_zombie_groan_4.ogg": {
+   "bytes": 3480,
+   "duration": 0.633
+  },
+  "sfx/speech/zombie/speech_zombie_groan.ogg": {
+   "bytes": 3723,
+   "duration": 0.721
+  },
+  "sfx/tool/axe_1.ogg": {
+   "bytes": 2704,
+   "duration": 0.661
+  },
+  "sfx/tool/camera_shutter_1.ogg": {
+   "bytes": 2437,
+   "duration": 0.517
+  },
+  "sfx/tool/geiger_high.ogg": {
+   "bytes": 6087,
+   "duration": 1.005
+  },
+  "sfx/tool/geiger_low.ogg": {
+   "bytes": 4669,
+   "duration": 1.008
+  },
+  "sfx/tool/geiger_medium.ogg": {
+   "bytes": 7666,
+   "duration": 1.498
+  },
+  "sfx/tool/hacksaw_1.ogg": {
+   "bytes": 6842,
+   "duration": 1.398
+  },
+  "sfx/tool/oxytorch_1.ogg": {
+   "bytes": 2853,
+   "duration": 0.532
+  },
+  "sfx/tool/pickaxe_1.ogg": {
+   "bytes": 3140,
+   "duration": 0.592
+  },
+  "sfx/tool/pickaxe_2.ogg": {
+   "bytes": 2551,
+   "duration": 0.481
+  },
+  "sfx/tool/pickaxe_3.ogg": {
+   "bytes": 2903,
+   "duration": 0.556
+  },
+  "sfx/tool/shovel_1.ogg": {
+   "bytes": 6429,
+   "duration": 1.302
+  }
+ }
+}
