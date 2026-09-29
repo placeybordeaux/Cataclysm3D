@@ -47,7 +47,25 @@ export interface PendingLoad {
  * Boot: a load requested before the last reload. Read it now so main.ts can build the Game
  * for the save's world. Consumes the request (a crash while loading won't loop).
  */
+const HOT_KEY = 'cdda3d.hotReload';
+
 export async function takePendingLoad(): Promise<PendingLoad | null> {
+  // Dev only: Vite full-reloaded the page after a code edit; resume the snapshot taken just
+  // before (see installSave), so editing code doesn't throw you back to the title screen.
+  if (import.meta.hot) {
+    try {
+      // Not removed until the resumed game is running (startSession): another edit saved while
+      // this boot is still loading reloads again, and must resume the same snapshot.
+      const hot = sessionStorage.getItem(HOT_KEY);
+      if (hot) {
+        const file = JSON.parse(hot) as SaveFile;
+        return { slot: file.meta.slot, file };
+      }
+    } catch (e) {
+      sessionStorage.removeItem(HOT_KEY);
+      console.warn(`hot-reload resume failed: ${(e as Error).message}`);
+    }
+  }
   let slot: string | null = null;
   try {
     slot = sessionStorage.getItem(PENDING_KEY);
@@ -191,6 +209,19 @@ export async function installSave(
   };
   window.addEventListener('pagehide', onUnload);
 
+  // Dev only: snapshot the running game right before Vite reloads the page for a code edit.
+  // Kept in sessionStorage (this tab only) and consumed by takePendingLoad on the next boot.
+  if (import.meta.hot) {
+    import.meta.hot.on('vite:beforeFullReload', () => {
+      if (!mgr.active || game.player.dead) return;
+      try {
+        sessionStorage.setItem(HOT_KEY, JSON.stringify(mgr.snapshot(mgr.slot ?? 'hot-reload')));
+      } catch (e) {
+        console.warn(`hot-reload snapshot failed (game will restart): ${(e as Error).message}`);
+      }
+    });
+  }
+
   const handle: SaveHandle = {
     manager: mgr,
     async applyPending(p) {
@@ -201,6 +232,7 @@ export async function installSave(
       return applyFile(p.file);
     },
     startSession() {
+      if (import.meta.hot) sessionStorage.removeItem(HOT_KEY);
       mgr.active = !game.player.dead;
     },
     endSession() {
