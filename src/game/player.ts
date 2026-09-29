@@ -12,6 +12,8 @@ export class PlayerAvatar extends Character {
   /** yaw 0 looks north (-y); positive yaw turns clockwise (toward east). */
   yaw = 0;
   pitch = 0;
+  /** Walk-speed multiplier from what the hands are doing (combat guard; set by PlayerCombat). */
+  moveSpeedMul = 1;
 
   constructor(data: GameData, opts: { seed?: number } = {}) {
     super(data, opts);
@@ -36,7 +38,7 @@ export class PlayerAvatar extends Character {
     // General MOVE_COST enchantments (mutations such as hooves/leg changes).
     cost = Math.max(1, this.byEnchant(cost, 'MOVE_COST'));
     const legMul = [1, 0.5, 0.25][this.brokenLegs()];
-    return (this.speed / cost) * ACTION_SCALE * modeMul * legMul;
+    return (this.speed / cost) * ACTION_SCALE * modeMul * legMul * this.moveSpeedMul;
   }
 
   /** Report `tiles` walked on terrain of `moveCost` so stamina drains like CDDA. */

@@ -1,12 +1,12 @@
-// CDDA quantity strings ("250 ml", "1 h 30 m", "2 USD 50 cent") -> numbers in our base units.
+// BN/CDDA quantity strings ("250 ml", "1 h 30 m", "2 USD 50 cent") -> numbers in our base units.
 //
 // Grammar mirrors units::read_from_json_string_common (src/units.h): one or more
 // `<signed int><optional spaces><unit>` pairs, summed. We additionally accept decimals
 // because it costs nothing and some docs examples use them.
 //
-// Base units (see src/data/types.ts): ml, g, cm, game seconds, kJ, W, cents, KB, °C.
+// Base units (see src/data/types.ts): ml, g, cm, game seconds, kJ, W, cents, KB, °C, dB, %.
 
-export type Dimension = 'volume' | 'mass' | 'length' | 'time' | 'energy' | 'power' | 'money' | 'memory' | 'temperature' | 'angle';
+export type Dimension = 'volume' | 'mass' | 'length' | 'time' | 'energy' | 'power' | 'money' | 'memory' | 'temperature' | 'angle' | 'sound' | 'probability';
 
 // Every unit token is unique across dimensions, which is what makes dimension inference
 // from the string alone safe (e.g. "m" is minutes; CDDA spells metres "meter").
@@ -58,6 +58,10 @@ export const UNITS: Record<string, [Dimension, number]> = {
   arcmin: ['angle', 1 / 60],
   '°': ['angle', 1],
   rad: ['angle', 180 / Math.PI],
+  // BN units/sound.h (sound_units) and units_probability.h; probabilities in percent
+  dB: ['sound', 1],
+  pct: ['probability', 1],
+  pm: ['probability', 1e-4],
 };
 
 const PAIR = /([+-]?)(\d+(?:\.\d+)?)\s*([A-Za-z°]+)/y;

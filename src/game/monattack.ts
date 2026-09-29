@@ -6,6 +6,7 @@ import { BODY_PARTS, type BodyPartId } from './bodyparts';
 import { SIZE_RANK, turnsToEffectSeconds, turnsToSeconds, type Monster, type SpecialAttackState } from './monster';
 import type { MonsterSystem } from './monai';
 import { sfx } from '../audio/sfx';
+import { FEEL, type TelegraphKind } from './combatfeel';
 
 // Monster special attacks (monattack.cpp hardcoded ones + mattack_actors.cpp data-driven
 // melee/bite/leap/gun actors) against the player. Each returns true when the attack was
@@ -104,11 +105,7 @@ function asUnits(v: unknown): DamageUnit[] | undefined {
 export function meleeActor(sys: MonsterSystem, m: Monster, sa: SpecialAttackState, bite: boolean): boolean {
   const d = sa.def;
   const p = sys.game.player;
-  const range = typeof d.range === 'number' ? d.range : 1;
-  if (!sys.inMeleeRange(m, range)) return false;
-  if (!evalCondition(sys, m, d.condition)) return false;
-  // Grabs don't stack: CDDA's grab conditions exclude already-grabbed targets for most actors.
-  if (d.grab && p.hasEffect('grabbed') && !m.hasEffect('grabbing') && !bite) return false;
+  if (!meleeActorReady(sys, m, sa, bite)) return false;
   const name = m.TheName();
   const units = rollDamage(sys, asUnits(d.damage_max_instance) ?? [{ damage_type: 'bash', amount: 9 }], d.min_mul ?? 0.5, d.max_mul ?? 1);
   const hitsizeMin = typeof d.hitsize_min === 'number' && d.hitsize_min >= 0 ? d.hitsize_min : bite ? 1 : undefined;
@@ -138,7 +135,9 @@ export function meleeActor(sys: MonsterSystem, m: Monster, sa: SpecialAttackStat
   if (bite) sfx.monsterBite(true, m);
   else sfx.monsterHit(m);
   sys.onPlayerHurt(m, dealt, res.bp ?? bp);
-  if (d.grab) applyGrab(sys, m);
+  // A parried grab never takes hold, and the grabber reels (combatfeel.ts guard timing).
+  if (res.block?.parry) parried(sys, m);
+  else if (d.grab) applyGrab(sys, m);
   // Effects: CDDA effects_require_dmg defaults true.
   if (dealt > 0 || d.effects_require_dmg === false) {
     for (const e of (d.effects ?? []) as { id: string; chance?: number; duration?: number | [number, number]; affect_hit_bp?: boolean; permanent?: boolean }[]) {
@@ -160,6 +159,43 @@ export function meleeActor(sys: MonsterSystem, m: Monster, sa: SpecialAttackStat
   return true;
 }
 
+/** Can this melee/bite actor hit right now (range, data condition, grab stacking)? */
+export function meleeActorReady(sys: MonsterSystem, m: Monster, sa: SpecialAttackState, bite: boolean): boolean {
+  const d = sa.def;
+  const range = typeof d.range === 'number' ? d.range : 1;
+  if (!sys.inMeleeRange(m, range)) return false;
+  if (!evalCondition(sys, m, d.condition)) return false;
+  // Grabs don't stack: CDDA's grab conditions exclude already-grabbed targets for most actors.
+  if (d.grab && sys.game.player.hasEffect('grabbed') && !m.hasEffect('grabbing') && !bite) return false;
+  return true;
+}
+
+/** The survivor parried: the attacker is knocked off balance for a moment. */
+function parried(sys: MonsterSystem, m: Monster): void {
+  m.addEffect('stunned', FEEL.parryStun);
+  sfx.parry(m);
+}
+
+/**
+ * How a special attack is telegraphed before it resolves (combatfeel.ts): a TelegraphKind when
+ * it is a blow at the survivor that could land now (the caller winds up, then calls
+ * trySpecial), null when it is such a blow but can't land now, undefined for attacks that
+ * aren't telegraphed this way (ranged specials, shrieks, guns — they go straight to trySpecial).
+ */
+export function specialTelegraph(sys: MonsterSystem, m: Monster, sa: SpecialAttackState): TelegraphKind | null | undefined {
+  const d = sa.def;
+  const heavy = SIZE_RANK[m.size] > 3;
+  if (d.attack_type === 'melee' || d.attack_type === 'bite' || d.type === 'bite') {
+    const bite = d.attack_type === 'bite' || d.type === 'bite';
+    if (!meleeActorReady(sys, m, sa, bite)) return null;
+    return heavy && typeof d.throw_strength === 'number' && d.throw_strength > 0 ? 'heavy' : 'melee';
+  }
+  if (d.type === 'leap' || d.id === 'leap') return leapReady(sys, m, d) ? 'leap' : null;
+  if (d.id === 'LUNGE') return leapReady(sys, m, LUNGE) ? 'leap' : null;
+  if (d.id === 'SMASH') return sys.inMeleeRange(m, 1) ? 'heavy' : null;
+  return undefined;
+}
+
 export function applyGrab(sys: MonsterSystem, m: Monster): void {
   const p = sys.game.player;
   m.addEffect('grabbing', 3600);
@@ -179,7 +215,8 @@ export function defaultMelee(sys: MonsterSystem, m: Monster): void {
   if (res.hit) {
     sfx.monsterHit(m);
     sys.onPlayerHurt(m, res.result?.damage ?? 0, res.bp);
-  }
+    if (res.block?.parry) parried(sys, m);
+  } else sfx.monsterWhiff(m);
 }
 
 // ---------------------------------------------------------------- hardcoded specials
@@ -273,14 +310,23 @@ function boomerVomit(sys: MonsterSystem, m: Monster, maxRange: number): boolean 
   return true;
 }
 
-function leap(sys: MonsterSystem, m: Monster, d: Record<string, any>): boolean {
+const LUNGE = { max_range: 4, message: '%s lunges at you!' };
+
+/** Leap preconditions: sees the survivor within its range band along a clear line. */
+function leapReady(sys: MonsterSystem, m: Monster, d: Record<string, any>): boolean {
   const dist = sys.distToPlayer(m);
   const maxR = typeof d.max_range === 'number' ? d.max_range : 5;
   const minC = typeof d.min_consider_range === 'number' ? d.min_consider_range : 0;
   const maxC = typeof d.max_consider_range === 'number' ? d.max_consider_range : 200;
   if (!m.seesPlayer || dist < Math.max(2.2, minC) || dist > Math.min(maxR, maxC) + 0.5) return false;
   const p = sys.game.player;
-  if (!sys.clearLine(m, p.x, p.y)) return false;
+  return sys.clearLine(m, p.x, p.y);
+}
+
+function leap(sys: MonsterSystem, m: Monster, d: Record<string, any>): boolean {
+  if (!leapReady(sys, m, d)) return false;
+  const p = sys.game.player;
+  const dist = sys.distToPlayer(m);
   const len = Math.max(0.01, dist - 1.1);
   const t = Math.max(0.12, len / 12);
   m.dashVx = ((p.x - m.x) / dist) * (len / t);
@@ -371,7 +417,7 @@ export function trySpecial(sys: MonsterSystem, m: Monster, sa: SpecialAttackStat
     case 'SMASH':
       return meleeActor(sys, m, { ...sa, def: { ...d, damage_max_instance: [{ damage_type: 'bash', amount: 30 }], throw_strength: 100, hit_dmg_u: '%1$s takes a powerful swing at your %2$s, pulverizing it!' } }, false);
     case 'LUNGE':
-      return leap(sys, m, { max_range: 4, message: '%s lunges at you!' });
+      return leap(sys, m, LUNGE);
     default:
       if (!SILENT_SKIP.has(id)) warnOnce('monster_attack', id);
       return false;

@@ -128,7 +128,7 @@ const http = createHttp(async (req, res) => {
   const what = (req.url ?? '/').slice(1);
   try {
     let out: unknown;
-    if (what === 'eval') {
+    if (what === 'eval' || what === 'js') {
       // An expression returns its value; anything that doesn't parse as one runs as statements.
       out = await page.evaluate(
         `(async () => { const AF = (async () => {}).constructor; let f;
@@ -180,6 +180,8 @@ const http = createHttp(async (req, res) => {
       else if (what === 'xmove') await xin.move(Number(a[0]), Number(a[1] ?? 0));
       else if (what === 'xclick') await xin.click(Number(a[0]), Number(a[1]), Number(a[2] ?? 1));
       else if (what === 'xhere') await xin.clickHere(Number(a[0] || 1));
+      else if (what === 'xbdown') await xin.buttonDown(Number(a[0] || 1));
+      else if (what === 'xbup') await xin.buttonUp(Number(a[0] || 1));
       else if (what === 'xwheel') await xin.wheel(a[0] as 'up' | 'down', Number(a[1] ?? 1));
       else if (what === 'layout') xin.layout(a[0]);
       else if (what === 'xtab') {
@@ -203,6 +205,8 @@ const http = createHttp(async (req, res) => {
           player: g && { x: +g.player.x.toFixed(2), y: +g.player.y.toFixed(2), yaw: +g.player.yaw.toFixed(3), running: g.player.running },
         };
       });
+    } else if (what === 'seq') {
+      out = await runSeq(body);
     } else if (what === 'load') {
       out = await load(body);
     } else if (what === 'log') {
@@ -221,3 +225,53 @@ const http = createHttp(async (req, res) => {
   }
 });
 http.listen(port, '127.0.0.1', () => console.log(`drive listening on ${port}`));
+
+/**
+ * Timed script for judging animation timing: one `<ms> <cmd> [args]` per line (or `;`), run at
+ * those offsets from the start. Input commands (xkey xdown xup xbdown xbup xhere xmove eval) fire
+ * on their own timeline; `shot <path>` requests queue on a second one, because a screenshot
+ * takes tens of ms and would otherwise push later input late. `burst <n> <everyMs> <prefix>`
+ * expands to n shots. Returns each shot's path with the time it was actually taken.
+ *   drive.ts seq "0 burst 10 100 shots/swing; 50 xbdown 1; 120 xbup 1"
+ */
+async function runSeq(script: string): Promise<{ path: string; ms: number }[]> {
+  const steps: { at: number; cmd: string; args: string[] }[] = [];
+  for (const line of script.split(/[;\n]/).map((l) => l.trim()).filter(Boolean)) {
+    const [at, cmd, ...args] = line.split(/\s+/);
+    if (cmd === 'burst') {
+      const [n, every, prefix] = args;
+      for (let i = 0; i < Number(n); i++) steps.push({ at: Number(at) + i * Number(every), cmd: 'shot', args: [`${prefix}_${String(i).padStart(2, '0')}.png`] });
+    } else steps.push({ at: Number(at), cmd, args });
+  }
+  const t0 = Date.now();
+  const wait = (at: number) => new Promise((r) => setTimeout(r, Math.max(0, at - (Date.now() - t0))));
+  const shots: { path: string; ms: number }[] = [];
+  const shotLine = (async () => {
+    for (const s of steps.filter((x) => x.cmd === 'shot').sort((a, b) => a.at - b.at)) {
+      await wait(s.at);
+      const p = resolve(s.args[0]);
+      mkdirSync(dirname(p), { recursive: true });
+      const ms = Date.now() - t0;
+      await page.screenshot({ path: p as `${string}.png` });
+      shots.push({ path: p, ms });
+    }
+  })();
+  const inputLine = (async () => {
+    for (const s of steps.filter((x) => x.cmd !== 'shot').sort((a, b) => a.at - b.at)) {
+      await wait(s.at);
+      const a = s.args;
+      if (s.cmd === 'eval' || s.cmd === 'js') await page.evaluate(a.join(' '));
+      else if (!headful) throw new Error(`${s.cmd} needs serve --headful`);
+      else if (s.cmd === 'xkey') await xin.key(a.join(' '));
+      else if (s.cmd === 'xdown') await xin.down(a[0]);
+      else if (s.cmd === 'xup') await xin.up(a[0]);
+      else if (s.cmd === 'xbdown') await xin.buttonDown(Number(a[0] || 1));
+      else if (s.cmd === 'xbup') await xin.buttonUp(Number(a[0] || 1));
+      else if (s.cmd === 'xhere') await xin.clickHere(Number(a[0] || 1));
+      else if (s.cmd === 'xmove') await xin.move(Number(a[0]), Number(a[1] ?? 0), 1);
+      else throw new Error(`seq: unknown command ${s.cmd}`);
+    }
+  })();
+  await Promise.all([shotLine, inputLine]);
+  return shots;
+}

@@ -9,19 +9,22 @@ import { techniqueMessage, type TargetInfo, type TechniqueOutcome } from './tech
 import type { MonsterSystem } from './monai';
 import { Grid, hasLOS } from './los';
 import { sfx, type MeleeSkill } from '../audio/sfx';
+import { FEEL, arcFor, defenseOf, hitStopSeconds, sweptArcTarget, swingTiming, type SwingStyle, type SwingTiming } from './combatfeel';
+import { moveWithCollision } from './physics';
 
-// The survivor's attacks in real time: LMB / `f` swings or fires, RMB aims a gun, `G` throws.
-// Melee picks the monster under the crosshair (exact ray hit first, then the closest within
-// a cone), resolves it with combat.ts meleeAttack and applies the damage through the monster
-// system. Guns are hitscan: the CDDA dispersion roll becomes a cone offset around the view
-// ray, walked tile by tile until a wall or a monster circle stops it.
+// The survivor's attacks in real time: LMB / `f` swings or fires, RMB aims a gun (or guards
+// with a melee weapon / bare hands), Space or a double-tapped strafe side-steps, `G` throws.
+//
+// LMB melee runs through the feel layer (combatfeel.ts): wind-up -> contact -> active window ->
+// recovery. The blow resolves at contact, against whatever the weapon's swept arc finds around
+// the crosshair *then* (exact ray hit first, else closest in angle), with combat.ts meleeAttack
+// underneath; a target stepping into the arc during the short active window still gets hit.
+// `melee()` without the phases (tests, scripts) resolves instantly like before.
+// Guns are hitscan: the CDDA dispersion roll becomes a cone offset around the view ray,
+// walked tile by tile until a wall or a monster circle stops it.
 
-/** Half-angle of the melee target cone (radians). */
-const MELEE_CONE = (32 * Math.PI) / 180;
 /** Real seconds between the rounds of a burst (CDDA fires a burst within one action). */
 const BURST_INTERVAL = 0.075;
-/** Player reach in tiles (centre to monster edge), CDDA adjacency incl. diagonals. */
-const MELEE_REACH = 1.2;
 
 export interface Tracer {
   x0: number;
@@ -37,6 +40,31 @@ export interface ViewModelHook {
   attack(kind: 'melee' | 'fire' | 'throw' | 'sweep'): void;
   /** Raise the weapon/arms briefly (a block). */
   block?(): void;
+  /** Feel layer: a phase-timed swing whose contact pose lands at windup + strike. */
+  swing?(ph: { windup: number; strike: number; follow: number; recovery: number; style: SwingStyle }): void;
+  /** Hold the pose for hit-stop. */
+  impact?(seconds: number): void;
+  setGuard?(on: boolean): void;
+  /** Gun kick scaled by the round's recoil (replaces attack('fire') when present). */
+  recoil?(k: number): void;
+}
+
+/** A swing in progress (feel layer). `t` counts from the click. */
+export interface SwingState {
+  t: number;
+  timing: SwingTiming;
+  reach: number;
+  arc: number;
+  style: SwingStyle;
+  resolved: boolean;
+}
+
+/** How a weapon is swung on screen (and how wide its arc is). */
+export function swingStyleOf(w: Item | null): SwingStyle {
+  if (!w) return 'punch';
+  const skill = w.meleeSkill();
+  if (skill === 'stabbing' || w.hasFlag('SPEAR') || w.hasFlag('REACH_ATTACK')) return 'thrust';
+  return 'swing';
 }
 
 /** CDDA melee_message verbs by dominant damage type and total damage. */
@@ -102,6 +130,18 @@ export function applyTechniqueToMonster(m: Monster, o: TechniqueOutcome, fromX: 
 export class PlayerCombat implements GameSystem {
   readonly name = 'player-combat';
   cooldown = 0;
+  /** The swing being animated/resolved (null between swings). */
+  swing: SwingState | null = null;
+  /** Hit-stop seconds left: the swing clock and cooldown hold while the blow lands. */
+  hitStop = 0;
+  /** Side-step in progress: velocity (tiles/s) and seconds left. */
+  step: { vx: number; vy: number; t: number } | null = null;
+  stepCooldown = 0;
+  /** Gunfire feedback for the renderer (camera kick): the round's recoil, ~1 for a pistol. */
+  onFire: ((kick: number) => void) | null = null;
+  private time = 0;
+  private prevHeld = new Set<string>();
+  private tapAt: Record<string, number> = {};
   readonly tracers: Tracer[] = [];
   /** Shots fired so far (renderer uses it to trigger muzzle flashes). */
   shots = 0;
@@ -123,7 +163,11 @@ export class PlayerCombat implements GameSystem {
   }
 
   update(game: Game, dt: number): void {
-    this.cooldown = Math.max(0, this.cooldown - dt);
+    this.time += dt;
+    // Hit-stop freezes the swing clock (and its cooldown) for a few frames when a blow lands.
+    if (this.hitStop > 0) this.hitStop = Math.max(0, this.hitStop - dt);
+    else this.cooldown = Math.max(0, this.cooldown - dt);
+    this.stepCooldown = Math.max(0, this.stepCooldown - dt);
     for (let i = this.tracers.length - 1; i >= 0; i--) if ((this.tracers[i].t -= dt) <= 0) this.tracers.splice(i, 1);
     const input = game.input;
     const p = game.player;
@@ -132,7 +176,15 @@ export class PlayerCombat implements GameSystem {
     this.lastX = p.x;
     this.lastY = p.y;
     tickMartialArts(p, dt);
-    if (p.dead || input.captured) return;
+    const def = defenseOf(p);
+    def.dodgeWindow = Math.max(0, def.dodgeWindow - dt);
+    this.updateStep(dt);
+    if (this.hitStop <= 0) this.updateSwing(dt);
+    if (p.dead || input.captured) {
+      this.setGuard(false);
+      this.prevHeld.clear();
+      return;
+    }
     // LMB: consume our clicks but leave other buttons' clicks for whoever else reads them.
     const clicks = input.consumeClicks();
     const others = clicks.filter((b) => b !== 0);
@@ -143,64 +195,180 @@ export class PlayerCombat implements GameSystem {
     const held = (input.mouseButtons & 1) !== 0 && (!gun || currentMode(gun).qty > 1);
     this.updateBurst(dt);
     const lmb = clicks.includes(0) || held;
-    if (gun && (input.mouseButtons & 4) !== 0) aim(p, gun, dt * ACTION_SCALE * 100);
-    if (lmb && this.cooldown <= 0) this.attack();
+    const rmb = (input.mouseButtons & 4) !== 0;
+    if (gun && rmb) aim(p, gun, dt * ACTION_SCALE * 100);
+    // RMB with a melee weapon or bare hands: guard (lowered while a swing plays).
+    this.setGuard(!gun && rmb && !this.swing && !p.effects.has('downed') && !game.movementOverride?.());
+    if (def.guarding) {
+      def.guardAge += dt;
+      p.modStamina(-FEEL.guardStaminaPerSec * dt);
+    }
+    this.detectSidestep();
+    if (lmb && this.cooldown <= 0 && !this.swing) this.attack();
   }
 
-  /** LMB / debug: fire if wielding a gun, else melee. */
+  private setGuard(on: boolean): void {
+    const p = this.game.player;
+    const def = defenseOf(p);
+    if (on !== def.guarding) {
+      def.guarding = on;
+      def.guardAge = 0;
+      this.viewmodel()?.setGuard?.(on);
+    }
+    p.moveSpeedMul = on ? FEEL.guardMoveMul : 1;
+  }
+
+  // ------------------------------------------------------------------ side-step
+
+  /** Space, or a second tap of A/D/S within FEEL.doubleTap, side-steps that way. */
+  private detectSidestep(): void {
+    const held = this.game.input.held;
+    let dir: string | null = null;
+    for (const k of ['KeyA', 'KeyD', 'KeyS', 'Space']) {
+      const down = held.has(k);
+      if (down && !this.prevHeld.has(k)) {
+        if (k === 'Space') dir = 'Space';
+        else if (this.time - (this.tapAt[k] ?? -Infinity) <= FEEL.doubleTap) dir = k;
+        this.tapAt[k] = this.time;
+      }
+      if (down) this.prevHeld.add(k);
+      else this.prevHeld.delete(k);
+    }
+    if (dir) this.sidestep(dir);
+  }
+
+  /**
+   * A quick step (FEEL.dodgeDistance over FEEL.dodgeTime) left/right/back; Space goes the way
+   * the movement keys point, else back. Blows landing in the next FEEL.dodgeWindow roll CDDA's
+   * dodge with a bonus (combat.ts tryDodgeRoll); stepping out of reach makes them whiff.
+   */
+  sidestep(key: string): boolean {
+    const game = this.game;
+    const p = game.player;
+    if (this.stepCooldown > 0 || this.step || p.dead || p.effects.has('downed') || p.hasEffect('grabbed') || game.movementOverride?.()) return false;
+    if (p.stamina < FEEL.dodgeStamina) {
+      game.message("You're too winded to dodge.", 'c_yellow');
+      this.stepCooldown = FEEL.dodgeCooldown;
+      return false;
+    }
+    const held = game.input.held;
+    let fx = 0, fy = -1;
+    if (key === 'KeyA') [fx, fy] = [-1, 0];
+    else if (key === 'KeyD') [fx, fy] = [1, 0];
+    else if (key === 'Space') {
+      const x = (held.has('KeyD') ? 1 : 0) - (held.has('KeyA') ? 1 : 0), y = (held.has('KeyW') ? 1 : 0) - (held.has('KeyS') ? 1 : 0);
+      if (x || y) [fx, fy] = [x, y];
+    }
+    const len = Math.hypot(fx, fy);
+    fx /= len;
+    fy /= len;
+    // Same frame as Game.updatePlayerMovement: forward = (sin yaw, -cos yaw).
+    const sin = Math.sin(p.yaw), cos = Math.cos(p.yaw);
+    const wx = fy * sin + fx * cos, wy = -fy * cos + fx * sin;
+    const v = FEEL.dodgeDistance / FEEL.dodgeTime;
+    this.step = { vx: wx * v, vy: wy * v, t: FEEL.dodgeTime };
+    this.stepCooldown = FEEL.dodgeCooldown;
+    defenseOf(p).dodgeWindow = FEEL.dodgeWindow;
+    p.modStamina(-FEEL.dodgeStamina);
+    sfx.meleeWhiff(false);
+    return true;
+  }
+
+  private updateStep(dt: number): void {
+    const s = this.step;
+    if (!s) return;
+    const p = this.game.player;
+    const t = Math.min(dt, s.t);
+    s.t -= t;
+    [p.x, p.y] = moveWithCollision(this.game.map, p.x, p.y, p.z, s.vx * t, s.vy * t);
+    if (s.t <= 0 || p.dead) this.step = null;
+  }
+
+  // ------------------------------------------------------------------ phased swing
+
+  /** Start a swing (LMB): the blow resolves at contact, see updateSwing. */
+  beginSwing(): void {
+    const p = this.game.player;
+    const w = p.inv.wielded;
+    const reach = w?.hasFlag('REACH_ATTACK') ? FEEL.reachLong : FEEL.reach;
+    const style = swingStyleOf(w);
+    const timing = swingTiming(attackCooldownSeconds(p, w), w?.weight() ?? 0);
+    this.swing = { t: 0, timing, reach, arc: arcFor(style), style, resolved: false };
+    this.cooldown = timing.total;
+    const vm = this.viewmodel();
+    // The follow-through carries past contact for up to 0.12 s, then the hands come back.
+    const follow = Math.min(0.12, timing.active + timing.recovery * 0.4);
+    if (vm?.swing) vm.swing({ windup: timing.windup, strike: timing.strike, follow, recovery: timing.total - timing.windup - timing.strike - follow, style });
+    else vm?.attack('melee');
+  }
+
+  /** Advance the swing: from contact until the active window closes, the arc looks for a target. */
+  private updateSwing(dt: number): void {
+    const s = this.swing;
+    if (!s) return;
+    s.t += dt;
+    const contact = s.timing.windup + s.timing.strike;
+    if (!s.resolved && s.t >= contact) {
+      const m = this.meleeTarget(s.reach, s.arc);
+      if (m || s.t >= contact + s.timing.active) {
+        s.resolved = true;
+        // An NPC under the crosshair may take the blow instead (npcai decides; asks first if friendly).
+        if (!this.npcMelee?.(s.reach, m)) this.melee(m, { phased: s.t });
+      }
+    }
+    if (s.resolved && s.t >= s.timing.total) this.swing = null;
+  }
+
+  /** LMB / debug: fire if wielding a gun, else start a (phased) swing. */
   attack(): void {
     if (this.attackGuard && !this.attackGuard()) return;
     const w = this.game.player.inv.wielded;
     if (w?.isGun()) this.fire();
-    else this.melee();
+    else this.beginSwing();
   }
 
   // ------------------------------------------------------------------ melee
 
-  /** Monster under the crosshair within reach: exact ray hit preferred, else smallest angle. */
-  meleeTarget(reach = MELEE_REACH): Monster | null {
+  /**
+   * Monster the weapon's arc meets right now: the one the crosshair ray is on (the camera
+   * raycast knows the exact sprite), else combatfeel.sweptArcTarget within `reach` and ±`arc`
+   * of the aim, closest to the crosshair first, never through walls.
+   */
+  meleeTarget(reach = FEEL.reach, arc = FEEL.arcSwing): Monster | null {
     const p = this.game.player;
-    // The UI's camera raycast (game.lookAt) knows exactly which sprite the crosshair is on.
     const look = this.game.lookAt?.(reach + 1.5);
     const hit = look?.kind === 'creature' ? (look.creature as { monster?: Monster } | undefined)?.monster : undefined;
     if (hit && !hit.dead && Math.hypot(hit.x - p.x, hit.y - p.y) - hit.radius <= reach) return hit;
-    let best: Monster | null = null, bestScore = Infinity;
-    for (const m of this.sys.active) {
-      if (m.dead || m.z !== p.z) continue;
-      const dx = m.x - p.x, dy = m.y - p.y;
-      const d = Math.hypot(dx, dy);
-      if (d - m.radius > reach) continue;
-      const ang = angleDiff(Math.atan2(dx, -dy), p.yaw);
-      const rayHit = ang <= Math.atan2(m.radius, Math.max(d, 0.01)) + 0.05;
-      if (!rayHit && ang > MELEE_CONE) continue;
-      if (!hasLOS(this.grid, p.tileX, p.tileY, m.tileX, m.tileY, p.z)) continue;
-      const score = (rayHit ? 0 : 10) + ang + d * 0.1;
-      if (score < bestScore) {
-        bestScore = score;
-        best = m;
-      }
-    }
-    return best;
+    const near = this.sys.active.filter((m) => !m.dead && m.z === p.z);
+    return sweptArcTarget(p, near, reach, arc, (m) => !hasLOS(this.grid, p.tileX, p.tileY, m.tileX, m.tileY, p.z));
   }
 
-  melee(target: Monster | null = null): boolean {
+  /**
+   * One melee blow. Without `phased` (scripts, tests) it picks a target, animates and resolves
+   * at once, like before the feel layer. `phased` = seconds since the swing started: the swing
+   * clock already runs the animation and cooldown, this only resolves the blow at contact.
+   */
+  melee(target: Monster | null = null, o: { phased?: number } = {}): boolean {
     const game = this.game;
     const p = game.player;
     const w = p.inv.wielded;
-    const reach = w?.hasFlag('REACH_ATTACK') ? 2.2 : MELEE_REACH;
-    const m = target ?? this.meleeTarget(reach);
-    if (!target && this.npcMelee?.(reach, m)) return true;
+    const phased = o.phased !== undefined;
+    const reach = w?.hasFlag('REACH_ATTACK') ? FEEL.reachLong : FEEL.reach;
+    const m = target ?? (phased ? null : this.meleeTarget(reach, arcFor(swingStyleOf(w))));
+    if (!target && !phased && this.npcMelee?.(reach, m)) return true;
     const ws = weaponSound(w);
     sfx.meleeSwing(undefined, ws);
     if (!m) {
-      this.viewmodel()?.attack('melee');
+      if (!phased) this.viewmodel()?.attack('melee');
       // Swinging at nothing still costs the swing (and a little stamina).
-      this.cooldown = attackCooldownSeconds(p, w);
+      const cd = attackCooldownSeconds(p, w);
+      this.cooldown = phased ? Math.max(this.cooldown, cd - o.phased!) : cd;
       p.modStamina(-20);
+      sfx.meleeWhiff((w?.weight() ?? 0) > 2000);
       this.feedback('melee', 'whiff', null, p.x + Math.sin(p.yaw) * reach, p.y - Math.cos(p.yaw) * reach, 0);
       return false;
     }
-    const hit = this.swingAt(m, { reach, primary: true });
+    const hit = this.swingAt(m, { reach, primary: true, elapsed: o.phased });
     return hit;
   }
 
@@ -209,12 +377,12 @@ export class PlayerCombat implements GameSystem {
    * effects (stun, downed, knockback, AoE follow-ups), prints CDDA's technique message.
    * Follow-up AoE swings (`primary: false`) cost no time or stamina, like CDDA.
    */
-  swingAt(m: Monster, o: { reach?: number; primary: boolean }): boolean {
+  swingAt(m: Monster, o: { reach?: number; primary: boolean; elapsed?: number }): boolean {
     const game = this.game;
     const p = game.player;
     const rng = this.sys.rng;
     const ws = weaponSound(p.inv.wielded);
-    const reach = o.reach ?? MELEE_REACH;
+    const reach = o.reach ?? FEEL.reach;
     const stamina = p.stamina;
     const res = meleeAttack(p, { dodge: m.dodge(), armor: m.type.armor, sizeMeleePenalty: m.sizeMeleePenalty(), info: monsterTargetInfo(m) }, rng, m.theName(), {
       allowSpecial: o.primary,
@@ -222,13 +390,19 @@ export class PlayerCombat implements GameSystem {
       downable: !m.has('IMMOBILE'),
     });
     if (o.primary) {
-      this.cooldown = res.cooldownSeconds;
-      this.viewmodel()?.attack(res.outcome?.aoe ? 'sweep' : 'melee');
+      // Phased: the swing clock already spent `elapsed`; CDDA's cost (stumbles, techniques)
+      // can only make the rest longer.
+      if (o.elapsed !== undefined) this.cooldown = Math.max(this.cooldown, res.cooldownSeconds - o.elapsed);
+      else {
+        this.cooldown = res.cooldownSeconds;
+        this.viewmodel()?.attack(res.outcome?.aoe ? 'sweep' : 'melee');
+      }
     } else p.stamina = stamina;
     // Hostility: animals remember who hit them even on a miss.
     m.aggroCharacter = true;
     if (res.shatter) this.sys.emitSound(p.x, p.y, p.z, 16, 'Crack!', 'player', '');
     if (!res.hit) {
+      if (o.primary) sfx.meleeWhiff((p.inv.wielded?.weight() ?? 0) > 2000);
       this.feedback('melee', 'miss', m, m.x, m.y, 0);
       return false;
     }
@@ -240,9 +414,17 @@ export class PlayerCombat implements GameSystem {
     this.sys.emitSound(m.x, m.y, m.z, 8, 'Smack!', 'player', '');
     // Victims of a sweep are chosen before the blow can push the target out of the arc.
     const victims = res.outcome?.aoe ? this.aoeVictims(res.outcome.aoe, m, reach) : [];
-    this.sys.hurt(m, res.total, 'player');
+    this.sys.hurt(m, res.total, 'player', { crit: res.crit });
+    // Hit-stop: the hands, the swing clock and the struck monster hold for a few frames.
+    let stop = 0;
+    if (o.primary && o.elapsed !== undefined) {
+      stop = m.dead ? FEEL.hitStopMax : hitStopSeconds(res.total, m.hpMax, res.crit);
+      this.hitStop = Math.max(this.hitStop, stop);
+      this.viewmodel()?.impact?.(stop);
+      m.busy = Math.max(m.busy, stop);
+    }
     // Before the technique can knock it away: the impact is where it stood when struck.
-    this.feedback('melee', res.crit ? 'crit' : 'hit', m, m.x, m.y, res.total);
+    this.feedback('melee', res.crit ? 'crit' : 'hit', m, m.x, m.y, res.total, stop);
     if (m.dead) triggerBuffs(p, 'onkill');
     else if (res.outcome) applyTechniqueToMonster(m, res.outcome, p.x, p.y, rng);
     if (victims.length) {
@@ -256,7 +438,7 @@ export class PlayerCombat implements GameSystem {
    * Tell hit-feedback listeners (particles, stagger, crosshair marker) how an attack went.
    * The impact point is the near side of the target (what the camera sees get hit).
    */
-  private feedback(kind: 'melee' | 'gun' | 'throw', outcome: 'hit' | 'crit' | 'miss' | 'whiff', m: Monster | null, x: number, y: number, damage: number): void {
+  private feedback(kind: 'melee' | 'gun' | 'throw', outcome: 'hit' | 'crit' | 'miss' | 'whiff', m: Monster | null, x: number, y: number, damage: number, hitStop = 0): void {
     const p = this.game.player;
     if (m) {
       const d = Math.hypot(m.x - p.x, m.y - p.y) || 1;
@@ -269,6 +451,7 @@ export class PlayerCombat implements GameSystem {
       // A hit that takes a third of its health (or a crit that hurts) visibly rocks the target.
       heavy: !!m && damage > 0 && (damage >= m.hpMax * 0.3 || outcome === 'crit' || damage >= 20),
       blood: m ? this.sys.bloodType(m.type) : undefined,
+      hitStop,
     });
   }
 
@@ -277,7 +460,7 @@ export class PlayerCombat implements GameSystem {
    * target (one each side, 20°–110° off the swing), "spin" everything in reach (needs 2+),
    * "impale" one enemy right behind the target.
    */
-  aoeVictims(kind: string, target: Monster, reach = MELEE_REACH): Monster[] {
+  aoeVictims(kind: string, target: Monster, reach = FEEL.reach): Monster[] {
     const p = this.game.player;
     const dir = Math.atan2(target.x - p.x, -(target.y - p.y));
     const near = this.sys.monstersNear(p.x, p.y, p.z, reach + 0.6).filter((o) => o !== target && !o.dead && !o.friendly && Math.hypot(o.x - p.x, o.y - p.y) - o.radius <= reach);
@@ -370,7 +553,12 @@ export class PlayerCombat implements GameSystem {
       return null;
     }
     this.shots++;
-    this.viewmodel()?.attack('fire');
+    // Kick scaled by the round's recoil (MOA added; ~150-250 for a 9 mm pistol).
+    const kick = Math.max(0.4, Math.min(2.5, (shot.addedRecoil ?? 200) / 200));
+    const vm = this.viewmodel();
+    if (vm?.recoil) vm.recoil(kick);
+    else vm?.attack('fire');
+    this.onFire?.(kick);
     const ammo = gun.ammoData() ?? null;
     sfx.gunshot(gun.typeId, undefined, { ammoType: typeof ammo?.ammo_type === 'string' ? ammo.ammo_type : undefined, loudness: shot.noise.volume });
     // CDDA make_gun_sound_effect: silent weapons make no sound at all.

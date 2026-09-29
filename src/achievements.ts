@@ -107,12 +107,13 @@ export async function installAchievements(game: Game, worldgen: WorldGenerator |
     if (portion.def?.comestible_type === 'FOOD') emit('character_eats_item', { character: AV, itype: portion.typeId });
   });
   // PlayerCombat lives in installMonsters; wrap its entry points rather than editing it.
-  const combat = api?.combat as { melee?: (t?: unknown) => boolean; fire?: () => boolean; meleeTarget?: () => { type: { id: string } } | null } | undefined;
+  const combat = api?.combat as { melee?: (t?: unknown, ...rest: unknown[]) => boolean; fire?: () => boolean; meleeTarget?: () => { type: { id: string } } | null } | undefined;
   if (combat?.melee && combat.meleeTarget) {
     const melee = combat.melee.bind(combat), target = combat.meleeTarget.bind(combat);
-    combat.melee = (t?: unknown) => {
+    // Pass every argument through: the phased swing (combatfeel) calls melee(target, { phased }).
+    combat.melee = (t?: unknown, ...rest: unknown[]) => {
       const m = (t as { type?: { id: string } } | null | undefined) ?? target();
-      const r = melee(t);
+      const r = melee(t, ...rest);
       if (r && m?.type?.id) emit('character_melee_attacks_monster', { attacker: AV, weapon: game.player.inv.wielded?.typeId ?? 'null', victim_type: m.type.id });
       return r;
     };

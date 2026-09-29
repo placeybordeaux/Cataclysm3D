@@ -1,6 +1,7 @@
-// Per-object preprocessing applied to raw CDDA JSON *before* inheritance resolution:
+// Per-object preprocessing applied to raw BN JSON *before* inheritance resolution:
 //  - drop translator/dev comments ("//", "//~", "//2", ...) and ascii art references
-//  - convert quantity strings to numbers in base units
+//  - convert quantity strings to numbers in base units, and BN's legacy integers in
+//    non-base units (250 ml volume steps, moves, hours...) likewise (see legacyTable)
 //  - flatten translation objects ({str, str_pl}) to strings; top-level `name` also yields
 //    `name_plural`
 //
@@ -16,6 +17,7 @@ const NEVER_QUANTITY = new Set([
   'ctxt', 'message', 'msg', 'result', 'item', 'items', 'group', 'ammo', 'ammo_type', 'ammo-item',
   'type', 'symbol', 'color', 'flags', 'category', 'snippet_category', 'default', 'replace',
   'u_spawn_item', 'tools', 'magazine_adaptor', 'ammo_modifier', 'sound', 'sound_fail', 'npc_background',
+  'magazines', 'default_ammo', 'acceptable_ammo', 'reloads_like', 'weapon_category', 'signage', 'container',
 ]);
 
 // Keys that are quantities even without whitespace ("-25g"). Values with a space
@@ -25,6 +27,8 @@ const QUANTITY_KEYS = new Set([
   'integral_longest_side', 'barrel_length', 'barrel_volume', 'time', 'spoils_in', 'mass', 'max_volume',
   'max_contains_volume', 'max_contains_weight', 'min_item_volume', 'max_item_volume', 'max_item_length',
   'min_item_length', 'duration', 'energy', 'power_draw', 'capacity', 'folded_volume', 'keg_capacity',
+  'contains', 'storage', 'magazine_well', 'max_pet_vol', 'min_pet_vol', 'install_time', 'max_weight',
+  'weight_capacity_bonus', 'max_capacity', 'reload_noise_volume', 'charge_interval',
 ]);
 
 const DROP_KEYS = new Set(['ascii_picture', 'ascii_art']);
@@ -84,8 +88,57 @@ function convertValue(v: unknown, key: string): unknown {
   return v;
 }
 
-/** Returns a new object; the input is not mutated (loader output is shared with the mapgen extractor). */
+// ---------------------------------------------------------------------------------------
+// BN legacy integers. Some members accept a bare int in a unit other than our base unit;
+// the C++ reader multiplies it (and the same parse is used for "relative" values, never for
+// "proportional" factors). Strings in these members are ordinary quantities.
+//   units::volume assign(): int * legacy_volume_factor (250 ml)       assign.cpp
+//   furn_t keg_capacity: legacy_volume_reader (int * 250 ml)          map/mapdata.cpp
+//   islot_comestible spoils_in: assign(..., 1_hours) factor           item_factory.cpp
+//   islot_book time: int minutes                                       item_factory.cpp
+//   islot_gunmod install_time: int moves (100 per second)              item_factory.cpp
+//   islot_seed grow: assign(..., 1_days)                               item_factory.cpp
+//   recipe / uncraft time: int moves                                   recipe.cpp
+// Mass ints are grams, money ints cents, energy ints kJ: already our base units.
+const V250 = 250;
+const MOVES = 0.01;
+const ITEM_VOLUME_KEYS = ['volume', 'integral_volume', 'storage', 'magazine_well', 'barrel_volume', 'barrel_length', 'contains', 'max_pet_vol', 'min_pet_vol'];
+const ITEM_LEGACY: Record<string, number> = {
+  ...Object.fromEntries(ITEM_VOLUME_KEYS.map((k) => [k, V250])),
+  spoils_in: 3600,
+  install_time: MOVES,
+  grow: 86400,
+};
+// sub-objects that carry another slot's members on any item type (load_basic_info)
+const ITEM_SLOT_OBJECTS = ['container_data', 'armor_data', 'pet_armor_data', 'book_data', 'gun_data', 'gunmod_data', 'seed_data'];
+const ITEM_TYPES_FOR_LEGACY = new Set([
+  'GENERIC', 'TOOL', 'COMESTIBLE', 'ARMOR', 'TOOL_ARMOR', 'PET_ARMOR', 'GUN', 'GUNMOD', 'AMMO', 'MAGAZINE', 'BOOK',
+  'CONTAINER', 'BIONIC_ITEM', 'TOOLMOD', 'ENGINE', 'WHEEL', 'FUEL', 'BATTERY',
+]);
+
+const isPlainObject = (v: unknown): v is Record<string, any> => !!v && typeof v === 'object' && !Array.isArray(v);
+
+function legacyTable(type: unknown): Record<string, number> | undefined {
+  if (typeof type !== 'string') return undefined;
+  if (ITEM_TYPES_FOR_LEGACY.has(type)) return type === 'BOOK' ? { ...ITEM_LEGACY, time: 60 } : ITEM_LEGACY;
+  if (type === 'recipe' || type === 'uncraft') return { time: MOVES };
+  if (type === 'furniture') return { keg_capacity: V250 };
+  if (type === 'terrain') return { max_volume: V250 };
+  return undefined;
+}
+
+function convertMembers(obj: Record<string, any>, legacy: Record<string, number> | undefined, out: Record<string, any>): void {
+  for (const [k, v] of Object.entries(obj)) {
+    if (isComment(k) || DROP_KEYS.has(k)) continue;
+    const f = legacy?.[k];
+    if (f !== undefined && typeof v === 'number') out[k] = Math.round(v * f * 1e6) / 1e6;
+    else out[k] = convertValue(v, k);
+  }
+}
+
+/** Returns a new object; the input is not mutated (loader output is shared with the other extractors). */
 export function prepareObject(obj: Record<string, any>): Record<string, any> {
+  const legacy = legacyTable(obj.type);
   const out: Record<string, any> = {};
   for (const [k, v] of Object.entries(obj)) {
     if (isComment(k) || DROP_KEYS.has(k)) continue;
@@ -94,7 +147,16 @@ export function prepareObject(obj: Record<string, any>): Record<string, any> {
       out.name_plural = translationPlural(v);
       continue;
     }
-    out[k] = convertValue(v, k);
+    const f = legacy?.[k];
+    if (f !== undefined && typeof v === 'number') {
+      out[k] = Math.round(v * f * 1e6) / 1e6;
+    } else if (legacy && k === 'relative' && isPlainObject(v)) {
+      convertMembers(v, legacy, (out[k] = {}));
+    } else if (legacy && ITEM_SLOT_OBJECTS.includes(k) && isPlainObject(v)) {
+      convertMembers(v, k === 'book_data' ? { ...ITEM_LEGACY, time: 60 } : ITEM_LEGACY, (out[k] = {}));
+    } else {
+      out[k] = convertValue(v, k);
+    }
   }
   return out;
 }

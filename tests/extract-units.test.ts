@@ -26,6 +26,8 @@ describe('parseQuantity', () => {
     ['2 USD 50 cent', 'money', 250],
     ['1 kUSD', 'money', 100000],
     ['-50 cent', 'money', -50],
+    ['40 dB', 'sound', 40], // BN reload_noise_volume
+    ['10 days 19 hours', 'time', 932400], // BN spoils_in
   ] as const)('%s', (s, dim, value) => {
     const q = parseQuantity(s);
     expect(q?.dim).toBe(dim);

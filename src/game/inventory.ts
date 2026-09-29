@@ -86,7 +86,9 @@ export function armorPortion(it: Item, bp: BodyPartId): ArmorPortion | undefined
   return {
     ...list[0],
     coverage: Math.max(...list.map((p) => p.coverage ?? 0)),
-    encumbrance: [Math.max(...list.map((p) => enc(p)[0] ?? 0)), Math.max(...list.map((p) => enc(p)[1] ?? enc(p)[0] ?? 0))],
+    // TODO(BN inventory): BN portions carry encumbrance + max_encumbrance separately
+    encumbrance: Math.max(...list.map((p) => enc(p)[0] ?? 0)),
+    max_encumbrance: Math.max(...list.map((p) => p.max_encumbrance ?? enc(p)[1] ?? enc(p)[0] ?? 0)),
     material: withMat?.material,
   };
 }

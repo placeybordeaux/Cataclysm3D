@@ -6,10 +6,11 @@ import { warnOnce } from '../data/warn';
 import type { MonsterDef } from '../data/types';
 import type { Game, GameSystem } from './game';
 import { moveWithCollision, CREATURE_RADIUS } from './physics';
-import { Monster, dayOf, turnsToSeconds, upgradeTarget } from './monster';
+import { Monster, dayOf, turnsToSeconds, upgradeTarget, type MonsterWindup } from './monster';
 import { Grid, clearWalk, hasLOS } from './los';
 import { findPath } from './pathfind';
-import { defaultMelee, trySpecial } from './monattack';
+import { defaultMelee, specialTelegraph, trySpecial } from './monattack';
+import { FEEL, defenseOf, surroundAngles, telegraphSeconds, type TelegraphKind } from './combatfeel';
 import { monsterMeleeAttack, type MonsterAttackResult } from './combat';
 import type { Character } from './character';
 import { BODY_PARTS } from './bodyparts';
@@ -49,6 +50,8 @@ interface MonBrain {
   gy: number;
   speedMul: number;
   direct: boolean;
+  /** Chasing and standing at attack distance: don't move again until out of reach (no jitter). */
+  holding: boolean;
 }
 
 export interface Projectile {
@@ -150,6 +153,10 @@ export class MonsterSystem implements GameSystem {
   private grabRollTimer = 0;
   private lightCache = 100;
   private dirty = false;
+  /** Extra reach (m) while a telegraphed blow resolves: the lunge at the end of a wind-up. */
+  private reachGrace = 0;
+  /** Bearings (from the survivor) of the slots close chasers spread into this tick. */
+  private slots = new Map<Monster, number>();
   /** Far idle monsters and evicted dormant corpses, per OMT column (monstash.ts). */
   readonly stash: MonsterStash;
 
@@ -169,7 +176,7 @@ export class MonsterSystem implements GameSystem {
     if (opts.name) m.name = opts.name;
     m.rollUpgrade(dayOf(this.game.clock.seconds));
     this.all.push(m);
-    this.brains.set(m, { goal: 'none', gx: x, gy: y, speedMul: 1, direct: true });
+    this.brains.set(m, { goal: 'none', gx: x, gy: y, speedMul: 1, direct: true, holding: false });
     // Newly spawned monsters near the player join the bubble immediately.
     if (this.inBubble(m)) this.activate(m);
     for (const f of this.onSpawned) f(m);
@@ -228,7 +235,7 @@ export class MonsterSystem implements GameSystem {
 
   /** Center distance at which `m` can hit the player with a reach-`range` attack. */
   reach(m: Monster, range = 1): number {
-    return m.radius + PLAYER_RADIUS + 0.75 + (range - 1);
+    return m.radius + PLAYER_RADIUS + 0.75 + (range - 1) + this.reachGrace;
   }
 
   inMeleeRange(m: Monster, range = 1): boolean {
@@ -358,6 +365,7 @@ export class MonsterSystem implements GameSystem {
     const g = this.grabbedBy;
     if (g) g.effects.delete('grabbing');
     this.grabbedBy = null;
+    defenseOf(this.game.player).struggle = 0;
     if (this.game.player.hasEffect('grabbed')) this.game.player.effects.remove('grabbed');
   }
 
@@ -469,7 +477,7 @@ export class MonsterSystem implements GameSystem {
    * Apply final (post-armor) damage to a monster. Handles HURT triggers, pack anger, blood and
    * death. `source` 'player' makes the monster (and CDDA-style its friends) hostile.
    */
-  hurt(m: Monster, amount: number, source: 'player' | Monster | null, opts: { bleedType?: string } = {}): void {
+  hurt(m: Monster, amount: number, source: 'player' | Monster | null, opts: { bleedType?: string; crit?: boolean } = {}): void {
     if (m.dead) return;
     const dmg = Math.max(0, Math.round(amount));
     m.hp -= dmg;
@@ -490,8 +498,44 @@ export class MonsterSystem implements GameSystem {
       }
       // Stagger hard hits: CDDA stuns on big bash crits via techniques; a light flinch here.
       if (dmg >= m.hpMax * 0.4 && m.rng.oneIn(3)) m.addEffect('stunned', 0.5);
+      if (source === 'player' && m.hp > 0) this.react(m, dmg, !!opts.crit);
     }
     if (m.hp <= 0) this.die(m, source);
+  }
+
+  /**
+   * Feel-layer hit reaction (combatfeel.ts), proportional to the blow's share of max HP: a
+   * flinch that pauses the monster and delays its wind-up, a hard enough blow (or a crit)
+   * interrupting the wind-up outright, and a short shove away from the survivor.
+   */
+  private react(m: Monster, dmg: number, crit: boolean): void {
+    const share = dmg / Math.max(1, m.hpMax);
+    const flinch = Math.min(FEEL.flinchMax, share * FEEL.flinchPerHp);
+    m.flinch = Math.max(m.flinch, flinch);
+    const w = m.windup;
+    if (w) {
+      if (share >= FEEL.staggerShare || crit) this.interruptWindup(m);
+      else {
+        w.t += flinch;
+        w.total += flinch;
+      }
+    }
+    const shove = Math.min(FEEL.shoveMax, share * FEEL.shovePerHp);
+    if (shove > 0.03 && !m.has('IMMOBILE') && m.dashTime <= 0) {
+      const p = this.game.player;
+      const d = Math.max(0.01, Math.hypot(m.x - p.x, m.y - p.y));
+      const t = 0.12;
+      m.dashVx = ((m.x - p.x) / d) * (shove / t);
+      m.dashVy = ((m.y - p.y) / d) * (shove / t);
+      m.dashTime = t;
+    }
+  }
+
+  private interruptWindup(m: Monster): void {
+    if (!m.windup) return;
+    m.windup = null;
+    m.attackCooldown = Math.max(m.attackCooldown, FEEL.monsterRecovery);
+    this.game.events.emit('monsterAttack', { monster: m, phase: 'interrupted', x: m.x, y: m.y, z: m.z });
   }
 
   /** CDDA monster::bleed / bloodType: warm flesh bleeds fd_blood; BILE/ACID_BLOOD override. */
@@ -685,6 +729,7 @@ export class MonsterSystem implements GameSystem {
     this.buildSpatial();
     this.pathBudget = PATH_BUDGET;
     this.servicePaths();
+    this.assignSlots();
 
     for (const m of this.active) {
       if (m.dead) continue;
@@ -726,6 +771,7 @@ export class MonsterSystem implements GameSystem {
     m.attackCooldown = Math.max(0, m.attackCooldown - dt);
     m.busy = Math.max(0, m.busy - dt);
     m.hitFlash = Math.max(0, m.hitFlash - dt);
+    m.flinch = Math.max(0, m.flinch - dt);
     m.wanderTime = Math.max(0, m.wanderTime - dt);
     m.lastSeenAge += dt;
     m.pathAge += dt;
@@ -841,11 +887,17 @@ export class MonsterSystem implements GameSystem {
   private act(m: Monster, dt: number): void {
     const p = this.game.player;
     const brain = this.brains.get(m)!;
+    if (m.windup) this.tickWindup(m, dt);
     if (m.dashTime > 0) {
       const t = Math.min(dt, m.dashTime);
       m.dashTime -= t;
       [m.x, m.y] = moveWithCollision(this.game.map, m.x, m.y, m.z, m.dashVx * t, m.dashVy * t, m.radius);
       m.moving = true;
+      return;
+    }
+    // Committed to a telegraphed blow, or reeling from one: no stepping, no other attacks.
+    if (m.windup || m.flinch > 0) {
+      m.moving = false;
       return;
     }
     if (m.hasEffect('downed') || m.hasEffect('stunned') && m.rng.oneIn(3)) {
@@ -855,28 +907,30 @@ export class MonsterSystem implements GameSystem {
     const att = m.attitude();
     if (m.busy <= 0 && att === 'attack' && !p.dead) {
       // Special attacks first (they check their own range/conditions), then plain melee.
+      // Blows aimed at the survivor telegraph first (combatfeel.ts); ranged specials fire now.
       for (const sa of m.specials) {
         if (sa.cooldown > 0 || p.dead) continue;
         const isMelee = sa.def.attack_type === 'melee' || sa.def.attack_type === 'bite';
         // Melee specials (grab, bite) spend the same moves as a plain swing in CDDA, so they
         // wait for the swing cooldown instead of landing on top of it.
         if (isMelee && m.attackCooldown > 0) continue;
+        const tele = specialTelegraph(this, m, sa);
+        if (tele === null) continue;
+        if (tele) {
+          this.startWindup(m, tele, sa);
+          m.moving = false;
+          return;
+        }
         if (trySpecial(this, m, sa)) {
-          const cd = typeof sa.def.cooldown === 'number' ? sa.def.cooldown : 0;
-          sa.cooldown = Math.max(sa.cooldown, turnsToSeconds(cd));
-          const cost = typeof sa.def.move_cost === 'number' ? sa.def.move_cost : 100;
-          if (isMelee) m.attackCooldown = Math.max(m.attackCooldown, cost / m.speed / MELEE_SCALE);
-          m.busy = Math.max(m.busy, isMelee ? 0.15 : 0);
-          this.face(m, p.x, p.y);
+          this.specialDone(m, sa, isMelee);
           if (p.dead) return;
           break;
         }
       }
       if (m.attackCooldown <= 0 && m.busy <= 0 && !p.dead && this.inMeleeRange(m)) {
-        this.face(m, p.x, p.y);
-        defaultMelee(this, m);
-        m.attackCooldown = (m.type.attack_cost || 100) / m.speed / MELEE_SCALE;
-        m.busy = 0.15;
+        this.startWindup(m, m.size === 'large' || m.size === 'huge' ? 'heavy' : 'melee', null);
+        m.moving = false;
+        return;
       }
     }
     const ct = this.creatureTargets.get(m);
@@ -899,12 +953,112 @@ export class MonsterSystem implements GameSystem {
       m.moving = false;
       return;
     }
-    if (brain.goal === 'chase' && !ct && this.inMeleeRange(m)) {
-      m.moving = false;
-      this.face(m, p.x, p.y);
+    if (brain.goal === 'chase' && !ct) {
+      // Hold at attack distance: stop a little inside reach and stay put until the survivor is
+      // properly out of it, instead of stepping in and out every tick at the edge.
+      const d = this.distToPlayer(m);
+      const reach = this.reach(m);
+      const inRange = d <= (brain.holding ? reach + 0.05 : reach - FEEL.holdInside) && this.inMeleeRange(m);
+      brain.holding = inRange;
+      if (inRange) {
+        m.moving = false;
+        this.face(m, p.x, p.y);
+        return;
+      }
+      const slot = this.slots.get(m);
+      if (slot !== undefined) {
+        // Close in on a free slot around the survivor rather than the survivor's own tile.
+        const hold = reach - FEEL.holdInside;
+        brain.gx = p.x + Math.sin(slot) * hold;
+        brain.gy = p.y - Math.cos(slot) * hold;
+      }
+    } else brain.holding = false;
+    this.moveToward(m, brain, dt);
+  }
+
+  /** Swing cycle (s) of an attack costing `moves`: CDDA's cost, stretched to fit the tell. */
+  private attackCycle(m: Monster, moves: number, windup: number): number {
+    return Math.max(moves / m.speed / MELEE_SCALE, windup + FEEL.monsterRecovery);
+  }
+
+  /** Begin telegraphing a blow at the survivor (plain melee when `sa` is null). */
+  private startWindup(m: Monster, kind: TelegraphKind, sa: MonsterWindup['special']): void {
+    const p = this.game.player;
+    const secs = telegraphSeconds(m.speed, kind);
+    m.windup = { t: secs, total: secs, kind, special: sa };
+    this.face(m, p.x, p.y);
+    if (kind !== 'leap') {
+      const cost = sa ? (typeof sa.def.move_cost === 'number' ? sa.def.move_cost : 100) : m.type.attack_cost || 100;
+      m.attackCooldown = Math.max(m.attackCooldown, this.attackCycle(m, cost, secs));
+    }
+    sfx.monsterWindup(m, kind === 'heavy');
+    this.game.events.emit('monsterAttack', { monster: m, phase: 'windup', x: m.x, y: m.y, z: m.z, seconds: secs, heavy: kind === 'heavy' });
+  }
+
+  /** Count down a wind-up; at zero the blow lands if the survivor is still within reach (+lunge). */
+  private tickWindup(m: Monster, dt: number): void {
+    const w = m.windup!;
+    const p = this.game.player;
+    if (p.dead || m.hasEffect('downed') || m.hasEffect('stunned') || m.attitude() !== 'attack' || m.z !== p.z) {
+      this.interruptWindup(m);
       return;
     }
-    this.moveToward(m, brain, dt);
+    // Leaps are aimed when they launch; blows track the survivor through the tell.
+    this.face(m, p.x, p.y);
+    w.t -= dt;
+    if (w.t > 0) return;
+    m.windup = null;
+    let done = false;
+    this.reachGrace = w.kind === 'leap' ? 0 : FEEL.lunge;
+    try {
+      if (w.special) done = trySpecial(this, m, w.special);
+      else if (this.inMeleeRange(m)) {
+        defaultMelee(this, m);
+        done = true;
+      }
+    } finally {
+      this.reachGrace = 0;
+    }
+    if (w.special && done) this.specialDone(m, w.special, w.kind !== 'leap');
+    else m.busy = Math.max(m.busy, 0.15);
+    if (!done && w.kind !== 'leap') sfx.monsterWhiff(m);
+    this.game.events.emit('monsterAttack', { monster: m, phase: done ? 'resolved' : 'whiff', x: m.x, y: m.y, z: m.z, heavy: w.kind === 'heavy' });
+  }
+
+  /** Cooldowns after a special attack went off. */
+  private specialDone(m: Monster, sa: MonsterWindup['special'] & object, isMelee: boolean): void {
+    const cd = typeof sa.def.cooldown === 'number' ? sa.def.cooldown : 0;
+    sa.cooldown = Math.max(sa.cooldown, turnsToSeconds(cd));
+    const cost = typeof sa.def.move_cost === 'number' ? sa.def.move_cost : 100;
+    if (isMelee) m.attackCooldown = Math.max(m.attackCooldown, cost / m.speed / MELEE_SCALE);
+    m.busy = Math.max(m.busy, isMelee ? 0.15 : 0);
+    this.face(m, this.game.player.x, this.game.player.y);
+  }
+
+  /**
+   * Spread the monsters closing on the survivor into slots around them (combatfeel.ts
+   * surroundAngles), so a crowd surrounds instead of queueing in one file and shoving.
+   */
+  private assignSlots(): void {
+    this.slots.clear();
+    const p = this.game.player;
+    if (p.dead) return;
+    const close: Monster[] = [];
+    for (const m of this.active) {
+      if (m.dead || m.z !== p.z || m.friendly || this.creatureTargets.has(m)) continue;
+      const b = this.brains.get(m);
+      if (b?.goal !== 'chase' || !b.direct || m.has('IMMOBILE')) continue;
+      if (Math.hypot(m.x - p.x, m.y - p.y) > FEEL.surroundRange) continue;
+      close.push(m);
+    }
+    if (close.length < 2) return;
+    const hold = PLAYER_RADIUS + 0.3 + 0.75 - FEEL.holdInside;
+    const angles = surroundAngles(close.map((m) => ({ angle: Math.atan2(m.x - p.x, -(m.y - p.y)), radius: m.radius })), hold);
+    close.forEach((m, i) => {
+      // Only a slot the monster can actually stand in and walk to.
+      const sx = p.x + Math.sin(angles[i]) * hold, sy = p.y - Math.cos(angles[i]) * hold;
+      if (this.grid.passable(Math.floor(sx), Math.floor(sy), m.z) && clearWalk(this.grid, m.x, m.y, sx, sy, m.z, m.radius * 0.9)) this.slots.set(m, angles[i]);
+    });
   }
 
   private face(m: Monster, x: number, y: number): void {
@@ -1069,7 +1223,8 @@ export class MonsterSystem implements GameSystem {
 
   /**
    * Grabbed survivors can't walk away: each attempt (at most one per CDDA turn) rolls to
-   * break free against the grabber's grab_strength; failure snaps them back.
+   * break free against the grabber's grab_strength; failure snaps them back. Struggling
+   * (`struggle()`, the interact key while held) rolls the same way without moving.
    */
   private updateGrab(dt: number): void {
     const g = this.grabbedBy;
@@ -1090,18 +1245,45 @@ export class MonsterSystem implements GameSystem {
       p.y = this.lastPY;
       return;
     }
-    this.grabRollTimer = 1 / ACTION_SCALE;
-    const strength = (g.type as any).grab_strength ?? 20;
-    const roll = this.rng.int(0, p.str + p.dex + p.getSkill('unarmed') * 2 + p.getSkill('melee'));
-    if (roll > this.rng.int(0, Math.floor(strength / 2))) {
-      this.message(`You break out of ${g.theName()}'s grab!`, 'c_light_green');
-      this.releaseGrab();
-      g.addEffect('stunned', 0.3);
-    } else {
+    if (!this.breakFreeRoll()) {
       this.message('You try to break free, but fail!', 'c_red');
       p.x = this.lastPX;
       p.y = this.lastPY;
     }
+  }
+
+  /**
+   * One break-free roll (CDDA grab_break: str + dex + 2·unarmed + melee against half the
+   * grab strength), at most one per turn. Each failed struggle adds FEEL.struggleBonus to the
+   * next, so mashing gets you out eventually. true = free.
+   */
+  private breakFreeRoll(): boolean {
+    const g = this.grabbedBy;
+    const p = this.game.player;
+    if (!g) return true;
+    this.grabRollTimer = 1 / ACTION_SCALE;
+    const def = defenseOf(p);
+    const strength = (g.type as any).grab_strength ?? 20;
+    const roll = this.rng.int(0, p.str + p.dex + p.getSkill('unarmed') * 2 + p.getSkill('melee')) + def.struggle;
+    if (roll > this.rng.int(0, Math.floor(strength / 2))) {
+      this.message(`You break out of ${g.theName()}'s grab!`, 'c_light_green');
+      this.releaseGrab();
+      g.addEffect('stunned', 0.3);
+      def.struggle = 0;
+      return true;
+    }
+    def.struggle += FEEL.struggleBonus;
+    return false;
+  }
+
+  /**
+   * The survivor struggles against a grab (interact key while held). 'wait' when the last
+   * roll was less than a turn ago, null when nothing holds them.
+   */
+  struggle(): 'free' | 'fail' | 'wait' | null {
+    if (!this.grabbedBy) return null;
+    if (this.grabRollTimer > 0) return 'wait';
+    return this.breakFreeRoll() ? 'free' : 'fail';
   }
 
   private updateProjectiles(dt: number): void {

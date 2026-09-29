@@ -46,6 +46,8 @@ export interface SpriteSpec {
 export interface SpriteHandle {
   set(x: number, y: number, z: number): void;
   setFrame(frame: TileFrame, height?: number): void;
+  /** Explicit billboard size in metres (squash/stretch, lying bodies); setFrame(…, h) resets it. */
+  setSize(width: number, height: number): void;
   /** Tint fully to `color` then fade back over `seconds`. */
   flash(color?: number, seconds?: number): void;
   setVisible(v: boolean): void;
@@ -198,6 +200,11 @@ class Sprite implements SpriteHandle {
       this.frame = frame;
       this.layer.writeInstance(this);
     }
+  }
+  setSize(width: number, height: number): void {
+    this.w = width;
+    this.h = height;
+    if (this.batch) this.layer.writeInstance(this);
   }
   flash(color = 0xffffff, seconds = 0.2): void {
     this.flashColor.setHex(color);

@@ -57,6 +57,12 @@ function weaponVariant(id: string, w: WeaponSound): string {
   return w.id && has(id, w.id) ? w.id : meleeSkillVariant(w);
 }
 
+/** Lower a voice's pitch (heavier variants of a synth sound); 1 leaves it alone. */
+function slowed(v: Voice | null, rate: number): Voice | null {
+  if (v && rate !== 1) v.setRate(rate, 0);
+  return v;
+}
+
 /** Tiles past which CDDA switches to "_distant" gun variants. */
 export const GUN_DISTANT_TILES = 17;
 
@@ -72,6 +78,27 @@ export const sfx = {
   meleeHit(material: string, pos?: Vec3, weapon: WeaponSound = {}): Voice | null {
     const id = material === 'steel' || material === 'iron' || material === 'metal' ? 'melee_hit_metal' : 'melee_hit_flesh';
     return play(id, weaponVariant(id, weapon), { pos, pitchJitter: 0.2 });
+  },
+
+  /** Your swing cutting through nothing (the feel layer's clear miss, on the contact frame). */
+  meleeWhiff(heavy = false): Voice | null {
+    return slowed(play('synth_whoosh', 'default', { pitchJitter: 0.12, volume: heavy ? 0.9 : 0.7 }), heavy ? 0.8 : 1);
+  },
+  /** A monster drawing back to strike (combatfeel.ts telegraph); heavy = hulk-sized blow. */
+  monsterWindup(pos: Vec3, heavy = false): Voice | null {
+    return slowed(play('synth_windup', 'default', { pos, pitchJitter: 0.12, range: 20 }), heavy ? 0.7 : 1);
+  },
+  /** A monster's telegraphed blow landing on air (you stepped out of reach, or it missed). */
+  monsterWhiff(pos: Vec3): Voice | null {
+    return slowed(play('synth_whoosh', 'default', { pos, pitchJitter: 0.15, volume: 0.8 }), 0.85);
+  },
+  /** Guard raised just in time. */
+  parry(pos?: Vec3): Voice | null {
+    return play('synth_parry', 'default', { pos, pitchJitter: 0.08 });
+  },
+  /** A dying monster's body hitting the ground. */
+  bodyFall(pos: Vec3, heavy = false): Voice | null {
+    return slowed(play('synth_bodyfall', 'default', { pos, pitchJitter: 0.1, range: 25 }), heavy ? 0.8 : 1);
   },
 
   /** A monster's melee attack connecting with the player. */

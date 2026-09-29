@@ -14,6 +14,12 @@ import type { TileFrame } from './textureSource';
 // (with a brief point light), 'throw'.
 //
 //   renderer.viewmodel.attack('melee' | 'fire' | 'throw')
+//
+// The combat feel layer (src/game/combatfeel.ts) drives phase-exact animations on top:
+// `swing()` times anticipation -> strike -> follow-through -> recovery so the contact pose
+// lands exactly when the blow resolves, `impact()` holds the pose for hit-stop, `setGuard()`
+// raises the weapon/fists while RMB is held, `recoil()` scales the gun kick, `jolt()` knocks
+// the hands when you're hit, `reload()` dips the gun for the reload time, `ads` centres it.
 
 export type AttackKind = 'melee' | 'fire' | 'throw' | 'sweep';
 
@@ -219,6 +225,50 @@ const BLOCK: Key[] = [[0, 0, 0, 0, 1], [0.25, -0.12, 0.2, 0.5, 1], [0.7, -0.12, 
 const BLOCK_FISTS: Key[] = [[0, 0, 0, 0, 1], [0.25, -0.1, 0.18, 0, 1], [0.7, -0.1, 0.18, 0, 1], [1, 0, 0, 0, 1]];
 const PUNCH: Key[] = [[0, 0, 0, 0, 1], [0.35, -0.13, 0.16, 0, 1], [0.55, -0.12, 0.15, 0, 1], [1, 0, 0, 0, 1]];
 
+export type SwingStyle = 'swing' | 'thrust' | 'punch';
+
+/** Phase lengths (s) of a feel-layer swing; contact = windup + strike. */
+export interface SwingPhases {
+  windup: number;
+  strike: number;
+  follow: number;
+  recovery: number;
+  style: SwingStyle;
+}
+
+/** Poses [dx, dy, rot] per swing style: anticipation (wound up), contact, follow-through. */
+const SWING_POSES: Record<SwingStyle, { wind: [number, number, number]; contact: [number, number, number]; follow: [number, number, number] }> = {
+  // Weapon cocked back over the right shoulder, whips across to the left.
+  swing: { wind: [0.12, 0.07, -0.7], contact: [-0.2, 0.07, 0.28], follow: [-0.4, 0.0, 0.7] },
+  // Pull back and down, then drive straight into the centre of the view.
+  thrust: { wind: [0.07, -0.1, -0.12], contact: [-0.16, 0.16, 0.08], follow: [-0.18, 0.17, 0.1] },
+  // Fist drawn back low, then punched to the crosshair.
+  punch: { wind: [0.05, -0.07, 0], contact: [-0.14, 0.17, 0], follow: [-0.13, 0.16, 0] },
+};
+// Guard: weapon raised across the body / both fists up.
+const GUARD_POSE: [number, number, number] = [-0.14, 0.2, 0.55];
+const GUARD_FISTS: [number, number, number] = [-0.1, 0.17, 0];
+
+/**
+ * Keys (normalised to 0..1) for a phased swing, starting from the pose the hands are in now so
+ * back-to-back swings and guard-to-swing never pop. Contact sits exactly at windup + strike.
+ */
+export function swingKeys(ph: SwingPhases, from: [number, number, number] = [0, 0, 0]): { keys: Key[]; dur: number } {
+  const P = SWING_POSES[ph.style];
+  const dur = ph.windup + ph.strike + ph.follow + ph.recovery;
+  const at = (s: number) => s / dur;
+  return {
+    dur,
+    keys: [
+      [0, from[0], from[1], from[2], 1],
+      [at(ph.windup), ...P.wind, 1],
+      [at(ph.windup + ph.strike), ...P.contact, 1],
+      [at(ph.windup + ph.strike + ph.follow), ...P.follow, 1],
+      [1, 0, 0, 0, 1],
+    ],
+  };
+}
+
 export class Viewmodel {
   readonly scene = new THREE.Scene();
   readonly camera = new THREE.OrthographicCamera(0, 1, 1, 0, -10, 10);
@@ -230,7 +280,8 @@ export class Viewmodel {
   private flash: Part | null = null;
   private itemKey = '';
   private handKey = -1;
-  private anim: { kind: AttackKind; t: number; dur: number; keys: Key[]; hand: 0 | 1 | 2 } | null = null;
+  /** `contact`: normalised time of the swing's contact pose (hit-stop snaps to it). */
+  private anim: { kind: AttackKind; t: number; dur: number; keys: Key[]; hand: 0 | 1 | 2; contact?: number } | null = null;
   /** Hold the current animation at its t (tests/screenshots). */
   private frozen = false;
   private punchHand: 0 | 1 = 1;
@@ -241,6 +292,18 @@ export class Viewmodel {
   private flashT = 0;
   private sway = 0;
   private lastYaw = NaN;
+  /** Hit-stop: seconds the current animation holds its pose. */
+  private holdT = 0;
+  private guardOn = false;
+  private guardBlend = 0;
+  /** Aim down sights (RMB with a gun): the gun eases toward the centre of the view. */
+  ads = false;
+  private adsBlend = 0;
+  /** Knock from being hit: offset (fractions of the screen height) that springs back. */
+  private joltX = 0;
+  private joltY = 0;
+  /** The weapon hand's pose last frame, so a new animation starts where the hands are. */
+  private lastPose: [number, number, number] = [0, 0, 0];
   /** Brief light for muzzle flashes (renderer wires this to a mode:'point' light). */
   onMuzzleFlash: ((seconds: number) => void) | null = null;
 
@@ -289,6 +352,63 @@ export class Viewmodel {
       this.flashT = 0.06;
       this.onMuzzleFlash?.(0.08);
     }
+  }
+
+  /**
+   * A phase-timed swing (combat feel layer): anticipation over `windup`, the fast strike so the
+   * contact pose lands at windup + strike (when the blow resolves), follow-through, recovery.
+   * Bare hands punch, alternating fists.
+   */
+  swing(ph: SwingPhases): void {
+    this.frozen = false;
+    this.holdT = 0;
+    const fists = !this.itemKey;
+    const style: SwingStyle = fists ? 'punch' : ph.style;
+    if (fists) this.punchHand = this.punchHand === 1 ? 0 : 1;
+    const from: [number, number, number] = fists ? [0, 0, 0] : this.lastPose;
+    const { keys, dur } = swingKeys({ ...ph, style }, from);
+    this.anim = { kind: 'melee', t: 0, dur, keys, hand: fists ? this.punchHand : 1, contact: keys[2][0] };
+  }
+
+  /**
+   * Hit-stop: hold the contact pose for `seconds` (the blow connected). The simulation resolves
+   * on its 30 Hz tick and the hands may be a frame short of contact then, so snap to it.
+   */
+  impact(seconds: number): void {
+    const a = this.anim;
+    if (a?.contact !== undefined && a.t < a.contact) a.t = a.contact;
+    this.holdT = Math.max(this.holdT, seconds);
+  }
+
+  /** Raise (or lower) the guard; held until released, a swing takes precedence while it plays. */
+  setGuard(on: boolean): void {
+    this.guardOn = on;
+  }
+
+  /** Gun kick scaled by the shot's recoil (1 = a typical pistol round). */
+  recoil(k: number): void {
+    this.frozen = false;
+    const a = Math.max(0.4, Math.min(2.2, k));
+    this.anim = {
+      kind: 'fire', t: 0, dur: 0.16 + 0.08 * a, hand: 1,
+      keys: [[0, 0, 0, 0, 1], [0.1, 0.02 * a, 0.045 * a, 0.12 * a, 1], [0.35, 0.012 * a, 0.03 * a, 0.07 * a, 1], [1, 0, 0, 0, 1]],
+    };
+    this.flashT = 0.06;
+    this.onMuzzleFlash?.(0.08);
+  }
+
+  /** Knock the hands (you got hit): `side` -1 left .. 1 right, `amount` 0..1. */
+  jolt(side: number, amount: number): void {
+    const k = Math.max(0, Math.min(1, amount));
+    this.joltX += side * 0.05 * k;
+    this.joltY -= 0.06 * k;
+  }
+
+  /** Lower the gun out of view and bring it back over the reload time. */
+  reload(seconds: number): void {
+    this.frozen = false;
+    const d = Math.max(0.35, seconds);
+    this.anim = { kind: 'fire', t: 0, dur: d, hand: 1, keys: [[0, 0, 0, 0, 1], [0.22, 0.05, -0.3, -0.45, 1], [0.78, 0.05, -0.3, -0.45, 1], [1, 0, 0, 0, 1]] };
   }
 
   /** Raise the weapon (or both fists) to block; never cuts a swing short. */
@@ -407,14 +527,22 @@ export class Viewmodel {
     this.sway = Math.max(-0.06, Math.min(0.06, this.sway));
 
     if (this.anim && !this.frozen) {
-      this.anim.t += dt / this.anim.dur;
+      if (this.holdT > 0) this.holdT = Math.max(0, this.holdT - dt);
+      else this.anim.t += dt / this.anim.dur;
       if (this.anim.t >= 1) this.anim = null;
     }
     if (!this.frozen) this.flashT = Math.max(0, this.flashT - dt);
+    this.guardBlend += ((this.guardOn ? 1 : 0) - this.guardBlend) * Math.min(1, dt * 16);
+    this.adsBlend += ((this.ads && wielded?.isGun?.() ? 1 : 0) - this.adsBlend) * Math.min(1, dt * 12);
+    const spring = Math.min(1, dt * 9);
+    this.joltX -= this.joltX * spring;
+    this.joltY -= this.joltY * spring;
 
     // bob and animation offsets are fractions of the screen height
-    const bobX = Math.cos(this.bobPhase) * this.bobAmp * 0.025;
-    const bobY = -Math.abs(Math.sin(this.bobPhase)) * this.bobAmp * 0.025;
+    // Aiming down the sights steadies the hands: less bob and sway.
+    const steady = 1 - 0.7 * this.adsBlend;
+    const bobX = Math.cos(this.bobPhase) * this.bobAmp * 0.025 * steady + this.joltX;
+    const bobY = -Math.abs(Math.sin(this.bobPhase)) * this.bobAmp * 0.025 * steady + this.joltY;
     const vis = this.enabled;
     const place = (p: Part, x: number, y: number, rot: number, shown: boolean) => {
       p.mesh.visible = vis && shown;
@@ -424,17 +552,23 @@ export class Viewmodel {
     };
 
     const [fl, fr] = this.fists!;
+    const g = this.guardBlend;
     if (this.weapon) {
-      const a = this.anim ? pose(this.anim.keys, this.anim.t) : { dx: 0, dy: 0, rot: 0, vis: true };
-      const gx = lowW * 0.5 + lowH * (0.42 + bobX + this.sway + a.dx);
-      const gy = lowH * (0.22 + bobY + a.dy);
+      const a = this.anim ? pose(this.anim.keys, this.anim.t) : { dx: GUARD_POSE[0] * g, dy: GUARD_POSE[1] * g, rot: GUARD_POSE[2] * g, vis: true };
+      this.lastPose = [a.dx, a.dy, a.rot];
+      // ADS: the gun comes in toward the centre and up so the muzzle sits just under the crosshair.
+      const ads = this.adsBlend;
+      const gx = lowW * 0.5 + lowH * ((0.42 - 0.3 * ads) + (bobX + this.sway) * steady + a.dx);
+      const gy = lowH * (0.22 + 0.07 * ads + bobY + a.dy);
       place(this.weapon, gx, gy, a.rot, a.vis);
       fl.mesh.visible = fr.mesh.visible = false;
       const m = this.weapon.muzzle.clone().rotateAround(new THREE.Vector2(), a.rot);
       place(this.flash!, gx + m.x, gy + m.y, 0, this.flashT > 0);
     } else {
       for (let hand = 0; hand < 2; hand++) {
-        const a = this.anim && (this.anim.hand === hand || this.anim.hand === 2) ? pose(this.anim.keys, this.anim.t) : { dx: 0, dy: 0, rot: 0, vis: true };
+        const a = this.anim && (this.anim.hand === hand || this.anim.hand === 2)
+          ? pose(this.anim.keys, this.anim.t)
+          : { dx: GUARD_FISTS[0] * g, dy: GUARD_FISTS[1] * g, rot: 0, vis: true };
         const side = hand === 1 ? 1 : -1;
         const x = lowW * 0.5 + lowH * (side * (0.36 + bobX + a.dx) + this.sway);
         const y = lowH * (0.14 + bobY * (hand ? 1 : 0.8) + a.dy);

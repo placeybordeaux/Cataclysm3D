@@ -1,8 +1,15 @@
-// Reusable CDDA JSON loading + inheritance resolution.
+// Reusable Cataclysm JSON loading + inheritance resolution, targeting Cataclysm: Bright
+// Nights (~/code/Cataclysm-BN). Names still say "cdda": the formats share ancestry and the
+// other extractors import these names.
 //
-// Shared with the mapgen extractor (tools/extract/mapgen.ts), so keep this free of
-// output-format concerns: it reads raw JSON, groups it by type, and resolves copy-from
-// the way CDDA's generic_factory / per-type loaders do (doc/JSON/JSON_INHERITANCE.md).
+// Shared with the world extractors (mapgen, npcs, vehicles, ...), so keep this free of
+// output-format concerns: it reads raw JSON, groups it by type, and resolves copy-from the
+// way BN's loaders do. BN ships no JSON docs in the checkout; the C++ is the reference:
+//   src/generic_factory.h  handle_inheritance + optional(): explicit > proportional > relative
+//   src/assign.h/.cpp      assign(): relative > proportional > explicit (items and most slots)
+//   src/item_factory.cpp   load_definition / load_basic_info (item copy-from, looks_like)
+//   src/item_factory.cpp   load_item_group: repeated ids *append* (no copy-from), "purge"
+//   src/mongroup.cpp       LoadMonsterGroup: keyed by "name", repeated names extend
 
 import fs from 'node:fs';
 import os from 'node:os';
@@ -14,8 +21,9 @@ export type CddaObject = Record<string, any>;
 /** Where each raw object came from; attached as a non-enumerable property so JSON output ignores it. */
 export const SOURCE = Symbol('cddaSource');
 
+/** Game data checkout: $CDDA_DIR, else Bright Nights at ~/code/Cataclysm-BN. */
 export function defaultCddaDir(): string {
-  return process.env.CDDA_DIR ?? path.join(os.homedir(), 'code/Cataclysm-DDA');
+  return process.env.CDDA_DIR ?? path.join(os.homedir(), 'code/Cataclysm-BN');
 }
 
 function listJsonFiles(dir: string): string[] {
@@ -46,7 +54,7 @@ export interface LoadOptions {
  */
 export function loadCddaObjects(cddaDir: string = defaultCddaDir(), opts: LoadOptions = {}): Map<string, CddaObject[]> {
   const jsonDir = fs.existsSync(path.join(cddaDir, 'data/json')) ? path.join(cddaDir, 'data/json') : cddaDir;
-  if (!fs.existsSync(jsonDir)) throw new Error(`CDDA data dir not found: ${jsonDir} (set CDDA_DIR)`);
+  if (!fs.existsSync(jsonDir)) throw new Error(`game data dir not found: ${jsonDir} (set CDDA_DIR or pass --cdda)`);
   const only = opts.types ? new Set(opts.types) : null;
   const exclude = new Set(opts.excludeTypes ?? []);
   const byType = new Map<string, CddaObject[]>();
@@ -81,54 +89,72 @@ export function sourceOf(obj: CddaObject): string | undefined {
 // ---------------------------------------------------------------------------------------
 // Type families: types that share one id namespace for copy-from.
 
-// Pre-"subtypes" CDDA used one `type` per item slot; all of them are the ITEM namespace.
-// Current data only uses "ITEM", but mods/older checkouts may still use the legacy names.
-export const LEGACY_ITEM_TYPES = [
-  'ITEM', 'GENERIC', 'TOOL', 'TOOL_ARMOR', 'ARMOR', 'PET_ARMOR', 'GUN', 'GUNMOD', 'AMMO', 'MAGAZINE',
-  'COMESTIBLE', 'BOOK', 'BIONIC_ITEM', 'TOOLMOD', 'ENGINE', 'WHEEL', 'BATTERY',
+// BN keeps one JSON `type` per item kind (init.cpp registers each with its own
+// Item_factory::load_* function) but they share the one itype id namespace, so a TOOL may
+// copy-from a GENERIC. Modern DDA's single "ITEM" type is deliberately *not* listed: DDA data
+// then fails loudly as an unclassified type instead of being half-understood.
+export const ITEM_TYPES = [
+  'GENERIC', 'TOOL', 'COMESTIBLE', 'ARMOR', 'TOOL_ARMOR', 'PET_ARMOR', 'GUN', 'GUNMOD', 'AMMO', 'MAGAZINE', 'BOOK',
+  'CONTAINER', 'BIONIC_ITEM', 'TOOLMOD', 'ENGINE', 'WHEEL', 'FUEL', 'BATTERY',
 ];
+/** @deprecated DDA-era name, kept for importers; same list as ITEM_TYPES. */
+export const LEGACY_ITEM_TYPES = ITEM_TYPES;
 
 export function familyOf(type: string): string {
-  if (LEGACY_ITEM_TYPES.includes(type)) return 'ITEM';
-  // recipe_dictionary loads these three into the same map (recipe_dictionary.cpp).
-  if (type === 'recipe' || type === 'practice' || type === 'nested_category') return 'recipe';
+  if (ITEM_TYPES.includes(type)) return 'ITEM';
+  // recipe_dictionary::load_nested_category stores into the recipe map (uncraft has its own)
+  if (type === 'recipe' || type === 'nested_category') return 'recipe';
   return type;
 }
 
+/** Types belonging to a family name, so callers may ask for "ITEM" as if it were a type. */
+export function familyTypes(family: string): string[] {
+  if (family === 'ITEM') return ITEM_TYPES;
+  if (family === 'recipe') return ['recipe', 'nested_category'];
+  return [family];
+}
+
 /**
- * Ids an object defines. `id` may be an array (one definition per id). Recipes are keyed
- * by result/variant/id_suffix (recipe::load in recipe.cpp). Objects without any id
- * (speech, dream, snippet with only category...) return [].
+ * Ids an object defines. `id` may be an array (one definition per id); generic_factory also
+ * accepts the legacy "ident". Recipes are keyed by result + "_" + id_suffix (BN
+ * recipe::load; BN has no DDA recipe variants). Objects without any id (speech, dream,
+ * snippet with only category...) return [].
  */
 export function objectIds(obj: CddaObject): string[] {
   const fam = familyOf(obj.type);
   if (typeof obj.abstract === 'string') return [obj.abstract];
   if (fam === 'recipe' || obj.type === 'uncraft') {
-    if (obj.type === 'practice' || obj.type === 'nested_category') return [obj.id];
-    let id: string = obj.result ?? obj.id;
-    if (id === undefined) return [];
-    if (obj.type === 'recipe') {
-      if (obj.variant) id += '_' + obj.variant;
-      if (obj.id_suffix) id += '_' + obj.id_suffix;
-    }
-    return [id];
+    if (obj.type === 'nested_category') return [obj.id];
+    if (typeof obj.result !== 'string') throw new Error(`${obj.type} without string "result": ${JSON.stringify(obj).slice(0, 200)}`);
+    return [obj.type === 'recipe' && obj.id_suffix ? `${obj.result}_${obj.id_suffix}` : obj.result];
   }
   if (Array.isArray(obj.id)) return obj.id;
   if (typeof obj.id === 'string') return [obj.id];
+  if (typeof obj.ident === 'string') return [obj.ident];
   // types keyed by something other than "id"
   switch (obj.type) {
     case 'MONSTER_FACTION':
+    case 'monstergroup':
+    case 'EXTERNAL_OPTION':
+    case 'named_color':
       return typeof obj.name === 'string' ? [obj.name] : [];
     case 'profession_item_substitutions':
-      return [obj.item ?? obj.trait ?? obj.group].filter((x) => typeof x === 'string');
-    case 'ter_furn_migration':
-      return [obj.from_ter ?? obj.from_furn].filter((x) => typeof x === 'string');
+      return [obj.item ?? obj.trait ?? obj.item_group].filter((x) => typeof x === 'string');
     case 'rotatable_symbol':
       return Array.isArray(obj.tuple) ? [obj.tuple.join('')] : [];
     case 'hit_range':
       return ['default'];
   }
   return [];
+}
+
+/** generic_factory "alias": extra ids that resolve to the same object (t_wall_h -> t_wall). */
+export function objectAliases(obj: CddaObject): string[] {
+  const a = obj.alias;
+  if (a === undefined) return [];
+  if (typeof a === 'string') return [a];
+  if (Array.isArray(a) && a.every((x) => typeof x === 'string')) return a;
+  throw new Error(`${obj.type} ${obj.id}: bad "alias" ${JSON.stringify(a)}`);
 }
 
 // ---------------------------------------------------------------------------------------
@@ -141,8 +167,13 @@ export interface InheritHooks {
   notInherited?: string[];
   /** Keys whose object values merge field-by-field with the parent's instead of replacing. */
   mergeObjects?: string[];
-  /** Keys the child *must* not take from its own JSON when it has copy-from (item_group). */
+  /** Keys the child *must* not take from its own JSON when it has copy-from. */
   ignoreOwnWhenCopying?: string[];
+  /**
+   * true for families read with assign() (assign.h: relative beats proportional beats the
+   * explicit value); false for generic_factory optional() (explicit first).
+   */
+  modifierFirst?: boolean;
   /** Called after merging with the resolved result, the parent id, and the raw child. */
   post?(result: CddaObject, parentId: string, parent: CddaObject, child: CddaObject, parentIsAbstract: boolean): void;
 }
@@ -263,44 +294,59 @@ function isPairArray(v: unknown): v is unknown[] {
   return Array.isArray(v) && v.length > 0 && v.every((x) => Array.isArray(x) && typeof x[0] === 'string' && typeof x[1] === 'number');
 }
 
-// Our units are coarser than CDDA's internal ones for these (g vs mg, cm vs mm), so
-// truncation after scaling happens at the internal resolution.
-const MASS_KEYS = new Set(['weight', 'integral_weight', 'mass', 'max_contains_weight', 'trigger_weight']);
-const LENGTH_KEYS = new Set(['longest_side', 'integral_longest_side', 'barrel_length']);
+// Our gram unit is coarser than BN's internal milligrams (units::mass is int64 mg), so
+// truncation after scaling happens at mg resolution. Volumes (ml), money (cents) and plain
+// ints are integers in both.
+const MASS_KEYS = new Set(['weight', 'integral_weight', 'mass', 'max_weight', 'weight_capacity_bonus', 'trigger_weight']);
 
 /**
  * Apply one `relative` / `proportional` entry for top-level member `key`.
- * C++ does `int_member *= float_factor` (generic_factory.h): the product is computed in
- * 32-bit float and truncated toward zero, so e.g. 100 * 0.7f is 70 (the float product
- * rounds to 70.0f) where a double product of the float factor would truncate to 69.
+ * BN reads the factor as a double and does `out = val * scalar` (assign.h) or
+ * `member *= scalar` (generic_factory.h handle_proportional): a double product truncated
+ * toward zero for integer members (100 * 0.7 = 70; 1500 * 0.57 = 855.0000000000001 -> 855).
+ * DDA used a 32-bit float factor; BN does not.
  */
 export function applyModifier(base: unknown, mod: unknown, kind: 'relative' | 'proportional', key = ''): unknown {
-  const f32 = (b: number) => Math.fround(b);
-  const op: NumOp = kind === 'relative' ? (a, b) => a + b : (a, b) => a * f32(b);
+  const op: NumOp = kind === 'relative' ? (a, b) => a + b : (a, b) => a * b;
   let quant: Quantize = floatQ;
   if (kind === 'proportional') {
-    if (MASS_KEYS.has(key)) quant = (r) => Math.trunc(Math.fround(r * 1000)) / 1000;
-    else if (LENGTH_KEYS.has(key)) quant = (r) => Math.trunc(Math.fround(r * 10)) / 10;
-    else quant = (r, b) => (Number.isInteger(b) ? Math.trunc(Math.fround(r)) : floatQ(r));
+    if (MASS_KEYS.has(key)) quant = (r) => Math.trunc(floatQ(r * 1000)) / 1000;
+    else quant = (r, b) => (Number.isInteger(b) ? Math.trunc(r) : floatQ(r));
   }
   if (isPairArray(mod)) return applyPairs(base, mod, op);
   return applyNumeric(base, mod, op, quant);
 }
 
-export function applyExtend(base: unknown, ext: unknown): unknown {
-  if (base === undefined) return clone(ext);
+// members read as sets/lists whose JSON may be a single string (auto_flags_reader, get_tags)
+const SET_KEYS = new Set([
+  '', 'flags', 'material', 'species', 'categories', 'techniques', 'effects', 'ammo', 'use_action', 'weapon_category',
+  'valid_mods', 'faults', 'anger_triggers', 'fear_triggers', 'placate_triggers', 'death_function',
+]);
+
+export function applyExtend(base: unknown, ext: unknown, key = ''): unknown {
+  if (base === undefined) return SET_KEYS.has(key) || typeof ext === 'object' ? clone(ext) : undefined;
   if (Array.isArray(base)) {
     const add = Array.isArray(ext) ? ext : [ext];
     const out = [...base];
     for (const a of add) {
-      // flag-like string sets are deduplicated (auto_flags_reader is a set)
+      // flag-like string sets are deduplicated (assign_set inserts into a set)
       if (typeof a === 'string' && out.includes(a)) continue;
+      // [id, n] pairs are maps in C++ (qualities: def.qualities[id] = level): same id replaces
+      if (isPairArray([a])) {
+        const i = out.findIndex((b) => Array.isArray(b) && b[0] === (a as unknown[])[0]);
+        if (i >= 0) {
+          out[i] = clone(a);
+          continue;
+        }
+      }
       out.push(clone(a));
     }
     return out;
   }
   if (isObj(base) && isObj(ext)) return { ...base, ...clone(ext) };
-  // scalar "extend" (e.g. extend a string field into a list)
+  // A set member written as a single string ("flags": "X") extends into a list; "extend" on
+  // a true scalar ("harvest") is ignored by BN, whose readers only look in "extend" for sets
+  if (!SET_KEYS.has(key)) return base;
   return Array.isArray(ext) ? [base, ...ext] : [base, ext];
 }
 
@@ -311,6 +357,8 @@ export function applyDelete(base: unknown, del: unknown): unknown {
     return base.filter((b) => {
       for (const d of dels) {
         if (deepEqual(b, d)) return false;
+        // BN delete_qualities_from_json only removes a quality whose level matches too
+        if (isPairArray([d])) continue;
         const bk = elemKey(b);
         const dk = elemKey(d);
         if (bk !== undefined && bk === dk) return false;
@@ -348,16 +396,30 @@ export function mergeInherited(parent: CddaObject | undefined, child: CddaObject
     else out[k] = clone(v);
   }
   if (!('abstract' in child)) delete out.abstract;
-  for (const kind of ['relative', 'proportional'] as const) {
-    const mods = child[kind];
-    if (!isObj(mods)) continue;
-    for (const [k, m] of Object.entries(mods)) {
-      // an explicit value in the child wins over a modifier of the parent's (optional() reads one or the other)
+  // Exactly one of explicit / relative / proportional applies per member, and modifiers act
+  // on the *inherited* value. Which one wins depends on the C++ reader:
+  //   generic_factory optional(): explicit, else proportional, else relative
+  //   assign() (items):           relative, else proportional, else explicit
+  const rel = isObj(child.relative) ? child.relative : {};
+  const prop = isObj(child.proportional) ? child.proportional : {};
+  for (const k of new Set([...Object.keys(rel), ...Object.keys(prop)])) {
+    const inherited = parent?.[k];
+    if (hooks.modifierFirst) {
+      if (k in rel) out[k] = applyModifier(clone(inherited), rel[k], 'relative', k);
+      else out[k] = applyModifier(clone(inherited), prop[k], 'proportional', k);
+    } else {
       if (k in child) continue;
-      out[k] = applyModifier(out[k], m, kind, k);
+      if (k in prop) out[k] = applyModifier(clone(inherited), prop[k], 'proportional', k);
+      else out[k] = applyModifier(clone(inherited), rel[k], 'relative', k);
     }
   }
-  if (isObj(child.extend)) for (const [k, e] of Object.entries(child.extend)) out[k] = applyExtend(out[k], e);
+  if (isObj(child.extend)) {
+    for (const [k, e] of Object.entries(child.extend)) {
+      const v = applyExtend(out[k], e, k);
+      if (v === undefined) delete out[k];
+      else out[k] = v;
+    }
+  }
   if (isObj(child.delete)) {
     for (const [k, d] of Object.entries(child.delete)) {
       const r = applyDelete(out[k], d);
@@ -375,6 +437,10 @@ export interface ResolvedFamily {
   abstracts: Map<string, CddaObject>;
   /** Number of duplicate definitions that replaced an earlier one. */
   duplicates: string[];
+  /** Non-fatal oddities BN tolerates (reported by the C++ as load errors). */
+  warnings: string[];
+  /** generic_factory "alias" id -> canonical id (byId also answers alias lookups). */
+  aliases: Map<string, string>;
 }
 
 /**
@@ -389,13 +455,17 @@ export function resolveFamily(
   hooks: InheritHooks = {},
   prepare: (o: CddaObject) => CddaObject = (o) => o,
 ): ResolvedFamily {
-  interface Def { id: string; raw: CddaObject; index: number; resolved?: CddaObject; resolving?: boolean; abstract: boolean }
+  interface Def { id: string; raw: CddaObject; src: string; index: number; resolved?: CddaObject; resolving?: boolean; abstract: boolean; discarded?: boolean }
   const defs: Def[] = [];
+  const warnings: string[] = [];
   const byIdDefs = new Map<string, Def[]>();
+  const aliases = new Map<string, string>();
   for (const raw0 of objs) {
     const raw = prepare(raw0);
-    for (const id of objectIds(raw0)) {
-      const d: Def = { id, raw, index: defs.length, abstract: typeof raw0.abstract === 'string' };
+    const ids = objectIds(raw0);
+    for (const a of objectAliases(raw0)) aliases.set(a, ids[0]);
+    for (const id of ids) {
+      const d: Def = { id, raw, src: sourceOf(raw0) ?? '?', index: defs.length, abstract: typeof raw0.abstract === 'string' };
       defs.push(d);
       let l = byIdDefs.get(id);
       if (!l) byIdDefs.set(id, (l = []));
@@ -416,17 +486,26 @@ export function resolveFamily(
       } else {
         pdef = cands?.at(-1);
       }
-      if (!pdef) {
-        const src = sourceOf(d.raw) ?? '';
-        throw new Error(`${d.raw.type} ${d.id} (${src}): copy-from unknown id "${pid}"`);
+      if (!pdef && pid === d.id) {
+        // BN core has a few of these (enchantment_value PAIN_GOOD): the C++ defers the object,
+        // never finds the parent and reports "circular dependency, this object is discarded".
+        warnings.push(`${d.raw.type} ${d.id} (${d.src}): copy-from itself with no earlier definition; discarded like BN`);
+        d.discarded = true;
+        d.resolving = false;
+        d.resolved = {};
+        return d.resolved;
       }
+      if (!pdef) throw new Error(`${d.raw.type} ${d.id} (${d.src}): copy-from unknown id "${pid}"`);
+      if (pdef.discarded) throw new Error(`${d.raw.type} ${d.id} (${d.src}): copy-from discarded object "${pid}"`);
       const parent = resolve(pdef, [...chain, d.id]);
       result = mergeInherited(parent, d.raw, hooks);
       hooks.post?.(result, pid, parent, d.raw, pdef.abstract);
     } else {
       result = mergeInherited(undefined, d.raw, hooks);
     }
-    if (Array.isArray(result.id)) result.id = d.id;
+    if (!d.abstract && ('id' in result || 'ident' in result)) result.id = d.id;
+    delete result.ident;
+    delete result.alias;
     d.resolving = false;
     d.resolved = result;
     return result;
@@ -436,55 +515,110 @@ export function resolveFamily(
   const duplicates: string[] = [];
   for (const [id, list] of byIdDefs) {
     for (const d of list) resolve(d, []);
-    const last = list.at(-1)!;
+    const kept = list.filter((x) => !x.discarded);
+    const last = kept.at(-1);
+    if (!last) continue;
     if (list.length > 1 && !list.slice(1).every((x) => x.raw['copy-from'] === id)) duplicates.push(id);
     if (last.abstract) abstracts.set(id, last.resolved!);
     else byId.set(id, last.resolved!);
   }
-  return { byId, abstracts, duplicates };
+  // generic_factory::load: map[alias] = int id of the canonical object, overriding any
+  // object that happened to use the alias as its own id.
+  for (const [alias, id] of aliases) {
+    const o = byId.get(id);
+    if (!o) {
+      warnings.push(`alias ${alias} -> unknown or discarded id ${id}`);
+      continue;
+    }
+    byId.set(alias, o);
+  }
+  return { byId, abstracts, duplicates, aliases, warnings };
 }
 
 // ---------------------------------------------------------------------------------------
 // Per-family quirks of the C++ loaders that the generic merge doesn't capture.
 
-// looks_like: CDDA defaults it to the copy-from id. We skip abstract parents (they never
-// have sprites), so the renderer's looks_like fallback chain only walks real ids.
+// looks_like: BN defaults it to the copy-from id (item_factory load_definition,
+// map_data_common_t::load_symbol, mtype::load). We skip abstract parents (they never have
+// sprites) so the renderer's looks_like fallback chain only walks real ids.
+function looksLikeInherited(r: CddaObject, pid: string, parent: CddaObject, child: CddaObject, parentAbstract: boolean): void {
+  r.looks_like = child.looks_like ?? parent.looks_like ?? (parentAbstract ? undefined : pid);
+  if (r.looks_like === undefined) delete r.looks_like;
+}
+
+// Item "slots" (itype's islot_* members) an item type loads. load_definition copies the whole
+// parent itype, so slots accumulate down a copy-from chain: a GENERIC copied from a TOOL is
+// still a tool. Slot objects ("armor_data", "gun_data", ...) add slots on any type.
+export const ITEM_TYPE_SLOTS: Record<string, string[]> = {
+  GENERIC: [], TOOL: ['TOOL'], COMESTIBLE: ['COMESTIBLE'], ARMOR: ['ARMOR'], TOOL_ARMOR: ['TOOL', 'ARMOR'],
+  PET_ARMOR: ['PET_ARMOR'], GUN: ['GUN'], GUNMOD: ['GUNMOD'], AMMO: ['AMMO'], MAGAZINE: ['MAGAZINE'], BOOK: ['BOOK'],
+  CONTAINER: ['CONTAINER'], BIONIC_ITEM: ['BIONIC_ITEM'], TOOLMOD: ['TOOLMOD'], ENGINE: ['ENGINE'], WHEEL: ['WHEEL'],
+  FUEL: ['FUEL'], BATTERY: ['BATTERY'],
+};
+export const ITEM_SLOT_OBJECTS: Record<string, string> = {
+  container_data: 'CONTAINER', armor_data: 'ARMOR', pet_armor_data: 'PET_ARMOR', book_data: 'BOOK', gun_data: 'GUN',
+  bionic_data: 'BIONIC_ITEM', ammo_data: 'AMMO', seed_data: 'SEED', artifact_data: 'ARTIFACT', brewable: 'BREWABLE',
+  fuel: 'FUEL', relic_data: 'RELIC', milling: 'MILLING', gunmod_data: 'GUNMOD',
+};
+/** Slots of one raw definition (not counting inherited ones). */
+export function ownItemSlots(o: CddaObject): string[] {
+  const t = ITEM_TYPE_SLOTS[o.type];
+  if (!t) throw new Error(`item ${o.id ?? o.abstract}: unknown item type ${o.type}`);
+  return [...t, ...Object.keys(ITEM_SLOT_OBJECTS).filter((k) => isObj(o[k])).map((k) => ITEM_SLOT_OBJECTS[k])];
+}
+// legacy single-portion armor members (item_factory.cpp Item_factory::load(islot_armor&))
+const LEGACY_ARMOR_KEYS = ['covers', 'coverage', 'encumbrance', 'max_encumbrance'];
+
 export const FAMILY_HOOKS: Record<string, InheritHooks> = {
   ITEM: {
+    // every item slot is read with assign() (item_factory.cpp load_basic_info & friends)
+    modifierFirst: true,
     post(r, pid, parent, child, parentAbstract) {
-      // item_factory: looks_like = copy-from (if it names a real item), then the JSON's own
+      // load_definition: a real parent's id always becomes looks_like (even if the parent had
+      // its own); an abstract parent passes its looks_like on. The JSON's own value wins.
       r.looks_like = child.looks_like ?? (parentAbstract ? parent.looks_like : pid);
       if (r.looks_like === undefined) delete r.looks_like;
+      r.__slots = [...new Set([...(parent.__slots ?? []), ...ownItemSlots(parent)])];
+      // Armor portions (load(islot_armor&)): an own "armor_portion_data" replaces everything;
+      // otherwise legacy top-level members edit portion 0 of the inherited data, and changing
+      // "encumbrance" without "max_encumbrance" resets max to it ("DISGUSTING hack").
+      const own = (k: string) => k in child || (isObj(child.relative) && k in child.relative) || (isObj(child.proportional) && k in child.proportional);
+      if ('armor_portion_data' in child) {
+        for (const k of LEGACY_ARMOR_KEYS) delete r[k];
+      } else if (Array.isArray(r.armor_portion_data) && LEGACY_ARMOR_KEYS.some(own)) {
+        if (r.armor_portion_data.length !== 1) throw new Error(`item ${child.id}: legacy armor fields on an item with ${r.armor_portion_data.length} armor_portion_data entries`);
+        const p = { ...r.armor_portion_data[0] };
+        const [enc0, max0] = Array.isArray(p.encumbrance) ? p.encumbrance : [p.encumbrance ?? 0, p.encumbrance ?? 0];
+        const enc = own('encumbrance') ? r.encumbrance : enc0;
+        const max = own('max_encumbrance') ? r.max_encumbrance : enc !== enc0 ? enc : max0;
+        p.encumbrance = [enc, max];
+        if (own('coverage')) p.coverage = r.coverage;
+        if (own('covers')) p.covers = r.covers;
+        r.armor_portion_data = [p];
+        for (const k of LEGACY_ARMOR_KEYS) delete r[k];
+      } else if (own('encumbrance') && !own('max_encumbrance') && r.encumbrance !== parent.encumbrance) {
+        r.max_encumbrance = r.encumbrance;
+      }
     },
   },
   terrain: {
-    // mapdata.cpp: these are reset on every load, and bash/deconstruct merge field-wise
-    notInherited: ['open', 'close', 'transforms_into', 'prying', 'hacksaw', 'oxytorch', 'boltcut'],
-    mergeObjects: ['bash', 'deconstruct'],
-    post(r, pid, parent, child, parentAbstract) {
-      r.looks_like = child.looks_like ?? (parentAbstract ? parent.looks_like : pid);
-      if (r.looks_like === undefined) delete r.looks_like;
-    },
+    // map/mapdata.cpp ter_t::load: the activity_data members are re-made on every load
+    // (not inherited); "bash" is read with optional() into the inherited struct so it merges
+    // field-wise; "deconstruct"/"pry" replace wholesale when present. open/close/roof/
+    // transforms_into ARE inherited in BN (DDA resets them).
+    notInherited: ['hacksaw', 'oxytorch', 'boltcut'],
+    mergeObjects: ['bash'],
+    post: looksLikeInherited,
   },
   furniture: {
-    notInherited: ['prying', 'hacksaw', 'oxytorch', 'boltcut'],
-    mergeObjects: ['bash', 'deconstruct'],
-    post(r, pid, parent, child, parentAbstract) {
-      r.looks_like = child.looks_like ?? (parentAbstract ? parent.looks_like : pid);
-      if (r.looks_like === undefined) delete r.looks_like;
-    },
+    notInherited: ['hacksaw', 'oxytorch', 'boltcut'],
+    mergeObjects: ['bash'],
+    post: looksLikeInherited,
   },
-  MONSTER: {
-    post(r, pid, parent, child, parentAbstract) {
-      r.looks_like = child.looks_like ?? parent.looks_like ?? (parentAbstract ? undefined : pid);
-      if (r.looks_like === undefined) delete r.looks_like;
-    },
-  },
+  MONSTER: { post: looksLikeInherited },
   // recipe.cpp: "inline requirements are always replaced (cannot be inherited)"
   recipe: { notInherited: ['tools', 'qualities', 'components'] },
   uncraft: { notInherited: ['tools', 'qualities', 'components'] },
-  // item_factory: a copy-from group only takes its additions from "extend"
-  item_group: { ignoreOwnWhenCopying: ['entries', 'items', 'groups'] },
   // veh_type.cpp vehicle_prototype::load: "parts" always *append* to the inherited list
   // (e.g. "car" = car_abstract's body + its own engine and tank).
   vehicle: {
@@ -495,17 +629,28 @@ export const FAMILY_HOOKS: Record<string, InheritHooks> = {
 };
 
 /**
- * One-stop helper for other extractors: load the given CDDA types and resolve copy-from
- * per family with the standard hooks. With `prepare` (default true) objects also get
- * comments stripped, quantity strings converted to base units and translations
- * flattened (see prepare.ts). Returns type -> id -> resolved object (abstracts excluded).
+ * Families that do not use copy-from at all in BN: a repeated id *adds to* the earlier
+ * definition. They must go through their own merge (itemgroup.ts mergeItemGroupDefs,
+ * normalize.ts normalizeMonsterGroups), never resolveFamily.
+ */
+export const APPENDING_FAMILIES = new Set(['item_group', 'monstergroup']);
+
+/**
+ * One-stop helper for other extractors: load the given types (family names such as "ITEM"
+ * expand to all their types) and resolve copy-from per family with the standard hooks.
+ * With `prepare` (default true) objects also get comments stripped, quantity strings
+ * converted to base units and translations flattened (see prepare.ts).
+ * Returns type -> id -> resolved object (abstracts excluded; alias ids included).
+ * item_group / monstergroup are not supported here (see APPENDING_FAMILIES).
  */
 export function loadResolved(
   types: string[],
   cddaDir: string = defaultCddaDir(),
   opts: { prepare?: boolean } = {},
 ): Map<string, Map<string, CddaObject>> {
-  const raw = loadCddaObjects(cddaDir, { types });
+  const wanted = types.flatMap(familyTypes);
+  for (const t of wanted) if (APPENDING_FAMILIES.has(familyOf(t))) throw new Error(`loadResolved: ${t} has no copy-from in BN; use its dedicated merge`);
+  const raw = loadCddaObjects(cddaDir, { types: wanted });
   const families = new Map<string, CddaObject[]>();
   for (const [type, list] of raw) {
     const f = familyOf(type);

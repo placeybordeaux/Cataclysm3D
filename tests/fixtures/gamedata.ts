@@ -9,17 +9,38 @@ const base = { symbol: '?', color: 'white', flags: [] as string[], material: [] 
 // Fixture rows omit name_plural/category/to_hit/subtypes; mk() fills them in.
 type Partial1 = Partial<ItemDef> & { id: string; name: string; type: string; subtypes?: string[] };
 /** Fill the fields the extractor always emits. */
-const mk = (d: Partial1): ItemDef => ({
-  weight: 0,
-  volume: 0,
-  ...base,
-  name_plural: d.name + 's',
-  category: 'other',
-  to_hit: -2,
-  subtypes: d.type !== 'ITEM' && d.type !== 'GENERIC' ? [d.type] : [],
-  ...d,
-  type: d.type === 'ITEM' ? (d.subtypes?.[0] ?? 'GENERIC') : d.type,
-});
+// TODO(BN inventory): these are DDA-shaped rows (pocket_data, DDA count-by-charges rules);
+// rewrite them from BN JSON together with the inventory. mk() only fills the fields the BN
+// extractor always emits so they type-check.
+const mk = (d: Partial1): ItemDef => {
+  const subtypes = d.subtypes ?? (d.type !== 'ITEM' && d.type !== 'GENERIC' ? [d.type] : []);
+  const sub = (s: string) => subtypes.includes(s) || d.type === s;
+  return {
+    weight: 0,
+    volume: 0,
+    ...base,
+    name_plural: d.name + 's',
+    category: 'other',
+    to_hit: -2,
+    price: 0,
+    stackable: false,
+    rigid: true,
+    phase: 'solid',
+    bashing: 0,
+    cutting: 0,
+    melee_damage: {},
+    qualities: [],
+    magazine_well: 0,
+    // DDA rule the fixtures were written for: only non-solid comestibles count by charges
+    count_by_charges: !!d.stackable || sub('AMMO') || (sub('COMESTIBLE') && d.phase !== undefined && d.phase !== 'solid'),
+    ...d,
+    integral_volume: d.integral_volume ?? d.volume ?? 0,
+    integral_weight: d.integral_weight ?? d.weight ?? 0,
+    price_postapoc: d.price_postapoc ?? d.price ?? 0,
+    subtypes,
+    type: d.type === 'ITEM' ? (d.subtypes?.[0] ?? 'GENERIC') : d.type,
+  };
+};
 
 const items: ItemDef[] = ([
   // containers/containers.json
