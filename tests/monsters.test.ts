@@ -106,6 +106,21 @@ describe('monster AI', () => {
     expect(Math.hypot(z.x - 12, z.y - 12)).toBeLessThan(d0);
   });
 
+  it('zombies smash through a closed door to reach a noise (bash.ts)', () => {
+    const { game, sys } = world(9);
+    // 5x5 room around the survivor with a door on the east wall.
+    for (let y = 10; y <= 14; y++) for (let x = 10; x <= 14; x++) if (x === 10 || x === 14 || y === 10 || y === 14) game.map.setTer(x, y, 0, 't_wall');
+    game.map.setTer(14, 12, 0, 't_door_c');
+    for (let i = 0; i < 4; i++) sys.spawnById('mon_zombie', 17.5, 11.5 + i * 0.5, 0);
+    let broke = false;
+    for (let t = 0; t < 90 && !broke; t++) {
+      game.events.emit('sound', { x: 12, y: 12, z: 0, volume: 20, description: 'a scream' });
+      step(game, 1);
+      broke = game.map.terAt(14, 12, 0).id !== 't_door_c';
+    }
+    expect(broke).toBe(true);
+  });
+
   it('dormant monsters far away drift toward loud noises (horde behaviour)', () => {
     const { game, sys } = world();
     const z = sys.spawnById('mon_zombie', 12.5 + 70, 12.5, 0)!;
