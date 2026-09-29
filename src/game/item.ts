@@ -585,6 +585,20 @@ export class Item implements MapItem {
       noise *= (m.def.loudness_multiplier as number | undefined) ?? 1;
     }
     noise = Math.max(0, Math.trunc(noise));
+    // Launchers, bows and crossbows have their own sounds whatever their loudness.
+    const at = new Set(this.ammoTypes());
+    if (at.has('40x46mm') || at.has('40x53mm')) return { volume: 8, sound: 'Thunk!' };
+    if (at.has('12mm') || at.has('metal_rail')) return { volume: 24, sound: 'tz-CRACKck!' };
+    if (['flammable', '66mm', '120mm', '84x246mm', 'm235', 'atgm', 'RPG-7', 'homebrew_rocket'].some((a) => at.has(a))) return { volume: 4, sound: 'Fwoosh!' };
+    if (at.has('arrow')) return { volume: noise, sound: 'whizz!' };
+    if (at.has('strange_arrow')) return { volume: noise, sound: 'Crack!' };
+    if (at.has('bolt') || at.has('bolt_ballista')) return { volume: noise, sound: 'thonk!' };
+    if (at.has('atlatl')) return { volume: noise, sound: 'swoosh!' };
+    const fx = new Set([...asArray(ammo?.effects as string[] | undefined), ...asArray(this.def.ammo_effects as string[] | undefined)]);
+    if (fx.has('LASER') || fx.has('PLASMA')) return { volume: noise, sound: noise < 20 ? 'Fzzt!' : noise < 40 ? 'Pew!' : noise < 60 ? 'Tsewww!' : 'Kra-kow!' };
+    if (fx.has('LIGHTNING')) return { volume: noise, sound: noise < 20 ? 'Bzzt!' : noise < 40 ? 'Bzap!' : noise < 60 ? 'Bzaapp!' : 'Kra-koom!' };
+    if (fx.has('WHIP')) return { volume: noise, sound: 'Crack!' };
+    if (fx.has('LIQUID')) return { volume: noise, sound: 'Splash!' };
     if (noise <= 0) return { volume: 0, sound: '' };
     if (noise < 10) return { volume: noise, sound: burst ? 'Brrrip!' : 'plink!' };
     if (noise < 150) return { volume: noise, sound: burst ? 'Brrrap!' : 'bang!' };

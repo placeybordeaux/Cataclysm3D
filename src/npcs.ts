@@ -328,6 +328,9 @@ function installDebug(api: DebugApi, game: Game, sys: NpcSystem, wg: WorldGenera
   /** Accept a mission from an NPC without the dialogue (tests). */
   api.giveMission = (id: string, uid?: number) => {
     const n = find(uid);
+    // Calling it twice must not stack a second copy of a mission already in progress.
+    const running = [...sys.missions.all.values()].find((q) => q.id === id && q.status === 'active' && q.npcUid === (n?.uid ?? -1));
+    if (running) return running.uid;
     const m = sys.missions.create(id, n ?? null);
     if (m) sys.missions.assign(m, n ? sys.dialogueFor(n) : null);
     return m?.uid ?? null;
