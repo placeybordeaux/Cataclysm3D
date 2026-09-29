@@ -1,3 +1,4 @@
+import { disarmUnloadGuard } from '../core/unload';
 import type { Game } from '../game/game';
 import { reloadPage } from '../core/unload';
 import type { DebugApi } from '../debug';
@@ -49,6 +50,7 @@ export interface PendingLoad {
  * for the save's world. Consumes the request (a crash while loading won't loop).
  */
 const HOT_KEY = 'cdda3d.hotReload';
+const HOT_IDB_KEY = 'dev/hotReload';
 
 export async function takePendingLoad(): Promise<PendingLoad | null> {
   // Dev only: Vite full-reloaded the page after a code edit; resume the snapshot taken just
@@ -57,10 +59,10 @@ export async function takePendingLoad(): Promise<PendingLoad | null> {
     try {
       // Not removed until the resumed game is running (startSession): another edit saved while
       // this boot is still loading reloads again, and must resume the same snapshot.
-      const hot = sessionStorage.getItem(HOT_KEY);
-      if (hot) {
-        const file = JSON.parse(hot) as SaveFile;
-        return { slot: file.meta.slot, file };
+      if (sessionStorage.getItem(HOT_KEY)) {
+        const file = await defaultBackend().get<SaveFile>(HOT_IDB_KEY);
+        if (file) return { slot: file.meta.slot, file };
+        sessionStorage.removeItem(HOT_KEY);
       }
     } catch (e) {
       sessionStorage.removeItem(HOT_KEY);
@@ -213,10 +215,16 @@ export async function installSave(
   // Dev only: snapshot the running game right before Vite reloads the page for a code edit.
   // Kept in sessionStorage (this tab only) and consumed by takePendingLoad on the next boot.
   if (import.meta.hot) {
-    const snapshot = () => {
+    // The snapshot goes to IndexedDB (sessionStorage only holds a marker): a well-played game
+    // easily exceeds Firefox's ~5 MB sessionStorage quota. Vite awaits these listeners before
+    // reloading, so the async write completes first.
+    const snapshot = async () => {
+      // A dev reload is on purpose: no "Leave site?" prompt (it would block Vite's reload).
+      disarmUnloadGuard();
       if (!mgr.active || game.player.dead) return;
       try {
-        sessionStorage.setItem(HOT_KEY, JSON.stringify(mgr.snapshot(mgr.slot ?? 'hot-reload')));
+        await defaultBackend().put(HOT_IDB_KEY, mgr.snapshot(mgr.slot ?? 'hot-reload'));
+        sessionStorage.setItem(HOT_KEY, '1');
       } catch (e) {
         console.warn(`hot-reload snapshot failed (game will restart): ${(e as Error).message}`);
       }
