@@ -90,7 +90,8 @@ class Expander {
     } else def = ref;
     const items = this.entries(def.subtype, def.entries, stackIds);
     const ci = def['container-item'];
-    if (ci && items.length) return [{ id: ci, count: 1, contents: items }];
+    // CDDA: "container-item": "null" means "spawn loose", not "wrap in the null item".
+    if (ci && ci !== 'null' && items.length) return [{ id: ci, count: 1, contents: items }];
     return items;
   }
 
@@ -153,7 +154,7 @@ class Expander {
     for (const g of e['contents-group'] ?? []) contents.push(...this.group(g, stackIds));
     if (contents.length) it.contents = [...(it.contents ?? []), ...stack(contents)];
     const container = e['container-item'] ?? (e['container-group'] ? this.group(e['container-group'], stackIds)[0]?.id : undefined);
-    if (container) return { id: container, count: 1, contents: [it] };
+    if (container && container !== 'null') return { id: container, count: 1, contents: [it] };
     return it;
   }
 }
