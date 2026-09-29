@@ -1,7 +1,7 @@
-// Extract CDDA worldgen content (mapgen, palettes, overmap terrains/specials, region
-// settings, city names) into compact JSON under public/data/.
+// Extract Cataclysm: Bright Nights worldgen content (mapgen, palettes, overmap terrains/
+// specials, region settings, city names) into compact JSON under public/data/.
 //
-// Usage: npm run extract:mapgen -- [--cdda ~/code/Cataclysm-DDA] [--out public/data] [--dry-run]
+// Usage: npm run extract:mapgen -- [--cdda ~/code/Cataclysm-BN] [--out public/data] [--dry-run]
 //   --dry-run   parse + report sizes/stats, write nothing
 //
 // Only mapgen reachable from what our overmap generator can place is kept (city buildings
@@ -21,8 +21,8 @@ import { migrateGroup, normalizeGroupRef, type ItemMigration } from './itemgroup
 
 const argv = process.argv.slice(2);
 if (argv.includes('--help') || argv.includes('-h')) {
-  console.log(`extract:mapgen - CDDA mapgen/overmap JSON -> public/data/{mapgen,palettes,overmap}.json
-  --cdda <dir>   CDDA checkout (default ~/code/Cataclysm-DDA)
+  console.log(`extract:mapgen - BN mapgen/overmap JSON -> public/data/{mapgen,palettes,overmap}.json
+  --cdda <dir>   game checkout (default $CDDA_DIR or ~/code/Cataclysm-BN)
   --out <dir>    output dir (default public/data)
   --dry-run      don't write files, just report`);
   process.exit(0);
@@ -37,34 +37,53 @@ const DRY = argv.includes('--dry-run');
 
 /** Wilderness overmap specials we scatter outside towns (must exist, non-mutable). */
 export const WILD_SPECIALS = [
-  'Evac Shelter', 'Evac Shelter Unfinished', 'Rural Gas Station', 'cemetery', 'cemetery_religious',
-  'church_rural', 'Dairy Farm', 'Apple Orchard', 'Cabin', 'Cabin_1', 'Cabin_2', 'Cabin_3', 'Cabin_4',
+  // BN's evacuee start: the shelter plus its two alternative floor plans.
+  'Evac Shelter', 'Evac Shelter 1', 'Evac Shelter 2', 'Rural Gas Station', 'cemetery', 'cemetery_religious',
+  'Dairy Farm', 'Apple Orchard', 'Farm', 'Cabin', 'Cabin_1', 'Cabin_2', 'Cabin_3', 'Cabin_4',
   'rural_house', 'rural_house_yard', 'campsite', 'junkyard', 'Radio Tower', 'desolate barn',
   'Hunting Blind', 'LMOE Shelter', 'Pond', 'Derelict Property', 'Moonshine Still', 'Sugar House',
-  'shooting range', '4x4_microlab_surface', 'Cave', 'Toxic Waste Dump', 'Swamp Shack',
+  'shooting range', '4x4_microlab_surface', 'Cave', 'Toxic Waste Dump', 'Swamp Shack', 'Fishing Pond',
   // The Free Merchants' refugee center (NPC hub); overmap.ts keeps one near the start town.
   'evac_center',
-  // CDDA 0.J+ labs are modular JSON specials (the hardcoded lab/lab_stairs/lab_finale
-  // generator is gone): the 6-floor mutagen lab (surface security + parking, residential,
-  // cargo, mutagen research floors down to z-7). overmap.ts guarantees one near the start.
-  'lab_mutagen_6_level',
+  // BN keeps two kinds of lab: the classic science lab ("Lab": a z0 lab_stairs entrance over the
+  // mutable lab_basement special, drawn by the Lua "lab" mapgen, see src/world/mapgen/lab.ts) and
+  // the modular JSON 6-floor mutagen lab. overmap.ts guarantees one of each near the start.
+  'Lab', 'lab_mutagen_6_level',
 ];
 
-/** Base terrains the overmap generator emits directly. */
+/** Base terrains the overmap generator emits directly (BN has no solid_earth/deep_rock: every
+ *  z<0 OMT defaults to empty_rock). `bridge` replaces road over water. The classic lab's
+ *  underground terrains come from overmap.ts's lab_basement generator. */
 const BASE_OTERS = [
   'field', 'forest', 'forest_thick', 'forest_water', 'road', 'road_nesw_manhole', 'river',
-  'river_center', 'lake_surface', 'lake_shore', 'open_air', 'solid_earth', 'empty_rock', 'deep_rock',
+  'river_center', 'lake_surface', 'lake_shore', 'open_air', 'empty_rock', 'bridge',
+  'lab', 'lab_filler', 'lab_stairs', 'lab_core', 'lab_finale',
 ];
+
+/** BN mapgen_functions.cpp get_mapgen_cfunction: C++ generators an OMT uses when its mapgen id
+ *  equals one of these names (load_overmap_terrain_mapgens registers them by id) or when its
+ *  overmap_terrain says {"method": "builtin", "name": ...}. */
+const BN_CFUNCTIONS = new Set([
+  'null', 'test', 'crater', 'field', 'forest', 'forest_trail_straight', 'forest_trail_curved', 'forest_trail_end',
+  'forest_trail_tee', 'forest_trail_four_way', 'hive', 'road_straight', 'road_curved', 'road_end', 'road_tee',
+  'road_four_way', 'highway', 'railroad_straight', 'railroad_curved', 'railroad_end', 'railroad_tee',
+  'railroad_four_way', 'railroad_bridge', 'river_center', 'river_curved_not', 'river_straight', 'river_curved',
+  'river_shore', 'parking_lot', 'cavern', 'open_air', 'rift', 'hellmouth', 'empty_rock', 'rock', 'subway_straight',
+  'subway_curved', 'subway_end', 'subway_tee', 'subway_four_way', 'sewer_straight', 'sewer_curved', 'sewer_end',
+  'sewer_tee', 'sewer_four_way', 'tutorial', 'lake_shore', 'pd_border',
+]);
 const LINEAR_SUFFIXES = ['_straight', '_curved', '_end', '_tee', '_four_way'];
 const DIRS = ['_north', '_east', '_south', '_west'];
 
 // ---------------------------------------------------------------------------------------
 // Load (shared loader from tools/extract/cdda.ts; the main extractor skips these types)
 
+// BN keeps region settings in one monolithic region_settings object (DDA 0.F style), not DDA
+// 0.J's region_settings_* / forest_biome_* split.
 const WANTED_TYPES = [
-  'mapgen', 'palette', 'overmap_terrain', 'overmap_special', 'city_building', 'overmap_location', 'region_settings',
-  'region_settings_city', 'region_settings_forest', 'region_settings_lake', 'region_settings_forest_mapgen',
-  'forest_biome_mapgen', 'forest_biome_component', 'region_settings_terrain_furniture', 'region_terrain_furniture', 'MIGRATION',
+  'mapgen', 'palette', 'overmap_terrain', 'overmap_special', 'city_building', 'overmap_location', 'region_settings', 'MIGRATION',
+  // only for their "alias" ids (see canonical below)
+  'terrain', 'furniture',
 ];
 const byType = loadCddaObjects(CDDA, { types: WANTED_TYPES });
 const all = (t: string) => byType.get(t) ?? [];
@@ -76,6 +95,29 @@ function strip(o: any): any {
   if (o && typeof o === 'object') {
     const r: any = {};
     for (const [k, v] of Object.entries(o)) if (!k.startsWith('//')) r[k] = strip(v);
+    return r;
+  }
+  return o;
+}
+// BN terrain/furniture may declare "alias" ids (t_fence -> t_fence_h, t_fence_v; the roof's
+// t_gutter_north...) that mapgen keeps using. The runtime registries only know canonical ids,
+// so mapgen strings naming an alias are rewritten here.
+const aliasOf = new Map<string, string>();
+for (const t of ['terrain', 'furniture']) {
+  for (const o of all(t)) {
+    for (const a of o.alias === undefined ? [] : Array.isArray(o.alias) ? o.alias : [o.alias]) {
+      const prev = aliasOf.get(a);
+      if (prev && prev !== o.id) throw new Error(`${t} alias ${a} claimed by ${prev} and ${o.id}`);
+      aliasOf.set(a, o.id);
+    }
+  }
+}
+function canonical(o: any): any {
+  if (typeof o === 'string') return aliasOf.get(o) ?? o;
+  if (Array.isArray(o)) return o.map(canonical);
+  if (o && typeof o === 'object') {
+    const r: any = {};
+    for (const [k, v] of Object.entries(o)) r[aliasOf.get(k) ?? k] = canonical(v);
     return r;
   }
   return o;
@@ -92,8 +134,9 @@ for (const [id, r] of oterFamily) {
   {
     const def: OterDef = { id, name: str(r.name) || id, sym: str(r.sym ?? '?'), color: str(r.color ?? 'white'), flags: [...new Set<string>(r.flags ?? [])] };
     if (r.uniform_terrain) def.uniform = r.uniform_terrain;
-    const b = Array.isArray(r.mapgen) ? r.mapgen.find((m: any) => m.builtin) : undefined;
-    if (b) def.builtin = b.builtin;
+    // BN spells builtins {"method": "builtin", "name": "forest"} (DDA: {"builtin": "forest"}).
+    const b = Array.isArray(r.mapgen) ? r.mapgen.find((m: any) => m.method === 'builtin' || m.builtin) : undefined;
+    if (b) def.builtin = b.name ?? b.builtin;
     if (typeof r.extras === 'string') def.extras = r.extras;
     if (typeof r.mondensity === 'number') def.mondensity = r.mondensity;
     if (r.spawns) def.spawns = r.spawns;
@@ -130,6 +173,10 @@ for (const [type, city] of [['overmap_special', false], ['city_building', true]]
       occurrences: range(o.occurrences, [0, 0]),
       flags: o.flags ?? [],
     };
+    // BN "place_nested": another (usually mutable) special grown from a point of this one,
+    // e.g. the classic Lab's lab_basement under its lab_stairs entrance.
+    if (Array.isArray(o.place_nested) && o.place_nested.length)
+      specials[o.id].nested = o.place_nested.map((n: any) => ({ p: pt(n.point), special: n.special }));
   }
 }
 for (const w of WILD_SPECIALS) if (!specials[w]) throw new Error(`WILD_SPECIALS entry not found: ${w}`);
@@ -138,71 +185,86 @@ const locations: Record<string, string[]> = {};
 for (const o of all('overmap_location')) locations[o.id] = o.terrains ?? [];
 
 // ---------------------------------------------------------------------------------------
-// Region settings (id "default"), with forest biomes and region pseudo terrain resolved.
+// Region settings (BN region_settings "default", one monolithic object).
 
-const byId = (type: string, id: string) => {
-  const o = all(type).find((x) => x.id === id);
-  if (!o) throw new Error(`${type} ${id} not found`);
-  return o;
+const rs = all('region_settings').find((o) => o.id === 'default');
+if (!rs) throw new Error('region_settings default not found');
+/** {id: weight} (BN) -> [id, weight][] (what the runtime's weighted picks read). */
+const weights = (o: Record<string, number> | undefined, what: string): [string, number][] => {
+  if (!o || typeof o !== 'object' || Array.isArray(o)) throw new Error(`region_settings: ${what} is not an {id: weight} object`);
+  return Object.entries(o).filter(([k]) => !k.startsWith('//')).map(([k, w]) => [k, Number(w)]);
 };
-const rs = byId('region_settings', 'default');
-const rsCity = byId('region_settings_city', rs.cities);
-const rsForest = byId('region_settings_forest', rs.forests);
-const rsLake = byId('region_settings_lake', rs.lakes);
-const rsComp = byId('region_settings_forest_mapgen', rs.forest_composition);
-const components = resolveFamily(all('forest_biome_component')).byId;
-const resolveComponent = (id: string): any => {
-  const c = components.get(id);
-  if (!c) throw new Error(`forest_biome_component ${id} missing`);
-  return c;
-};
-const forestBiomes: ForestBiome[] = rsComp.biomes.map((bid: string) => {
-  const b = byId('forest_biome_mapgen', bid);
-  const comps = (b.components as string[]).map(resolveComponent).sort((a, c) => (a.sequence ?? 0) - (c.sequence ?? 0));
+const rsCity = rs.city;
+// BN forest_mapgen_settings is keyed by the forest OMT type it applies to; components are
+// named {sequence, chance, types} objects (forest_mapgen_settings in regional_settings.cpp).
+const forestBiomes: ForestBiome[] = Object.entries<any>(rs.forest_mapgen_settings).map(([oter, b]) => {
+  const comps = Object.values<any>(b.components ?? {}).sort((a, c) => (a.sequence ?? 0) - (c.sequence ?? 0));
+  const tf: ForestBiome['terrain_furniture'] = {};
+  for (const [ter, e] of Object.entries<any>(b.terrain_furniture ?? {})) tf[ter] = { chance: e.chance, furniture: weights(e.furniture, `${oter}.terrain_furniture.${ter}`) };
   return {
-    id: b.id,
-    terrains: b.terrains ?? [],
+    id: oter,
+    terrains: [oter],
     sparseness_adjacency_factor: b.sparseness_adjacency_factor ?? 0,
     item_group: b.item_group,
     item_group_chance: b.item_group_chance,
     item_spawn_iterations: b.item_spawn_iterations,
-    groundcover: b.groundcover ?? [],
-    components: comps.map((c) => ({ chance: c.chance, types: c.types })),
-    terrain_furniture: b.terrain_furniture,
+    groundcover: weights(b.groundcover, `${oter}.groundcover`),
+    components: comps.map((c) => ({ chance: c.chance, types: weights(c.types, `${oter} component`) })),
+    terrain_furniture: Object.keys(tf).length ? tf : undefined,
   } satisfies ForestBiome;
 });
-const tf = byId('region_settings_terrain_furniture', rs.terrain_furniture);
+const rtf = rs.region_terrain_and_furniture;
 const regionTerrain: Record<string, [string, number][]> = {};
 const regionFurniture: Record<string, [string, number][]> = {};
-for (const id of tf.ter_furn as string[]) {
-  const o = byId('region_terrain_furniture', id);
-  if (o.ter_id) regionTerrain[o.ter_id] = o.replace_with_terrain;
-  if (o.furn_id) regionFurniture[o.furn_id] = o.replace_with_furniture;
-}
+for (const [id, o] of Object.entries<any>(rtf.terrain)) regionTerrain[id] = weights(o, id);
+for (const [id, o] of Object.entries<any>(rtf.furniture)) regionFurniture[id] = weights(o, id);
+const fc = rs.field_coverage;
 const region: RegionSettings = {
   default_groundcover: rs.default_groundcover,
   city: {
-    city_size: rsCity.city_size, city_spacing: rsCity.city_spacing,
+    // BN world options CITY_SIZE / CITY_SPACING (options.cpp defaults 8 and 4); BN's region
+    // settings don't carry them.
+    city_size: 8, city_spacing: 4,
     shop_radius: rsCity.shop_radius, shop_sigma: rsCity.shop_sigma,
     park_radius: rsCity.park_radius, park_sigma: rsCity.park_sigma,
-    houses: rsCity.houses, shops: rsCity.shops, parks: rsCity.parks,
+    apartment_radius: rsCity.apartment_radius, apartment_sigma: rsCity.apartment_sigma,
+    houses: weights(rsCity.houses, 'city.houses'), shops: weights(rsCity.shops, 'city.shops'), parks: weights(rsCity.parks, 'city.parks'),
+    urban_houses: weights(rsCity.urban_houses, 'city.urban_houses'), urban_shops: weights(rsCity.urban_shops, 'city.urban_shops'),
+    finales: weights(rsCity.finales, 'city.finales'),
   },
   forest: {
-    noise_threshold_forest: rsForest.noise_threshold_forest,
-    noise_threshold_forest_thick: rsForest.noise_threshold_forest_thick,
-    noise_threshold_swamp_adjacent_water: rsForest.noise_threshold_swamp_adjacent_water,
-    noise_threshold_swamp_isolated: rsForest.noise_threshold_swamp_isolated,
+    noise_threshold_forest: rs.overmap_forest_settings.noise_threshold_forest,
+    noise_threshold_forest_thick: rs.overmap_forest_settings.noise_threshold_forest_thick,
+    noise_threshold_swamp_adjacent_water: rs.overmap_forest_settings.noise_threshold_swamp_adjacent_water,
+    noise_threshold_swamp_isolated: rs.overmap_forest_settings.noise_threshold_swamp_isolated,
   },
-  lake: { noise_threshold_lake: rsLake.noise_threshold_lake, lake_size_min: rsLake.lake_size_min },
+  lake: { noise_threshold_lake: rs.overmap_lake_settings.noise_threshold_lake, lake_size_min: rs.overmap_lake_settings.lake_size_min },
   forestBiomes,
   regionTerrain,
   regionFurniture,
+  field: {
+    percent_coverage: fc.percent_coverage,
+    default_ter: fc.default_ter,
+    other: weights(fc.other, 'field_coverage.other'),
+    boost_chance: fc.boost_chance,
+    boosted_percent_coverage: fc.boosted_percent_coverage,
+    boosted_other: weights(fc.boosted_other, 'field_coverage.boosted_other'),
+    boosted_other_percent: fc.boosted_other_percent,
+  },
 };
 
 // ---------------------------------------------------------------------------------------
 // Mapgen reachability
 
-const mapgens = all('mapgen').filter((m) => !m.update_mapgen_id);
+// BN "method": "lua" mapgens (luamethod: lab, lab_ice, slimepit) have no object; their
+// om_terrains get a builtin marker "lua:<method>" (src/world/mapgen/lab.ts ports the lab one).
+const luaBuiltins: Record<string, string> = {};
+for (const m of all('mapgen')) {
+  if (m.method !== 'lua') continue;
+  for (const id of [m.om_terrain].flat(2) as string[]) luaBuiltins[id] = `lua:${m.luamethod}`;
+}
+const mapgens = all('mapgen').filter((m) => !m.update_mapgen_id && m.method !== 'lua');
+for (const m of mapgens) if (m.method !== 'json') throw new Error(`unknown mapgen method ${m.method}`);
 const nestedDefs = new Map<string, any[]>();
 const omtDefs = new Map<string, any[]>();
 for (const m of mapgens) {
@@ -238,7 +300,13 @@ const addOm = (id: string) => {
   if (terrains[b]?.flags.includes('LINEAR')) for (const s of LINEAR_SUFFIXES) wantOm.add(b + s);
 };
 BASE_OTERS.forEach(addOm);
-const cityIds = [...region.city.houses, ...region.city.shops, ...region.city.parks].map(([id]) => id);
+// The Lua lab mapgen runs these JSON floor plans (data:generate) for its rooms.
+for (const id of ['lab_1side', 'lab_4side', 'lab_4side_filler', 'lab_finale_1level', 'lab_1side_ice', 'lab_finale_1level_ice']) {
+  if (!omtDefs.has(id)) throw new Error(`lab floor plan mapgen ${id} missing`);
+  addOm(id);
+}
+const c = region.city;
+const cityIds = [...new Set([...c.houses, ...c.shops, ...c.parks, ...(c.urban_houses ?? []), ...(c.urban_shops ?? []), ...(c.finales ?? [])].map(([id]) => id))];
 for (const id of [...cityIds, ...WILD_SPECIALS]) {
   const s = specials[id];
   if (s) s.overmaps.forEach((o) => o.om && addOm(o.om));
@@ -341,6 +409,7 @@ function normalizeMapgenItems(obj: any): any {
   }
   (obj.place_items ?? []).forEach(group);
   (obj.place_item ?? []).forEach(single);
+  (obj.add ?? []).forEach(single); // BN: deprecated alias of place_item
   (obj.place_loot ?? []).forEach(single);
   for (const v of Object.values<any>(obj.sealed_item ?? {})) each(v, (e) => { group(e.items); single(e.item); });
   return obj;
@@ -364,6 +433,12 @@ for (const id of keptNested) {
 }
 for (const [id, m] of [...keptUpdates].sort(([a], [b]) => (a < b ? -1 : 1))) {
   (mapgenOut.update ??= {})[id] = mapgenOut.objects.push(normalizeMapgenItems(strip(m.object))) - 1;
+}
+// Builtin (C++ / Lua) generators by mapgen id, for ids the generator may need.
+mapgenOut.builtin = {};
+for (const id of [...wantOm].sort()) {
+  const name = luaBuiltins[id] ?? terrains[id]?.builtin ?? (BN_CFUNCTIONS.has(id) ? id : undefined);
+  if (name) mapgenOut.builtin[id] = name;
 }
 const palettesOut: Record<string, any> = {};
 for (const id of keptPalettes) palettesOut[id] = normalizeMapgenItems(strip(paletteRaw.get(id)));
@@ -391,12 +466,17 @@ const overmapOut: OvermapData = {
 // ---------------------------------------------------------------------------------------
 // Write
 
+mapgenOut.objects = mapgenOut.objects.map(canonical);
+for (const k of Object.keys(palettesOut)) palettesOut[k] = canonical(palettesOut[k]);
+overmapOut.region = canonical(overmapOut.region);
+console.log(`canonicalized ${aliasOf.size} terrain/furniture alias ids`);
+
 const outputs: [string, unknown][] = [
   ['mapgen.json', mapgenOut],
   ['palettes.json', palettesOut],
   ['overmap.json', overmapOut],
 ];
-console.log(`om_terrain ids with mapgen: ${Object.keys(mapgenOut.omt).length} (of ${omtDefs.size}), ` +
+console.log(`om_terrain ids with mapgen: ${Object.keys(mapgenOut.omt).length} (of ${omtDefs.size}), builtin: ${Object.keys(mapgenOut.builtin).length}, ` +
   `nested: ${keptNested.size} (of ${nestedDefs.size}), update_mapgen: ${keptUpdates.size} (of ${updateDefs.size}), palettes: ${keptPalettes.size} (of ${paletteRaw.size}), ` +
   `terrains: ${Object.keys(usedTerrains).length}, specials: ${Object.keys(usedSpecials).length}`);
 if (!DRY) mkdirSync(OUT, { recursive: true });

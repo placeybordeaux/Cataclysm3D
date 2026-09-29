@@ -28,6 +28,11 @@ tileset, rendered in the "3D pixel art" style of *Project Shadowglass*.
 - Tileset (CC-BY-SA): `/home/peter/code/CDDA-3d/vendor/tilesets/gfx/UltimateCataclysm`
   (source form: per-sprite PNGs + JSON; see its `tile_info.json`). `vendor/` is git-ignored —
   from a worktree, use the absolute path above.
+- v2 (Bright Nights): `npm run atlas` reads BN's *compiled* UltiCa by default
+  (`~/code/Cataclysm-BN/gfx/UltimateCataclysm`: tile_config.json + sheets, tools/atlas/compiled.ts);
+  `--source-form --tileset-dir <vendor dir>` is v1's input, `--fill-from <vendor dir>` optionally adds
+  the ids BN's tileset lacks. The world extractors (mapgen, npcs, vehicles, ui, achievements) default
+  to `~/code/Cataclysm-BN` like the core one (`defaultCddaDir()`; `$CDDA_DIR` overrides).
 
 ## Tooling
 
@@ -138,14 +143,17 @@ tests/               vitest unit tests (pure logic, no DOM/WebGL)
 
 ### Combat depth (src/game/{techniques,martialarts,gunmods,monguns,explosion}.ts, wired by src/combatdepth.ts)
 - `meleeAttack(c, {dodge, armor, info?: TargetInfo}, rng, name, {allowSpecial, aoeTargets, forceTechnique})`
-  picks a weapon/style technique (melee.cpp pick_technique: dummy/defensive skipped, crit_tec,
-  `condition` via a small dialogue-condition evaluator, skill/weapon requirements, weighting, AoE
-  needing victims) and returns `technique` + `outcome` (stun/down turns, knockback, aoe, disarm);
+  picks a weapon/style technique (BN melee.cpp get_valid_techniques: dummy/defensive skipped, crit_tec,
+  downed/stunned/human_target, BN ma_requirements (req_buffs, skills, weapon damage/flags/categories,
+  mutations_required, wall_adjacent via `maWorld`), weighting, AoE needing victims; no DDA dialogue
+  conditions) and returns `technique` + `outcome` (stun/down turns, knockback, aoe, disarm);
+  Rolled damage carries BN's `multiplier` (armor comes off before it: `applyFlatArmor`).
   the world layer applies it (`applyTechniqueToMonster` in playercombat.ts: monster effects +
   dash knockback; `PlayerCombat.swingAt`/`aoeVictims` for wide/spin/impale follow-ups). Messages
   use the technique text (`techniqueMessage`, `hitMessage`: "You sweep the zombie for 12 damage.").
   No `info` = no techniques (legacy callers). Glass shattering + `handleMeleeWear` happen inside.
-- Defense: `monsterMeleeAttack` uses `tryDodgeRoll` (one dodge per combat turn, stamina cost) and
+- Defense: `monsterMeleeAttack` uses `tryDodgeRoll` (BN: always rolls, each dodge already spent this
+  turn costs 2 dodge; `onDodged(c, attackerSkill)` spends it when the attack misses) and
   `blockHit` (WBLOCK_1/2/3 weapons, style arm/leg blocks, logarithmic_range(0,40,score) of physical
   damage gets through, "You block most of the damage with your baseball bat!"); NPC-vs-character
   melee uses `characterDefend`. A combat turn is `COMBAT_TURN` = 1/MELEE_SCALE real s; dodges/blocks
@@ -316,6 +324,21 @@ tests/               vitest unit tests (pure logic, no DOM/WebGL)
   `cdda.labLoot(r)`, `cdda.rideElevator(z?)`, `cdda.useComputer(picks?)`, `cdda.swipeCard()`,
   `cdda.dissect()`. Probes: `tsx tools/dev/probe_lab.ts <seed> [special] [z]` (OMTs, stairs, loot),
   `tools/dev/probe_reach.ts <seed> [special] [keys]` (walk-in reachability).
+
+### Bright Nights world (src/world/mapgen/{bnbuiltin,lab}.ts, tools/extract/mapgen.ts)
+- BN builds fields, roads and parking lots in C++ and labs in Lua; `mapgen.json` `builtin` maps a
+  mapgen id to its generator (`field`, `road_straight`..., `parking_lot`, `empty_rock`, `lua:lab`), and
+  `worldgen.generateInto` runs JSON first, then water, then these. bnbuiltin.ts ports mapgen_field /
+  mapgen_road / mapgen_parking_lot; lab.ts ports data/json/lua/mapgen/lab.lua (z0 card-reader bunker,
+  JSON floor plans `lab_4side`/`lab_1side`/`lab_finale_1level` per room, walls/doors, stairs, lights).
+- Overmap: BN city profile (hamlets, finale buildings, urban lists over size 10), the classic `Lab`
+  special grows a simplified mutable `lab_basement` (CLASSIC_LAB_SPECIAL, LAB_BASEMENT_TYPES), bridges
+  replace straight roads over water, z<0 is `empty_rock`. The start is BN's `Evac Shelter`.
+- BN semantics kept at runtime: floors have no INDOORS flag (indoors = covered from above), every
+  open-air tile over terrain with a `roof` gets it (mapbuffer post-pass), consoles are `t_console`
+  terrain, vending machines are `f_vending_c` or broken `f_vending_o`, `translate_ter` works.
+  Terrain/furniture `alias` ids are rewritten to canonical ids by the extractor.
+- `tools/bn-shots.sh [prefix] [seed]`: shelter, street, house, forest, top-down town, overmap, lab.
 
 ### Seasons, foraging, farming, water (src/game/{sun,harvest,farming,water,woodcut,actualize}.ts, src/nature.ts)
 - `sun.ts` is the one sun: `sunPosition(seconds)` (CDDA calendar.cpp altitude/azimuth, Boston),

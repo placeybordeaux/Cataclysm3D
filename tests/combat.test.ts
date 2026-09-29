@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { Rng } from '../src/core/rng';
 import { Character } from '../src/game/character';
 import {
-  aim, attackCooldownSeconds, attackSpeedMoves, critChance, dispersionFromSkill, fireGun, gunDispersion, gunRecoil, maxDispersionMoa,
+  aim, applyFlatArmor, attackCooldownSeconds, attackSpeedMoves, critChance, dispersionFromSkill, fireGun, gunDispersion, gunRecoil, maxDispersionMoa,
   meleeAttack, meleeHitBase, meleeHitChance, monsterCanAttackHigh, monsterMeleeAttack, normalAtLeast, rollMeleeDamage, selectBodyPart,
   sizeFromVolume, swingSpeedRating, unwieldyWarning, weaponDispersionSources,
 } from '../src/game/combat';
@@ -43,25 +43,34 @@ describe('weapon speed legibility', () => {
   });
 });
 
-describe('melee: attack speed (melee.cpp Character::attack_speed)', () => {
-  it('pipe at 8 dex, no skill: 40 + 40*15/15 - 4 = 76 moves', () => {
+describe('melee: attack speed (BN melee.cpp Character::attack_cost)', () => {
+  it('pipe at 8 dex, no skill: 40 + 40*15/15 - 8 dex = 72 moves', () => {
     const c = survivor();
     const pipe = createItem(data, 'pipe');
-    expect(attackSpeedMoves(c, pipe)).toBe(76);
-    expect(attackCooldownSeconds(c, pipe)).toBeCloseTo(76 / 100 / 2);
+    expect(attackSpeedMoves(c, pipe)).toBe(72);
+    expect(attackCooldownSeconds(c, pipe)).toBeCloseTo(72 / 100 / 2);
   });
 
-  it('unarmed: attack_time 65 -> 32 + 32 - 4 = 60; melee 10 -> 32 + 10 - 4', () => {
+  it('unarmed: attack_cost 65 -> 32 + 32 - 8 = 56; melee 10 -> 32 + 10 - 8', () => {
     const c = survivor();
-    expect(attackSpeedMoves(c, null)).toBe(60);
+    expect(attackSpeedMoves(c, null)).toBe(56);
     c.setSkill('melee', 10);
-    expect(attackSpeedMoves(c, null)).toBe(38);
+    expect(attackSpeedMoves(c, null)).toBe(34);
   });
 
   it('exhaustion doubles the base cost at 0 stamina', () => {
     const c = survivor();
     c.stamina = 0;
-    expect(attackSpeedMoves(c, createItem(data, 'pipe'))).toBe(40 * 2 + 40 - 4);
+    expect(attackSpeedMoves(c, createItem(data, 'pipe'))).toBe(40 * 2 + 40 - 8);
+  });
+
+  it('torso encumbrance slows the swing', () => {
+    const c = survivor();
+    c.inv.wear(createItem(data, 'hoodie'));
+    c.inv.wear(createItem(data, 'jacket_leather'));
+    const enc = c.inv.encumbrance('torso');
+    expect(enc).toBeGreaterThan(0);
+    expect(attackSpeedMoves(c, createItem(data, 'pipe'))).toBe(72 + enc);
   });
 });
 
@@ -72,11 +81,11 @@ describe('melee: to-hit and crits', () => {
     c.setSkill('bashing', 3);
     c.setSkill('melee', 2);
     expect(meleeHitBase(c, createItem(data, 'pipe'))).toBe(2 + 1 + 1);
-    // torso encumbrance 20 -> -2
+    // BN: torso encumbrance 20 scales accuracy by 1 - 20/100 (DDA subtracted enc/10)
     const d = survivor();
     d.inv.wear(createItem(data, 'hoodie'));
     d.inv.wear(createItem(data, 'jacket_leather'));
-    expect(meleeHitBase(d, null)).toBe(2 - 2);
+    expect(meleeHitBase(d, null)).toBeCloseTo(2 * 0.8);
   });
 
   it('hit chance vs an undodging zombie matches normal(10, 25) >= 0', () => {
@@ -107,12 +116,28 @@ describe('melee: to-hit and crits', () => {
 });
 
 describe('melee: damage (roll_melee_damage_internal)', () => {
-  it('pipe average: (10 + 0.75*8 str) with low cap 0.4, x0.8 at skill 0 = 8.96 bash', () => {
+  it('pipe average: (10 + 0.75*8 str) with low cap 0.4, x0.7 armed at bashing 0 = 7.84 bash', () => {
     const c = survivor();
     const d = rollMeleeDamage(c, createItem(data, 'pipe'), false, new Rng(1), true);
     expect(d).toHaveLength(1);
     expect(d[0].type).toBe('bash');
-    expect(d[0].amount).toBeCloseTo(8.96);
+    expect(d[0].amount).toBeCloseTo(7.84);
+    expect(d[0].multiplier).toBeCloseTo(0.7);
+  });
+
+  it('bare hands add the unarmed skill to the blow and use the unarmed multiplier', () => {
+    const c = survivor();
+    c.setSkill('unarmed', 5);
+    // (0 + 6 str + 5 skill) with low cap 0.4 → avg 7.7, x(0.96 + 0.2)
+    const d = rollMeleeDamage(c, null, false, new Rng(1), true).find((u) => u.type === 'bash')!;
+    expect(d.amount).toBeCloseTo(((0.4 * 11 + 11) / 2) * 1.16);
+  });
+
+  it('armor comes off before the skill multiplier (damage_unit::damage_multiplier)', () => {
+    const c = survivor();
+    const units = rollMeleeDamage(c, createItem(data, 'pipe'), false, new Rng(1), true);
+    // raw 11.2 − armor 2 = 9.2, × 0.7
+    expect(applyFlatArmor(units, { bash: 2 })[0].amount).toBeCloseTo((11.2 - 2) * 0.7);
   });
 
   it('stab skill multiplier 0.66 at skill 0; crits multiply by 1 + skill/10 and ignore 34% armor', () => {
@@ -197,9 +222,9 @@ describe('ranged', () => {
 });
 
 describe('monsters vs the survivor', () => {
-  it('zombie accuracy normal(4*5, 25) vs dodge (8/2)*5: about half the attacks land', () => {
+  it('zombie accuracy normal(4*5, 25) vs BN dodge (8/4)*5: about two in three attacks land', () => {
     const c = survivor();
-    expect(c.dodge()).toBeCloseTo(4, 1);
+    expect(c.dodge()).toBeCloseTo(2, 1);
     const rng = new Rng(6);
     let hits = 0;
     const N = 3000;
@@ -212,8 +237,9 @@ describe('monsters vs the survivor', () => {
       c.stamina = c.staminaMax();
       if (monsterMeleeAttack(zombie, c, rng).hit) hits++;
     }
-    expect(hits / N).toBeGreaterThan(0.45);
-    expect(hits / N).toBeLessThan(0.56);
+    const expected = normalAtLeast(20, 25, 10);
+    expect(hits / N).toBeGreaterThan(expected - 0.03);
+    expect(hits / N).toBeLessThan(expected + 0.03);
   });
 
   it('hits land on body parts by hit_size (anatomy::select_body_part)', () => {

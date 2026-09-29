@@ -1,5 +1,5 @@
-// NPCs against the real extracted CDDA data: generation from templates/classes, the dialogue
-// engine on real talk topics (conditions, effects, trials, variables), missions, trade
+// NPCs against the real extracted Bright Nights data: generation from templates/classes, the
+// dialogue engine on real talk topics (conditions, effects, trials, variables), missions, trade
 // valuation, and the real-time AI (followers fighting zombies, zombies attacking NPCs).
 import fs from 'node:fs';
 import path from 'node:path';
@@ -83,14 +83,15 @@ describe('npc generation', () => {
     expect(sk.cooking).toBeLessThanOrEqual(3);
   });
 
-  // TODO(BN): written for DDA data/behaviour; fails on Bright Nights core data (AssertionError: expected 0 to be greater than 3). Port with its system.
-  it.skip('builds Smokes from his template: name, class gear, shop stock, mission', () => {
+  it('builds the refugee center merchant from its template: name, class gear, shop stock, mission', () => {
     const { npcs } = world();
-    const n = npcs.spawn({ template: 'free_merchants_merchant' }, 14, 12, 0)!;
-    expect(n.name).toBe('Smokes');
-    expect(n.displayName()).toBe('Smokes, Merchant');
+    const n = npcs.spawn({ template: 'evac_merchant' }, 14, 12, 0)!;
+    // BN's merchant has no unique name: a random one plus the template's name_suffix.
+    expect(n.name).toMatch(/^\S+/);
+    expect(n.displayName()).toBe(`${n.name}, Merchant`);
     expect(n.faction).toBe('free_merchants');
     expect(n.isShopkeeper()).toBe(true);
+    // BN's plain "shopkeeper_item_group" id is normalized to DDA's list form by extract:npcs.
     expect(n.stock.length).toBeGreaterThan(3);
     expect(n.inv.worn.length).toBeGreaterThan(0);
     expect(npcs.missions.offeredBy(n).map((m) => m.id)).toEqual(['MISSION_FREE_MERCHANTS_EVAC_1']);
@@ -121,14 +122,15 @@ describe('npc generation', () => {
 
   it('round-trips through toJSON/fromJSON', () => {
     const { npcs, game } = world();
-    const n = npcs.spawn({ template: 'free_merchants_merchant' }, 14, 12, 0)!;
+    const n = npcs.spawn({ template: 'evac_merchant' }, 14, 12, 0)!;
+    const name = n.name;
     n.vars.set('foo', 'bar');
     n.op.trust = 3;
     const j = JSON.parse(JSON.stringify(npcs.toJSON()));
     const w2 = new NpcSystem(game, nd, null);
     w2.fromJSON(j);
     const m = w2.npcs[0];
-    expect(m.name).toBe('Smokes');
+    expect(m.name).toBe(name);
     expect(m.vars.get('foo')).toBe('bar');
     expect(m.op.trust).toBe(3);
     expect(m.stock.length).toBe(n.stock.length);
@@ -168,7 +170,7 @@ describe('dialogue on real talk topics', () => {
   // TODO(BN): written for DDA data/behaviour; fails on Bright Nights core data (AssertionError: expected 'I gotta go<punc.…>' to match /^I gotta go[.…]$/). Port with its system.
   it.skip('expands punctuation snippets with an ellipsis and the default goodbye', () => {
     const { npcs } = world(3);
-    const n = npcs.spawn({ template: 'free_merchants_merchant' }, 14, 12, 0)!;
+    const n = npcs.spawn({ template: 'evac_merchant' }, 14, 12, 0)!;
     const d = npcs.talkTo(n)!;
     expect(d.parseTags('I gotta go<punc.…>')).toMatch(/^I gotta go[.…]$/);
     expect(d.parseTags('Go<punc…!>')).toMatch(/^Go[…!]$/);
@@ -181,25 +183,30 @@ describe('dialogue on real talk topics', () => {
   });
 
 
-  it('Smokes: first meeting sets u_val, then the talk menu opens', () => {
-    const { npcs } = world(3);
-    const n = npcs.spawn({ template: 'free_merchants_merchant' }, 14, 12, 0)!;
+  it('merchant: merged topic definitions, conditional responses, and topic changes', () => {
+    const { npcs, game } = world(3);
+    const n = npcs.spawn({ template: 'evac_merchant' }, 14, 12, 0)!;
     const d = npcs.talkTo(n)!;
     let v = d.view();
-    expect(v.id).toBe('TALK_FREE_MERCHANTS_MERCHANT');
-    expect(v.line.length).toBeGreaterThan(3);
-    const who = v.responses.find((r) => r.text.startsWith('Who are you?'))!;
-    expect(who).toBeTruthy();
-    // Not yet met: "I wanted to talk." is hidden.
-    expect(v.responses.some((r) => r.text === 'I wanted to talk.')).toBe(false);
-    d.choose(who.index);
-    expect(npcs.playerVars.get('general_meeting_u_met_Gavin')).toBe('yes');
+    expect(v.id).toBe('TALK_EVAC_MERCHANT');
+    // dynamic_line switches on u_is_wearing badge_marshal
+    expect(v.line).toMatch(/Welcome[.…]/);
+    expect(v.line).not.toMatch(/marshal/);
+    const notes = "What's with these 'free merchant certified notes'?";
+    // u_has_item FMCNote: hidden until the survivor carries a note
+    expect(v.responses.some((r) => r.text === notes)).toBe(false);
+    // responses from later definitions of the same topic are appended, but hidden by their conditions
+    expect(v.responses.some((r) => r.text.startsWith('Are you interested in buying any processed lumber'))).toBe(false);
+    game.player.inv.pickUp(createItem(data, 'FMCNote'));
+    const again = new Dialogue(npcs, n);
+    again.start();
+    expect(again.view().responses.some((r) => r.text === notes)).toBe(true);
+    const plans = v.responses.find((r) => r.text === 'What are you doing here?')!;
+    expect(plans).toBeTruthy();
+    d.choose(plans.index);
     v = d.view();
-    expect(v.id).toBe('TALK_FREE_MERCHANTS_MERCHANT_Intro');
-    // Back to the main topic: the "met" branch is now available.
-    const back = new Dialogue(npcs, n);
-    back.start();
-    expect(back.view().responses.some((r) => r.text === 'I wanted to talk.')).toBe(true);
+    expect(v.id).toBe('TALK_EVAC_MERCHANT_PLANS');
+    expect(v.line.length).toBeGreaterThan(20);
   });
 
   it('stranger greeting: CDDA persuade/intimidate chances and hostile effect', () => {
@@ -249,7 +256,7 @@ describe('dialogue on real talk topics', () => {
 
   it('conditions: compare_string, u_has_items, is_season, npc_has_effect, trait', () => {
     const { npcs, game } = world();
-    const n = npcs.spawn({ template: 'free_merchants_merchant' }, 14, 12, 0)!;
+    const n = npcs.spawn({ template: 'evac_merchant' }, 14, 12, 0)!;
     const d = new Dialogue(npcs, n);
     npcs.playerVars.set('x', 'yes');
     expect(d.cond({ compare_string: ['yes', { u_val: 'x' }] })).toBe(true);
@@ -268,7 +275,7 @@ describe('dialogue on real talk topics', () => {
 
   it('effects: u_spawn_item, u_sell_item (owed), u_add_var, math, u_buy_item from owed credit', () => {
     const { npcs, game } = world();
-    const n = npcs.spawn({ template: 'free_merchants_merchant' }, 14, 12, 0)!;
+    const n = npcs.spawn({ template: 'evac_merchant' }, 14, 12, 0)!;
     const d = new Dialogue(npcs, n);
     d.effect({ u_spawn_item: 'FMCNote', count: 3 });
     expect(game.player.inv.countOf('FMCNote')).toBe(3);
@@ -330,23 +337,24 @@ describe('missions', () => {
     delete nd.missions.TEST_KILL;
   });
 
-  it("Smokes' Clear Back Bay runs its mapgen updates: barricade effect, inline start/end update_mapgen", () => {
+  it('Clear Back Bay runs its inline start/end update_mapgen on evac_center_9 and spawns the boss', () => {
     const { npcs } = world();
     const n = npcs.spawn({ cls: 'NC_SCAVENGER' }, 14, 12, 0)!;
     const calls: { src: unknown; at: { x: number; y: number; z: number }; drop?: boolean }[] = [];
-    // A fake overmap: evac_center_8 two OMTs east, evac_center_9 three.
-    npcs.findOmt = (pred) => (pred('evac_center_8') ? { x: 2, y: 0 } : pred('evac_center_9') ? { x: 3, y: 0 } : null);
+    // A fake overmap: evac_center_9 three OMTs east.
+    npcs.findOmt = (pred) => (pred('evac_center_9') ? { x: 3, y: 0 } : null);
     npcs.mapgenUpdate = (src, at, opts) => (calls.push({ src, at, drop: opts?.dropMissionTargets }), true);
     const inst = npcs.missions.create('MISSION_FREE_MERCHANTS_EVAC_1', n)!;
     npcs.missions.assign(inst, npcs.dialogueFor(n));
-    const ids = calls.map((c) => (typeof c.src === 'string' ? c.src : 'inline'));
-    expect(ids).toContain('smokes_take_down_back_bay_barricade');
-    expect(calls.find((c) => c.src === 'smokes_take_down_back_bay_barricade')!.at).toEqual({ x: 2, y: 0, z: 0 });
-    const start = calls.find((c) => typeof c.src !== 'string')!;
+    // BN has no named update_mapgen here: the start update is inline.
+    expect(calls.length).toBe(1);
+    const start = calls[0];
+    expect(typeof start.src).not.toBe('string');
     expect(start.drop).toBe(true);
     expect(start.at).toEqual({ x: 3, y: 0, z: 0 });
-    // the boss zombie the start update places is the mission target, spawned by the mission system
-    expect(inst.targetMonster?.name).toBe('Sean McLaughlin');
+    // the boss zombie (GROUP_REFUGEE_BOSS_ZOMBIE) the start update places is the mission target,
+    // spawned by the mission system
+    expect(inst.targetMonster).toBeTruthy();
     calls.length = 0;
     inst.targetMonster!.dead = true;
     npcs.missions.succeed(inst, null);
@@ -366,7 +374,7 @@ describe('trade', () => {
   // TODO(BN): written for DDA data/behaviour; fails on Bright Nights core data (TypeError: Cannot read properties of undefined (reading 'typeId')). Port with its system.
   it.skip('prices a box of ammo by its rounds and names its variant', () => {
     const { npcs, game } = world();
-    const n = npcs.spawn({ template: 'free_merchants_merchant' }, 14, 12, 0)!;
+    const n = npcs.spawn({ template: 'evac_merchant' }, 14, 12, 0)!;
     const p = game.player;
     const [box] = expandItemGroup(data, 'boxed_77x58', new Rng(1)).flatMap((sp) => fromSpawned(data, sp));
     expect(box.typeId).toBe('45_ammo_box_50');
@@ -384,7 +392,7 @@ describe('trade', () => {
 
   it('values goods with the int/speech markup, currency at face value, and settles the balance', () => {
     const { npcs, game } = world();
-    const n = npcs.spawn({ template: 'free_merchants_merchant' }, 14, 12, 0)!;
+    const n = npcs.spawn({ template: 'evac_merchant' }, 14, 12, 0)!;
     const p = game.player;
     p.int_base = 8;
     n.int_base = 8;
@@ -452,7 +460,8 @@ describe('save', () => {
       return { game, sys: h.sys };
     };
     const A = await build();
-    const n = A.sys.spawn({ template: 'free_merchants_merchant' }, 14, 12, 0)!;
+    const n = A.sys.spawn({ template: 'evac_merchant' }, 14, 12, 0)!;
+    const name = n.name;
     const d = A.sys.talkTo(n)!;
     d.effect([{ u_add_var: 'met', value: 'yes' }, { npc_add_var: 'mood', value: 'good' }, 'follow']);
     const inst = A.sys.missions.offeredBy(n)[0];
@@ -464,7 +473,7 @@ describe('save', () => {
     applySave(B.game, file);
     expect(B.sys.npcs.length).toBe(1);
     const m = B.sys.npcs[0];
-    expect(m.name).toBe('Smokes');
+    expect(m.name).toBe(name);
     expect(m.isAlly()).toBe(true);
     expect(m.op.trust).toBe(4);
     expect(m.vars.get('mood')).toBe('good');

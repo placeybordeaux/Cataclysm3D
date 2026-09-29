@@ -47,6 +47,20 @@ describe('atlas.json', () => {
     const h = frame(atlas.lookup('hammer')!.fg!.frame);
     expect(h.w).toBeLessThanOrEqual(32);
   });
+
+  // BN's compiled UltiCa (tile_config.json): sprite indices are global across sheets, and a
+  // frame carries the pixel size of the sheet holding the sprite.
+  it('reads the compiled BN tileset with per-sheet sprite sizes and offsets', () => {
+    expect(index.tileset).toBe('UltimateCataclysm');
+    const ram = frame(atlas.lookup('RAM')!.fg!.frame); // small.png: 20x20 drawn at +6,0
+    expect([ram.w, ram.h, ram.ox, ram.oy]).toEqual([20, 20, 6, 0]);
+    const bookcase = index.tiles.f_bookcase; // tall.png multitile, rotates explicitly false
+    expect(bookcase.rotates).toBeUndefined();
+    expect(bookcase.multitile?.corner?.fg?.[0].sprites).toHaveLength(4);
+    const b = frame(bookcase.fg![0].sprites[0]);
+    expect([b.w, b.h, b.oy]).toEqual([32, 64, -32]);
+    expect(Object.keys(index.tiles).some((k) => k.endsWith('_season_winter'))).toBe(true);
+  });
 });
 
 describe('variant selection', () => {

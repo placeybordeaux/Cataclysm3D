@@ -103,7 +103,8 @@ export function monsterTargetInfo(m: Monster): TargetInfo {
     flags: m.type.flags,
     hasEffect: (id) => m.hasEffect(id as MonEffect),
     isMonster: true,
-    hasWeapon: false,
+    // BN disarm techniques work on monsters that carry a monster_weapon (feral humans).
+    hasWeapon: !!(m.type as { monster_weapon?: string }).monster_weapon && !m.hasEffect('monster_disarmed' as MonEffect),
     volumeMl: m.type.volume,
     grabStrength: typeof m.type.grab_strength === 'number' ? m.type.grab_strength : undefined,
   };
