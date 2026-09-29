@@ -5,7 +5,13 @@ export interface GameEvents {
   /** Player-visible message, CDDA color tag like "c_red" optional. */
   message: { text: string; color?: string };
   /** A noise at tile position; volume in CDDA sound units (roughly tiles of range). */
-  sound: { x: number; y: number; z: number; volume: number; description: string; source?: unknown };
+  sound: {
+    x: number; y: number; z: number; volume: number; description: string; source?: unknown;
+    /** CDDA sound_effect id/variant to play (sounds::sound's id/variant). Omit to let
+     *  src/audio/soundEvents.ts guess from the description; '' = already played, stay silent. */
+    sfxId?: string;
+    sfxVariant?: string;
+  };
   creatureDied: { creature: unknown; killer?: unknown };
   mapChanged: { x: number; y: number; z: number };
   playerDied: { cause: string };
