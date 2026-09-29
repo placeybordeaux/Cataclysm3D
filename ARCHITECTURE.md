@@ -137,6 +137,14 @@ tests/               vitest unit tests (pure logic, no DOM/WebGL)
 - `game.events.on('sound' | 'message' | …)` typed bus in `src/core/events.ts` — add event
   types there.
 - `map.onChunkGenerated` for spawning things when chunks appear.
+- **Save/load** (src/save): any system with persistent state calls
+  `registerSaveable(game, 'key', { save: () => json, load: (json, ctx) => …, missing?, order? })`
+  (src/save/registry.ts; `ctx.warn(msg)` for dropped unknown ids; order: map 0, world 5,
+  player 10, monsters 20, default 50). Map chunks are saved only when dirty (changed since
+  generation — tracked automatically, no calls needed); state kept *outside* the chunk
+  (like bash.ts map damage) must be saved by its owner. Saves are gzip JSON in IndexedDB,
+  one slot per character; death deletes the save and adds a memorial entry.
+  `cdda.save.{save,list,load,queueLoad,stats,memorial}`; `npm run shot -- … --reload`.
 - `input.onPress(e => …)` for global keys, `input.capture(handler)` for modal menus.
 - Audio: call `sfx.meleeHit(...)`, `sfx.gunshot(...)`, `sfx.door(...)`… from `src/audio/sfx.ts`
   (no-ops without audio), or put `sfxId`/`sfxVariant` (CDDA sound_effect id/variant) on

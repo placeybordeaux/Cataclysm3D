@@ -60,6 +60,11 @@ export class Spawner {
   private cities = new Map<string, CityHorde | null>();
   /** Counts for debugging / tests. */
   readonly stats = { chunks: 0, requests: 0, monsters: 0, horde: 0, dormant: 0 };
+  /**
+   * Chunks whose spawns were already consumed in an earlier session (set by save/load):
+   * regenerating them must not spawn their monsters again — those live in the save.
+   */
+  skipChunk: ((c: Chunk) => boolean) | null = null;
 
   constructor(readonly sys: MonsterSystem, readonly overmap: OvermapView | null = null, opts: SpawnerOptions = {}) {
     this.opts = { cityHordeScale: 0.3, density: 1, safeRadius: 10, ...opts };
@@ -86,6 +91,7 @@ export class Spawner {
     const requests = c.spawns;
     // Spawn points are one-shot (CDDA removes them once spawned) so reloads don't duplicate.
     c.spawns = [];
+    if (this.skipChunk?.(c)) return;
     const rng = new Rng(hashSeed(this.sys.game.seed, c.cx, c.cy, c.z, 0x5ba7));
     this.stats.chunks++;
     for (const r of requests) {

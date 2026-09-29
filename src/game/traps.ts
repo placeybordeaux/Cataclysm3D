@@ -58,6 +58,11 @@ function tstate(game: Game): TState {
   return s;
 }
 
+/** Trap tiles ("x,y,z") the player has discovered; mutable, for save/load. */
+export function knownTraps(game: Game): Set<string> {
+  return tstate(game).known;
+}
+
 /** Does the player know about / can see this trap? (visibility −1 = obvious, low = easy) */
 export function playerSeesTrap(game: Game, x: number, y: number, z: number): boolean {
   const id = trapAt(game, x, y, z);
