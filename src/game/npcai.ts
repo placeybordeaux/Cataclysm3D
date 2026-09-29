@@ -7,11 +7,14 @@ import type { Game, GameSystem } from './game';
 import { Grid, clearWalk, hasLOS } from './los';
 import { findPath } from './pathfind';
 import { moveWithCollision, CREATURE_RADIUS } from './physics';
-import { applyFlatArmor, fireGun, meleeAttack, selectBodyPart, type ShotResult } from './combat';
+import { applyFlatArmor, characterDefend, fireGun, hitMessage, meleeAttack, selectBodyPart, tryDodgeRoll, type ShotResult } from './combat';
+import { techniqueMessage, type TargetInfo } from './techniques';
+import { tickMartialArts } from './martialarts';
+import { turnsToEffectSeconds } from './monster';
 import { createItem, type Item } from './item';
 import type { Monster } from './monster';
 import type { MonsterSystem, MonsterTarget } from './monai';
-import { meleeVerb } from './playercombat';
+import { applyTechniqueToMonster, meleeVerb, monsterTargetInfo } from './playercombat';
 import { emitSound } from './sound';
 import { sfx } from '../audio/sfx';
 import { playerCanSee, isOutside, isDay } from './vision';
@@ -309,6 +312,8 @@ export class NpcSystem implements GameSystem, TalkWorld, MissionHost {
     }
     for (const n of this.npcs) {
       if (n.dead || !this.inBubble(n)) continue;
+      // Martial-arts turn clock: dodges/blocks refresh each combat turn, buffs expire.
+      tickMartialArts(n, dt);
       // Character needs/effects tick at 1 Hz (cheap enough for a handful of NPCs).
       const acc = (this.charAcc.get(n) ?? 0) + gameDt;
       if (slow) {
@@ -694,7 +699,8 @@ export class NpcSystem implements GameSystem, TalkWorld, MissionHost {
     const w = n.inv.wielded;
     if (foe.kind === 'monster') {
       const m = foe.m;
-      const res = this.muted(n, () => meleeAttack(n, { dodge: m.dodge(), armor: m.type.armor, sizeMeleePenalty: m.sizeMeleePenalty() }, this.rng, m.theName()));
+      // NPCs use weapon/style techniques too (same combat.ts path as the survivor).
+      const res = this.muted(n, () => meleeAttack(n, { dodge: m.dodge(), armor: m.type.armor, sizeMeleePenalty: m.sizeMeleePenalty(), info: monsterTargetInfo(m) }, this.rng, m.theName(), { downable: !m.has('IMMOBILE') }));
       n.attackCooldown = res.cooldownSeconds;
       m.aggroCharacter = true;
       if (!res.hit) {
@@ -703,22 +709,28 @@ export class NpcSystem implements GameSystem, TalkWorld, MissionHost {
       }
       let dom = 'bash', best = 0;
       for (const d of res.damage) if (d.amount > best) (best = d.amount), (dom = d.type);
-      if (this.visible(n)) this.message(`${n.name} ${verb3(meleeVerb(dom, res.total, (a, b) => this.rng.int(a, b)))} ${m.theName()}${res.total > 0 ? '' : ' but does no damage'}.`);
+      if (this.visible(n)) {
+        const tec = res.technique && techniqueMessage(res.technique, m.theName(), n.name);
+        this.message(tec ? hitMessage(tec, res.total, res.crit, true) : `${n.name} ${verb3(meleeVerb(dom, res.total, (a, b) => this.rng.int(a, b)))} ${m.theName()}${res.total > 0 ? '' : ' but does no damage'}.`);
+      }
       sfx.meleeHit(m.type.material[0] ?? 'flesh', m, { id: w?.typeId, skill: w ? w.meleeSkill() : 'unarmed' });
       emitSound(this.game, { x: m.tileX, y: m.tileY, z: m.z }, 8, 'Smack!', { category: 'combat', source: n, ambient: true });
       this.monsters?.hurt(m, res.total, null);
+      if (!m.dead && res.outcome) applyTechniqueToMonster(m, res.outcome, n.x, n.y, this.rng);
       return;
     }
     const target = foe.kind === 'npc' ? foe.n : this.player;
-    const res = this.muted(n, () => meleeAttack(n, { dodge: target.dodge() }, this.rng, foe.kind === 'npc' ? foe.n.name : 'you'));
+    const res = this.muted(n, () => meleeAttack(n, { dodge: tryDodgeRoll(target) / 5 }, this.rng, foe.kind === 'npc' ? foe.n.name : 'you'));
     n.attackCooldown = res.cooldownSeconds;
     if (!res.hit) {
       if (foe.kind === 'player') this.message(`${n.name} misses you.`);
       else if (this.visible(n)) this.message(`${n.name} misses ${target.name}.`, 'c_light_gray');
       return;
     }
-    const bp: BodyPartId = selectBodyPart(this.rng, { hitRoll: res.hitSpread });
+    let bp: BodyPartId = selectBodyPart(this.rng, { hitRoll: res.hitSpread });
     const units = res.damage.map((d) => ({ ...d }));
+    // The defender blocks with a weapon or limb like against monsters (block_hit).
+    bp = (foe.kind === 'player' ? characterDefend(target, units, bp, this.rng) : this.muted(target, () => characterDefend(target, units, bp, this.rng, true))).bp;
     const absorbed = target.inv.absorbHit(bp, units, this.rng);
     const r = this.muted(target, () => target.takeHit(bp, absorbed));
     sfx.meleeHit('flesh', { x: target === this.player ? this.player.x : (target as Npc).x, y: target === this.player ? this.player.y : (target as Npc).y, z: n.z }, { id: w?.typeId, skill: w ? w.meleeSkill() : 'unarmed' });
@@ -883,20 +895,37 @@ export class NpcSystem implements GameSystem, TalkWorld, MissionHost {
     const p = this.player;
     if (m && Math.hypot(m.x - p.x, m.y - p.y) < Math.hypot(n.x - p.x, n.y - p.y)) return false;
     const w = p.inv.wielded;
-    const res = meleeAttack(p, { dodge: n.dodge() }, this.rng, n.name);
+    const info: TargetInfo = { size: 3, bodytype: 'human', isMonster: false, hasWeapon: !!n.inv.wielded, hasEffect: (id) => n.hasEffect(id), flags: [], species: ['HUMAN'] };
+    const res = meleeAttack(p, { dodge: tryDodgeRoll(n) / 5, info }, this.rng, n.name);
     sfx.meleeSwing(undefined, { id: w?.typeId, skill: w ? w.meleeSkill() : 'unarmed' });
     this.lastPlayerSwing = res.cooldownSeconds;
     if (!res.hit) {
       this.afterHit(n, 0, { kind: 'player' });
       return true;
     }
-    const bp = selectBodyPart(this.rng, { hitRoll: res.hitSpread });
-    const absorbed = n.inv.absorbHit(bp, res.damage.map((d) => ({ ...d })), this.rng);
+    let bp = selectBodyPart(this.rng, { hitRoll: res.hitSpread });
+    const units = res.damage.map((d) => ({ ...d }));
+    bp = this.muted(n, () => characterDefend(n, units, bp, this.rng, true)).bp;
+    const absorbed = n.inv.absorbHit(bp, units, this.rng);
     const r = n.takeHit(bp, absorbed);
+    // Techniques on people: downed/stunned become effects, disarms drop the weapon.
+    const o = res.outcome;
+    if (o && !n.dead) {
+      if (o.downTurns > 0) n.addEffect('downed', turnsToEffectSeconds(o.downTurns));
+      if (o.stunTurns > 0) n.addEffect('stunned', turnsToEffectSeconds(o.stunTurns));
+      if (o.disarms && n.inv.wielded) {
+        const dropped = n.inv.wielded;
+        n.inv.wielded = null;
+        this.game.map.addItem(n.tileX, n.tileY, n.z, dropped);
+        this.message(`You disarm ${n.name}!`);
+      }
+    }
     let dom = 'bash', best = 0;
     for (const d of res.damage) if (d.amount > best) (best = d.amount), (dom = d.type);
     const verb = meleeVerb(dom, r.damage, (a, b) => this.rng.int(a, b));
-    this.message(r.damage > 0 ? `You ${verb} ${n.name}'s ${BODY_PARTS[bp].name} for ${r.damage} damage.${res.crit ? '  Critical!' : ''}` : `You ${verb} ${n.name} but do no damage.`);
+    const tec = res.technique && techniqueMessage(res.technique, n.name);
+    if (tec) this.message(hitMessage(tec, r.damage, res.crit));
+    else this.message(r.damage > 0 ? `You ${verb} ${n.name}'s ${BODY_PARTS[bp].name} for ${r.damage} damage.${res.crit ? '  Critical!' : ''}` : `You ${verb} ${n.name} but do no damage.`);
     sfx.meleeHit('flesh', n, { id: w?.typeId, skill: w ? w.meleeSkill() : 'unarmed' });
     emitSound(this.game, { x: n.tileX, y: n.tileY, z: n.z }, 8, 'Smack!', { category: 'combat', source: this.player, sfxId: '', ambient: true });
     this.afterHit(n, r.damage, { kind: 'player' });

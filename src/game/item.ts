@@ -28,6 +28,8 @@ export interface ItemJSON {
   vars?: Record<string, string | number>;
   /** One array per pocket, in pocket_data order. */
   pockets?: ItemJSON[][];
+  /** Installed gunmods (CDDA's MOD pocket). */
+  gunmods?: ItemJSON[];
 }
 
 export interface FitResult {
@@ -266,6 +268,8 @@ export class Item implements MapItem {
   sealed = false;
   vars: Record<string, string | number> = {};
   pockets: Pocket[];
+  /** Installed gunmods (CDDA keeps them in a MOD pocket); see src/game/gunmods.ts. */
+  gunmods: Item[] = [];
 
   constructor(readonly data: GameData, def: ItemDef) {
     this.typeId = def.id;
@@ -326,6 +330,7 @@ export class Item implements MapItem {
     if (this.countByCharges) return this.unitWeight() * this.charges;
     let w = this.def.weight;
     for (const p of this.pockets) w += p.weightUsed();
+    for (const m of this.gunmods) w += m.weight();
     return w;
   }
   /** ml including non-rigid pocket contents (item::volume). */
@@ -404,6 +409,7 @@ export class Item implements MapItem {
   stacksWith(o: Item): boolean {
     if (o.typeId !== this.typeId || o.damage !== this.damage || o.active !== this.active) return false;
     if (this.allContents().length || o.allContents().length) return false;
+    if (this.gunmods.length || o.gunmods.length) return false;
     // CDDA compares rot at hour granularity so fresh food from one batch stacks.
     if (Math.floor(this.rot / 3600) !== Math.floor(o.rot / 3600)) return false;
     return JSON.stringify(this.vars) === JSON.stringify(o.vars);
@@ -573,7 +579,12 @@ export class Item implements MapItem {
     let noise = this.def.loudness ?? 0;
     const ammo = this.ammoData();
     if (ammo) noise += ammoLoudness(ammo);
-    noise = Math.max(0, noise);
+    // Suppressors and the like (ranged.cpp gun_noise: += loudness_modifier, *= multiplier).
+    for (const m of this.gunmods) {
+      noise += (m.def.loudness_modifier as number | undefined) ?? 0;
+      noise *= (m.def.loudness_multiplier as number | undefined) ?? 1;
+    }
+    noise = Math.max(0, Math.trunc(noise));
     if (noise <= 0) return { volume: 0, sound: '' };
     if (noise < 10) return { volume: noise, sound: burst ? 'Brrrip!' : 'plink!' };
     if (noise < 150) return { volume: noise, sound: burst ? 'Brrrap!' : 'bang!' };
@@ -676,6 +687,7 @@ export class Item implements MapItem {
     if (this.sealed) j.sealed = true;
     if (Object.keys(this.vars).length) j.vars = { ...this.vars };
     if (this.pockets.some((p) => !p.empty)) j.pockets = this.pockets.map((p) => p.contents.map((c) => c.toJSON()));
+    if (this.gunmods.length) j.gunmods = this.gunmods.map((m) => m.toJSON());
     return j;
   }
   static fromJSON(data: GameData, j: ItemJSON): Item {
@@ -693,6 +705,7 @@ export class Item implements MapItem {
       if (!p) throw new Error(`Item.fromJSON: ${j.typeId} has no pocket #${i}`);
       p.contents = list.map((c) => Item.fromJSON(data, c));
     });
+    it.gunmods = (j.gunmods ?? []).map((m) => Item.fromJSON(data, m));
     return it;
   }
 }
