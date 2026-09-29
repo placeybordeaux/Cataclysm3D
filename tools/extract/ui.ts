@@ -1,12 +1,14 @@
-// Extract the bits of CDDA data only the UI needs (title art, tombstone, names, help text,
-// mood faces) into public/data/ui.json. Kept apart from the main extractor because these
-// live outside data/json (data/title, data/names, data/core/help.json) and are plain text.
+// Extract the bits of Bright Nights data only the UI needs (title art, tombstone, names, help
+// text, mood faces, tips) into public/data/ui.json. Kept apart from the main extractor because
+// these live outside data/json (data/title, data/names, data/help/texts.json, data/raw/tips.json)
+// and are plain text. BN draws the tombstone and the mood smileys in C++ (game.cpp,
+// panels.cpp), so those are transcribed below.
 //
-// Usage: npm run extract:ui -- [--cdda ~/code/Cataclysm-DDA] [--out public/data] [--dry-run]
+// Usage: npm run extract:ui -- [--cdda ~/code/Cataclysm-BN] [--out public/data] [--dry-run]
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { defaultCddaDir } from './cdda';
+import { defaultGameDir } from './gamedir';
 
 function usage(): string {
   return `Usage: npm run extract:ui -- [options]
@@ -14,13 +16,13 @@ function usage(): string {
 Write public/data/ui.json (title art, tombstone art, name lists, help topics, mood faces, tips).
 
 Options:
-  --cdda <dir>   Cataclysm-DDA checkout (default: $CDDA_DIR or ~/code/Cataclysm-DDA)
+  --cdda <dir>   game checkout (default: $CDDA_DIR or ~/code/Cataclysm-BN)
   --out <dir>    output directory (default: public/data)
   --dry-run      print a summary instead of writing
   -h, --help     show this help`;
 }
 
-const args = { cdda: defaultCddaDir(), out: 'public/data', dryRun: false };
+const args = { cdda: defaultGameDir(), out: 'public/data', dryRun: false };
 const argv = process.argv.slice(2);
 for (let i = 0; i < argv.length; i++) {
   const k = argv[i];
@@ -40,12 +42,41 @@ const readJson = (p: string) => JSON.parse(read(p));
 const title = read('data/title/en.title').split('\n').filter((l) => l && !l.startsWith('#'));
 if (title.length < 6) throw new Error('title art not found or too short');
 
-const graveyard = readJson('data/json/ascii_art/graveyard.json') as any[];
-const tombArt = graveyard.find((o) => o.id === 'ascii_tombstone');
-if (!tombArt) throw new Error('ascii_tombstone missing');
-const endScreens = readJson('data/json/end_screen.json') as any[];
-const tombScreen = endScreens.find((o) => o.id === 'death_tombstone');
-if (!tombScreen) throw new Error('death_tombstone end_screen missing');
+// BN game.cpp (death screen, the default stone without a bible): the picture, coloured like
+// BN does it per glyph (% green, _ and | white, @ brown, * red).
+const BN_TOMBSTONE = [
+  String.raw`           _________  ____           `,
+  String.raw`         _/         ${'`'}/    \_         `,
+  String.raw`       _/      _     _      \_.      `,
+  String.raw`     _%\      |_) | |_)       \_     `,
+  String.raw`   _/ \/      | \ | |           \_   `,
+  String.raw` _/                               \_ `,
+  String.raw`|                                   |`,
+  String.raw` )                                 < `,
+  String.raw`|                                   |`,
+  String.raw`|                                   |`,
+  String.raw`|   _                               |`,
+  String.raw`|__/                                |`,
+  String.raw` / ${'`'}--.                             |`,
+  String.raw`|                                  ( `,
+  String.raw`|                                   |`,
+  String.raw`|                                   |`,
+  String.raw`|     %                         .   |`,
+  String.raw`|  @${'`'}                            %% |`,
+  String.raw`| %@%@%\                *      %${'`'}%@%|`,
+  String.raw`%%@@@.%@%\%%            ${'`'}\  %%.%%@@%@`,
+  String.raw`@%@@%%%%%@@@@@@%%%%%%%%@@%%@@@%%%@%%@`,
+];
+const GLYPH_COLOR: Record<string, string> = { '%': 'green', '@': 'brown', '*': 'red' };
+// Only the grass rows get colour tags: the runtime stamps the name/survival lines onto
+// untagged rows (src/ui/death.ts), and plain white _ | are the default text colour anyway.
+const tombPicture = BN_TOMBSTONE.map((row) => row.replace(/([%@*])\1*/g, (run) => `<color_${GLYPH_COLOR[run[0]]}>${run}</color>`));
+// Where BN prints "In memory of: <name>", "Survived: <time>" and "Kills: <n>" on that stone.
+const tombInfo: [[number, number], string][] = [
+  [[6, 8], 'In memory of: <u_name>'],
+  [[13, 9], 'Survived: <time_survived>'],
+  [[15, 10], 'Kills: <total_kills>'],
+];
 
 const namesRaw = readJson('data/names/en.json') as { usage: string; gender?: string; name: string[] }[];
 const pick = (usage: string, gender?: string) =>
@@ -60,7 +91,7 @@ const names = {
 for (const [k, v] of Object.entries(names)) if (!v.length && k !== 'unisex') throw new Error(`no ${k} names`);
 
 // Help topics: messages are strings or {force_monospaced: {str}} blocks.
-const help = (readJson('data/core/help.json') as any[])
+const help = (readJson('data/help/texts.json') as any[])
   .filter((o) => o.type === 'help')
   .sort((a, b) => a.order - b.order)
   .map((o) => ({
@@ -68,20 +99,24 @@ const help = (readJson('data/core/help.json') as any[])
     messages: (o.messages as any[]).map((m) => (typeof m === 'string' ? m : (m.force_monospaced?.str ?? m.str ?? ''))).filter(Boolean),
   }));
 
-const moodFaces = (readJson('data/json/mood_faces.json') as any[]).find((o) => o.id === 'DEFAULT')?.values;
-if (!moodFaces) throw new Error('DEFAULT mood_face missing');
+// BN panels.cpp morale_emotion (default, non-horizontal human face) with morale_stat's colour:
+// green from +10, red from -10. First entry whose value <= morale wins.
+const moodFaces = [
+  [100, 'green', '8D'], [50, 'green', ':D'], [10, 'green', ':)'], [-10, 'white', ':|'], [-50, 'red', '):'],
+  [-100, 'red', 'D:'], [-Infinity, 'red', 'D8'],
+].map(([value, color, face]) => ({ value: value === -Infinity ? -1e9 : value, face: `<color_${color}>${face}</color>` }));
 
-// data/core/tips.json: the "tip" snippets CDDA shows on the loading screen and under the
-// main menu ("tip of the day").
-const tips = (readJson('data/core/tips.json') as any[])
+// data/raw/tips.json: the "tip" snippets BN shows on the loading screen and under the main
+// menu ("tip of the day").
+const tips = (readJson('data/raw/tips.json') as any[])
   .filter((o) => o.type === 'snippet' && o.category === 'tip')
   .flatMap((o) => (o.text as any[]).map((t) => (typeof t === 'string' ? t : t.text ?? t.str ?? '')))
   .filter(Boolean) as string[];
-if (tips.length < 20) throw new Error(`only ${tips.length} tips in data/core/tips.json`);
+if (tips.length < 20) throw new Error(`only ${tips.length} tips in data/raw/tips.json`);
 
 const out = {
   title,
-  tombstone: { picture: tombArt.picture as string[], added_info: tombScreen.added_info, last_words_label: tombScreen.last_words_label },
+  tombstone: { picture: tombPicture, added_info: tombInfo, last_words_label: 'Last Words:' },
   names,
   help,
   moodFaces,
