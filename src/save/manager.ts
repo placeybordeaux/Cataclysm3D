@@ -57,6 +57,8 @@ const EMERGENCY_DATA = 'cdda3d.emergency.data';
 export class SaveManager {
   /** Slot of the running character; null until its first save (or after death). */
   slot: string | null = null;
+  /** The slot of the character that just died (null: never saved). For the death screen. */
+  diedWithSlot: string | null = null;
   /** A character is being played (autosave and unload saves apply). */
   active = false;
   /** Cached slot list (hasSave() must answer synchronously for the menus). */
@@ -187,6 +189,7 @@ export class SaveManager {
     this.active = false;
     const slot = this.slot;
     this.slot = null;
+    this.diedWithSlot = slot;
     if (slot && permadeath(this.game)) await this.delete(slot);
     // A character that never started (title screen backdrop) isn't memorialized.
     if (!wasActive && !slot) return;

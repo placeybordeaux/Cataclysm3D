@@ -53,7 +53,10 @@ export function showDeathScreen(ctx: UiContext, hud: Hud, cause: string, diedAt 
     extra.length ? h('div', { class: 'ui2-small', html: extra.map((l) => l || '&nbsp;').join('<br>') }) : '',
     h('div', { class: 'ui2-section', text: 'Last messages' }),
     h('div', { class: 'dt-msgs' }, ...hud.log.recent(8).map((e) => h('div', { class: `tone-${messageTone(e.color)}`, html: colorize(logLine(e)) }))),
-    permadeath(game) ? '' : h('div', { class: 'tone-good', text: 'Permadeath is off: your last save is kept. Load it from the main menu to try again.' }),
+    // Only promise a save that exists: the run's slot (a save, an autosave or a load made one).
+    permadeath(game) ? '' : (saveHandle(game)?.manager.slot ?? saveHandle(game)?.manager.diedWithSlot)
+      ? h('div', { class: 'tone-good', text: 'Permadeath is off: your last save is kept. Load it from the main menu to try again.' })
+      : h('div', { class: 'ui2-dim', text: 'This survivor was never saved, so there is nothing to load. Next time: F5 saves, and the game autosaves every few hours.' }),
     h('div', { class: 'dt-words' }, h('span', { class: 'ui2-dim', text: ctx.data.tombstone.last_words_label ?? 'Last Words:' }), words),
     h('div', { class: 'tone-accent ui2-small', text: 'Type your last words if you like, then press Enter to return to the main menu.' }),
   );

@@ -87,6 +87,10 @@ export function openOvermap(ctx: UiContext): Panel | null {
   const hoverEl = h('div', { class: 'om-hover', attrs: { 'data-testid': 'map-hover' } });
   const levelEl = h('span', { class: 'ui2-small' });
   const notesEl = h('div', { class: 'om-notes' });
+  // The letters on screen (places the tileset has no picture for: M, +, F, n…) and what they
+  // are. Playtest: half the town was unexplained letters; only hovering told you.
+  const glyphLegend = h('div', { class: 'om-legend' });
+  let glyphKey = '';
   const side = h('div', { class: 'om-side' },
     h('div', { class: 'ui2-section', text: 'Here' }), hoverEl,
     h('div', { class: 'om-controls' },
@@ -97,7 +101,7 @@ export function openOvermap(ctx: UiContext): Panel | null {
       button('▼', () => level(-1), { small: true, title: 'Level down (>)' }),
       levelEl,
     ),
-    h('div', { class: 'ui2-section', text: 'Legend' }), legend(),
+    h('div', { class: 'ui2-section', text: 'Legend' }), legend(), glyphLegend,
     h('div', { class: 'ui2-section', text: 'Your notes' }), notesEl,
   );
   const panel = openScreen(game, {
@@ -226,6 +230,7 @@ export function openOvermap(ctx: UiContext): Panel | null {
     const x0 = Math.floor(cx - cw / cell / 2), y0 = Math.floor(cy - ch / cell / 2);
     const offX = Math.round((x0 - (cx - cw / cell / 2)) * cell), offY = Math.round((y0 - (cy - ch / cell / 2)) * cell);
     const sprites = ZOOMS[zi] >= 16 && !!atlas;
+    const glyphs = new Map<string, { sym: string; rgb: string; names: Set<string> }>();
     for (let r = 0; r < rows; r++)
       for (let c = 0; c < cols; c++) {
         const x = x0 + c, y = y0 + r;
@@ -249,6 +254,13 @@ export function openOvermap(ctx: UiContext): Panel | null {
             const def = terrains[o.type];
             const n = cddaColor(def?.color ?? 'light_gray');
             g.fillStyle = `rgb(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255})`;
+            const sym = def?.sym?.[0] ?? '?';
+            if (px >= 0 && py >= 0 && px < cw && py < ch) {
+              const k = `${sym}|${g.fillStyle}`;
+              const e = glyphs.get(k) ?? { sym, rgb: g.fillStyle as string, names: new Set<string>() };
+              e.names.add(def?.name ?? o.type);
+              glyphs.set(k, e);
+            }
             g.font = `${Math.round(cell * 0.8)}px Terminus, monospace`;
             g.textAlign = 'center';
             g.textBaseline = 'middle';
@@ -263,6 +275,22 @@ export function openOvermap(ctx: UiContext): Panel | null {
           g.fillRect(px, py, cell, cell);
         }
       }
+    const gk = [...glyphs.entries()].map(([k, e]) => `${k}:${[...e.names].join(',')}`).sort().join('|');
+    if (gk !== glyphKey) {
+      glyphKey = gk;
+      // One row per name (fences come in five glyphs); scenery that reads fine is left out.
+      const shown = new Set<string>(['fence', 'field', 'open air']);
+      const rows = [...glyphs.values()].filter((e) => {
+        const fresh = [...e.names].filter((n) => !shown.has(n));
+        fresh.forEach((n) => shown.add(n));
+        e.names = new Set(fresh);
+        return fresh.length > 0;
+      });
+      glyphLegend.replaceChildren(...rows.slice(0, 14).flatMap((e) => {
+        const names = [...e.names];
+        return [h('span', { class: 'om-swatch', html: `<span style="color:${e.rgb}">${e.sym.replace(/[<&>]/g, (c) => `&#${c.charCodeAt(0)};`)}</span>` }), h('span', { text: names.slice(0, 2).join(', ') + (names.length > 2 ? ', …' : '') })];
+      }));
+    }
     const toScreen = (x: number, y: number) => ({ sx: (offX + (x - x0) * cell) / dpr, sy: (offY + (y - y0) * cell) / dpr });
     const cellCss = cell / dpr;
 

@@ -1033,16 +1033,16 @@ export class VehicleSystem implements GameSystem, MapOverlay {
   }
 
   /**
-   * Push a light vehicle 1–3 tiles along (dx, dy), or a tile to either side of that, to the
-   * first spot its whole footprint fits: walkable, clear of other vehicles, creatures, you and
+   * Push a light vehicle off to the side of (dx, dy), else 1–3 tiles along it, to the first
+   * spot its whole footprint fits: walkable, clear of other vehicles, creatures, you and
    * the pushing vehicle's new footprint (`blocked`). False (nothing moved) when pinned.
    */
   private shove(o: Vehicle, dx: number, dy: number, blocked: Set<number>): boolean {
     const map = this.game.map;
     const p = this.game.player;
     const sx = Math.round(dx), sy = Math.round(dy);
-    const tries: [number, number][] = [];
-    for (let d = 1; d <= 3; d++) tries.push([sx * d, sy * d], [sx * d - sy, sy * d + sx], [sx * d + sy, sy * d - sx]);
+    // Aside first (a snowplowed bike just gets hit again), then straight ahead.
+    const tries: [number, number][] = [[sx - sy * 2, sy + sx * 2], [sx + sy * 2, sy - sx * 2], [sx * 2 - sy * 2, sy * 2 + sx * 2], [sx * 2 + sy * 2, sy * 2 - sx * 2], [sx, sy], [sx * 2, sy * 2], [sx * 3, sy * 3]];
     for (const [ox, oy] of tries) {
       if (!ox && !oy) continue;
       const ok = o.occupiedTiles(o.facing, o.x + ox, o.y + oy).every((t) => {
