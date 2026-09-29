@@ -94,6 +94,7 @@ export async function installAchievements(game: Game, worldgen: WorldGenerator |
     if (cr?.type?.id) emit('character_kills_monster', { killer: AV, victim_type: cr.type.id });
     else emit('character_kills_character', { killer: AV, victim: 'npc', victim_name: cr?.name ?? '' });
   });
+  game.events.on('playerHeadshot', () => emit('character_gets_headshot', { character: AV }));
   game.events.on('playerHurt', (e) => {
     if (e.amount > 0) emit('character_takes_damage', { character: AV, damage: Math.round(e.amount) });
   });

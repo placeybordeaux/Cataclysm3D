@@ -516,15 +516,20 @@ describe('monster guns (gun_actor)', () => {
   };
 
   // TODO(BN): written for DDA data/behaviour; fails on Bright Nights core data (AssertionError: expected -1 to be greater than 1). Port with its system.
-  it.skip('a turret announces its target lock, then fires from its starting_ammo', () => {
+  it('a turret announces its target lock, then fires from its starting_ammo', () => {
     const { game, sys, msgs } = world(11);
     const t = sys.spawnById('mon_turret', 12.5, 6.5, 0)!;
     tick(game, 6);
     const lock = msgs.findIndex((m) => m === 'The improvised MP5 turret says "Hostile detected."');
-    const fire = msgs.findIndex((m) => m === 'The improvised MP5 turret fires its H&K MP5A2 submachine gun!');
+    const fire = msgs.findIndex((m) => m === 'The improvised MP5 turret fires its H&K MP5A4!');
     expect(lock).toBeGreaterThanOrEqual(0);
     expect(fire).toBeGreaterThan(lock);
     expect(monGunState(t).ammo['9mm']).toBeLessThan(30);
+    // BN: no_crits caps severity at ×1.1 — a 31-damage 9mm round never exceeds 35.
+    for (const m of msgs) {
+      const d = /You were hit in the .* for (\d+) damage/.exec(m);
+      if (d) expect(Number(d[1])).toBeLessThanOrEqual(35);
+    }
   });
 
   it('out of range the turret holds fire; with no ammo left it only clicks', () => {

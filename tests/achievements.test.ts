@@ -219,7 +219,7 @@ describe('achievements (BN achievements.json semantics)', () => {
 
   it('marks achievements fed by events this port never emits as unsupported', () => {
     const d = withExtra({
-      transformations: { t_headshots: { id: 't_headshots', event_type: 'character_gets_headshot' } },
+      transformations: { t_headshots: { id: 't_headshots', event_type: 'character_triggers_trap' } },
       statistics: { num_headshots: { id: 'num_headshots', stat_type: 'count', event_transformation: 't_headshots' } },
       achievements: { test_headshots: { id: 'test_headshots', name: 'Headshots', requirements: [{ event_statistic: 'num_headshots', is: '>=', target: 1 }] } },
     });

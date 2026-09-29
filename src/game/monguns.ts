@@ -2,13 +2,14 @@ import type { DamageUnit, ItemDef } from '../data/types';
 import { warnOnce } from '../data/warn';
 import { Character, MAX_RECOIL } from './character';
 import {
-  dispersionFromSkill, moaToRadians, rollDispersionMoa, selectBodyPart, type DispersionSources,
+  dispersionFromSkill, moaToRadians, rollDispersionMoa, type DispersionSources,
 } from './combat';
 import { ammoLoudness, asArray, defaultAmmoId } from './item';
 import { gunModes } from './gunmods';
 import { turnsToSeconds, type Monster, type SpecialAttackState } from './monster';
 import type { MonsterSystem } from './monai';
-import { BODY_PARTS } from './bodyparts';
+import { BODY_PARTS, type BodyPartId } from './bodyparts';
+import { GUN_PROJECTILE_SPEED, projectileHit } from './projectile';
 import { CREATURE_RADIUS } from './physics';
 import { sfx } from '../audio/sfx';
 
@@ -160,7 +161,7 @@ export function gunActor(sys: MonsterSystem, m: Monster, sa: SpecialAttackState,
   for (let i = 0; i < shots && !p.dead; i++) {
     if (needsAmmo) st.ammo[ammoKey] = (st.ammo[ammoKey] ?? 0) - 1;
     if (throwing) throwAt(sys, m, gun, ammo, c);
-    else shootAt(sys, m, gun, ammo, c, shots > 1);
+    else shootAt(sys, m, gun, ammo, c, shots > 1, !!d.no_crits);
   }
   st.targetedUntil = Math.max(st.targetedUntil, sys.time) + turnsToSeconds(typeof d.targeting_timeout_extend === 'number' ? d.targeting_timeout_extend : 3);
   m.busy = Math.max(m.busy, turnsToSeconds((typeof d.move_cost === 'number' ? d.move_cost : 150) / 100));
@@ -176,7 +177,7 @@ function fmtName(template: string, monName: string, gun: ItemDef): string {
 }
 
 /** One hitscan round at the survivor: dispersion cone, walls stop it, CDDA damage bands. */
-function shootAt(sys: MonsterSystem, m: Monster, gun: ItemDef, ammo: ItemDef | null, c: Character, burst: boolean): void {
+function shootAt(sys: MonsterSystem, m: Monster, gun: ItemDef, ammo: ItemDef | null, c: Character, burst: boolean, noCrit: boolean): void {
   const p = sys.game.player;
   const rng = sys.rng;
   const moa = rollDispersionMoa(dispersionOf(c, gun, ammo), rng);
@@ -199,24 +200,27 @@ function shootAt(sys: MonsterSystem, m: Monster, gun: ItemDef, ammo: ItemDef | n
   monsterGunHooks.tracer?.(m.x, m.y, m.x + dx * endT, m.y + dy * endT, m.z);
   if (!hits) return;
   const missedBy = perp / radius;
-  // Creature::deal_projectile_attack bands, with the same partial dodge term the survivor's
-  // own shots give monsters.
-  const dodge = Math.min(1, (p.dodge() * 5 * rng.next()) / Math.max(1, rng.dice(10, 50)));
-  const goodhit = missedBy * 0.9 + dodge;
-  const roll = goodhit + rng.next() * (1 - Math.min(1, goodhit));
-  const mult = goodhit < 0.2 && roll * 0.5 < 0.2 ? (1 - 0.25 * roll) * 2 : goodhit < 0.5 ? (1 - 0.5 * roll) * 2 : goodhit < 0.8 ? 1.5 - roll : Math.max(0.05, 1.05 - roll);
-  const units = damageOf(gun, ammo).map((u) => ({ type: u.type, amount: u.amount * mult, armor_penetration: u.armor_penetration }));
-  hitSurvivor(sys, m, units, roll);
+  hitSurvivor(sys, m, damageOf(gun, ammo), missedBy, noCrit);
 }
 
-function hitSurvivor(sys: MonsterSystem, m: Monster, units: { type: string; amount: number; armor_penetration?: number }[], roll: number): void {
+/**
+ * Creature::deal_projectile_attack on the survivor (src/game/projectile.ts): BN severity and
+ * hit location, grazes before armor, "You were hit in the %s for %d damage." / "You avoid".
+ */
+function hitSurvivor(sys: MonsterSystem, m: Monster, base: { type: string; amount: number; armor_penetration?: number }[], missedBy: number, noCrit: boolean, speed = GUN_PROJECTILE_SPEED): void {
   const p = sys.game.player;
-  const bp = selectBodyPart(sys.rng, { hitRoll: 1 - roll });
+  const r = projectileHit({ dodgeRoll: p.dodge() * 5, isCharacter: true }, { missedBy, noCrit, speed }, sys.rng);
+  if (!r.hit) {
+    sys.message(`You avoid ${m.theName()}'s projectile!`, 'c_yellow');
+    return;
+  }
+  const bp = r.location as BodyPartId;
+  const units = base.map((u) => ({ type: u.type, amount: u.amount * r.severity, armor_penetration: u.armor_penetration, armor_multiplier: r.graze ? 1 : r.severity }));
   const absorbed = p.inv.absorbHit(bp, units, sys.rng);
-  const r = p.takeHit(bp, absorbed);
-  if (r.damage > 0) sys.message(`You were hit in the ${BODY_PARTS[bp].name} for ${r.damage} damage.`, 'c_red');
+  const hit = p.takeHit(bp, absorbed);
+  if (hit.damage > 0) sys.message(`You were hit in the ${BODY_PARTS[bp].name} for ${hit.damage} damage.`, 'c_red');
   else sys.message(`The shot reflects off your ${BODY_PARTS[bp].name}!`);
-  sys.onPlayerHurt(m, r.damage, bp);
+  sys.onPlayerHurt(m, hit.damage, bp);
 }
 
 /** Thrown "guns" (rocks): a visible projectile that hits if the survivor is still there. */
@@ -233,6 +237,7 @@ function throwAt(sys: MonsterSystem, m: Monster, gun: ItemDef, ammo: ItemDef | n
     if (p.dead || miss > CREATURE_RADIUS + 0.25) return;
     const units = damageOf(gun, ammo);
     if (!units.length) units.push({ type: 'bash', amount: Math.min(ammo ? ammo.weight / 100 + 4 : 5, 16), armor_penetration: 0 });
-    hitSurvivor(sys, m, units, Math.min(1, miss));
+    // Thrown rocks fly slowly (BN thrown projectile speed ~ 10-20 m/s): dodging matters.
+    hitSurvivor(sys, m, units, Math.min(0.99, miss / (CREATURE_RADIUS + 0.25)), false, 15);
   });
 }
