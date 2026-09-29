@@ -1,7 +1,6 @@
 import { Rng } from '../core/rng';
 import { cycleDensity, defaultDensity, densityLabel, setDefaultDensity, zombieDensity } from '../game/density';
-import type { ItemGroupDef, MutationDef } from '../data/types';
-import { expandItemGroup } from '../data/itemgroups';
+import type { MutationDef } from '../data/types';
 import { fromSpawned, type Item } from '../game/item';
 import { cddaText } from '../game/units';
 import { c, colorize, confirm, openWindow, prompt, type UiWindow } from './framework';
@@ -14,6 +13,8 @@ import { spriteImg, type UiContext } from './context';
 import { applyProfessionKnowledge } from '../game/crafting';
 import { globalAchievements } from '../game/achievements';
 import { achievementsOf } from '../achievements';
+import { professionItems, type ProfessionItemsDef } from '../game/profession';
+import { bodyMods } from '../game/bodymods';
 
 // New character (CDDA newcharacter.cpp), simplified to five tabs: SCENARIO, PROFESSION,
 // TRAITS, STATS, DESCRIPTION. Point pools follow CDDA's "multiple pools" rules
@@ -112,14 +113,12 @@ export function applyBuild(ctx: UiContext, b: Build): void {
     // CDDA "custom-flags": ["auto_wield"] (the baseball player's bat): wielded before anything
     // else can end up in the hands.
     let autoWield: Item | null = null;
-    for (const key of ['both', b.male ? 'male' : 'female'] as const) {
-      const g = b.profession.items?.[key] as ItemGroupDef | undefined;
-      if (!g) continue;
-      for (const s of expandItemGroup(data, g, rng)) {
-        const made = fromSpawned(data, s);
-        if (!autoWield && s.flags?.includes('auto_wield')) autoWield = made[0] ?? null;
-        items.push(...made);
-      }
+    // BN profession::items: groups, trait bonuses/substitutions, VARSIZE → FIT.
+    for (const s of professionItems(data, b.profession as ProfessionItemsDef, b.male, p.traits, rng)) {
+      const made = fromSpawned(data, s);
+      if (!autoWield && s.flags?.includes('auto_wield')) autoWield = made[0] ?? null;
+      for (const it of made) if (it.isBook()) p.identifiedBooks.add(it.typeId);
+      items.push(...made);
     }
     const inv = p.inv;
     if (autoWield && inv.canWield(autoWield).ok) inv.wielded = autoWield;
@@ -136,11 +135,46 @@ export function applyBuild(ctx: UiContext, b: Build): void {
       else floor.push(it);
     }
     for (const it of floor) game.map.addItem(p.tileX, p.tileY, p.z, it);
+    startBodyMods(game, b);
   } finally {
     p.onMessage = sink;
   }
+  startPets(game, b);
   game.stats.startSeconds = game.clock.seconds;
   ctx.build = { scenario: scenName(b.scenario, b.male), profession: profName(b.profession, b.male) };
+}
+
+/**
+ * newcharacter.cpp / game.cpp start_game, the body parts: profession CBMs (power filled),
+ * starts_active mutations powered, and BN's starting accumulated mutagen.
+ */
+function startBodyMods(game: UiContext['game'], b: Build): void {
+  const mods = bodyMods(game.player);
+  if (!mods) return;
+  mods.mut.syncBase();
+  for (const t of game.player.traits) if (mods.mut.idx.def(t)?.starts_active) mods.mut.powered.add(t);
+  for (const id of (b.profession as { CBMs?: string[] }).CBMs ?? []) {
+    if (mods.bio.def(id)) mods.bio.add(id);
+    else console.warn(`profession ${b.profession.id}: unknown CBM ${id}`);
+  }
+  mods.bio.power = mods.bio.maxPower();
+  mods.mut.startGame();
+}
+
+/** Profession `pets` ({name, amount}) spawn tame next to the survivor (start_game). */
+function startPets(game: UiContext['game'], b: Build): void {
+  const pets = (b.profession as { pets?: { name: string; amount?: number }[] }).pets ?? [];
+  const sys = (game as unknown as { monsters?: { spawnById(id: string, x: number, y: number, z: number, o: { friendly?: boolean }): unknown } }).monsters;
+  if (!pets.length || !sys) return;
+  const p = game.player;
+  let n = 0;
+  for (const pet of pets) {
+    for (let i = 0; i < (pet.amount ?? 1); i++, n++) {
+      const a = (n * 2 * Math.PI) / 6;
+      const m = sys.spawnById(pet.name, p.tileX + Math.round(Math.cos(a) * 2), p.tileY + Math.round(Math.sin(a) * 2), p.z, { friendly: true });
+      if (!m) console.warn(`profession ${b.profession.id}: unknown pet ${pet.name}`);
+    }
+  }
 }
 
 /** Opens character creation; resolves with the build, or null if the player backed out. */
@@ -323,10 +357,8 @@ export function openCharGen(ctx: UiContext): Promise<Build | null> {
     function itemsOf(pr: ProfessionDef, male: boolean): string[] {
       const rng = new Rng(ctx.game.seed ^ 0x5eed);
       const items: Item[] = [];
-      for (const key of ['both', male ? 'male' : 'female'] as const) {
-        const g = pr.items?.[key] as ItemGroupDef | undefined;
-        if (g) for (const sp of expandItemGroup(ctx.game.data, g, rng)) items.push(...fromSpawned(ctx.game.data, sp));
-      }
+      const traits = new Set([...(b.scenario.forced_traits ?? []), ...(pr.traits ?? []), ...b.traits]);
+      for (const sp of professionItems(ctx.game.data, pr as ProfessionItemsDef, male, traits, rng)) items.push(...fromSpawned(ctx.game.data, sp));
       return items.map((it) => `${spriteImg(ctx.renderer, it.typeId) || '<span class="icon"></span>'}${esc(it.name())}`);
     }
 
