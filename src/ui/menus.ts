@@ -1,11 +1,10 @@
-import { c, colorize, confirm, getUiRoot, hoverMoved, openMenu, type UiWindow } from './framework';
+import { c, colorize, confirm, getUiRoot, hoverMoved } from './framework';
 import { sfx } from '../audio/sfx';
 import { openOptions } from './options';
 import { openHelp } from './help';
 import { applyBuild, openCharGen } from './chargen';
 import type { Hud } from './hud';
 import type { UiContext } from './context';
-import { logLine } from './format';
 import { openMemorialFor } from '../save/install';
 import { maybeShowStartHints, randomTip } from './tips';
 import { progressionOf } from '../progression/registry';
@@ -167,72 +166,6 @@ export function showMainMenu(ctx: UiContext, hud: Hud): Promise<void> {
   });
 }
 
-/** In-game Esc menu. */
-export function openEscMenu(ctx: UiContext, onQuit: () => void): UiWindow {
-  const { game } = ctx;
-  type Act = 'resume' | 'options' | 'help' | 'save' | 'savequit' | 'quit';
-  const canSave = !!game.save;
-  const pausedUntilClosed = (w: UiWindow) => {
-    game.paused = true;
-    const t = setInterval(() => {
-      if (!w.closed) return;
-      clearInterval(t);
-      game.paused = wasPaused;
-    }, 100);
-  };
-  // The Esc menu always stops time, whatever the difficulty says about other menus.
-  const wasPaused = game.paused;
-  game.paused = true;
-  return openMenu<Act>({
-    title: 'Cataclysm: Dark Days Ahead',
-    width: '40ch',
-    onClose: () => void (game.paused = wasPaused),
-    entries: [
-      { label: 'Resume', value: 'resume', hotkey: 'r' },
-      { label: 'Options', value: 'options', hotkey: 'o' },
-      { label: 'Help', value: 'help', hotkey: '?' },
-      { label: canSave ? 'Save game' : c('c_dark_gray', 'Save game (not available yet)'), value: 'save', hotkey: 's', disabled: !canSave },
-      { label: canSave ? 'Save and quit' : c('c_dark_gray', 'Save and quit'), value: 'savequit', hotkey: 'S', disabled: !canSave },
-      { label: 'Quit to main menu', value: 'quit', hotkey: 'Q' },
-    ],
-    onSelect: (a) => {
-      setTimeout(async () => {
-        // Options and Help reached from the Esc menu keep time stopped until they close.
-        if (a === 'options' || a === 'help') pausedUntilClosed(a === 'options' ? openOptions(ctx) : openHelp(ctx));
-        else if (a === 'save') {
-          await game.save!();
-          game.message('Game saved.', 'c_light_green');
-        } else if (a === 'savequit') {
-          try {
-            await game.save!();
-          } catch (e) {
-            game.message(`Save failed: ${(e as Error).message}`, 'c_light_red');
-            return;
-          }
-          onQuit();
-        } else if (a === 'quit') {
-          if (await confirm('Quit to main menu?  <color_light_red>Unsaved progress will be lost.</color>', { destructive: true })) onQuit();
-        }
-      }, 0);
-    },
-  });
-}
 
-/** 'P' full message log (CDDA Messages screen). */
-export function openMessageLog(ctx: UiContext, hud: Hud): UiWindow {
-  const w = openMenu<number>({
-    title: 'Messages',
-    width: 'min(110ch, 94vw)',
-    height: '86vh',
-    entries: hud.log.entries.map((e, i) => {
-      const t = e.gameTime;
-      const hh = String(Math.floor((t % 86400) / 3600)).padStart(2, '0'), mm = String(Math.floor((t % 3600) / 60)).padStart(2, '0');
-      return { label: `${c('c_dark_gray', `${hh}:${mm}`)} ${colorize(`<color_${(e.color ?? 'c_light_gray').replace(/^c_/, '')}>${logLine(e)}</color>`)}`, value: i, hotkey: '' };
-    }),
-    onSelect: () => false,
-  });
-  w.refresh();
-  // Newest at the bottom, scrolled into view, like CDDA.
-  w.body.scrollTop = w.body.scrollHeight;
-  return w;
-}
+// The in-game Esc menu and the message log live in escmenu.ts (ui2); re-exported here for callers.
+export { openEscMenu, openMessageLog } from './escmenu';

@@ -10,6 +10,7 @@
 //   tsx tools/drive.ts hold  "w 1500"                  # hold a key for N ms (real keydown/keyup)
 //   tsx tools/drive.ts click "480 270"                 # real mouse click at page coords
 //   tsx tools/drive.ts type  "some text"               # type text into the focused element
+//   tsx tools/drive.ts resize "1920 1080"             # change the viewport (headful: up to the --size it started with)
 //   tsx tools/drive.ts stop
 //
 // --headful runs a real Chromium window on a private Xvfb display and enables OS-level input
@@ -210,6 +211,12 @@ const http = createHttp(async (req, res) => {
           player: g && { x: +g.player.x.toFixed(2), y: +g.player.y.toFixed(2), yaw: +g.player.yaw.toFixed(3), running: g.player.running },
         };
       });
+    } else if (what === 'resize') {
+      const [w, h] = body.trim().split(/\s+/).map(Number);
+      if (!(w > 0 && h > 0)) throw new Error('resize "W H"');
+      if (headful) await fitWindow(page, w, h);
+      else await page.setViewport({ width: w, height: h });
+      out = await page.evaluate(() => `${innerWidth}x${innerHeight}`);
     } else if (what === 'seq') {
       out = await runSeq(body);
     } else if (what === 'load') {

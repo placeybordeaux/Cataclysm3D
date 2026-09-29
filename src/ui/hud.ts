@@ -2,19 +2,22 @@ import type { Game } from '../game/game';
 import { BODY_PARTS, MAIN_PARTS } from '../game/bodyparts';
 import { colorize, c, cssColor } from './framework';
 import {
-  durationText, hpBar, hungerColor, logLine, MessageLog, moraleFace, painColor, sleepinessColor, staminaBar, tempColor, thirstColor,
+  hpBar, hungerColor, logLine, MessageLog, moraleFace, painColor, sleepinessColor, staminaBar, tempColor, thirstColor,
 } from './format';
 import { omtLabel, playerOmt, type UiContext } from './context';
 import { attackCooldownSeconds, attackSpeedMoves, swingSpeedRating } from '../game/combat';
+import { ModernHud, type BannerSpec, type HudPrefs } from './hud_modern';
 
-// The always-on HUD: CDDA's sidebar (right edge), the message log (bottom left), a
-// crosshair with a context prompt under it, and the activity progress bar. Pure overlay:
-// pointer-events none, rebuilt a few times a second from game state.
+// The always-on HUD: the crosshair with a context prompt under it and the hit marker (here),
+// plus the modern HUD (src/ui/hud_modern.ts: vitals, needs, compass, clock, weapon, message
+// feed, activity bar) — or, with Options > HUD style = Detailed, CDDA's sidebar (rendered here,
+// shown by the modern HUD in its restyled frame). Pure overlay, rebuilt a few times a second.
 //
 // Other systems talk to it through `hud` (exported below), no instance needed:
 //   hud.setPrompt('[e] Open door')            // sticky until setPrompt(null)
 //   const off = hud.addPromptProvider((g) => doorUnderCrosshair(g) ? '[e] Open door' : null)
 //   hud.safeMode = { text: 'DANGER', color: 'c_red' }
+//   hud.setBanner('pause', { text: 'PAUSED', sub: 'Space to resume', tone: 'warn' })  // top centre, under the compass
 
 export type PromptProvider = (game: Game) => string | null | undefined;
 
@@ -51,7 +54,26 @@ export const hud = {
   safeMode: { text: 'SAFE', color: 'c_green' } as { text: string; color: string },
   /** The prompt currently shown (for tests). */
   currentPrompt: null as string | null,
+  /**
+   * Status banner slot, top centre under the compass (PAUSED, SLEEPING, …): one banner per id,
+   * null removes it. Works before the HUD exists (kept and shown once it does).
+   */
+  setBanner(id: string, spec: BannerSpec | null): void {
+    if (spec) pendingBanners.set(id, spec);
+    else pendingBanners.delete(id);
+    modern?.setBanner(id, spec);
+  },
+  /** Modern HUD preferences (Options > HUD style / HUD width). */
+  prefs(): HudPrefs | null {
+    return modern?.prefs ?? null;
+  },
+  setPrefs(p: Partial<HudPrefs>): void {
+    modern?.setPrefs(p);
+  },
 };
+
+const pendingBanners = new Map<string, BannerSpec>();
+let modern: ModernHud | null = null;
 
 export const promptProviders: readonly PromptProvider[] = providers;
 
@@ -76,12 +98,12 @@ export class Hud {
   private logEl: HTMLElement;
   private cross: HTMLElement;
   private promptEl: HTMLElement;
-  private actEl: HTMLElement;
   private hitEl: HTMLElement;
   private hitUntil = 0;
   private visible = true;
   private lastSide = 0;
   private raf = 0;
+  readonly modern: ModernHud;
 
   constructor(private ctx: UiContext, root: HTMLElement) {
     this.el = document.createElement('div');
@@ -93,8 +115,11 @@ export class Hud {
     this.logEl = this.el.querySelector('.hud-log')!;
     this.cross = this.el.querySelector('.hud-cross')!;
     this.promptEl = this.el.querySelector('.hud-prompt')!;
-    this.actEl = this.el.querySelector('.hud-activity')!;
     this.hitEl = this.el.querySelector('.hud-hit')!;
+    this.modern = modern = new ModernHud(ctx, this.log, this.side, () => ctx.game.keys.handler('messages')?.());
+    for (const [id, b] of pendingBanners) this.modern.setBanner(id, b);
+    // Sidebar extras (bionic power, martial arts style, fire mode) go under the weapon.
+    this.modern.extraProviders = () => sidebarProviders.flatMap((f) => f(ctx.game) ?? []);
     // Hit marker: four diagonal ticks around the crosshair, coloured by how the blow landed.
     ctx.game.events.on('playerAttack', (e) => {
       if (e.outcome === 'whiff' || e.outcome === 'miss') return;
@@ -103,7 +128,7 @@ export class Hud {
     });
     ctx.game.events.on('message', (m) => {
       this.log.add(m.text, m.color, performance.now(), ctx.game.clock.seconds);
-      this.renderLog();
+      this.modern.onMessage();
     });
     const loop = () => {
       this.raf = requestAnimationFrame(loop);
@@ -115,11 +140,15 @@ export class Hud {
   setVisible(v: boolean): void {
     this.visible = v;
     this.el.style.display = v ? '' : 'none';
+    this.modern.setVisible(v);
   }
 
   destroy(): void {
     cancelAnimationFrame(this.raf);
     this.el.remove();
+    this.modern.el.remove();
+    this.side.remove();
+    if (modern === this.modern) modern = null;
   }
 
   /** Called every animation frame; the heavy sidebar rebuild is throttled. */
@@ -134,11 +163,11 @@ export class Hud {
       this.hitEl.className = 'hud-hit';
     }
     this.renderPrompt();
-    this.renderActivity();
-    if (now - this.lastSide > 200) {
+    this.modern.frame(now);
+    // The CDDA sidebar only renders while the Detailed HUD shows it.
+    if (now - this.lastSide > 200 && this.modern.prefs.detailed) {
       this.lastSide = now;
       this.renderSidebar();
-      this.renderLog();
     }
     void g;
   }
@@ -161,19 +190,7 @@ export class Hud {
     }
   }
 
-  private renderActivity(): void {
-    const a = this.ctx.game.activities.current;
-    // Activities with their own progress UI (crafting, construction, reading: src/ui/craft2).
-    if (!a || a.spec.customUi) {
-      if (this.actEl.style.display !== 'none') this.actEl.style.display = 'none';
-      return;
-    }
-    const W = 20;
-    const n = Math.round(a.fraction * W);
-    this.actEl.style.display = '';
-    this.actEl.innerHTML = `${c('c_white', a.spec.name)}  ${c('c_dark_gray', '[')}${c('c_light_green', '#'.repeat(n))}${c('c_dark_gray', '-'.repeat(W - n) + ']')} ${c('c_white', `${Math.floor(a.fraction * 100)}%`)}  ${c('c_light_gray', `${durationText(Math.max(0, a.spec.duration - a.elapsed))} left`)}  ${c('c_dark_gray', '(move to stop)')}`;
-  }
-
+  /** Legacy log strip (hidden by the modern HUD's CSS; its feed replaces it). */
   renderLog(): void {
     const now = performance.now();
     const recent = this.log.recent(8);

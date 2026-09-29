@@ -2,6 +2,7 @@ import type { Game } from './game/game';
 import type { DebugApi } from './debug';
 import { tacticalPauseOf, type TacticalPause } from './game/pause';
 import { Keys } from './ui/keys';
+import { hud } from './ui/hud';
 
 // Tactical pause wiring (state machine in src/game/pause.ts): the `tactical_pause` key
 // (default ` and Pause/Break; Space is the side-step), which also works inside menus and ui2
@@ -25,39 +26,22 @@ export function installTacticalPause(game: Game, api?: DebugApi): TacticalPause 
   });
   game.events.on('playerDied', () => tp.clear());
 
-  if (typeof document !== 'undefined') {
-    const el = document.createElement('div');
-    el.className = 'tactical-pause-banner';
-    Object.assign(el.style, {
-      position: 'fixed', left: '50%', top: '9vh', transform: 'translateX(-50%)', zIndex: '40', pointerEvents: 'none',
-      font: '600 22px/1.2 var(--font, monospace)', letterSpacing: '0.35em', color: '#ffe066', textAlign: 'center',
-      padding: '6px 18px 7px 24px', background: 'rgba(0,0,0,0.62)', border: '1px solid rgba(255,224,102,0.55)',
-      textShadow: '1px 1px 0 #000', display: 'none',
-    } as Partial<CSSStyleDeclaration>);
-    const sub = document.createElement('div');
-    Object.assign(sub.style, { font: '400 13px/1.3 var(--font, monospace)', letterSpacing: '0.05em', color: '#d8d8d8', marginTop: '2px' });
-    const title = document.createElement('div');
-    el.append(title, sub);
-    document.body.appendChild(el);
-    const draw = () => {
-      el.style.display = tp.paused && !game.player.dead ? '' : 'none';
-      if (!tp.paused) return;
-      const key = game.keys.label('tactical_pause');
-      title.textContent = 'PAUSED';
-      // A menu's own pause is small (the window says so itself); the player's pause is big.
-      sub.textContent = tp.manual ? `${key} to resume · look around, open any menu` : '';
-      sub.style.display = tp.manual ? '' : 'none';
-      title.style.fontSize = tp.manual ? '' : '13px';
-      el.style.top = tp.manual ? '9vh' : '1.2vh';
-    };
-    tp.onChange(draw);
-    const prevChange = game.keys.onChange;
-    game.keys.onChange = () => {
-      prevChange?.();
-      draw();
-    };
+  // The PAUSED banner lives in the HUD's status banner slot (top centre, under the compass).
+  // A menu's own pause is a small note (the window says so itself); the player's pause is big.
+  const draw = () => {
+    if (!tp.paused || game.player.dead) return hud.setBanner('pause', null);
+    const key = game.keys.label('tactical_pause');
+    hud.setBanner('pause', tp.manual
+      ? { text: 'PAUSED', sub: `${key} to resume · look around, open any menu`, tone: 'warn' }
+      : { text: 'Paused', tone: 'info', small: true });
+  };
+  tp.onChange(draw);
+  const prevChange = game.keys.onChange;
+  game.keys.onChange = () => {
+    prevChange?.();
     draw();
-  }
+  };
+  draw();
 
   if (api)
     Object.assign(api, {

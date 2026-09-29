@@ -21,8 +21,8 @@ import type { UiContext } from '../ui/context';
 import { raycastTiles, type RayHit } from '../game/raycast';
 import type { LookCreature } from '../game/game';
 import { LEVEL_HEIGHT } from '../world/coords';
+import { openLookCard } from '../ui/look';
 import { tacticalPauseOf } from '../game/pause';
-import { describeHit } from '../ui/look';
 import { vehicleSolidHeight } from '../ui/vehicle_ui';
 import { registerOption } from '../ui/options';
 import { h, ui2Layers } from './dom';
@@ -38,6 +38,12 @@ import { setupMockInventory, type MockSetup } from './mock/setup';
 import type { RawItems } from './mock/data';
 import { palette } from './theme';
 import type { UiScalePref } from './logic/scale';
+
+/**
+ * Told whenever the object under the free cursor changes (null = nothing / cursor captured),
+ * with the pointer position: the look card (src/ui/look.ts) uses it for hover inspection.
+ */
+export const worldHoverListeners: ((t: WorldTarget | null, x: number, y: number) => void)[] = [];
 
 export interface Ui2Handle {
   toggleInventory(): void;
@@ -131,16 +137,9 @@ export function installUi2(game: Game, renderer: Renderer, ctx: UiContext, api: 
     openContextMenu({ x: r.left + r.width / 2, y: r.top + r.height / 2 }, items, { title: t.name });
   });
 
-  // Built-in world entry: what `x` look mode would say about it.
+  // Built-in world entry: the look card (src/ui/look.ts) for it.
   worldContextProviders.push((t) => [
-    {
-      label: 'Look at', key: 'L', time: 0,
-      action: () => {
-        const text = describeHit(ctx, t.hit as RayHit<LookCreature>).replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
-        const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
-        toast({ category: 'info', title: t.name, body: lines.slice(0, 4).join(' · ') || undefined, key: `look:${t.x},${t.y},${t.z}` });
-      },
-    },
+    { label: 'Look at', key: 'L', time: 0, action: () => void openLookCard(ctx, t) },
   ]);
 
   // --- options
@@ -221,20 +220,7 @@ function worldHover(game: Game, renderer: Renderer) {
     return fromHit(hit);
   };
 
-  const fromHit = (hit: RayHit<LookCreature> | null): WorldTarget | null => {
-    if (!hit) return null;
-    const items = hit.kind === 'floor' ? game.map.itemsAt(hit.x, hit.y, hit.z) : [];
-    const kind: WorldTarget['kind'] = items.length ? 'items' : (hit.kind as WorldTarget['kind']);
-    const name =
-      hit.kind === 'creature' && hit.creature ? hit.creature.name
-      : items.length ? (items.length === 1 ? itemName(items[0]) : `${items.length} items`)
-      : hit.furniture && hit.furniture.id !== 'f_null' ? hit.furniture.name
-      : hit.terrain.name;
-    return {
-      kind, name, x: hit.x, y: hit.y, z: hit.z, dist: hit.dist, hit,
-      terrain: hit.terrain.id, furniture: hit.furniture?.id !== 'f_null' ? hit.furniture?.id : undefined, creature: hit.creature,
-    };
-  };
+  const fromHit = (hit: RayHit<LookCreature> | null) => targetFromHit(game, hit);
 
   return {
     pick,
@@ -243,6 +229,7 @@ function worldHover(game: Game, renderer: Renderer) {
     update(x: number, y: number) {
       cur = pick(x, y);
       if (!cur || cur.kind === 'ceiling') return this.clear();
+      for (const f of worldHoverListeners) f(cur, x, y);
       // A tall box for things you bump into, a flat one for floors and piles.
       const tall = cur.kind === 'creature' ? 1.8 : cur.kind === 'furniture' ? 1.0 : cur.kind === 'terrain' || cur.kind === 'vehicle' ? LEVEL_HEIGHT : 0.06;
       box.scale.set(1.02, tall, 1.02);
@@ -255,10 +242,28 @@ function worldHover(game: Game, renderer: Renderer) {
       label.style.top = `${y}px`;
     },
     clear() {
+      const had = cur !== null;
       cur = null;
       box.visible = false;
       label.style.display = 'none';
+      if (had) for (const f of worldHoverListeners) f(null, 0, 0);
     },
+  };
+}
+
+/** The WorldTarget for a tile raycast hit (what the cursor or crosshair points at). */
+export function targetFromHit(game: Game, hit: RayHit<LookCreature> | null): WorldTarget | null {
+  if (!hit) return null;
+  const items = hit.kind === 'floor' ? game.map.itemsAt(hit.x, hit.y, hit.z) : [];
+  const kind: WorldTarget['kind'] = items.length ? 'items' : (hit.kind as WorldTarget['kind']);
+  const name =
+    hit.kind === 'creature' && hit.creature ? hit.creature.name
+    : items.length ? (items.length === 1 ? itemName(items[0]) : `${items.length} items`)
+    : hit.furniture && hit.furniture.id !== 'f_null' ? hit.furniture.name
+    : hit.terrain.name;
+  return {
+    kind, name, x: hit.x, y: hit.y, z: hit.z, dist: hit.dist, hit,
+    terrain: hit.terrain.id, furniture: hit.furniture?.id !== 'f_null' ? hit.furniture?.id : undefined, creature: hit.creature,
   };
 }
 
