@@ -2,7 +2,7 @@
    sizes in --u / metric vars, colours from --p-*. */
 
 #ui2 .bn-equip-top { display: flex; gap: calc(var(--u) * 6); align-items: flex-start; }
-#ui2 .bn-worn { flex: 1; min-width: calc(var(--fs) * 16); display: flex; flex-direction: column; gap: var(--u); }
+#ui2 .bn-worn { flex: 1; min-width: calc(var(--fs) * 10); display: flex; flex-direction: column; gap: var(--u); }
 #ui2 .bn-worn .bn-list { max-height: calc(var(--cell) * 4.6); }
 #ui2 .bn-worn .bn-list[data-hands] { min-height: 0; }
 
@@ -19,7 +19,11 @@
 #ui2 .bn-part.drop-bad > .bn-stack { border-image: var(--skin-inset-bad); }
 #ui2 .bn-tip-layer { display: flex; align-items: center; gap: calc(var(--u) * 2); }
 
-#ui2 .bn-list { max-height: min(62vh, calc(var(--cell) * 9)); min-height: calc(var(--cell) * 1.5); }
+#ui2 .bn-list { max-height: min(62vh, calc(var(--cell) * 9)); min-height: calc(var(--cell) * 1.5); container-type: inline-size; }
+/* Narrow lists (960×540 at 1×): the name gets the room; weight stays, volume is in the tooltip
+   and the capacity bars. Container queries can't read var(), so these are CSS px. */
+@container (max-width: 300px) { #ui2 .bn-row .ui2-row-num + .ui2-row-num { display: none; } }
+@container (max-width: 200px) { #ui2 .bn-row .ui2-row-num { display: none; } }
 #ui2 .bn-cat { color: var(--p-accent); font-size: var(--fs-s); margin-top: calc(var(--u) * 3); border-bottom: var(--u) solid var(--p-bg-raised); }
 #ui2 .bn-cat:first-child { margin-top: 0; }
 #ui2 .bn-row { position: relative; }
@@ -38,6 +42,7 @@
 #ui2 .bn-empty-inside { color: var(--p-text-dim); font-size: var(--fs-s); }
 
 #ui2 .bn-tabs .ui2-tabs { flex-wrap: wrap; }
+#ui2 .bn-source-list { min-height: 0; display: flex; flex-direction: column; }
 #ui2 .bn-source-head { display: flex; flex-direction: column; gap: var(--u); }
 #ui2 .bn-source-title { display: flex; align-items: center; justify-content: space-between; gap: calc(var(--u) * 3); color: var(--p-text-dim); font-size: var(--fs-s); }
 #ui2 .bn-result:empty { display: none; }

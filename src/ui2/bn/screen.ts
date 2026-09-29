@@ -44,6 +44,12 @@ export function bnInventoryOpen(): boolean {
 
 let activeSource: string | null = null;
 
+// Window widths. The 1080p sizes are the floor on big screens (wider on ultrawide, so names stop
+// truncating); on small ones (960×540 at 1× scale) all three shrink to fit side by side, so none
+// sits over another or over the hotbar. Narrow lists drop their volume column (inventory.css).
+const LIST_W = 'min(calc(clamp(var(--fs) * 21, 18vw, var(--fs) * 30) + var(--row-icon) * 2), 28vw)';
+const EQUIP_W = 'min(calc(var(--cell) * 3 + var(--gap) * 2 + var(--row-icon) + clamp(var(--fs) * 18, 22vw - var(--cell) * 3, var(--fs) * 26)), calc(44vw - 48px))';
+
 export function openBnInventory(env: ListEnv, o: ScreenOpts = {}): void {
   const m = env.model;
   if (bnInventoryOpen()) {
@@ -82,7 +88,7 @@ export function openBnInventory(env: ListEnv, o: ScreenOpts = {}): void {
     id: 'inv.equip',
     title: 'Equipment',
     // Wider on ultrawide screens (names stop truncating), the 1080p size as the floor.
-    width: 'calc(var(--cell) * 3 + var(--gap) * 2 + var(--row-icon) + clamp(var(--fs) * 18, 22vw - var(--cell) * 3, var(--fs) * 26))',
+    width: EQUIP_W,
     footer: pauseNote,
     onClose: () => {
       for (const c of cleanups.splice(0)) c();
@@ -114,7 +120,7 @@ export function openBnInventory(env: ListEnv, o: ScreenOpts = {}): void {
   };
   refreshStorage();
   cleanups.push(m.onChange(refreshStorage));
-  const invP = openPanel({ ...base, id: 'inv.carried', title: 'Inventory', width: 'calc(clamp(var(--fs) * 21, 18vw, var(--fs) * 30) + var(--row-icon) * 2)', onClose: () => inv.destroy() });
+  const invP = openPanel({ ...base, id: 'inv.carried', title: 'Inventory', width: LIST_W, onClose: () => inv.destroy() });
   invP.body.append(invVol.el, invWt.el, storageNote, inv.el);
   panels.push(invP);
 
@@ -165,7 +171,15 @@ export function openBnInventory(env: ListEnv, o: ScreenOpts = {}): void {
   // Any window without a remembered spot (first time, or one the player never moved): lay the
   // screen out as a row again rather than cascading the new one over the others.
   if (panels.some((p) => !rememberedPosition(p.id))) layoutPanels(panels);
+  keepAboveHotbar(panels);
   equip.front();
+}
+
+/** Top of the hotbar (the screen's windows end above it), or the viewport bottom without one. */
+function hotbarTop(): number {
+  const hb = document.querySelector<HTMLElement>('#ui2 .ui2-hotbar');
+  const r = hb?.getBoundingClientRect();
+  return r && r.height ? r.top : viewport().h;
 }
 
 function layoutPanels(panels: Panel[]): void {
@@ -174,8 +188,22 @@ function layoutPanels(panels: Panel[]): void {
     return { w: r.width, h: r.height };
   });
   const vp = viewport();
-  // Sit in the upper part of the screen: the hotbar lives at the bottom.
-  arrangeRow(sizes, { w: vp.w, h: vp.h * 0.86 }, 12, 12).forEach((pos, i) => panels[i].moveTo(pos.x, pos.y));
+  // Sit above the hotbar: it stays usable (drag items onto it) while the inventory is open.
+  arrangeRow(sizes, { w: vp.w, h: Math.min(vp.h * 0.86, hotbarTop() - 8) }, 12, 12).forEach((pos, i) => panels[i].moveTo(pos.x, pos.y));
+}
+
+/**
+ * Cap each window's height so it ends above the hotbar; their lists scroll instead. At 960×540
+ * a long Inventory list or a Nearby window full of tabs otherwise grew over the hotbar (and, at
+ * one row, over each other). A window the player dragged down low keeps a usable minimum.
+ */
+function keepAboveHotbar(panels: Panel[]): void {
+  const limit = hotbarTop() - 8;
+  const vp = viewport();
+  for (const p of panels) {
+    const top = p.el.getBoundingClientRect().top;
+    p.el.style.maxHeight = `${Math.max(vp.h * 0.4, limit - top)}px`;
+  }
 }
 
 // ------------------------------------------------------------------ nearby
@@ -191,7 +219,7 @@ function openNearby(env: ListEnv, focus: string | null): Panel {
   const own: (() => void)[] = [];
   const p = openPanel({
     group: BN_GROUP, pauses: true, id: 'inv.nearby', title: 'Nearby',
-    width: 'calc(clamp(var(--fs) * 21, 18vw, var(--fs) * 30) + var(--row-icon) * 2)',
+    width: LIST_W,
     onClose: () => {
       own.splice(0).forEach((c) => c());
       nearbyApi = null;
