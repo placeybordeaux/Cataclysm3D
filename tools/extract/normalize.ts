@@ -541,7 +541,7 @@ export function normalizeMonsterGroups(objs: Json[]): Record<string, MonsterGrou
       if (m.ends !== undefined) e.ends = m.ends * 3600;
       return e;
     });
-    const g: Json = extending ? { ...prev, monsters: [...prev.monsters, ...monsters] } : { ...strip(o, ['name', 'override', 'auto_total']), monsters };
+    const g: Json = extending ? { ...prev, monsters: [...prev.monsters, ...monsters] } : { ...strip(o, ['name', 'name_plural', 'override', 'auto_total']), monsters };
     g.id = id;
     if (!extending || o.default !== undefined) {
       if (typeof o.default !== 'string') throw new Error(`monstergroup ${id}: missing "default"`);
