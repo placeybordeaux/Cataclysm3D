@@ -39,6 +39,10 @@ async function main(): Promise<void> {
     const { runAtlasDebug } = await import('./render/atlasDebug');
     return runAtlasDebug(document.getElementById('view') as HTMLCanvasElement);
   }
+  if (params.get('debug') === 'ui2') {
+    const { runUi2Showcase } = await import('./ui2/showcase');
+    return runUi2Showcase(document.getElementById('view') as HTMLCanvasElement);
+  }
   // A save chosen on the previous page (title screen Load) decides the world to build.
   const pending = await takePendingLoad();
   const seed = pending?.file ? pending.file.world.seed : Number(params.get('seed') ?? Math.floor(Math.random() * 2 ** 31));
