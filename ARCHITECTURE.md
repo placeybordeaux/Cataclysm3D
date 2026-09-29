@@ -37,8 +37,13 @@ tileset, rendered in the "3D pixel art" style of *Project Shadowglass*.
   Read tool**; visual features are not done until you've seen them working.
   `--print "<expr>"` prints JSON from the page for scripted assertions.
 - `tools/drive.ts` keeps one Vite + headless Chromium session alive for long playtests:
-  `tsx tools/drive.ts serve [--gpu]` (via `heavy`), then `drive.ts eval|shot|load|log` (or curl
-  `127.0.0.1:9555/eval`); page scripts can `await shot(path)`. `--gpu` renders on the real GPU.
+  `tsx tools/drive.ts serve [--gpu] [--dist]` (via `heavy`), then `drive.ts eval|shot|load|log` (or curl
+  `127.0.0.1:9555/eval`); page scripts can `await shot(path)`. `--gpu` renders on the real GPU;
+  `--dist` serves the production build (`npm run build` first). Real input: `drive.ts key "i Escape
+  ArrowDown*5 Shift+e"`, `hold "w 1500"`, `click "480 270"`, `type "text"`. For scripted walks,
+  `cdda.findPath(x, y)` returns a door-aware A* route; `cdda.godMode(true)` for long captures.
+- Static assets are fetched relative to `ASSET_BASE` (src/core/assets.ts, Vite `base: './'`), so
+  `dist/` works from any sub-path: never hard-code `/data/`, `/atlas/`, `/audio/`.
 - `window.cdda` (src/debug.ts) is the automation API. Register helpers for anything you
   add (`cdda.spawnMonster(id, dx, dy)`, `cdda.giveItem(id)`, …) so others can test.
 - Generated data lives in `public/data/` (by `npm run data:all`, which runs every extractor) and `public/atlas/`
@@ -447,6 +452,11 @@ Keys: `V` camera mode, `F` flashlight.
 - **Tile art**: everything goes through `TileTextureSource` (src/render/textureSource.ts);
   `AtlasTextureSource` (UltiCa) falls back to `ProceduralTextureSource`. Monster/item
   systems should get frames via `renderer.source.sprite(id)` / `.item(id)` / `.glyph()`.
+- **Seams**: world textures take alpha (cut-out coverage) from mip 0 while colour uses the chosen
+  mip (materials.ts WORLD_MAP), ceilings tuck `CEIL_TUCK` into the walls below and door leaves
+  overlap their lintel: edge-to-edge geometry showed sky-coloured dotted cracks on real GPUs.
+- **Cameras**: third person becomes a chase camera while driving (`rig.suppressBob`); the mouse
+  wheel zooms top-down (`rig.topDistance` 10–60).
 - **Other**: `renderer.setWeather('clear'|'rain'|'storm'|'snow')`,
   `renderer.setCameraMode('first'|'third'|'top')`, `renderer.flushChunks()` (tests).
   Plain three.js objects added to `renderer.scene` are auto-patched for the MRT output.

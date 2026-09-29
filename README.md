@@ -21,11 +21,31 @@ Useful URL parameters: `seed=<n>` (world seed), `skipmenu=1` (straight into the 
 `gen=test` (small test scene), `debug=1` (render stats; F6 cycles colour grading),
 `px=<n>` (internal render height), `radius=<chunks>`, `debug=atlas` (sprite atlas viewer).
 
+## Gallery
+
+All captured in the production build at 1920×1080 on a GPU (`docs/screenshots/`).
+
+| | |
+|---|---|
+| ![Waking up in the evac shelter](docs/screenshots/01_shelter_start.png) | ![A town street at golden hour](docs/screenshots/02_town_street_golden_hour.png) |
+| Waking up in the evacuation shelter | A town street at golden hour, the dead already walking |
+| ![Melee with a baseball bat](docs/screenshots/03_zombie_melee.png) | ![Flashlight at night](docs/screenshots/04_night_flashlight.png) |
+| Melee: CDDA to-hit, criticals and blood on the pavement | Night inside a house, by flashlight |
+| ![Top-down view of a town](docs/screenshots/05_top_down_town.png) | ![Driving at night](docs/screenshots/06_night_driving_headlights.png) |
+| The top-down camera (`v`, mouse wheel zooms) cuts roofs away | Driving at night with headlights and cruise control |
+| ![Talking to the Free Merchants](docs/screenshots/07_refugee_center_dialogue.png) | ![An underground lab corridor](docs/screenshots/08_lab_corridor.png) |
+| CDDA dialogue at the refugee center | A zombie scientist in an underground lab |
+| ![The crafting menu](docs/screenshots/09_crafting_menu.png) | ![A winter forest](docs/screenshots/10_winter_forest.png) |
+| Crafting with CDDA recipes, tools and nearby components | Seasons: a snowy winter forest |
+| ![The overmap](docs/screenshots/11_overmap.png) | ![Character creation](docs/screenshots/12_character_creation.png) |
+| The overmap, with the refugee center marked | Character creation: scenarios, professions, traits |
+
 ## Controls
 
 Movement is first-person: **WASD** to move, **mouse** to look (click to capture), **Shift**
 to run, **c** to crouch, **LMB** to attack or fire, **RMB** to aim, and **v** to cycle the
-camera between first person, over the shoulder, and top-down (classic CDDA view).
+camera between first person, over the shoulder (a chase camera at the wheel), and top-down
+(classic CDDA view; the mouse wheel zooms it).
 Everything else uses CDDA's keys, moved where WASD collides with them:
 
 | Key | Action | Key | Action |
@@ -91,7 +111,7 @@ npm run data:all                     # re-extract public/data from ~/code/Catacl
 npm run atlas                        # recompile the UltiCa sprite atlas
 npm run audio                        # rebuild the soundpack subset
 npm run shot -- --help               # headless screenshots / scripted checks
-npx tsx tools/drive.ts --help        # persistent headless session (optionally on the GPU)
+npx tsx tools/drive.ts --help        # persistent headless session (--gpu, --dist = production build)
 ```
 
 ## Credits and licences
