@@ -1,7 +1,31 @@
-/* CDDA's look is a curses terminal: black panels, monospace, 16 named colors. The UI keeps
-   that identity on top of the 3D view. */
-@import url('https://fonts.googleapis.com/css2?family=VT323&display=swap');
+/* CDDA's look is a curses terminal: black panels, the Terminus font CDDA ships, 16 named
+   colors. The UI keeps that identity on top of the 3D view. */
+@font-face { font-family: 'Terminus'; src: url('/fonts/Terminus.ttf') format('truetype'); }
+@font-face { font-family: 'Unifont'; src: url('/fonts/unifont.ttf') format('truetype'); }
+:root {
+  --c-black: #000000; --c-red: #ff0000; --c-green: #006e00; --c-brown: #5c3317; --c-blue: #0000c8;
+  --c-magenta: #8b3a62; --c-cyan: #0096b4; --c-light_gray: #969696; --c-dark_gray: #636363;
+  --c-light_red: #ff9696; --c-light_green: #00ff00; --c-yellow: #ffff00; --c-light_blue: #6464ff;
+  --c-pink: #fe00fe; --c-light_cyan: #00f0ff; --c-white: #ffffff;
+  --ui-font: 'Terminus', 'Unifont', 'DejaVu Sans Mono', monospace;
+  --ui-size: 16px;
+}
 html, body { margin: 0; height: 100%; overflow: hidden; background: #000; }
 #view { position: fixed; inset: 0; width: 100vw; height: 100vh; image-rendering: pixelated; display: block; }
-#ui { position: fixed; inset: 0; pointer-events: none; font-family: 'VT323', 'DejaVu Sans Mono', monospace; font-size: 18px; color: #c0c0c0; }
-#ui .panel { pointer-events: auto; background: rgba(0,0,0,0.85); border: 1px solid #969696; padding: 4px 8px; }
+#ui { position: fixed; inset: 0; pointer-events: none; font-family: var(--ui-font); font-size: var(--ui-size); line-height: 1.15; color: var(--c-light_gray); }
+#ui .panel { pointer-events: auto; background: rgba(0,0,0,0.85); border: 1px solid var(--c-light_gray); padding: 4px 8px; }
+
+/* Modal windows (src/ui/framework.ts) */
+#ui .cdda-window { position: absolute; pointer-events: auto; background: #000; border: 1px solid var(--c-light_gray);
+  display: flex; flex-direction: column; box-shadow: 0 0 0 1px #000, 0 0 30px rgba(0,0,0,.8); max-height: 92vh; }
+#ui .cdda-window > .title { color: var(--c-light_red); text-align: center; border-bottom: 1px solid var(--c-light_gray); padding: 1px 8px; white-space: pre; }
+#ui .cdda-window > .body { overflow: auto; padding: 2px 8px; flex: 1; white-space: pre-wrap; }
+#ui .cdda-window > .footer { border-top: 1px solid var(--c-light_gray); padding: 1px 8px; color: var(--c-dark_gray); white-space: pre-wrap; }
+#ui .menu-entry { white-space: pre; cursor: pointer; }
+#ui .menu-entry.sel { background: var(--c-blue); color: var(--c-white); }
+#ui .menu-entry.disabled { color: var(--c-dark_gray); }
+#ui .menu-entry .hotkey { color: var(--c-light_green); }
+#ui .menu-header { color: var(--c-light_blue); white-space: pre; margin-top: 2px; }
+#ui .cols { display: flex; gap: 12px; }
+#ui .cols > * { flex: 1; min-width: 0; }
+#ui ::-webkit-scrollbar { width: 6px; } #ui ::-webkit-scrollbar-thumb { background: var(--c-dark_gray); }

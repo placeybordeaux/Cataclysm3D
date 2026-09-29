@@ -7,6 +7,7 @@ import { WorldGenerator } from './world/worldgen';
 import { loadWorldgenData } from './world/worldgen_data';
 import { installWorldgenDebug } from './world/worldgen_debug';
 import { installDebugApi } from './debug';
+import { initUi } from './ui/framework';
 
 // URL params (all optional): seed=<int>, gen=world|test (default world), debug=1 (render stats overlay),
 // renderer params px/grade/tex/cam/walls (see src/render/renderer.ts), debug=atlas (sprite sheet view
@@ -24,6 +25,7 @@ async function main(): Promise<void> {
   const canvas = document.getElementById('view') as HTMLCanvasElement;
   const [data, worldgenData] = await Promise.all([loadGameData(), genKind === 'world' ? loadWorldgenData() : null]);
   const input = new Input(canvas);
+  initUi(document.getElementById('ui') as HTMLElement, input);
   const game = new Game(data, seed, input);
   let worldgen: WorldGenerator | null = null;
   if (worldgenData) {

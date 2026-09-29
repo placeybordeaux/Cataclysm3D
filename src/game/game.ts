@@ -6,6 +6,8 @@ import { GameMap } from '../world/map';
 import { PlayerAvatar } from './player';
 import { moveWithCollision } from './physics';
 import { fromSpawned } from './item';
+import { ActivityManager } from './activity';
+import { Keys } from '../ui/keys';
 import type { SpawnedItem } from '../data/itemgroups';
 import type { ItemSpawn } from '../world/map';
 
@@ -31,12 +33,17 @@ export class Game {
   readonly map: GameMap;
   readonly player: PlayerAvatar;
   readonly systems: GameSystem[] = [];
+  readonly activities: ActivityManager;
+  readonly keys: Keys;
   paused = false;
   private acc = 0;
   mouseSensitivity = 0.0025;
 
   constructor(readonly data: GameData, readonly seed: number, readonly input: Input) {
     this.map = new GameMap(seed);
+    this.keys = new Keys(input);
+    this.activities = new ActivityManager(this);
+    this.systems.push(this.activities);
     this.player = new PlayerAvatar(data, { seed });
     this.player.onMessage = (text, color) => this.message(text, color);
     this.player.onDeath = (cause) => this.events.emit('playerDied', { cause });

@@ -167,3 +167,28 @@ and wall style). Keys: `V` camera mode, `F` flashlight.
 - Before finishing: `npm run typecheck` and `npm test` pass; commit on your branch with a
   descriptive message. Report: what you built, what's verified (with screenshot paths),
   what's missing, and any interface changes other agents must know about.
+
+## Shared infrastructure (use these, don't reinvent)
+
+- **UI framework** `src/ui/framework.ts`: `openWindow`, `openMenu` (CDDA uilist: letter
+  hotkeys, headers, detail pane, arrows/jk/Enter/Esc, mouse), `confirm`, `prompt`,
+  `colorize` (CDDA `<color_red>…</color>` markup), `c(color, text)`, `cssColor`. Windows
+  capture the keyboard while open. Font is CDDA's Terminus (public/fonts). Every screen
+  should be built from these.
+- **Key bindings** `src/ui/keys.ts`: all default keys live in `DEFAULT_BINDINGS`; systems call
+  `game.keys.register(actionId, 'Description', handler)`. To add an action, add it to the
+  table (keep it conflict-free; WASD/shift/space are movement).
+- **Activities** `src/game/activity.ts`: `game.activities.start({name, duration, onComplete,
+  onProgress?, onCancel?, warp?, interruptible?})` for any long action (craft, read, butcher,
+  construct, wait, sleep). Warps the clock, cancels on movement/danger. Danger sources
+  register `game.activities.dangerChecks.push(() => reason | null)`.
+- **Items on the map** are real `Item` instances (`src/game/item.ts`). Mapgen emits
+  `ItemSpawn`s which `GameMap.itemFactory` (set in Game) converts via `fromSpawned`.
+
+## Merge etiquette for parallel agents
+
+You work in a git worktree; the lead merges branches. Shared hot files — `src/main.ts`,
+`src/game/game.ts`, `src/debug.ts`, `src/core/events.ts`, `src/data/types.ts`,
+`src/ui/keys.ts`, `ARCHITECTURE.md` — take **small, additive** edits only (new lines, new
+fields), never reformat or reorder them. Put your feature in your own files and wire it in with
+a few lines (e.g. `installMonsters(game, renderer)` from main.ts).
