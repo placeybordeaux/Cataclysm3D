@@ -1,0 +1,77 @@
+/* Looting UIs (src/ui2/loot): the crosshair quick-loot panel, the area loot window, the pile
+   markers in the world. Same rules as ui2.css: sizes in --u / metric vars, colours --p-*. */
+
+/* ---- quick loot / peek panel, right of the crosshair ---- */
+#ui2 .lq {
+  position: absolute; pointer-events: none !important; width: calc(var(--fs) * 19 + var(--row-icon));
+  border: var(--b3) solid transparent; border-image: var(--skin-tip); background: rgba(7, 8, 12, .82);
+  filter: var(--shadow); display: flex; flex-direction: column;
+}
+#ui2 .lq.peek { width: calc(var(--fs) * 16 + var(--row-icon)); opacity: .94; }
+#ui2 .lq-head { display: flex; align-items: baseline; justify-content: space-between; gap: calc(var(--u) * 3); padding: 0 calc(var(--u) * 2); color: var(--p-accent); }
+#ui2 .lq-head .lq-n { color: var(--p-text-dim); font-size: var(--fs-s); }
+#ui2 .lq-title { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+#ui2 .lq-rows { display: flex; flex-direction: column; }
+#ui2 .lq-row { display: flex; align-items: center; gap: calc(var(--u) * 3); padding: 0 calc(var(--u) * 2); border: var(--u) solid transparent; }
+#ui2 .lq-row.sel { border-color: var(--p-accent); background: rgba(255, 255, 255, .06); }
+#ui2 .lq-row.sel .lq-name { color: var(--p-text-bright); }
+#ui2 .lq-row.bad .lq-name { color: var(--p-text-dim); }
+#ui2 .lq-name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#ui2 .lq-count { color: var(--p-info); font-size: var(--fs-s); }
+#ui2 .lq-wt { color: var(--p-text-dim); font-size: var(--fs-s); min-width: 6ch; text-align: right; }
+#ui2 .lq-more { color: var(--p-text-dim); font-size: var(--fs-s); padding: 0 calc(var(--u) * 2); }
+#ui2 .lq-empty { color: var(--p-text-dim); padding: 0 calc(var(--u) * 2); }
+#ui2 .lq-warn { font-size: var(--fs-s); padding: 0 calc(var(--u) * 2); }
+#ui2 .lq-bars { display: grid; grid-template-columns: auto 1fr; column-gap: calc(var(--u) * 3); align-items: center; font-size: var(--fs-s); color: var(--p-text-dim); padding: var(--u) calc(var(--u) * 2) 0; border-top: var(--u) solid var(--p-bg-raised); margin-top: var(--u); }
+#ui2 .lq-bar { height: calc(var(--u) * 3); background: rgba(0, 0, 0, .6); position: relative; }
+#ui2 .lq-bar > i { position: absolute; left: 0; top: 0; bottom: 0; background: var(--p-info); }
+#ui2 .lq-bar.warn > i { background: var(--p-warn); }
+#ui2 .lq-bar.full > i { background: var(--p-danger); }
+#ui2 .lq-bar > b { position: absolute; top: 0; bottom: 0; width: var(--u); background: var(--p-accent); }
+#ui2 .lq-keys { display: flex; flex-wrap: wrap; gap: 0 calc(var(--u) * 4); font-size: var(--fs-s); color: var(--p-text-dim); padding: var(--u) calc(var(--u) * 2) 0; }
+#ui2 .lq-keys kbd { font: inherit; color: var(--p-accent); }
+#ui2 .lq-flash { font-size: var(--fs-s); padding: 0 calc(var(--u) * 2); }
+
+/* ---- pile markers (world layer) ---- */
+#ui2 .lm {
+  position: absolute; pointer-events: none; transform: translate(-50%, -100%); display: flex; align-items: center;
+  gap: var(--u); padding: var(--u); background: rgba(7, 8, 12, .72); border: var(--u) solid var(--p-outline); white-space: nowrap;
+}
+
+
+#ui2 .lm-n { font-size: var(--fs-s); color: var(--p-text-bright); padding-right: var(--u); }
+#ui2 .lm.reach { border-color: var(--p-accent); }
+#ui2 .lm.empty { background: rgba(7, 8, 12, .5); border-color: transparent; color: var(--p-text-dim); font-size: var(--fs-s); padding: 0 calc(var(--u) * 2); }
+#ui2 .lm.unsearched { border-color: var(--p-magic); color: var(--p-magic); padding: 0 calc(var(--u) * 3); min-width: calc(var(--row-icon) * 0.9); justify-content: center; }
+#ui2 .lm.unsearched.reach { animation: lm-shimmer 1.2s steps(4) infinite; }
+@keyframes lm-shimmer { 0% { border-color: var(--p-magic); color: var(--p-magic); } 50% { border-color: var(--p-text-bright); color: var(--p-text-bright); } 100% { border-color: var(--p-magic); color: var(--p-magic); } }
+
+/* ---- area loot window ---- */
+#ui2 .la { display: flex; flex-direction: column; gap: calc(var(--u) * 2); min-height: 0; }
+#ui2 .la-chips { display: flex; flex-wrap: wrap; gap: var(--u); }
+#ui2 .la-chip { font-size: var(--fs-s); padding: 0 calc(var(--u) * 2); border: var(--u) solid var(--p-bevel-hi); background: none; cursor: pointer; color: var(--p-text-dim); }
+#ui2 .la-chip:hover { color: var(--p-text); }
+#ui2 .la-chip.on { border-color: var(--p-accent); color: var(--p-accent); }
+#ui2 .la-actions { display: flex; gap: calc(var(--u) * 2); align-items: center; flex-wrap: wrap; }
+#ui2 .la-list { overflow-y: auto; max-height: min(58vh, calc(var(--cell) * 10)); min-height: calc(var(--cell) * 2); display: flex; flex-direction: column; }
+#ui2 .la-row { display: flex; align-items: center; gap: calc(var(--u) * 3); padding: var(--u) calc(var(--u) * 2); border: var(--u) solid transparent; cursor: pointer; }
+#ui2 .la-row:hover { background: rgba(255, 255, 255, .05); }
+#ui2 .la-row.sel { border-color: var(--p-accent); }
+#ui2 .la-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+#ui2 .la-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#ui2 .la-src { display: flex; flex-wrap: wrap; gap: var(--u); }
+#ui2 .la-src span { font-size: var(--fs-s); color: var(--p-text-dim); border: var(--u) solid var(--p-bg-raised); padding: 0 var(--u); }
+#ui2 .la-count { color: var(--p-info); font-size: var(--fs-s); }
+#ui2 .la-wt { color: var(--p-text-dim); font-size: var(--fs-s); min-width: 6ch; text-align: right; }
+#ui2 .la-take { font-size: var(--fs-s); }
+#ui2 .la-empty { color: var(--p-text-dim); padding: calc(var(--u) * 3); }
+#ui2 .la-result:empty { display: none; }
+#ui2 .la-result { border-top: var(--u) solid var(--p-bg-raised); padding-top: var(--u); font-size: var(--fs-s); }
+#ui2 .la-foot { font-size: var(--fs-s); color: var(--p-text-dim); }
+#ui2 .la-foot kbd { font: inherit; color: var(--p-accent); }
+
+/* Item sprites read at a glance only at the grid size (UltiCa items sit small in their 32 px
+   cell): the crosshair panel and the markers draw them at the inventory-cell scale. */
+#ui2 .lq, #ui2 .lm.big { --row-icon: var(--icon); --row-icon-k: var(--icon-k); }
+#ui2 .lq-row { gap: calc(var(--u) * 2); }
+#ui2 .lq-row .ui2-icon { margin: calc(var(--u) * -3) 0; }

@@ -674,7 +674,7 @@ export class BnInventoryModel implements InventoryModel {
     // Names are pluralised for the totals at the end.
     const byName = new Map<string, Item>();
     const add = (list: { name: string; count: number; reason?: string }[], it: Item, count: number, reason?: string) => {
-      const name = it.baseName(1);
+      const name = lootName(it, 1);
       byName.set(name, it);
       const x = list.find((e) => e.name === name && e.reason === reason);
       if (x) x.count += count;
@@ -715,7 +715,7 @@ export class BnInventoryModel implements InventoryModel {
         if (r.moved < n) add(res.left, it, n - r.moved, count !== undefined && r.moved === count ? 'too heavy: would overburden you' : shortReason(r.msg || 'no room'));
       } else add(res.left, it, n, shortReason(r.msg));
     }
-    for (const e of [...res.taken, ...res.left]) if (byName.has(e.name)) e.name = byName.get(e.name)!.baseName(e.count);
+    for (const e of [...res.taken, ...res.left]) if (byName.has(e.name)) e.name = lootName(byName.get(e.name)!, e.count);
     if (res.taken.length) who.msg(`You take ${res.taken.map((t) => (t.count > 1 ? `${t.count} ${t.name}` : t.name)).join(', ')}.`);
     this.refresh(true);
     return res;
@@ -738,6 +738,15 @@ function shortReason(msg: string): string {
   if (/too heavy/i.test(msg)) return 'too heavy';
   if (/liquid/i.test(msg)) return 'needs a container';
   return msg.replace(/\.$/, '');
+}
+
+/**
+ * What a take report calls a thing: a bag of rations is "protein rations (small resealable
+ * plastic bags)" — what you wanted first — not just the bags; anything else its own name.
+ */
+function lootName(it: Item, n: number): string {
+  const inner = it.isContainer() && it.contents.length === 1 ? it.contents[0] : null;
+  return inner ? `${inner.baseName(n)} (${it.baseName(n)})` : it.baseName(n);
 }
 
 function canMoveDry(it: Item, from: Loc, to: Loc, who: Character): boolean {

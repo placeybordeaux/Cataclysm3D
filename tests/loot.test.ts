@@ -53,6 +53,10 @@ describe('what loot is worth', () => {
     expect(lootCategory(glock)).toBe('weapons');
     expect(lootCategory(createItem(data, '9mm', { charges: 10 }))).toBe('ammo');
     expect(lootCategory(createItem(data, 'jeans'))).toBe('clothing');
+    // Liquids are BN AMMO (for their containers): a bottle of water is still a drink.
+    const bottle = createItem(data, 'bottle_plastic');
+    spawnItem(createItem(data, 'water_clean', { charges: 2 }), L.in(bottle), { force: true });
+    expect(lootCategory(bottle)).toBe('food');
     for (const id of FIXTURE_ITEMS) expect(LOOT_CATEGORIES).toContain(lootCategory(createItem(data, id)));
   });
 

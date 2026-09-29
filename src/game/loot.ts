@@ -34,6 +34,10 @@ const CATEGORY_OF: Record<string, LootCategory> = {
 };
 
 export function lootCategory(it: Item): LootCategory {
+  // A bag of rations or a bottle of water is food: what it holds decides.
+  if (it.isContainer() && it.contents.length) return lootCategory(it.contents[0]);
+  // Liquids are BN "ammo" (for their containers); water is still a drink.
+  if (it.isComestible()) return CATEGORY_OF[it.def.category] === 'meds' ? 'meds' : 'food';
   if (it.isGun()) return 'weapons';
   if (it.isAmmo() || it.isMagazine()) return 'ammo';
   if (it.isArmor() && !CATEGORY_OF[it.def.category]) return 'clothing';

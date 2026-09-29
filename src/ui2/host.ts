@@ -18,6 +18,10 @@ export interface Ui2Settings {
   pauseInInventory: boolean;
   /** The v1 letter-list inventory screens instead of the ui2 ones (Options > "Inventory screens"). */
   classicInventory?: boolean;
+  /** Options > "Looting style" (src/ui2/loot): crosshair quick loot, area loot window, or the inventory's tabs. */
+  lootStyle?: 'quick' | 'area' | 'tabs';
+  /** Options > "Loot markers": badges over piles and containers in sight. */
+  lootMarkers?: boolean;
 }
 
 const SETTINGS_KEY = 'cdda3d.ui2.settings';

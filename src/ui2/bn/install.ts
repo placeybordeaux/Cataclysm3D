@@ -41,6 +41,15 @@ export interface BnInventoryHandle {
   hotbar: Hotbar;
   toggle(focus?: string): void;
   open(focus?: string): void;
+  /** Open the screen on a place, or bring that place to the front when it's already open. */
+  toggleFocus(focus: string): void;
+  /** Run a timed action: at once under the tactical pause, else after a progress bar. */
+  perform(label: string, moves: number, fn: () => void, anchor?: HTMLElement | null): void;
+  /**
+   * Looting UIs (src/ui2/loot) take over `g` and `e` on piles for their style; null = the
+   * inventory's own Nearby tab. Called with the tile when `e` targets a pile / container.
+   */
+  lootHooks: { pickupKey: (() => boolean) | null; pile: ((x: number, y: number, z: number) => boolean) | null };
 }
 
 /** Real seconds under which an action just happens (no bar flicker). */
@@ -284,7 +293,9 @@ export function installBnInventory(game: Game, ctx: UiContext, api: DebugApi, ca
       },
     });
   });
+  const lootHooks: BnInventoryHandle['lootHooks'] = { pickupKey: null, pile: null };
   reg('pickup', 'Pick up items nearby', () => {
+    if (lootHooks.pickupKey?.()) return;
     model.refresh();
     const near = model.nearby().filter((p) => p.items.length);
     const total = near.reduce((a, p) => a + p.items.length, 0);
@@ -306,6 +317,7 @@ export function installBnInventory(game: Game, ctx: UiContext, api: DebugApi, ca
   patchInteractUi({
     pickup: (_title, x, y, z) => {
       if (classic()) return legacyPickup(ctx, _title, x, y, z);
+      if (lootHooks.pile?.(x, y, z)) return;
       toggleFocus(`ground:${x},${y},${z}`);
     },
   });
@@ -355,7 +367,7 @@ export function installBnInventory(game: Game, ctx: UiContext, api: DebugApi, ca
     }
   }, 500);
 
-  const handle: BnInventoryHandle = { model, hotbar, toggle, open };
+  const handle: BnInventoryHandle = { model, hotbar, toggle, open, toggleFocus, perform, lootHooks };
   api.inv2 = {
     model,
     hotbar,

@@ -139,7 +139,7 @@ export class Game {
   private updatePlayerMovement(dt: number): void {
     const p = this.player;
     const k = this.input.held;
-    if (this.input.captured) return;
+    if (this.input.captured && !this.input.menuWalk) return;
     if (this.movementOverride?.()) return;
     let fx = 0, fy = 0;
     if (k.has('KeyW')) fy += 1;
