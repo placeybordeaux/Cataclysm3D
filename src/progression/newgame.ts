@@ -89,7 +89,12 @@ function identityForm(ctx: UiContext, prog: ProgressionHandle, id: Identity, onE
   });
   const descText = h('span', {});
   // Custom: a button to the rules editor (src/difficulty.ts), which opens over this panel.
-  const edit = button('Edit rules', () => customRulesEditor.open?.(), { small: true, title: 'The rules a Custom game uses' });
+  // The editor is a legacy (curses-style) window, which sits under ui2 windows: step aside meanwhile.
+  const edit = button('Edit rules', () => {
+    const win = edit.closest<HTMLElement>('.ui2-win');
+    if (win) win.style.visibility = 'hidden';
+    customRulesEditor.open?.(() => win && (win.style.visibility = ''));
+  }, { small: true, title: 'The rules a Custom game uses' });
   const desc = h('div', { class: 'pg-desc' }, descText, ' ', edit);
   const drawDesc = () => {
     descText.textContent = DIFFICULTIES.find((d) => d.id === id.difficulty)!.desc;

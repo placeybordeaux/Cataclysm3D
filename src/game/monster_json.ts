@@ -9,6 +9,8 @@ export interface MonsterJSON {
   id: string;
   x: number; y: number; z: number;
   hp: number;
+  /** Monster.hpScale (difficulty resilience at spawn) when not 1. */
+  hpScale?: number;
   facing: number;
   anger: number;
   morale: number;
@@ -34,6 +36,7 @@ export function monsterToJSON(m: Monster): MonsterJSON {
     id: m.type.id, x: m.x, y: m.y, z: m.z, hp: m.hp, facing: m.facing, anger: m.anger, morale: m.morale, aggro: m.aggroCharacter,
     upgradeDay: m.upgradeDay,
   };
+  if (m.hpScale !== 1) j.hpScale = m.hpScale;
   if (m.friendly) j.friendly = true;
   if (m.name) j.name = m.name;
   if (m.horde) j.horde = true;
@@ -61,6 +64,7 @@ export function restoreMonster(sys: MonsterSystem, j: MonsterJSON, warn: (msg: s
     name: j.name,
     rng: new Rng(hashSeed(game.seed, Math.floor(j.x * 16), Math.floor(j.y * 16), j.z, sys.all.length, 0x10ad)),
   });
+  m.hpScale = j.hpScale ?? 1;
   m.hp = j.hp;
   m.horde = !!j.horde;
   m.facing = j.facing;

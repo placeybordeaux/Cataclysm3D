@@ -30,9 +30,6 @@ export class PlayerAvatar extends Character {
     const running = this.running && this.canRun();
     const modeMul = running ? 2 : this.crouching ? 0.5 : 1;
     let cost = Math.max(moveCost, 1);
-    // Leg encumbrance adds to move cost (simplified limb move_speed score).
-    const legEnc = this.inv.encumbrance('leg_l') + this.inv.encumbrance('leg_r') + (this.inv.encumbrance('foot_l') + this.inv.encumbrance('foot_r')) / 2;
-    cost *= 1 + legEnc / 100;
     // Character::run_cost: damaged legs add up to 50 each; movecost_modifier mutations; flat
     // ground gets movecost_flatground_modifier (Fleet-Footed) + FLAT_MOVE_COST, obstacles
     // movecost_obstacle_modifier + OBSTACLE_MOVE_COST (never below 100).
@@ -46,7 +43,10 @@ export class PlayerAvatar extends Character {
       cost *= this.mutationValue('movecost_flatground_modifier');
       cost += this.enchantBonus('FLAT_MOVE_COST', cost);
     }
-    cost = Math.max(1, this.byEnchant(cost, 'MOVE_COST'));
+    // BN run_cost: leg and foot encumbrance add a little, not a percentage (jeans + sneakers
+    // ≈ +7 moves). A multiplier here made a dressed survivor walk no faster than a zombie.
+    cost += ((this.inv.encumbrance('foot_l') + this.inv.encumbrance('foot_r')) * 2.5 + (this.inv.encumbrance('leg_l') + this.inv.encumbrance('leg_r')) * 1.5) / 10;
+    cost = Math.max(20, this.byEnchant(cost, 'MOVE_COST'));
     return (this.speed / cost) * ACTION_SCALE * modeMul * this.moveSpeedMul;
   }
 

@@ -65,7 +65,7 @@ export function installDifficulty(game: Game, o: { spawner: Spawner | null; api?
     // progression's section (if any) re-applies its choice after this.
   });
 
-  customRulesEditor.open = () => openDifficultyEditor(game, 'template');
+  customRulesEditor.open = (onClose) => void openDifficultyEditor(game, 'template', onClose);
   registerOption({
     name: 'Difficulty…',
     value: () => presetName(difficultyState(game)?.preset ?? 'accessible'),
@@ -102,7 +102,7 @@ export function setWorldDifficulty(game: Game, preset: Difficulty, settings: Dif
  * The Difficulty screen. 'game' edits this world's rules (live); 'template' edits the Custom
  * rules a new Custom game starts with (the new-game flow's "Edit rules" button).
  */
-export function openDifficultyEditor(game: Game, mode: 'game' | 'template'): UiWindow {
+export function openDifficultyEditor(game: Game, mode: 'game' | 'template', onClose?: () => void): UiWindow {
   type Row = { kind: 'preset' } | { kind: 'knob'; knob: Knob };
   const cur = (): DifficultyState =>
     mode === 'game' ? difficultyState(game) ?? { preset: 'accessible', settings: settingsFor('accessible') } : { preset: 'custom', settings: storedCustom() };
@@ -153,6 +153,7 @@ export function openDifficultyEditor(game: Game, mode: 'game' | 'template'): UiW
     detailPane: true,
     footer: `${c('c_light_green', '←→')}/${c('c_light_green', 'Enter')} change`,
     closeLabel: 'done',
+    onClose,
     entries: entries(),
     onKey: (e, row) => {
       if (!row) return false;

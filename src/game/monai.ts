@@ -680,7 +680,7 @@ export class MonsterSystem implements GameSystem {
     this.corpses.splice(this.corpses.indexOf(c), 1);
     for (const f of this.onCorpseGone) f(c);
     const m = this.spawn(def, c.x, c.y, c.z);
-    m.hp = Math.max(1, Math.round(def.hp * 0.75));
+    m.hp = Math.max(1, Math.round(m.hpMax * 0.75));
     return m;
   }
 

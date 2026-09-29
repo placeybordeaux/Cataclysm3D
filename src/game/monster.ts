@@ -177,7 +177,8 @@ export class Monster {
     this.y = y;
     this.z = z;
     this.rng = rng;
-    this.hp = type.hp;
+    this.hpScale = BALANCE.monsterResilience;
+    this.hp = this.hpMax;
     this.anger = type.aggression;
     this.morale = type.morale;
     this.aggroCharacter = (type as any).aggro_character !== false;
@@ -206,8 +207,10 @@ export class Monster {
   get id(): string {
     return this.type.id;
   }
+  /** BN MONSTER_RESILIENCE at creation (difficulty); hit points are type.hp × this. */
+  hpScale = 1;
   get hpMax(): number {
-    return this.type.hp;
+    return Math.max(1, Math.round(this.type.hp * this.hpScale));
   }
   get size(): CreatureSize {
     return monsterSize(this.type);
@@ -337,7 +340,7 @@ export class Monster {
   polymorph(type: MonsterDef): void {
     const frac = this.hp / Math.max(1, this.hpMax);
     this.type = type;
-    this.hp = Math.max(1, Math.round(type.hp * frac));
+    this.hp = Math.max(1, Math.round(this.hpMax * frac));
     this.anger = type.aggression;
     this.morale = type.morale;
     this.initSpecials();

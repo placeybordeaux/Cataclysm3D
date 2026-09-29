@@ -34,6 +34,8 @@ export interface DifficultySettings {
   dormantSafe: boolean;
   /** Monster walking speed (BN MONSTER_SPEED / 100). */
   monsterSpeed: number;
+  /** Monster hit points (BN MONSTER_RESILIENCE / 100), for monsters spawned from now on. */
+  monsterResilience: number;
   /** Items in newly generated map areas (BN ITEM_SPAWNRATE). */
   itemSpawnRate: number;
   // --- combat
@@ -63,14 +65,14 @@ export interface DifficultySettings {
 }
 
 const CLASSIC: DifficultySettings = {
-  spawnScale: 0.75, hordeScale: 0.2, safeRadius: 10, dormantSafe: false, monsterSpeed: 1, itemSpawnRate: 1,
+  spawnScale: 0.75, hordeScale: 0.2, safeRadius: 10, dormantSafe: false, monsterSpeed: 1, monsterResilience: 1, itemSpawnRate: 1,
   feel: 'classic', crashDamage: 1, bleed: 1,
   hunger: 1, thirst: 1, fatigue: 1, healing: 1, cold: 1,
   dayLength: 1, pauseInMenus: false, permadeath: true,
 };
 
 const ACCESSIBLE: DifficultySettings = {
-  spawnScale: 0.45, hordeScale: 0.1, safeRadius: 24, dormantSafe: true, monsterSpeed: 0.9, itemSpawnRate: 1,
+  spawnScale: 0.45, hordeScale: 0.1, safeRadius: 24, dormantSafe: true, monsterSpeed: 0.9, monsterResilience: 0.7, itemSpawnRate: 1,
   feel: 'accessible', crashDamage: 0.5, bleed: 0.5,
   hunger: 0.75, thirst: 0.75, fatigue: 0.85, healing: 2, cold: 0.7,
   dayLength: 1, pauseInMenus: true, permadeath: false,
@@ -103,8 +105,9 @@ export const KNOBS: readonly Knob[] = [
   { key: 'spawnScale', name: 'Zombies in buildings', group: 'Monsters & world', newAreasOnly: true, choices: [0.25, 0.35, 0.45, 0.6, 0.75, 1, 1.5], format: pct, desc: 'Monsters placed by map generation (house zombies, monsters in shops…), on top of Zombie density.  Bright Nights is 100%; Classic eases it to 75% for real-time play.' },
   { key: 'hordeScale', name: 'City hordes', group: 'Monsters & world', newAreasOnly: true, choices: [0, 0.05, 0.1, 0.15, 0.2, 0.3, 0.5, 1], format: pct, desc: 'Street hordes in towns as a share of Bright Nights\' 80 zombies per city size.  Classic 20%.' },
   { key: 'safeRadius', name: 'Safe radius', group: 'Monsters & world', newAreasOnly: true, choices: [0, 5, 10, 16, 24, 32, 48], format: (v) => `${v} m`, desc: 'No hostile monster is placed this close to you when an area is generated (the evac shelter\'s surroundings in particular).' },
-  { key: 'dormantSafe', name: 'Safe radius covers corpses', group: 'Monsters & world', newAreasOnly: true, choices: [false, true], format: yesNo, desc: 'The safe radius also keeps away dormant zombies (corpses that get up when you come close).' },
+  { key: 'dormantSafe', name: 'Safe radius: corpses too', group: 'Monsters & world', newAreasOnly: true, choices: [false, true], format: yesNo, desc: 'The safe radius also keeps away dormant zombies (corpses that get up when you come close).' },
   { key: 'monsterSpeed', name: 'Monster speed', group: 'Monsters & world', choices: [0.75, 0.8, 0.85, 0.9, 1, 1.1, 1.25], format: pct, desc: 'How fast monsters walk (Bright Nights MONSTER_SPEED).  Their swings keep Bright Nights\' rate.' },
+  { key: 'monsterResilience', name: 'Monster toughness', group: 'Monsters & world', newAreasOnly: true, choices: [0.5, 0.6, 0.7, 0.8, 0.9, 1, 1.25, 1.5], format: pct, desc: 'Hit points of monsters that appear from now on (Bright Nights MONSTER_RESILIENCE).  Classic 100%.' },
   { key: 'itemSpawnRate', name: 'Item spawn rate', group: 'Monsters & world', newAreasOnly: true, choices: [0.25, 0.5, 0.75, 1, 1.5, 2, 3], format: pct, desc: 'Items found in newly explored places (Bright Nights ITEM_SPAWNRATE).' },
   { key: 'feel', name: 'Combat timing', group: 'Combat', choices: ['accessible', 'classic'], format: (v) => (v === 'accessible' ? 'forgiving' : 'tight'), desc: 'forgiving: longer enemy wind-ups, wider parry window, bigger side-step dodge bonus.  tight: Bright Nights\' swing rate with short tells.' },
   { key: 'bleed', name: 'Bleeding', group: 'Combat', choices: MULTS.filter((v) => v > 0 && v <= 2), format: pct, desc: 'How quickly bleeding wounds cost health.' },
@@ -249,6 +252,7 @@ export function applyDifficultySettings(game: Game, preset: Difficulty, settings
   game.map.itemSpawnRate = s.itemSpawnRate;
   BALANCE.monsterSpeed = s.monsterSpeed;
   BALANCE.crashDamage = s.crashDamage;
+  BALANCE.monsterResilience = s.monsterResilience;
   setFeelDifficulty(s.feel);
   game.player.balance = { ...NEUTRAL_SURVIVOR, hunger: s.hunger, thirst: s.thirst, fatigue: s.fatigue, healing: s.healing, bleed: s.bleed, cold: s.cold };
   setClockRate(1 / s.dayLength);

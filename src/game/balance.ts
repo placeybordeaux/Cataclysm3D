@@ -31,7 +31,12 @@ export interface WorldBalance {
   monsterSpeed: number;
   /** Damage the survivor takes from vehicle crashes and being run over. */
   crashDamage: number;
+  /**
+   * Monster hit points (BN MONSTER_RESILIENCE / 100). Read when a monster is created, so it
+   * applies to monsters spawned afterwards (BN: "requires world reset").
+   */
+  monsterResilience: number;
 }
 
 /** The live world multipliers. Mutate through difficulty.ts (applyDifficulty), tests may poke fields. */
-export const BALANCE: WorldBalance = { monsterSpeed: 1, crashDamage: 1 };
+export const BALANCE: WorldBalance = { monsterSpeed: 1, crashDamage: 1, monsterResilience: 1 };

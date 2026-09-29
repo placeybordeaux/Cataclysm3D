@@ -54,6 +54,7 @@ afterEach(() => {
   // Module-level live knobs: leave them as BN's for the other test files.
   BALANCE.monsterSpeed = 1;
   BALANCE.crashDamage = 1;
+  BALANCE.monsterResilience = 1;
   setClockRate(1);
   setFeelDifficulty('accessible');
 });
@@ -67,7 +68,7 @@ describe('difficulty presets', () => {
       for (const k of KNOBS) expect(k.choices, `${id}.${k.key} must be one of its knob choices`).toContain(s[k.key]);
     }
     const c = DIFFICULTY_PRESETS.classic;
-    expect([c.hunger, c.thirst, c.fatigue, c.healing, c.cold, c.bleed, c.monsterSpeed, c.dayLength]).toEqual([1, 1, 1, 1, 1, 1, 1, 1]);
+    expect([c.hunger, c.thirst, c.fatigue, c.healing, c.cold, c.bleed, c.monsterSpeed, c.monsterResilience, c.dayLength]).toEqual([1, 1, 1, 1, 1, 1, 1, 1, 1]);
     expect(c.spawnScale).toBe(0.75);
     expect(c.hordeScale).toBe(0.2);
     expect(c.permadeath).toBe(true);

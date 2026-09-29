@@ -12,7 +12,7 @@
 // Scenarios:
 //   day1   the real world at the evac shelter (worldgen + spawner + monster AI + weather at
 //          real time, 30 ticks/s) with a scripted "reasonable newcomer": walk to the nearest
-//          house with loot, loot it, fight single zombies it meets, run from groups or when
+//          house with loot, loot it, fight single zombies it meets, run from two or more or when
 //          hurt, return to the shelter at night and sleep. Measures contact times, zombies near
 //          the start, crowding, damage and deaths.
 //   needs  hunger/thirst/fatigue milestones over 3 days for a survivor who never eats or
@@ -41,14 +41,14 @@ import { MAIN_PARTS } from '../src/game/bodyparts';
 import { SECONDS_PER_HOUR } from '../src/core/time';
 import { applyBuild, defaultBuild } from '../src/ui/chargen';
 import type { UiContext } from '../src/ui/context';
-import type { Item } from '../src/game/item';
+import { createItem, type Item } from '../src/game/item';
 import type { Monster } from '../src/game/monster';
 
 const HELP = `balance_sim: headless difficulty-preset simulation (see docs/BALANCE.md)
 
   --preset accessible|classic   preset to simulate (default accessible)
   --seeds N                     world seeds (default 20), starting at --seed0 (default 1)
-  --scenario all|day1|needs|cold (default all)
+  --scenario all|day1|duel|needs|cold (default all)
   --hours H                     day1 length in game hours from 08:00 (default 24)
   --set key=value[,key=value]   override preset knobs (e.g. --set spawnScale=0.5,safeRadius=16)
   --out FILE                    append JSON-lines records here
@@ -219,7 +219,7 @@ function day1(seed: number): Day1 {
     }
     if (args.trace && Math.round(real * 30) % 30 === 0) {
       const ms = sys.active.filter((m) => hostile(m) && m.z === p.z && sys.distToPlayer(m) <= 15).map((m) => `${m.id.replace('mon_', '')}@${sys.distToPlayer(m).toFixed(1)}`);
-      console.error(`t=${real.toFixed(0)}s ${game.clock.format()} ${bot.state()} pos ${p.x.toFixed(1)},${p.y.toFixed(1)} hp t${p.hp.torso.cur}/h${p.hp.head.cur} stam ${Math.round(p.stamina)} near [${ms.join(' ')}]`);
+      console.error(`t=${real.toFixed(0)}s ${game.clock.format()} ${bot.state()} pos ${p.x.toFixed(1)},${p.y.toFixed(1)} hp t${p.hp.torso.cur}/h${p.hp.head.cur} stam ${Math.round(p.stamina)} run ${p.running ? 1 : 0} v ${p.moveSpeed(100).toFixed(1)} near [${ms.join(' ')}]`);
     }
     const hp = hpNow();
     if (hp < lastHp) res.hpLost += lastHp - hp;
@@ -261,6 +261,7 @@ class Newcomer {
   private lootT = 0;
   private target: [number, number] | null = null;
   private stuckT = 0;
+  private cornered = 0;
   private lastPos = [0, 0];
   private badTargets = new Set<string>();
 
@@ -280,15 +281,18 @@ class Newcomer {
     const sys = mons.sys;
     const hour = game.clock.hourOfDay;
     const near = sys.active.filter((m) => hostile(m) && m.z === p.z && sys.distToPlayer(m) <= 10);
-    const hurt = p.hp.torso.cur / p.hp.torso.max < 0.45 || p.hp.head.cur / p.hp.head.max < 0.45;
+    const hurt = p.hp.torso.cur / p.hp.torso.max < 0.6 || p.hp.head.cur / p.hp.head.max < 0.6;
     const night = hour >= 21 || hour < 6;
     // --- decide
-    if (near.length >= 3 || (hurt && near.length > 0)) {
+    this.cornered = Math.max(0, this.cornered - dt);
+    if (this.cornered > 0 && near.length) this.mode = 'fight';
+    else if (near.filter((m) => sys.distToPlayer(m) <= 8).length >= 2 || (hurt && near.length > 0)) {
       if (this.mode !== 'flee') this.fledCount++;
       this.mode = 'flee';
     } else if (near.length > 0 && near.some((m) => sys.distToPlayer(m) <= 6)) this.mode = 'fight';
     else if (this.mode === 'fight' || this.mode === 'flee') this.mode = night ? 'home' : 'explore';
-    if (night && (this.mode === 'explore' || this.mode === 'loot')) this.mode = 'home';
+    // Night, or hurt: go home and rest (sleep heals), like a player with a scare.
+    if ((night || hurt) && (this.mode === 'explore' || this.mode === 'loot')) this.mode = 'home';
 
     this.drinkEat();
     switch (this.mode) {
@@ -301,7 +305,8 @@ class Newcomer {
         this.face(p.x + ax, p.y + ay);
         held.add('KeyW');
         held.add('ShiftLeft');
-        if (this.stuck(dt)) this.face(p.x - ay, p.y + ax);
+        // Cornered (a wall, a grab): turn and fight for a few seconds instead of running in place.
+        if (this.stuck(dt)) this.cornered = 3;
         return;
       }
       case 'fight': {
@@ -316,7 +321,7 @@ class Newcomer {
       case 'home': {
         const s = this.w.start;
         if (Math.hypot(p.x - s.x - 0.5, p.y - s.y - 0.5) < 1.5 || p.hasEffect('lying_down')) {
-          if (p.sleepiness > SLEEPINESS.TIRED * 0.5 || hour >= 22 || hour < 6) {
+          if (hurt || p.sleepiness > SLEEPINESS.TIRED * 0.5 || hour >= 22 || hour < 6) {
             if (goToSleep(game)) this.slept = true;
           }
           return;
@@ -494,6 +499,57 @@ class Newcomer {
   }
 }
 
+// ------------------------------------------------------------------ duels on open ground
+
+/**
+ * The newcomer's melee against 1 or 2 zombies on flat ground: walk in, swing whenever the
+ * weapon is ready, never guard or side-step. Real-time loop (telegraphs, hit-stop, swing
+ * phases) exactly as in play.
+ */
+function duel(seed: number, weapon: string, foes: number): Record<string, number | string | boolean> {
+  const { game: gd } = data();
+  const game = new Game(gd, seed, fakeInput());
+  const floor = 't_dirt';
+  game.map.generator = {
+    generate(map, c) {
+      c.ter.fill(map.terrain.index(c.z === 0 ? floor : c.z > 0 ? 't_open_air' : 't_rock'));
+      c.empty = false;
+    },
+  };
+  const mons = installMonsters(game, null, null as never);
+  registerDifficultyTargets(game, { spawner: mons.spawner });
+  applyDifficultySettings(game, preset, presetSettings());
+  const p = game.player;
+  p.x = 30.5;
+  p.y = 30.5;
+  p.z = 0;
+  p.onMessage = null;
+  const ctx = { game, data: { names: uiNames() } } as unknown as UiContext;
+  const b = defaultBuild(ctx);
+  b.density = undefined;
+  applyBuild(ctx, b);
+  if (weapon !== 'fists') p.inv.wielded = createItem(gd, weapon);
+  const ms: Monster[] = [];
+  for (let i = 0; i < foes; i++) ms.push(mons.sys.spawn(gd.monsters.mon_zombie, 34.5, 29.5 + 2 * i, 0));
+  const hp0 = MAIN_PARTS.reduce((a, bp) => a + p.hp[bp].cur, 0);
+  let t = 0, swings = 0;
+  while (t < 180 && !p.dead && ms.some((m) => !m.dead)) {
+    const m = ms.filter((x) => !x.dead).sort((a, c) => Math.hypot(a.x - p.x, a.y - p.y) - Math.hypot(c.x - p.x, c.y - p.y))[0];
+    game.input.held.clear();
+    p.yaw = Math.atan2(m.x - p.x, -(m.y - p.y));
+    const d = Math.hypot(m.x - p.x, m.y - p.y) - m.radius;
+    if (d > 0.9) game.input.held.add('KeyW');
+    if (d <= 1.15 && mons.combat.cooldown <= 0 && !mons.combat.swing) {
+      mons.combat.beginSwing();
+      swings++;
+    }
+    game.tick(TICK);
+    t += TICK;
+  }
+  const hp1 = MAIN_PARTS.reduce((a, bp) => a + Math.max(0, p.hp[bp].cur), 0);
+  return { weapon, foes, won: !p.dead && ms.every((m) => m.dead), died: p.dead, seconds: +t.toFixed(1), swings, swingsPerSec: +(swings / t).toFixed(2), hpLost: hp0 - hp1, torsoLeft: p.hp.torso.cur };
+}
+
 // ------------------------------------------------------------------ needs over 3 days
 
 interface Milestone { what: string; gameHour: number; realMin: number }
@@ -604,6 +660,10 @@ function run(): Rec[] {
     if (args.out) appendFileSync(args.out, JSON.stringify(r) + '\n');
   };
   if (want('needs')) emit({ scenario: 'needs', preset: label, seed: 0, ...needs() });
+  if (want('duel'))
+    for (const weapon of ['fists', 'knife_chef', 'pipe', 'crowbar', 'bat'])
+      for (const foes of [1, 2])
+        for (let seed = s0; seed < s0 + n; seed++) emit({ scenario: 'duel', preset: label, seed, ...duel(seed, weapon, foes) });
   for (let seed = s0; seed < s0 + n; seed++) {
     if (want('day1')) {
       const t = Date.now();
@@ -665,6 +725,18 @@ function summarise(recs: Rec[]): void {
         return `day ${d} ${String(Math.floor(h)).padStart(2, '0')}:${String(Math.round((h % 1) * 60)).padStart(2, '0')} (${m.realMin.toFixed(0)} real min)`;
       });
       console.log(`| ${w} | ${cells.join(' | ')} |`);
+    }
+  }
+  const du = recs.filter((r) => r.scenario === 'duel') as unknown as (Record<string, number | string | boolean> & Rec)[];
+  if (du.length) {
+    console.log('\n## Melee duels on open ground (walk in and swing; no guard, no side-step)\n');
+    console.log('| preset | weapon | zombies | runs | won | died | fight length (median s) | HP lost (median, of 530) | swings/s |');
+    console.log('|---|---|---|---|---|---|---|---|---|');
+    const keys = [...new Set(du.map((r) => `${r.preset}|${r.weapon}|${r.foes}`))];
+    for (const k of keys) {
+      const [pr, w, f] = k.split('|');
+      const rs = du.filter((r) => r.preset === pr && r.weapon === w && String(r.foes) === f);
+      console.log(`| ${pr} | ${w} | ${f} | ${rs.length} | ${rs.filter((r) => r.won).length} | ${rs.filter((r) => r.died).length} | ${median(rs.map((r) => r.seconds as number)).toFixed(0)} | ${median(rs.map((r) => r.hpLost as number))} | ${median(rs.map((r) => r.swingsPerSec as number)).toFixed(2)} |`);
     }
   }
   const cd = recs.filter((r) => r.scenario === 'cold') as unknown as (Record<string, number | string | boolean> & Rec)[];

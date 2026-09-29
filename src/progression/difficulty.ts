@@ -22,14 +22,15 @@ export interface DifficultyInfo {
 export const DIFFICULTIES: DifficultyInfo[] = [
   { id: 'accessible', name: 'Accessible', desc: 'Gentler early spawns, forgiving needs, clear warnings. Menus pause.' },
   { id: 'classic', name: 'Classic', desc: 'Bright Nights numbers, adapted only where real time breaks them.' },
-  { id: 'custom', name: 'Custom', desc: 'Your own rules: spawns, monster speed, needs, healing, cold, day length, pausing, permadeath.  Starts from Accessible; edit them here or in Options > Difficulty.' },
+  { id: 'custom', name: 'Custom', desc: 'Your own rules (spawns, needs, cold, pausing, permadeath…), starting from Accessible.' },
 ];
 
 /**
  * Opens the Custom rules editor (src/difficulty.ts sets it; the rules a new Custom game starts
- * with). Null until installed: the new-game flow then shows no edit button.
+ * with) and calls onClose when it closes. Null until installed: the new-game flow then shows
+ * no edit button.
  */
-export const customRulesEditor: { open: (() => void) | null } = { open: null };
+export const customRulesEditor: { open: ((onClose: () => void) => void) | null } = { open: null };
 
 export const DEFAULT_DIFFICULTY: Difficulty = 'accessible';
 
