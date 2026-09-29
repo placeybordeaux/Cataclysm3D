@@ -1,5 +1,6 @@
 import type { Input } from '../core/input';
 import { sfx } from '../audio/sfx';
+import { Keys } from './keys';
 
 // Shared building blocks for CDDA-style curses screens. Every modal screen (inventory,
 // crafting, construction, character sheet, …) should be made from these so the whole UI
@@ -86,6 +87,17 @@ export interface UiWindow {
   readonly closed: boolean;
 }
 
+/** Close callbacks of open windows, oldest first. */
+const openWindows: (() => void)[] = [];
+
+/** Close the topmost window (what Esc would have done). Returns false if none is open. */
+export function closeTopWindow(): boolean {
+  const top = openWindows[openWindows.length - 1];
+  if (!top) return false;
+  top();
+  return true;
+}
+
 /** Open a modal window that captures keyboard input until closed. */
 export function openWindow(opts: WindowOpts): UiWindow {
   const root = getUiRoot();
@@ -107,9 +119,14 @@ export function openWindow(opts: WindowOpts): UiWindow {
   root.appendChild(el);
   if (!opts.silent) sfx.ui('menu_open');
   let closed = false;
+  const closeSelf = () => win.close();
+  openWindows.push(closeSelf);
+  // The key that opened this window (e.g. "i", "&") closes it again, as does Backspace, so
+  // players never need Esc — which in a browser also releases the captured mouse.
+  const openKey = Keys.openingKey();
   const release = input!.capture((e) => {
     if (opts.onKey && opts.onKey(e) === true) return true;
-    if (e.key === 'Escape') {
+    if (e.key === 'Escape' || e.key === 'Backspace' || (openKey !== null && e.key === openKey)) {
       win.close();
       return true;
     }
@@ -126,10 +143,15 @@ export function openWindow(opts: WindowOpts): UiWindow {
     close() {
       if (closed) return;
       closed = true;
+      const wi = openWindows.lastIndexOf(closeSelf);
+      if (wi >= 0) openWindows.splice(wi, 1);
       release();
       el.remove();
       if (!opts.silent) sfx.ui('menu_close');
       opts.onClose?.();
+      // Back to gameplay: re-enter mouse-look if the lock was lost (we're inside the key
+      // or click that closed the window, which counts as the required user gesture).
+      if (!input!.captured) input!.tryLock();
     },
     get closed() {
       return closed;
@@ -168,6 +190,9 @@ export function openMenu<T>(opts: MenuOpts<T>): UiWindow & { refresh(entries?: M
   let entries = opts.entries;
   let sel = 0;
   let keys: string[] = [];
+  // Don't hand out the opening key as an entry hotkey: pressing it again should close.
+  const ok = Keys.openingKey();
+  const autoKeys = ok && ok.length === 1 ? AUTO_KEYS.replace(ok, '') : AUTO_KEYS;
   const win = openWindow({
     ...opts,
     onKey: (e) => {
@@ -230,12 +255,12 @@ export function openMenu<T>(opts: MenuOpts<T>): UiWindow & { refresh(entries?: M
       if (i <= sel) selAuto = auto;
       auto++;
     });
-    const page = Math.floor(selAuto / AUTO_KEYS.length) * AUTO_KEYS.length;
+    const page = Math.floor(selAuto / autoKeys.length) * autoKeys.length;
     auto = 0;
     keys = entries.map((e) => {
       if (e.hotkey !== undefined) return e.hotkey;
       const k = auto++ - page;
-      return k >= 0 ? AUTO_KEYS[k] ?? '' : '';
+      return k >= 0 ? autoKeys[k] ?? '' : '';
     });
     let html = '';
     let lastHeader: string | undefined;

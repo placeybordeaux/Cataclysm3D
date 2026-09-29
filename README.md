@@ -52,8 +52,8 @@ Everything else uses CDDA's keys, moved where WASD collides with them:
 |---|---|---|---|
 | `e` | examine / open / use | `g` `,` | pick up |
 | `i` | inventory | `q` | drop |
-| `z` | wield | `W` / `T` | wear / take off |
-| `E` | eat / drink | `A` | apply / activate |
+| `z` | wield | `O` / `T` | wear / take off |
+| `E` | eat / drink | `u` | apply / activate |
 | `r` / `U` | reload / unload | `f` | fire |
 | `b` | fire mode | `G` | throw |
 | `X` | smash | `B` | butcher / dissect |
@@ -66,7 +66,7 @@ Everything else uses CDDA's keys, moved where WASD collides with them:
 | `^` | vehicle controls | `k` `h` `n` | engine / headlights / horn |
 | `p` | bionics | `[` | mutations |
 | `_` | martial arts | `)` | achievements & scores |
-| `S` | save | `?` | help |
+| `F5` | quicksave | `?` | help |
 
 ## What's in it
 

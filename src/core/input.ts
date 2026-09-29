@@ -13,10 +13,22 @@ export class Input {
   /** Stack of modal handlers; top of stack gets keys exclusively. */
   private captureStack: KeyHandler[] = [];
   private clicks: number[] = [];
+  /**
+   * True while the player is in gameplay and the mouse should be captured (false on the
+   * title screen). Menus keep the capture so closing them drops you straight back into
+   * mouse-look; only the browser's own Esc handling or focus loss releases it.
+   */
+  wantLock = false;
+  /** Real-time of the last Escape keydown we handled (see pointer-lock loss handling). */
+  lastEscape = -1;
+  /** Increments on every keydown; lets a window know whether its opening key was the last one pressed. */
+  keySeq = 0;
 
   constructor(private canvas: HTMLCanvasElement) {
     window.addEventListener('keydown', (e) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      this.keySeq++;
+      if (e.key === 'Escape') this.lastEscape = performance.now();
       const top = this.captureStack[this.captureStack.length - 1];
       if (top) {
         if (top(e) !== false) e.preventDefault();
@@ -54,15 +66,31 @@ export class Input {
   onPress(h: KeyHandler): void {
     this.pressHandlers.push(h);
   }
-  /** Push a modal handler; returns a release function. Releases pointer lock so menus get the mouse. */
+  /**
+   * Push a modal handler; returns a release function. Pointer lock is deliberately kept:
+   * menus are keyboard-driven (CDDA style), and releasing the lock would force a click to
+   * get back into mouse-look after every menu.
+   */
   capture(h: KeyHandler): () => void {
     this.captureStack.push(h);
     this.held.clear();
-    if (document.pointerLockElement) document.exitPointerLock();
     return () => {
       const i = this.captureStack.lastIndexOf(h);
       if (i >= 0) this.captureStack.splice(i, 1);
     };
+  }
+  get locked(): boolean {
+    return document.pointerLockElement === this.canvas;
+  }
+  /**
+   * Try to re-enter mouse-look. Only succeeds inside a user gesture (key/click handler) and
+   * not immediately after the browser's own Esc unlock; failures are expected and silent —
+   * the "click to resume" overlay covers them.
+   */
+  tryLock(): void {
+    if (!this.wantLock || this.locked) return;
+    const req = this.canvas.requestPointerLock?.() as unknown as Promise<void> | undefined;
+    req?.catch?.(() => {});
   }
   get captured(): boolean {
     return this.captureStack.length > 0;

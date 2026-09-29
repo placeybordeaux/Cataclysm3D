@@ -49,6 +49,8 @@ export class Game {
   readonly activities: ActivityManager;
   readonly keys: Keys;
   paused = false;
+  /** Gameplay without mouse capture (after Esc / focus loss) pauses until the player clicks back in. */
+  lockPaused = false;
   /** Modal UI (input.captured) pauses the simulation like CDDA's turn-based menus. */
   pauseInMenus = true;
   /** Run statistics for the memorial screen (src/game/stats.ts). */
@@ -103,9 +105,12 @@ export class Game {
     // Mouse look is applied per frame (not per tick) so it stays perfectly smooth.
     const [mx, my] = this.input.consumeMouse();
     const p = this.player;
-    p.yaw += mx * this.mouseSensitivity;
-    p.pitch = Math.max(-1.5, Math.min(1.5, p.pitch - my * this.mouseSensitivity));
-    if (this.paused || (this.pauseInMenus && this.input.captured)) return;
+    // Menus keep pointer lock, so ignore mouse motion while one is open (it would spin the view).
+    if (!this.input.captured) {
+      p.yaw += mx * this.mouseSensitivity;
+      p.pitch = Math.max(-1.5, Math.min(1.5, p.pitch - my * this.mouseSensitivity));
+    }
+    if (this.paused || this.lockPaused || (this.pauseInMenus && this.input.captured)) return;
     this.acc = Math.min(this.acc + realDt, 0.25);
     while (this.acc >= TICK) {
       this.tick(TICK);

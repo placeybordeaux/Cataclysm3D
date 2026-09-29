@@ -8,6 +8,7 @@ import { loadWorldgenData } from './world/worldgen_data';
 import { installWorldgenDebug } from './world/worldgen_debug';
 import { installDebugApi } from './debug';
 import { initUi } from './ui/framework';
+import { installPointerPolicy } from './ui/pointer';
 import { installUi } from './ui/index';
 import { installAudio } from './audio/install';
 import { installCrafting } from './ui/crafting_install';
@@ -114,6 +115,10 @@ async function main(): Promise<void> {
   const loaded = pending ? await save.applyPending(pending) : false;
   api.ready = true;
   if (!loaded) await ui.boot();
+  // Gameplay proper: capture the mouse from here on (title/chargen use it as a pointer).
+  const pointer = installPointerPolicy(game);
+  pointer.begin();
+  game.events.on('playerDied', () => pointer.end());
   // Spawns were held while the title screen / character creation ran (density choice).
   monsters.spawner.release();
   save.startSession();
