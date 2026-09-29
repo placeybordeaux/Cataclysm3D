@@ -404,6 +404,8 @@ export interface MonsterDef extends Glyph {
   death_function?: unknown;
   death_drops?: ItemGroupRef;
   harvest?: string;
+  /** harvest id used by the dissect activity (CDDA mtype::dissect; CBMs, mutagen samples) */
+  dissect?: string;
   flags: string[];
   /** half_life / age_grow are in days, as in CDDA */
   upgrades?: { half_life?: number; into_group?: string; into?: string; age_grow?: number; [k: string]: unknown };

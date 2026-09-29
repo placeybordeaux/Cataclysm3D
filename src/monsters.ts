@@ -6,7 +6,7 @@ import { MonsterSystem } from './game/monai';
 import { Spawner, type OvermapView } from './game/spawner';
 import { PlayerCombat, type ViewModelHook } from './game/playercombat';
 import { MonsterView } from './render/monsterView';
-import { butcherSeconds, butcherToolQuality, butcherYield, type ButcherKind } from './game/butchery';
+import { butcherSeconds, butcherToolQuality, butcherYield, type ButcherKind, canDissect, dissectPracticeCap, dissectSeconds, dissectToolMessage, dissectToolQuality, dissectYield } from './game/butchery';
 import { monsterSize, type Monster } from './game/monster';
 import { createItem, loadAmmo, type Item } from './game/item';
 import { snippet } from './data/index';
@@ -163,6 +163,43 @@ export function startButcher(game: Game, sys: MonsterSystem, c: CorpseAt, kind: 
   });
 }
 
+/** Start dissecting a corpse (CDDA ACT_DISSECT). Returns false (with a message) when impossible. */
+export function startDissect(game: Game, sys: MonsterSystem, c: CorpseAt): boolean {
+  const p = game.player;
+  const def = game.data.monsters[c.item.vars.corpse as string];
+  if (!def) {
+    game.message('You can\'t make sense of this corpse.');
+    return false;
+  }
+  if (!canDissect(game.data, def)) {
+    game.message(`There's nothing to dissect in the ${def.name}.`);
+    return false;
+  }
+  const q = dissectToolQuality(p);
+  const toolMsg = dissectToolMessage(q);
+  if (q <= 0) {
+    game.message(toolMsg!);
+    return false;
+  }
+  if (toolMsg) game.message(toolMsg);
+  return game.activities.start({
+    name: `dissecting the ${def.name}`,
+    duration: dissectSeconds(def, q),
+    onComplete: () => {
+      if (!game.map.itemsAt(c.x, c.y, c.z).includes(c.item as any)) return game.message('The corpse is gone.');
+      const res = dissectYield(game.data, p, def, q, sys.rng, c.item.damageLevel());
+      const h = def.dissect ? game.data.misc.harvest?.[def.dissect] : undefined;
+      if (typeof h?.message === 'string' && res.ok) game.message(h.message);
+      for (const msg of res.messages) game.message(msg, /^You discover/.test(msg) ? 'c_light_green' : undefined);
+      if (!res.ok) return;
+      sys.removeCorpseItem(c.item, c.x, c.y, c.z);
+      for (const it of res.items) game.map.addItem(c.x, c.y, c.z, it);
+      p.practice('firstaid', res.practice, dissectPracticeCap(def, q));
+      game.message(`You finish dissecting the ${def.name}.`);
+    },
+  });
+}
+
 function butcherMenu(game: Game, sys: MonsterSystem): void {
   const list = corpsesNear(game);
   if (!list.length) return game.message('There are no corpses here to butcher.');
@@ -170,14 +207,25 @@ function butcherMenu(game: Game, sys: MonsterSystem): void {
     const def = game.data.monsters[c.item.vars.corpse as string];
     const q = Math.max(0, butcherToolQuality(game.player));
     const fmt = (s: number) => (s >= 3600 ? `${(s / 3600).toFixed(1)} hours` : `${Math.round(s / 60)} minutes`);
-    openMenu<ButcherKind>({
+    const fine = dissectToolQuality(game.player);
+    const dissectable = !!def && canDissect(game.data, def);
+    openMenu<ButcherKind | 'dissect'>({
       title: `Butcher the ${def?.name ?? 'corpse'}`,
-      entries: (['quick', 'full'] as ButcherKind[]).map((k) => ({
-        label: `${k === 'quick' ? 'Quick butchery' : 'Full butchery'}  (${def ? fmt(butcherSeconds(def, q, k)) : '?'})`,
-        value: k,
-      })),
+      entries: [
+        ...(['quick', 'full'] as ButcherKind[]).map((k) => ({
+          label: `${k === 'quick' ? 'Quick butchery' : 'Full butchery'}  (${def ? fmt(butcherSeconds(def, q, k)) : '?'})`,
+          value: k as ButcherKind | 'dissect',
+        })),
+        // CDDA's butcher menu greys Dissect out with the reason (no CUT_FINE tool, nothing inside).
+        {
+          label: `Dissect  (${!dissectable ? 'nothing to dissect' : fine <= 0 ? 'needs a fine cutting tool' : fmt(dissectSeconds(def!, fine))})`,
+          value: 'dissect' as const,
+          disabled: !dissectable || fine <= 0,
+        },
+      ],
       onSelect: (k) => {
-        startButcher(game, sys, c, k);
+        if (k === 'dissect') startDissect(game, sys, c);
+        else startButcher(game, sys, c, k);
       },
     });
   };
@@ -256,4 +304,10 @@ function installDebug(api: DebugApi, game: Game, sys: MonsterSystem, spawner: Sp
     return startButcher(game, sys, c, kind);
   };
   api.kills = () => Object.fromEntries(sys.kills);
+  /** Dissect the nearest corpse (no menu); completes after the activity runs (use cdda.step). */
+  api.dissect = () => {
+    const c = corpsesNear(game)[0];
+    if (!c) return 'no corpse';
+    return startDissect(game, sys, c);
+  };
 }
