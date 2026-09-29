@@ -4,6 +4,7 @@ import type { Chunk, SpawnRequest } from '../world/map';
 import { pickFromMonsterGroup, type MonsterGroupContext, type MonsterSpawn } from '../data/index';
 import { warnOnce } from '../data/warn';
 import { dormantBase, type MonsterSystem } from './monai';
+import { chunkTracker } from '../save/tracking';
 
 // Turns mapgen spawn requests (Chunk.spawns) into monsters, plus CDDA's overmap-level city
 // hordes (overmap::place_mongroups). Chunks generate lazily, so everything is keyed off the
@@ -106,12 +107,26 @@ export class Spawner {
     if (this.skipChunk?.(c)) return;
     const rng = new Rng(hashSeed(this.sys.game.seed, c.cx, c.cy, c.z, 0x5ba7));
     this.stats.chunks++;
-    for (const r of requests) {
-      this.stats.requests++;
-      this.request(c, r, rng);
+    this.baselineChunk = c;
+    this.cleanBeforeCorpses = null;
+    try {
+      for (const r of requests) {
+        this.stats.requests++;
+        this.request(c, r, rng);
+      }
+      if (c.z === 0 && this.overmap) this.cityHorde(c, rng);
+    } finally {
+      this.baselineChunk = null;
     }
-    if (c.z === 0 && this.overmap) this.cityHorde(c, rng);
+    // Dormant-zombie corpses are part of what generating this chunk produces: accept them into
+    // its baseline so a chunk nobody touched stays clean (evictable, not saved). The monster
+    // stash keeps them across eviction and save/load, since the spawner skips regenerated chunks.
+    if (this.cleanBeforeCorpses) chunkTracker(this.sys.game)?.rebaseline(c);
   }
+
+  /** Chunk being populated by onChunk (not update_mapgen), and whether it was clean before any corpse. */
+  private baselineChunk: Chunk | null = null;
+  private cleanBeforeCorpses: boolean | null = null;
 
   private request(c: Chunk, r: SpawnRequest, rng: Rng): void {
     const data = this.sys.game.data;
@@ -194,6 +209,10 @@ export class Spawner {
         for (let n = 0; n < s.count; n++) {
           const tx = x + (n ? rng.int(-1, 1) : 0), ty = y + (n ? rng.int(-1, 1) : 0);
           if (!this.inChunk(c, tx, ty) || !map.passable(tx, ty, c.z)) continue;
+          if (this.baselineChunk === c && this.cleanBeforeCorpses === null) {
+            const tracker = chunkTracker(this.sys.game);
+            this.cleanBeforeCorpses = !!tracker && !tracker.isDirty(c);
+          }
           this.sys.placeCorpse(bdef, tx + 0.5, ty + 0.5, c.z, { dormant: true, facing: rng.next() * 6.28 });
           this.stats.dormant++;
         }

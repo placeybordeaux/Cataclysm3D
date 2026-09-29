@@ -1,7 +1,7 @@
 import type { Game } from '../game/game';
 import type { MonsterSystem, CorpseRecord } from '../game/monai';
 import type { Spawner } from '../game/spawner';
-import type { Monster, MonEffect } from '../game/monster';
+import { monsterToJSON, restoreMonster, type MonsterJSON } from '../game/monster_json';
 import type { CharacterJSON } from '../game/character';
 import type { GameStatsJSON } from '../game/stats';
 import type { Item, ItemJSON } from '../game/item';
@@ -12,7 +12,8 @@ import { knownTraps } from '../game/traps';
 import { registerSaveable, type LoadContext } from './registry';
 import { decodeChunk, encodeChunk, Palette, paletteResolver, type ChunkJSON } from './chunks';
 import { sanitizeItemJSON, type Warn } from './items';
-import { installChunkTracking, type ChunkTracker } from './tracking';
+import { chunkTracker, installChunkTracking, type ChunkTracker } from './tracking';
+import type { StashColumnJSON, StashedCorpse } from '../game/monstash';
 
 // Save sections for the core systems. Each system's state is described next to its
 // save/load pair; anything not listed is derived (recomputed next tick) or cosmetic.
@@ -169,28 +170,6 @@ function registerPlayer(game: Game): void {
 
 // ------------------------------------------------------------------ monsters
 
-interface MonsterJSON {
-  id: string;
-  x: number; y: number; z: number;
-  hp: number;
-  facing: number;
-  anger: number;
-  morale: number;
-  aggro: boolean;
-  friendly?: boolean;
-  name?: string;
-  effects?: [MonEffect, number][];
-  attackCooldown?: number;
-  busy?: number;
-  /** Special attack cooldowns by special id. */
-  specials?: [string, number][];
-  upgradeDay: number;
-  /** [x, y, seconds left] of the noise being investigated. */
-  wander?: [number, number, number];
-  /** [x, y, seconds ago] where the player was last seen; absent = never. */
-  lastSeen?: [number, number, number];
-}
-
 interface CorpseJSON {
   /** Float position (renderer) — the item sits at the floor of it. */
   x: number; y: number; z: number;
@@ -206,25 +185,8 @@ interface MonstersSection {
   monsters: MonsterJSON[];
   corpses: CorpseJSON[];
   kills: [string, number][];
-}
-
-function monsterToJSON(m: Monster): MonsterJSON {
-  const j: MonsterJSON = {
-    id: m.type.id, x: m.x, y: m.y, z: m.z, hp: m.hp, facing: m.facing, anger: m.anger, morale: m.morale, aggro: m.aggroCharacter,
-    upgradeDay: m.upgradeDay,
-  };
-  if (m.friendly) j.friendly = true;
-  if (m.name) j.name = m.name;
-  // 'grabbing' is tied to the grab link we don't persist (the survivor starts free).
-  const eff = [...m.effects].filter(([e, t]) => t > 0 && e !== 'grabbing');
-  if (eff.length) j.effects = eff;
-  if (m.attackCooldown > 0) j.attackCooldown = m.attackCooldown;
-  if (m.busy > 0) j.busy = m.busy;
-  const sp = m.specials.filter((s) => s.cooldown > 0).map((s) => [String(s.def.id), s.cooldown] as [string, number]);
-  if (sp.length) j.specials = sp;
-  if (m.wanderTime > 0) j.wander = [m.wanderX, m.wanderY, m.wanderTime];
-  if (Number.isFinite(m.lastSeenAge)) j.lastSeen = [m.lastSeenX, m.lastSeenY, m.lastSeenAge];
-  return j;
+  /** Far monsters / clean-chunk dormant corpses folded into OMT columns (monstash.ts). */
+  stash?: StashColumnJSON[];
 }
 
 function registerMonsters(game: Game, sys: MonsterSystem): void {
@@ -232,22 +194,33 @@ function registerMonsters(game: Game, sys: MonsterSystem): void {
     order: 20,
     save() {
       const map = game.map;
+      const tracker = chunkTracker(game);
       const corpses: CorpseJSON[] = [];
+      const cleanDormant: StashedCorpse[] = [];
       for (const c of sys.corpses) {
         const tx = Math.floor(c.x), ty = Math.floor(c.y);
-        if (!map.hasChunk(Math.floor(tx / 24), Math.floor(ty / 24), c.z)) continue;
+        const chunk = map.hasChunk(Math.floor(tx / 24), Math.floor(ty / 24), c.z) ? map.chunk(Math.floor(tx / 24), Math.floor(ty / 24), c.z) : null;
+        if (!chunk) continue;
         const idx = map.itemsAt(tx, ty, c.z).indexOf(c.item as never);
         if (idx < 0) continue;
+        // Spawner-laid dormant corpses are part of a clean chunk's baseline, and clean chunks
+        // aren't saved: keep them in the stash, which lays them again when the chunk regenerates.
+        if (c.dormant && tracker && !tracker.isDirty(chunk)) {
+          cleanDormant.push({ monId: c.monId, x: c.x, y: c.y, z: c.z, facing: c.facing, diedAt: c.diedAt });
+          continue;
+        }
         corpses.push({ x: c.x, y: c.y, z: c.z, idx, monId: c.monId, diedAt: c.diedAt, facing: c.facing, ...(c.dormant ? { dormant: true } : {}) });
       }
-      return { monsters: sys.all.filter((m) => !m.dead).map(monsterToJSON), corpses, kills: [...sys.kills] };
+      const stash = sys.stash.toJSON(cleanDormant);
+      return { monsters: sys.all.filter((m) => !m.dead).map(monsterToJSON), corpses, kills: [...sys.kills], ...(stash.length ? { stash } : {}) };
     },
     load(s, ctx) {
       clearMonsters(sys);
       sys.kills.clear();
       for (const [id, n] of s.kills) sys.kills.set(id, n);
-      for (const j of s.monsters) restoreMonster(game, sys, j, ctx);
+      for (const j of s.monsters) restoreMonster(sys, j, ctx.warn);
       restoreCorpses(game, sys, s.corpses, ctx);
+      sys.stash.load(s.stash ?? []);
     },
     missing: () => clearMonsters(sys),
   });
@@ -258,31 +231,8 @@ function clearMonsters(sys: MonsterSystem): void {
   sys.releaseGrab();
   for (const m of sys.all) sys.remove(m);
   for (const c of sys.corpses.splice(0)) for (const f of sys.onCorpseGone) f(c);
+  sys.stash.clear();
   sys.projectiles.length = 0;
-}
-
-function restoreMonster(game: Game, sys: MonsterSystem, j: MonsterJSON, ctx: LoadContext): void {
-  const def = game.data.monsters[j.id];
-  if (!def) return ctx.warn(`unknown monster "${j.id}" dropped`);
-  const m = sys.spawn(def, j.x, j.y, j.z, {
-    friendly: j.friendly,
-    name: j.name,
-    rng: new Rng(hashSeed(game.seed, Math.floor(j.x * 16), Math.floor(j.y * 16), j.z, sys.all.length, 0x10ad)),
-  });
-  m.hp = j.hp;
-  m.facing = j.facing;
-  m.anger = j.anger;
-  m.morale = j.morale;
-  m.aggroCharacter = j.aggro;
-  m.upgradeDay = j.upgradeDay;
-  m.effects.clear();
-  for (const [e, t] of j.effects ?? []) m.effects.set(e, t);
-  m.attackCooldown = j.attackCooldown ?? 0;
-  m.busy = j.busy ?? 0;
-  const cds = new Map(j.specials ?? []);
-  for (const sp of m.specials) sp.cooldown = cds.get(String(sp.def.id)) ?? 0;
-  if (j.wander) [m.wanderX, m.wanderY, m.wanderTime] = j.wander;
-  if (j.lastSeen) [m.lastSeenX, m.lastSeenY, m.lastSeenAge] = j.lastSeen;
 }
 
 function restoreCorpses(game: Game, sys: MonsterSystem, list: CorpseJSON[], ctx: LoadContext): void {

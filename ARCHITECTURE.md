@@ -102,6 +102,10 @@ tests/               vitest unit tests (pure logic, no DOM/WebGL)
   chase/flee/wander/idle; budgeted A* (`pathfind.ts`) over `los.ts` Grid (never generates
   chunks); `hurt(m, dmg, 'player')`, `die`, corpses (`corpses`, `onDied`, `onCorpseGone`),
   kills. Emits `playerHurt` and `creatureDied`.
+- `monstash.ts` (`sys.stash`): idle dormant monsters > 7 OMTs away are serialised per OMT column
+  and leave `sys.all` (back within 6 OMTs); unnamed/non-friendly only, so don't hold references to
+  far monsters. Spawner dormant corpses are chunk baseline (rebaselined), stashed on eviction and
+  re-laid on regeneration; saved in the `monsters` section's `stash`. `cdda.monsterStash()`.
 - `monattack.ts` special attacks: data melee/bite actors (misc.monster_attack), leap, boomer
   bile, and hardcoded SHRIEK, ACID, RESURRECT, SHOCKSTORM, PARROT, SMASH...
 - `spawner.ts` consumes `chunk.spawns` (then clears them) + CDDA city hordes; tuning knob
