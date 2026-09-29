@@ -147,7 +147,9 @@ tests/               vitest unit tests (pure logic, no DOM/WebGL)
   index registered as a `GameMap.overlays` entry (so `map.moveCost/passable/opaque`,
   physics and monster `Grid` see vehicles), driving physics per tick, collisions (terrain via
   bash.ts, monsters via `monsterCreatureHooks`, the player, other vehicles), engine/horn/
-  alarm noise via `emitSound`, save section `vehicles` (order 30).
+  alarm noise via `emitSound` (with CDDA sfx id/variant), save section `vehicles` (order 30).
+  Audio: `src/audio/vehicleAudio.ts` `EngineSounds` (running-engine loop per nearby vehicle,
+  internal while driving, rate by CDDA gear, gear-shift clunks) and CDDA variant pickers.
 - Keys: `^` take controls / controls menu, `k` engine, `h` headlights, `n` horn; at the
   controls WASD drive (S brakes then reverses), Space handbrake. `e` on a vehicle part goes
   through `interactOverrides` in interact.ts (doors toggle, else a part menu: cargo get/put,
@@ -288,9 +290,10 @@ Keys: `V` camera mode, `F` flashlight.
 - Map edits need no renderer calls: chunk meshes rebuild when `chunk.version` changes.
 - Debug API: `cdda.setCameraMode`, `cdda.flashlight`, `cdda.setWeather`, `cdda.settle()`
   (build all chunks + render; call before screenshots), `cdda.renderStats()`,
-  `cdda.lightAt(dx,dy)`, `cdda.lightmapAscii(r)`, `cdda.addLight(dx,dy,{…})`,
-  `cdda.addField(type,dx,dy,n)`, `cdda.placeItem(id,dx,dy)`, `cdda.lookAt(x,y)`,
-  `cdda.findFurniture(re)`, `cdda.attack(kind)`, `cdda.viewmodelPose(kind,t)` (freeze an
+  `cdda.lightAt(x?,y?,z?)` (absolute tile, gameplay light = this light map where exact),
+  `cdda.lightmapAscii(r)`, `cdda.addLight(dx,dy,{…})`, `cdda.addField(x,y,z,type,n)`,
+  `cdda.placeItem(id,dx,dy,count?)`, `cdda.lookAt(x,y)`, `cdda.findFurniture(re)`,
+  `cdda.viewmodelAttack(kind)` (animation only; `cdda.attack()` really attacks), `cdda.viewmodelPose(kind,t)` (freeze an
   attack pose), `cdda.shake(a)`, `cdda.hurtFlash(a)`, `cdda.benchRender(n)` (ms/frame),
   `cdda.shimmerTest(frames, px/frame)` (pixel-stability metric for a slow pan).
   `tools/render-shots.sh <prefix>` renders the regression screenshot set.
