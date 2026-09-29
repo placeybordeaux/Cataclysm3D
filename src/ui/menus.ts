@@ -10,6 +10,21 @@ import { maybeShowStartHints, randomTip } from './tips';
 import { progressionOf } from '../progression/registry';
 import { runNewGame, runQuickStart } from '../progression/newgame';
 import { openJournal } from '../progression/journal';
+import { registerOption } from './options';
+import { asciiFontPx, drawPixelLogo, setTitleLogoStyle, titleLogoStyle } from './titlelogo';
+
+let logoOption = false;
+/** Options > Title logo (pixel / the CDDA ASCII art), registered once. */
+function registerLogoOption(): void {
+  if (logoOption) return;
+  logoOption = true;
+  registerOption({
+    name: 'Title logo',
+    value: () => (titleLogoStyle() === 'ascii' ? 'ASCII art (CDDA)' : 'Pixel'),
+    change: () => setTitleLogoStyle(titleLogoStyle() === 'ascii' ? 'pixel' : 'ascii'),
+    desc: 'The logo on the title screen: big pixel letters (easy to read at any size) or the ASCII art from Cataclysm.',
+  });
+}
 
 // Title screen (CDDA main_menu.cpp look: the ASCII logo from data/title/en.title over a
 // slowly turning, darkened view of the world, and a horizontal menu bar with highlighted
@@ -36,6 +51,14 @@ export function showMainMenu(ctx: UiContext, hud: Hud): Promise<void> {
     const el = document.createElement('div');
     el.className = 'screen dim main-menu';
     root.appendChild(el);
+    registerLogoOption();
+    // Drawn once per size; render() re-creates the markup around it.
+    const logo = document.createElement('canvas');
+    logo.className = 'title-logo';
+    logo.setAttribute('aria-label', 'Cataclysm: Bright Nights');
+    let logoFor = '';
+    const onResize = () => render();
+    window.addEventListener('resize', onResize);
     let sel = 0;
     let busy = false;
     // CDDA main_menu.cpp shows a random "tip of the day" under the menu.
@@ -55,6 +78,7 @@ export function showMainMenu(ctx: UiContext, hud: Hud): Promise<void> {
 
     const close = () => {
       cancelAnimationFrame(raf);
+      window.removeEventListener('resize', onResize);
       release();
       el.remove();
       p.yaw = saved.yaw;
@@ -118,12 +142,13 @@ export function showMainMenu(ctx: UiContext, hud: Hud): Promise<void> {
       if (!e.enabled()) return void sfx.ui('menu_error');
       sfx.ui('menu_select');
       sel = i;
-      render();
       busy = true;
+      render();
       try {
         await e.run();
       } finally {
         busy = false;
+        if (el.isConnected) render();
       }
     };
 
@@ -142,20 +167,45 @@ export function showMainMenu(ctx: UiContext, hud: Hud): Promise<void> {
       return true;
     });
 
+    /** The pixel logo (a canvas slotted in after the markup) or the ASCII art at an integer font size. */
+    function logoMarkup(): string {
+      const W = window.innerWidth, H = window.innerHeight;
+      if (titleLogoStyle() === 'ascii') {
+        const art = ctx.data.title.slice();
+        while (art.length && !art[art.length - 1].replace(/<[^>]+>/g, '').trim()) art.pop();
+        return `<div class="pre title-art" style="font-size:${asciiFontPx(W, H, 80, art.length)}px;line-height:1;text-shadow:0 0 6px #000,1px 1px 0 #000;background:rgba(0,0,0,.45);padding:.4em .8em">${colorize(art.join('\n'))}</div>`;
+      }
+      // Smaller while a window is up, so both lines stay clear above it.
+      const key = `${W}x${H}${busy ? 'c' : ''}`;
+      if (logoFor !== key) {
+        logoFor = key;
+        drawPixelLogo(logo, busy ? Math.min(W, H * 0.9) : Math.min(W, H * 2.2));
+      }
+      return '<div class="title-logo-slot"></div>';
+    }
+
     function render() {
       const bar = entries.map((e, i) => {
         const first = e.label[0], rest = e.label.slice(1);
         const inner = `${c(e.enabled() ? 'c_light_green' : 'c_dark_gray', first)}${c(e.enabled() ? (i === sel ? 'c_white' : 'c_light_gray') : 'c_dark_gray', rest)}`;
         return `<span class="mm-item" data-i="${i}" style="cursor:pointer;padding:0 .6em;${i === sel ? 'background:var(--c-blue)' : ''}">[${inner}]</span>`;
       }).join('');
+      // While a window opened from here is up (Start, New Game), only the logo stays, at the top,
+      // clear of the window (QA: the Start window covered it with the menu row peeking out).
+      if (busy) {
+        el.innerHTML = `<div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;padding-top:3vh">${logoMarkup()}</div>`;
+        el.querySelector('.title-logo-slot')?.replaceWith(logo);
+        return;
+      }
       el.innerHTML = `<div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2.5vh">
-          <div class="pre title-art" style="text-shadow:0 0 6px #000,1px 1px 0 #000;line-height:1.05">${colorize(ctx.data.title.join('\n'))}</div>
+          ${logoMarkup()}
           <div class="pre" style="color:var(--c-light_gray);text-shadow:1px 1px 0 #000">${c('c_dark_gray', 'a real-time 3D port of')} ${c('c_white', 'Cataclysm: Bright Nights')}</div>
           ${banner.length ? `<div class="pre title-unlocks" style="text-align:center;text-shadow:1px 1px 0 #000">${banner.map((u) => `${c('c_light_green', u.kind === 'scenario' ? 'New scenario unlocked:' : u.kind === 'cosmetic' ? 'New title unlocked:' : u.kind === 'creator' ? 'Unlocked:' : 'New start unlocked:')} ${c('c_white', u.name)}`).join('\n')}</div>` : ''}
           <div class="pre cdda-box" style="padding:.3em 1em">${bar}</div>
           <div class="pre" style="color:var(--c-dark_gray)">${c('c_light_green', '←→')} select  ${c('c_light_green', 'Enter')} confirm  or press the highlighted letter</div>
           ${tip ? `<div style="max-width:70ch;text-align:center;color:var(--c-light_gray);text-shadow:1px 1px 0 #000">${c('c_light_cyan', 'Tip of the day:')} ${c('c_light_gray', tip)}</div>` : ''}
         </div>`;
+      el.querySelector('.title-logo-slot')?.replaceWith(logo);
       el.querySelectorAll<HTMLElement>('.mm-item').forEach((it) => {
         const i = Number(it.dataset.i);
         it.onmousemove = (ev) => hoverMoved(ev) && sel !== i && ((sel = i), render());
