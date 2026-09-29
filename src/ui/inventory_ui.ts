@@ -234,20 +234,34 @@ function actionsFor(e: InvEntry): { action: ItemAction; key: string; label: stri
   return out;
 }
 
+/** Item-menu actions added by other systems (gunmods: install/remove). Shown only when `ok`. */
+export interface ExtraItemAction {
+  key: string;
+  label: (e: InvEntry) => string;
+  ok: (e: InvEntry) => boolean;
+  run: (ctx: UiContext, e: InvEntry) => void;
+}
+export const extraItemActions: ExtraItemAction[] = [];
+
 /** CDDA's item action menu: the item's info plus a list of what you can do with it. */
 export function openItemMenu(ctx: UiContext, e: InvEntry, onDone?: () => void): UiWindow {
   const acts = actionsFor(e);
-  return openMenu<ItemAction>({
+  const detail = () => `${spriteImg(ctx.renderer, e.item.typeId, 'icon-big')}${itemInfo(e.item, ctx.game.player)}`;
+  const extra = extraItemActions.filter((x) => x.ok(e));
+  return openMenu<ItemAction | ExtraItemAction>({
     title: e.item.name(),
     width: 'min(96ch, 94vw)',
     detailPane: true,
-    entries: acts.map((a) => ({
-      label: a.ok ? a.label : c('c_dark_gray', a.label),
-      value: a.action,
-      hotkey: a.key,
-      disabled: !a.ok,
-      detail: () => `${spriteImg(ctx.renderer, e.item.typeId, 'icon-big')}${itemInfo(e.item, ctx.game.player)}`,
-    })),
+    entries: [
+      ...acts.map((a) => ({
+        label: a.ok ? a.label : c('c_dark_gray', a.label),
+        value: a.action as ItemAction | ExtraItemAction,
+        hotkey: a.key,
+        disabled: !a.ok,
+        detail,
+      })),
+      ...extra.map((x) => ({ label: x.label(e), value: x as ItemAction | ExtraItemAction, hotkey: x.key, detail })),
+    ],
     onSelect: (action) => {
       // Examine opens on top; everything else closes the menu first.
       if (action === 'examine') {
@@ -255,7 +269,8 @@ export function openItemMenu(ctx: UiContext, e: InvEntry, onDone?: () => void): 
         return false;
       }
       setTimeout(() => {
-        doAction(ctx, action, e);
+        if (typeof action === 'string') doAction(ctx, action, e);
+        else action.run(ctx, e);
         onDone?.();
       }, 0);
     },

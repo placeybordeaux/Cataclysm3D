@@ -18,6 +18,7 @@ import { lightAt } from './game/vision';
 import { installMonsters } from './monsters';
 import { installNpcs } from './npcs';
 import { installMutBio } from './mutbio';
+import { installCombatDepth } from './combatdepth';
 import { installChunkTracking } from './save/tracking';
 import { installSave, takePendingLoad } from './save/install';
 
@@ -78,6 +79,8 @@ async function main(): Promise<void> {
   const save = await installSave(game, { api, genKind, worldgen, monsters });
   game.events.on('gameLoaded', () => renderer.chunks.invalidateAll());
   const ui = await installUi(game, renderer, worldgen, api);
+  // After the UI: wraps the reload key (clears gun jams) and adds item-menu gunmod actions.
+  installCombatDepth(game, renderer, monsters, api);
 
   let last = performance.now();
   const loop = (now: number) => {
