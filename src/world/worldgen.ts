@@ -8,6 +8,8 @@ import { hasFlag } from './registry';
 import type { WorldgenData } from './worldgen_data';
 import { MapBuffer, OMT } from './mapgen/buffer';
 import { mapgenForest, mapgenWater, biomeFor, isWaterType, resolveRegional } from './mapgen/builtin';
+import { type BuiltinEnv, runBnBuiltin } from './mapgen/bnbuiltin';
+import { mapgenLab } from './mapgen/lab';
 import { Levels, MapgenDat, MapgenEnv, MapgenRunner } from './mapgen/jsonmapgen';
 import { GenStats } from './mapgen/stats';
 import { ArgStores, ParamCtx } from './mapgen/values';
@@ -85,6 +87,14 @@ export class WorldGenerator implements ChunkGenerator {
     this.runner = new MapgenRunner(env);
   }
 
+  private get builtinEnv(): BuiltinEnv {
+    return {
+      region: this.wg.overmap.region,
+      terrains: this.wg.overmap.terrains,
+      expandItems: (ref, rng) => expandItemGroup(this.game, ref as any, rng),
+    };
+  }
+
   private terrainFlags(id: string): readonly string[] | undefined {
     if (this.terFlagCache.has(id)) return this.terFlagCache.get(id);
     const m = this.map;
@@ -126,7 +136,7 @@ export class WorldGenerator implements ChunkGenerator {
 
     const onUnknown = (id: string) => this.stats.unknownId('region', id);
     for (const b of levels.values()) resolveRegional(b, this.wg.overmap.region, dat.rng, onUnknown);
-    if (c.z > 0 && omt.type === 'open_air') this.addRoofs(map, c, base);
+    if (c.z > 0) this.addRoofs(map, c, base);
 
     this.writeChunk(map, c, base);
     c.omt = { id: omt.id, source };
@@ -290,6 +300,20 @@ export class WorldGenerator implements ChunkGenerator {
       mapgenWater(dat, base);
       return 'builtin:water';
     }
+    // BN C++/Lua builtins (field, road_*, parking_lot, rock, the Lua lab...).
+    const builtin = this.wg.mapgen.builtin?.[mapgenId] ?? def?.builtin;
+    if (builtin) {
+      if (builtin === 'lua:lab' || builtin === 'lua:lab_ice') {
+        mapgenLab({ runner: this.runner, terrains: defs }, dat, levels);
+        return `builtin:${builtin}`;
+      }
+      if (builtin === 'forest' && biomeFor(this.wg.overmap.region, dat.oter.type)) {
+        mapgenForest(dat, base, this.wg.overmap.region, (ref, rng) => expandItemGroup(this.game, ref as any, rng));
+        return 'builtin:forest';
+      }
+      if (runBnBuiltin(builtin, this.builtinEnv, dat, base)) return `builtin:${builtin}`;
+      this.stats.unsupportedFeature(`builtin mapgen ${builtin}`);
+    }
     if (def?.uniform) {
       base.ter.fill(def.uniform);
       return 'uniform';
@@ -307,9 +331,9 @@ export class WorldGenerator implements ChunkGenerator {
   }
 
   /**
-   * Put roofs over terrain that declares one (CDDA ter_t::roof) when this OMT is plain open
-   * air: tree canopies over trees (map::add_tree_tops) and roofs over buildings that lack a
-   * JSON roof level.
+   * BN mapbuffer post-pass: every open-air tile above terrain that declares a roof (ter_t::roof)
+   * becomes that roof: tree canopies over trees, roofs over buildings that lack a JSON roof
+   * level (or leave holes in it). DDA limits this to TREE/INDOORS/WALL terrain in open_air OMTs.
    */
   private addRoofs(map: GameMap, c: Chunk, buf: MapBuffer): void {
     const below = map.chunk(c.cx, c.cy, c.z - 1);
@@ -319,7 +343,6 @@ export class WorldGenerator implements ChunkGenerator {
       const t = map.terrain.get(below.ter[i]);
       const r = t.roof;
       if (!r) continue;
-      if (!hasFlag(t, 'TREE') && !hasFlag(t, 'INDOORS') && !hasFlag(t, 'WALL')) continue;
       if (this.terrainFlags(r) !== undefined) buf.ter[i] = r;
     }
   }
@@ -410,8 +433,9 @@ export class WorldGenerator implements ChunkGenerator {
   // Start location & debug helpers
 
   /**
-   * CDDA's default scenario starts in an evac shelter ("sloc_shelter_safe" forces the
-   * shelter_basic palette). Returns a passable tile inside the shelter's ZONE_START_POINT.
+   * The default (evacuee) scenario starts in an evac shelter. BN's sloc_shelter picks a
+   * shelter OMT and a free indoor tile in it; DDA's shelter has a ZONE_START_POINT and a
+   * "shelter_palette" parameter (sloc_shelter_safe), used when present.
    */
   findStartLocation(kind: 'shelter' = 'shelter', map?: GameMap): StartLocation {
     const m = map ?? this.map;
@@ -425,7 +449,10 @@ export class WorldGenerator implements ChunkGenerator {
     const cand: [number, number][] = [];
     const x0 = zone ? zone.x0 : sp.x * CHUNK + 6, x1 = zone ? zone.x1 : sp.x * CHUNK + 17;
     const y0 = zone ? zone.y0 : sp.y * CHUNK + 6, y1 = zone ? zone.y1 : sp.y * CHUNK + 17;
-    for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) if (m.passable(x, y, 0) && m.furnAt(x, y, 0).id === 'f_null') cand.push([x, y]);
+    // BN floors carry no INDOORS flag: a tile is indoors when something covers it (its roof).
+    const indoors = (x: number, y: number) => hasFlag(m.terAt(x, y, 0), 'INDOORS') || m.hasFloor(x, y, 1);
+    for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) if (m.passable(x, y, 0) && m.furnAt(x, y, 0).id === 'f_null' && indoors(x, y)) cand.push([x, y]);
+    if (!cand.length) for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) if (m.passable(x, y, 0) && m.furnAt(x, y, 0).id === 'f_null') cand.push([x, y]);
     if (!cand.length) for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) if (m.passable(x, y, 0)) cand.push([x, y]);
     if (!cand.length) throw new Error('evac shelter start zone has no passable tile');
     const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;

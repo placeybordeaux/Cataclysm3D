@@ -228,10 +228,53 @@ describe('multi-OMT and nested mapgen', () => {
     expect(withRoad.ter[MapBuffer.idx(15, 15)]).toBe('t_wall');
   });
 
-  it('real shelter mapgen resolves its layout parameter and nested chunk', () => {
+  it('real BN shelter mapgen builds walls, the basement stairs and its nested furniture', () => {
     const b = run(realWg, { type: 'shelter', rot: 0, line: -1 }, 9);
     const walls = b.ter.filter((t) => game.terrain[t]?.flags.includes('WALL')).length;
     expect(walls).toBeGreaterThan(30);
-    expect(b.zones.some((z) => z.type === 'ZONE_START_POINT')).toBe(true);
+    expect(b.ter).toContain('t_stairs_down');
+    expect(b.furn.filter(Boolean).length).toBeGreaterThan(10);
+  });
+});
+
+describe('BN mapgen keys', () => {
+  it('translate_ter swaps one terrain for another over the whole OMT; "add" places items', () => {
+    const wg = synth({
+      fill_ter: 't_floor',
+      rows: rows24((x, y) => (x === 3 || y === 7 ? 'D' : '.')),
+      terrain: { D: 't_door_metal_locked' },
+      translate_ter: [{ from: 't_door_metal_locked', to: 't_door_metal_c', x: 0, y: 0 }],
+      add: [{ item: 'rock', x: 5, y: 5, chance: 100 }],
+    });
+    const b = run(wg);
+    expect(b.ter).not.toContain('t_door_metal_locked');
+    expect(b.ter.filter((t) => t === 't_door_metal_c').length).toBe(47);
+    expect(b.items.get(MapBuffer.idx(5, 5))?.[0].typeId).toBe('rock');
+  });
+
+  it('keeps combining marks with their base character in rows (utf8_display_split)', () => {
+    const wg = synth({
+      fill_ter: 't_floor',
+      rows: rows24((x) => (x === 2 ? 'a\u0331' : '.')),
+      terrain: { 'a\u0331': 't_wall' },
+    });
+    const b = run(wg);
+    for (let y = 0; y < OMT; y++) expect(b.ter[MapBuffer.idx(2, y)]).toBe('t_wall');
+    expect(b.ter[MapBuffer.idx(3, 0)]).toBe('t_floor');
+  });
+
+  // t_console / f_vending_o: BN terrain/furniture (runs once terrain.json is BN's).
+  it.runIf(!!game.terrain.t_console)('computers are t_console terrain, vending machines are f_vending_c or broken open', () => {
+    const wg = synth({
+      fill_ter: 't_floor',
+      rows: rows24(() => '.'),
+      place_computers: [{ name: 'test', security: 0, x: 4, y: 4 }],
+      place_vendingmachines: [{ x: 8, y: 8 }, { x: 10, y: 10, reinforced: true }],
+    });
+    const b = run(wg);
+    expect(b.ter[MapBuffer.idx(4, 4)]).toBe('t_console');
+    expect(b.furn[MapBuffer.idx(4, 4)]).toBe('');
+    expect(['f_vending_c', 'f_vending_o']).toContain(b.furn[MapBuffer.idx(8, 8)]);
+    expect(b.furn[MapBuffer.idx(10, 10)]).toBe('f_vending_reinforced');
   });
 });

@@ -354,8 +354,12 @@ describe('far chunk eviction', () => {
   }, 60_000);
 });
 
+// BN mapgen stocks kitchens from BN item groups (SUS_kitchen_misc...); with DDA items/groups
+// still committed the start area has no perishable food, so this waits for the BN core data.
+const bnItemGroups = !!data.itemGroups.SUS_kitchen_misc;
+
 describe('actualized chunks stay clean', () => {
-  it('mapgen food rotting over the days does not make an untouched chunk dirty or saved', () => {
+  it.runIf(bnItemGroups)('mapgen food rotting over the days does not make an untouched chunk dirty or saved', () => {
     const W = build(4242, 'world');
     installNature(W.game, null);
     const { game, tracker } = W;

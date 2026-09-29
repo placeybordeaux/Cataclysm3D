@@ -19,7 +19,7 @@ const enum Phase { Removal, Terrain, Furniture, Default, Nested, Transform, Fact
 const SYMBOL_KINDS = [
   'terrain', 'furniture', 'fields', 'npcs', 'signs', 'vendingmachines', 'toilets', 'gaspumps', 'items',
   'monsters', 'vehicles', 'item', 'remove_vehicles', 'remove_all', 'traps', 'monster', 'rubble', 'computers',
-  'sealed_item', 'nested', 'liquids', 'corpses', 'graffiti', 'zones', 'ter_furn_transforms',
+  'sealed_item', 'nested', 'liquids', 'corpses', 'graffiti', 'zones', 'ter_furn_transforms', 'translate',
 ] as const;
 /** Positioned-object keys -> the piece kind they create. */
 const PLACE_KINDS: Record<string, string> = {
@@ -31,6 +31,8 @@ const PLACE_KINDS: Record<string, string> = {
   place_monster: 'monster', place_rubble: 'rubble', place_computers: 'computers', place_nested: 'nested',
   place_graffiti: 'graffiti', place_zones: 'zones', place_ter_furn_transforms: 'ter_furn_transforms',
   place_variables: 'variables', faction_owner: 'faction_owner',
+  // BN: "add" is the deprecated spelling of place_item; translate_ter replaces one terrain by another.
+  add: 'item', translate_ter: 'translate',
 };
 /** Keys we understand structurally (not pieces). Anything else in an object is "unsupported". */
 const STRUCTURAL = new Set([
@@ -43,7 +45,7 @@ function phaseOf(kind: string): Phase {
     case 'terrain': return Phase.Terrain;
     case 'furniture': case 'toilets': return Phase.Furniture;
     case 'nested': return Phase.Nested;
-    case 'ter_furn_transforms': return Phase.Transform;
+    case 'ter_furn_transforms': case 'translate': return Phase.Transform;
     case 'faction_owner': return Phase.Faction;
     case 'zones': case 'variables': return Phase.Zones;
     case 'remove_all': case 'remove_vehicles': case 'remove_npcs': return Phase.Removal;
@@ -182,7 +184,8 @@ export class MapgenCompiler {
       for (let y = 0; y < size; y++) {
         const row = obj.rows[y + oy];
         if (typeof row !== 'string') continue;
-        const chars = Array.from(row);
+        // utf8_display_split: a combining mark belongs to the symbol before it.
+        const chars = row.match(/\P{M}\p{M}*/gu) ?? [];
         for (let x = 0; x < size; x++) {
           const ch = chars[x + ox];
           if (ch === undefined) continue;
@@ -575,22 +578,28 @@ export class MapgenRunner {
         return;
       }
       case 'vendingmachines': {
+        // BN map::place_vending: reinforced machines stay stocked; ordinary ones are broken
+        // open (f_vending_o, glass around) half the time, else closed and stocked.
         const i = at();
         if (i < 0) return;
         const group = d.item_group !== undefined ? evalValue(d.item_group, dat.params, rng) : 'default_vending_machine';
-        const furn = d.reinforced ? (d.powered ? 'f_vending_reinforced' : 'f_vending_reinforced_off') : d.powered ? 'f_vending_c' : 'f_vending_c_off';
-        buf.furn[i] = this.knownFurn(furn) ? furn : '';
-        if (!group) return;
-        // CDDA: lootable machines are ransacked unless one_in(days_since_cataclysm + 4).
-        if (d.lootable && !rng.oneIn(4)) {
-          const broken = env.furnitureBashTo(furn);
-          if (broken !== undefined) buf.furn[i] = broken;
+        const stock = () => {
+          if (group) this.addItems(buf, i, env.expandItems(group, rng));
+        };
+        if (d.reinforced) {
+          buf.furn[i] = this.knownFurn('f_vending_reinforced') ? 'f_vending_reinforced' : '';
+          return stock();
+        }
+        if (rng.oneIn(2)) {
+          buf.furn[i] = this.knownFurn('f_vending_o') ? 'f_vending_o' : '';
           const cx = i % OMT, cy = Math.floor(i / OMT);
           for (let yy = cy - 1; yy <= cy + 1; yy++)
             for (let xx = cx - 1; xx <= cx + 1; xx++)
-              if (MapBuffer.inb(xx, yy) && rng.oneIn(4)) buf.addItem(MapBuffer.idx(xx, yy), { typeId: 'glass_shard', count: rng.int(1, 25) });
-        } else this.addItems(buf, i, env.expandItems(group, rng));
-        return;
+              if (MapBuffer.inb(xx, yy) && rng.oneIn(4)) buf.addItem(MapBuffer.idx(xx, yy), { typeId: 'glass_shard', count: rng.int(1, 2) });
+          return;
+        }
+        buf.furn[i] = this.knownFurn('f_vending_c') ? 'f_vending_c' : '';
+        return stock();
       }
       case 'toilets': {
         const i = at();
@@ -726,9 +735,11 @@ export class MapgenRunner {
         return;
       }
       case 'computers': {
+        // BN jmapgen_computer: the console is terrain (t_console), with no furniture.
         const i = at();
         if (i < 0) return;
-        if (this.knownFurn('f_console')) buf.furn[i] = 'f_console';
+        if (this.knownTer('t_console')) buf.ter[i] = 't_console';
+        buf.furn[i] = '';
         buf.computers.set(i, d);
         return;
       }
@@ -766,7 +777,15 @@ export class MapgenRunner {
           for (let x = xr.a; x <= xr.b; x++) if (MapBuffer.inb(x, y)) this.transformTile(tf, buf, MapBuffer.idx(x, y), rng);
         return;
       }
+      case 'translate': {
+        // BN jmapgen_translate: map::translate(from, to) over the whole OMT.
+        const from = evalValue(d.from, dat.params, rng), to = evalValue(d.to, dat.params, rng);
+        if (!from || !to || !this.knownTer(to)) return;
+        for (let i = 0; i < OMT * OMT; i++) if (buf.ter[i] === from) buf.ter[i] = to;
+        return;
+      }
       case 'variables':
+      case 'faction_owner': // item/furniture ownership isn't modelled
         return;
       default:
         env.stats.unsupportedFeature(p.kind);
@@ -803,6 +822,11 @@ export class MapgenRunner {
         return n === undefined ? [f] : n === 'fd_null' ? [] : [{ ...f, type: n }];
       }));
     }
+  }
+
+  /** Place nested chunk `id` with its origin at (x, y) (BN Lua mapgendata:nest). */
+  runNested(id: string, x: number, y: number, dat: MapgenDat, levels: Levels): void {
+    this.applyNested({ chunks: [id] }, { a: x, b: x }, { a: y, b: y }, 0, dat, levels);
   }
 
   private applyNested(d: any, xr: IntR, yr: IntR, dz: number, dat: MapgenDat, levels: Levels): void {

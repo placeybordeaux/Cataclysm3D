@@ -1,9 +1,10 @@
-// Underground labs against real data: CDDA's modular lab special placed near the start,
-// stacked across z-levels with stairs that line up, JSON lab rooms with lab loot/monsters,
-// and the lab machinery (card readers, hacking, consoles, gates, elevators, climbing).
+// Underground labs against real data: the modular mutagen lab and BN's classic Lua-drawn lab
+// placed near the start, stacked across z-levels with stairs that line up, JSON lab rooms with
+// lab loot/monsters, and the lab machinery (card readers, hacking, consoles, gates, elevators,
+// climbing).
 import { describe, expect, it } from 'vitest';
 import { WorldGenerator } from '../src/world/worldgen';
-import { LAB_SPECIAL, MICROLAB_SPECIAL } from '../src/world/overmap/overmap';
+import { CLASSIC_LAB_SPECIAL, LAB_BASEMENT_TYPES, LAB_SPECIAL, MICROLAB_SPECIAL } from '../src/world/overmap/overmap';
 import { CHUNK } from '../src/world/coords';
 import { hasFlag } from '../src/world/registry';
 import { Game } from '../src/game/game';
@@ -82,7 +83,9 @@ describe('lab chunks', () => {
       for (let ly = 0; ly < CHUNK; ly++)
         for (let lx = 0; lx < CHUNK; lx++) {
           const x = c.x * CHUNK + lx, y = c.y * CHUNK + ly;
-          if (!hasFlag(map.terAt(x, y, c.z), 'GOES_DOWN')) continue;
+          const t = map.terAt(x, y, c.z);
+          // BN deep water is GOES_DOWN too (you can dive); only stairs/ladders must connect.
+          if (!hasFlag(t, 'GOES_DOWN') || hasFlag(t, 'SWIMMABLE')) continue;
           const d = stairDestination(game, x, y, c.z, 'down');
           expect(d, `${c.id} ${lx},${ly}`).not.toBeNull();
           // arriving on up-stairs means you can climb back
@@ -144,10 +147,59 @@ describe('lab chunks', () => {
     expect([...ter.keys()].some((id) => id.startsWith('t_door_metal_locked'))).toBe(true);
     // ID cards to get through the readers, mutagen / lab supplies
     expect([...items].some((id) => id.startsWith('id_science'))).toBe(true);
-    expect([...items].some((id) => /mutagen/.test(id))).toBe(true);
+    expect([...items].some((id) => /mutagen|serum/.test(id))).toBe(true);
     expect(items.size).toBeGreaterThan(200);
     expect([...spawns].some((id) => /^GROUP_LAB_/.test(id))).toBe(true);
     expect([...spawns].some((id) => /turret|secubot|skitterbot|hack/.test(id))).toBe(true);
+  });
+});
+
+describe("BN's classic lab (Lab special + lab_basement, Lua lab mapgen)", () => {
+  const { map, gen, start } = world(1);
+  const { sp, cells } = labCells(gen, CLASSIC_LAB_SPECIAL, { x: start.omx, y: start.omy });
+
+  it('has a z0 lab_stairs bunker over a multi-level basement with a finale at the bottom', () => {
+    expect(sp).toBeDefined();
+    expect(Math.hypot(sp.x - start.omx, sp.y - start.omy)).toBeLessThan(45);
+    expect(cells.find((c) => c.z === 0)?.id).toBe('lab_stairs');
+    expect(gen.overmap.omtAt(sp.x, sp.y, -1).type).toBe('lab_core');
+    const under = cells.filter((c) => c.z < 0);
+    for (const c of under) expect(LAB_BASEMENT_TYPES as readonly string[]).toContain(c.id);
+    const bottom = Math.min(...under.map((c) => c.z));
+    expect(bottom).toBeLessThanOrEqual(-2);
+    expect(under.some((c) => c.z === bottom && c.id === 'lab_finale')).toBe(true);
+    // every level but the bottom has a staircase room over the next level's core
+    for (let z = -1; z > bottom; z--) {
+      const st = under.find((c) => c.z === z && c.id === 'lab_stairs')!;
+      expect(st, `z ${z}`).toBeDefined();
+      expect(gen.overmap.omtAt(st.x, st.y, z - 1).type).toBe('lab_core');
+    }
+  });
+
+  it('draws the entrance bunker and JSON floor plans, with stairs connecting every level', () => {
+    for (const c of cells) map.chunk(c.x, c.y, c.z);
+    const game = { map } as unknown as Game;
+    const entry = map.chunk(sp.x, sp.y, 0)!;
+    expect(entry.omt?.source).toBe('builtin:lua:lab');
+    const ids = (ch: Chunk) => Array.from(ch.ter).map((t) => map.terrain.get(t).id);
+    expect(ids(entry)).toContain('t_card_science');
+    expect(ids(entry).filter((t) => t === 't_stairs_down').length).toBe(2);
+    let walls = 0, connected = 0, downs = 0;
+    for (const c of cells.filter((e) => e.z < 0)) {
+      const ch = map.chunk(c.x, c.y, c.z)!;
+      expect(ch.omt?.source).toBe('builtin:lua:lab');
+      walls += ids(ch).filter((t) => t === 't_concrete_wall').length;
+      for (let i = 0; i < CHUNK * CHUNK; i++) {
+        const x = c.x * CHUNK + (i % CHUNK), y = c.y * CHUNK + Math.floor(i / CHUNK);
+        if (!hasFlag(map.terAt(x, y, c.z), 'GOES_DOWN') || hasFlag(map.terAt(x, y, c.z), 'SWIMMABLE')) continue;
+        downs++;
+        const d = stairDestination(game, x, y, c.z, 'down');
+        if (d && hasFlag(map.terAt(d.x, d.y, d.z), 'GOES_UP')) connected++;
+      }
+    }
+    expect(walls).toBeGreaterThan(100);
+    expect(downs).toBeGreaterThan(0);
+    expect(connected).toBe(downs);
   });
 });
 
@@ -174,8 +226,15 @@ function flat() {
   return { game, msgs };
 }
 
+// These exercise the machinery against DDA-shaped data (JSON "cardreader" examine actors,
+// f_console furniture, boom barriers). BN hardcodes card readers in C++ and makes consoles
+// terrain (t_console), so each runs only while the data it needs is present.
+const hasTer = (id: string) => !!data.terrain[id];
+const hasFurn = (id: string) => !!data.furniture[id];
+const cardreaderData = hasTer('t_card_science') && !!cardreaderOf(data.terrain.t_card_science as any);
+
 describe('lab machinery', () => {
-  it('a science card opens the metal doors around its reader and the reader stays', async () => {
+  it.runIf(cardreaderData)('a science card opens the metal doors around its reader and the reader stays', async () => {
     const { game, msgs } = flat();
     game.map.setTer(12, 10, 0, 't_card_science');
     game.map.setTer(13, 11, 0, 't_door_metal_locked');
@@ -223,7 +282,7 @@ describe('lab machinery', () => {
     expect(ok).toBeGreaterThan(8);
   });
 
-  it('consoles: failing to bypass security triggers a failure, success unlocks nearby doors', async () => {
+  it.runIf(hasFurn('f_console'))('consoles: failing to bypass security triggers a failure, success unlocks nearby doors', async () => {
     const { game, msgs } = flat();
     game.map.setFurn(11, 10, 0, 'f_console');
     game.map.setTer(15, 10, 0, 't_door_metal_locked');
@@ -286,7 +345,7 @@ describe('lab machinery', () => {
     expect(elevatorFloors(game, 12, 10, -2).map((f) => f.z)).toEqual([-2]);
   });
 
-  it('climbing over a boom barrier puts you on the far side', () => {
+  it.runIf(hasTer('t_boom_barrier_lowered'))('climbing over a boom barrier puts you on the far side', () => {
     const { game } = flat();
     game.map.setTer(11, 10, 0, 't_boom_barrier_lowered');
     expect(hasFlag(game.map.terAt(11, 10, 0), 'CLIMBABLE')).toBe(true);

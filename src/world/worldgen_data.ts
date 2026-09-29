@@ -25,6 +25,9 @@ export interface MapgenData {
   nested: Record<string, { w: number; o: number }[]>;
   /** update_mapgen_id -> object index (only ids dialogue/missions reference; see extract:mapgen) */
   update?: Record<string, number>;
+  /** mapgen id -> builtin generator name (BN C++ mapgen_functions.cpp names such as "field",
+   *  "road_straight", "forest", or "lua:lab" for BN's Lua mapgen). JSON mapgen wins when both exist. */
+  builtin?: Record<string, string>;
   objects: Json[];
 }
 
@@ -72,6 +75,8 @@ export interface SpecialDef {
   citySizes: [number, number];
   occurrences: [number, number];
   flags: string[];
+  /** BN place_nested: specials grown from a point of this one (e.g. Lab -> lab_basement). */
+  nested?: { p: [number, number, number]; special: string }[];
 }
 
 export interface ForestBiome {
@@ -99,6 +104,13 @@ export interface RegionSettings {
     houses: [string, number][];
     shops: [string, number][];
     parks: [string, number][];
+    /** BN: towns bigger than 10 pick shops (and, within apartment_radius, houses) from these. */
+    apartment_radius?: number;
+    apartment_sigma?: number;
+    urban_houses?: [string, number][];
+    urban_shops?: [string, number][];
+    /** BN: big towns try to place one of these "finale" buildings (mall, hospital...). */
+    finales?: [string, number][];
   };
   forest: {
     noise_threshold_forest: number;
@@ -111,6 +123,16 @@ export interface RegionSettings {
   /** t_region_* / f_region_* pseudo ids -> weighted concrete (or further pseudo) ids */
   regionTerrain: Record<string, [string, number][]>;
   regionFurniture: Record<string, [string, number][]>;
+  /** BN field_coverage (mapgen_field): shrubs/flowers/boulders scattered over fields. */
+  field?: {
+    percent_coverage: number;
+    default_ter: string;
+    other: [string, number][];
+    boost_chance: number;
+    boosted_percent_coverage: number;
+    boosted_other: [string, number][];
+    boosted_other_percent: number;
+  };
 }
 
 export interface OvermapData {
