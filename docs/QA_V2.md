@@ -39,6 +39,8 @@ with the game. Run the suite on the GPU, or with `--params look=classic` under S
 | realinput, Chromium on the GPU, 960×540, all 33 scenarios | **315/315** (was 294/302 at the start: 4 inventory checks, the hotbar drag, newgame) |
 | realinput, Chromium on the GPU, 1920×1080, all scenarios | **315/315** |
 | realinput, Firefox + HMR, 960×540: title, move, esc, keys, focus, ui2, inv, invbag, invloot, invkeys, save, quit | **92/92** (2 failures before the Firefox fix below) |
+| **Polish pass** (same branch, later): `npm test` | green: 949 passed, 24 skipped |
+| **Polish pass**: realinput, Chromium on the GPU, 960×540, all scenarios (new: `getin`, `firstfight`, hotbar checks in `invkeys`) | **328/328** |
 
 Firefox under WebDriver BiDi was practical: pointer lock, real Esc, drag & drop and the
 "Leave site?" prompt all behave under xdotool, so the suite runs there as-is (not the
@@ -70,8 +72,8 @@ Firefox under WebDriver BiDi was practical: pointer lock, real Esc, drag & drop 
 | 1 | At 960×540 (1× scale) Equipment + Inventory + Nearby were wider than the screen; Nearby wrapped onto a second row **over the hotbar and the bottom of the Inventory list** | S1 | ✔ | widths shrink with the viewport (unchanged ≥ 1080p), narrow lists drop the volume column (container query), every window ends above the hotbar and its list scrolls |
 | 2 | 4 real-input inventory checks failed only in the full run (ui2 right-click menu, ui2 Classic shift-click bar, invbag "pipes on the bag row", invloot Take all message; also invkeys' hotbar drag grabbed the wrong item) | S2 | ✔ | the state that leaked was the **inventory filling up** over earlier scenarios: the item under test ended up at the bottom of the Inventory list, underneath the Nearby window (#1), so clicks hit Nearby. Fixed by #1; all pass in the full run |
 | 3 | Take all: "Left emergency jacket: no room in your inventory" ×9 (a cupboard of single jackets), repeated in a toast that ran off the screen; "Took 7 folded emergency blanket" | S2 | ✔ | one line per kind and reason, plural totals |
-| 4 | Take all is greedy in list order: 7 blankets (4 kg, 3.5 L) filled a 6.5 L inventory before the jackets | S3 | ✘ inventory | sort by value/volume, or ask "take what fits?" with a preview |
-| 5 | Hotbar is pre-bound (slots 1–4) to tiny unlabeled icons; nothing says what they are until you hover with the inventory open | S3 | ✘ inventory | name under each bound slot, or a first-time tip |
+| 4 | Take all is greedy in list order: 7 blankets (4 kg, 3.5 L) filled a 6.5 L inventory before the jackets | S3 | ✘ looting UX | a survival-first order was built in the polish pass, then withdrawn: the looting-UX rework (quick-loot popup, merged piles) owns Take all |
+| 5 | Hotbar is pre-bound (slots 1–4) to tiny unlabeled icons; nothing says what they are until you hover with the inventory open | S3 | ✔ polish | a short name under each bound slot ("stick", "water"), the wielded one highlighted, and a number key says what it used ("3: combat knife") or how to fill an empty slot (unit test; realinput `invkeys`) |
 
 ### World interaction and HUD
 
@@ -82,7 +84,7 @@ Firefox under WebDriver BiDi was practical: pointer lock, real Esc, drag & drop 
 | 8 | Opening a picker (`z`) with the crosshair on furniture popped that furniture's look card (and outline) over the hotbar before the mouse moved | S3 | ✔ | world hover needs real mouse motion, ignoring the unlock's cursor jump |
 | 9 | Look card said a cupboard was "Easy to walk on" | S3 | ✔ | furniture's move cost counts |
 | 10 | Progress box wrapped "Crafting long pointy / stick" and "16 / s" | S3 | ✔ | sized to its label |
-| 11 | "You hear thump! ×21" while nothing visible happens (zombies bashing somewhere) | S3 | ✘ HUD/sound | direction ("thump! to the north"), or fold unseen repeats |
+| 11 | "You hear thump! ×21" while nothing visible happens (zombies bashing somewhere) | S3 | ✔ polish | "You hear a thump to the north, 12 m away." (floor too). The same noise from the same direction is logged once per 6 s. Heard noises get a fading amber mark on the compass strip, taller when loud, an edge arrow when behind (unit tests; screenshot) |
 | 12 | Map: half a town is CDDA letters (M + F n g ^) and the legend explained only six sprites | S2 | ✔ | a second legend lists the letters in view with their names |
 | 13 | Death screen said "your last save is kept" for a survivor that was never saved | S2 | ✔ | says so only when a save exists, otherwise how saving works |
 | 14 | "Bloated" and "Famished" shown at once (seen after a test setup; reachable by eating a lot while starving) — accurate in BN, confusing on a HUD | S3 | ✘ HUD | one line ("Starving, just ate too much") or explain in the tooltip |
@@ -99,15 +101,15 @@ Firefox under WebDriver BiDi was practical: pointer lock, real Esc, drag & drop 
 |---|---|---|---|---|
 | 16 | `e` ("get out" on the driving HUD) only let go of the controls: you sat in a closed car and walked into its walls | S1 | ✔ | stopped: opens the nearest door and puts you on free ground (unit test) |
 | 17 | A car stopped dead against a bicycle lying on the road, throttle held, 0 mph | S2 | ✔ | vehicles under ⅕ of your mass are shoved aside (then ahead), damaged, your speed shared (unit test) |
-| 18 | Taking the controls is `^` (Shift+6): odd for newcomers; `e` on a car examines it | S3 | ✘ vehicles | `e` on the driver's door/seat could take the controls |
-| 19 | Running zombies over at ~20 mph flings them but rarely kills: the memorial said "Kills 0 … You were a pacifist" after ramming six | S3 | ✘ balance | BN-faithful numbers; consider a kill credit/feedback for heavy hits |
+| 18 | Taking the controls is `^` (Shift+6): odd for newcomers; `e` on a car examines it | S3 | ✔ polish | by the driver's door the crosshair says "[e] Drive the Car  [o] More…"; `e` gets in and takes the controls, `e` again (stopped) climbs out. Rear doors, the passenger side and the trunk keep their own action; the context menu has Drive (primary), the door, Examine and the cargo. `^` still works (unit test; realinput `getin`) |
+| 19 | Running zombies over at ~20 mph flings them but rarely kills: the memorial said "Kills 0 … You were a pacifist" after ramming six | S3 | ✔ polish | **not** BN-faithful before: bodies used DDA's energy-in-mph² loop (~10 damage at 20 mph). BN converts impulse into damage (0.1 per N·s) minus torso bash armor, which is ~90 at 20 mph. Six zombies at 20 mph now all die, each kill credited to the driver (stats, achievements, progression), with "rams into the zombie, killing it!" A runaway car credits nobody (tests/runover.test.ts) |
 
 ### Visuals (for the render owner)
 
 | # | Issue | Sev | Status |
 |---|---|---|---|
 | 20 | Headlights at night light a small spot ~15 m ahead; the road right in front of the car stays black | S2 | ✘ render |
-| 21 | Title screen: the ASCII logo is dim blue on a dark backdrop, and the Start window covers it (its top row peeks out) | S3 | ✘ UI |
+| 21 | Title screen: the ASCII logo is dim blue on a dark backdrop, and the Start window covers it (its top row peeks out) | S3 | ✔ polish: a pixel-art logo at a whole-pixel scale; it moves up, smaller, while Start/New Game is open; the ASCII art is Options > Title logo (integer font size, dark backing) |
 | 22 | Weather "Snowstorm 2 °C" on a green spring day 1 — the sky shows a few flakes but the scene reads as a mild morning | S3 | ✘ weather/render |
 | 23 | Sky: large flat angular cloud slabs with hard edges in the full look | S3 | ✘ render |
 | 24 | A zombie at arm's length draws with its head below the crosshair (the sprite sits low); newcomers aim at the head and "swing wildly and miss" | S3 | ✘ render/combat |
@@ -120,6 +122,23 @@ misses, grabbed four times (mash `e`, the bar shows the progress), bitten twice 
 jacket. Telegraph + grab bar + stamina bar + messages make it readable; it still feels long
 and "swing wildly and miss" twice in a row with no visual reason is the most confusing part.
 
+**Polish pass (✔):**
+- A zombie's grab, bite and scratch cooldowns were counted on the movement clock, while the
+  swings they alternate with run on the melee clock. That made grabs ~1.5× as frequent per swing
+  as in BN, on both presets. They now use the melee clock.
+- Accessible also spaces grabs ×1.6, and a staggering hit makes the grabber let go ("The zombie
+  loses its grip on you!"). The banner says "mash [e] to break free (or hit it hard)".
+- Every miss says why above the crosshair for a second: *miss: dodged*, *clumsy swing*, *wild
+  swing*, *off balance*, *out of reach* or *no damage*.
+- In the headless newcomer model (`npm run sim -- --scenario first`), Accessible went from
+  7.0 / 10.5 s (median / p90, up to 3 grabs) to 6.2 / 9.0 s (at most 1 grab). Classic went
+  from 3 to 2 grabs (median).
+- The real-input `firstfight` scenario (xdotool LMB, mashing `e` when grabbed) finishes in
+  ~3–4 s with 0–1 grabs.
+- A human is slower than the bot (aiming, stepping), so the ~8–12 s goal for a real newcomer
+  still needs a human playtest to confirm.
+- Not done: aim assist toward the torso for low-drawn sprites (#24, render).
+
 ### Found by the new harness options
 
 | # | Issue | Sev | Status | Fix |
@@ -127,7 +146,7 @@ and "swing wildly and miss" twice in a row with no visual reason is the most con
 | 26 | **Firefox, `npm run dev`: Ctrl+R mid-game resumed the run instead of reaching the title.** Firefox closes the dev-server socket on every unload and Vite reports it as a disconnect, which took the hot-reload snapshot meant for dev-server restarts. Chromium doesn't report it, which is why it never showed up before | S2 (dev) | ✔ | disconnects while the page is leaving are ignored (realinput `save` in Firefox + `--hmr`) |
 | 27 | Under SwiftShader the default "full" look runs at 1–3 fps on this machine and time-based real-input checks fail (walking, clocks) | — | ✔ harness | `--gpu`; or `--params look=classic` |
 | 28 | `newgame`'s "fresh profile" setup re-unlocked the Security Guard from the running page's in-memory achievements | — | ✔ harness | wipe storage directly, again on pagehide |
-| 29 | The death screen "Kills 0 · You were a pacifist" after a car had rammed six zombies (none died) | S3 | ✘ | see #19 |
+| 29 | The death screen "Kills 0 · You were a pacifist" after a car had rammed six zombies (none died) | S3 | ✔ | see #19 |
 
 
 ## Assessment for the new-audience goal
@@ -171,25 +190,29 @@ sitting in a closed car). Most of those were fixed here; the remaining ones are 
 
 ### Top 10 next improvements
 
-1. **Combat feedback on a miss**: show *why* (a dodge animation, "it ducks", the swing arc
+1. ◐ **Combat feedback on a miss**: show *why* (a dodge animation, "it ducks", the swing arc
    passing beside it); aim assist toward the torso at arm's length (zombie sprites sit low).
-   Owner: combat feel.
-2. **Shorter first fight on Accessible**: fewer grabs in the first in-game hour, or a
+   Owner: combat feel. *Polish pass: the reason shows at the crosshair; no dodge animation or
+   aim assist yet.*
+2. ✔ **Shorter first fight on Accessible**: fewer grabs in the first in-game hour, or a
    weaker first zombie; the grab loop is the moment most likely to lose a newcomer.
-   Owner: balance.
+   Owner: balance. *Polish pass: grab pacing, and hit-to-break-free on Accessible (see Combat).*
 3. **Headlights that light the road** in front of the car (cone and range). Owner: render.
-4. **`e` gets you into a car** from beside the driver's door (keep `^` for the panel).
+4. ✔ **`e` gets you into a car** from beside the driver's door (keep `^` for the panel).
    Owner: vehicles.
-5. **Directional sound messages** ("thump! to the north", fold unseen repeats) and an
+5. ✔ **Directional sound messages** ("thump! to the north", fold unseen repeats) and an
    on-screen sound indicator. Owner: HUD/audio.
 6. **Mark lootable furniture at a distance**: a subtle highlight or "(17 items)" when the
    crosshair rests on a container within ~4 m. Owner: world interaction.
-7. **Hotbar labels** for bound slots and a first-time tip explaining the pre-bound items.
-   Owner: inventory.
+7. ✔ **Hotbar labels** for bound slots and a first-time tip explaining the pre-bound items.
+   Owner: inventory. *Polish pass: labels, a highlight on the wielded slot, and key-press
+   feedback. No separate tip: the empty-slot feedback says how to bind.*
 8. **Curate tip-of-the-day** to features this port has; drop CDDA-isms from messages
    (a message style pass). Owner: UX.
-9. **Title screen**: a proper logo image and big buttons instead of the terminal menu row;
-   keep letters as accelerators. Owner: UI.
+9. ◐ **Title screen**: a proper logo image and big buttons instead of the terminal menu row;
+   keep letters as accelerators. Owner: UI. *Polish pass: the pixel logo. The menu row is
+   unchanged.*
 10. **Take all that thinks**: prefer what fits and what's valuable (food, weapons, bags)
-    over 4 kg of blankets, and offer "wear it" for clothing. Owner: inventory.
+    over 4 kg of blankets, and offer "wear it" for clothing. Owner: looting UX (the rework in
+    progress).
 
