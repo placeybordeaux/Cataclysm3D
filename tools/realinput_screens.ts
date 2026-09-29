@@ -52,9 +52,18 @@ export function screenScenarios(c: ScreensCtx): Scenario[] {
     return v;
   };
 
+  /** Close whatever ui2 panels a failed step left open, then back to captured gameplay. */
+  const reset = async () => {
+    for (let i = 0; i < 6 && (await u()).panels.length; i++) {
+      await c.x().key('Escape');
+      await sleep(150);
+    }
+    await c.toGameplay();
+  };
+
   return [
     ['talk', 'dialogue: e talks, cursor freed + paused, typewriter skips, 1-9 answer, Esc leaves', async () => {
-      await c.toGameplay();
+      await reset();
       await js(`cdda.godMode?.(true); cdda.ui2.settings.pauseInInventory = true; cdda.ui2.saveSettings(); cdda.screens.prefs.speed = 'slow'`);
       await js(`(() => { const uid = cdda.spawnNpc('NC_SCAVENGER', 0, -2, { attitude: 'NULL' }); cdda.faceNpc(uid); cdda.game.player.pitch = -0.05; return uid; })()`);
       await sleep(600);
@@ -92,7 +101,7 @@ export function screenScenarios(c: ScreensCtx): Scenario[] {
       await js(`cdda.screens.prefs.speed = 'normal'`);
     }],
     ['trade', 'trade: drag goods onto the table with the real mouse, make the deal, items conserved', async () => {
-      await c.toGameplay();
+      await reset();
       await js(`(() => { const uid = cdda.spawnNpc('evac_merchant', 0, -2); cdda.faceNpc(uid); for (let i = 0; i < 12; i++) cdda.giveItem('FMCNote'); cdda.__tradeNpc = uid; })()`);
       // Setup opens the screen (the dialogue route is covered by 'talk'); everything after is real input.
       await js(`cdda.trade(cdda.__tradeNpc)`);
@@ -110,7 +119,7 @@ export function screenScenarios(c: ScreensCtx): Scenario[] {
       })()`);
       const before = await counts();
       // Their cheapest good onto "You get".
-      const row = await js<{ i: number; name: string } | null>(`(() => { const rows = [...document.querySelectorAll('#ui2 [data-testid="trade-theirs"] .ix-trow')]; if (!rows.length) return null; const price = (r) => parseFloat(r.querySelector('.ix-trow-price').textContent.replace(/[^0-9.]/g, '')); let best = 0; rows.forEach((r, i) => { if (price(r) < price(rows[best])) best = i; }); return { i: best, name: rows[best].querySelector('.ix-trow-name').textContent }; })()`);
+      const row = await js<{ i: number; name: string } | null>(`(() => { const list = document.querySelector('#ui2 [data-testid="trade-theirs"]').getBoundingClientRect(); const all = [...document.querySelectorAll('#ui2 [data-testid="trade-theirs"] .ix-trow')]; const rows = all.filter(r => { const b = r.getBoundingClientRect(); return b.top >= list.top && b.bottom <= list.bottom; }); if (!rows.length) return null; const price = (r) => parseFloat(r.querySelector('.ix-trow-price').textContent.replace(/[^0-9.]/g, '')); let best = 0; rows.forEach((r, i) => { if (price(r) < price(rows[best])) best = i; }); return { i: all.indexOf(rows[best]), name: rows[best].querySelector('.ix-trow-name').textContent }; })()`);
       const from = row ? await js<[number, number]>(`(() => { const r = document.querySelectorAll('#ui2 [data-testid="trade-theirs"] .ix-trow')[${row.i}].getBoundingClientRect(); return [Math.round(r.left + 40), Math.round(r.top + r.height / 2)]; })()`) : null;
       const getZone = await at('#ui2 [data-testid="trade-get"]');
       if (from && getZone) await drag(from, getZone);
@@ -133,7 +142,7 @@ export function screenScenarios(c: ScreensCtx): Scenario[] {
       if (v.panels.includes('trade')) await c.x().key('Escape');
     }],
     ['missions', 'mission log: M opens it (free cursor), tabs by mouse, M closes', async () => {
-      await c.toGameplay();
+      await reset();
       await js(`(() => { const id = Object.keys(cdda.npcSystem.nd.missions).find(k => cdda.npcSystem.nd.missions[k].goal === 'MGOAL_FIND_ITEM'); const n = cdda.npcSystem.nearest(40); const uid = cdda.giveMission(id, n?.uid); const m = cdda.npcSystem.missions.get(uid); m.target = { x: Math.floor(cdda.game.player.x / 24) + 5, y: Math.floor(cdda.game.player.y / 24) - 3, z: 0 }; })()`);
       await c.x().key('M');
       let v = await waitPanel('missions');
@@ -148,9 +157,12 @@ export function screenScenarios(c: ScreensCtx): Scenario[] {
       check('M closes it again', !v.panels.includes('missions'), v.panels);
     }],
     ['vehicle', 'vehicle: ^ at the wheel opens the panel, diagram click, engine button, driving HUD', async () => {
+      await reset();
+      // A car on a straight road, you at the wheel with the engine running (setup only).
+      const trip = await js<unknown>(`JSON.stringify(cdda.roadTrip('car'))`);
+      check('setup: a car on a road', trip !== 'null', trip);
       await c.toGameplay();
-      await js(`(() => { cdda.spawnVehicle('car', 0, -6, 0); cdda.enterVehicle(undefined, { start: true }); })()`);
-      await sleep(400);
+      await sleep(600);
       check('the driving HUD shows while at the wheel', await js<boolean>(`getComputedStyle(document.querySelector('#ui2 .ix-drivehud')).display !== 'none'`));
       await shot('drive_hud');
       await c.x().key('asciicircum');
@@ -174,7 +186,7 @@ export function screenScenarios(c: ScreensCtx): Scenario[] {
       await js(`cdda.exitVehicle()`);
     }],
     ['body', 'bionics (p), mutations ([), martial arts (_): panels, switches by mouse', async () => {
-      await c.toGameplay();
+      await reset();
       await js(`cdda.installBionic('bio_power_storage'); cdda.installBionic('bio_flashlight'); cdda.givePower(100)`);
       await c.x().key('p');
       let v = await waitPanel('bionics');
@@ -202,8 +214,8 @@ export function screenScenarios(c: ScreensCtx): Scenario[] {
       await waitPanel('martialarts', false);
     }],
     ['autodoc', 'Autodoc: e on it, odds + risks shown, Operate asks once, the operation starts', async () => {
-      await c.toGameplay();
-      await js(`(() => { const p = cdda.game.player; cdda.spawnAutodoc(0, -1); p.yaw = 0; p.pitch = -0.6; cdda.giveCbm('bio_flashlight'); cdda.installBionic('bio_painkiller'); })()`);
+      await reset();
+      await js(`(() => { const p = cdda.game.player; while (cdda.vehicleAt(0, 0) || cdda.vehicleAt(0, -1)) p.x += 3; cdda.spawnAutodoc(0, -1); p.yaw = 0; p.pitch = -0.6; cdda.giveCbm('bio_flashlight'); cdda.installBionic('bio_painkiller'); })()`);
       await sleep(400);
       await c.x().key('e');
       let v = await waitPanel('autodoc');
@@ -229,7 +241,7 @@ export function screenScenarios(c: ScreensCtx): Scenario[] {
       check('…and the Autodoc begins (time warps through the operation)', await js<boolean>(`cdda.ui.log().some(l => /configuring the Autodoc/.test(l))`), await js(`cdda.ui.log().slice(-3)`));
     }],
     ['scores', 'achievements: ) opens the journal-style panel, tabs by keys', async () => {
-      await c.toGameplay();
+      await reset();
       await c.x().key('parenright');
       let v = await waitPanel('achievements');
       check(') opens the achievements panel', v.panels.includes('achievements') && !v.locked, v);
