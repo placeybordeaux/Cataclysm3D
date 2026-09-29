@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { Game } from '../game/game';
-import { LEVEL_HEIGHT } from '../world/coords';
+import { CHUNK, LEVEL_HEIGHT } from '../world/coords';
 import { loadAtlas } from './atlas';
 import { AtlasTextureSource, type WallStyle } from './atlasSource';
 import { CameraRig, type CameraMode } from './camera';
@@ -359,6 +359,15 @@ export class Renderer {
       vm.update(dt, p.inv.wielded, p.x, p.y, p.yaw, this.pipeline.lowW, this.pipeline.lowH, (id) => this.source.item(id));
       overlay = vm;
     }
+    // Fog of war tied to the draw distance: fully opaque before the nearest not-yet-loaded
+    // chunk can be (the load circle is (radius + 0.5) chunks around the player's chunk, and
+    // the player may stand anywhere in theirs), so new chunks and trees always appear inside
+    // solid fog and fade in as you approach instead of popping into view.
+    const po = this.pipeline.options;
+    po.fogFar = Math.max(2, this.chunks.radius - 1) * CHUNK;
+    po.fogNear = po.fogFar * 0.35;
+    po.fogMax = 1;
+    this.chunks.visibleDist = po.fogNear + (po.fogFar - po.fogNear) * 0.5;
     this.pipeline.render(this.scene, cam, this.skyState.fog, overlay);
     this.updateDebug(dt);
   }

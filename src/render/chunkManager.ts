@@ -38,6 +38,8 @@ export interface ChunkStats {
   lastBuildMs: number;
   /** empty (open-air) chunks skipped instead of meshed, cumulative */
   skippedEmpty: number;
+  /** first builds of chunks already inside the clearly visible (not fogged) range: pop-in, cumulative */
+  lateBuilds: number;
 }
 
 const key = (cx: number, cy: number, z: number) => ((z + 16) * 4096 + (cx + 2048)) * 4096 + (cy + 2048);
@@ -45,12 +47,14 @@ const key = (cx: number, cy: number, z: number) => ((z + 16) * 4096 + (cx + 2048
 export class ChunkManager {
   readonly group = new THREE.Group();
   /** Chunks drawn around the player (circular); post-pass fog hides the edge. */
-  radius = 4;
+  radius = 6;
   levelsBelow = 1;
   levelsAbove = 1;
   /** Max milliseconds of meshing per frame (at least one chunk is always built). */
   budgetMs = 4;
-  readonly stats: ChunkStats = { entries: 0, pending: 0, builtThisFrame: 0, lastBuildMs: 0, skippedEmpty: 0 };
+  /** Distance (tiles) inside which a chunk appearing counts as visible pop-in (set by the renderer from the fog). */
+  visibleDist = 1e9;
+  readonly stats: ChunkStats = { entries: 0, pending: 0, builtThisFrame: 0, lastBuildMs: 0, skippedEmpty: 0, lateBuilds: 0 };
   private entries = new Map<number, Entry>();
   private dirty: Entry[] = [];
   private shapes: ShapeTable;
@@ -123,6 +127,11 @@ export class ChunkManager {
     let built = 0;
     for (const e of dirty) {
       if (!unlimited && (built > 0 || created > 0) && performance.now() - t0 > this.budgetMs) break;
+      if (e.builtSig === -1 && e.z === pz) {
+        const nx = Math.max(e.cx * CHUNK, Math.min(px, e.cx * CHUNK + CHUNK));
+        const ny = Math.max(e.cy * CHUNK, Math.min(py, e.cy * CHUNK + CHUNK));
+        if (Math.hypot(nx - px, ny - py) < this.visibleDist) this.stats.lateBuilds++;
+      }
       const b0 = performance.now();
       this.build(e);
       this.stats.lastBuildMs = performance.now() - b0;
