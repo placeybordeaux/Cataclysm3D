@@ -8,6 +8,7 @@ import { canMerge, fmtDuration, fmtVolume, fmtWeight, splitCounts, type ItemView
 import { ToastQueue } from '../src/ui2/logic/toasts';
 import { MockStore, insideOf } from '../src/ui2/mock/store';
 import { buildMockKit, DOLL_SLOTS, type RawItems } from '../src/ui2/mock/data';
+import { LAYER_ORDER } from '../src/ui2/dom';
 
 const item = (o: Partial<ItemView> & { id: string }): ItemView => ({
   typeId: o.id.replace(/\d+$/, ''), name: o.id, count: 1, stackable: false, weight: 100, volume: 100, ...o,
@@ -275,5 +276,15 @@ describe('ui2 mock store', () => {
     expect(bag.capacity?.volume).toBeGreaterThan(0);
     expect(k.store.contents(insideOf(bag.id)).length).toBeGreaterThan(3);
     expect(warnings.filter((w) => /container .* missing/.test(w))).toEqual([]);
+  });
+});
+
+describe('ui2 layers', () => {
+  it('windows stack above toasts (a toast never eats clicks meant for a window), below dialogs and popups', () => {
+    const at = (n: (typeof LAYER_ORDER)[number]) => LAYER_ORDER.indexOf(n);
+    expect(at('windows')).toBeGreaterThan(at('toasts'));
+    expect(at('modal')).toBeGreaterThan(at('windows'));
+    expect(at('popups')).toBeGreaterThan(at('modal'));
+    expect(LAYER_ORDER[LAYER_ORDER.length - 1]).toBe('drag');
   });
 });

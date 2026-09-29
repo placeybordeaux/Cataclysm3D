@@ -11,7 +11,7 @@ drop, context menus, tooltips, toasts, hotbar, paper doll — plain TypeScript +
 - **Tests:** `tests/ui2.test.ts` (layout math, scale, palette contrast, drop validation, stack
   splitting, toast rate limiting, item conservation over 4000 random moves).
   Real input: `tools/realinput.ts --only ui2,ui2kit` (`ui2kit` drags and right-clicks on the
-  showcase, which keeps the mock inventory while the in-game one moves to real items); interactive: `tools/drive.ts serve --headful` with
+  showcase, which keeps the mock inventory; the in-game one runs on real items, see `inv*` scenarios); interactive: `tools/drive.ts serve --headful` with
   `xmoveto` / `xmdown` / `xmup` for drags (see its header).
 
 Screenshots: `docs/screenshots/ui2/`.
@@ -165,6 +165,8 @@ undo; `hideTooltip()`.
 **Toasts** — `toast({category: 'discovery' | 'achievement' | 'warning' | 'info', title, body?, icon?,
 key?})`. At most 3 visible; repeats fold ("×4"); per-category minimum gap (discovery 4 s) and
 duration; queue of 6, least important dropped first (`TOAST_RULES` in `logic/toasts.ts`).
+Toasts sit *below* windows (`LAYER_ORDER` in `dom.ts`): the stack is top-left, and at 960×540 it
+overlapped a centred window's tabs and swallowed their clicks.
 
 **Dialogs** — `confirmModal({title, body, ok, cancel, danger, icon}) → Promise<boolean>` (danger:
 Y confirms, Enter doesn't). `countPrompt({title, subtitle, max, initial, icon, ok}) →

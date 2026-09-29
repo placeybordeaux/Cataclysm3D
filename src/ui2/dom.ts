@@ -57,6 +57,13 @@ export interface Layers {
   drag: HTMLElement;
 }
 
+/**
+ * Bottom to top. Windows sit above toasts: a toast is a passing notice, and at 960x540 the
+ * stack (top-left) overlaps a centred window's tab bar, where it ate the clicks meant for the
+ * tabs. Toasts stay visible and clickable wherever no window covers them.
+ */
+export const LAYER_ORDER = ['world', 'hud', 'toasts', 'windows', 'modal', 'popups', 'drag'] as const;
+
 let layers: Layers | null = null;
 
 /** The ui2 root (#ui2, above the legacy #ui) and its z-ordered layers. Created on first use. */
@@ -65,16 +72,8 @@ export function ui2Layers(): Layers {
   const root = document.getElementById('ui2') ?? h('div', { attrs: { id: 'ui2' } });
   if (!root.isConnected) document.body.appendChild(root);
   const layer = (name: string) => root.appendChild(h('div', { class: `ui2-layer ui2-layer-${name}` }));
-  layers = {
-    root,
-    world: layer('world'),
-    hud: layer('hud'),
-    windows: layer('windows'),
-    toasts: layer('toasts'),
-    modal: layer('modal'),
-    popups: layer('popups'),
-    drag: layer('drag'),
-  };
+  const made = Object.fromEntries(LAYER_ORDER.map((n) => [n, layer(n)])) as unknown as Record<(typeof LAYER_ORDER)[number], HTMLElement>;
+  layers = { root, ...made };
   return layers;
 }
 
