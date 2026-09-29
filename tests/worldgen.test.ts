@@ -105,8 +105,7 @@ describe('world generator', () => {
     }
   });
 
-  // TODO(BN): written for DDA data/behaviour; fails on Bright Nights core data (AssertionError: expected [ 'TRANSPARENT', …(5) ] to include 'INDOORS'). Port with its system.
-  it.skip('starts the player on a passable tile inside the shelter', () => {
+  it('starts the player on a passable tile inside the shelter', () => {
     const { map, gen } = world(11);
     const s = gen.findStartLocation('shelter', map);
     expect(map.passable(s.x, s.y, 0)).toBe(true);
@@ -115,8 +114,7 @@ describe('world generator', () => {
     expect(gen.overmap.omtAt(s.omx, s.omy, 0).type).toBe('shelter');
   });
 
-  // TODO(BN): written for DDA data/behaviour; fails on Bright Nights core data (AssertionError: expected 11 to be +0 // Object.is equality). Port with its system.
-  it.skip('generates 25 chunks around the start quickly and mostly from JSON mapgen', () => {
+  it('generates 25 chunks around the start quickly and mostly from JSON mapgen', () => {
     const { map, gen } = world(21);
     const s = gen.findStartLocation('shelter', map);
     const t0 = performance.now();

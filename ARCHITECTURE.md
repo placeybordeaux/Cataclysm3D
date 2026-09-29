@@ -32,7 +32,7 @@ tileset, rendered in the "3D pixel art" style of *Project Shadowglass*.
   (`~/code/Cataclysm-BN/gfx/UltimateCataclysm`: tile_config.json + sheets, tools/atlas/compiled.ts);
   `--source-form --tileset-dir <vendor dir>` is v1's input, `--fill-from <vendor dir>` optionally adds
   the ids BN's tileset lacks. The world extractors (mapgen, npcs, vehicles, ui, achievements) default
-  to `~/code/Cataclysm-BN` (tools/extract/gamedir.ts; `$CDDA_DIR` overrides).
+  to `~/code/Cataclysm-BN` like the core one (`defaultCddaDir()`; `$CDDA_DIR` overrides).
 
 ## Tooling
 

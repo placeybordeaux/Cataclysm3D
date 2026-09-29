@@ -167,8 +167,7 @@ describe('rotation', () => {
     expect(east.furn).toEqual(turned.furn);
   });
 
-  // TODO(BN): written for DDA data/behaviour; fails on Bright Nights core data (AssertionError: expected [ 'TRANSPARENT', …(5) ] to include 'WALL'). Port with its system.
-  it.skip('house_01 walls match the JSON rows', () => {
+  it('house_01 walls match the JSON rows', () => {
     const obj = realWg.mapgen.objects[realWg.mapgen.omt.house_01.find((r) => r.w === 100)!.o];
     // force the "normal variant" (weight 100) by giving it the only entry
     const wg = { ...realWg, mapgen: { ...realWg.mapgen, omt: { ...realWg.mapgen.omt, house_01: [{ w: 1, o: realWg.mapgen.objects.indexOf(obj) }] } } };

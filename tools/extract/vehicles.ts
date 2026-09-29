@@ -15,10 +15,9 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { FAMILY_HOOKS, familyOf, LEGACY_ITEM_TYPES, loadCddaObjects, objectIds, resolveFamily, type CddaObject } from './cdda';
+import { defaultCddaDir, FAMILY_HOOKS, familyOf, familyTypes, loadCddaObjects, objectIds, resolveFamily, type CddaObject } from './cdda';
 import { prepareObject } from './prepare';
 import { parseQuantity } from './units';
-import { defaultGameDir } from './gamedir';
 import type { VehicleDataFile, VPartDef, VProtoDef, VProtoPart, VItemSpawn } from '../../src/game/vehicle_data';
 
 function usage(): string {
@@ -33,7 +32,7 @@ Options:
   -h, --help     show this help`;
 }
 
-const args = { cdda: defaultGameDir(), out: 'public/data', dryRun: false };
+const args = { cdda: defaultCddaDir(), out: 'public/data', dryRun: false };
 const argv = process.argv.slice(2);
 for (let i = 0; i < argv.length; i++) {
   const k = argv[i];
@@ -47,12 +46,11 @@ for (let i = 0; i < argv.length; i++) {
 }
 
 const t0 = performance.now();
-// BN spreads items over many types, including CONTAINER, and copy-from crosses them (a TOOL
-// copying a CONTAINER), so they resolve as one family here.
-const ITEM_TYPES = [...new Set([...LEGACY_ITEM_TYPES, 'CONTAINER'])];
+// BN spreads items over many types (TOOL, AMMO, CONTAINER...) that resolve as one ITEM family.
+// Not loadResolved: vpart shapes must be expanded on the raw objects before copy-from.
 const res = new Map<string, Map<string, CddaObject>>();
 {
-  const raw = loadCddaObjects(args.cdda, { types: ['vehicle', 'vehicle_part', 'vehicle_group', 'material', ...ITEM_TYPES] });
+  const raw = loadCddaObjects(args.cdda, { types: ['vehicle', 'vehicle_part', 'vehicle_group', 'material', ...familyTypes('ITEM')] });
   // BN vpart "shapes": each {direction, symbol} entry defines another part "<id>_<direction>"
   // (frame_vertical, windshield_ne...) copying the one that lists them (veh_type.cpp).
   const vparts = raw.get('vehicle_part') ?? [];
@@ -68,7 +66,7 @@ const res = new Map<string, Map<string, CddaObject>>();
   }
   const families = new Map<string, CddaObject[]>();
   for (const [type, list] of raw) {
-    const f = ITEM_TYPES.includes(type) ? 'ITEM' : familyOf(type);
+    const f = familyOf(type);
     families.set(f, [...(families.get(f) ?? []), ...list]);
   }
   for (const [f, list] of families) {

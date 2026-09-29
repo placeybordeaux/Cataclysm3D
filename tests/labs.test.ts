@@ -77,8 +77,7 @@ describe('lab chunks', () => {
     for (const c of cells) expect(map.chunk(c.x, c.y, c.z)!.omt?.source, c.id).toBe('json');
   });
 
-  // TODO(BN): written for DDA data/behaviour; fails on Bright Nights core data (AssertionError: lab_2x2_MUT_tier_2_SE_east 5,8: expected null not to be null). Port with its system.
-  it.skip('stairs down always lead to stairs up (or a walkable spot) on the level below', () => {
+  it('stairs down always lead to stairs up (or a walkable spot) on the level below', () => {
     let checked = 0;
     for (const c of cells) {
       for (let ly = 0; ly < CHUNK; ly++)

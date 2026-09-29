@@ -8,7 +8,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { defaultGameDir } from './gamedir';
+import { defaultCddaDir } from './cdda';
 
 function usage(): string {
   return `Usage: npm run extract:ui -- [options]
@@ -22,7 +22,7 @@ Options:
   -h, --help     show this help`;
 }
 
-const args = { cdda: defaultGameDir(), out: 'public/data', dryRun: false };
+const args = { cdda: defaultCddaDir(), out: 'public/data', dryRun: false };
 const argv = process.argv.slice(2);
 for (let i = 0; i < argv.length; i++) {
   const k = argv[i];

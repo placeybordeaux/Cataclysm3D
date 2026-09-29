@@ -15,8 +15,7 @@ import type {
   ForestBiome, MapgenData, OterDef, OvermapData, RegionSettings, SpecialDef, SpecialOvermap,
 } from '../../src/world/worldgen_data';
 import type { ItemGroupRef } from '../../src/data/types';
-import { loadCddaObjects, objectIds, resolveFamily } from './cdda';
-import { defaultGameDir } from './gamedir';
+import { defaultCddaDir, loadCddaObjects, objectIds, resolveFamily } from './cdda';
 import { prepareObject } from './prepare';
 import { migrateGroup, normalizeGroupRef, type ItemMigration } from './itemgroup';
 
@@ -32,7 +31,7 @@ const arg = (name: string, def: string) => {
   const i = argv.indexOf(name);
   return i >= 0 ? argv[i + 1] : def;
 };
-const CDDA = resolve(arg('--cdda', defaultGameDir()));
+const CDDA = resolve(arg('--cdda', defaultCddaDir()));
 const OUT = resolve(arg('--out', 'public/data'));
 const DRY = argv.includes('--dry-run');
 

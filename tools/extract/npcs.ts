@@ -7,9 +7,8 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { FAMILY_HOOKS, loadCddaObjects, objectIds, resolveFamily, type CddaObject } from './cdda';
+import { defaultCddaDir, FAMILY_HOOKS, loadCddaObjects, objectIds, resolveFamily, type CddaObject } from './cdda';
 import { prepareObject } from './prepare';
-import { defaultGameDir } from './gamedir';
 
 function usage(): string {
   return `Usage: npm run extract:npcs -- [options]
@@ -24,7 +23,7 @@ Options:
   -h, --help     show this help`;
 }
 
-const args = { cdda: defaultGameDir(), out: 'public/data', dryRun: false };
+const args = { cdda: defaultCddaDir(), out: 'public/data', dryRun: false };
 const argv = process.argv.slice(2);
 for (let i = 0; i < argv.length; i++) {
   const k = argv[i];
