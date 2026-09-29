@@ -3,6 +3,7 @@ import type { Renderer } from './render/renderer';
 import type { BodyPartId } from './game/bodyparts';
 import { MAIN_PARTS } from './game/bodyparts';
 import { createItem } from './game/item';
+import { installRenderDebug } from './render/renderDebug';
 
 // window.cdda is the automation surface used by tools/shot.ts and by agents testing
 // features headlessly. Anything a test needs to set up (spawn, teleport, time) belongs here.
@@ -67,6 +68,7 @@ export function installDebugApi(game: Game, renderer: Renderer): DebugApi {
     },
   };
   installCharacterHelpers(api, game);
+  installRenderDebug(api, game, renderer);
   (window as any).cdda = api;
   return api;
 }

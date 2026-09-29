@@ -4,11 +4,13 @@ import type { Chunk, GameMap } from '../world/map';
 import { pointSeed } from './atlasIndex';
 import { GeomBuilder } from './geometry';
 import type { TileFrame, TileTextureSource } from './textureSource';
-import { furnitureShape, lightEmitted, terrainShape, type FurnitureShape, type TerrainShape } from './tileKinds';
+import { hasFlag } from '../world/registry';
+import { fieldStyle, furnitureShape, terrainShape, type FurnitureShape, type TerrainShape } from './tileKinds';
 
 // Builds the static geometry of one chunk at one z-level: merged quads grouped by texture
-// page (one draw call per page), plus lists of billboards and light sources the chunk
-// contributes. Pure w.r.t. three.js scene state: the ChunkManager owns meshes/handles.
+// page (one draw call per page), plus the billboards the chunk contributes. Light sources
+// are not collected here: the light map (lightmap.ts) scans chunks itself. Pure w.r.t.
+// three.js scene state: the ChunkManager owns meshes/handles.
 //
 // Vertical layout of a level (z * LEVEL_HEIGHT = floor top):
 //   floor top ........ base
@@ -22,8 +24,13 @@ const DOOR_H = 2.1;
 const SILL_H = 0.9;
 const WATER_DROP = 0.22;
 const HALFWALL_H = 1.0;
-/** Share of sky ambient reaching faces under a roof (interiors are darker than outside). */
+/** Share of sky ambient reaching faces under a roof (interiors are darker than outside).
+ *  Only a fallback now: the light map (lightmap.ts) replaces it on the player's level. */
 export const INDOOR_SKY = 0.5;
+/** Height of floor decals (blood, bile...) above the floor: clear of z-fighting at range. */
+const DECAL_LIFT = 0.012;
+/** Item sprites lying on furniture: top height by furniture shape. */
+const FURN_TOP: Record<FurnitureShape, number> = { none: 0, billboard: 0, table: 0.8, counter: 0.92, cabinet: 1.85 };
 
 export interface ChunkSprite {
   x: number; // tile coords (float, centre of tile = +0.5)
@@ -31,25 +38,17 @@ export interface ChunkSprite {
   z: number;
   frame: TileFrame;
   height: number; // metres
-  kind: 'tree' | 'furniture' | 'item' | 'fire';
-}
-
-export interface ChunkLight {
-  x: number;
-  y: number;
-  z: number;
-  /** metres above the level's floor */
-  height: number;
-  color: number;
-  /** CDDA luminance units */
-  luminance: number;
-  flicker: boolean;
+  kind: 'tree' | 'furniture' | 'item' | 'fire' | 'cloud';
+  /** metres above the level floor (items on tables, drifting smoke) */
+  lift?: number;
+  opacity?: number;
+  /** dissolve when the camera is close (tall trees) */
+  fadeNear?: boolean;
 }
 
 export interface ChunkMeshData {
   pages: Map<THREE.Texture, GeomBuilder>;
   sprites: ChunkSprite[];
-  lights: ChunkLight[];
 }
 
 const SHAPES: TerrainShape[] = ['none', 'floor', 'liquid', 'wall', 'halfwall', 'window', 'door', 'door_open', 'fence', 'tree', 'shrub', 'stairs_up', 'stairs_down'];
@@ -107,7 +106,6 @@ export function buildChunkMesh(
   const below = new LevelSampler(map, z - 1);
   const pages = new Map<THREE.Texture, GeomBuilder>();
   const sprites: ChunkSprite[] = [];
-  const lights: ChunkLight[] = [];
   // Ambient multiplier for faces emitted next; set per tile / per side face.
   let curSky = 1;
   const geo = (f: TileFrame) => {
@@ -294,7 +292,10 @@ export function buildChunkMesh(
           const jx = ((seed & 255) / 255 - 0.5) * 0.4, jy = (((seed >> 8) & 255) / 255 - 0.5) * 0.4;
           // Tileset trees are ~3 m at their native scale; first person wants them taller.
           const h = shape === S.tree ? 4.8 + ((seed >> 16) & 7) * 0.12 : f.h / (f.ppm ?? 16);
-          sprites.push({ x: x + 0.5 + jx, y: y + 0.5 + jy, z, frame: f, height: h, kind: 'tree' });
+          // Tall trees dissolve (dithered) when the camera is right next to them instead of
+          // filling the view with a handful of giant texels. (A 3D trunk box was tried: it
+          // never lines up with the billboard's drawn trunk and looked worse.)
+          sprites.push({ x: x + 0.5 + jx, y: y + 0.5 + jy, z, frame: f, height: h, kind: 'tree', fadeNear: shape === S.tree });
           break;
         }
         case S.stairs_up: {
@@ -319,6 +320,15 @@ export function buildChunkMesh(
 
       // Furniture
       const fi = chunk.furn[ly * CHUNK + lx];
+      // Where items on this tile sit: on the furniture's top, or hidden inside it.
+      let itemLift = 0, itemsHidden = false;
+      if (fi !== 0) {
+        const fdef = map.furniture.defs[fi];
+        const fs = shapes.furniture(fi);
+        // CDDA CONTAINER furniture (lockers, dressers, fridges) holds its items out of sight
+        itemsHidden = hasFlag(fdef, 'CONTAINER') || hasFlag(fdef, 'SEALED');
+        itemLift = fs === 'billboard' ? (/bed|couch|sofa|mattress|cot/.test(fdef.id) ? 0.45 : 0) : FURN_TOP[fs];
+      }
       if (fi !== 0) {
         const fdef = map.furniture.defs[fi];
         const fs = shapes.furniture(fi);
@@ -340,30 +350,44 @@ export function buildChunkMesh(
             geo(side).box(x + ins, base, y + ins, x + 1 - ins, base + h, y + 1 - ins, 63 & ~8, side, top, base);
           }
         }
-        const lum = lightEmitted(fdef);
-        if (lum > 0) lights.push({ x: x + 0.5, y: y + 0.5, z, height: 1.2, color: 0xffd9a0, luminance: lum, flicker: false });
       }
-      const tl = lightEmitted(def);
-      if (tl > 0) lights.push({ x: x + 0.5, y: y + 0.5, z, height: shape === S.floor ? 2.2 : 1.0, color: 0xffe2b8, luminance: tl, flicker: false });
 
-      // Items: one small sprite per tile, showing the top item.
+      // Items: the top item's sprite; a pile (2+) shows up to three items spread around the
+      // tile so it reads as a heap. Items in container furniture are hidden like CDDA does.
       const list = chunk.items.get(ly * CHUNK + lx);
-      if (list && list.length) {
-        const top = list[list.length - 1];
-        if (!items || items(top.typeId)) {
-          const f = src.item(top.typeId);
-          sprites.push({ x: x + 0.5, y: y + 0.5, z, frame: f, height: (f.h / (f.ppm ?? 16)) * 0.5, kind: 'item' });
+      if (list && list.length && !itemsHidden) {
+        const n = Math.min(3, list.length);
+        for (let k = 0; k < n; k++) {
+          const it = list[list.length - 1 - k];
+          if (items && !items(it.typeId)) continue;
+          const f = src.item(it.typeId);
+          const h = (f.h / (f.ppm ?? 16)) * 0.5;
+          // pile offsets: deterministic per tile so rebuilds don't shuffle the heap
+          const a = ((seed >> (k * 3)) & 7) * 0.785 + k * 2.1;
+          const r = k === 0 ? 0 : 0.2;
+          sprites.push({ x: x + 0.5 + Math.cos(a) * r, y: y + 0.5 + Math.sin(a) * r, z, frame: f, height: h, kind: 'item', lift: itemLift - 0.12 * h });
         }
       }
-      // Fires: sprite + flickering light. Other fields are drawn by their own systems.
+      // Fields: floor decals (blood, bile...) go into the chunk geometry; smoke/gas are
+      // dithered translucent billboards; fire is a billboard (its light is in the light map).
       const fl = chunk.fields.get(ly * CHUNK + lx);
       if (fl) for (const fd of fl) {
-        if (fd.type !== 'fd_fire') continue;
-        sprites.push({ x: x + 0.5, y: y + 0.5, z, frame: src.sprite('fire'), height: 0.5 + fd.intensity * 0.25, kind: 'fire' });
-        lights.push({ x: x + 0.5, y: y + 0.5, z, height: 0.6, color: 0xff9a40, luminance: 40 + fd.intensity * 40, flicker: true });
+        const st = fieldStyle(fd.type);
+        const lvl = Math.max(1, Math.min(3, fd.intensity));
+        if (st.kind === 'fire') {
+          sprites.push({ x: x + 0.5, y: y + 0.5, z, frame: src.sprite(`${fd.type}_int${lvl}`), height: 0.5 + lvl * 0.25, kind: 'fire' });
+        } else if (st.kind === 'decal') {
+          const f = src.sprite(`${fd.type}_int${lvl}`);
+          // random quarter turn per tile breaks up repeats; rotate is honoured by topQuad
+          const rf: TileFrame = { ...f, rotate: ((seed >> 5) & 3) as 0 | 1 | 2 | 3 };
+          topQuad(x, y, base + (shape === S.liquid ? -WATER_DROP : 0) + DECAL_LIFT, rf);
+        } else if (st.kind === 'cloud') {
+          const f = src.sprite(`${fd.type}_int${lvl}`);
+          sprites.push({ x: x + 0.5, y: y + 0.5, z, frame: f, height: 1.2 + lvl * 0.35, kind: 'cloud', lift: 0.15, opacity: 0.3 + lvl * 0.15 });
+        }
       }
     }
-  return { pages, sprites, lights };
+  return { pages, sprites };
 }
 
 function connMask(nShape: number[], pred: (s: number) => boolean): number {

@@ -117,17 +117,44 @@ distance-dependent asset detail for readability. Our implementation:
 Pipeline: scene → low-res MRT target (~360 px tall, exact integer upscale; colour + view
 normals + depth) → post pass (depth/normal outlines, fog, Bayer dither, palette/LUT grade)
 → nearest blit. URL params: `px=`, `grade=palette|smooth|off`, `tex=atlas|procedural`,
-`cam=first|third|top`, `walls=tinted|sprite`, `debug=1` (stats overlay; F6/F7 cycle grade
-and wall style). Keys: `V` camera mode, `F` flashlight.
+`cam=first|third|top`, `walls=tinted|sprite`, `radius=<chunks, default 4>`,
+`dither=view|screen`, `debug=1` (stats overlay; F6/F7 cycle grade and wall style).
+Keys: `V` camera mode, `F` flashlight.
 
 - **Sprites** (creatures, items, effects): `const h = renderer.sprites.add({ x, y, z,
   frame | glyph: {symbol, color}, height, anchor, lift })` → `h.set(x, y, z)`,
   `h.setFrame(frame, height?)`, `h.flash(color, seconds)`, `h.setVisible(b)`, `h.remove()`.
   Tile coords (+0.5 = tile centre). Billboards are lit, shadowed and darker indoors.
+  Spec extras: `opacity` (0..1, dithered screen-door; `h.setOpacity(v)`), `fadeNear`
+  (dissolve when the camera is within ~2 m). Monster-count scale is fine: dynamic sprites
+  share one instanced draw per texture page. Static per-chunk sets use `sprites.addStatic`.
 - **Lights**: `const l = renderer.lights.add({ x, y, z, color, intensity, radius, height,
-  flicker })` → `l.set(...)`, `l.intensity = …`, `l.remove()`. Nearest 8 are active.
-  Terrain/furniture `light_emitted` and `fd_fire` fields are picked up automatically.
-  `renderer.setFlashlight(on)` is the items-system hook.
+  flicker })` → `l.set(...)`, `l.intensity = …`, `l.remove()`. Terrain/furniture
+  `light_emitted`, `fd_fire` fields and items with a `LIGHT_<n>` flag are picked up
+  automatically. `renderer.setFlashlight(on)` is the items-system hook.
+  All of them go through the **light map** (src/render/lightmap.ts + lightfield.ts): a
+  CDDA-lightmap-style CPU pass over 128×128 tiles of the player's z-level (sun/sky through
+  open sky, windows and doors as directional cones + a little bounce; every source
+  shadowcast with CDDA's falloff), uploaded as a float texture the world/sprite shaders
+  sample (masked bilinear, so light never crosses a wall). The nearest 4 sources also get a
+  three.js point light for normal shading, gated by the light map (no leaks). Natural light
+  rebuilds when chunks change, artificial light at ≤10 Hz (fire flicker) or when a handle
+  changes. Daytime interiors use eye adaptation (exposure); nights stay dark.
+- **Light queries**: `renderer.lightAt(x, y, z)` → CDDA light level in luminance units
+  (daylight ~100, lit room ≥10, `LIGHT_AMBIENT_LOW` 3.5 = too dark to see) — use it for
+  vision/stealth. Exact on the player's level within 64 tiles, an indoor/outdoor estimate
+  elsewhere.
+- **Viewmodel** (first person only): `renderer.viewmodel?.attack('melee'|'fire'|'throw')`
+  animates the wielded item (`player.inv.wielded`, atlas sprite composited with a pixel
+  fist; bare fists when unarmed): swing/punch, recoil + muzzle flash + light, throw.
+  Walking bob and look sway are automatic.
+- **Hit feedback**: `renderer.shake(0..1)`, `renderer.hurtFlash(0..1)` (red vignette);
+  both fire automatically on `game.events.emit('playerHurt', { amount, bp? })`.
+- **Fields** (`chunk.fields`): liquids/gore/debris (fd_blood, fd_bile, fd_gibs_*, fd_acid…)
+  are floor decals, smoke/gases are dithered translucent billboards, fire is a billboard +
+  light; see `fieldStyle()` in tileKinds.ts. Rain stops at roofs (light-map cover texture).
+- **Items on the map**: top item as a small billboard, piles show up to 3; items sit on
+  tables/counters, are hidden inside CONTAINER furniture (lockers, dressers, fridges).
 - **Tile art**: everything goes through `TileTextureSource` (src/render/textureSource.ts);
   `AtlasTextureSource` (UltiCa) falls back to `ProceduralTextureSource`. Monster/item
   systems should get frames via `renderer.source.sprite(id)` / `.item(id)` / `.glyph()`.
@@ -136,7 +163,12 @@ and wall style). Keys: `V` camera mode, `F` flashlight.
   Plain three.js objects added to `renderer.scene` are auto-patched for the MRT output.
 - Map edits need no renderer calls: chunk meshes rebuild when `chunk.version` changes.
 - Debug API: `cdda.setCameraMode`, `cdda.flashlight`, `cdda.setWeather`, `cdda.settle()`
-  (build all chunks + render; call before screenshots), `cdda.renderStats()`.
+  (build all chunks + render; call before screenshots), `cdda.renderStats()`,
+  `cdda.lightAt(dx,dy)`, `cdda.lightmapAscii(r)`, `cdda.addLight(dx,dy,{…})`,
+  `cdda.addField(type,dx,dy,n)`, `cdda.placeItem(id,dx,dy)`, `cdda.lookAt(x,y)`,
+  `cdda.findFurniture(re)`, `cdda.attack(kind)`, `cdda.viewmodelPose(kind,t)` (freeze an
+  attack pose), `cdda.shake(a)`, `cdda.hurtFlash(a)`, `cdda.benchRender(n)` (ms/frame),
+  `cdda.shimmerTest(frames, px/frame)` (pixel-stability metric for a slow pan).
   `tools/render-shots.sh <prefix>` renders the regression screenshot set.
 
 ## Game design conversion rules

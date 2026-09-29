@@ -9,6 +9,8 @@ export interface GameEvents {
   creatureDied: { creature: unknown; killer?: unknown };
   mapChanged: { x: number; y: number; z: number };
   playerDied: { cause: string };
+  /** The player took damage (renderer: camera shake + red flash). */
+  playerHurt: { amount: number; bp?: string };
 }
 
 type Handler<T> = (payload: T) => void;
