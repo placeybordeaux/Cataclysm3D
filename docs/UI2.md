@@ -10,7 +10,8 @@ drop, context menus, tooltips, toasts, hotbar, paper doll — plain TypeScript +
 - **Import from `src/ui2/index.ts`** only.
 - **Tests:** `tests/ui2.test.ts` (layout math, scale, palette contrast, drop validation, stack
   splitting, toast rate limiting, item conservation over 4000 random moves).
-  Real input: `tools/realinput.ts --only ui2`; interactive: `tools/drive.ts serve --headful` with
+  Real input: `tools/realinput.ts --only ui2,ui2kit` (`ui2kit` drags and right-clicks on the
+  showcase, which keeps the mock inventory while the in-game one moves to real items); interactive: `tools/drive.ts serve --headful` with
   `xmoveto` / `xmdown` / `xmup` for drags (see its header).
 
 Screenshots: `docs/screenshots/ui2/`.

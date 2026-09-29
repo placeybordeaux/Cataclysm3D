@@ -41,6 +41,10 @@ function check(name: string, ok: boolean, detail: unknown = ''): boolean {
 
 // ------------------------------------------------------------------ page helpers
 let page: Page;
+/** The game page (set at start-up); scenarios that visit other pages come back to it. */
+let gameUrl = '';
+/** Browser dialogs seen (beforeunload): the page's "Leave site?" guard. */
+const dialogs: string[] = [];
 let x: XInput;
 interface State {
   lock: boolean; focus: boolean; fullscreen: boolean; windows: string[]; captured: boolean; held: string[];
@@ -85,6 +89,11 @@ async function until(what: (s: State) => boolean, ms = 3000): Promise<State> {
 /** Back to plain gameplay with the mouse captured. Chrome refuses a re-lock for ~1 s after an Esc unlock. */
 async function toGameplay(): Promise<State> {
   let s = await state();
+  // ui2 windows (inventory, pickers) close with Esc too.
+  for (let i = 0; i < 6 && s.panels.length; i++) {
+    await x.key('Escape');
+    s = await state();
+  }
   for (let i = 0; i < 8 && s.windows.length; i++) {
     const n = s.windows.length;
     await x.key(i % 2 ? 'Escape' : 'Backspace');
@@ -98,6 +107,25 @@ async function toGameplay(): Promise<State> {
   }
   return s;
 }
+/**
+ * Resolved player attacks (the playerAttack event: melee blows resolve at contact, after the
+ * wind-up, see docs/COMBAT_FEEL.md). Installs the listener once per page load; returns
+ * everything seen so far. A whiff at nothing prints no message, so the log can't tell.
+ */
+/** `sinceContact`: game seconds past the swing's contact point when a melee blow resolved
+ *  (null = no phased swing running, i.e. it resolved instantly). */
+type Attack = { kind: string; outcome: string; t: number; uid: number | null; sinceContact: number | null };
+const attacks = () =>
+  js<Attack[]>(`(() => {
+    if (!window.__atk) {
+      window.__atk = [];
+      cdda.game.events.on('playerAttack', (e) => {
+        const s = cdda.combat?.swing;
+        window.__atk.push({ kind: e.kind, outcome: e.outcome, t: performance.now(), uid: e.target?.uid ?? null, sinceContact: s ? s.t - (s.timing.windup + s.timing.strike) : null });
+      });
+    }
+    return window.__atk;
+  })()`);
 const center = async (sel: string): Promise<[number, number] | null> =>
   page.evaluate((q) => {
     const el = document.querySelector(q);
@@ -340,10 +368,13 @@ const scenarios: Scenario[] = [
     s = await until((t) => !t.windows.length);
     check('Esc twice: menu opens and closes; hint says how to resume', !s.windows.length && s.hint, s);
     await sleep(1400);
+    const a0 = (await attacks()).length;
     await x.click(W / 2, H / 2);
     s = await until((t) => t.lock);
-    const attacked = (await log()).slice(-2).join(' ');
-    check('a click on the paused view only resumes (no attack)', s.lock && !/You (miss|hit|swing)/.test(attacked), attacked);
+    // A swing resolves after its wind-up: wait long enough to see one if it started.
+    await sleep(700);
+    const swung = (await attacks()).slice(a0);
+    check('a click on the paused view only resumes (no attack)', s.lock && !swung.length, { lock: s.lock, swung });
     // Chrome refuses a re-lock for 1.25 s after an Esc unlock; a key pressed sooner must still
     // resume once that's over (Input retries within the key's activation window).
     await x.key('i');
@@ -550,14 +581,42 @@ const scenarios: Scenario[] = [
     check('the rebind is stored', /"wear":\["y"\]/.test(stored ?? ''), stored);
     await js(`cdda.game.keys.resetBindings()`);
   }],
-  ['mouse', 'LMB attacks when captured; wheel zooms the top-down camera', async () => {
+  ['mouse', 'LMB swings (wind-up, then the blow resolves at contact); wheel zooms the top-down camera', async () => {
     await toGameplay();
+    // Setup: a weapon and nothing in reach.
     await js(`cdda.giveItem('crowbar', { wield: true })`);
-    const before = (await log()).length;
+    await js(`cdda.clearMonsters(8)`);
+    let a0 = (await attacks()).length;
+    const swingState = () => js<object>(`(() => { const c = cdda.combat, i = cdda.game.input; return { lock: i.locked, captured: i.captured, paused: cdda.game.paused, lockPaused: cdda.game.lockPaused, cooldown: c.cooldown, swing: !!c.swing }; })()`);
+    const pre = await swingState();
     await x.clickHere(1);
-    await sleep(600);
+    // Slow software-rendered frames (1920x1080) stretch the swing in real time: poll.
+    let blows: Attack[] = [];
+    for (let i = 0; i < 30 && !blows.length; i++) {
+      await sleep(100);
+      blows = (await attacks()).slice(a0);
+    }
+    await sleep(300);
+    blows = (await attacks()).slice(a0);
+    // A whiff makes no log line (whoosh only, docs/COMBAT_FEEL.md), so this reads the event;
+    // sinceContact >= 0 means it resolved from the phased swing at contact, not on the click.
+    check('LMB at nothing swings: one melee whiff, resolved at contact after the wind-up (not on the click)',
+      blows.length === 1 && blows[0].kind === 'melee' && blows[0].outcome === 'whiff' && blows[0].sinceContact !== null && blows[0].sinceContact >= 0, { blows, pre, after: await swingState() });
+    // Setup: a sturdy zombie right in front, faced (aiming is the combat suites' job).
+    await js(`cdda.godMode(true)`);
+    const uid = await js<number>(`(() => { const uid = cdda.spawnMonster('mon_zombie', 0, -1.3); const m = cdda.game.monsters.all.find((z) => z.uid === uid); m.hp = 500; return uid; })()`);
+    const before = (await log()).length;
+    a0 = (await attacks()).length;
+    for (let i = 0; i < 8 && !(await attacks()).slice(a0).some((b) => b.outcome === 'hit' || b.outcome === 'crit'); i++) {
+      await js(`(() => { const m = cdda.game.monsters.all.find((z) => z.uid === ${uid}); const p = cdda.game.player; p.yaw = Math.atan2(m.x - p.x, -(m.y - p.y)); p.pitch = -0.1; })()`);
+      await x.clickHere(1);
+      await sleep(1200);
+    }
+    blows = (await attacks()).slice(a0);
     const msgs = (await log()).slice(before);
-    check('LMB swings the weapon', msgs.length > 0, msgs.join(' / ') || 'no message');
+    check('LMB at a zombie in reach resolves against it', blows.length > 0 && blows.every((b) => b.kind === 'melee' && b.uid === uid), blows);
+    check('…and a hit is logged ("You bash/hit … the zombie")', blows.some((b) => b.outcome === 'hit' || b.outcome === 'crit') && msgs.some((m) => /^You .*zombie/i.test(m)), { blows, msgs });
+    await js(`cdda.clearMonsters(8); cdda.godMode(false)`);
     await x.key('v');
     await x.key('v');
     const mode = await js<string>(`cdda.renderer?.cameraMode ?? ''`);
@@ -568,11 +627,13 @@ const scenarios: Scenario[] = [
     check('wheel zooms in top-down view', mode !== 'top' || d1 !== d0, { mode, d0, d1 });
     await x.key('v');
   }],
-  ['ui2', 'ui2 preview: Tab frees the cursor (no resume hint), drag & drop, context menu, Tab re-captures', async () => {
+  // Drag & drop and the item context menu are checked on the ?debug=ui2 showcase ('ui2kit'):
+  // the in-game Tab inventory is being replaced by the real-item inventory (src/ui2/bn), whose
+  // own scenarios test drags on it.
+  ['ui2', 'ui2 in game: Tab frees the cursor (no resume hint), pauses (Accessible), Tab re-captures', async () => {
     await toGameplay();
     type U = { surfaces: number; tacticalPause: boolean; locked: boolean; panels: string[]; menu: string[][] };
     const u = () => js<U>('cdda.ui2.state()');
-    const where = (t: string) => js<string[]>(`(() => { const o = []; cdda.ui2.mock().model.store.walk((it, loc) => it.typeId === ${JSON.stringify(t)} && o.push(loc)); return o; })()`);
     await x.key('Tab');
     await sleep(500);
     let s = await state();
@@ -581,26 +642,6 @@ const scenarios: Scenario[] = [
     check('…without the "click to resume" hint', !s.hint && !s.lockPaused, s);
     check('…and the tactical pause on (Accessible default)', v.tacticalPause, v);
     await shot('ui2_inventory');
-    // Drag the first ground item into the backpack with real mouse down / move / up.
-    const from = await center('[data-id="inv.ground"] .ui2-cell');
-    const to = await center('[data-id="inv.back"] .ui2-container');
-    const typeId = await js<string>(`cdda.ui2.mock().model.contents('ground')[0].typeId`);
-    await x.moveTo(from![0], from![1], 2);
-    await x.buttonDown(1);
-    await x.moveTo(to![0], to![1], 12);
-    await x.buttonUp(1);
-    await sleep(200);
-    const locs = await where(typeId);
-    check(`dragging ${typeId} from the ground into the backpack moves it`, locs.length > 0 && locs.every((l) => l.startsWith('in:')), locs);
-    // Right-click an item: context menu with timed actions; Esc closes only the menu.
-    const cell = await center('[data-id="inv.back"] .ui2-cell');
-    await x.click(cell![0], cell![1], 3);
-    await sleep(200);
-    v = await u();
-    check('right-click opens the item context menu', v.menu.length === 1 && v.menu[0].length > 2, v.menu);
-    await x.key('Escape');
-    v = await u();
-    check('Esc closes the menu, the windows stay', !v.menu.length && v.panels.includes('inv.equip'), v);
     await x.key('Tab');
     s = await until((t) => t.lock, 3000);
     v = await u();
@@ -622,6 +663,56 @@ const scenarios: Scenario[] = [
     check('with it on (default), game time stops', p1 === p0, { p0, p1 });
     await x.key('Tab');
     await until((t) => t.lock, 3000);
+  }],
+  ['ui2kit', 'ui2 showcase (?debug=ui2): drag ground → backpack, right-click menu, Esc closes only the menu', async () => {
+    type K = { panels: string[]; menu: string[][]; where: (t: string) => string[] };
+    const k = () => js<Omit<K, 'where'>>('(({ panels, menu }) => ({ panels, menu }))(cdda.ui2.state())');
+    const where = (t: string) => js<string[]>(`cdda.ui2.state().where(${JSON.stringify(t)})`);
+    // Centre of the first matching element that isn't covered by another window.
+    const visible = (sel: string) =>
+      page.evaluate((q) => {
+        for (const el of document.querySelectorAll<HTMLElement>(q)) {
+          const r = el.getBoundingClientRect();
+          const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+          if (r.width && r.height && el.contains(document.elementFromPoint(cx, cy))) return { x: Math.round(cx), y: Math.round(cy), item: el.dataset.item ?? null };
+        }
+        return null;
+      }, sel);
+    dialogs.length = 0;
+    await page.goto(new URL('/?debug=ui2', gameUrl).href);
+    await page.waitForFunction('window.cdda?.ready', { timeout: 60_000 });
+    await sleep(500);
+    let v = await k();
+    check('the showcase opens the inventory: Equipment, backpack, Ground', ['inv.equip', 'inv.back', 'inv.ground'].every((p) => v.panels.includes(p)), v.panels);
+    await shot('ui2kit');
+    // Drag a ground item into the backpack with real mouse down / move / up.
+    const from = await visible('[data-id="inv.ground"] .ui2-cell[data-item]');
+    const to = await visible('[data-id="inv.back"] .ui2-container');
+    const typeId = from && (await js<string>(`cdda.ui2.model.store.find(${JSON.stringify(from.item)})?.item.typeId ?? ''`));
+    check('a ground item and the backpack are on screen', !!from && !!to && !!typeId, { from, to, typeId });
+    if (!from || !to || !typeId) return;
+    const before = await where(typeId);
+    await x.moveTo(from.x, from.y, 2);
+    await x.buttonDown(1);
+    await x.moveTo(to.x, to.y, 12);
+    await x.buttonUp(1);
+    await sleep(300);
+    const locs = await where(typeId);
+    check(`dragging ${typeId} from the ground into the backpack moves it`, locs.length > 0 && locs.every((l) => l.startsWith('in:')), { before, locs });
+    // Right-click an item: context menu with timed actions; Esc closes only the menu.
+    const cell = await visible('[data-id="inv.back"] .ui2-cell[data-item]');
+    await x.click(cell!.x, cell!.y, 3);
+    await sleep(250);
+    v = await k();
+    check('right-click opens the item context menu', v.menu.length === 1 && v.menu[0].length > 2, v.menu);
+    await x.key('Escape');
+    await sleep(100);
+    v = await k();
+    check('Esc closes the menu, the windows stay', !v.menu.length && v.panels.includes('inv.back'), v);
+    // Back to the game for the scenarios that follow.
+    await page.goto(gameUrl);
+    await page.waitForFunction('window.cdda?.ready', { timeout: 240_000 });
+    await quickStart();
   }],
   ['pause', 'tactical pause: ` freezes time but not the view, works inside menus; Classic menus run, the Esc menu pauses', async () => {
     await toGameplay();
@@ -679,10 +770,12 @@ const scenarios: Scenario[] = [
   ['save', 'F5 saves; leaving the page asks first; title Load/Memorial screens', async () => {
     await toGameplay();
     const before = (await log()).length;
+    await js('window.__samePage = 1');
     await x.key('F5');
     await sleep(1500);
     const msgs = (await log()).slice(before);
-    check('F5 says the game was saved (and does not reload the page)', msgs.some((m) => /saved/i.test(m)), msgs);
+    const same = await js<boolean>('window.__samePage === 1');
+    check('F5 says the game was saved (and does not reload the page)', same && msgs.some((m) => /saved/i.test(m)), { same, msgs });
     dialogs.length = 0;
     await page.reload({ waitUntil: 'load' }).catch(() => {});
     await page.waitForFunction('window.cdda?.ready', { timeout: 240_000 });
@@ -740,12 +833,12 @@ page = (await browser.pages())[0] ?? (await browser.newPage());
 x = new XInput(page);
 const errors: string[] = [];
 page.on('pageerror', (e) => errors.push(String((e as Error).stack ?? e)));
-const dialogs: string[] = [];
 page.on('dialog', (d) => {
   dialogs.push(d.type());
   void d.accept();
 });
-await page.goto(`http://127.0.0.1:${port}/?seed=1&realinput=1&menu=1`);
+gameUrl = `http://127.0.0.1:${port}/?seed=1&realinput=1&menu=1`;
+await page.goto(gameUrl);
 await page.waitForFunction('window.cdda?.ready || window.cddaError', { timeout: 240_000 });
 {
   const cdp = await page.createCDPSession();
