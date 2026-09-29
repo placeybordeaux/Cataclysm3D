@@ -62,7 +62,8 @@ export function installUi2(game: Game, renderer: Renderer, ctx: UiContext, api: 
       document.body.classList.remove('ui2-cursor-free');
       hover.clear();
       // Inside the key press / click that closed the last window: a valid gesture to re-lock.
-      input.tryLock();
+      // Not when dying closed them: the death screen needs the cursor.
+      if (!game.player.dead) input.tryLock();
     },
     setPaused(p) {
       game.tacticalPause = p;

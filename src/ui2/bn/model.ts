@@ -84,7 +84,11 @@ function categoryRank(it: Item): number {
 
 /** Can these be shown as one stack? (separate identical items, nothing inside) */
 function groupable(a: Item, b: Item): boolean {
-  return !a.countByCharges && !b.countByCharges && !a.hasContents() && !b.hasContents() && !a.magazine && !b.magazine && a.stacksWith(b);
+  if (a.countByCharges || b.countByCharges || a.typeId !== b.typeId) return false;
+  if (!a.hasContents() && !b.hasContents() && !a.magazine && !b.magazine) return a.stacksWith(b);
+  // Twenty-five sealed rations in a cupboard read as one line: containers group when they're
+  // identical down to what they hold (the saved form says exactly that).
+  return JSON.stringify(a.toJSON()) === JSON.stringify(b.toJSON());
 }
 
 export class BnInventoryModel implements InventoryModel {

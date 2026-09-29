@@ -31,7 +31,7 @@ export const PICKER_GROUP = 'picker';
  * A focused list of the items an action applies to, like BN's single-purpose menus but
  * clickable: arrows + Enter, click, or double-click. Picking runs `run` and closes.
  */
-export function openPicker(model: BnInventoryModel, o: { title: string; none: string; rows: PickRow[]; run(r: PickRow): void; note?: string; onNone?(msg: string): void }): boolean {
+export function openPicker(model: BnInventoryModel, o: { title: string; none: string; rows: PickRow[]; run(r: PickRow): void; note?: string; onNone?(msg: string): void; closeKeys?: string[] }): boolean {
   if (!o.rows.length) {
     o.onNone?.(o.none);
     return false;
@@ -66,6 +66,12 @@ export function openPicker(model: BnInventoryModel, o: { title: string; none: st
     id: 'inv.picker', title: o.title, group: PICKER_GROUP, pauses: true,
     width: 'calc(var(--fs) * 30 + var(--row-icon) * 2)',
     footer: o.note ?? '↑↓ Enter: choose · Esc: cancel · Tab: full inventory',
+    // Like every menu: the key that opened it closes it, and so does Backspace.
+    onKey: (e) => {
+      if (e.repeat || !(e.key === 'Backspace' || o.closeKeys?.includes(e.key))) return false;
+      p.close();
+      return true;
+    },
   });
   p.body.append(list.el);
   // Centre it: it's a question, not a window you arrange.

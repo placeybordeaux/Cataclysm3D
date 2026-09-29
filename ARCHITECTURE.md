@@ -622,7 +622,8 @@ Keys: `V` camera mode, `F` flashlight.
   windows, drag & drop, context menus (+ `worldContextProviders` for world objects), tooltips,
   toasts, hotbar, paper doll, integer UI scaling. New and ported screens are built from it.
   Opening a ui2 surface frees the cursor and may set `game.tacticalPause`; `?debug=ui2` is the
-  showcase; Tab opens the (mock) preview inventory, `o` the crosshair's context menu.
+  showcase; i / Tab open the inventory (`src/ui2/bn/`, on the BN item model), `o` the crosshair's
+  context menu; 1…0 are hotbar slots.
 - **Key bindings** `src/ui/keys.ts`: all default keys live in `DEFAULT_BINDINGS`; systems call
   `game.keys.register(actionId, 'Description', handler)`. To add an action, add it to the
   table (keep it conflict-free; WASD/shift/space are movement). Players can rebind

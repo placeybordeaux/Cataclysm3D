@@ -185,7 +185,7 @@ export function installBnInventory(game: Game, ctx: UiContext, api: DebugApi, ca
     }
     closeGroup('picker');
     openBnInventory(env, {
-      focus, worldEl: canvas, hotbar, closeKeys: inventoryKeys(),
+      focus, worldEl: canvas, hotbar, closeKeys: [...inventoryKeys(), 'Backspace'],
       onClose: () => {
         extraTiles = [];
       },
@@ -238,7 +238,7 @@ export function installBnInventory(game: Game, ctx: UiContext, api: DebugApi, ca
       // Carried first, then by how good it is for this (the best weapon on top for z).
       if (rank) rows = rows.map((r) => ({ r, k: (model.onBody(r.loc) ? 1e6 : 0) + rank(model.itemOf(r.view.id)!) })).sort((a, b) => b.k - a.k).map((x) => x.r);
       openPicker(model, {
-        title, none, onNone: (msg) => game.message(msg, 'c_light_gray'),
+        title, none, onNone: (msg) => game.message(msg, 'c_light_gray'), closeKeys: game.keys.keysFor(id),
         rows,
         run: runAction(label),
       });
@@ -251,7 +251,7 @@ export function installBnInventory(game: Game, ctx: UiContext, api: DebugApi, ca
   picker('unload', 'Unload / empty item', 'Unload what?', 'You have nothing to unload.', /^(Unload|Empty|Pour out)/, (_v, loc) => model.onBody(loc));
   reg('apply', 'Activate / apply item', () => {
     openPicker(model, {
-      title: 'Use what?', none: "You don't have any items you can use.", onNone: (msg) => game.message(msg, 'c_light_gray'),
+      title: 'Use what?', none: "You don't have any items you can use.", onNone: (msg) => game.message(msg, 'c_light_gray'), closeKeys: game.keys.keysFor('apply'),
       rows: rowsFor((v, loc, it) => (model.onBody(loc) && useActions(it.def).length ? false : null)),
       run: (r) => {
         const acts = model.actions(r.view, r.loc);
@@ -264,7 +264,7 @@ export function installBnInventory(game: Game, ctx: UiContext, api: DebugApi, ca
   const openMenuAt = (items: MenuItem[], title: string) => void import('../menu').then(({ openContextMenu }) => openContextMenu({ x: innerWidth / 2, y: innerHeight / 2 }, items, { title }));
   reg('drop', 'Drop items', () => {
     openPicker(model, {
-      title: 'Drop what?', none: 'You have nothing to drop.', onNone: (msg) => game.message(msg, 'c_light_gray'),
+      title: 'Drop what?', none: 'You have nothing to drop.', onNone: (msg) => game.message(msg, 'c_light_gray'), closeKeys: game.keys.keysFor('drop'),
       rows: rowsFor((v, loc) => (model.onBody(loc) ? (() => { const g = model.who.inv.groundHere(); return g ? (model.check(v.id, ground(g), v.count).kind === 'reject' ? (model.check(v.id, ground(g), v.count) as { reason: string }).reason : false) : 'Nowhere to drop it'; })() : null)),
       note: 'Enter: drop · stacks ask how many · Esc: cancel',
       run: async (r) => {
@@ -364,6 +364,8 @@ export function installBnInventory(game: Game, ctx: UiContext, api: DebugApi, ca
         if (a.view.typeId !== typeId) continue;
         const el = document.querySelector(`${sel} [data-item="${a.view.id}"]`);
         if (!el) continue;
+        // A long list (a cupboard of rations) may have it scrolled out of view.
+        el.scrollIntoView({ block: 'nearest' });
         const r = el.getBoundingClientRect();
         if (!r.width) continue;
         return { x: Math.round(r.left + Math.min(r.width / 2, 60)), y: Math.round(r.top + r.height / 2), id: a.view.id, loc: a.loc };
