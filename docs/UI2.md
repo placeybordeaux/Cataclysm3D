@@ -219,7 +219,7 @@ The real inventory on the BN item model (docs/INVENTORY_MODEL.md), replacing the
 
 - **Opening**: i / Tab toggle (opening key, Esc or Backspace close). `g` picks up a lone item or opens
   Nearby; `e` on a pile / locker / corpse / open trunk (vehicle "Get items") opens with that place in
-  front. The Nearby tab defaults to what's under you, else where you looted last.
+  front — in the "Inventory tabs" looting style; Quick and Area loot take over `e` / `g` ("Looting" below). The Nearby tab defaults to what's under you, else where you looted last.
 - **Action keys** z O T E u q U open a picker (a focused list with times, greyed rows say why);
   the picked item gets the same action as in the context menu.
 - **Time**: actions run through `perform(label, moves, fn)`: instant under the tactical pause
@@ -233,6 +233,55 @@ The real inventory on the BN item model (docs/INVENTORY_MODEL.md), replacing the
 - **Tests**: `tests/inventory_ui2.test.ts` (views, drops, liquids, the v1 bag scenario, take all, a
   conservation fuzz over the model's operations); real input: `tools/realinput.ts --only
   ui2,inv,invbag,invloot,inve,invliquid,invkeys` (every drag checks `census`).
+
+## Looting (`src/ui2/loot/`, rules in `src/game/loot.ts`)
+
+Playtest: "It's a little laborious looting a bunch of stuff. It's unclear what's even in the item
+piles from the images and I gotta click in and then click out for each pile." Options > **Looting
+style** (persisted in the ui2 settings, `settings.lootStyle`) switches live between:
+
+| style | how | keys |
+|---|---|---|
+| **Quick** (default) | Skyrim / Fallout: looking at a pile, locker, body or open trunk within reach lists it next to the crosshair; mouse-look never stops | wheel or ↑↓ select · `interact` (e) takes it · `reload` (r) takes all · `inventory2`/`inventory` (Tab / i) opens the full screen on that place |
+| **Area** | Zomboid / BN AIM: one window with every place in reach merged by item type, with where each lies, category filters; it stays open while you walk (WASD) and turn (hold the right mouse button on the world), the list follows you | `pickup` (g) opens / closes · click a row: take that kind (all places) · right-click: take from one place, examine · `reload` (r) or the button: Take all (the filter's category only when one is on) · ↑↓ Enter |
+| **Inventory tabs** | the inventory's Nearby tabs (the flow before), `e` / `g` open it on that place | |
+
+The panel's keys are the player's own bindings for those actions, meaning "take" / "take all" /
+"open it" only while the panel is up (Fallout's R), so rebinding reload rebinds take-all.
+
+All styles:
+- **Peek**: in Area / Inventory tabs the crosshair shows a read-only list of the top items.
+- **Pile markers** (Options > "Loot markers"): a badge over each pile / storage container in sight
+  within 9 tiles (line of sight by tile walk; at most 28, nearest first): the most notable item
+  (`notableItem`: scavenger value, guns first) at full sprite size when close or valuable, and
+  how many things. Containers show what the survivor remembers: `?` until searched (it shimmers
+  within reach), their contents once seen, a dim `empty` when emptied (close by). DOM on the ui2
+  world layer, positions projected every frame: the renderer is untouched.
+- **Memory** (`LootMemory`, save section `lootMemory`): a container counts as searched once its
+  contents were on screen (the quick panel for 300 ms, listed in the area window, looted).
+- **Smart Take all** (`BnInventoryModel.take(sources, filter?)`, also the inventory's Take all):
+  best value per share of the room left first (`takeOrder`: BN post-apocalypse price with what it
+  holds, ×2–2.5 for ammo / meds, ×1.5 food / weapons), never past the weight limit (overburdened
+  stays a choice made by hand), stacks partly; the report says what stayed and why ("no room in
+  your inventory", "too heavy: would overburden you", "no container for it"). Every take is a
+  `moveItem`; `tests/loot.test.ts` walks random quick takes / take alls / area takes by type and
+  category / drops and checks the census after each.
+- **Time**: takes run through the inventory's `perform`: instant when the difficulty pauses in
+  menus (Accessible, like the paused inventory), BN pickup time with a progress bar otherwise.
+- The Area window sets `input.menuWalk` (src/core/input.ts), which lets `Game` keep moving the
+  survivor while a window has the keyboard.
+
+Screenshots: `docs/screenshots/ui2/loot/` (1920×1080 and 3440×1304, from the real-input run).
+Automation: `cdda.loot.{style(), setStyle(s), panel(), area(), searchState(x, y, z), memory(),
+markers(), model}`. Real input: `tools/realinput.ts --only lootquick,lootarea,lootsweep`
+(`tools/realinput_loot.ts`); `lootsweep` sweeps the shelter (3 cupboards, a pile, 2 lockers)
+in each style and prints the input counts.
+
+| sweep of 6 places (real input, GPU) | mouse aims | keys | clicks | inputs | stops | wall time |
+|---|---|---|---|---|---|---|
+| Inventory tabs (e → Take all → Tab, per place) | 6 | 12 | 6 | **24** | 5 | 17–19 s |
+| Quick (aim → r) | 6 | 6 | 0 | **12** | 5 | 5 s |
+| Area (g, r, walk, r, g) | 0 | 4 | 0 | **4** | 2 | 3–4 s |
 
 ## Not done yet / for the next agents
 

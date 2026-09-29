@@ -35,6 +35,7 @@ import { dragging } from './dragdrop';
 import { worldContextProviders, worldMenu, type WorldTarget } from './world';
 import { toast, toastState } from './toast';
 import { installBnInventory } from './bn/install';
+import { installLoot } from './loot/install';
 import { bnInventoryOpen } from './bn/screen';
 import { palette } from './theme';
 import type { UiScalePref } from './logic/scale';
@@ -86,6 +87,8 @@ export function installUi2(game: Game, renderer: Renderer, ctx: UiContext, api: 
 
   // The inventory on the player's real (BN) items: i / Tab, the action keys, the hotbar.
   const inv = installBnInventory(game, ctx, api, canvas);
+  // Looting from the world: the crosshair panel, the area window, pile markers (src/ui2/loot).
+  installLoot(game, renderer, api, inv, canvas);
   const inventory = () => inv.toggle();
   // Inside ui2 the game's bindings don't run; Tab closes it again from there.
   shortcut('Tab', inventory);

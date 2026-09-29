@@ -23,6 +23,7 @@ import {
 import type { Item } from '../../game/item';
 import { carriedAs, isAt, itemsAt, L, moveItem, transaction, type Loc, type MoveResult } from '../../game/moves';
 import { cddaText } from '../../game/units';
+import { takeOrder } from '../../game/loot';
 import type { DropVerdict } from '../logic/dnd';
 import { fmtVolume, type Badge, type ItemStat, type ItemView } from '../logic/items';
 import type { MenuItem } from '../menu';
@@ -642,27 +643,47 @@ export class BnInventoryModel implements InventoryModel {
   // ------------------------------------------------------------------ looting
 
   /**
-   * Take everything from a nearby source into the inventory (liquids into carried
-   * containers where they fit). Each item is its own move; what doesn't fit stays, with why.
+   * Take everything from a nearby source into the inventory (liquids into carried containers
+   * where they fit). Smart: the most value per share of the room you have left goes first
+   * (src/game/loot.ts takeOrder), and nothing is taken past your weight limit (you'd be
+   * overburdened), so what stays is the heavy, bulky, cheap stuff — with why.
    */
   takeAll(source: string): TakeAllResult {
+    return this.take([source]);
+  }
+
+  /**
+   * The smart take over several places (the area loot window's "Take all", "Take all of this
+   * type"): each item is its own moveItem, so conservation holds exactly as for a drag.
+   */
+  take(sources: string[], filter?: (it: Item) => boolean): TakeAllResult {
     const res: TakeAllResult = { taken: [], left: [] };
-    const from = this.resolve(source);
-    if (!from) return { taken: [], left: [{ name: 'everything', count: 0, reason: 'That place is out of reach now.' }] };
     const who = this.who;
     const inv = L.inv(who);
+    const cands: { it: Item; from: Loc }[] = [];
+    for (const key of sources) {
+      const from = this.resolve(key);
+      if (!from) {
+        res.left.push({ name: 'everything there', count: 0, reason: 'That place is out of reach now.' });
+        continue;
+      }
+      for (const it of itemsAt(from)) if (!filter || filter(it)) cands.push({ it, from });
+    }
     // One line per kind of thing (and per reason it stayed): a cupboard of ten single jackets
     // listed "Left emergency jacket: no room" ten times, and "7 folded emergency blanket".
     // Names are pluralised for the totals at the end.
     const byName = new Map<string, Item>();
     const add = (list: { name: string; count: number; reason?: string }[], it: Item, count: number, reason?: string) => {
-      const name = it.baseName(1);
+      const name = lootName(it, 1);
       byName.set(name, it);
       const x = list.find((e) => e.name === name && e.reason === reason);
       if (x) x.count += count;
       else list.push(reason === undefined ? { name, count } : { name, count, reason });
     };
-    for (const it of [...itemsAt(from)]) {
+    const room = () => ({ volume: who.inv.volumeCapacity() - who.inv.volumeCarried(), weight: who.inv.weightCapacity() - who.inv.weightCarried() });
+    const fromOf = new Map(cands.map((c) => [c.it, c.from]));
+    for (const it of takeOrder(cands.map((c) => c.it), room())) {
+      const from = fromOf.get(it)!;
       if (!isAt(it, from)) continue;
       const n = it.count();
       if (it.isLiquid()) {
@@ -676,16 +697,38 @@ export class BnInventoryModel implements InventoryModel {
         if (left > 0) add(res.left, it, left, 'no container for it');
         continue;
       }
-      const r = moveItem(it, from, inv, { actor: who, partial: true, quiet: true });
+      // Stay within the weight you can carry without slowing down: past it, "take all" would
+      // quietly overburden you (BN lets you pick up to 4×: that stays a choice made by hand).
+      const wLeft = room().weight;
+      let count: number | undefined;
+      if (it.weight() > wLeft) {
+        const k = it.countByCharges && it.unitWeight() > 0 ? Math.floor(wLeft / it.unitWeight()) : 0;
+        if (k <= 0) {
+          add(res.left, it, n, wLeft <= 0 ? 'you are at your weight limit' : 'too heavy: would overburden you');
+          continue;
+        }
+        count = k;
+      }
+      const r = moveItem(it, from, inv, { actor: who, partial: true, quiet: true, count });
       if (r.ok) {
         add(res.taken, it, r.moved);
-        if (r.moved < n) add(res.left, it, n - r.moved, shortReason(r.msg || 'no room'));
+        if (r.moved < n) add(res.left, it, n - r.moved, count !== undefined && r.moved === count ? 'too heavy: would overburden you' : shortReason(r.msg || 'no room'));
       } else add(res.left, it, n, shortReason(r.msg));
     }
-    for (const e of [...res.taken, ...res.left]) e.name = byName.get(e.name)!.baseName(e.count);
+    for (const e of [...res.taken, ...res.left]) if (byName.has(e.name)) e.name = lootName(byName.get(e.name)!, e.count);
     if (res.taken.length) who.msg(`You take ${res.taken.map((t) => (t.count > 1 ? `${t.count} ${t.name}` : t.name)).join(', ')}.`);
     this.refresh(true);
     return res;
+  }
+
+  /** BN moves a take would cost (100 per thing picked up, like BN's pickup), for the progress bar. */
+  takeCost(sources: string[], filter?: (it: Item) => boolean): number {
+    let n = 0;
+    for (const key of sources) {
+      const from = this.resolve(key);
+      if (from) for (const it of itemsAt(from)) if (!filter || filter(it)) n++;
+    }
+    return n * 100;
   }
 }
 
@@ -695,6 +738,15 @@ function shortReason(msg: string): string {
   if (/too heavy/i.test(msg)) return 'too heavy';
   if (/liquid/i.test(msg)) return 'needs a container';
   return msg.replace(/\.$/, '');
+}
+
+/**
+ * What a take report calls a thing: a bag of rations is "protein rations (small resealable
+ * plastic bags)" — what you wanted first — not just the bags; anything else its own name.
+ */
+function lootName(it: Item, n: number): string {
+  const inner = it.isContainer() && it.contents.length === 1 ? it.contents[0] : null;
+  return inner ? `${inner.baseName(n)} (${it.baseName(n)})` : it.baseName(n);
 }
 
 function canMoveDry(it: Item, from: Loc, to: Loc, who: Character): boolean {

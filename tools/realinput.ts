@@ -23,6 +23,7 @@ import { mkdirSync, utimesSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fitWindow, launchBrowser, startXvfb, XInput, type BrowserKind } from './lib/realinput';
 import { screenScenarios } from './realinput_screens';
+import { lootScenarios } from './realinput_loot';
 
 const argv = process.argv.slice(2);
 const opt = (n: string, d: string) => (argv.includes(n) ? argv[argv.indexOf(n) + 1] : d);
@@ -980,6 +981,8 @@ const scenarios: Scenario[] = [
   ['inve', 'e on a pile of loot a step away opens the inventory on that place', async () => {
     await toGameplay();
     await js(`cdda.inv2.spawn('pipe', 1, 0); cdda.inv2.spawn('rock', 1, 0)`);
+    // This is the "Inventory tabs" looting style (the quick style takes with e: lootquick).
+    await js(`cdda.loot.setStyle('tabs')`);
     // Setup: look down at the tile east of you (yaw east, pitch toward the floor a step away).
     await js('cdda.game.player.yaw = Math.PI / 2; cdda.game.player.pitch = -0.95');
     await sleep(200);
@@ -990,10 +993,14 @@ const scenarios: Scenario[] = [
     await shot('inve_focus');
     await x.key('Tab');
     await until((t) => t.lock, 3000);
+    await js(`cdda.loot.setStyle('quick')`);
   }],
   ['invliquid', 'liquids: drag a bottle of water onto a jar pours it; dropping water on the world asks before spilling', async () => {
     await toGameplay();
     await js(`cdda.giveItem('backpack', { wear: true }); cdda.inv2.spawn('bottle_plastic', 0, 0, { contents: [['water_clean', 2]] }); cdda.inv2.spawn('jar_glass', 0, 0)`);
+    // Setup: look up, off the pile inve left east (Tab while the crosshair is on a pile opens the inventory on it).
+    await js('cdda.game.player.pitch = 1.5');
+    await sleep(300);
     await x.key('Tab');
     await until((t) => t.panels.includes('Nearby'), 3000);
     const c0 = await censusNow();
@@ -1383,6 +1390,16 @@ async function quitToMenu(when: string): Promise<{ title: boolean; playing: bool
   await sleep(1000);
   return { ...(await atTitle()), dialogs: [...dialogs] };
 }
+
+// Looting (quick loot, area loot, the sweep comparison): before 'death'.
+scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...lootScenarios({
+  page: () => page, x: () => x, js, check, shot, toGameplay, sleep, size: [W, H],
+  fresh: async () => {
+    await page.goto(gameUrl);
+    await page.waitForFunction('window.cdda?.ready', { timeout: 240_000 });
+    await quickStart();
+  },
+}));
 
 // Interaction screens (dialogue, trade, missions, vehicles, body, Autodoc, scores): before 'death'.
 scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...screenScenarios({ page: () => page, x: () => x, js, check, shot, toGameplay, sleep }));

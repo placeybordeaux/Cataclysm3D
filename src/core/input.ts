@@ -33,6 +33,11 @@ export class Input {
   menuCursor: MenuCursor = 'captured';
   /** The top window wants mouse-look to keep working (look mode); set by the UI framework. */
   menuMouseLook = false;
+  /**
+   * Windows open that you walk with (the area loot window: sweep a room with it open): while
+   * > 0, WASD keeps moving the survivor although a window has the keyboard.
+   */
+  menuWalk = 0;
   /** We released the lock ourselves (free-cursor menu); the next unlock isn't an Esc. */
   expectUnlock = false;
   /** Real-time of the last Escape keydown we handled (see pointer-lock loss handling). */
