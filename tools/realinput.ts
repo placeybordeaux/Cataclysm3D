@@ -409,6 +409,44 @@ const scenarios: Scenario[] = [
     check('wheel zooms in top-down view', mode !== 'top' || d1 !== d0, { mode, d0, d1 });
     await x.key('v');
   }],
+  ['ui2', 'ui2 preview: Tab frees the cursor (no resume hint), drag & drop, context menu, Tab re-captures', async () => {
+    await toGameplay();
+    type U = { surfaces: number; tacticalPause: boolean; locked: boolean; panels: string[]; menu: string[][] };
+    const u = () => js<U>('cdda.ui2.state()');
+    const where = (t: string) => js<string[]>(`(() => { const o = []; cdda.ui2.mock().model.store.walk((it, loc) => it.typeId === ${JSON.stringify(t)} && o.push(loc)); return o; })()`);
+    await x.key('Tab');
+    await sleep(500);
+    let s = await state();
+    let v = await u();
+    check('Tab opens the ui2 inventory with a free cursor', v.panels.includes('inv.equip') && !s.lock, { v, lock: s.lock });
+    check('…without the "click to resume" hint', !s.hint && !s.lockPaused, s);
+    check('…and the tactical pause on (Accessible default)', v.tacticalPause, v);
+    await shot('ui2_inventory');
+    // Drag the first ground item into the backpack with real mouse down / move / up.
+    const from = await center('[data-id="inv.ground"] .ui2-cell');
+    const to = await center('[data-id="inv.back"] .ui2-container');
+    const typeId = await js<string>(`cdda.ui2.mock().model.contents('ground')[0].typeId`);
+    await x.moveTo(from![0], from![1], 2);
+    await x.buttonDown(1);
+    await x.moveTo(to![0], to![1], 12);
+    await x.buttonUp(1);
+    await sleep(200);
+    const locs = await where(typeId);
+    check(`dragging ${typeId} from the ground into the backpack moves it`, locs.length > 0 && locs.every((l) => l.startsWith('in:')), locs);
+    // Right-click an item: context menu with timed actions; Esc closes only the menu.
+    const cell = await center('[data-id="inv.back"] .ui2-cell');
+    await x.click(cell![0], cell![1], 3);
+    await sleep(200);
+    v = await u();
+    check('right-click opens the item context menu', v.menu.length === 1 && v.menu[0].length > 2, v.menu);
+    await x.key('Escape');
+    v = await u();
+    check('Esc closes the menu, the windows stay', !v.menu.length && v.panels.includes('inv.equip'), v);
+    await x.key('Tab');
+    s = await until((t) => t.lock, 3000);
+    v = await u();
+    check('Tab closes it and re-captures the mouse', !v.surfaces && s.lock && !v.tacticalPause, { v, lock: s.lock });
+  }],
   ['save', 'F5 saves; leaving the page asks first; title Load/Memorial screens', async () => {
     await toGameplay();
     const before = (await log()).length;

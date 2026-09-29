@@ -32,7 +32,7 @@ import { installChunkEviction } from './save/eviction';
 
 // URL params (all optional): seed=<int>, gen=world|test (default world), debug=1 (render stats overlay),
 // renderer params px/grade/tex/cam/walls (see src/render/renderer.ts), debug=atlas (sprite sheet view
-// instead of the game, see src/render/atlasDebug.ts)
+// instead of the game, see src/render/atlasDebug.ts), debug=ui2 (ui2 component showcase, docs/UI2.md)
 
 async function main(): Promise<void> {
   const params = new URLSearchParams(location.search);
