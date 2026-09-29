@@ -106,12 +106,12 @@ Firefox under WebDriver BiDi was practical: pointer lock, real Esc, drag & drop 
 
 | # | Issue | Sev | Status |
 |---|---|---|---|
-| 20 | Headlights at night light a small spot ~15 m ahead; the road right in front of the car stays black | S2 | ✘ render |
+| 20 | Headlights at night light a small spot ~15 m ahead; the road right in front of the car stays black | S2 | ✔ road reads ~35 m ahead (screenshots/polish/drive_*) |
 | 21 | Title screen: the ASCII logo is dim blue on a dark backdrop, and the Start window covers it (its top row peeks out) | S3 | ✘ UI |
 | 22 | Weather "Snowstorm 2 °C" on a green spring day 1 — the sky shows a few flakes but the scene reads as a mild morning | S3 | ✘ weather/render |
-| 23 | Sky: large flat angular cloud slabs with hard edges in the full look | S3 | ✘ render |
-| 24 | A zombie at arm's length draws with its head below the crosshair (the sprite sits low); newcomers aim at the head and "swing wildly and miss" | S3 | ✘ render/combat |
-| 25 | A large green "Z" sprite floated beside the road near the start (a sign/graffiti billboard?) | S3 | ✘ render |
+| 23 | Sky: large flat angular cloud slabs with hard edges in the full look | S3 | ✔ sin-hash discontinuities; soft dithered fbm clouds (screenshots/polish/sky_*) |
+| 24 | A zombie at arm's length draws with its head below the crosshair (the sprite sits low); newcomers aim at the head and "swing wildly and miss" | S3 | ✔ face on the crosshair inside 1.3 m (monsterView meleeAimLift; screenshots/polish/zombie_*) |
+| 25 | A large green "Z" sprite floated beside the road near the start (a sign/graffiti billboard?) | S3 | ✔ a camo zombie soldier without UltiCa art: 72 such monsters get stand-in sprites (screenshots/polish/proxy_after.png) |
 
 ### Combat (Accessible)
 
