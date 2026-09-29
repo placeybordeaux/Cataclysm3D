@@ -5,6 +5,7 @@ import { evalMathArray, type MathHost } from './talkmath';
 import type { Character } from './character';
 import type { Item } from './item';
 import { BODY_PARTS, type BodyPartId } from './bodyparts';
+import { blockAttemptChance, defenseOf, guardScoreBonus } from './combatfeel';
 import {
   buffFlat, charHasFlag, currentStyle, flatBonus, maOf, multBonus, requirementsMet, triggerBuffs,
   type BonusEntry, type MaRequirements,
@@ -344,6 +345,8 @@ export interface BlockResult {
   description?: string;
   message?: string;
   weaponDamaged?: WearResult;
+  /** Blocked with a freshly raised guard (combatfeel.ts parry window). */
+  parry?: boolean;
 }
 
 /** Hooks the world layer sets (viewmodel block pose, spilled items). */
@@ -358,14 +361,20 @@ export const combatHooks: {
  * str + WBLOCK bonus + melee skill; limb blocks (style arm_block/leg_block vs unarmed skill)
  * use str + unarmed skill and move the hit to that limb. The block score maps through
  * logarithmic_range(0, 40) to the fraction of physical damage that gets through; martial-arts
- * "block" buffs absorb flat damage first. Mutates `units`.
+ * "block" buffs absorb flat damage first. Mutates `units`. While the survivor holds a guard
+ * (combatfeel.ts) the reaction roll is skipped, blocks don't run out, the score gets the guard
+ * bonus (more for a parry) and bare hands block with the arms.
  */
 export function blockHit(c: Character, units: { type: string; amount: number }[], bp: BodyPartId, attackerSize: number, rng: Rng, opts: { silent?: boolean } = {}): BlockResult {
   const none: BlockResult = { blocked: false, bp };
   if (c.isAsleep() || c.effects.has('winded')) return none;
   triggerBuffs(c, 'ongethit');
   const ma = maOf(c);
-  if (ma.blocksLeft < 1) return none;
+  // A raised guard (combatfeel.ts) is the survivor choosing to block: BN's rule (no reaction
+  // roll, blocks don't run out; each still costs stamina) plus a block-score bonus.
+  const guarding = defenseOf(c).guarding;
+  const guard = guardScoreBonus(defenseOf(c));
+  if (ma.blocksLeft < 1 && !guarding) return none;
   // CDDA refuses to block below 2000 stamina (of ~8500 at default cardio).
   if (c.stamina < 2000) {
     if (!opts.silent) c.msg("You're close to exhaustion and cannot block effectively.", 'c_yellow');
@@ -373,8 +382,8 @@ export function blockHit(c: Character, units: { type: string; amount: number }[]
   }
   if (HUMAN_SIZE + 1 < attackerSize) return none;
   const melee = c.getSkill('melee');
-  if (!(rng.next() * 100 < melee * 20)) return none;
-  ma.blocksLeft--;
+  if (!guarding && !(rng.next() < blockAttemptChance(melee, false))) return none;
+  if (ma.blocksLeft > 0) ma.blocksLeft--;
 
   let flatBlock = buffFlat(c, 'block');
   const style = currentStyle(c);
@@ -390,7 +399,8 @@ export function blockHit(c: Character, units: { type: string; amount: number }[]
   let hitBp = bp;
   let wear: WearResult | undefined;
   if (unarmed || forceUnarmed || wornShield || armedBodyBlock || (shield && !allowWeaponBlocking)) {
-    const arm = unarmedSkill >= (style.arm_block ?? 99) && !c.isLimbBroken('arm_l') && !c.isLimbBroken('arm_r');
+    // Guarding bare-handed means arms up: a limb block even without a style that teaches it.
+    const arm = (guarding || unarmedSkill >= (style.arm_block ?? 99)) && !c.isLimbBroken('arm_l') && !c.isLimbBroken('arm_r');
     const leg = unarmedSkill >= (style.leg_block ?? 99);
     if (!arm && !leg) return { ...none };
     score = c.str + unarmedSkill;
@@ -405,7 +415,7 @@ export function blockHit(c: Character, units: { type: string; amount: number }[]
     withWhat = shield.baseName();
     wear = handleMeleeWear(c, shield, 1, rng, opts.silent);
   } else return { ...none };
-  score += buffFlat(c, 'block_effectiveness');
+  score += buffFlat(c, 'block_effectiveness') + guard.bonus;
 
   const through = logarithmicRange(0, 40, score);
   let total = 0, blocked = 0;
@@ -428,13 +438,13 @@ export function blockHit(c: Character, units: { type: string; amount: number }[]
   }
   const ratio = total > 1e-6 ? (total - blocked) / total : 0;
   const description = ratio < 1e-6 ? 'all' : ratio < 0.2 ? 'nearly all' : ratio < 0.4 ? 'most' : ratio < 0.6 ? 'a lot' : ratio < 0.8 ? 'some' : ratio > 1e-6 ? 'a little' : 'none';
-  const message = `You block ${description} of the damage with your ${withWhat}!`;
+  const message = guard.parry ? `You parry, and block ${description} of the damage with your ${withWhat}!` : `You block ${description} of the damage with your ${withWhat}!`;
   if (!opts.silent) c.msg(message);
   // Blocking costs stamina: base burn 15 × 6 × (20 − melee)/20 on CDDA's scale.
   c.modStamina(-Math.round(15 * 6 * ((20 - melee) / 20)));
   triggerBuffs(c, 'onblock');
   combatHooks.onBlock?.(c, withWhat);
-  return { blocked: true, with: withWhat, bp: hitBp, description, message, weaponDamaged: wear };
+  return { blocked: true, with: withWhat, bp: hitBp, description, message, weaponDamaged: wear, parry: guard.parry };
 }
 
 // ------------------------------------------------------------------ weapon wear

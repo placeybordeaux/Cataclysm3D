@@ -5,6 +5,7 @@ import { ALL_PARTS, BODY_PARTS, type BodyPartId } from './bodyparts';
 import { MAX_RECOIL, type Character, type DamageResult } from './character';
 import { asArray, type Item } from './item';
 import { buffFlat, buffMult, currentStyle, maOf, triggerBuffs } from './martialarts';
+import { defenseOf, sidestepDodgeRoll } from './combatfeel';
 import { aimLevel, isJammed, modSum, rollMalfunction, shotSpreadMultiplier, sightDispersion, type AimLevel } from './gunmods';
 import {
   applyTechnique, blockHit, defensiveTechnique, glassShatter, handleMeleeWear, pickTechnique, techniqueMessage,
@@ -680,11 +681,14 @@ export function sizeRank(size: CreatureSize): number {
 /**
  * Character dodge_roll + on_try_dodge: dodge × 5 while a dodge is left this turn (else 0).
  * Each attempt uses one up and burns stamina (base burn 15 × 6 × (20 − dodge skill)/20)
- * unless a free dodge from a martial-arts buff covers it.
+ * unless a free dodge from a martial-arts buff covers it. During a side-step (combatfeel.ts)
+ * the step already paid for it: the roll gets the side-step bonus and uses no dodge.
  */
 export function tryDodgeRoll(c: Character): number {
   const ma = maOf(c);
   const d = c.dodge();
+  const step = c.effects.has('downed') ? null : sidestepDodgeRoll(d, defenseOf(c));
+  if (step !== null) return step;
   if (ma.dodgesLeft <= 0 || d <= 0) return 0;
   ma.dodgesLeft--;
   if (ma.freeDodgesLeft > 0) ma.freeDodgesLeft--;

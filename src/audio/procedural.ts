@@ -191,6 +191,49 @@ const GENERATORS: Record<string, Gen> = {
     for (let i = 0; i < x.length; i++) x[i] *= Math.sin((Math.PI * i) / x.length);
     return normalize(x, 0.7);
   },
+  // A swing through empty air: band-passed noise sweeping down, loud in the middle.
+  whoosh(sr, rnd) {
+    const sec = 0.28 + rnd() * 0.08, x = noise(buf(sr, sec), rnd);
+    const f0 = 1400 + rnd() * 500;
+    lowpass(x, sr, (i) => f0 * (1 - 0.7 * (i / x.length)) + 150);
+    highpass(x, sr, 180);
+    for (let i = 0; i < x.length; i++) x[i] *= Math.sin((Math.PI * i) / x.length) ** 1.6;
+    return normalize(x, 0.75);
+  },
+  // A monster drawing back to strike: a short rising snarl over a cloth/limb rustle.
+  windup(sr, rnd) {
+    const sec = 0.32 + rnd() * 0.08, x = buf(sr, sec);
+    const f0 = 85 + rnd() * 35;
+    let ph = 0;
+    for (let i = 0; i < x.length; i++) {
+      const t = i / sr;
+      ph += (2 * Math.PI * f0 * (1 + 0.8 * (t / sec) + 0.05 * Math.sin(2 * Math.PI * 9 * t))) / sr;
+      x[i] = ((ph / (2 * Math.PI)) % 1) * 2 - 1 + (rnd() * 2 - 1) * 0.4;
+    }
+    const out = mix(bandpass(x.slice(), sr, 650 + rnd() * 200, 2.5), bandpass(x, sr, 1500, 3), 0.5);
+    mix(out, lowpass(noise(buf(sr, sec), rnd), sr, 900), 0.25);
+    for (let i = 0; i < out.length; i++) {
+      const u = i / out.length;
+      out[i] *= Math.min(1, u * 6) * (u < 0.8 ? 0.4 + 0.75 * u : (1 - u) * 5);
+    }
+    return normalize(out, 0.8);
+  },
+  // Guard meets blow at the right moment: bright clack with a short ring.
+  parry(sr, rnd) {
+    const x = partials(sr, 0.45, 900 + rnd() * 200, [1, 2.3, 3.7, 5.9], 0.09, rnd);
+    mix(x, env(highpass(noise(buf(sr, 0.04), rnd), sr, 1800), sr, 0.0005, 0.008), 1.5);
+    mix(x, env(lowpass(noise(buf(sr, 0.12), rnd), sr, 300), sr, 0.001, 0.03), 1.2);
+    return normalize(x, 0.85);
+  },
+  // A body hitting the ground: low thump plus a slap of limbs.
+  bodyfall(sr, rnd) {
+    const x = env(lowpass(noise(buf(sr, 0.5), rnd), sr, 160 + rnd() * 60), sr, 0.003, 0.09);
+    const thump = buf(sr, 0.3);
+    for (let i = 0; i < thump.length; i++) thump[i] = Math.sin((2 * Math.PI * (55 + rnd()) * i) / sr);
+    mix(x, env(thump, sr, 0.003, 0.08), 0.9);
+    mix(x, env(bandpass(noise(buf(sr, 0.1), rnd), sr, 700, 1.5), sr, 0.001, 0.02), 0.5, Math.round(sr * (0.05 + rnd() * 0.04)));
+    return normalize(x, 0.85);
+  },
   heartbeat(sr) {
     const x = buf(sr, 0.9);
     for (const [at, g] of [[0, 1], [0.28, 0.7]] as const) {
@@ -269,6 +312,10 @@ export const SYNTH_EFFECTS: SoundEffectDef[] = [
   { id: 'synth_growl', variants: ['default'], volume: 80, files: files('growl', 4) },
   { id: 'synth_monster_step', variants: ['default'], volume: 50, files: files('shuffle', 4) },
   { id: 'synth_heartbeat', variants: ['default'], volume: 80, files: files('heartbeat', 1) },
+  { id: 'synth_whoosh', variants: ['default'], volume: 55, files: files('whoosh', 3) },
+  { id: 'synth_windup', variants: ['default'], volume: 70, files: files('windup', 4) },
+  { id: 'synth_parry', variants: ['default'], volume: 85, files: files('parry', 2) },
+  { id: 'synth_bodyfall', variants: ['default'], volume: 75, files: files('bodyfall', 3) },
   { id: 'menu_select', variants: ['default'], volume: 50, files: files('ui_confirm', 1) },
   { id: 'menu_open', variants: ['default'], volume: 45, files: files('ui_open', 1) },
   { id: 'menu_close', variants: ['default'], volume: 45, files: files('ui_close', 1) },

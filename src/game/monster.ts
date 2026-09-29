@@ -22,6 +22,14 @@ export interface SpecialAttackState {
   cooldown: number;
 }
 
+export interface MonsterWindup {
+  t: number;
+  total: number;
+  kind: 'melee' | 'heavy' | 'leap';
+  /** Special attack being wound up (grab, bite, smash, leap); null = plain melee. */
+  special: SpecialAttackState | null;
+}
+
 let nextUid = 1;
 
 /** CDDA turns -> real seconds of action time. */
@@ -140,6 +148,13 @@ export class Monster {
   dashVy = 0;
   /** Accumulated damage flash for the renderer (set to >0 when hit). */
   hitFlash = 0;
+  /**
+   * An attack being telegraphed (combatfeel.ts): `t` seconds left of `total`, then the CDDA
+   * attack runs if the survivor is still within reach (monai.ts). Rooted meanwhile.
+   */
+  windup: MonsterWindup | null = null;
+  /** Seconds left of a hit flinch (the renderer rocks the sprite; AI pauses). */
+  flinch = 0;
   /** Stumble wobble state (STUMBLES). */
   wobble: number;
   /** Speech/sound bookkeeping. */

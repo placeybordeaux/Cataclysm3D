@@ -32,7 +32,16 @@ export interface GameEvents {
     target?: unknown;
     /** CDDA field id the target bleeds (fd_blood...), null = sparks/dust */
     blood?: string | null;
+    /** Freeze-frame seconds the blow earned (feel layer); the struck sprite holds too. */
+    hitStop?: number;
   };
+  /**
+   * A monster's attack on the survivor changed phase (src/game/monai.ts, feel layer in
+   * combatfeel.ts): 'windup' = it started telegraphing (`seconds` until it lands), then one of
+   * 'resolved' (the CDDA attack ran; hit/miss/block come through playerHurt & messages),
+   * 'whiff' (you were out of reach when it landed), 'interrupted' (staggered out of it).
+   */
+  monsterAttack: { monster: unknown; phase: 'windup' | 'resolved' | 'whiff' | 'interrupted'; x: number; y: number; z: number; seconds?: number; heavy?: boolean };
   /** A save was loaded into this game (renderer: rebuild chunk meshes; UI: refresh). */
   gameLoaded: { slot: string | null };
 }
