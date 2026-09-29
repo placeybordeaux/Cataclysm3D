@@ -8,7 +8,7 @@ import { SIZE_RANK, turnsToEffectSeconds, turnsToSeconds, type Monster, type Spe
 import type { MonsterSystem } from './monai';
 import { sfx } from '../audio/sfx';
 import { FEEL, defenseOf, type TelegraphKind } from './combatfeel';
-import { blockHit, defensiveTechnique } from './techniques';
+import { blockHit, grabBreakTechnique } from './techniques';
 
 // Monster special attacks as Cataclysm: Bright Nights runs them: the hardcoded functions of
 // monattack.cpp (GRAB, SHRIEK, ACID, BOOMER, SMASH, RESURRECT, …, looked up by id) and the
@@ -210,7 +210,7 @@ function grab(sys: MonsterSystem, m: Monster): boolean {
     return true;
   }
   // Only a martial-arts grab_break technique (can_use_grab_break_tec) gets the dexterity roll.
-  if (defensiveTechnique(p, 'grab_break') && sys.rng.int(0, p.dex) > sys.rng.int(0, m.type.melee_dice + m.type.melee_dice_sides)) {
+  if (grabBreakTechnique(p) && sys.rng.int(0, p.dex) > sys.rng.int(0, m.type.melee_dice + m.type.melee_dice_sides)) {
     sys.message(fmt(p.hasEffect('grabbed') ? 'The %s tries to grab you as well, but you bat it away!' : 'The %s tries to grab you, but you break its grab!', name));
     return true;
   }
