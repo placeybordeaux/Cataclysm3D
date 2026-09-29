@@ -209,6 +209,17 @@ describe('in-progress crafts (conservation)', () => {
     expect(carried(h, 'craft')).toHaveLength(0);
   });
 
+  it('an in-progress craft survives save/load (vars + components)', () => {
+    const h = spearSetup(5);
+    const craft = startCraft(h, findRecipe(data, 'spear_wood')!).craft!;
+    h.work(30);
+    h.activities.cancel('You stop.');
+    const back = Item.fromJSON(data, JSON.parse(JSON.stringify(craft.toJSON())));
+    expect(craftState(data, back)).toEqual(craftState(data, craft));
+    expect(back.contents.map((c) => c.typeId).sort()).toEqual(craft.contents.map((c) => c.typeId).sort());
+    expect(back.name()).toBe(craft.name());
+  });
+
   it('taking an in-progress craft apart gives every component back', () => {
     const h = spearSetup();
     const before = counts(h);
