@@ -102,6 +102,11 @@ export class Inventory {
   /** Worn items, sorted innermost layer first. */
   worn: Item[] = [];
   private activeAcc = new WeakMap<Item, number>();
+  /**
+   * use_action handlers owned by other systems, keyed by use_action type (e.g. crafting
+   * registers 'firestarter', which needs the map). Consulted for types use() doesn't know.
+   */
+  readonly useHandlers = new Map<string, (it: Item, ua: { type: string; [k: string]: any }) => ActionResult>();
 
   constructor(readonly owner: Character) {}
 
@@ -514,8 +519,13 @@ export class Inventory {
         return this.useTransform(it, ua);
       case 'consume_drug':
         return this.consume(it);
-      default:
+      default: {
+        for (const a of acts) {
+          const h = this.useHandlers.get(a.type);
+          if (h) return h(it, a);
+        }
         return this.say(false, `You can't do anything interesting with your ${it.name()}.`);
+      }
     }
   }
 

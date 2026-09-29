@@ -111,6 +111,10 @@ export interface CharacterJSON {
   turn: number;
   dead: boolean; causeOfDeath?: string;
   inventory: InventoryJSON;
+  /** Crafting knowledge (src/game/crafting.ts, reading.ts); optional for older saves. */
+  learnedRecipes?: string[];
+  identifiedBooks?: string[];
+  proficiencies?: string[];
 }
 
 export class Character {
@@ -159,6 +163,12 @@ export class Character {
   readonly effects: EffectSet;
   readonly traits = new Set<string>();
   readonly inv: Inventory;
+  /** Recipe ids learned from books, professions or memorized (autolearn is computed). */
+  readonly learnedRecipes = new Set<string>();
+  /** Book item ids read at least once (CDDA "identified"/skimmed). */
+  readonly identifiedBooks = new Set<string>();
+  /** CDDA proficiency ids known (crafting time/skill penalties when missing). */
+  readonly proficiencies = new Set<string>();
   /** Gun recoil/aim state in MOA; MAX_RECOIL means completely unaimed. */
   recoil = MAX_RECOIL;
   running = false;
@@ -1037,6 +1047,7 @@ export class Character {
       traits: [...this.traits], effects: this.effects.toJSON(), morale: structuredClone(this.morale.points),
       turn: this.turn, dead: this.dead, causeOfDeath: this.causeOfDeath,
       inventory: this.inv.toJSON(),
+      learnedRecipes: [...this.learnedRecipes], identifiedBooks: [...this.identifiedBooks], proficiencies: [...this.proficiencies],
     };
   }
   load(j: CharacterJSON): void {
@@ -1053,6 +1064,10 @@ export class Character {
     this.effects.load(j.effects);
     this.morale.points = structuredClone(j.morale);
     this.inv.load(j.inventory);
+    for (const [set, list] of [[this.learnedRecipes, j.learnedRecipes], [this.identifiedBooks, j.identifiedBooks], [this.proficiencies, j.proficiencies]] as const) {
+      set.clear();
+      for (const id of list ?? []) set.add(id);
+    }
     this.resetStats();
   }
 }
