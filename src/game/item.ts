@@ -425,7 +425,7 @@ export class Item implements MapItem {
   toHit(): number {
     const t = this.def.to_hit;
     if (t === undefined) return 0;
-    return typeof t === 'number' ? t : toHitFromAccuracy(t);
+    return typeof t === 'number' ? t : toHitFromAccuracy(t as MeleeAccuracy);
   }
   /** item::attack_time: 65 + (volume/62.5ml + weight/60g) / count. */
   attackTime(): number {
@@ -449,7 +449,7 @@ export class Item implements MapItem {
   // --- guns, magazines, ammo ---
   /** Ammo types this item accepts (gun "ammo", magazine/tool "ammo_type"/"ammo"). */
   ammoTypes(): string[] {
-    if (this.isGun() || this.isTool()) return asArray(this.def.ammo);
+    if (this.isGun() || this.isTool()) return asArray(this.def.ammo ?? (this.def.tool_ammo as string[] | undefined));
     if (this.isMagazine()) return asArray(this.def.ammo_type);
     return [];
   }

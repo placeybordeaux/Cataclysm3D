@@ -60,9 +60,22 @@ function portionCovers(p: ArmorPortion): BodyPartId[] {
   return (p.covers ?? []).filter(isBodyPart);
 }
 
+/**
+ * The item's armor data for a whole body part. CDDA splits clothing into sub-location
+ * portions (torso_upper/torso_lower, foot_sole...); we merge them per part: the highest
+ * coverage and encumbrance, and the materials of the best-covering portion that lists any.
+ */
 export function armorPortion(it: Item, bp: BodyPartId): ArmorPortion | undefined {
-  for (const p of it.def.armor ?? []) if (portionCovers(p).includes(bp)) return p;
-  return undefined;
+  const list = (it.def.armor ?? []).filter((p) => portionCovers(p).includes(bp));
+  if (list.length <= 1) return list[0];
+  const enc = (p: ArmorPortion) => asArray(p.encumbrance);
+  const withMat = list.filter((p) => p.material?.length).sort((a, b) => (b.coverage ?? 0) - (a.coverage ?? 0))[0];
+  return {
+    ...list[0],
+    coverage: Math.max(...list.map((p) => p.coverage ?? 0)),
+    encumbrance: [Math.max(...list.map((p) => enc(p)[0] ?? 0)), Math.max(...list.map((p) => enc(p)[1] ?? enc(p)[0] ?? 0))],
+    material: withMat?.material,
+  };
 }
 
 export function covers(it: Item, bp: BodyPartId): boolean {
@@ -74,13 +87,13 @@ function isBackpackLike(it: Item): boolean {
   return it.hasFlag('BELTED') && covers(it, 'torso') && it.containerVolumeCapacity() >= 5000;
 }
 
-/** Power draw in mW from a number or "1560 mW" / "1 W". */
-function powerDrawMw(v: unknown): number {
+/** Power draw in W (extractor units) or a raw CDDA string like "1560 mW". */
+function powerDrawW(v: unknown): number {
   if (typeof v === 'number') return v;
   if (typeof v !== 'string') return 0;
   const m = /^\s*([\d.]+)\s*(mW|W|kW)\s*$/.exec(v);
   if (!m) throw new Error(`Bad power_draw "${v}"`);
-  return parseFloat(m[1]) * (m[2] === 'mW' ? 1 : m[2] === 'W' ? 1000 : 1e6);
+  return parseFloat(m[1]) * (m[2] === 'mW' ? 0.001 : m[2] === 'W' ? 1 : 1000);
 }
 
 export class Inventory {
@@ -706,12 +719,12 @@ export class Inventory {
   }
 
   // ------------------------------------------------------------ time
-  /** Active items drain charges (power_draw in mW, 1 charge = 1 kJ; or turns_per_charge). */
+  /** Active items drain charges (power_draw in W, 1 battery charge = 1 kJ; or turns_per_charge). */
   update(dt: number): void {
     for (const it of this.allItems()) {
       if (!it.active) continue;
-      const mw = powerDrawMw(it.def.power_draw);
-      const perCharge = mw > 0 ? 1e6 / mw : (it.def.turns_per_charge ?? 0);
+      const w = powerDrawW(it.def.power_draw);
+      const perCharge = w > 0 ? 1000 / w : (it.def.turns_per_charge ?? 0);
       if (perCharge <= 0) continue;
       let acc = (this.activeAcc.get(it) ?? 0) + dt;
       while (acc >= perCharge) {

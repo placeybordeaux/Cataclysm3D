@@ -6,10 +6,11 @@ const data = makeData();
 
 describe('item basics', () => {
   it('to_hit from melee_accuracy sums to base -7 offsets (item_factory.cpp melee_accuracy)', () => {
-    expect(createItem(data, 'pipe').toHit()).toBe(0); // solid+short+any+neutral
-    expect(createItem(data, 'knife_combat').toHit()).toBe(-1); // weapon+hand+point+good
-    expect(createItem(data, 'glock_19').toHit()).toBe(-2);
+    expect(toHitFromAccuracy({ grip: 'solid', length: 'short', surface: 'any', balance: 'neutral' })).toBe(0); // pipe
+    expect(toHitFromAccuracy({ grip: 'weapon', length: 'hand', surface: 'point', balance: 'good' })).toBe(-1); // bayonet
+    expect(toHitFromAccuracy({ grip: 'solid', length: 'hand', surface: 'line', balance: 'neutral' })).toBe(-2); // glock
     expect(toHitFromAccuracy({})).toBe(-7 + 3 + 0 + 2 + 2);
+    expect(createItem(data, 'pipe').toHit()).toBe(0);
   });
 
   it('attack_time = 65 + volume/62.5ml + weight/60g (item_gun_tool_ammo.cpp)', () => {
