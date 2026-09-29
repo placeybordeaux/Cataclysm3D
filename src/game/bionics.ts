@@ -462,7 +462,7 @@ export class BionicState {
   }
   private hasFuel(d: BionicDef): boolean {
     const fuel = d.fuel_options?.[0];
-    if (fuel === 'metabolism') return this.c.storedKcal - 0.8 * this.c.healthyKcal() > 0;
+    if (fuel === 'metabolism') return this.c.storedKcal - 0.8 * this.c.maxStoredKcal() > 0;
     if (fuel === 'battery') return !!this.batterySource();
     return true;
   }
@@ -662,12 +662,12 @@ export class BionicState {
       return;
     }
     if (fuel === 'metabolism') {
-      if (this.c.storedKcal - 0.8 * this.c.healthyKcal() <= 0) {
+      if (this.c.storedKcal - 0.8 * this.c.maxStoredKcal() <= 0) {
         this.msg(`Stored calories are below the safe threshold, your ${this.name(b.id)} shuts down to preserve your health.`);
         this.deactivate(b.id, true);
         return;
       }
-      this.c.storedKcal -= 1;
+      this.c.modStoredKcal(-1);
       this.modPower(energy * eff);
     } else if (fuel === 'battery') {
       const src = this.batterySource();
@@ -704,7 +704,7 @@ export class BionicState {
    */
   private nanobots(b: InstalledBionic, d: BionicDef): void {
     const kcalTrigger = d.kcal_trigger_cost ?? 0;
-    const threshold = kcalTrigger > 0 ? 0.85 * this.c.healthyKcal() + kcalTrigger : 0;
+    const threshold = kcalTrigger > 0 ? 0.85 * this.c.maxStoredKcal() + kcalTrigger : 0;
     if (this.c.storedKcal < threshold) {
       this.msg(`Your ${this.name(b.id)} shut down to conserve calories.`, 'c_yellow');
       this.deactivate(b.id, true);
@@ -734,7 +734,7 @@ export class BionicState {
         if (this.c.storedKcal < threshold || this.power < (d.trigger_cost ?? 0)) return;
         this.c.heal(p, 1);
         this.power -= d.trigger_cost ?? 0;
-        this.c.storedKcal -= kcalTrigger;
+        this.c.modStoredKcal(-kcalTrigger);
       }
     }
   }

@@ -92,9 +92,9 @@ describe('mutagen (BN mutagen_actor / mutagen_iv_actor)', () => {
     for (const seed of [1, 2, 3, 4, 5, 6]) {
       const { c, mut, log } = survivor(seed);
       const kcal = c.storedKcal, thirst = c.thirst, tired = c.sleepiness;
-      const r = c.inv.consume(dose('mutagen_lizard'));
-      expect(r.ok).toBe(true);
-      // mutation_category LIZARD mutagen_message, then BN's "You drink your …".
+      // The use action alone (drinking also quenches: that part is the item model's).
+      mut.useMutagen(dose('mutagen_lizard'), { type: 'mutagen', mutation_category: 'LIZARD' });
+      // mutation_category LIZARD mutagen_message.
       expect(log.join(' ')).toContain('For a heartbeat, your blood cools down.');
       // mutagen_hunger/thirst/fatigue defaults 10/10/5 per mutation (one: not is_strong);
       // mod_stored_nutr(10) = round(10 × 2500 / 288) = 87 kcal.
@@ -106,6 +106,10 @@ describe('mutagen (BN mutagen_actor / mutagen_iv_actor)', () => {
       if (gained.length) gainedAny++;
     }
     expect(gainedAny).toBeGreaterThan(3);
+    // Drinking runs the use action (BN Character::eat invokes it).
+    const { c, log } = survivor(1);
+    expect(c.inv.consume(dose('mutagen_lizard')).ok).toBe(true);
+    expect(log.join(' ')).toContain('For a heartbeat, your blood cools down.');
   });
 
   it('serums need a syringe (comestible tool) and give several mutations', () => {

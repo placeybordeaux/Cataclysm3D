@@ -1,7 +1,7 @@
 import type { GameData, MutationDef } from '../data/types';
 import { ACTION_SCALE, CLOCK_SCALE } from '../core/time';
 import { isBodyPart, type BodyPartId } from './bodyparts';
-import type { Character } from './character';
+import { SLEEPINESS, THIRST, type Character } from './character';
 import { covers } from './inventory';
 import { asArray, type Item } from './item';
 import { cddaText } from './units';
@@ -850,7 +850,7 @@ export class MutationState {
       if (cat.mutagen_pain) this.c.modPain(cat.mutagen_pain * this.rng.int(1, 5));
     }
     this.modStoredNutr(cat.mutagen_hunger * count);
-    this.c.thirst += cat.mutagen_thirst * count;
+    this.c.modThirst(cat.mutagen_thirst * count);
     this.c.sleepiness += cat.mutagen_fatigue * count;
     return { ok: true };
   }
@@ -878,8 +878,8 @@ export class MutationState {
       this.mutateCategory(cat.id);
       this.c.modPain(cat.iv_pain * this.rng.int(1, 5));
     }
-    this.c.storedKcal -= 10 * cat.iv_hunger * count;
-    this.c.thirst += cat.iv_thirst * count;
+    this.c.modStoredKcal(-10 * cat.iv_hunger * count);
+    this.c.modThirst(cat.iv_thirst * count);
     this.c.sleepiness += cat.iv_fatigue * count;
     if (cat.iv_morale > 0 || cat.id === 'CHIMERA' || cat.id === 'ELFA') {
       const type = cat.id === 'CHIMERA' ? 'morale_mutagen_chimera' : cat.id === 'ELFA' ? 'morale_mutagen_elf' : 'morale_mutagen_mutation';
@@ -933,7 +933,7 @@ export class MutationState {
           this.msg("Feels like you're on fire, but you're OK.", 'c_yellow');
         }
         this.modStoredNutr(2 * cured);
-        this.c.thirst += 2 * cured;
+        this.c.modThirst(2 * cured);
         this.c.sleepiness += 2 * cured;
       }
     }
@@ -942,7 +942,7 @@ export class MutationState {
 
   /** Character::mod_stored_nutr: legacy nutrition points → kcal (2500 / 288 each). */
   private modStoredNutr(nutr: number): void {
-    this.c.storedKcal -= Math.round((nutr * 2500) / (12 * 24));
+    this.c.modStoredKcal(-Math.round((nutr * 2500) / (12 * 24)));
   }
 
   /** A new character's accumulated mutagen (game.cpp start_game: 27 days, capped at 22). */
@@ -961,9 +961,9 @@ export class MutationState {
   /** can_use_mutation: resource floors below which activation would kill you. */
   private canUse(d: MutData): boolean {
     return !(
-      (d.hunger && this.c.storedKcal < this.c.healthyKcal() * 0.5) ||
-      (d.thirst && this.c.thirst >= 240) ||
-      (d.fatigue && this.c.sleepiness >= 575)
+      (d.hunger && this.c.kcalPercent() < 0.5) ||
+      (d.thirst && this.c.thirst >= THIRST.DEHYDRATED) ||
+      (d.fatigue && this.c.sleepiness >= SLEEPINESS.EXHAUSTED)
     );
   }
   /** Character::activate_mutation / deactivate_mutation (costs, transform, toggle). */
@@ -999,8 +999,8 @@ export class MutationState {
       return;
     }
     if ((d.time ?? 0) > 0) this.charge.set(id, d.time! - 1);
-    if (d.hunger) this.c.storedKcal -= cost * 6;
-    if (d.thirst) this.c.thirst += cost;
+    if (d.hunger) this.c.modStoredKcal(-cost * 6);
+    if (d.thirst) this.c.modThirst(cost);
     if (d.fatigue) this.c.sleepiness += cost;
   }
   /** Character::suffer_mutation_power: a powered mutation's upkeep, once per turn. */
@@ -1013,23 +1013,18 @@ export class MutationState {
     if ((d.time ?? 0) > 0) this.charge.set(id, d.time! - 1);
     const cost = d.cost ?? 0;
     let stop = false;
-    if (d.hunger) {
-      this.modStoredNutr(cost);
-      if (this.c.bmiFat() < 18.5) {
-        this.msg(`You're too malnourished to keep your ${this.name(id)} going.`, 'c_yellow');
-        stop = true;
-      }
-    }
+    // BN also stops below an underweight BMI, but its bmi() is a constant 25: never.
+    if (d.hunger) this.modStoredNutr(cost);
     if (d.thirst) {
-      this.c.thirst += cost;
-      if (this.c.thirst >= 240) {
+      this.c.modThirst(cost);
+      if (this.c.thirst >= THIRST.DEHYDRATED) {
         this.msg(`You're too dehydrated to keep your ${this.name(id)} going.`, 'c_yellow');
         stop = true;
       }
     }
     if (d.fatigue) {
       this.c.sleepiness += cost;
-      if (this.c.sleepiness >= 575) {
+      if (this.c.sleepiness >= SLEEPINESS.EXHAUSTED) {
         this.msg(`You're too exhausted to keep your ${this.name(id)} going.`, 'c_yellow');
         stop = true;
       }
