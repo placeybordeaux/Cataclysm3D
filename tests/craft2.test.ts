@@ -9,7 +9,7 @@ import { craftingInventory, findRecipe, type CraftHost } from '../src/game/craft
 import { createItem } from '../src/game/item';
 import { PlayerAvatar } from '../src/game/player';
 import { GameMap } from '../src/world/map';
-import { qualityIcon, RecipeBook, searchMatcher, sourcesOf, type RowQuery } from '../src/ui/craft2/craft_model';
+import { nameMatches, qualityIcon, RecipeBook, searchMatcher, sourcesOf, type RowQuery } from '../src/ui/craft2/craft_model';
 
 const dir = path.join(__dirname, '../public/data');
 const load = (f: string) => JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8'));
@@ -60,6 +60,18 @@ describe('recipe browser rows', () => {
     expect(searchMatcher(data, 'c:long stick')(r)).toBe(true);
     expect(searchMatcher(data, 'c:nail')(r)).toBe(false);
     expect(searchMatcher(data, 't:cutting')(r)).toBe(true);
+  });
+
+  it('a plain search also finds descriptions ("spear" → long pointy stick), names rank first', () => {
+    const stick = findRecipe(data, 'pointy_stick_long')!;
+    expect(searchMatcher(data, 'spear')(stick)).toBe(true);
+    const h = host();
+    const rows = new RecipeBook(h, craftingInventory(h)).rows(q({ query: "spear" }));
+    const ids = rows.map((r) => r.recipe.id);
+    expect(ids).toContain('pointy_stick_long');
+    const named = rows.map((r) => nameMatches(data, 'spear', r.recipe));
+    expect(named.indexOf(false)).toBeGreaterThan(0);
+    expect(named.slice(named.indexOf(false)).every((n) => !n)).toBe(true);
   });
 
   it('where to get a component: recipes that make it and things that come apart into it', () => {

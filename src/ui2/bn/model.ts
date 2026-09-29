@@ -651,15 +651,20 @@ export class BnInventoryModel implements InventoryModel {
     if (!from) return { taken: [], left: [{ name: 'everything', count: 0, reason: 'That place is out of reach now.' }] };
     const who = this.who;
     const inv = L.inv(who);
-    const add = (list: { name: string; count: number }[], name: string, count: number) => {
-      const x = list.find((e) => e.name === name);
+    // One line per kind of thing (and per reason it stayed): a cupboard of ten single jackets
+    // listed "Left emergency jacket: no room" ten times, and "7 folded emergency blanket".
+    // Names are pluralised for the totals at the end.
+    const byName = new Map<string, Item>();
+    const add = (list: { name: string; count: number; reason?: string }[], it: Item, count: number, reason?: string) => {
+      const name = it.baseName(1);
+      byName.set(name, it);
+      const x = list.find((e) => e.name === name && e.reason === reason);
       if (x) x.count += count;
-      else list.push({ name, count });
+      else list.push(reason === undefined ? { name, count } : { name, count, reason });
     };
     for (const it of [...itemsAt(from)]) {
       if (!isAt(it, from)) continue;
       const n = it.count();
-      const name = it.baseName(n);
       if (it.isLiquid()) {
         let left = n;
         for (const c of who.inv.allItems()) {
@@ -667,16 +672,17 @@ export class BnInventoryModel implements InventoryModel {
           const r = moveItem(it, from, L.in(c), { actor: who, partial: true, quiet: true });
           if (r.ok) left -= r.moved;
         }
-        if (n - left > 0) add(res.taken, name, n - left);
-        if (left > 0) res.left.push({ name, count: left, reason: 'no container for it' });
+        if (n - left > 0) add(res.taken, it, n - left);
+        if (left > 0) add(res.left, it, left, 'no container for it');
         continue;
       }
       const r = moveItem(it, from, inv, { actor: who, partial: true, quiet: true });
       if (r.ok) {
-        add(res.taken, name, r.moved);
-        if (r.moved < n) res.left.push({ name, count: n - r.moved, reason: shortReason(r.msg || 'no room') });
-      } else res.left.push({ name, count: n, reason: shortReason(r.msg) });
+        add(res.taken, it, r.moved);
+        if (r.moved < n) add(res.left, it, n - r.moved, shortReason(r.msg || 'no room'));
+      } else add(res.left, it, n, shortReason(r.msg));
     }
+    for (const e of [...res.taken, ...res.left]) e.name = byName.get(e.name)!.baseName(e.count);
     if (res.taken.length) who.msg(`You take ${res.taken.map((t) => (t.count > 1 ? `${t.count} ${t.name}` : t.name)).join(', ')}.`);
     this.refresh(true);
     return res;

@@ -98,8 +98,18 @@ export function installUi2(game: Game, renderer: Renderer, ctx: UiContext, api: 
   const hover = worldHover(game, renderer);
   const free = () => surfacesOpen() > 0 && !input.locked;
   let pending: PointerEvent | null = null;
+  // Only real mouse motion hovers: a picker (z, E…) frees the cursor where the crosshair was,
+  // and the object behind it popped its look card over the hotbar before the mouse moved.
+  // The unlock itself can report a jump of the resting cursor, so the first 400 ms don't count.
+  let freeSince = 0;
   canvas.addEventListener('pointermove', (e) => {
-    if (!free()) return hover.clear();
+    if (!free()) {
+      freeSince = 0;
+      return hover.clear();
+    }
+    const now = performance.now();
+    if (!freeSince) freeSince = now;
+    if ((!e.movementX && !e.movementY) || now - freeSince < 400) return;
     if (!pending) requestAnimationFrame(() => {
       if (pending && free()) hover.update(pending.clientX, pending.clientY);
       pending = null;

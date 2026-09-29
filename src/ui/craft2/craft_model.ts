@@ -86,7 +86,10 @@ export class RecipeBook {
       out.push({ recipe: r, source: k.source, name: recipeName(data, r), check, some, isNew: q.isNew(r.id) });
     }
     if (q.category === 'RECENT') out.sort((a, b) => recentIdx.get(a.recipe.id)! - recentIdx.get(b.recipe.id)!);
-    else out.sort((a, b) => Number(b.isNew) - Number(a.isNew) || Number(b.check.ok) - Number(a.check.ok) || a.name.localeCompare(b.name));
+    else {
+      const byName = new Map(out.map((o) => [o, nameMatches(data, q.query, o.recipe)]));
+      out.sort((a, b) => Number(byName.get(b)) - Number(byName.get(a)) || Number(b.isNew) - Number(a.isNew) || Number(b.check.ok) - Number(a.check.ok) || a.name.localeCompare(b.name));
+    }
     return out;
   }
 }
@@ -113,9 +116,18 @@ export function searchMatcher(data: GameData, query: string): (r: RecipeDef) => 
       case 'd':
         return has(cddaText(data.items[r.result]?.description));
       default:
-        return has(recipeName(data, r)) || has(r.result);
+        // Names first, but the description too: a newcomer types "spear" and BN's spear-like
+        // starter weapon is the "long pointy stick" ("…than a properly-made spear").
+        return has(recipeName(data, r)) || has(r.result) || has(cddaText(data.items[r.result]?.description));
     }
   };
+}
+
+/** A plain (unprefixed) query that matches the recipe's name, not only its description. */
+export function nameMatches(data: GameData, query: string, r: RecipeDef): boolean {
+  const q = query.trim().toLowerCase();
+  if (!q || /^[ctsdq]:/.test(q)) return true;
+  return recipeName(data, r).toLowerCase().includes(q) || r.result.toLowerCase().includes(q);
 }
 
 const reverseCache = new WeakMap<GameData, { makes: Map<string, RecipeDef[]>; salvage: Map<string, string[]> }>();

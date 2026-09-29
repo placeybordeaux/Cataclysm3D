@@ -309,13 +309,13 @@ body.ui2-dragging, body.ui2-dragging * { cursor: grabbing !important; }
 
 /* ---- progress ---- */
 #ui2 .ui2-prog {
-  position: absolute; left: 50%; top: calc(50% + var(--fs) * 3); transform: translateX(-50%); width: calc(var(--fs) * 14);
+  position: absolute; left: 50%; top: calc(50% + var(--fs) * 3); transform: translateX(-50%); width: max-content; min-width: calc(var(--fs) * 14); max-width: min(calc(var(--fs) * 30), 90vw);
   border: var(--b3) solid transparent; border-image: var(--skin-tip); padding: var(--u) calc(var(--u) * 3) calc(var(--u) * 2); pointer-events: none;
   display: flex; flex-direction: column; gap: var(--u);
 }
 #ui2 .ui2-prog.anchored { transform: translate(-50%, -100%); }
 #ui2 .ui2-prog-top { display: flex; justify-content: space-between; gap: calc(var(--u) * 3); font-size: var(--fs-s); }
-#ui2 .ui2-prog-right { color: var(--p-text-dim); }
+#ui2 .ui2-prog-right { color: var(--p-text-dim); white-space: nowrap; }
 #ui2 .ui2-prog-track { height: calc(var(--u) * 5); }
 #ui2 .ui2-prog-fill { position: absolute; left: 0; top: 0; bottom: 0; background: var(--p-accent); }
 #ui2 .ui2-prog.done .ui2-prog-fill { background: var(--p-good); }

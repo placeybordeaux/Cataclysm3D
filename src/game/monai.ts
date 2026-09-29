@@ -873,7 +873,13 @@ export class MonsterSystem implements GameSystem {
   private spottedMessage(m: Monster): void {
     if (this.time - this.lastSpotted < 10) return;
     this.lastSpotted = this.time;
-    this.message(`Spotted ${m.displayName()}--safe mode is on!`, 'c_light_red');
+    // CDDA said "--safe mode is on!": there is no safe mode in real time, and a newcomer can't
+    // act on it. Say where it is instead (y is south).
+    const p = this.game.player;
+    const a = Math.atan2(m.x - p.x, -(m.y - p.y));
+    const dir = ['north', 'northeast', 'east', 'southeast', 'south', 'southwest', 'west', 'northwest'][((Math.round(a / (Math.PI / 4)) % 8) + 8) % 8];
+    const name = m.displayName();
+    this.message(`You spot ${/^[aeiou]/i.test(name) ? "an" : "a"} ${name} to the ${dir}!`, "c_light_red");
   }
 
   /** Attacks, then movement. */

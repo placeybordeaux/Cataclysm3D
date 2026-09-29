@@ -421,8 +421,14 @@ export function interact(game: Game, target: TargetTile | null = targetTile(game
   const tt = target ?? { x: p.tileX, y: p.tileY, z: p.z, dist: 0 };
   const list = interactionsAt(game, tt.x, tt.y, tt.z);
   if (!list.length) {
-    // Plain floor under the crosshair isn't worth a pop-up window.
-    if (!target || !interesting(game, tt.x, tt.y, tt.z)) game.message('There is nothing to examine there.', 'c_light_gray');
+    // Aimed at something a few steps off (the crosshair is on a cupboard across the room):
+    // say it's out of reach. Playtest: "nothing to examine there" read as "this can't be used".
+    const far = target ? null : targetTile(game, 6);
+    const farList = far ? interactionsAt(game, far.x, far.y, far.z) : [];
+    if (far && farList.length) {
+      const f = game.map.furnAt(far.x, far.y, far.z), t = game.map.terAt(far.x, far.y, far.z);
+      game.message(`The ${f.id !== 'f_null' ? f.name : t.name} is out of reach: step closer.`, 'c_light_gray');
+    } else if (!target || !interesting(game, tt.x, tt.y, tt.z)) game.message('There is nothing to examine there.', 'c_light_gray');
     else describe(game, tt.x, tt.y, tt.z);
     return false;
   }
@@ -451,6 +457,11 @@ export function interactionPrompt(game: Game): string | null {
     const list = interactionsAt(game, t.x, t.y, t.z);
     // A bare description (walls, stools, bushes) isn't worth a prompt; `e` still shows it.
     if (list.length && !(list.length === 1 && list[0].id === 'describe')) return `[${key}] ${list[0].label}${list.length > 1 ? ' …' : ''}`;
+  } else {
+    // Something usable a few steps away: name it, so the player knows to walk up to it.
+    const far = targetTile(game, 4);
+    const list = far ? interactionsAt(game, far.x, far.y, far.z) : [];
+    if (far && list.length && !(list.length === 1 && list[0].id === 'describe')) return `${list[0].label} (step closer)`;
   }
   // Standing on stairs: suggest the stair keys.
   const here = game.map.terAt(p.tileX, p.tileY, p.z);

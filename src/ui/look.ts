@@ -148,7 +148,9 @@ export function lookCardContent(ctx: UiContext, t: WorldTarget, actions: boolean
   const veh = describeVehicleAt(g, t.x, t.y, t.z);
   if (veh) out.push(h('div', { class: 'lk-desc', html: veh }));
   if (ter && !cr && t.kind !== 'items') {
-    const mc = ter.move_cost;
+    // Furniture adds to the floor's cost (a cupboard is not "easy to walk on"); < 0 blocks.
+    const fm = furn?.move_cost_mod ?? 0;
+    const mc = fm < 0 ? 0 : ter.move_cost + fm;
     out.push(h('div', { class: 'ui2-small ui2-dim', text: mc <= 0 ? 'Impassable' : mc > 2 ? `Slow going (move cost ${mc})` : 'Easy to walk on' }));
   }
   for (const f of fieldNames(ctx, t.x, t.y, t.z)) out.push(h('div', { class: 'ui2-small tone-bad', text: f }));
