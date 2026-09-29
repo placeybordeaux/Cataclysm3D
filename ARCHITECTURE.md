@@ -66,9 +66,12 @@ src/
                      inventory, combat, crafting, needs, effects, fields, sound …
   render/            Three.js pixel-art pipeline, chunk meshing, sprites, lighting, sky
   ui/                DOM overlay in CDDA curses style: sidebar, log, menus, screens
+  audio/             WebAudio engine (audio.ts), CDDA soundset lookup, sfx.* helpers,
+                     ambience/footsteps/world-sound mapping, procedural fill-ins
 tools/
   extract/           CDDA JSON → public/data/*.json
   atlas/             UltiCa PNGs → public/atlas/*
+  audio/             CC CDDA soundpacks → public/audio/* (Opus + soundset.json + CREDITS.md)
   shot.ts            headless screenshot harness
 tests/               vitest unit tests (pure logic, no DOM/WebGL)
 ```
@@ -80,6 +83,11 @@ tests/               vitest unit tests (pure logic, no DOM/WebGL)
   types there.
 - `map.onChunkGenerated` for spawning things when chunks appear.
 - `input.onPress(e => …)` for global keys, `input.capture(handler)` for modal menus.
+- Audio: call `sfx.meleeHit(...)`, `sfx.gunshot(...)`, `sfx.door(...)`… from `src/audio/sfx.ts`
+  (no-ops without audio), or put `sfxId`/`sfxVariant` (CDDA sound_effect id/variant) on
+  `sound` events; `sfxId: ''` marks a sound you already played. Volumes live in
+  `cdda.audio.settings` (assign a field to apply + persist). `npm run audio` rebuilds
+  public/audio (committed); `cdda.audioSelfTest()` verifies it headlessly.
 
 ## Visual style: "Shadowglass" 3D pixel art
 

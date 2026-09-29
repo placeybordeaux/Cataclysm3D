@@ -10,7 +10,8 @@
     "test": "vitest run",
     "extract": "tsx tools/extract/index.ts",
     "atlas": "tsx tools/atlas/index.ts",
-    "shot": "tsx tools/shot.ts"
+    "shot": "tsx tools/shot.ts",
+    "audio": "tsx tools/audio/index.ts"
   },
   "dependencies": {
     "three": "^0.186.1"

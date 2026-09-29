@@ -4,6 +4,7 @@ import { Game } from './game/game';
 import { Renderer } from './render/renderer';
 import { TestGenerator } from './world/testgen';
 import { installDebugApi } from './debug';
+import { installAudio } from './audio/install';
 
 // URL params (all optional): seed=<int>, gen=test, debug=1, debug=atlas (sprite sheet view
 // instead of the game, see src/render/atlasDebug.ts)
@@ -22,6 +23,7 @@ async function main(): Promise<void> {
   game.map.generator = new TestGenerator();
   const renderer = new Renderer(canvas, game);
   const api = installDebugApi(game, renderer);
+  installAudio(game, api);
 
   let last = performance.now();
   const loop = (now: number) => {
