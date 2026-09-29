@@ -349,6 +349,8 @@ export function openOvermap(ctx: UiContext): Panel | null {
       label(d.x, d.y - 0.9, `◆ ${d.label}`, 'dest');
     }
     labels.replaceChildren(...L);
+    // For tests (tools/realinput.ts): where the view is and how far it's zoomed.
+    panel.el.dataset.view = `${cx.toFixed(2)},${cy.toFixed(2)},${cz},${ZOOMS[zi]}`;
     levelEl.textContent = cz === 0 ? 'surface' : cz > 0 ? `+${cz}` : `${cz}`;
     renderHover();
     renderNotes();

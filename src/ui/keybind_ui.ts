@@ -1,40 +1,39 @@
 import type { Game } from '../game/game';
-import { c, confirm, legendKey, openWindow, type UiWindow } from './framework';
+import { h, confirmModal, type Panel } from '../ui2';
+import { openScreen } from './screen2';
 import { addBinding, applyBinding, checkBinding, keyLabel } from './keymap';
 
-// Options > Key bindings (CDDA's keybinding screen, reduced): every action with its keys.
-// Enter (or a click) waits for a new key and replaces the action's keys with it, + adds an
-// extra key, - unbinds, R resets everything. Movement keys, Space/Shift and the keys every
-// menu uses are refused with the reason; a key another action has is moved after a yes/no.
-// Changes apply at once and persist (src/ui/keys.ts setBindings → localStorage).
+// Options > Key bindings (CDDA's keybinding screen, reduced; a ui2 window): every action with
+// its keys. Enter (or a click on the selected row) waits for a new key and replaces the action's
+// keys with it, + adds an extra key, - unbinds, R resets everything. Movement keys, Space/Shift
+// and the keys every menu uses are refused with the reason; a key another action has is moved
+// after a yes/no. Changes apply at once and persist (src/ui/keys.ts setBindings → localStorage).
 
-export function openKeybindings(game: Game): UiWindow {
+export function openKeybindings(game: Game): Panel {
   const keys = game.keys;
   const actions = keys.actionList();
   let sel = 0;
   /** Waiting for a key: 'set' replaces, 'add' appends. */
   let capturing: null | 'set' | 'add' = null;
-  let flash = '';
+  let flash: { text: string; tone: string } | null = null;
   let busy = false;
 
-  const footer = () =>
-    capturing
-      ? `${c('c_yellow', `Press the new key for "${actions[sel].name}"`)}  ${legendKey('Esc', 'cancel')}`
-      : `${legendKey('↑↓', 'move')}  ${legendKey('Enter', 'rebind')}  ${legendKey('+', 'add key')}  ${legendKey('-', 'unbind')}  ${legendKey('R', 'reset all')}`;
-
-  const win = openWindow({
+  const win = openScreen(game, {
+    id: 'scr.keys',
     title: 'Key bindings',
-    width: 'min(90ch, 94vw)',
-    height: '86vh',
+    group: 'scr.keys',
+    pauses: 'always',
+    width: 'min(calc(var(--fs) * 40), 94vw)',
+    height: 'min(calc(var(--fs) * 34), 90vh)',
     closeLabel: 'done',
-    closeOnOpenKey: false,
+    legend: [['↑↓', 'move'], ['Enter', 'rebind'], ['+', 'add key'], ['-', 'unbind'], ['R', 'reset all']],
     onKey: (e) => {
       if (busy) return true;
       if (capturing) {
         if (e.repeat) return true;
         if (e.key === 'Escape') {
           capturing = null;
-          flash = '';
+          flash = null;
           render();
           return true;
         }
@@ -57,25 +56,24 @@ export function openKeybindings(game: Game): UiWindow {
     },
   });
 
-  const list = document.createElement('div');
-  const status = document.createElement('div');
-  status.className = 'pre';
-  status.style.minHeight = '2.4em';
-  status.style.whiteSpace = 'pre-wrap';
+  const status = h('div', { class: 'kb-status', attrs: { 'data-testid': 'keys-status' } });
+  const list = h('div', { class: 'ui2-list', attrs: { 'data-testid': 'keys-list' } });
+  list.style.flex = '1';
   win.body.append(status, list);
+  win.body.style.overflow = 'hidden';
 
   function move(d: number) {
     sel = Math.max(0, Math.min(actions.length - 1, sel + d));
-    flash = '';
+    flash = null;
     render();
   }
   function start(mode: 'set' | 'add') {
     if (actions[sel].id === 'menu') {
-      flash = c('c_light_red', 'The menu stays on Esc, so there is always a way out.');
+      flash = { text: 'The menu stays on Esc, so there is always a way out.', tone: 'bad' };
       return render();
     }
     capturing = mode;
-    flash = '';
+    flash = null;
     render();
   }
   function unbind() {
@@ -84,16 +82,16 @@ export function openKeybindings(game: Game): UiWindow {
     const b = keys.bindings();
     b[a.id] = [];
     keys.setBindings(b);
-    flash = c('c_yellow', `${a.name} is now unbound.`);
+    flash = { text: `${a.name} is now unbound.`, tone: 'warn' };
     render();
   }
   async function resetAll() {
     busy = true;
-    const yes = await confirm('Reset every key binding to the defaults?');
+    const yes = await confirmModal({ title: 'Reset key bindings', body: 'Reset every key binding to the defaults?', ok: 'Reset', danger: true });
     busy = false;
     if (!yes) return;
     keys.resetBindings();
-    flash = c('c_light_green', 'All keys reset to the defaults.');
+    flash = { text: 'All keys reset to the defaults.', tone: 'good' };
     render();
   }
   async function bind(e: KeyboardEvent, mode: 'set' | 'add') {
@@ -103,7 +101,7 @@ export function openKeybindings(game: Game): UiWindow {
     const b = keys.bindings();
     const chk = checkBinding(b, a.id, { key: e.key, code: e.code, ctrlKey: e.ctrlKey, altKey: e.altKey, metaKey: e.metaKey, altGraph: e.getModifierState?.('AltGraph') }, keys.blockedChars());
     if (!chk.ok) {
-      flash = c('c_light_red', chk.message);
+      flash = { text: chk.message, tone: 'bad' };
       capturing = null;
       return render();
     }
@@ -112,15 +110,16 @@ export function openKeybindings(game: Game): UiWindow {
       const other = actions.find((x) => x.id === chk.replaces)?.name ?? chk.replaces;
       busy = true;
       render();
-      const yes = await confirm(`${c('c_yellow', keyLabel(e.key))} is already used by <color_white>${other}</color>.  Use it for <color_white>${a.name}</color> instead?`);
+      const yes = await confirmModal({ title: 'Key already used', body: `${keyLabel(e.key)} is already used by ${other}. Use it for ${a.name} instead?`, ok: 'Use it' });
       busy = false;
       if (!yes) {
-        flash = c('c_light_gray', 'Nothing changed.');
+        flash = { text: 'Nothing changed.', tone: 'dim' };
         return render();
       }
     }
     keys.setBindings(mode === 'set' ? applyBinding(b, a.id, e.key) : addBinding(b, a.id, e.key));
-    flash = c('c_light_green', `${a.name}: ${keysText(a.id)}`) + (chk.replaces ? c('c_yellow', `   (${actions.find((x) => x.id === chk.replaces)?.name ?? chk.replaces}: ${keysText(chk.replaces)})`) : '');
+    const moved = chk.replaces ? `   (${actions.find((x) => x.id === chk.replaces)?.name ?? chk.replaces}: ${keysText(chk.replaces)})` : '';
+    flash = { text: `${a.name}: ${keysText(a.id)}${moved}`, tone: 'good' };
     render();
   }
   function keysText(id: string): string {
@@ -129,38 +128,41 @@ export function openKeybindings(game: Game): UiWindow {
   }
 
   function render() {
-    win.setFooter(footer());
     const unreachable = new Set(keys.unreachable());
     const blocked = keys.blockedChars();
     const b = keys.bindings();
-    status.innerHTML = flash || c('c_dark_gray', `Movement: ${keys.movementKeys()} + Shift (run) + Space; those keys never trigger actions.`);
-    list.innerHTML = actions
-      .map((a, i) => {
+    status.replaceChildren(
+      flash
+        ? h('span', { class: `tone-${flash.tone}`, text: flash.text })
+        : capturing
+          ? h('span', { class: 'tone-warn', text: `Press the new key for "${actions[sel].name}" (Esc cancels)` })
+          : h('span', { class: 'ui2-dim', text: `Movement: ${keys.movementKeys()} + Shift (run) + Space; those keys never trigger actions.` }),
+    );
+    list.replaceChildren(
+      ...actions.map((a, i) => {
         const ks = b[a.id] ?? [];
         // Layout stand-ins (AZERTY's w for wield) aren't the player's binding but do work: show them.
         const standIns = keys.keysFor(a.id).filter((k) => !ks.includes(k));
-        const shown = ks.length
-          ? [
-              ...ks.map((k) => (blocked.has(k) ? c('c_dark_gray', `${keyLabel(k)}(movement)`) : c('c_yellow', keyLabel(k)))),
-              ...standIns.map((k) => c('c_light_cyan', `${keyLabel(k)}(layout)`)),
-            ].join(' ')
-          : c('c_red', 'unbound');
-        const warn = ks.length && unreachable.has(a.id) ? c('c_light_red', '  ← no usable key on this layout') : '';
-        const name = a.name.length > 44 ? a.name.slice(0, 43) + '…' : a.name;
         const on = i === sel;
-        const keyCell = on && capturing ? c('c_yellow', '<press a key>') : shown;
-        return `<div class="menu-entry${on ? ' sel' : ''}" data-i="${i}">${c(on ? 'c_white' : 'c_light_gray', name.padEnd(46))}${keyCell}${warn}</div>`;
-      })
-      .join('');
-    list.querySelectorAll<HTMLElement>('.menu-entry').forEach((row) => {
-      const i = Number(row.dataset.i);
-      row.onclick = () => {
-        if (busy) return;
-        if (sel === i && !capturing) start('set');
-        else (sel = i), (capturing = null), (flash = ''), render();
-      };
-    });
-    (list.querySelector('.sel') as HTMLElement | null)?.scrollIntoView({ block: 'nearest' });
+        const chips = on && capturing
+          ? [h('span', { class: 'kb-key wait', text: 'press a key' })]
+          : ks.length
+            ? [
+                ...ks.map((k) => h('span', { class: `kb-key${blocked.has(k) ? ' blocked' : ''}`, text: blocked.has(k) ? `${keyLabel(k)} (movement)` : keyLabel(k) })),
+                ...standIns.map((k) => h('span', { class: 'kb-key layout', text: `${keyLabel(k)} (layout)` })),
+              ]
+            : [h('span', { class: 'kb-key none', text: 'unbound' })];
+        const warn = ks.length && unreachable.has(a.id) ? h('span', { class: 'ui2-small tone-bad', text: '  no usable key on this layout' }) : '';
+        const row = h('div', { class: `ui2-list-row kb-row${on ? ' selected' : ''}`, data: { i: String(i) } }, h('span', null, h('span', { text: a.name }), warn), h('span', { class: 'kb-keys' }, ...chips));
+        row.addEventListener('click', () => {
+          if (busy) return;
+          if (sel === i && !capturing) start('set');
+          else (sel = i), (capturing = null), (flash = null), render();
+        });
+        return row;
+      }),
+    );
+    (list.querySelector('.selected') as HTMLElement | null)?.scrollIntoView({ block: 'nearest' });
   }
   render();
   return win;

@@ -228,7 +228,7 @@ export function openCharacterSheet(ctx: UiContext): Panel {
     const misc = game.data.misc ?? {};
     const defs = Object.values(misc.skill ?? {}) as { id: string; name: unknown; description?: unknown; display_category?: string; sort_rank?: number }[];
     const cats = new Map<string, typeof defs>();
-    for (const d of defs) cats.set(d.display_category ?? 'other', [...(cats.get(d.display_category ?? 'other') ?? []), d]);
+    for (const d of defs.filter((x) => !/none$/.test(x.display_category ?? 'none'))) cats.set(d.display_category ?? 'other', [...(cats.get(d.display_category ?? 'other') ?? []), d]);
     const out = h('div', { class: 'cs-skills' });
     const catName = (c: string) => c.replace(/^display_/, '').replace(/^./, (x) => x.toUpperCase());
     for (const [cat, list] of [...cats].sort((a, b) => a[0].localeCompare(b[0]))) {

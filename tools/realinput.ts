@@ -47,6 +47,8 @@ interface State {
   lockPaused: boolean; hint: boolean; x: number; y: number; yaw: number; running: boolean; deathScreen: boolean;
   /** ui2 window titles (progression's Start / New Game / Journal) and visible toast titles. */
   panels: string[]; toasts: string[];
+  /** ui2 window ids (scr.character, scr.map, …) and whether the look card (x) is up. */
+  panelIds: string[]; look: boolean;
 }
 const state = (): Promise<State> =>
   page.evaluate(() => {
@@ -61,6 +63,8 @@ const state = (): Promise<State> =>
       deathScreen: !!document.querySelector('.death-screen'),
       panels: [...document.querySelectorAll('#ui2 .ui2-win .ui2-title-text')].map((t) => t.textContent ?? ''),
       toasts: [...document.querySelectorAll('#ui2 .ui2-toast:not(.leaving) .ui2-toast-title')].map((t) => t.textContent ?? ''),
+      panelIds: [...document.querySelectorAll('#ui2 .ui2-win')].map((w) => (w as HTMLElement).dataset.id ?? ''),
+      look: !!document.querySelector('#ui2 .lk-card.mode-look'),
     };
   });
 const js = <T>(code: string): Promise<T> => page.evaluate(code) as Promise<T>;
@@ -85,11 +89,11 @@ async function until(what: (s: State) => boolean, ms = 3000): Promise<State> {
 /** Back to plain gameplay with the mouse captured. Chrome refuses a re-lock for ~1 s after an Esc unlock. */
 async function toGameplay(): Promise<State> {
   let s = await state();
-  for (let i = 0; i < 8 && s.windows.length; i++) {
-    const n = s.windows.length;
+  for (let i = 0; i < 8 && (s.windows.length || s.panels.length || s.look); i++) {
+    const n = s.windows.length + s.panels.length + Number(s.look);
     await x.key(i % 2 ? 'Escape' : 'Backspace');
     s = await state();
-    if (s.windows.length === n && i % 2) check(`${s.windows[n - 1]} closes on Backspace or Esc`, false, s.windows);
+    if (s.windows.length + s.panels.length + Number(s.look) === n && i % 2) check(`${[...s.windows, ...s.panels].pop()} closes on Backspace or Esc`, false, [s.windows, s.panels]);
   }
   if (!s.lock) {
     await sleep(1400);
@@ -275,48 +279,59 @@ const scenarios: Scenario[] = [
     await js(`(() => { for (const id of ['granola', 'bandages', 'crowbar', 'manual_mechanics', 'rock']) cdda.giveItem(id); cdda.learnAll?.(); })()`);
     const keys: [string, string][] = [
       ['i', 'Inventory'], ['z', 'Wield what?'], ['O', 'Wear what?'], ['T', 'Take off what?'], ['E', 'Consume item'], ['u', 'Use item'],
-      ['R', 'Read what?'], ['&', 'Crafting'], ['*', 'Construction'], ['(', 'Disassemble item:'], ['@', 'Character'], ['m', ''],
-      ['P', 'Messages'], ['?', 'Help'], [')', ''], ['p', ''], ['[', ''], ['_', ''], ['M', ''], ['x', 'Look Around'], ['q', 'Drop which items?'],
+      ['R', 'Read what?'], ['&', 'Crafting'], ['*', 'Construction'], ['(', 'Disassemble item:'], ['@', 'ui2:scr.character'], ['m', 'ui2:scr.map'],
+      ['P', 'ui2:scr.log'], ['?', 'ui2:scr.help'], [')', ''], ['p', ''], ['[', ''], ['_', ''], ['M', ''], ['x', 'look'], ['q', 'Drop which items?'],
       ['|', ''], ['$', ''], ['C', ''], ['B', ''],
     ];
+    // Legacy curses windows (.cdda-window), ui2 screens (title 'ui2:<window id>') and the look card.
+    const opened = (t: State) => t.windows.length + t.panels.length + Number(t.look);
     for (const [k, title] of keys) {
       const before = (await log()).length;
       await x.key(k);
-      let s = await until((t) => t.windows.length > 0, 1200);
+      let s = await until((t) => opened(t) > 0, 1200);
       const msgs = (await log()).slice(before);
-      if (!s.windows.length) {
+      if (!opened(s)) {
         // Not every key opens a window (nothing to butcher here); it must at least say something.
         check(`${k}: no window, but a message says why`, msgs.length > 0, msgs.length ? msgs.join(' / ') : 'no window and no message');
         continue;
       }
-      const top = s.windows[s.windows.length - 1];
-      check(`${k} opens ${title || top}`, !title || top === title, s.windows);
+      const ui2 = !s.windows.length;
+      const top = s.look ? 'look' : ui2 ? `ui2:${s.panelIds[s.panelIds.length - 1]}` : s.windows[s.windows.length - 1];
+      check(`${k} opens ${title || top}`, !title || top === title, [s.windows, s.panelIds, s.look]);
+      if (ui2) check(`${k}: the cursor is free for pointing`, !s.lock, s);
       await shot(`menu_${top || k}`);
-      const legend = await js<string>(`[...document.querySelectorAll('.cdda-window .footer')].pop()?.textContent ?? ''`);
-      check(`${k}: footer names the close keys`, /Esc/.test(legend), legend);
-      const overflowX = await js<boolean>(`(() => { const w = [...document.querySelectorAll('.cdda-window')].pop(); const r = w.getBoundingClientRect(); return r.right > innerWidth + 1 || r.bottom > innerHeight + 1 || r.left < -1 || r.top < -1; })()`);
-      check(`${k}: window fits the ${W}x${H} screen`, !overflowX);
+      if (!s.look) {
+        const sel = ui2 ? '#ui2 .ui2-win' : '.cdda-window';
+        const legend = await js<string>(`[...document.querySelectorAll('${ui2 ? '#ui2 .ui2-win .ui2-footer' : '.cdda-window .footer'}')].pop()?.textContent ?? ''`);
+        check(`${k}: footer names the close keys`, /Esc/.test(legend), legend);
+        const overflowX = await js<boolean>(`(() => { const w = [...document.querySelectorAll('${sel}')].pop(); const r = w.getBoundingClientRect(); return r.right > innerWidth + 1 || r.bottom > innerHeight + 1 || r.left < -1 || r.top < -1; })()`);
+        check(`${k}: window fits the ${W}x${H} screen`, !overflowX);
+      }
       await x.key(k);
-      s = await until((t) => !t.windows.length, 800);
-      if (s.windows.length) {
+      s = await until((t) => !opened(t) && (!ui2 || t.lock), 1500);
+      if (opened(s)) {
         // A second-level window (item action menu, confirm) — fall back to Backspace.
-        check(`${k} closes ${top} again`, false, s.windows);
+        check(`${k} closes ${top} again`, false, [s.windows, s.panelIds]);
         await toGameplay();
-      } else check(`${k} closes ${top} again, mouse still captured`, s.lock, s);
+      } else check(`${k} closes ${top} again, mouse ${ui2 ? 'captured again' : 'still captured'}`, s.lock, s);
     }
   }],
   ['esc', 'Esc: pause menu, Esc in a menu, resuming by key and by click', async () => {
     await toGameplay();
     await x.key('Escape');
-    let s = await until((t) => t.windows.length > 0);
-    check('Esc in gameplay opens the pause menu', s.windows[0] === 'Cataclysm: Dark Days Ahead', s.windows);
+    let s = await until((t) => t.panelIds.includes('scr.esc'));
+    check('Esc in gameplay opens the pause menu', s.panelIds.includes('scr.esc'), [s.windows, s.panelIds]);
     check('…and the cursor is free (browser Esc)', !s.lock);
-    const sel = await js<string>(`document.querySelector('.cdda-window .menu-entry.sel')?.textContent ?? ''`);
+    const t0 = await js<number>('cdda.game.clock.seconds');
+    await sleep(600);
+    check('the pause menu stops time', (await js<number>('cdda.game.clock.seconds')) === t0);
+    const sel = await js<string>(`document.querySelector('#ui2 .esc-col .ui2-btn.sel')?.textContent ?? ''`);
     check('pause menu highlights Resume even with the cursor resting on it', /Resume/.test(sel), sel);
+    await shot('esc_menu');
     await sleep(1400);
     await x.key('r');
     s = await until((t) => t.lock);
-    check('r (Resume) closes it and recaptures the mouse', !s.windows.length && s.lock, { s, refusals: await js('cdda.game.input.lockRefusals'), now: await js('performance.now()') });
+    check('r (Resume) closes it and recaptures the mouse', !s.panels.length && s.lock, { s, refusals: await js('cdda.game.input.lockRefusals'), now: await js('performance.now()') });
     await x.key('i');
     await x.key('Escape');
     s = await until((t) => !t.windows.length && t.hint);
@@ -328,15 +343,17 @@ const scenarios: Scenario[] = [
     check('any key resumes mouse-look', s.lock && !s.hint, { s, refusals: await js('cdda.game.input.lockRefusals'), now: await js('performance.now()') });
     await x.key('Escape');
     await sleep(1400);
-    const r = await center('.cdda-window .menu-entry[data-i="0"]');
+    await until((t) => t.panelIds.includes('scr.esc'));
+    const r = await center('#ui2 .esc-col .ui2-btn[data-i="0"]');
     await x.click(r![0], r![1]);
     s = await until((t) => t.lock);
-    check('clicking Resume closes the menu and recaptures', !s.windows.length && s.lock, s);
+    check('clicking Resume closes the menu and recaptures', !s.panels.length && s.lock, s);
     await x.key('Escape');
+    await until((t) => t.panelIds.includes('scr.esc'));
     await sleep(300);
     await x.key('Escape');
-    s = await until((t) => !t.windows.length);
-    check('Esc twice: menu opens and closes; hint says how to resume', !s.windows.length && s.hint, s);
+    s = await until((t) => !t.panels.length && t.hint);
+    check('Esc twice: menu opens and closes; hint says how to resume', !s.panels.length && s.hint, s);
     await sleep(1400);
     await x.click(W / 2, H / 2);
     s = await until((t) => t.lock);
@@ -473,26 +490,30 @@ const scenarios: Scenario[] = [
     await toGameplay();
     await js(`cdda.giveItem('jacket_light')`); // setup: something the Wear menu can list
     await x.key('Escape');
-    await until((t) => t.windows.length > 0);
+    await until((t) => t.panelIds.includes('scr.esc'));
     await x.key('o');
-    let s = await until((t) => t.windows.includes('Options'));
-    check('pause menu → o opens Options', s.windows.includes('Options'), s.windows);
+    let s = await until((t) => t.panels.includes('Options'));
+    check('pause menu → o opens Options', s.panels.includes('Options'), s.panels);
+    await shot('options');
     await x.key('Enter'); // first entry: Key bindings…
-    s = await until((t) => t.windows.includes('Key bindings'));
-    check('Enter on the first entry opens Key bindings', s.windows.includes('Key bindings'), s.windows);
+    s = await until((t) => t.panels.includes('Key bindings'));
+    check('Enter on the first entry opens Key bindings', s.panels.includes('Key bindings'), s.panels);
     await shot('keybindings');
     const idx = await js<number>(`cdda.game.keys.actionList().findIndex((a) => a.id === 'wear')`);
     await x.key(`Down*${idx}`, 30);
     await x.key('Enter');
     await x.key('Shift+w');
-    let flash = await js<string>(`document.querySelector('.cdda-window .body .pre')?.textContent ?? ''`);
+    const status = `document.querySelector('[data-testid=keys-status]')?.textContent ?? ''`;
+    let flash = await js<string>(status);
     check('binding Shift+W is refused as a movement key', /moves you/.test(flash), flash);
     await x.key('Enter');
     await x.key('y');
-    flash = await js<string>(`document.querySelector('.cdda-window .body .pre')?.textContent ?? ''`);
+    flash = await js<string>(status);
     check('wear is now y', await js<string>(`cdda.game.keys.label('wear')`) === 'y', flash);
     await x.key('Backspace');
     await x.key('Backspace');
+    s = await state();
+    check('Backspace steps back: Key bindings, then Options, leaving the pause menu', s.panelIds.join() === 'scr.esc', s.panelIds);
     await x.key('Backspace');
     s = await toGameplay();
     await x.key('y');
@@ -599,6 +620,89 @@ const scenarios: Scenario[] = [
     check('Backspace leaves it', !s.windows.length, s.windows);
     // Back into a game for the scenarios that follow.
     await quickStart();
+  }],
+  ['screens', 'modern HUD, map (drag, wheel, note, destination → compass), look card, character sheet tabs', async () => {
+    await toGameplay();
+    // --- HUD: needs light up only when they matter
+    const need = (id: string) => js<string>(`document.querySelector('[data-testid=hud-needs] [data-need=${id}]')?.dataset.level ?? 'none'`);
+    check('the modern HUD shows the vitals', await js<boolean>(`!!document.querySelector('[data-testid=hud-vitals]')?.offsetWidth`));
+    check('thirst starts dim', (await need('thirst')) === '0', await need('thirst'));
+    await js(`cdda.game.player.thirst = 700`); // setup: parched
+    await sleep(600);
+    check('parched: the thirst icon is an emergency', (await need('thirst')) === '3', await need('thirst'));
+    await js(`cdda.game.player.thirst = 0`);
+    // --- map
+    await x.key('m');
+    let s = await until((t) => t.panelIds.includes('scr.map'), 2000);
+    check('m opens the map with a free cursor', s.panelIds.includes('scr.map') && !s.lock, s.panelIds);
+    const view = () => js<string>(`document.querySelector('[data-id="scr.map"]')?.dataset.view ?? ''`);
+    const v0 = await view();
+    const r = await page.evaluate(() => {
+      const e = document.querySelector('[data-testid=map-view]')!.getBoundingClientRect();
+      return { x: Math.round(e.x + e.width / 2), y: Math.round(e.y + e.height / 2) };
+    });
+    await x.moveTo(r.x, r.y);
+    await x.buttonDown(1);
+    await x.moveTo(r.x + 120, r.y + 60, 6);
+    await x.buttonUp(1);
+    await sleep(200);
+    const v1 = await view();
+    check('dragging pans the map', v0.split(',')[0] !== v1.split(',')[0] && v0.split(',')[1] !== v1.split(',')[1], { v0, v1 });
+    await x.wheel('down', 2);
+    await sleep(200);
+    const v2 = await view();
+    check('the wheel zooms out', Number(v2.split(',')[3]) < Number(v1.split(',')[3]), { v1, v2 });
+    await x.wheel('up', 2);
+    await x.click(r.x, r.y, 3);
+    await sleep(300);
+    const add = await js<{ x: number; y: number } | null>(`cdda.ui2.textRect('Add note')`);
+    check('right-click on the map offers a note', !!add, await js('cdda.ui2.state().menu'));
+    if (add) {
+      await x.click(add.x, add.y);
+      await sleep(300);
+      await x.type('safe house');
+      await x.key('Return');
+      await sleep(200);
+    }
+    const notes = await js<{ text: string }[]>(`cdda.ui.mapMarks().notes`);
+    check('typing a note and Enter saves it', notes.some((n) => n.text === 'safe house'), notes);
+    await x.click(r.x, r.y, 3);
+    await sleep(300);
+    const dest = await js<{ x: number; y: number } | null>(`cdda.ui2.textRect('Set as destination')`);
+    if (dest) await x.click(dest.x, dest.y);
+    await sleep(200);
+    check('…and it can be the destination', (await js<{ label: string } | null>(`cdda.ui.mapMarks().destination`))?.label === 'safe house');
+    await shot('map');
+    await x.key('m');
+    s = await until((t) => !t.panels.length && t.lock, 2000);
+    check('m closes the map and mouse-look is back', !s.panels.length && s.lock, s);
+    await sleep(300);
+    check('the compass points at the destination', await js<boolean>(`!!document.querySelector('.hud2-poi.dest')`));
+    // --- look card
+    await x.key('x');
+    s = await until((t) => t.look, 1500);
+    check('x shows the look card anchored in the world, cursor free', s.look && !s.lock, s);
+    const name = await js<string>(`document.querySelector('.lk-card.mode-look .lk-name')?.textContent ?? ''`);
+    check('the card names what the crosshair points at', name.length > 0 && name.toLowerCase() === (await js<string>(`(cdda.lookCard?.target()?.name ?? '').toLowerCase()`)), name);
+    await shot('look');
+    await x.key('x');
+    s = await until((t) => !t.look && t.lock, 1500);
+    check('x again closes it and recaptures', !s.look && s.lock, s);
+    // --- character sheet
+    await x.key('at');
+    s = await until((t) => t.panelIds.includes('scr.character'), 1500);
+    const tab = await js<{ x: number; y: number } | null>(`cdda.ui2.textRect('Skills')`);
+    if (tab) await x.click(tab.x, tab.y);
+    await sleep(200);
+    const content = await js<string>(`document.querySelector('[data-testid=charsheet-content]')?.textContent ?? ''`);
+    check('clicking the Skills tab lists skills with progress', /Melee|Bashing/.test(content) && /%/.test(content), content.slice(0, 120));
+    await shot('character_skills');
+    await x.key('Right');
+    await sleep(100);
+    check('→ switches tabs', /good trait|bad trait|No traits/i.test(await js<string>(`document.querySelector('[data-testid=charsheet-content]')?.textContent ?? ''`)));
+    await x.key('at');
+    s = await until((t) => !t.panels.length && t.lock, 1500);
+    check('@ closes it', !s.panels.length && s.lock, s);
   }],
   ['death', 'dying: menus close, the mouse is freed, last words can be typed at once', async () => {
     await toGameplay();

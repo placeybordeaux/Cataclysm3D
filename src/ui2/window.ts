@@ -209,7 +209,8 @@ export function openPanel(opts: PanelOpts): Panel {
   return panel;
 }
 
-window.addEventListener('resize', () => {
+// Guarded: game modules that import ui2 are also loaded by headless unit tests (no DOM).
+if (typeof window !== 'undefined') window.addEventListener('resize', () => {
   for (const p of open) {
     const r = p.el.getBoundingClientRect();
     const c = clampRect({ x: r.left, y: r.top, w: r.width, h: r.height }, viewport());

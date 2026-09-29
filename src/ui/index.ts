@@ -11,12 +11,12 @@ import { loadUiData, type UiContext } from './context';
 import { itemActionHooks, installInventoryUi, carriedEntries, nearbyEntries, openPickupMenu, openDropMenu, openItemPicker, showItemInfo } from './inventory_ui';
 import { openCharacterSheet } from './charsheet';
 import { openHelp } from './help';
-import { cameraLookAt, describeHit, openLookMode } from './look';
+import { cameraLookAt, describeHit, installLookHover, openLookMode } from './look';
 import { INITIAL_VISIBILITY, openOvermap, overmapSeenTracker, revealAround } from './overmap_ui';
-import { showDeathScreen } from './death';
+import { showDeathScreen } from './death_screen';
 import { openEscMenu, openMessageLog, showMainMenu } from './menus';
 import { applyStoredOptions, openOptions, registerOption } from './options';
-import { installMapMarks } from './mapmarks';
+import { installMapMarks, mapMarks } from './mapmarks';
 import { DEFAULT_BINDINGS } from './keys';
 import { installTipsOption, openHints } from './tips';
 import { installLiquidUi } from './liquid_ui';
@@ -182,6 +182,8 @@ export async function installUi(game: Game, renderer: Renderer, worldgen: WorldG
     chargen: () => openCharGen(ctx).then((b) => b && applyBuild(ctx, b)),
     /** Apply a default (random-named Evacuee survivor) build without the UI. */
     quickStart: () => applyBuild(ctx, defaultBuild(ctx)),
+    /** Map notes + destination (src/ui/mapmarks.ts). */
+    mapMarks: () => mapMarks(game),
     log: () => h.log.entries.map((e) => (e.count > 1 ? `${e.text} x${e.count}` : e.text)),
   };
   /** Put an item on the map relative to the player (dx, dy tiles). For pickup/look tests. */
@@ -198,6 +200,7 @@ export async function installUi(game: Game, renderer: Renderer, worldgen: WorldG
   };
 
   installUi2(game, renderer, ctx, api);
+  installLookHover(ctx);
   return {
     ctx,
     hud: h,

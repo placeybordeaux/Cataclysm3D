@@ -1,4 +1,6 @@
-import { c, colorize, openMenu, type UiWindow } from './framework';
+import { colorize } from './framework';
+import { h, scrollList, type Panel } from '../ui2';
+import { openScreen } from './screen2';
 import type { UiContext } from './context';
 import { keyLabel } from './keymap';
 
@@ -13,7 +15,7 @@ const INTRO = `<color_white>Surviving the Cataclysm</color>
 
 The world ended.  Most people turned into shambling, hungry things, and the rest of us are hiding in evac shelters waiting for a rescue that is not coming.  You have what you are wearing and whatever you can scavenge.
 
-<color_light_green>Look after your body.</color>  The sidebar on the right tracks your hit points per body part, your stamina, pain, hunger, thirst, tiredness and body temperature.  A labelled need is a problem; a <color_red>red</color> one is an emergency.  Thirst kills faster than hunger.
+<color_light_green>Look after your body.</color>  The figure in the bottom-left corner shows your health per body part (red drops: bleeding, white bands: bandaged, cracks: broken).  The icons next to it are hunger, thirst, sleep, temperature, pain and mood: they stay dim while all is well, light up with a word when something needs attention, and pulse when it's an emergency.  Thirst kills faster than hunger.  With the cursor free (any window open, or <keybind:look>), hover an icon for what to do.
 
 <color_light_green>Scavenge.</color>  Houses, shops and the shelter itself hold food, water, clothing and tools.  Press <keybind:pickup> to pick things up, <keybind:inventory> to look through your stuff, <keybind:wear> to wear clothes and bags (more pockets means more you can carry), <keybind:eat> to eat or drink.
 
@@ -21,36 +23,33 @@ The world ended.  Most people turned into shambling, hungry things, and the rest
 
 <color_light_green>Rest.</color>  Sleep somewhere safe (<keybind:sleep>), wait out the night (<keybind:wait>), bandage wounds with <keybind:apply>.  Darkness is dangerous; a flashlight (<keybind:flashlight>) helps you see and helps them see you.
 
-<color_light_green>Look around.</color>  <keybind:look> describes whatever is under the crosshair, <keybind:map> shows the map of places you have seen.
+<color_light_green>Look around.</color>  <keybind:look> describes whatever is under the crosshair (and frees the cursor so you can point at other things), <keybind:map> shows the map of places you have seen: drag it, zoom with the wheel, right-click to write notes or set a destination for the compass at the top of the screen.  Red marks on the compass are hostiles you can see.
 
 When you die, and you will, the game shows what you accomplished.  Then you start again, a little wiser.`;
 
 const keyName = keyLabel;
 
-function keybindingsText(ctx: UiContext): string {
+/** The key reference: movement, mouse, menus, then every registered action (rebindable). */
+function keybindingsEl(ctx: UiContext): HTMLElement {
   const keys = ctx.game.keys;
   const wasd = keys.movementKeys().split('').join(' ');
-  const rows: string[] = [];
-  const row = (k: string, n: string, col = 'c_yellow') => rows.push(`${c(col, k.padEnd(10))} ${esc(n)}`);
-  rows.push(c('c_light_blue', 'MOVEMENT'));
-  row(wasd, 'Move (forward / left / back / right)');
-  row('Mouse', 'Look around (click the view to capture the mouse)');
-  row('Shift', 'Run (uses stamina)');
-  row('LMB', 'Attack / fire');
-  row('RMB', 'Aim (hold)');
-  row('Wheel', 'Zoom (top-down camera)');
-  rows.push('', c('c_light_blue', 'MENUS'));
-  row('↑↓ PgUp/Dn', 'Move the highlight (j k where they are not hotkeys)');
-  row('letter', 'Pick the entry with that hotkey');
-  row('Enter', 'Select');
-  row('Bksp', 'Close (the key that opened a menu also closes it)');
-  row('Esc', 'Close; in gameplay opens the pause menu');
-  rows.push(c('c_dark_gray', `Outside fullscreen the browser frees the mouse on Esc; click the view or press any key to take it back. ${keyName(keys.keyFor('fullscreen'))} fullscreen keeps it captured.`));
-  rows.push('', c('c_light_blue', 'ACTIONS') + c('c_dark_gray', '  (rebind in Options > Key bindings)'));
-  const listed = keys.list();
-  for (const [ks, name] of listed.sort((a, b) => a[1].localeCompare(b[1])))
-    row(ks.length ? ks.map(keyName).join(' ') : 'unbound', name, ks.length ? 'c_yellow' : 'c_red');
-  return rows.join('\n');
+  const out = h('div', { class: 'hp-keys-wrap' });
+  const group = (title: string, rows: [string, string, boolean?][]) => {
+    out.append(h('div', { class: 'ui2-section', text: title }));
+    out.append(h('div', { class: 'hp-keys' }, ...rows.map(([k, n, bad]) => h('div', { class: 'hp-keyrow' }, h('span', { class: `hp-kbd${bad ? ' unbound' : ''}`, text: k }), h('span', { text: n })))));
+  };
+  group('Moving and fighting', [
+    [wasd, 'Move (forward / left / back / right)'], ['Mouse', 'Look around (click the view to capture the mouse)'], ['Shift', 'Run (uses stamina)'],
+    ['Space', 'Side-step / dodge'], ['LMB', 'Attack / fire'], ['RMB', 'Guard (melee) / aim (guns)'], ['Wheel', 'Zoom (top-down camera)'],
+  ]);
+  group('Windows and menus', [
+    ['Click', 'Select; double-click uses'], ['Right-click', 'Every action for an item or object, with its time'], ['Drag', 'Move items between containers, slots and the world'],
+    ['Esc', 'Close the top window; in play, the pause menu'], ['Bksp', 'Close (the key that opened a window also closes it)'], ['↑↓ Enter', 'Move and pick in lists'],
+  ]);
+  const listed = keys.list().sort((a, b) => a[1].localeCompare(b[1]));
+  group(`Actions (rebind in Options › Key bindings)`, listed.map(([ks, name]) => [ks.length ? ks.map(keyName).join(' ') : 'unbound', name, !ks.length]));
+  out.append(h('div', { class: 'ui2-small ui2-dim', text: `Outside fullscreen the browser frees the mouse on Esc; click the view or press any key to take it back. ${keyName(keys.keyFor('fullscreen'))} fullscreen keeps it captured.` }));
+  return out;
 }
 
 /** CDDA help strings reference keys as <keybind:action>; show ours where they map. */
@@ -67,23 +66,45 @@ function cddaHelpText(ctx: UiContext, messages: string[]): string {
     .join('\n\n');
 }
 
-export function openHelp(ctx: UiContext): UiWindow {
-  type Topic = () => string;
-  const entries: { label: string; value: Topic; detail: Topic }[] = [];
-  const add = (label: string, f: Topic) => entries.push({ label, value: f, detail: f });
-  add(c('c_white', 'Key bindings'), () => keybindingsText(ctx));
-  add(c('c_white', 'How to survive'), () => colorize(INTRO.replace(/<keybind:([a-z_]+)>/g, (_, id: string) => `<color_yellow>${esc(keyName(ctx.game.keys.keyFor(id)))}</color>`)));
-  for (const t of ctx.data.help) add(esc(t.name), () => cddaHelpText(ctx, t.messages));
-  const win = openMenu<Topic>({
-    title: 'Help',
-    width: 'min(130ch, 96vw)',
-    height: '90vh',
-    detailPane: true,
-    footer: `${c('c_light_green', '↑↓')} topic`,
-    entries,
-    onSelect: () => false,
+export function openHelp(ctx: UiContext): Panel {
+  type Topic = { label: string; render: () => HTMLElement };
+  const topics: Topic[] = [
+    { label: 'Key bindings', render: () => keybindingsEl(ctx) },
+    { label: 'How to survive', render: () => h('div', { class: 'hp-text-inner', html: colorize(INTRO.replace(/<keybind:([a-z_]+)>/g, (_, id: string) => `<color_yellow>${esc(keyName(ctx.game.keys.keyFor(id)))}</color>`)) }) },
+    ...ctx.data.help.map((t) => ({ label: t.name.replace(/^<[^>]*>:\s*/, ''), render: () => h('div', { class: 'hp-text-inner', html: cddaHelpText(ctx, t.messages) }) })),
+  ];
+  const text = h('div', { class: 'hp-text', attrs: { 'data-testid': 'help-text' } });
+  const list = scrollList<Topic>({
+    items: topics,
+    render: (t) => h('div', { text: t.label }),
+    onSelect: (t) => show(t),
+    onActivate: (t) => show(t),
   });
-  const list = win.body.querySelector('.cols')?.firstElementChild as HTMLElement | null;
-  if (list) list.style.flex = '0 0 30ch';
-  return win;
+  list.el.classList.add('hp-topics');
+  const panel = openScreen(ctx.game, {
+    id: 'scr.help',
+    title: 'Help',
+    group: 'scr.help',
+    action: 'help',
+    pauses: 'always',
+    width: 'min(calc(var(--fs) * 52), 96vw)',
+    height: 'min(calc(var(--fs) * 34), 90vh)',
+    legend: [['↑↓', 'topic'], ['PgUp/PgDn', 'scroll']],
+    onKey: (e) => {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        list.select(topics.indexOf(list.selected()!) + (e.key === 'ArrowDown' ? 1 : -1));
+        return true;
+      }
+      if (e.key === 'PageDown' || e.key === 'PageUp') return (text.scrollTop += (e.key === 'PageDown' ? 1 : -1) * text.clientHeight * 0.9), true;
+      return false;
+    },
+  });
+  panel.body.append(h('div', { class: 'hp-wrap' }, list.el, text));
+  panel.body.style.overflow = 'hidden';
+  function show(t: Topic): void {
+    text.replaceChildren(t.render());
+    text.scrollTop = 0;
+  }
+  list.select(0);
+  return panel;
 }

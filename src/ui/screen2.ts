@@ -23,7 +23,7 @@ export function legendEl(game: Game | null, items: [string, string][], action?: 
   const el = h('div', { class: 'scr-legend' });
   const key = (k: string) => h('span', { class: 'scr-key', text: k });
   const openKey = action && game ? game.keys.label(action) : null;
-  const all: [string, string][] = [...items, [[openKey, 'Bksp', 'Esc'].filter(Boolean).join(' / '), closeLabel]];
+  const all: [string, string][] = [...items, [[...new Set([openKey, 'Bksp', 'Esc'].filter(Boolean))].join(' / '), closeLabel]];
   all.forEach(([k, what], i) => {
     if (i) el.append(h('span', { class: 'ui2-dim', text: '  ·  ' }));
     el.append(key(k), h('span', { text: ` ${what}` }));
