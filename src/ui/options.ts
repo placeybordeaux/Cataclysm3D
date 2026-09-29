@@ -45,11 +45,17 @@ export function applyStoredOptions(ctx: UiContext): void {
   if (o.grade && !params.get('grade')) pipe.options.grade = o.grade;
 }
 
-interface Opt {
+export interface Opt {
   name: string;
   value: () => string;
   change: (dir: -1 | 1) => void;
   desc: string;
+}
+
+/** Options owned by other systems (e.g. autosave interval from src/save), shown after the game options. */
+const extraOptions: Opt[] = [];
+export function registerOption(o: Opt): void {
+  extraOptions.push(o);
 }
 
 export function openOptions(ctx: UiContext): UiWindow {
@@ -95,6 +101,7 @@ export function openOptions(ctx: UiContext): UiWindow {
     change: (d) => renderer.setCameraMode(cycle(CAMERA_MODES, renderer.cameraMode, d)),
     desc: 'First person, over the shoulder, or CDDA-style top-down (also V in game).',
   });
+  opts.push(...extraOptions);
   const audio = getAudioEngine();
   if (audio) {
     const s = audio.settings;

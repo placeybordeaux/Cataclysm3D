@@ -6,6 +6,7 @@ import { applyBuild, openCharGen } from './chargen';
 import type { Hud } from './hud';
 import type { UiContext } from './context';
 import { logLine } from './format';
+import { openMemorialFor } from '../save/install';
 
 // Title screen (CDDA main_menu.cpp look: the ASCII logo from data/title/en.title over a
 // slowly turning, darkened view of the world, and a horizontal menu bar with highlighted
@@ -76,6 +77,7 @@ export function showMainMenu(ctx: UiContext, hud: Hud): Promise<void> {
           if (await game.load!()) close();
         },
       },
+      { label: 'Memorial', key: 'm', enabled: () => true, run: () => openMemorialFor(game) },
       { label: 'Settings', key: 's', enabled: () => true, run: () => void openOptions(ctx) },
       { label: 'Help', key: 'h', enabled: () => true, run: () => void openHelp(ctx) },
       {
@@ -143,7 +145,7 @@ export function showMainMenu(ctx: UiContext, hud: Hud): Promise<void> {
 /** In-game Esc menu. */
 export function openEscMenu(ctx: UiContext, onQuit: () => void): UiWindow {
   const { game } = ctx;
-  type Act = 'resume' | 'options' | 'help' | 'save' | 'quit';
+  type Act = 'resume' | 'options' | 'help' | 'save' | 'savequit' | 'quit';
   const canSave = !!game.save;
   return openMenu<Act>({
     title: 'Cataclysm: Dark Days Ahead',
@@ -153,6 +155,7 @@ export function openEscMenu(ctx: UiContext, onQuit: () => void): UiWindow {
       { label: 'Options', value: 'options', hotkey: 'o' },
       { label: 'Help', value: 'help', hotkey: '?' },
       { label: canSave ? 'Save game' : c('c_dark_gray', 'Save game (not available yet)'), value: 'save', hotkey: 's', disabled: !canSave },
+      { label: canSave ? 'Save and quit' : c('c_dark_gray', 'Save and quit'), value: 'savequit', hotkey: 'S', disabled: !canSave },
       { label: 'Quit to main menu', value: 'quit', hotkey: 'Q' },
     ],
     onSelect: (a) => {
@@ -162,6 +165,14 @@ export function openEscMenu(ctx: UiContext, onQuit: () => void): UiWindow {
         else if (a === 'save') {
           await game.save!();
           game.message('Game saved.', 'c_light_green');
+        } else if (a === 'savequit') {
+          try {
+            await game.save!();
+          } catch (e) {
+            game.message(`Save failed: ${(e as Error).message}`, 'c_light_red');
+            return;
+          }
+          onQuit();
         } else if (a === 'quit') {
           if (await confirm('Quit to main menu?  <color_light_red>Unsaved progress will be lost.</color>')) onQuit();
         }

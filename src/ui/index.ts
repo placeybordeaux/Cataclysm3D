@@ -16,6 +16,9 @@ import { showDeathScreen } from './death';
 import { openEscMenu, openMessageLog, showMainMenu } from './menus';
 import { applyStoredOptions, openOptions } from './options';
 import { applyBuild, defaultBuild, openCharGen } from './chargen';
+import { registerSaveable } from '../save/registry';
+import { quitToTitle } from '../save/install';
+import type { LogEntry } from './format';
 
 // Wires the whole UI into the game: HUD, key bindings for every screen, the trackers the
 // screens need (distance walked, overmap exploration, kills), the death screen, and the
@@ -46,8 +49,24 @@ export async function installUi(game: Game, renderer: Renderer, worldgen: WorldG
   game.keys.register('map', 'View map', () => void openOvermap(ctx));
   game.keys.register('look', 'Look around', () => void openLookMode(ctx));
   game.keys.register('messages', 'View message log', () => void openMessageLog(ctx, h));
-  game.keys.register('menu', 'Main menu', () => void openEscMenu(ctx, () => location.reload()));
-  if (game.save) game.keys.register('save', 'Save game', () => void game.save!());
+  // CDDA keeps the message log in the save.
+  registerSaveable<LogEntry[]>(game, 'messages', {
+    order: 70,
+    save: () => h.log.entries.slice(-100).map((e) => ({ ...e })),
+    load: (list) => {
+      h.log.entries.length = 0;
+      // Old messages go to the log (P) without flashing on the HUD again.
+      h.log.entries.push(...list.map((e) => ({ ...e, time: -1e12 })));
+    },
+    missing: () => void (h.log.entries.length = 0),
+  });
+  game.keys.register('menu', 'Main menu', () => void openEscMenu(ctx, () => quitToTitle(game)));
+  if (game.save)
+    game.keys.register('save', 'Save game', () =>
+      void Promise.resolve(game.save!()).then(
+        () => game.message('Game saved.', 'c_light_green'),
+        (e) => game.message(`Save failed: ${(e as Error)?.message ?? e}`, 'c_light_red'),
+      ));
 
   // --- trackers for the memorial screen and the overmap
   let lx = game.player.x, ly = game.player.y, lz = game.player.z;
@@ -90,7 +109,7 @@ export async function installUi(game: Game, renderer: Renderer, worldgen: WorldG
         look: () => openLookMode(ctx),
         messages: () => openMessageLog(ctx, h),
         options: () => openOptions(ctx),
-        escmenu: () => openEscMenu(ctx, () => location.reload()),
+        escmenu: () => openEscMenu(ctx, () => quitToTitle(game)),
         pickup: () => openPickupMenu(ctx),
         drop: () => openDropMenu(ctx),
         iteminfo: () => {
