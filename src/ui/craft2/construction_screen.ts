@@ -36,6 +36,9 @@ export function ghostHeight(game: Game, con: ConstructionDef): number {
   if (!t) return 0.1;
   if (hasFlag(t, 'WALL') || hasFlag(t, 'DOOR') || hasFlag(t, 'WINDOW') || (t.move_cost ?? 1) === 0) return LEVEL_HEIGHT * 0.98;
   if (hasFlag(t, 'GOES_DOWN') || hasFlag(t, 'NO_FLOOR')) return 0.05;
+  // Half walls, barricades, fences: as tall as the cover they give.
+  const cover = Number((t as { coverage?: number }).coverage ?? 0);
+  if (cover > 0) return Math.max(0.12, (LEVEL_HEIGHT * cover) / 100);
   return 0.12;
 }
 
@@ -93,6 +96,7 @@ export function openConstructionScreen(game: Game, renderer: Renderer): Construc
   const catBar = h('div', { class: 'c2-cats' });
   const list = h('div', { class: 'c2-list' });
   const detail = h('div', { class: 'c2-detail' });
+  let routeKeys: (e: KeyboardEvent) => boolean = () => false;
   const panel = openPanel({
     id: PANEL_ID,
     title: 'Construction',
@@ -101,7 +105,9 @@ export function openConstructionScreen(game: Game, renderer: Renderer): Construc
     height: 'min(calc(var(--fs) * 34), 92vh)',
     group: 'construct',
     pauses: true,
-    footer: 'Type to search · ↑↓ pick · Enter place in the world · Tab category · Esc close',
+    // Keys while focus isn't in the search field: letters go there, the rest to the screen.
+    onKey: (e) => routeKeys(e),
+    footer: 'Type to search · ↑↓ pick · Enter place in the world · Tab category · Esc or * close',
     onClose: () => void (screen = null),
   });
   panel.body.classList.add('c2-build');
@@ -177,7 +183,7 @@ export function openConstructionScreen(game: Game, renderer: Renderer): Construc
   };
   const onKey = (e: KeyboardEvent): boolean => {
     const i = rows.findIndex((g) => g.id === sel);
-    if (e.key === 'Escape') panel.close();
+    if (e.key === 'Escape' || e.key === '*') panel.close();
     else if (e.key === 'ArrowDown') select(rows[Math.min(rows.length - 1, i + 1)]?.id ?? null);
     else if (e.key === 'ArrowUp') select(rows[Math.max(0, i - 1)]?.id ?? null);
     else if (e.key === 'Enter') place();
@@ -191,6 +197,16 @@ export function openConstructionScreen(game: Game, renderer: Renderer): Construc
   search.addEventListener('keydown', (e) => {
     if (onKey(e)) (e.preventDefault(), e.stopPropagation());
   });
+  routeKeys = (e) => {
+    if (e.key.length === 1 && e.key !== '*' && !e.ctrlKey && !e.altKey) {
+      search.focus();
+      search.value += e.key;
+      query = search.value.toLowerCase();
+      render();
+      return true;
+    }
+    return onKey(e);
+  };
   render();
   requestAnimationFrame(() => search.focus());
   screen = {
@@ -263,7 +279,7 @@ export function startPlacement(game: Game, renderer: Renderer, group: Constructi
   placement?.cancel();
   const data = game.data;
   const canvas = renderer.three.domElement as HTMLCanvasElement;
-  const mat = new THREE.MeshBasicMaterial({ color: new THREE.Color(palette.good), transparent: true, opacity: 0.35, depthWrite: false });
+  const mat = new THREE.MeshBasicMaterial({ color: new THREE.Color(palette.good), transparent: true, opacity: 0.22, depthWrite: false });
   const box = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), mat);
   const edges = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(1, 1, 1)), new THREE.LineBasicMaterial({ color: new THREE.Color(palette.good), transparent: true }));
   box.renderOrder = 998;
@@ -293,7 +309,8 @@ export function startPlacement(game: Game, renderer: Renderer, group: Constructi
     if (now - invAt > 700) (inv = constructionInventory(game)), (invAt = now);
     const [x, y, z] = targetTile(game);
     stage = stageFor(game, group, x, y, z, inv);
-    const probe = stage ?? group.constructions[0];
+    // Nothing fits: explain with the first stage (the one that starts from bare ground, if any).
+    const probe = stage ?? group.constructions.find((c) => !c.pre_terrain && !c.pre_furniture) ?? group.constructions[0];
     const why = stage ? null : siteProblem(game, probe, x, y, z);
     const check = canBuild(game, probe, inv);
     const ok = !!stage && check.ok;

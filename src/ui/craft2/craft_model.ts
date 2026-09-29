@@ -148,13 +148,46 @@ export function sourcesOf(host: CraftHost, id: string, known: ReadonlySet<string
   return { craft: craft.slice(0, 6), salvage: (r.salvage.get(id) ?? []).slice(0, 8) };
 }
 
-const qualityIconCache = new WeakMap<GameData, Map<string, string>>();
+const PREFERRED_QUALITY_ICON: Record<string, string[]> = {
+  CUT: ['knife_folding', 'knife_butcher', 'knife_combat'],
+  HAMMER: ['hammer', 'hammer_sledge'],
+  DIG: ['shovel', 'e_tool'],
+  PRY: ['crowbar', 'halligan'],
+  SAW_W: ['saw', 'hacksaw'],
+  SAW_M: ['hacksaw'],
+  SAW_M_FINE: ['hacksaw'],
+  SCREW: ['screwdriver', 'screwdriver_set'],
+  SCREW_FINE: ['screwdriver_set'],
+  WRENCH: ['wrench'],
+  CHISEL: ['chisel'],
+  AXE: ['hatchet', 'ax'],
+  BOIL: ['pot', 'pan'],
+  COOK: ['pot', 'pan'],
+  CONTAIN: ['pot', 'jar_glass'],
+  SEW: ['sewing_kit'],
+  GLARE: ['goggles_welding'],
+  WELD: ['welder'],
+  DRILL: ['hand_drill'],
+  SANDING: ['sandpaper'],
+  CUT_FINE: ['scalpel', 'knife_folding'],
+  BUTCHER: ['knife_butcher'],
+  PULL: ['pliers'],
+  SMOOTH: ['file'],
+};
+
+const qualityIconCache =new WeakMap<GameData, Map<string, string>>();
 /** A representative item for a tool quality icon: the lightest item with it at `level` or better. */
 export function qualityIcon(data: GameData, id: string, level: number): string | undefined {
   let m = qualityIconCache.get(data);
   if (!m) qualityIconCache.set(data, (m = new Map()));
   const key = `${id}:${level}`;
   if (m.has(key)) return m.get(key);
+  // Familiar tools first (the lightest item with a quality is often something odd without a sprite).
+  const pref = PREFERRED_QUALITY_ICON[id]?.find((i) => (data.items[i]?.qualities ?? []).some(([q, l]) => q === id && l >= level));
+  if (pref) {
+    m.set(key, pref);
+    return pref;
+  }
   let best: { id: string; w: number } | null = null;
   for (const d of Object.values(data.items)) {
     if (d.flags?.includes('PSEUDO')) continue;

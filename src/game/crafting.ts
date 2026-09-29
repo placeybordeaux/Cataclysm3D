@@ -751,7 +751,8 @@ export function continueCraft(host: CraftHost, craft: Item, opts: { instant?: bo
     const loss = exp * (1 - Math.min(roll, 1));
     const lost = state.progress * loss;
     state.progress = Math.max(0, state.progress - lost);
-    host.message(`You mess up and lose ${Math.round(lost * 100)}% progress.`, 'c_yellow');
+    if (lost >= 0.01) host.message(`You mess up and lose ${Math.round(lost * 100)}% progress.`, 'c_yellow');
+    else host.message('You mess up, but catch it in time.', 'c_yellow');
     state.nextFailure = nextFailurePoint(c, r, state.progress);
     save();
     // Restart the clock from the new progress (the activity's own bookkeeping).

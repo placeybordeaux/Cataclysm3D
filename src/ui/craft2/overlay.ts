@@ -108,12 +108,27 @@ export function installCraftOverlay(game: Game, renderer: Renderer): { state(): 
 }
 
 function labelFor(game: Game, name: string, target: unknown): string {
-  void game;
-  void target;
+  // "constructing Build Wood Wall" reads badly: the group name is already a verb phrase.
+  const site = target as Item | undefined;
+  if (site && typeof site.isCraft === 'function' && unfinishedState(game.data, site)) return site.baseName().replace(/^unfinished /, '');
   return name.charAt(0).toUpperCase() + name.slice(1);
 }
 
-const bars = new WeakMap<HTMLElement, { chapter: ReturnType<typeof progressBar>; skill: ReturnType<typeof progressBar>; book: Item | null; lines: HTMLElement }>();
+interface ReadUi {
+  chapter: ReturnType<typeof progressBar>;
+  skill: ReturnType<typeof progressBar>;
+  book: Item | null;
+  chapterText: HTMLElement;
+  skillText: HTMLElement;
+  lines: HTMLElement;
+}
+const bars = new WeakMap<HTMLElement, ReadUi>();
+
+/** A "label ... value" line above a bar (the bars are too thin for text inside). */
+function line(label: string): { el: HTMLElement; value: HTMLElement } {
+  const value = h('span');
+  return { el: h('div', { class: 'c2-read-line' }, h('span', { class: 'ui2-dim', text: label }), value), value };
+}
 
 function renderRead(game: Game, card: HTMLElement, frac: number, left: number): void {
   const st = reading.current!;
@@ -123,24 +138,29 @@ function renderRead(game: Game, card: HTMLElement, frac: number, left: number): 
     const chapter = progressBar('accent');
     const skill = progressBar('info');
     skill.el.classList.add('c2-read-bar-skill');
-    const lines = h('div', { class: 'c2-read-lines' });
+    const cl = line('This chapter');
+    const sl = line(b?.skill ? game.player.skillName(b.skill) : '');
+    const lines = h('div', { class: 'ui2-small ui2-dim' });
     card.replaceChildren(
       ...[h('div', { class: 'c2-read-head' }, iconEl(itemIconRef(game.data, st.book.typeId), 'grid'), h('div', null, h('div', { class: 'c2-read-title', text: cddaText(st.book.def.name) }), h('div', { class: 'ui2-small ui2-dim', text: st.mode === 'until_level' ? 'Reading until you gain a level' : 'Reading one chapter' }))),
-      h('div', { class: 'ui2-small ui2-dim', text: 'This chapter' }),
+      cl.el,
       chapter.el,
-      b?.skill ? h('div', { class: 'ui2-small ui2-dim', text: 'Skill' }) : null,
+      b?.skill ? sl.el : null,
       b?.skill ? skill.el : null,
       lines,
       h('div', { class: 'ui2-small ui2-dim', text: 'Move to stop reading.' })].filter((e): e is HTMLDivElement => !!e),
     );
-    ui = { chapter, skill, book: st.book, lines };
+    ui = { chapter, skill, book: st.book, chapterText: cl.value, skillText: sl.value, lines };
     bars.set(card, ui);
   }
-  ui.chapter.set(frac, `${fmtDuration(Math.max(0, left))} left`);
+  ui.chapter.set(frac);
+  ui.chapterText.textContent = `${fmtDuration(Math.max(0, left))} left`;
   if (b?.skill) {
     const lvl = game.player.getSkill(b.skill);
-    ui.skill.set(skillProgress(game.player, b.skill), `${game.player.skillName(b.skill)} ${lvl} → ${Math.min(lvl + 1, b.level)} · ${Math.floor(skillProgress(game.player, b.skill) * 100)}% (book teaches up to ${b.level})`);
+    const pct = skillProgress(game.player, b.skill);
+    ui.skill.set(pct);
+    ui.skillText.textContent = lvl >= b.level ? `level ${lvl} (all this book teaches)` : `level ${lvl} → ${lvl + 1}: ${Math.floor(pct * 100)}%`;
   }
-  const text = `${st.sessions} chapter${st.sessions === 1 ? '' : 's'} read`;
+  const text = `${st.sessions} chapter${st.sessions === 1 ? '' : 's'} read${b?.skill ? ` · teaches up to level ${b.level}` : ''}`;
   if (ui.lines.textContent !== text) ui.lines.textContent = text;
 }

@@ -428,7 +428,7 @@ export function continueConstruction(host: CraftHost, site: Item, x: number, y: 
   const speed = p.mutationValue('construction_speed_modifier') || 1;
   const total = Math.max(1, con.time / speed);
   const base = st.progress;
-  if (base > 0) host.message(`You continue working on the ${name}.`);
+  if (base > 0) host.message(`You get back to work: ${name}.`);
   return host.activities.start({
     name: `constructing ${name}`,
     kind: 'construction',
@@ -438,7 +438,7 @@ export function continueConstruction(host: CraftHost, site: Item, x: number, y: 
     duration: Math.max(1, Math.round(total * (1 - base))),
     onProgress: (_dt, f) => void (site.vars.craft_progress = base + (1 - base) * f),
     onComplete: finish,
-    onCancel: () => host.message(`The ${site.name()} waits for you: examine it to continue or cancel it.`, 'c_light_gray'),
+    onCancel: () => host.message(`The ${site.name()} waits for you: right-click it (or look at it and press <keybind:world_menu>) to continue or cancel.`, 'c_light_gray'),
   });
 }
 

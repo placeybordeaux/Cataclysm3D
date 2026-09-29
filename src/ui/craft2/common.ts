@@ -94,10 +94,21 @@ function fmtAvail(n: number): string {
 /** A requirement group row: alternatives joined by "or". */
 export function groupRow(data: GameData, g: GroupEval, o: ChipOpts = {}): HTMLElement {
   const row = h('div', { class: `c2-group${g.ok ? ' ok' : ' missing'}` });
-  g.alts.forEach((a, i) => {
+  // When you have one of many alternatives, the rest is noise until asked for.
+  const hidden = g.ok && g.alts.length > 3 ? g.alts.filter((a) => !a.have) : [];
+  const shown = g.alts.filter((a) => !hidden.includes(a));
+  shown.forEach((a, i) => {
     if (i) row.append(h('span', { class: 'c2-or', text: 'or' }));
     row.append(altChip(data, a, o));
   });
+  if (hidden.length) {
+    const more = h('button', { class: 'c2-more', text: `+${hidden.length} other${hidden.length === 1 ? '' : 's'}`, title: hidden.map((a) => a.text).join('\n') });
+    more.addEventListener('click', () => {
+      more.remove();
+      for (const a of hidden) row.append(h('span', { class: 'c2-or', text: 'or' }), altChip(data, a, o));
+    });
+    row.append(more);
+  }
   return row;
 }
 

@@ -76,6 +76,7 @@ export function openCraftingScreen(game: CraftHost): CraftingScreen {
   const count = h('div', { class: 'c2-count ui2-dim ui2-small' });
   const detail = h('div', { class: 'c2-detail' });
   const bottom = h('div', { class: 'c2-bottom' });
+  let routeKeys: (e: KeyboardEvent) => boolean = () => false;
   const panel = openPanel({
     id: PANEL_ID,
     title: 'Crafting',
@@ -84,7 +85,9 @@ export function openCraftingScreen(game: CraftHost): CraftingScreen {
     height: 'min(calc(var(--fs) * 36), 92vh)',
     group: 'craft',
     pauses: true,
-    footer: 'Type to search · ↑↓ pick · Enter craft · Ctrl+Enter queue · Tab category · Ctrl+↑↓ batch · Esc close',
+    // Keys while focus isn't in the search field: letters go there, the rest to the screen.
+    onKey: (e) => routeKeys(e),
+    footer: 'Type to search · ↑↓ pick · Enter craft · Ctrl+Enter queue · Tab category · Ctrl+↑↓ batch · Esc or & close',
     onClose: () => {
       newRecipes.clear();
       current = null;
@@ -379,6 +382,7 @@ export function openCraftingScreen(game: CraftHost): CraftingScreen {
             abandonCraft(game, c.item);
             refresh();
           }, { small: true, title: 'Get the components back (progress is lost)' }),
+          why ? h('span', { class: 'tone-warn ui2-small', text: why.replace(/^You can no longer make that craft: /, '') }) : null,
         );
         row.append(card);
       }
@@ -418,7 +422,8 @@ export function openCraftingScreen(game: CraftHost): CraftingScreen {
   };
   const onKey = (e: KeyboardEvent): boolean => {
     const k = e.key;
-    if (k === 'Escape') panel.close();
+    // Like every screen, the opening key closes it again (no recipe name has an '&').
+    if (k === 'Escape' || k === '&') panel.close();
     else if (k === 'ArrowUp' && e.ctrlKey) (batch++, renderDetail());
     else if (k === 'ArrowDown' && e.ctrlKey) ((batch = Math.max(1, batch - 1)), renderDetail());
     else if (k === 'ArrowDown') move(1);
@@ -437,12 +442,17 @@ export function openCraftingScreen(game: CraftHost): CraftingScreen {
       e.stopPropagation();
     }
   });
-  // Typing anywhere in the window goes to the search.
-  panel.el.addEventListener('keydown', (e) => {
-    if (e.target === search) return;
-    if (e.key.length === 1 && !e.ctrlKey && !e.altKey) search.focus();
-    else if (onKey(e)) e.preventDefault();
-  });
+  // Typing anywhere goes to the search.
+  routeKeys = (e) => {
+    if (e.key.length === 1 && e.key !== '&' && !e.ctrlKey && !e.altKey) {
+      search.focus();
+      search.value += e.key;
+      query = search.value;
+      rebuild();
+      return true;
+    }
+    return onKey(e);
+  };
 
   const api: CraftingScreen = {
     panel,

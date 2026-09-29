@@ -225,6 +225,8 @@ export function startReading(host: CraftHost, it: Item, mode: ReadMode = 'until_
   const b = bookData(it)!;
   if (b.intel > c.int) host.message('This book is too complex for you to easily understand.  It will take longer to read.', 'c_yellow');
   const title = cddaText(it.def.name);
+  // Nothing left to train: "until you gain a level" would just be one chapter anyway.
+  if (!b.skill || c.getSkill(b.skill) >= b.level) mode = 'once';
   const st: ReadingState = { book: it, mode, sessions: 0 };
   const session = (): boolean => {
     const vision = fineVisionMod(host);
