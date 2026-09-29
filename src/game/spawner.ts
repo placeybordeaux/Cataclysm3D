@@ -50,6 +50,8 @@ export interface SpawnerOptions {
   realtimeScale?: number;
   /** No hostile spawns closer than this to the player when a chunk generates. */
   safeRadius?: number;
+  /** safeRadius also applies to dormant zombies (corpses that rise); the difficulty preset sets it. */
+  dormantSafe?: boolean;
 }
 
 /**
@@ -86,7 +88,7 @@ export class Spawner {
   skipChunk: ((c: Chunk) => boolean) | null = null;
 
   constructor(readonly sys: MonsterSystem, readonly overmap: OvermapView | null = null, opts: SpawnerOptions = {}) {
-    this.opts = { cityHordeScale: CITY_HORDE_REALTIME, density: 1, realtimeScale: SPAWN_REALTIME, safeRadius: 10, ...opts };
+    this.opts = { cityHordeScale: CITY_HORDE_REALTIME, density: 1, realtimeScale: SPAWN_REALTIME, safeRadius: 10, dormantSafe: false, ...opts };
   }
 
   /**
@@ -267,6 +269,7 @@ export class Spawner {
         for (let n = 0; n < s.count; n++) {
           const tx = x + (n ? rng.int(-1, 1) : 0), ty = y + (n ? rng.int(-1, 1) : 0);
           if (!this.inChunk(c, tx, ty) || !map.passable(tx, ty, c.z)) continue;
+          if (this.opts.dormantSafe && p.z === c.z && Math.hypot(tx + 0.5 - p.x, ty + 0.5 - p.y) < this.opts.safeRadius) continue;
           if (this.baselineChunk === c && this.cleanBeforeCorpses === null) {
             const tracker = chunkTracker(this.sys.game);
             this.cleanBeforeCorpses = !!tracker && !tracker.isDirty(c);

@@ -148,6 +148,12 @@ export class GameMap {
   generator: ChunkGenerator | null = null;
   /** Converts mapgen item placements into real items; set by Game. */
   itemFactory: ((spawn: ItemSpawn) => MapItem[]) | null = null;
+  /**
+   * BN ITEM_SPAWNRATE for chunks generated from now on (the difficulty preset sets it): below 1
+   * each mapgen item spawn survives with that chance, above 1 it can repeat. Deterministic per
+   * tile, so a regenerated (evicted, clean) chunk gets the same items back.
+   */
+  itemSpawnRate = 1;
   /** Hooks for systems that must react to spawns during generation (monsters, vehicles). */
   onChunkGenerated: ((chunk: Chunk) => void)[] = [];
   /**

@@ -372,13 +372,21 @@ export class WorldGenerator implements ChunkGenerator {
       c.furn[i] = f ?? 0;
     }
     c.items.clear();
+    const rate = map.itemSpawnRate;
     for (const [k, v] of b.items) {
       const out: MapItem[] = [];
+      const rrng = rate !== 1 ? new Rng(hashSeed(map.seed, c.cx, c.cy, c.z, k, 0x17e5)) : null;
       for (const sp of v) {
         // Items already committed to the chunk (see readChunk) pass through untouched.
         if (sp.existing) out.push(sp.existing as MapItem);
-        else if (map.itemFactory) out.push(...map.itemFactory(sp));
-        else out.push(sp);
+        else {
+          // ITEM_SPAWNRATE: whole spawns (a stack, a filled container) come or go, never split.
+          const n = rrng ? Math.floor(rate) + (rrng.next() < rate - Math.floor(rate) ? 1 : 0) : 1;
+          for (let i = 0; i < n; i++) {
+            if (map.itemFactory) out.push(...map.itemFactory(sp));
+            else out.push(sp);
+          }
+        }
       }
       if (out.length) c.items.set(k, out);
     }

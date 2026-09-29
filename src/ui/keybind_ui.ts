@@ -1,6 +1,7 @@
 import type { Game } from '../game/game';
 import { c, confirm, legendKey, openWindow, type UiWindow } from './framework';
 import { addBinding, applyBinding, checkBinding, keyLabel } from './keymap';
+import { Keys } from './keys';
 
 // Options > Key bindings (CDDA's keybinding screen, reduced): every action with its keys.
 // Enter (or a click) waits for a new key and replaces the action's keys with it, + adds an
@@ -22,12 +23,15 @@ export function openKeybindings(game: Game): UiWindow {
       ? `${c('c_yellow', `Press the new key for "${actions[sel].name}"`)}  ${legendKey('Esc', 'cancel')}`
       : `${legendKey('↑↓', 'move')}  ${legendKey('Enter', 'rebind')}  ${legendKey('+', 'add key')}  ${legendKey('-', 'unbind')}  ${legendKey('R', 'reset all')}`;
 
+  Keys.rebinding++;
   const win = openWindow({
     title: 'Key bindings',
     width: 'min(90ch, 94vw)',
     height: '86vh',
     closeLabel: 'done',
     closeOnOpenKey: false,
+    // Any key may be the new binding: global keys (tactical pause) stand down meanwhile.
+    onClose: () => void Keys.rebinding--,
     onKey: (e) => {
       if (busy) return true;
       if (capturing) {

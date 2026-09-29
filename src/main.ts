@@ -29,6 +29,8 @@ import { frameStats, installPerfDebug } from './perfDebug';
 import { ChunkPrefetcher } from './world/prefetch';
 import { installAchievements } from './achievements';
 import { installProgression } from './progression/install';
+import { installDifficulty } from './difficulty';
+import { installTacticalPause } from './pause';
 import { installChunkEviction } from './save/eviction';
 
 // URL params (all optional): seed=<int>, gen=world|test (default world), debug=1 (render stats overlay),
@@ -86,6 +88,8 @@ async function main(): Promise<void> {
   // Crafting/reading probe `game.lightAt` for "too dark" checks; back it with real vision light.
   (game as unknown as { lightAt: (x: number, y: number, z: number) => number }).lightAt = (x, y, z) => lightAt(game, x, y, z);
   const monsters = installMonsters(game, renderer, worldgen, api);
+  // Difficulty presets (src/game/difficulty.ts): spawner knobs, needs, feel, pausing; before progression (its hook).
+  installDifficulty(game, { spawner: monsters.spawner, api });
   await installVehicles(game, renderer, api);
   await installNpcs(game, renderer, worldgen, monsters, api);
   installMutBio(game, renderer, api);
@@ -104,6 +108,8 @@ async function main(): Promise<void> {
   const achievements = await installAchievements(game, worldgen, api);
   // Unlocks, discovery tips, the journal; the title screen's Start / New Game use it.
   const progression = await installProgression(game, ui.ctx, worldgen, achievements, api);
+  // Tactical pause key + PAUSED banner (src/pause.ts).
+  installTacticalPause(game, api);
 
   // Mapgen ahead of the player in idle time (see src/world/prefetch.ts); ?prefetch=0 disables.
   const prefetch = new ChunkPrefetcher(game.map, () => game.player);

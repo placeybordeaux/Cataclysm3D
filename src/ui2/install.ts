@@ -5,8 +5,8 @@
 //   ui2 takes the keyboard through input.capture. Closing the last surface re-captures the
 //   mouse (the closing click/key is the user gesture Chrome needs).
 // - Game time: ui2 captures with timeFlows, so the legacy "menus pause" rule doesn't apply;
-//   inventory-type windows ask for game.tacticalPause instead, which the ui2 setting
-//   (Accessible default: on) grants. Classic players keep time running.
+//   inventory-type windows ask for a tactical-pause hold instead (src/game/pause.ts), which
+//   the ui2 setting grants; the difficulty preset sets it (Accessible: on, Classic: off).
 // - While the cursor is free: hovering the world outlines the object under the cursor (a 3D
 //   line box — it goes through the post pass, so it's pixelated and palette-graded like the
 //   world) with its name next to the cursor; right-click opens worldMenu(); left-click runs
@@ -21,6 +21,7 @@ import type { UiContext } from '../ui/context';
 import { raycastTiles, type RayHit } from '../game/raycast';
 import type { LookCreature } from '../game/game';
 import { LEVEL_HEIGHT } from '../world/coords';
+import { tacticalPauseOf } from '../game/pause';
 import { describeHit } from '../ui/look';
 import { vehicleSolidHeight } from '../ui/vehicle_ui';
 import { registerOption } from '../ui/options';
@@ -65,7 +66,8 @@ export function installUi2(game: Game, renderer: Renderer, ctx: UiContext, api: 
       input.tryLock();
     },
     setPaused(p) {
-      game.tacticalPause = p;
+      // A hold, not a switch: closing the inventory must not cancel the player's own pause.
+      tacticalPauseOf(game).hold('menus', p);
     },
   });
 
@@ -151,15 +153,8 @@ export function installUi2(game: Game, renderer: Renderer, ctx: UiContext, api: 
       setScalePref(order[(order.indexOf(scalePref()) + dir + order.length) % order.length]);
     },
   });
-  registerOption({
-    name: 'Pause in inventory',
-    desc: 'Tactical pause while inventory windows are open (Accessible). Off: time keeps running (Classic).',
-    value: () => (settings.pauseInInventory ? 'Yes' : 'No'),
-    change: () => {
-      settings.pauseInInventory = !settings.pauseInInventory;
-      saveSettings();
-    },
-  });
+  // Pausing in inventory windows (settings.pauseInInventory) is a difficulty rule now:
+  // Options > Difficulty > Pause in menus (src/difficulty.ts sets it from the preset).
 
   api.ui2 = {
     toggleInventory: inventory,

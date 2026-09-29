@@ -82,6 +82,8 @@ export const DEFAULT_BINDINGS: Record<string, string[]> = {
   // --- ui2 preview (src/ui2/install.ts): mouse-first inventory on mock data ---
   inventory2: ['Tab'],
   world_menu: ['o'], // context menu for what's under the crosshair (RMB is guard/aim while captured)
+  // --- tactical pause (src/pause.ts): works in menus too; Space is the side-step, P the message log ---
+  tactical_pause: ['`', 'Pause'],
   // --- progression (src/progression): tips, recipes, places, unlock progress ---
   journal: ['J'],
 };
@@ -117,6 +119,8 @@ export class Keys {
    * Esc, which in a browser also releases the captured mouse.
    */
   static opening: { key: string; seq: number } | null = null;
+  /** Open key-binding screens: while > 0, keys that work inside menus (tactical pause) don't. */
+  static rebinding = 0;
   private static input: Input | null = null;
   /** The opening key for a window being created now, or null. */
   static openingKey(): string | null {

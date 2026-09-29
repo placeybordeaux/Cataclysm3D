@@ -1,9 +1,9 @@
-// Difficulty preset chosen in the new-game flow (docs/DESIGN_V2.md decision 3). This is the
-// *stub* the new-game flow exposes: it records the choice (per character, in the save) and
-// calls whatever appliers are registered. The balance work owns what a preset changes:
+// Difficulty preset chosen in the new-game flow (docs/DESIGN_V2.md decision 3). The new-game
+// flow records the choice (per character, in the save) and calls the registered appliers.
+// What a preset changes lives in src/game/difficulty.ts (the knobs) and src/difficulty.ts,
+// which registers the applier:
 //
-//   import { difficultyHooks } from '../progression/difficulty';
-//   difficultyHooks.push((d, game) => { spawner.opts.density = d === 'accessible' ? 0.6 : 1; });
+//   difficultyHooks.push((d, game) => applyDifficultySettings(game, d, settingsFor(d)));
 //
 // Appliers run when a new game starts and again when a save loads.
 
@@ -22,8 +22,14 @@ export interface DifficultyInfo {
 export const DIFFICULTIES: DifficultyInfo[] = [
   { id: 'accessible', name: 'Accessible', desc: 'Gentler early spawns, forgiving needs, clear warnings. Menus pause.' },
   { id: 'classic', name: 'Classic', desc: 'Bright Nights numbers, adapted only where real time breaks them.' },
-  { id: 'custom', name: 'Custom', desc: 'Pick every rule yourself.', unavailable: 'Custom rules are not available yet.' },
+  { id: 'custom', name: 'Custom', desc: 'Your own rules: spawns, monster speed, needs, healing, cold, day length, pausing, permadeath.  Starts from Accessible; edit them here or in Options > Difficulty.' },
 ];
+
+/**
+ * Opens the Custom rules editor (src/difficulty.ts sets it; the rules a new Custom game starts
+ * with). Null until installed: the new-game flow then shows no edit button.
+ */
+export const customRulesEditor: { open: (() => void) | null } = { open: null };
 
 export const DEFAULT_DIFFICULTY: Difficulty = 'accessible';
 
