@@ -101,6 +101,33 @@ distance-dependent asset detail for readability. Our implementation:
 - Camera modes (switch with `V`): first-person (default), over-the-shoulder, top-down
   (classic CDDA view). Keep all three working.
 
+### Renderer APIs (src/render)
+
+Pipeline: scene → low-res MRT target (~360 px tall, exact integer upscale; colour + view
+normals + depth) → post pass (depth/normal outlines, fog, Bayer dither, palette/LUT grade)
+→ nearest blit. URL params: `px=`, `grade=palette|smooth|off`, `tex=atlas|procedural`,
+`cam=first|third|top`, `walls=tinted|sprite`, `debug=1` (stats overlay; F6/F7 cycle grade
+and wall style). Keys: `V` camera mode, `F` flashlight.
+
+- **Sprites** (creatures, items, effects): `const h = renderer.sprites.add({ x, y, z,
+  frame | glyph: {symbol, color}, height, anchor, lift })` → `h.set(x, y, z)`,
+  `h.setFrame(frame, height?)`, `h.flash(color, seconds)`, `h.setVisible(b)`, `h.remove()`.
+  Tile coords (+0.5 = tile centre). Billboards are lit, shadowed and darker indoors.
+- **Lights**: `const l = renderer.lights.add({ x, y, z, color, intensity, radius, height,
+  flicker })` → `l.set(...)`, `l.intensity = …`, `l.remove()`. Nearest 8 are active.
+  Terrain/furniture `light_emitted` and `fd_fire` fields are picked up automatically.
+  `renderer.setFlashlight(on)` is the items-system hook.
+- **Tile art**: everything goes through `TileTextureSource` (src/render/textureSource.ts);
+  `AtlasTextureSource` (UltiCa) falls back to `ProceduralTextureSource`. Monster/item
+  systems should get frames via `renderer.source.sprite(id)` / `.item(id)` / `.glyph()`.
+- **Other**: `renderer.setWeather('clear'|'rain'|'storm'|'snow')`,
+  `renderer.setCameraMode('first'|'third'|'top')`, `renderer.flushChunks()` (tests).
+  Plain three.js objects added to `renderer.scene` are auto-patched for the MRT output.
+- Map edits need no renderer calls: chunk meshes rebuild when `chunk.version` changes.
+- Debug API: `cdda.setCameraMode`, `cdda.flashlight`, `cdda.setWeather`, `cdda.settle()`
+  (build all chunks + render; call before screenshots), `cdda.renderStats()`.
+  `tools/render-shots.sh <prefix>` renders the regression screenshot set.
+
 ## Game design conversion rules
 
 - Controls: WASD move, mouse look, Shift run, C crouch, LMB attack/fire, RMB aim,
