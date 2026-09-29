@@ -286,10 +286,14 @@ function openNearby(env: ListEnv, focus: string | null): Panel {
     const fill = capacityBar('Room', fmtVolume);
     if (s.fill) fill.set(s.fill.used, s.fill.max);
     const take = button('Take all', () => {
-      if (!cur) return;
-      last = m.takeAll(cur);
-      showResult();
-      toast({ category: last.left.length ? 'warning' : 'info', title: summaryTitle(last).replace(/:$/, '.'), body: last.left.length ? last.left.map((l) => `${l.count > 1 ? l.count + ' ' : ''}${l.name}: ${l.reason}`).join(' · ') : undefined });
+      const src = cur;
+      if (!src) return;
+      // Picking things up takes BN's time (instant under the tactical pause).
+      env.perform('Taking everything', m.takeCost([src]), () => {
+        last = m.takeAll(src);
+        showResult();
+        toast({ category: last.left.length ? 'warning' : 'info', title: summaryTitle(last).replace(/:$/, '.'), body: last.left.length ? last.left.map((l) => `${l.count > 1 ? l.count + ' ' : ''}${l.name}: ${l.reason}`).join(' · ') : undefined });
+      }, head);
     }, { small: true, disabled: s.count ? false : 'Nothing here', key: 'A' });
     head.replaceChildren(h('div', { class: 'bn-source-title' }, h('span', { text: `${cap(m.where(cur))}` }), take), s.fill ? fill.el : h('span'));
     if (!list || (list.el.dataset.loc !== cur)) {
