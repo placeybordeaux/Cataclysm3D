@@ -10,6 +10,7 @@ import { ActivityManager } from './activity';
 import { Keys } from '../ui/keys';
 import type { SpawnedItem } from '../data/itemgroups';
 import type { ItemSpawn } from '../world/map';
+import type { WeatherState } from './weather';
 
 function toSpawned(sp: ItemSpawn): SpawnedItem {
   return { id: sp.typeId, count: sp.count ?? 1, charges: sp.charges, contents: sp.contents?.map(toSpawned) } as SpawnedItem;
@@ -36,6 +37,8 @@ export class Game {
   readonly activities: ActivityManager;
   readonly keys: Keys;
   paused = false;
+  /** Current weather (src/game/weather.ts); null until installWeather runs. Read by HUD/sound/vision. */
+  weather: WeatherState | null = null;
   private acc = 0;
   mouseSensitivity = 0.0025;
 

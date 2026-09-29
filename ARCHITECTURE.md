@@ -87,6 +87,22 @@ tests/               vitest unit tests (pure logic, no DOM/WebGL)
 - `combat.ts` pure CDDA melee/ranged/monster-attack math taking an Rng.
 - `player.ts` PlayerAvatar = Character + position/view. Game wires `onMessage`/`onDeath`.
 
+### World interaction (src/game, installed by src/worldInteraction.ts)
+
+- `sound.ts` `emitSound(game, {x,y,z}, volume, desc, {category?, source?, sfxId?})` — use it
+  for every noise (not `events.emit('sound')` directly): the player hears it (log, waking,
+  interrupting activities) and monsters poll `soundsHeardAt(game, x,y,z, hearing)` /
+  `recentSounds(game)`; CDDA sound_distance + weather attenuation + wall muffling.
+- `vision.ts` `lineOfSight`, `lightAt(game,x,y,z)` (CDDA light units), `playerCanSee`,
+  `creatureCanSee(game, from, to, visionDay, visionNight)`, `tooDarkReason(game,'read'|'craft')`.
+- `bash.ts` `bash(game,x,y,z, str | {bash,cut}, {source?,silent?,destroy?})` with CDDA
+  persistent map damage; `playerSmash` is the `X` key.
+- `fields.ts` fire/smoke/blood processing near the player; `ignite`, `addField`,
+  `fieldDamageAt(game,x,y,z,{materials,flags})` for monsters standing in fire.
+- `targeting.ts` `targetTile(game)` = tile under the crosshair within reach; `interact.ts`
+  (`e`), `zlevels.ts` (`<`/`>`, falling), `rest.ts` (`|` wait, `$` sleep), `weather.ts`
+  (`game.weather`), `traps.ts`, `lightitems.ts` (`F`: flashlight transform).
+
 ### Extension points (prefer these over editing someone else's code)
 
 - `game.systems.push({ name, update(game, realDt, gameDt) })` for per-tick simulation.

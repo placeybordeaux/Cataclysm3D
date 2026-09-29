@@ -9,6 +9,7 @@ import { installWorldgenDebug } from './world/worldgen_debug';
 import { installDebugApi } from './debug';
 import { initUi } from './ui/framework';
 import { installAudio } from './audio/install';
+import { installWorldInteraction } from './worldInteraction';
 
 // URL params (all optional): seed=<int>, gen=world|test (default world), debug=1 (render stats overlay),
 // renderer params px/grade/tex/cam/walls (see src/render/renderer.ts), debug=atlas (sprite sheet view
@@ -46,6 +47,7 @@ async function main(): Promise<void> {
   const api = installDebugApi(game, renderer);
   if (worldgen) installWorldgenDebug(api, game, worldgen);
   installAudio(game, api);
+  installWorldInteraction(game, renderer, api);
 
   let last = performance.now();
   const loop = (now: number) => {
