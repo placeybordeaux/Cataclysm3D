@@ -29,6 +29,9 @@ export const MAPGEN_TYPES = [
   'dimension', 'dimension_region_layout', 'omt_placeholder', 'overmap_special_migration', 'oter_id_migration', 'nested_mapgen',
   'update_mapgen', 'vehicle_placement', 'vehicle_spawn',
 ];
+// Owned by tools/extract/vehicles.ts (public/data/vehicles.json, with CDDA's "parts append"
+// copy-from rule and slimmed parts); nothing at runtime reads them from misc.
+export const VEHICLE_TYPES = ['vehicle', 'vehicle_part', 'vehicle_group', 'vehicle_part_category', 'vehicle_part_location'];
 const IGNORED_TYPES = [
   'talk_topic', 'npc', 'npc_class', 'widget', 'mission_definition', 'faction_mission', 'effect_on_condition', 'event_transformation',
   'event_statistic', 'achievement', 'conduct', 'score', 'jmath_function', 'camp_migration', 'var_migration', 'overlay_order',
@@ -49,8 +52,7 @@ const MISC: Record<string, string> = {
   field_type: 'field_type', trap: 'trap', construction: 'construction', construction_group: 'construction_group',
   construction_category: 'construction_category', body_part: 'body_part', sub_body_part: 'sub_body_part', anatomy: 'anatomy',
   limb_score: 'limb_score', character_mod: 'character_mod', skill: 'skill', ITEM_CATEGORY: 'item_category',
-  MONSTER_FACTION: 'monster_faction', SPECIES: 'species', snippet: 'snippet', vehicle: 'vehicle', vehicle_part: 'vehicle_part',
-  vehicle_group: 'vehicle_group', vehicle_part_category: 'vehicle_part_category', vehicle_part_location: 'vehicle_part_location',
+  MONSTER_FACTION: 'monster_faction', SPECIES: 'species', snippet: 'snippet',
   bionic: 'bionic', proficiency: 'proficiency', proficiency_category: 'proficiency_category', fault: 'fault', fault_fix: 'fault_fix',
   fault_group: 'fault_group', morale_type: 'morale_type', addiction_type: 'addiction_type', practice: 'practice',
   nested_category: 'nested_category', recipe_category: 'recipe_category', recipe_group: 'recipe_group', uncraft: 'uncraft',
@@ -99,7 +101,7 @@ function parseArgs(argv: string[]): Args {
 export function extract(cddaDir: string, log: (m: string) => void = console.log): { data: GameData; warnings: string[] } {
   const warnings: string[] = [];
   const warn = (m: string) => warnings.push(m);
-  const raw = loadCddaObjects(cddaDir, { excludeTypes: [...MAPGEN_TYPES, ...IGNORED_TYPES] });
+  const raw = loadCddaObjects(cddaDir, { excludeTypes: [...MAPGEN_TYPES, ...VEHICLE_TYPES, ...IGNORED_TYPES] });
 
   const unknownTypes = [...raw.keys()].filter((t) => !MISC[t] && !PRIMARY.includes(familyOf(t)) && familyOf(t) !== 'recipe');
   if (unknownTypes.length) throw new Error(`unclassified CDDA types (add to MISC or IGNORED_TYPES in tools/extract/index.ts): ${unknownTypes.join(', ')}`);

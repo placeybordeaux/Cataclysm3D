@@ -899,11 +899,10 @@ export function obstacleAt(map: GameMap, x: number, y: number, z: number, wheel:
 }
 
 /**
- * CDDA is_bashable_ter_furn(p, allow_floor = false): floor-only bashes (grass, pavement,
- * "bash_below") don't count. The extractor currently drops bash_below, so FLAT terrain
- * (walkable ground) stands in for it.
+ * CDDA is_bashable_ter_furn(p, allow_floor = false): floor-only bashes ("bash_below", e.g.
+ * grass) don't count. Plain floors without bash_below (t_floor, pavement) are excluded by
+ * the caller's move cost 2 check, exactly like vehicle_move.cpp.
  */
 function wallBash(d: TerrainDef | FurnitureDef): boolean {
-  if (!d.bash || d.bash.bash_below) return false;
-  return !('move_cost' in d && hasFlag(d, 'FLAT'));
+  return !!d.bash && !d.bash.bash_below;
 }

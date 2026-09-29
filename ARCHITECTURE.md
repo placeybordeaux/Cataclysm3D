@@ -38,7 +38,7 @@ tileset, rendered in the "3D pixel art" style of *Project Shadowglass*.
   `--print "<expr>"` prints JSON from the page for scripted assertions.
 - `window.cdda` (src/debug.ts) is the automation API. Register helpers for anything you
   add (`cdda.spawnMonster(id, dx, dy)`, `cdda.giveItem(id)`, …) so others can test.
-- Generated data lives in `public/data/` (by `npm run extract`) and `public/atlas/`
+- Generated data lives in `public/data/` (by `npm run data:all`, which runs every extractor) and `public/atlas/`
   (by `npm run atlas`). Both are **committed** so worktrees run without regenerating.
 
 ## Coordinates & units (see src/world/coords.ts, src/data/types.ts)
@@ -135,7 +135,8 @@ tests/               vitest unit tests (pure logic, no DOM/WebGL)
 
 - Data: `public/data/vehicles.json` from `npm run extract:vehicles` (prototypes with CDDA's
   copy-from "parts append" rule, slimmed vehicle parts, vehicle groups, fuel kJ/charge).
-  `misc.vehicle` predates the append fix; use vehicles.json.
+  `npm run data:all` regenerates every public/data file in order (core, npcs, mapgen, vehicles,
+  ui). Vehicle types are no longer in misc.json.
 - `vehicle.ts` `Vehicle`: parts on CDDA mount points (+x forward, +y right), world pose
   `x,y` (centre of mount 0,0) + `facing` deg (0 east, clockwise). `occupiedTiles()`,
   `mountAtTile`, `moveCostAt/opaqueAt` (CDDA obstacle/aisle rules, open doors), mass,
