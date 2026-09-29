@@ -12,7 +12,7 @@ const weapons = process.argv.length > 2 ? process.argv.slice(2) : ['fists', 'kni
 for (const w of weapons) {
   const c = new Character(data, { seed: 3 });
   c.msg = () => {};
-  if (w !== 'fists') c.inv.wielded = createItem(data, w);
+  if (w !== 'fists' && !c.inv.wield(createItem(data, w), null).ok) throw new Error(`can't wield ${w}`);
   const rng = new Rng(5);
   let hits = 0, dmg = 0, secs = 0;
   const N = 2000;

@@ -42,6 +42,7 @@ import { SECONDS_PER_HOUR } from '../src/core/time';
 import { applyBuild, defaultBuild } from '../src/ui/chargen';
 import type { UiContext } from '../src/ui/context';
 import { createItem, type Item } from '../src/game/item';
+import { L } from '../src/game/moves';
 import type { Monster } from '../src/game/monster';
 
 const HELP = `balance_sim: headless difficulty-preset simulation (see docs/BALANCE.md)
@@ -503,14 +504,11 @@ class Newcomer {
           const dmg = it.meleeDamage('bash') + it.meleeDamage('cut') + it.meleeDamage('stab');
           const cur = p.inv.wielded ? p.inv.wielded.meleeDamage('bash') + p.inv.wielded.meleeDamage('cut') + p.inv.wielded.meleeDamage('stab') : 0;
           if (!it.isGun() && dmg >= 8 && dmg > cur + 2 && it.weight() < 4000 && p.inv.canWield(it).ok) {
-            game.map.removeItem(x, y, p.z, it as never);
-            if (p.inv.wielded) game.map.addItem(x, y, p.z, p.inv.wielded as never);
-            p.inv.wielded = it;
-            this.weapon = it.typeId;
+            if (p.inv.wield(it, L.ground(game.map as never, x, y, p.z)).ok) this.weapon = it.typeId;
             continue;
           }
           if (!it.isComestible() && !it.isArmor()) continue;
-          if (p.inv.pickUp(it).ok) game.map.removeItem(x, y, p.z, it as never);
+          p.inv.pickUp(it, L.ground(game.map as never, x, y, p.z));
         }
       }
   }
@@ -555,7 +553,7 @@ function duel(seed: number, weapon: string, foes: number): Record<string, number
   const b = defaultBuild(ctx);
   b.density = undefined;
   applyBuild(ctx, b);
-  if (weapon !== 'fists') p.inv.wielded = createItem(gd, weapon);
+  if (weapon !== 'fists' && !p.inv.wield(createItem(gd, weapon), null).ok) throw new Error(`duel: can't wield ${weapon}`);
   const ms: Monster[] = [];
   for (let i = 0; i < foes; i++) ms.push(mons.sys.spawn(gd.monsters.mon_zombie, 34.5, 29.5 + 2 * i, 0));
   const hp0 = MAIN_PARTS.reduce((a, bp) => a + p.hp[bp].cur, 0);
@@ -637,9 +635,7 @@ function cold(seed: number): Record<string, number | string | boolean> {
     for (let dx = -10; dx <= 10 && !blanket; dx++) {
       for (const it of game.map.itemsAt(p.tileX + dx, p.tileY + dy, 0) as unknown as Item[]) {
         if (/blanket|sleeping_bag|quilt|duvet/.test(it.typeId) && p.inv.canWear(it).ok) {
-          game.map.removeItem(p.tileX + dx, p.tileY + dy, 0, it as never);
-          p.inv.wear(it);
-          blanket = true;
+          blanket = p.inv.wear(it, L.ground(game.map as never, p.tileX + dx, p.tileY + dy, 0)).ok;
           break;
         }
       }
