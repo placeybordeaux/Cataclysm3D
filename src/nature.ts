@@ -232,6 +232,7 @@ export function installNature(game: Game, renderer: Renderer | null, api?: Debug
     swimUi.confirmDive = (warn, answer) => {
       if (typeof document === 'undefined') return answer(true);
       const title = warn.length ? 'Diving will destroy the following items.  Proceed?' : 'Dive into the water?';
+      let answered = false;
       openMenu({
         title,
         entries: [
@@ -239,7 +240,12 @@ export function installNature(game: Game, renderer: Renderer | null, api?: Debug
           { label: c('c_white', 'Yes'), value: 'y', hotkey: 'y' },
           { label: c('c_white', 'No'), value: 'n', hotkey: 'n' },
         ],
-        onSelect: (v) => answer(v === 'y'),
+        onSelect: (v) => {
+          answered = true;
+          answer(v === 'y');
+        },
+        // Esc is a "no" too (and frees the question for the next attempt).
+        onClose: () => !answered && answer(false),
       });
     };
   }

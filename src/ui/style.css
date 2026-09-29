@@ -22,6 +22,8 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #000; }
 #ui .cdda-window > .body { overflow: auto; padding: 2px 8px; flex: 1; white-space: pre-wrap; }
 #ui .cdda-window > .footer { border-top: 1px solid var(--c-light_gray); padding: 1px 8px; color: var(--c-dark_gray); white-space: pre-wrap; }
 #ui .menu-entry { white-space: pre; cursor: pointer; }
+#ui .menu-list-clip { min-width: 0; overflow: hidden; }
+#ui .menu-list-clip .menu-entry { overflow: hidden; text-overflow: ellipsis; }
 #ui .menu-entry.sel { background: var(--c-blue); color: var(--c-white); }
 #ui .menu-entry.disabled { color: var(--c-dark_gray); }
 #ui .menu-entry .hotkey { color: var(--c-light_green); }

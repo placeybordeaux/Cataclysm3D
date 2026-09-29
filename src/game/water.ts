@@ -281,6 +281,8 @@ export function soakItems(game: Game): void {
   }
 }
 
+const asking = new WeakSet<Game>();
+
 /** Ask before diving in; the UI sets this (absent = always dive, e.g. tests). */
 export const swimUi: { confirmDive?: (warn: string[], answer: (yes: boolean) => void) => void } = {};
 
@@ -310,7 +312,11 @@ export function updateSwimming(game: Game, realDt: number): void {
     const tx = p.x, ty = p.y;
     p.x = st.shoreX;
     p.y = st.shoreY;
+    // One question at a time: ticks that run while it's open (scripted steps) mustn't stack more.
+    if (asking.has(game)) return;
+    asking.add(game);
     swimUi.confirmDive(warn, (yes) => {
+      asking.delete(game);
       if (!yes) return;
       st.divingOk = true;
       p.x = tx;

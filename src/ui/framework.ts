@@ -193,6 +193,9 @@ export function openMenu<T>(opts: MenuOpts<T>): UiWindow & { refresh(entries?: M
   if (opts.detailPane) {
     const cols = document.createElement('div');
     cols.className = 'cols';
+    // Long names ("The Hitchhiker's Guide to the Cataclysm (unread)") end in an ellipsis
+    // instead of running on under the detail pane.
+    listEl.className = 'menu-list-clip';
     cols.append(listEl, detailEl);
     detailEl.style.borderLeft = '1px solid var(--c-dark_gray)';
     detailEl.style.paddingLeft = '8px';

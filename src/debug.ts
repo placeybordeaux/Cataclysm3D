@@ -102,7 +102,12 @@ function installCharacterHelpers(api: DebugApi, game: Game): void {
   };
   /** Give an item: worn if armor and `wear`, else stashed/wielded. Returns the action message. */
   api.giveItem = (id: string, opts: { count?: number; wear?: boolean; wield?: boolean; ammo?: string } = {}) => {
-    const it = createItem(game.data, id, { count: opts.count, ammo: opts.ammo });
+    let it = createItem(game.data, id, { count: opts.count, ammo: opts.ammo });
+    // Liquids come in their default container (a loose puddle can't be carried).
+    if (it.isLiquid() && it.def.container && game.data.items[it.def.container]) {
+      const bottle = createItem(game.data, it.def.container);
+      if (!bottle.put(it)) it = bottle;
+    }
     if (opts.wear) return p().inv.wear(it).msg;
     if (opts.wield) return p().inv.wield(it).msg;
     return p().inv.pickUp(it).msg;
