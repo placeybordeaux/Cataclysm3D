@@ -8,6 +8,9 @@ import type { UiContext } from './context';
 import { logLine } from './format';
 import { openMemorialFor } from '../save/install';
 import { maybeShowStartHints, randomTip } from './tips';
+import { progressionOf } from '../progression/registry';
+import { runNewGame, runQuickStart } from '../progression/newgame';
+import { openJournal } from '../progression/journal';
 
 // Title screen (CDDA main_menu.cpp look: the ASCII logo from data/title/en.title over a
 // slowly turning, darkened view of the world, and a horizontal menu bar with highlighted
@@ -63,28 +66,42 @@ export function showMainMenu(ctx: UiContext, hud: Hud): Promise<void> {
       resolve();
     };
 
+    // v2 on-ramp (src/progression): Start = quick start as a named Evacuee, New Game = the
+    // start picker (unlocked professions/scenarios; the full creator once unlocked).
+    const prog = progressionOf(game);
+    const banner = prog?.takeTitleBanner() ?? [];
+    const startGame = () => {
+      close();
+      void maybeShowStartHints(ctx);
+    };
     const entries: MainEntry[] = [
-      {
-        label: 'New Game', key: 'n', enabled: () => true,
-        run: async () => {
-          el.style.display = 'none';
-          const build = await openCharGen(ctx);
-          el.style.display = '';
-          if (!build) return;
-          applyBuild(ctx, build);
-          close();
-          game.message(`${build.name}, you wake up in the evac shelter.  Press <keybind:help> for help.`, 'c_light_gray');
-          void maybeShowStartHints(ctx);
-        },
-      },
+      ...(prog
+        ? [
+            { label: 'Start', key: 's', enabled: () => true, run: async () => void ((await runQuickStart(ctx, prog, ctx.worldgen)) && startGame()) },
+            { label: 'New Game', key: 'n', enabled: () => true, run: async () => void ((await runNewGame(ctx, prog, ctx.worldgen)) && startGame()) },
+          ]
+        : [{
+            label: 'New Game', key: 'n', enabled: () => true,
+            run: async () => {
+              el.style.display = 'none';
+              const build = await openCharGen(ctx);
+              el.style.display = '';
+              if (!build) return;
+              applyBuild(ctx, build);
+              close();
+              game.message(`${build.name}, you wake up in the evac shelter.  Press <keybind:help> for help.`, 'c_light_gray');
+              void maybeShowStartHints(ctx);
+            },
+          }]),
       {
         label: 'Load', key: 'l', enabled: () => !!game.load && (game.hasSave?.() ?? true),
         run: async () => {
           if (await game.load!()) close();
         },
       },
+      ...(prog ? [{ label: 'Journal', key: 'j', enabled: () => true, run: () => void openJournal(game, prog, false) }] : []),
       { label: 'Memorial', key: 'm', enabled: () => true, run: () => openMemorialFor(game) },
-      { label: 'Settings', key: 's', enabled: () => true, run: () => void openOptions(ctx) },
+      { label: 'Options', key: 'o', enabled: () => true, run: () => void openOptions(ctx) },
       { label: 'Help', key: 'h', enabled: () => true, run: () => void openHelp(ctx) },
       {
         label: 'Quit', key: 'q', enabled: () => true,
@@ -134,7 +151,8 @@ export function showMainMenu(ctx: UiContext, hud: Hud): Promise<void> {
       }).join('');
       el.innerHTML = `<div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2.5vh">
           <div class="pre title-art" style="text-shadow:0 0 6px #000,1px 1px 0 #000;line-height:1.05">${colorize(ctx.data.title.join('\n'))}</div>
-          <div class="pre" style="color:var(--c-light_gray);text-shadow:1px 1px 0 #000">${c('c_dark_gray', 'a real-time 3D port of')} ${c('c_white', 'Cataclysm: Dark Days Ahead')}</div>
+          <div class="pre" style="color:var(--c-light_gray);text-shadow:1px 1px 0 #000">${c('c_dark_gray', 'a real-time 3D port of')} ${c('c_white', 'Cataclysm: Bright Nights')}</div>
+          ${banner.length ? `<div class="pre title-unlocks" style="text-align:center;text-shadow:1px 1px 0 #000">${banner.map((u) => `${c('c_light_green', u.kind === 'scenario' ? 'New scenario unlocked:' : u.kind === 'cosmetic' ? 'New title unlocked:' : u.kind === 'creator' ? 'Unlocked:' : 'New start unlocked:')} ${c('c_white', u.name)}`).join('\n')}</div>` : ''}
           <div class="pre cdda-box" style="padding:.3em 1em">${bar}</div>
           <div class="pre" style="color:var(--c-dark_gray)">${c('c_light_green', '←→')} select  ${c('c_light_green', 'Enter')} confirm  or press the highlighted letter</div>
           ${tip ? `<div style="max-width:70ch;text-align:center;color:var(--c-light_gray);text-shadow:1px 1px 0 #000">${c('c_light_cyan', 'Tip of the day:')} ${c('c_light_gray', tip)}</div>` : ''}
