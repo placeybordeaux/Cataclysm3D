@@ -86,6 +86,11 @@ page.on('console', (m) => {
   if (m.type() === 'error' || m.type() === 'warn' || m.type() === 'log') logBuf.push(`[${m.type()}] ${m.text()}`);
 });
 page.on('pageerror', (e) => logBuf.push(`[EXCEPTION] ${(e as Error).stack ?? e}`));
+// The game's "Leave site?" guard (src/core/unload.ts) would block `load`: accept it, logged.
+page.on('dialog', (d) => {
+  logBuf.push(`[dialog ${d.type()}] ${d.message()}`);
+  void d.accept();
+});
 page.on('response', (r) => {
   if (r.status() >= 400) logBuf.push(`[HTTP ${r.status()}] ${r.url()}`);
 });

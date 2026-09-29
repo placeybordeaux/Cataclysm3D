@@ -357,6 +357,7 @@ const scenarios: Scenario[] = [
   }],
   ['rebind', 'Options > Key bindings: rebind wear to y; movement keys refused; reset', async () => {
     await toGameplay();
+    await js(`cdda.giveItem('jacket_light')`); // setup: something the Wear menu can list
     await x.key('Escape');
     await until((t) => t.windows.length > 0);
     await x.key('o');
@@ -408,6 +409,52 @@ const scenarios: Scenario[] = [
     check('wheel zooms in top-down view', mode !== 'top' || d1 !== d0, { mode, d0, d1 });
     await x.key('v');
   }],
+  ['save', 'F5 saves; leaving the page asks first; title Load/Memorial screens', async () => {
+    await toGameplay();
+    const before = (await log()).length;
+    await x.key('F5');
+    await sleep(1500);
+    const msgs = (await log()).slice(before);
+    check('F5 says the game was saved (and does not reload the page)', msgs.some((m) => /saved/i.test(m)), msgs);
+    dialogs.length = 0;
+    await page.reload({ waitUntil: 'load' }).catch(() => {});
+    await page.waitForFunction('window.cdda?.ready', { timeout: 240_000 });
+    check('reloading mid-game asked "Leave site?" first', dialogs.includes('beforeunload'), dialogs);
+    await x.click(W / 2, 20);
+    await x.key('l');
+    let s = await until((t) => t.windows.length > 0, 3000);
+    check('title: l opens the Load menu', s.windows.includes('Load game'), s.windows);
+    await shot('load_menu');
+    await x.key('Backspace');
+    s = await state();
+    check('Backspace leaves it', !s.windows.length, s.windows);
+    // Back into a game for the scenarios that follow.
+    await x.key('n');
+    await x.key('F');
+    await x.key('y');
+    await sleep(300);
+    await x.key('y');
+    await until((t) => t.windows.includes('Hints'), 8000);
+    await x.key('Backspace');
+  }],
+  ['death', 'dying: menus close, the mouse is freed, last words can be typed at once', async () => {
+    await toGameplay();
+    await x.key('i');
+    await js(`cdda.hurt('head', 500); cdda.hurt('torso', 500)`);
+    let s = await until((t) => t.deathScreen, 4000);
+    await sleep(1800);
+    s = await state();
+    check('the death screen shows, with no menu left on top', s.deathScreen && !s.windows.length, s);
+    check('…and the mouse is free', !s.lock, s);
+    await shot('death');
+    await x.type('braaains');
+    const words = await js<string>(`document.querySelector('.last-words')?.value ?? ''`);
+    check('typing goes straight into the last words', words === 'braaains', words);
+    dialogs.length = 0;
+    await x.key('Enter');
+    await page.waitForFunction('window.cdda?.ready', { timeout: 240_000 }).catch(() => {});
+    check('Enter returns to the title without a "Leave site?" prompt', !dialogs.includes('beforeunload'), dialogs);
+  }],
 ];
 
 if (argv.includes('--list') || argv.includes('--dry-run')) {
@@ -432,6 +479,11 @@ page = (await browser.pages())[0] ?? (await browser.newPage());
 x = new XInput(page);
 const errors: string[] = [];
 page.on('pageerror', (e) => errors.push(String((e as Error).stack ?? e)));
+const dialogs: string[] = [];
+page.on('dialog', (d) => {
+  dialogs.push(d.type());
+  void d.accept();
+});
 await page.goto(`http://127.0.0.1:${port}/?seed=1&realinput=1&menu=1`);
 await page.waitForFunction('window.cdda?.ready || window.cddaError', { timeout: 240_000 });
 {

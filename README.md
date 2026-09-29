@@ -67,6 +67,15 @@ Everything else uses CDDA's keys, moved where WASD collides with them:
 | `p` | bionics | `[` | mutations |
 | `_` | martial arts | `)` | achievements & scores |
 | `F5` | quicksave | `?` | help |
+| `F11` | fullscreen | `Esc` | pause menu |
+
+Menus pause the game and close on the key that opened them, **Backspace** or **Esc**; the
+mouse stays captured, so closing a menu drops you straight back into mouse-look. Outside
+fullscreen the browser always frees the mouse on Esc: the game then pauses until you click
+or press any key. In fullscreen (`F11`) Esc is an ordinary key and the mouse stays captured
+(hold Esc to leave fullscreen). Every key can be rebound in **Options > Key bindings**;
+movement follows the physical WASD positions on any layout (ZQSD on AZERTY), and
+**Options > Menu cursor = free** shows the mouse cursor in menus for pointing and clicking.
 
 ## What's in it
 
@@ -111,7 +120,8 @@ npm run data:all                     # re-extract public/data from ~/code/Catacl
 npm run atlas                        # recompile the UltiCa sprite atlas
 npm run audio                        # rebuild the soundpack subset
 npm run shot -- --help               # headless screenshots / scripted checks
-npx tsx tools/drive.ts --help        # persistent headless session (--gpu, --dist = production build)
+npx tsx tools/drive.ts --help        # persistent headless session (--gpu, --dist = production build, --headful = real input)
+npx tsx tools/realinput.ts           # real keyboard/mouse UX regression (Xvfb + xdotool)
 ```
 
 ## Credits and licences
