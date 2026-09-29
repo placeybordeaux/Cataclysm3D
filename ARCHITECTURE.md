@@ -382,6 +382,8 @@ Keys: `V` camera mode, `F` flashlight.
   onProgress?, onCancel?, warp?, interruptible?})` for any long action (craft, read, butcher,
   construct, wait, sleep). Warps the clock, cancels on movement/danger. Danger sources
   register `game.activities.dangerChecks.push(() => reason | null)`.
+  The survivor's own state (freezing, dehydrated) goes in `activities.distractionChecks`: it
+  interrupts only when it newly arises, never blocks starting (CDDA's "ignore" semantics).
 - **Items on the map** are real `Item` instances (`src/game/item.ts`). Mapgen emits
   `ItemSpawn`s which `GameMap.itemFactory` (set in Game) converts via `fromSpawned`.
 - **Tile raycasts** `src/game/raycast.ts`: `raycastTiles(map, {x,y,h}, dir, {maxDist,
