@@ -38,7 +38,8 @@ export function saveSettings(): void {
 }
 
 let host: Ui2Host | null = null;
-const surfaces = new Set<{ pauses: boolean }>();
+/** `pauses`: true = pause if the setting wants it (inventory-type); 'always' = a pause menu. */
+const surfaces = new Set<{ pauses: boolean | 'always' }>();
 type KeyHandler = (e: KeyboardEvent) => boolean;
 const keyStack: KeyHandler[] = [];
 const shortcuts = new Map<string, (e: KeyboardEvent) => void>();
@@ -62,8 +63,8 @@ export function standaloneHost(): Ui2Host {
 }
 
 /** Register an open surface; call the returned function when it closes. */
-export function acquireSurface(opts: { pauses?: boolean } = {}): () => void {
-  const s = { pauses: !!opts.pauses };
+export function acquireSurface(opts: { pauses?: boolean | 'always' } = {}): () => void {
+  const s = { pauses: opts.pauses === 'always' ? ('always' as const) : !!opts.pauses };
   surfaces.add(s);
   if (!active) activate();
   updatePause();
@@ -88,7 +89,8 @@ function activate(): void {
 }
 
 function updatePause(): void {
-  const want = settings.pauseInInventory && [...surfaces].some((s) => s.pauses);
+  // Pause menus (Esc, options, help) stop time whatever the setting says, like the legacy menus did.
+  const want = [...surfaces].some((s) => s.pauses === 'always') || (settings.pauseInInventory && [...surfaces].some((s) => s.pauses));
   host?.setPaused(want);
 }
 

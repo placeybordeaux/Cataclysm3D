@@ -22,8 +22,8 @@ export interface PanelOpts {
   x?: number;
   y?: number;
   group?: string;
-  /** Inventory-type: asks for the tactical pause while open (see host.ts settings). */
-  pauses?: boolean;
+  /** Inventory-type: asks for the tactical pause while open (see host.ts settings); 'always' = a pause menu. */
+  pauses?: boolean | 'always';
   closable?: boolean;
   /** Extra title-bar elements (buttons, a view toggle). */
   titleExtras?: HTMLElement[];

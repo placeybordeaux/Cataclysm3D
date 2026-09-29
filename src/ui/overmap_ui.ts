@@ -227,7 +227,7 @@ export function openOvermap(ctx: UiContext): UiWindow | null {
 }
 
 /** Centre OMT of the evac_center special (the refugee center), or null if none is near. */
-function refugeeCenterOmt(wg: NonNullable<UiContext['worldgen']>, from: { x: number; y: number }): { x: number; y: number } | null {
+export function refugeeCenterOmt(wg: NonNullable<UiContext['worldgen']>, from: { x: number; y: number }): { x: number; y: number } | null {
   const sp = wg.overmap.findSpecial('evac_center', from, 3);
   if (!sp) return null;
   let n = 0, sx = 0, sy = 0;

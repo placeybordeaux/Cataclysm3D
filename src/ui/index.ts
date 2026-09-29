@@ -15,7 +15,8 @@ import { cameraLookAt, describeHit, openLookMode } from './look';
 import { INITIAL_VISIBILITY, openOvermap, overmapSeenTracker, revealAround } from './overmap_ui';
 import { showDeathScreen } from './death';
 import { openEscMenu, openMessageLog, showMainMenu } from './menus';
-import { applyStoredOptions, openOptions } from './options';
+import { applyStoredOptions, openOptions, registerOption } from './options';
+import { installMapMarks } from './mapmarks';
 import { DEFAULT_BINDINGS } from './keys';
 import { installTipsOption, openHints } from './tips';
 import { installLiquidUi } from './liquid_ui';
@@ -48,6 +49,19 @@ export async function installUi(game: Game, renderer: Renderer, worldgen: WorldG
   const ctx: UiContext = { game, renderer, worldgen, data };
   const h = new Hud(ctx, getUiRoot());
   applyStoredOptions(ctx);
+  installMapMarks(game);
+  registerOption({
+    name: 'HUD style',
+    desc: 'Modern: body, needs and weapon as icons that only light up when they matter. Detailed: the CDDA sidebar with every number.',
+    value: () => (h.modern.prefs.detailed ? 'Detailed' : 'Modern'),
+    change: () => h.modern.setPrefs({ detailed: !h.modern.prefs.detailed }),
+  });
+  registerOption({
+    name: 'HUD width',
+    desc: 'Full: the HUD uses the screen corners. 16:9: on ultrawide screens it stays in a centred 16:9 area, closer to where you look.',
+    value: () => (h.modern.prefs.narrow ? '16:9' : 'Full'),
+    change: () => h.modern.setPrefs({ narrow: !h.modern.prefs.narrow }),
+  });
   installTipsOption();
   installLiquidUi();
 
