@@ -482,31 +482,24 @@ export class Inventory {
     return w;
   }
 
-  /** Resistance of one worn item on a part vs a damage type (item::resist, simplified). */
-  armorResist(it: Item, bp: BodyPartId, dtype: string, rng?: Rng): number {
+  /**
+   * Resistance of one worn item vs a damage type — BN item.cpp phys_resist: the average of
+   * the materials' `<type>_resist`, times effective thickness (material_thickness minus the
+   * damage level, at least 1); stab is 0.8 × cut. BN has no per-portion materials, so the
+   * body part only matters for coverage (handled by the caller).
+   */
+  armorResist(it: Item, _bp: BodyPartId, dtype: string, _rng?: Rng): number {
+    if (dtype === 'stab') return Math.trunc(0.8 * this.armorResist(it, _bp, 'cut'));
+    if (dtype !== 'bash' && dtype !== 'cut' && dtype !== 'bullet') return 0;
     const mats = this.owner.data.misc?.material ?? {};
-    const resistOf = (mat: string): number => {
-      const r = mats[mat]?.resist as Record<string, number> | undefined;
-      if (!r) return 0;
-      if (r[dtype] !== undefined) return r[dtype];
-      // stab derives from cut * 0.8 when a material has no stab resist.
-      if (dtype === 'stab' && r.cut !== undefined) return r.cut * 0.8;
-      return 0;
-    };
-    const p = armorPortion(it, bp);
+    const ids = materialIds(it.def);
+    if (!ids.length) return 0;
     let resist = 0;
-    if (p?.material?.length) {
-      for (const m of p.material) {
-        const cover = m.covered_by_mat ?? 100;
-        if (rng && rng.int(0, 99) >= cover) continue;
-        resist += resistOf(m.type) * (m.thickness ?? 1) * (rng ? 1 : cover / 100);
-      }
-    } else {
-      const ids = materialIds(it.def);
-      if (ids.length) resist = (ids.reduce((s, m) => s + resistOf(m), 0) / ids.length) * (it.def.material_thickness ?? 1);
-    }
-    // damage_adjusted_armor_resist: damaged armor protects less.
-    return Math.max(0, resist * (1 - 0.1 * Math.max(0, it.damageLevel() - 1)));
+    for (const m of ids) resist += Number(mats[m]?.[`${dtype}_resist`] ?? 0);
+    resist /= ids.length;
+    const thickness = Number(it.def.material_thickness ?? 1);
+    const effThickness = Math.max(1, thickness - Math.max(0, it.damageLevel()));
+    return Math.round(resist * effThickness);
   }
 
   /**

@@ -41,8 +41,11 @@ const zombie: MonsterDef = {
   flags: ['SEES', 'HEARS', 'STUMBLES', 'WARM', 'GRABS', 'BASHES', 'GROUP_BASH', 'POISON', 'NO_BREATHE', 'REVIVES', 'PUSH_MON', 'FILTHY', 'CLUMSY_ATTACKS'],
 };
 
-// materials.json resist values (bash/cut/bullet...), dmg_adj for display names.
-const material = (id: string, resist: Record<string, number>) => ({ id, name: id, resist, dmg_adj: ['lightly damaged', 'damaged', 'very damaged', 'thoroughly damaged'] });
+// BN materials.json: flat `<type>_resist` fields (bash/cut/bullet...), dmg_adj for display names.
+const material = (id: string, resist: Record<string, number>) => ({
+  id, name: id, dmg_adj: ['lightly damaged', 'damaged', 'very damaged', 'thoroughly damaged'],
+  ...Object.fromEntries(Object.entries(resist).map(([k, v]) => [`${k}_resist`, v])),
+});
 const materials = Object.fromEntries(
   [
     material('cotton', { bash: 1, cut: 1, acid: 3, heat: 0, bullet: 1 }),

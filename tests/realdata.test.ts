@@ -202,3 +202,16 @@ describe('filling containers (fromSpawned)', () => {
     expect(ms).toBeLessThan(200);
   });
 });
+
+describe('BN armor uses real material resistances', () => {
+  // Regression: v2's first BN build read DDA's `resist` object, so every armor blocked nothing.
+  it('a leather jacket and a hard hat actually resist bash/cut, with stab at 0.8 × cut', () => {
+    const c = new Character(data, { seed: 3 });
+    const jacket = createItem(data, 'jacket_leather');
+    const hat = createItem(data, 'hat_hard');
+    expect(c.inv.armorResist(jacket, 'torso', 'cut')).toBeGreaterThan(0);
+    expect(c.inv.armorResist(jacket, 'torso', 'bash')).toBeGreaterThan(0);
+    expect(c.inv.armorResist(hat, 'head', 'bash')).toBeGreaterThan(0);
+    expect(c.inv.armorResist(jacket, 'torso', 'stab')).toBe(Math.trunc(0.8 * c.inv.armorResist(jacket, 'torso', 'cut')));
+  });
+});
