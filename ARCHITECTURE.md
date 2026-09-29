@@ -118,6 +118,44 @@ tests/               vitest unit tests (pure logic, no DOM/WebGL)
   Other systems' use_actions: `inv.useHandlers.set(type, fn)` (crafting registers `firestarter`).
   UI + keys (`& * ( R`) + `cdda.*` helpers: `installCrafting(game, api)` in src/ui/crafting_install.ts.
 
+### Combat depth (src/game/{techniques,martialarts,gunmods,monguns,explosion}.ts, wired by src/combatdepth.ts)
+- `meleeAttack(c, {dodge, armor, info?: TargetInfo}, rng, name, {allowSpecial, aoeTargets, forceTechnique})`
+  picks a weapon/style technique (melee.cpp pick_technique: dummy/defensive skipped, crit_tec,
+  `condition` via a small dialogue-condition evaluator, skill/weapon requirements, weighting, AoE
+  needing victims) and returns `technique` + `outcome` (stun/down turns, knockback, aoe, disarm);
+  the world layer applies it (`applyTechniqueToMonster` in playercombat.ts: monster effects +
+  dash knockback; `PlayerCombat.swingAt`/`aoeVictims` for wide/spin/impale follow-ups). Messages
+  use the technique text (`techniqueMessage`, `hitMessage`: "You sweep the zombie for 12 damage.").
+  No `info` = no techniques (legacy callers). Glass shattering + `handleMeleeWear` happen inside.
+- Defense: `monsterMeleeAttack` uses `tryDodgeRoll` (one dodge per combat turn, stamina cost) and
+  `blockHit` (WBLOCK_1/2/3 weapons, style arm/leg blocks, logarithmic_range(0,40,score) of physical
+  damage gets through, "You block most of the damage with your baseball bat!"); NPC-vs-character
+  melee uses `characterDefend`. A combat turn is `COMBAT_TURN` = 1/MELEE_SCALE real s; dodges/blocks
+  refresh and buffs tick in `tickMartialArts` (PlayerCombat.update for the player, NpcSystem for NPCs).
+- Martial arts: `maOf(c)` (WeakMap state: known styles, style, buffs with stacks, dodges/blocks
+  left); `learnStyle`, `selectStyle`, `triggerBuffs(c, 'onhit'|…)`, `buffFlat/buffMult` feed hit,
+  dodge (Character.dodge), speed (resetStats), damage, arpen, armor, move cost, crit. Manuals teach
+  their `martial_art` when read (`readHooks` in reading.ts) or activated (MA_MANUAL); Brawling
+  autolearns at melee 1; profession traits' `initial_ma_styles` show as choices in the `_` menu.
+  Save section `martialarts` (order 12).
+- Guns: `Item.gunmods` (saved in ItemJSON), `gunmodCompatible/installGunmod/removeGunmod`
+  (valid_mod_locations + add_mod mounts, mod_targets, blacklists, IRREMOVABLE), `sightDispersion`,
+  mods in `gunDispersion/gunRecoil/gunNoise/aim`; `gunModes/currentMode/cycleMode` (`gun.vars.gun_mode`);
+  `fireGun` rolls malfunctions/jams (`gun.vars.jammed`, cleared by `r`), adds 5×recoil×(1−skill/20)
+  per round and returns `delayedRecoil`, `pellets/shotSpreadMoa/shotDamage`, `ammoEffects`.
+  PlayerCombat fires bursts BURST_INTERVAL apart (`combat.burst`), pellets per ray, INCENDIARY/
+  EXPLOSIVE/aoe ammo effects through `combat.hooks` (explosion.ts is an approximation). Aim levels:
+  `aimState(c, gun)` → Immediate/Regular/Careful/Precise (CDDA get_aim_types thresholds).
+- Monster guns (`monguns.ts gunActor`): special attack type "gun" — ranges pick the fire mode,
+  starting_ammo pool, targeting lock + `targeting_sound` announcement, fake shooter stats, hitscan vs
+  the survivor, "throw" skill actors lob a projectile. Survivor only (no NPC targets yet).
+- Hooks: `combatHooks.onBlock/onWeaponBroken`, `monsterGunHooks.tracer`, `inventory_ui.extraItemActions`
+  (item-menu entries), `renderer.viewmodel.block()` + attack kind `'sweep'`.
+- Keys `_` martial arts, `b` fire mode (CDDA `F` is our flashlight). Debug: `cdda.learnStyle(id)`,
+  `cdda.setStyle(id)`, `cdda.martialArts()`, `cdda.openMartialArts()`, `cdda.techniques(crit?)`,
+  `cdda.fireMode()`, `cdda.cycleFireMode()`, `cdda.installGunmod(gunId?, modId)`, `cdda.openGunmods()`,
+  `cdda.aimState()`.
+
 ### World interaction (src/game, installed by src/worldInteraction.ts)
 
 - `sound.ts` `emitSound(game, {x,y,z}, volume, desc, {category?, source?, sfxId?})` — use it
