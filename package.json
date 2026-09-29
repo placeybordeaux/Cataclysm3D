@@ -11,6 +11,7 @@
     "extract": "tsx tools/extract/index.ts",
     "extract:mapgen": "tsx tools/extract/mapgen.ts",
     "worldgen": "tsx tools/worldgen.ts",
+    "extract:ui": "tsx tools/extract/ui.ts",
     "atlas": "tsx tools/atlas/index.ts",
     "shot": "tsx tools/shot.ts"
   },
