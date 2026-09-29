@@ -592,6 +592,8 @@ export interface MonsterDef extends Glyph {
   /** half_life / age_grow are in days */
   upgrades?: { half_life?: number; into_group?: string; into?: string; age_grow?: number; [k: string]: unknown };
   luminance: number;
+  /** intensity added to the target's "grabbed" effect by GRAB (BN default 1) */
+  grab_strength?: number;
   looks_like?: string;
   diff?: number;
   [extra: string]: unknown;

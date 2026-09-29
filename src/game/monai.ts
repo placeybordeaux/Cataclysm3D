@@ -9,7 +9,7 @@ import { moveWithCollision, CREATURE_RADIUS } from './physics';
 import { Monster, dayOf, turnsToSeconds, upgradeTarget, type MonsterWindup } from './monster';
 import { Grid, clearWalk, hasLOS } from './los';
 import { findPath } from './pathfind';
-import { defaultMelee, specialTelegraph, trySpecial } from './monattack';
+import { defaultMelee, isMeleeSpecial, specialTelegraph, trySpecial } from './monattack';
 import { FEEL, defenseOf, surroundAngles, telegraphSeconds, type TelegraphKind } from './combatfeel';
 import { monsterMeleeAttack, type MonsterAttackResult } from './combat';
 import type { Character } from './character';
@@ -17,6 +17,8 @@ import { BODY_PARTS } from './bodyparts';
 import { createItem, fromSpawned, type Item } from './item';
 import type { BodyPartId } from './bodyparts';
 import { sfx } from '../audio/sfx';
+import { overflowDamage, runDeathFunctions } from './mondeath';
+import { corpseDissectables } from './butchery';
 import { bash } from './bash';
 import { addField, fieldDamageAt } from './fields';
 import { emitSound, heardVolume, type SoundCategory } from './sound';
@@ -361,6 +363,15 @@ export class MonsterSystem implements GameSystem {
     this.lastPY = p.y;
   }
 
+  /** Put the survivor somewhere (GRAB_DRAG) without the grab snapping them back. */
+  movePlayerTo(x: number, y: number): void {
+    const p = this.game.player;
+    p.x = x;
+    p.y = y;
+    this.lastPX = x;
+    this.lastPY = y;
+  }
+
   releaseGrab(): void {
     const g = this.grabbedBy;
     if (g) g.effects.delete('grabbing');
@@ -570,53 +581,32 @@ export class MonsterSystem implements GameSystem {
     // game.stats.kills is filled by the UI from the creatureDied event (killer === player).
     if (killer === 'player') this.kills.set(def.id, (this.kills.get(def.id) ?? 0) + 1);
     for (const o of this.monstersNear(m.x, m.y, m.z, 15)) if (o.type.default_faction === def.default_faction) this.trigger(o, 'FRIEND_DIED', 15);
-    const df = (def.death_function && typeof def.death_function === 'object' ? def.death_function : {}) as { message?: string; corpse_type?: string; effect?: { id?: string } };
-    // Overkill gibs the body (CDDA mdeath splatter when damage >> max hp).
-    const gibbed = m.hp < -m.hpMax && def.material.includes('flesh');
-    const corpseType = gibbed ? 'SPLATTER' : df.corpse_type ?? 'NORMAL';
-    const seen = this.playerSees(m);
-    if (seen) {
-      // Named monsters (mission targets) die by name, as they fought: "Sean McLaughlin dies!"
-      const tmpl = gibbed ? 'The %s is torn apart!' : df.message ?? 'The %s dies!';
-      const msg = m.name ? tmpl.replace(/\b[Tt]he %s/, m.name).replace('%s', m.name) : tmpl.replace('%s', monsterName(def));
-      if (msg) this.message(msg, killer === 'player' ? 'c_light_green' : undefined);
-    }
-    sfx.monsterDeath(def.id, m, gibbed);
-    switch (df.effect?.id) {
-      case 'death_boomer': {
-        for (let j = -1; j <= 1; j++) for (let i = -1; i <= 1; i++) this.addField(tx + i, ty + j, m.z, 'fd_bile', 1);
-        const p = this.game.player;
-        if (p.z === m.z && Math.max(Math.abs(p.tileX - tx), Math.abs(p.tileY - ty)) <= 1) {
-          p.addEffect('boomered', (5 * 24) / ACTION_SCALE);
-          this.message("You're covered in bile!", 'c_red');
-        }
-        break;
-      }
-      case 'death_acid':
-        for (let j = -1; j <= 1; j++) for (let i = -1; i <= 1; i++) if (m.rng.oneIn(2) || (i === 0 && j === 0)) this.addField(tx + i, ty + j, m.z, 'fd_acid', 2);
-        break;
-      default:
-        if (df.effect?.id) warnOnce('death_effect', df.effect.id);
-    }
-    let corpse: CorpseRecord | null = null;
-    if (corpseType === 'NORMAL') corpse = this.dropCorpse(m);
-    else if (corpseType === 'SPLATTER') {
-      const gib = this.bloodType(def) === 'fd_blood' ? 'fd_gibs_flesh' : this.bloodType(def) ?? 'fd_gibs_flesh';
-      for (let j = -1; j <= 1; j++) for (let i = -1; i <= 1; i++) if (m.rng.oneIn(2) || (i === 0 && j === 0)) this.addField(tx + i, ty + j, m.z, gib, 2);
-    }
+    // The death functions (mondeath.ts) print their own messages and place the corpse.
+    sfx.monsterDeath(def.id, m, overflowDamage(m).pulverized);
+    const corpse = runDeathFunctions(this, m);
     if (def.death_drops) {
       const rng = new Rng(hashSeed(this.game.seed, m.uid, 0xd40b));
       for (const s of expandItemGroup(this.game.data, def.death_drops, rng)) for (const it of fromSpawned(this.game.data, s)) this.game.map.addItem(tx, ty, m.z, it);
     }
+    // mdeath::normal bleeds once more on the spot.
     const blood = this.bloodType(def);
-    if (blood && corpseType !== 'SPLATTER') this.addField(tx, ty, m.z, blood, 2);
+    if (blood && corpse) this.addField(tx, ty, m.z, blood, 2);
     this.game.events.emit('creatureDied', { creature: m, killer: killer === 'player' ? this.game.player : killer });
     for (const f of this.onDied) f(m, corpse);
   }
 
-  /** mdeath normal: a "corpse" item carrying the monster type (CDDA item::make_corpse). */
-  private dropCorpse(m: Monster): CorpseRecord | null {
-    return this.placeCorpse(m.type, m.x, m.y, m.z, { facing: m.facing, name: m.name });
+  /**
+   * make_mon_corpse: a "corpse" item carrying the monster type, its damage from overkill and
+   * the implants its harvest hides (rolled now, recovered by dissection).
+   */
+  dropCorpse(m: Monster, damage = 0): CorpseRecord | null {
+    const rec = this.placeCorpse(m.type, m.x, m.y, m.z, { facing: m.facing, name: m.name });
+    if (!rec) return null;
+    const it = rec.item as Item;
+    it.damage = damage;
+    const hidden = corpseDissectables(this.game.data, m.type, new Rng(hashSeed(this.game.seed, m.uid, 0xd155)));
+    if (hidden.length) it.vars.dissectables = JSON.stringify(hidden);
+    return rec;
   }
 
   placeCorpse(def: MonsterDef, x: number, y: number, z: number, opts: { facing?: number; name?: string; dormant?: boolean } = {}): CorpseRecord | null {
@@ -910,7 +900,7 @@ export class MonsterSystem implements GameSystem {
       // Blows aimed at the survivor telegraph first (combatfeel.ts); ranged specials fire now.
       for (const sa of m.specials) {
         if (sa.cooldown > 0 || p.dead) continue;
-        const isMelee = sa.def.attack_type === 'melee' || sa.def.attack_type === 'bite';
+        const isMelee = isMeleeSpecial(sa.def);
         // Melee specials (grab, bite) spend the same moves as a plain swing in CDDA, so they
         // wait for the swing cooldown instead of landing on top of it.
         if (isMelee && m.attackCooldown > 0) continue;
@@ -1019,18 +1009,19 @@ export class MonsterSystem implements GameSystem {
     } finally {
       this.reachGrace = 0;
     }
-    if (w.special && done) this.specialDone(m, w.special, w.kind !== 'leap');
+    if (w.special && done) this.specialDone(m, w.special, w.kind !== 'leap', true);
     else m.busy = Math.max(m.busy, 0.15);
     if (!done && w.kind !== 'leap') sfx.monsterWhiff(m);
     this.game.events.emit('monsterAttack', { monster: m, phase: done ? 'resolved' : 'whiff', x: m.x, y: m.y, z: m.z, heavy: w.kind === 'heavy' });
   }
 
   /** Cooldowns after a special attack went off. */
-  private specialDone(m: Monster, sa: MonsterWindup['special'] & object, isMelee: boolean): void {
+  private specialDone(m: Monster, sa: MonsterWindup['special'] & object, isMelee: boolean, charged = false): void {
     const cd = typeof sa.def.cooldown === 'number' ? sa.def.cooldown : 0;
     sa.cooldown = Math.max(sa.cooldown, turnsToSeconds(cd));
     const cost = typeof sa.def.move_cost === 'number' ? sa.def.move_cost : 100;
-    if (isMelee) m.attackCooldown = Math.max(m.attackCooldown, cost / m.speed / MELEE_SCALE);
+    // A telegraphed blow already charged its swing cycle when the wind-up began (startWindup).
+    if (isMelee && !charged) m.attackCooldown = Math.max(m.attackCooldown, cost / m.speed / MELEE_SCALE);
     m.busy = Math.max(m.busy, isMelee ? 0.15 : 0);
     this.face(m, this.game.player.x, this.game.player.y);
   }
@@ -1246,16 +1237,17 @@ export class MonsterSystem implements GameSystem {
       return;
     }
     if (!this.breakFreeRoll()) {
-      this.message('You try to break free, but fail!', 'c_red');
+      this.message('You try break out of the grab, but fail!', 'c_red');
       p.x = this.lastPX;
       p.y = this.lastPY;
     }
   }
 
   /**
-   * One break-free roll (CDDA grab_break: str + dex + 2·unarmed + melee against half the
-   * grab strength), at most one per turn. Each failed struggle adds FEEL.struggleBonus to the
-   * next, so mashing gets you out eventually. true = free.
+   * One break-free roll, BN try_remove_grab: free unless rng(0, str) < rng(grabbed intensity,
+   * 8), the intensity being the summed grab_strength of the grabbers. At most one per turn;
+   * each failed struggle adds FEEL.struggleBonus to the next (combat-feel), so mashing gets
+   * you out eventually. true = free.
    */
   private breakFreeRoll(): boolean {
     const g = this.grabbedBy;
@@ -1263,10 +1255,9 @@ export class MonsterSystem implements GameSystem {
     if (!g) return true;
     this.grabRollTimer = 1 / ACTION_SCALE;
     const def = defenseOf(p);
-    const strength = (g.type as any).grab_strength ?? 20;
-    const roll = this.rng.int(0, p.str + p.dex + p.getSkill('unarmed') * 2 + p.getSkill('melee')) + def.struggle;
-    if (roll > this.rng.int(0, Math.floor(strength / 2))) {
-      this.message(`You break out of ${g.theName()}'s grab!`, 'c_light_green');
+    const hold = Math.max(1, p.effects.intensity('grabbed'));
+    if (this.rng.int(0, Math.max(0, Math.floor(p.str))) + def.struggle >= this.rng.int(Math.min(hold, 8), 8)) {
+      this.message('You break out of the grab!', 'c_light_green');
       this.releaseGrab();
       g.addEffect('stunned', 0.3);
       def.struggle = 0;
