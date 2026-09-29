@@ -395,4 +395,24 @@ describe('traps & light items', () => {
     expect(toggleLight(game)).toBe(true);
     expect(game.player.inv.wielded!.typeId).toBe('flashlight');
   });
+
+  it("lightAt prefers the renderer's exact light map, adding only the survivor's beam", () => {
+    const { game } = makeGame();
+    game.clock.seconds = 24 * 3600 + 3600;
+    place(game, 9, 16);
+    // exact inside a small window around the player, like the renderer's light map
+    game.lightProvider = (x, y) => (Math.abs(x - 9) <= 5 && Math.abs(y - 16) <= 5 ? 42 : null);
+    expect(lightAt(game, 10, 16, 0)).toBe(42);
+    expect(lightAt(game, 30, 16, 0)).toBeLessThan(42); // estimate outside the window
+    // monster vision uses it too: at 01:00 a 40/1 vision zombie 4 tiles away only sees a lit target
+    expect(lineOfSight(game.map, 9, 20, 9, 16, 0)).toBe(true);
+    expect(creatureCanSee(game, { x: 9, y: 20, z: 0 }, { x: 9, y: 16, z: 0 }, 40, 1)).toBe(true);
+    game.lightProvider = () => 0;
+    expect(creatureCanSee(game, { x: 9, y: 20, z: 0 }, { x: 9, y: 16, z: 0 }, 40, 1)).toBe(false);
+    game.lightProvider = (x, y) => (Math.abs(x - 9) <= 5 && Math.abs(y - 16) <= 5 ? 42 : null);
+    game.player.inv.wield(createItem(data, 'flashlight', { ammo: 'default' }));
+    toggleLight(game);
+    expect(lightAt(game, 10, 16, 0)).toBeGreaterThan(42);
+    game.lightProvider = null;
+  });
 });

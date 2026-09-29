@@ -248,6 +248,11 @@ export class Renderer {
     return this.lightmap.lightAt(x, y, z);
   }
 
+  /** Light map value where it is exact (player's level, inside the 128-tile window), else null. */
+  exactLightAt(x: number, y: number, z: number): number | null {
+    return this.lightmap.exactLightAt(x, y, z);
+  }
+
   /** Build every pending chunk now (tests/screenshots; normal play is budgeted). */
   flushChunks(): void {
     const p = this.game.player;

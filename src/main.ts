@@ -62,6 +62,9 @@ async function main(): Promise<void> {
   installAudio(game, api);
   installCrafting(game, api);
   installWorldInteraction(game, renderer, api);
+  // One light model: vision.ts lightAt (monster vision, "too dark", playerCanSee) reads the
+  // renderer's shadowcast light map where it's exact and estimates elsewhere.
+  game.lightProvider = (x, y, z) => renderer.exactLightAt(x, y, z);
   // Crafting/reading probe `game.lightAt` for "too dark" checks; back it with real vision light.
   (game as unknown as { lightAt: (x: number, y: number, z: number) => number }).lightAt = (x, y, z) => lightAt(game, x, y, z);
   const monsters = installMonsters(game, renderer, worldgen, api);

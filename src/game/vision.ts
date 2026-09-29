@@ -228,8 +228,36 @@ function computeNatural(game: Game, x: number, y: number, z: number): number {
   return inside;
 }
 
-/** Total light at a tile (CDDA ambient_light_at), cheap enough for per-tick monster checks. */
+/**
+ * Flashlights and headlamps throw a beam (the renderer's spotlight); lamps, lanterns,
+ * candles and torches glow all round (a light handle, so they are in the light map).
+ */
+export function isDirectionalLight(it: Item): boolean {
+  return !it.hasFlag('FIRE') && !/lamp|lantern|candle|torch/.test(it.typeId);
+}
+
+/**
+ * Total light at a tile (CDDA ambient_light_at), cheap enough for per-tick monster checks.
+ * Uses `game.lightProvider` (the renderer's shadowcast light map) where it is exact; the
+ * survivor's own beam light isn't in that map, so it is added here like any point source.
+ */
 export function lightAt(game: Game, x: number, y: number, z: number): number {
+  const exact = game.lightProvider?.(x, y, z) ?? null;
+  if (exact !== null) {
+    let best: Item | null = null, lum = 0;
+    for (const it of game.player.inv.allItems()) {
+      const l = itemLight(it);
+      if (l > lum) (lum = l), (best = it);
+    }
+    if (!best || !isDirectionalLight(best)) return exact;
+    const p = game.player;
+    return exact + sourceLight(game, { x: p.tileX, y: p.tileY, z: p.z, lum }, x, y, z);
+  }
+  return estimatedLightAt(game, x, y, z);
+}
+
+/** vision.ts's own light estimate (no renderer): natural light + point sources over LOS. */
+export function estimatedLightAt(game: Game, x: number, y: number, z: number): number {
   let l = naturalLightAt(game, x, y, z);
   const cx = chunkOf(x), cy = chunkOf(y);
   for (let oy = -1; oy <= 1; oy++)

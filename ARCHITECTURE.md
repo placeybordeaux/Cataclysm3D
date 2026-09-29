@@ -264,7 +264,10 @@ Keys: `V` camera mode, `F` flashlight.
 - **Light queries**: `renderer.lightAt(x, y, z)` → CDDA light level in luminance units
   (daylight ~100, lit room ≥10, `LIGHT_AMBIENT_LOW` 3.5 = too dark to see) — use it for
   vision/stealth. Exact on the player's level within 64 tiles, an indoor/outdoor estimate
-  elsewhere.
+  elsewhere. **Gameplay code calls `vision.ts lightAt(game, x, y, z)`**, which reads this
+  light map through `game.lightProvider` (`renderer.exactLightAt`, set in main.ts) where it is
+  exact, adds the survivor's flashlight beam (a spotlight, not in the map), and falls back to
+  vision's own estimate elsewhere and in headless tests.
 - **Viewmodel** (first person only): `renderer.viewmodel?.attack('melee'|'fire'|'throw')`
   animates the wielded item (`player.inv.wielded`, atlas sprite composited with a pixel
   fist; bare fists when unarmed): swing/punch, recoil + muzzle flash + light, throw.
