@@ -87,14 +87,14 @@ export function lootScenarios(c: LootCtx): Scenario[] {
     const o = window.__lootO, g = cdda.game, p = g.player, out = {};
     const add = (it) => { for (const i of it.walk()) out[i.typeId] = (out[i.typeId] ?? 0) + i.count(); };
     for (const it of p.inv.topLevel()) add(it);
-    const tiles = [[-2,-3],[-1,-3],[0,-3],[0,-2],[-2,4],[-2,5]];
+    const tiles = [[-2,-3],[-1,-3],[0,-3],[-1,-1],[-2,4],[-2,5]];
     for (const [dx, dy] of tiles) for (const it of g.map.itemsAt(o.x + dx, o.y + dy, o.z)) add(it);
     return out;
   })()`;
   const sameCounts = (a: Record<string, number>, b: Record<string, number>) => [...new Set([...Object.keys(a), ...Object.keys(b)])].filter((k) => (a[k] ?? 0) !== (b[k] ?? 0));
-  const sourcesLeft = () => js<number[]>(`(() => { const o = window.__lootO, g = cdda.game; return [[-2,-3],[-1,-3],[0,-3],[0,-2],[-2,4],[-2,5]].map(([dx,dy]) => g.map.itemsAt(o.x+dx, o.y+dy, o.z).length); })()`);
+  const sourcesLeft = () => js<number[]>(`(() => { const o = window.__lootO, g = cdda.game; return [[-2,-3],[-1,-3],[0,-3],[-1,-1],[-2,4],[-2,5]].map(([dx,dy]) => g.map.itemsAt(o.x+dx, o.y+dy, o.z).length); })()`);
   const pile = () => js(`(() => { const o = window.__lootO, p = cdda.game.player; const dx = o.x - p.tileX, dy = o.y - p.tileY;
-    cdda.inv2.spawn('glock_19', dx, dy - 2); cdda.inv2.spawn('pipe', dx, dy - 2); cdda.inv2.spawn('9mm', dx, dy - 2, { charges: 30 }); cdda.inv2.spawn('bandages', dx, dy - 2, { charges: 3 }); })()`);
+    const ax = dx - 1, ay = dy - 1; cdda.inv2.spawn('glock_19', ax, ay); cdda.inv2.spawn('pipe', ax, ay); cdda.inv2.spawn('9mm', ax, ay, { charges: 30 }); cdda.inv2.spawn('bandages', ax, ay, { charges: 3 }); })()`);
   const panel = () => js<{ key: string; title: string; mode: string; sel: number; rows: { typeId: string; name: string; count: number }[]; text: string } | null>('cdda.loot.panel()');
 
   const setStyle = (s: string) => js(`cdda.loot.setStyle(${JSON.stringify(s)})`);
@@ -106,11 +106,20 @@ export function lootScenarios(c: LootCtx): Scenario[] {
     await setStyle(style);
     await standAt(-1, -2);
     await pile();
-    tally = { aims: 0, keys: 0, clicks: 0, walks: 1 };
+    tally = { aims: 0, keys: 0, clicks: 0, walks: style === 'area' ? 1 : 0 };
     const before = await js<Record<string, number>>(CENSUS);
     const t0 = Date.now();
-    const at1: [number, number][] = [[-2, -3], [-1, -3], [0, -3], [0, -2]];
-    const at2: [number, number][] = [[-2, 4], [-2, 5]];
+    // Where a player stands to face each place: the three cupboards stand side by side, so the
+    // two outer ones can't be aimed at past the middle one (you step in front of each); the
+    // pile lies behind you, the lockers down the west wall. The area window reaches all four
+    // from the middle spot and both lockers from one spot by the wall.
+    const route: { stand: [number, number]; aims: [number, number][] }[] = [
+      { stand: [-2, -2], aims: [[-2, -3]] },
+      { stand: [-1, -2], aims: [[-1, -3], [-1, -1]] },
+      { stand: [0, -2], aims: [[0, -3]] },
+      { stand: [-1, 4], aims: [[-2, 4]] },
+      { stand: [-1, 5], aims: [[-2, 5]] },
+    ];
     if (style === 'area') {
       await key('g');
       await key('r');
@@ -123,11 +132,11 @@ export function lootScenarios(c: LootCtx): Scenario[] {
       await shot(`lootsweep_area_second_spot`);
       await key('g');
     } else {
-      for (const [spot, list] of [[[-1, -2], at1], [[-1, 4], at2]] as [[number, number], [number, number][]][]) {
-        if (spot[1] === 4) await standAt(...spot);
-        for (const [dx, dy] of list) {
-          const ok = await aim(dx, dy);
-          if (!ok) check(`${style}: the crosshair reaches (${dx}, ${dy})`, false);
+      for (const { stand, aims } of route) {
+        await standAt(...stand);
+        for (const [dx, dy] of aims) {
+          const ok = await aim(dx, dy, dy === -1 ? 0 : 0.7);
+          if (!ok) check(`${style}: the crosshair reaches (${dx}, ${dy})`, false, await js(`({ t: cdda.target(), yaw: cdda.game.player.yaw, pitch: cdda.game.player.pitch, at: [cdda.game.player.x, cdda.game.player.y], o: window.__lootO, ui: cdda.ui2.state().locked })`));
           if (style === 'quick') {
             await key('r');
           } else {
@@ -166,7 +175,7 @@ export function lootScenarios(c: LootCtx): Scenario[] {
       await setStyle('quick');
       await standAt(-1, -2);
       await pile();
-      await aim(0, -2);
+      await aim(-1, -1, 0);
       await sleep(300);
       let p = await panel();
       check('looking at the pile shows its items next to the crosshair (mouse still captured)', !!p && p.mode === 'quick' && p.rows.length >= 4 && (await js<boolean>('cdda.ui2.state().locked')), p?.text);
@@ -185,7 +194,7 @@ export function lootScenarios(c: LootCtx): Scenario[] {
       check('the panel says what was taken', /Took/.test(p?.text ?? ''), p?.text);
       await key('r');
       await sleep(300);
-      const pileLeft = await js<number>(`(() => { const o = window.__lootO; return cdda.game.map.itemsAt(o.x, o.y - 2, o.z).length; })()`);
+      const pileLeft = await js<number>(`(() => { const o = window.__lootO; return cdda.game.map.itemsAt(o.x - 1, o.y - 1, o.z).length; })()`);
       check('r takes the rest (Take all): the pile is gone', pileLeft === 0, pileLeft);
       await aim(-1, -3);
       await sleep(400);
@@ -220,7 +229,7 @@ export function lootScenarios(c: LootCtx): Scenario[] {
       await setStyle('area');
       await standAt(-1, -2);
       await pile();
-      await aim(0, -3, 1.2);
+      await aim(-1, -3, 1.2);
       await sleep(300);
       const peek = await panel();
       check('the crosshair shows a read-only peek at what it points at', peek?.mode === 'peek' && peek.rows.length > 0, peek?.text);

@@ -952,6 +952,9 @@ const scenarios: Scenario[] = [
   ['invliquid', 'liquids: drag a bottle of water onto a jar pours it; dropping water on the world asks before spilling', async () => {
     await toGameplay();
     await js(`cdda.giveItem('backpack', { wear: true }); cdda.inv2.spawn('bottle_plastic', 0, 0, { contents: [['water_clean', 2]] }); cdda.inv2.spawn('jar_glass', 0, 0)`);
+    // Setup: look up, off the pile inve left east (Tab while the crosshair is on a pile opens the inventory on it).
+    await js('cdda.game.player.pitch = 1.5');
+    await sleep(300);
     await x.key('Tab');
     await until((t) => t.panels.includes('Nearby'), 3000);
     const c0 = await censusNow();

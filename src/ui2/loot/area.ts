@@ -128,7 +128,8 @@ export function openArea(env: AreaEnv, focus: string | null = null): void {
   const p = openPanel({
     id: AREA_ID, title: 'Loot nearby', group: 'loot', pauses: false,
     width: 'min(calc(var(--fs) * 26 + var(--row-icon) * 2), 44vw)',
-    x: Math.round(vw - Math.min(vw * 0.44, 560) - 24), y: Math.round(innerHeight * 0.08),
+    // Right side of the 16:9 play area (ultrawide: not off in the far corner), clear of the crosshair.
+    x: Math.round(Math.min(vw, vw / 2 + (innerHeight * 16) / 9 / 2) - Math.min(vw * 0.44, 560) - 24), y: Math.round(innerHeight * 0.08),
     onKey: (e) => onKey(e),
     onClose: () => {
       own.splice(0).forEach((f) => f());
