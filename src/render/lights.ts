@@ -119,11 +119,14 @@ export class SkyState {
   /** whether the directional light currently represents the moon */
   moonLit = false;
 
-  update(hour: number): void {
+  update(hour: number, sun?: SkySun): void {
+    // Keyframes are authored for a 06:00-20:00 day; with real sunrise/sunset (which move with
+    // the season) the hour is remapped so dawn colours arrive at the actual dawn.
+    const h = sun ? canonicalHour(hour, sun.sunrise, sun.sunset) : hour;
     let i = 0;
-    while (i < KEYS.length - 2 && KEYS[i + 1].h <= hour) i++;
+    while (i < KEYS.length - 2 && KEYS[i + 1].h <= h) i++;
     const a = KEYS[i], b = KEYS[i + 1];
-    const t = Math.min(1, Math.max(0, (hour - a.h) / (b.h - a.h)));
+    const t = Math.min(1, Math.max(0, (h - a.h) / (b.h - a.h)));
     lerpHex(this.zenith, a.zenith, b.zenith, t);
     lerpHex(this.horizon, a.horizon, b.horizon, t);
     lerpHex(this.fog, a.fog, b.fog, t);
@@ -132,18 +135,76 @@ export class SkyState {
     lerpHex(this.hemiGround, a.hemiGround, b.hemiGround, t);
     this.sunIntensity = a.sunI + (b.sunI - a.sunI) * t;
     this.hemiIntensity = a.hemiI + (b.hemiI - a.hemiI) * t;
-    // Sun arc: rises in the east at 6:00, sets west at 20:00 (fixed spring-ish day), tilted
-    // south so noon shadows point north like at New England latitudes.
-    const dayT = (hour - 6) / 14;
-    const ang = dayT * Math.PI;
-    this.sunDir.set(Math.cos(ang), Math.sin(ang) * 0.85, 0.45).normalize();
-    const nightT = ((hour + 24 - 20) % 24) / 10; // 20:00 -> 0, 06:00 -> 1
+    if (sun) {
+      // Real sun position (src/game/sun.ts): low winter noons, long summer days.
+      const alt = sun.altitude * DEG, az = sun.azimuth * DEG;
+      this.sunDir.set(-Math.sin(az) * Math.cos(alt), Math.sin(alt), Math.cos(az) * Math.cos(alt)).normalize();
+    } else {
+      // Sun arc: rises in the east at 6:00, sets west at 20:00 (fixed spring-ish day), tilted
+      // south so noon shadows point north like at New England latitudes.
+      const dayT = (hour - 6) / 14;
+      const ang = dayT * Math.PI;
+      this.sunDir.set(Math.cos(ang), Math.sin(ang) * 0.85, 0.45).normalize();
+    }
+    const nightT = ((h + 24 - 20) % 24) / 10; // 20:00 -> 0, 06:00 -> 1
     const mang = nightT * Math.PI;
     this.moonDir.set(Math.cos(mang), Math.max(0.25, Math.sin(mang) * 0.8), -0.35).normalize();
-    this.night = hour < 5 || hour > 21 ? 1 : hour < 6.5 ? (6.5 - hour) / 1.5 : hour > 19.5 ? (hour - 19.5) / 1.5 : 0;
+    this.night = h < 5 || h > 21 ? 1 : h < 6.5 ? (6.5 - h) / 1.5 : h > 19.5 ? (h - 19.5) / 1.5 : 0;
     this.moonLit = this.sunDir.y < 0.06;
+    if (sun?.season) this.applySeason(sun.season, 1 - this.night);
+  }
+
+  /**
+   * Seasonal mood on top of the time-of-day keys: snow bounce and a cold, pale sky in winter,
+   * warm low light in autumn, lush greens in summer. `day` 0..1 fades the effect at night.
+   */
+  private applySeason(season: 'spring' | 'summer' | 'autumn' | 'winter', day: number): void {
+    const s = SEASON_TINT[season];
+    const k = 0.35 + 0.65 * day;
+    const mul = (c: THREE.Color, m: readonly [number, number, number]) =>
+      c.setRGB(c.r * (1 + (m[0] - 1) * k), c.g * (1 + (m[1] - 1) * k), c.b * (1 + (m[2] - 1) * k));
+    mul(this.hemiGround, s.ground);
+    mul(this.hemiSky, s.sky);
+    mul(this.sunColor, s.sun);
+    mul(this.fog, s.fog);
+    mul(this.horizon, s.fog);
+    mul(this.zenith, s.zenith);
+    this.hemiIntensity *= 1 + (s.ambient - 1) * k;
   }
 }
+
+/** What SkyState needs to know about the real sun (src/game/sun.ts) and the season. */
+export interface SkySun {
+  /** hours of the day */
+  sunrise: number;
+  sunset: number;
+  /** degrees */
+  altitude: number;
+  azimuth: number;
+  season?: 'spring' | 'summer' | 'autumn' | 'winter';
+}
+
+const DEG = Math.PI / 180;
+
+/** Map a real hour onto the keyframes' 06:00 sunrise / 13:00 noon / 20:00 sunset day. */
+export function canonicalHour(hour: number, sunrise: number, sunset: number): number {
+  const noon = (sunrise + sunset) / 2;
+  const knots: [number, number][] = [[0, 0], [sunrise, 6], [noon, 13], [sunset, 20], [24, 24]];
+  for (let i = 0; i < knots.length - 1; i++) {
+    const [x0, y0] = knots[i], [x1, y1] = knots[i + 1];
+    if (hour <= x1) return y0 + ((hour - x0) / Math.max(1e-6, x1 - x0)) * (y1 - y0);
+  }
+  return hour;
+}
+
+type Tint = readonly [number, number, number];
+const SEASON_TINT: Record<'spring' | 'summer' | 'autumn' | 'winter', { ground: Tint; sky: Tint; sun: Tint; fog: Tint; zenith: Tint; ambient: number }> = {
+  spring: { ground: [0.96, 1.06, 0.94], sky: [1, 1, 1], sun: [1, 1, 0.98], fog: [0.98, 1.02, 1], zenith: [1, 1, 1], ambient: 1 },
+  summer: { ground: [1.0, 1.08, 0.88], sky: [1.02, 1.02, 0.98], sun: [1.03, 1.0, 0.94], fog: [1.02, 1.02, 0.96], zenith: [0.95, 1.0, 1.06], ambient: 1.02 },
+  autumn: { ground: [1.14, 0.98, 0.78], sky: [1.04, 0.98, 0.92], sun: [1.08, 0.96, 0.82], fog: [1.08, 1.0, 0.88], zenith: [0.98, 0.96, 0.94], ambient: 1 },
+  // snow on the ground reflects: brighter, bluish bounce; pale overcast-looking sky
+  winter: { ground: [1.55, 1.6, 1.75], sky: [0.96, 1.0, 1.08], sun: [0.94, 0.97, 1.04], fog: [1.08, 1.12, 1.2], zenith: [0.9, 0.95, 1.05], ambient: 1.1 },
+};
 
 export class LightManager {
   readonly group = new THREE.Group();

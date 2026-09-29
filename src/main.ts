@@ -13,6 +13,7 @@ import { installAudio } from './audio/install';
 import { installCrafting } from './ui/crafting_install';
 import { installVehicles } from './ui/vehicle_ui';
 import { installWorldInteraction } from './worldInteraction';
+import { installNature } from './nature';
 import { lightAt } from './game/vision';
 import { installMonsters } from './monsters';
 import { installNpcs } from './npcs';
@@ -62,6 +63,7 @@ async function main(): Promise<void> {
   installAudio(game, api);
   installCrafting(game, api);
   installWorldInteraction(game, renderer, api);
+  installNature(game, renderer, api);
   // Crafting/reading probe `game.lightAt` for "too dark" checks; back it with real vision light.
   (game as unknown as { lightAt: (x: number, y: number, z: number) => number }).lightAt = (x, y, z) => lightAt(game, x, y, z);
   const monsters = installMonsters(game, renderer, worldgen, api);

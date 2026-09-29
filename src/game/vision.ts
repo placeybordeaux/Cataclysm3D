@@ -5,6 +5,7 @@ import { hasFlag } from '../world/registry';
 import type { GameClock } from '../core/time';
 import { SECONDS_PER_DAY } from '../core/time';
 import type { Item } from './item';
+import { sunPosition as sunPositionAt } from './sun';
 
 // Tile vision and light, after CDDA lightmap.cpp / calendar.cpp, kept cheap:
 //  - lineOfSight: Bresenham over map.opaque (endpoints excluded)
@@ -23,8 +24,6 @@ export const LIGHT_SOURCE_BRIGHT = 10.0;
 export const DEFAULT_DAYLIGHT = 100;
 /** CDDA default map view distance for the player. */
 export const MAX_VIEW_DISTANCE = 60;
-/** New England, like CDDA's default location. */
-const LATITUDE = 42.36;
 
 /** Tiles on the line from (x0,y0) to (x1,y1) inclusive. */
 export function bresenham(x0: number, y0: number, x1: number, y1: number): [number, number][] {
@@ -51,16 +50,9 @@ export function lineOfSight(map: GameMap, x0: number, y0: number, x1: number, y1
 
 // ------------------------------------------------------------------ sun & moon
 
-/** Solar altitude in degrees at game time `seconds` (spring day 1 ≈ vernal equinox). */
+/** Solar altitude in degrees at game time `seconds` (shared with the renderer: src/game/sun.ts). */
 export function sunAltitudeAt(seconds: number): number {
-  const yearDays = 364;
-  const doy = (((seconds / SECONDS_PER_DAY) % yearDays) + yearDays) % yearDays;
-  const decl = 23.44 * Math.sin((2 * Math.PI * doy) / yearDays);
-  const hour = (((seconds % SECONDS_PER_DAY) + SECONDS_PER_DAY) % SECONDS_PER_DAY) / 3600;
-  const ha = (hour - 12) * 15;
-  const r = Math.PI / 180;
-  const s = Math.sin(LATITUDE * r) * Math.sin(decl * r) + Math.cos(LATITUDE * r) * Math.cos(decl * r) * Math.cos(ha * r);
-  return Math.asin(Math.max(-1, Math.min(1, s))) / r;
+  return sunPositionAt(seconds).altitude;
 }
 export function sunAltitude(clock: GameClock): number {
   return sunAltitudeAt(clock.seconds);

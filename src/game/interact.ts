@@ -41,6 +41,13 @@ export interface InteractUi {
  */
 export const interactOverrides: { interact(game: Game): boolean; prompt(game: Game): string | null }[] = [];
 
+/**
+ * Extra interactions for a tile contributed by other systems (src/game/nature.ts: harvest,
+ * forage, plant, fill containers, chop...). Called on every prompt refresh: keep it cheap.
+ * Entries are appended after doors/locks and furniture examine actions.
+ */
+export const interactionProviders: ((game: Game, x: number, y: number, z: number) => Interaction[])[] = [];
+
 let ui: InteractUi = {};
 export function setInteractUi(u: InteractUi): void {
   ui = u;
@@ -310,9 +317,11 @@ export function interactionsAt(game: Game, x: number, y: number, z: number): Int
       goToSleep(game);
     });
 
-  // --- containers & items
+  for (const prov of interactionProviders) out.push(...prov(game, x, y, z));
+
+  // --- containers & items (a planted crop keeps its seed as a hidden item: not a container)
   const items = map.itemsAt(x, y, z);
-  if (items.length || (f.id !== 'f_null' && hasFlag(f, 'CONTAINER'))) {
+  if (!hasFlag(f, 'PLANT') && (items.length || (f.id !== 'f_null' && hasFlag(f, 'CONTAINER')))) {
     const where = f.id !== 'f_null' ? f.name : t.name;
     const n = items.length;
     add('pickup', n ? `Look in the ${where} (${n} item${n === 1 ? '' : 's'})` : `Look in the ${where}`, () => {

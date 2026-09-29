@@ -19,6 +19,7 @@ import { Viewmodel } from './viewmodel';
 import { DecorLayer } from './decor';
 import { displayIrradiance } from './lightfield';
 import type { LightHandle } from './lights';
+import { sunPosition, sunTimes, type SunTimes } from '../game/sun';
 
 export { CDDA_COLORS, cddaColor } from './colors';
 
@@ -92,6 +93,8 @@ export class Renderer {
    *  except for moving casters, which then update at this rate). */
   shadowHz = 20;
   private playerLookT = 0;
+  private sunDay = NaN;
+  private sunT: SunTimes = sunTimes(0);
 
   constructor(private canvas: HTMLCanvasElement, private game: Game, opts: RendererOptions = {}) {
     const params = typeof location !== 'undefined' ? new URLSearchParams(location.search) : new URLSearchParams();
@@ -298,7 +301,12 @@ export class Renderer {
 
     this.sprites.update(dt);
     this.decor.update(this.game.map, p.x, p.y, p.z, clock.season, this.source);
-    this.skyState.update(clock.hourOfDay);
+    if (this.sunDay !== clock.day) {
+      this.sunDay = clock.day;
+      this.sunT = sunTimes(clock.day);
+    }
+    const sunPos = sunPosition(clock.seconds);
+    this.skyState.update(clock.hourOfDay, { sunrise: this.sunT.sunrise, sunset: this.sunT.sunset, altitude: sunPos.altitude, azimuth: sunPos.azimuth, season: clock.season });
     this.lightmap.naturalLevel = naturalLightLevel(Math.asin(this.skyState.sunDir.y));
     this.lightmap.update(p.x, p.y, p.z, dt, this.time, this.lights.handles(), this.lights.handlesDirty);
     this.lights.handlesDirty = false;

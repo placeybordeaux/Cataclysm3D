@@ -29,6 +29,8 @@ const HALFWALL_H = 1.0;
 export const INDOOR_SKY = 0.5;
 /** Height of floor decals (blood, bile...) above the floor: clear of z-fighting at range. */
 const DECAL_LIFT = 0.012;
+/** Floor terrains whose tileset sprite is a cut-out drawn over ground (see the floor case). */
+const GROUND_OVERLAY = /^t_(trunk|stump|dirtmound|pit)(_|$)/;
 /** Item sprites lying on furniture: top height by furniture shape. */
 const FURN_TOP: Record<FurnitureShape, number> = { none: 0, billboard: 0, table: 0.8, counter: 0.92, cabinet: 1.85 };
 
@@ -125,7 +127,7 @@ export function buildChunkMesh(
   const neighborFloor = (x: number, y: number): string | null => {
     for (let d = 0; d < 4; d++) {
       const i = here.ter(x + DX[d], y + DY[d]);
-      if (floorish(shapes.terrain(i))) return terDefs[i].id;
+      if (floorish(shapes.terrain(i)) && !GROUND_OVERLAY.test(terDefs[i].id)) return terDefs[i].id;
     }
     return null;
   };
@@ -189,7 +191,12 @@ export function buildChunkMesh(
         case S.stairs_down:
           break;
         case S.floor:
-          emitFloor(x, y, def.id, seed);
+          if (GROUND_OVERLAY.test(def.id)) {
+            // tileset draws felled trunks/stumps as cut-outs over the ground: lay them on
+            // the surrounding ground instead of punching see-through holes in the floor
+            emitFloor(x, y, neighborFloor(x, y) ?? 't_dirt', seed);
+            topQuad(x, y, base + DECAL_LIFT, src.terrain(def.id, 'floor', { variantSeed: seed, season }));
+          } else emitFloor(x, y, def.id, seed);
           break;
         case S.liquid: {
           const f = src.terrain(def.id, 'floor', { variantSeed: seed, season, connections: connMask(nShape, (n) => n === S.liquid) });
