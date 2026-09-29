@@ -538,7 +538,11 @@ export class VehicleRenderer {
   private lampOn = new THREE.MeshBasicMaterial({ color: 0xfff2c8 });
   private lampOff = new THREE.MeshBasicMaterial({ color: 0x8a8a80 });
   /** One shadowless spot for the nearest vehicle with its headlights on. */
-  readonly headlight = new THREE.SpotLight(0xfff0d4, 0, 70, 0.45, 0.4, 1.0);
+  // Range must stay over materials.ts HEADLIGHT_MIN_RANGE (that's what gives it the road
+  // wrap); decay 0.5 keeps the road ~30 m out within a few bands of the road at the bumper.
+  readonly headlight = new THREE.SpotLight(0xfff0d4, 0, 80, 0.5, 0.45, 0.5);
+  /** Spot intensity: the road reads ~35 m ahead at night. */
+  headlightIntensity = 45;
 
   constructor(private renderer: Renderer, private game: Game, private system: VehicleSystem) {
     this.group.name = 'vehicles';
@@ -547,6 +551,7 @@ export class VehicleRenderer {
     patchNormalOutput(this.lampOff, false);
     this.headlight.castShadow = false;
     renderer.scene.add(this.group, this.headlight, this.headlight.target);
+    renderer.vehicleView = this;
     system.onRemoved.push((v) => this.drop(v));
     renderer.beforeRender.push(() => this.update());
   }
@@ -662,7 +667,7 @@ export class VehicleRenderer {
       s.position.set(fx, h + 0.7, fy);
       s.target.position.set(tx, h - 0.4, ty);
       s.target.updateMatrixWorld();
-      s.intensity = 110;
+      s.intensity = this.headlightIntensity;
     } else s.intensity = 0;
   }
 

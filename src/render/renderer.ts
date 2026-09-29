@@ -132,6 +132,8 @@ export class Renderer {
   private camGround = 0;
   /** Visual ground offset at a tile position (relief/curbs); 0 when the look has none. */
   groundAt: ((x: number, y: number, z: number) => number) | null = null;
+  /** The vehicle renderer (vehicleMesh.ts) once installed: headlight tuning from cdda.renderer. */
+  vehicleView: { headlightIntensity: number; headlight: THREE.SpotLight } | null = null;
 
   constructor(private canvas: HTMLCanvasElement, private game: Game, opts: RendererOptions = {}) {
     const params = typeof location !== 'undefined' ? new URLSearchParams(location.search) : new URLSearchParams();

@@ -157,9 +157,19 @@ function patchChunk(src: string, find: string, add: string): string {
   if (!src.includes(find)) throw new Error(`materials: patch point not found: ${find}`);
   return src.replace(find, `${find}\n\t\t${add}`);
 }
+// Vehicle headlights (the only spot with a range over HEADLIGHT_MIN_RANGE; the flashlight's
+// is 22 m) wrap their light toward the surface normal: a lamp 0.7 m up meets the road at a
+// few degrees, so plain Lambert left the road black beyond ~15 m. Real roads read at night
+// by retroreflection and adapted eyes; the wrap stands in for both. Surfaces facing away
+// from the lamp stay unlit.
+export const HEADLIGHT_MIN_RANGE = 50;
 const LIGHTS_BEGIN = patchChunk(
-  patchChunk(THREE.ShaderChunk.lights_fragment_begin, 'getDirectionalLightInfo( directionalLight, directLight );', 'directLight.color *= lmSunGate();'),
-  'getPointLightInfo( pointLight, geometryPosition, directLight );', 'directLight.color *= lmPointGate();',
+  patchChunk(
+    patchChunk(THREE.ShaderChunk.lights_fragment_begin, 'getDirectionalLightInfo( directionalLight, directLight );', 'directLight.color *= lmSunGate();'),
+    'getPointLightInfo( pointLight, geometryPosition, directLight );', 'directLight.color *= lmPointGate();',
+  ),
+  'getSpotLightInfo( spotLight, geometryPosition, directLight );',
+  `if ( spotLight.distance > ${HEADLIGHT_MIN_RANGE.toFixed(1)} && dot( geometryNormal, directLight.direction ) > 0.0 ) directLight.direction = normalize( directLight.direction + geometryNormal * 0.9 );`,
 );
 
 /** How a banded-Lambert material gets its light-map sample. */
