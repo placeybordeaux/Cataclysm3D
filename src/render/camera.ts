@@ -29,6 +29,13 @@ export class CameraRig {
   suppressBob = false;
   /** Added to the eye height (metres): swimming puts the head at the water line (src/nature.ts). */
   eyeOffset = 0;
+  /** Aim-down-sights target 0..1 (src/feel.ts sets it while RMB is held with a gun) and its FOV. */
+  ads = 0;
+  adsFov = 50;
+  private adsBlend = 0;
+  /** Gun kick (radians): added to the view, springs back over ~0.15 s. `kick()` adds to it. */
+  private kickPitch = 0;
+  private kickYaw = 0;
   private bobPhase = 0;
   private bobAmp = 0;
   private lastX = NaN;
@@ -44,9 +51,20 @@ export class CameraRig {
    */
   snapRotation = true;
 
+  /** Knock the view (gun recoil): pitch up by `pitch` rad, sideways by `yaw`; it springs back. */
+  kick(pitch: number, yaw = 0): void {
+    this.kickPitch = Math.min(0.12, this.kickPitch + pitch);
+    this.kickYaw += yaw;
+  }
+
   update(dt: number, p: PlayerAvatar, map: GameMap, aspect: number, lowResHeight: number): void {
     const cam = this.camera;
     cam.aspect = aspect;
+    this.adsBlend += (this.ads - this.adsBlend) * Math.min(1, dt * 12);
+    const back = Math.exp(-dt * 16);
+    this.kickPitch *= back;
+    this.kickYaw *= back;
+    const fovFirst = this.fovFirst + (this.adsFov - this.fovFirst) * this.adsBlend;
     const eyeH = (p.crouching ? EYE_CROUCH : EYE) + this.eyeOffset;
     const base = p.z * LEVEL_HEIGHT;
 
@@ -61,17 +79,17 @@ export class CameraRig {
 
     const fwdX = Math.sin(p.yaw), fwdZ = -Math.cos(p.yaw);
     if (this.mode === 'first') {
-      cam.fov = this.fovFirst;
+      cam.fov = fovFirst;
       const bobY = Math.abs(Math.sin(this.bobPhase)) * this.bobAmp * 1.6 - this.bobAmp * 0.8;
       const bobX = Math.cos(this.bobPhase) * this.bobAmp * 0.6;
       cam.position.set(p.x - fwdZ * bobX, base + eyeH + bobY, p.y + fwdX * bobX);
       if (this.snapRotation) {
         const q = (2 * Math.tan((cam.fov * Math.PI) / 360)) / lowResHeight;
-        cam.rotation.set(Math.round(p.pitch / q) * q, -Math.round(p.yaw / q) * q, 0, 'YXZ');
-      } else cam.rotation.set(p.pitch, -p.yaw, 0, 'YXZ');
+        cam.rotation.set(Math.round(p.pitch / q) * q + this.kickPitch, -Math.round(p.yaw / q) * q - this.kickYaw, 0, 'YXZ');
+      } else cam.rotation.set(p.pitch + this.kickPitch, -p.yaw - this.kickYaw, 0, 'YXZ');
       this.focus.copy(cam.position);
     } else if (this.mode === 'third') {
-      cam.fov = this.fovFirst;
+      cam.fov = fovFirst;
       const eye = tmpEye.set(p.x, base + eyeH + 0.15, p.y);
       const cp = Math.cos(p.pitch), sp = Math.sin(p.pitch);
       const dir = tmpDir.set(fwdX * cp, sp, fwdZ * cp);

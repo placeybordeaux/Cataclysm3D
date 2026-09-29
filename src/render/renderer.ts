@@ -291,9 +291,10 @@ export class Renderer {
     return this.rig.mode !== 'top' || z <= this.game.player.z;
   }
 
-  render(): void {
+  /** Draw a frame. `fixedDt` (s) overrides the wall-clock step (frame-by-frame recordings). */
+  render(fixedDt?: number): void {
     const now = performance.now();
-    const dt = Math.min((now - this.last) / 1000, 0.1);
+    const dt = fixedDt ?? Math.min((now - this.last) / 1000, 0.1);
     this.last = now;
     this.time += dt;
     this.three.info.reset();

@@ -12,7 +12,9 @@ import type { TileFrame } from './textureSource';
 //  - a burst of single-pixel "impact" particles at the hit point: blood in the target's
 //    CDDA blood colour, sparks off metal/robots, a puff of dust where a bullet hits a wall
 //  - a brief white flash on the target sprite (the red hurt flash follows it)
-//  - a visual stagger on hard hits (MonsterView.kick)
+//  - a visual stagger on every damaging hit, scaled by the blow's share of max HP (MonsterView.kick)
+//  - a bigger spray on kills and a splash where the body lands (MonsterView.onBodyLanded)
+//  - gun tracers (a dotted pixel line for a frame or two) and bullet marks where rounds hit walls
 // Particles are sized to stay 2–4 low-res pixels on screen whatever their distance, so they
 // read as pixel-art spatter rather than modern-shooter decals.
 
@@ -29,7 +31,14 @@ const BLOOD: Record<string, number[]> = {
 };
 const SPARKS = [0xffe070, 0xffffff, 0xffa030];
 const DUST = [0x9a9080, 0x6a6458, 0xc0b8a8];
-const PALETTE = [...new Set([...Object.values(BLOOD).flat(), ...SPARKS, ...DUST])];
+const TRACER = [0xfff0b0, 0xffd060];
+const HOLE = [0x141210, 0x2a2622];
+const PALETTE = [...new Set([...Object.values(BLOOD).flat(), ...SPARKS, ...DUST, ...TRACER, ...HOLE])];
+
+/** Tracer dots live this long (s): one or two frames at 60 fps. */
+const TRACER_LIFE = 0.05;
+const MAX_MARKS = 60;
+const MARK_LIFE = 30;
 
 interface Particle {
   h: SpriteHandle;
@@ -94,6 +103,10 @@ const GRAVITY = 9;
 
 export class HitFx {
   private particles: Particle[] = [];
+  private tracerDots: { h: SpriteHandle; t: number }[] = [];
+  private marks: { h: SpriteHandle; t: number }[] = [];
+  private seenTracers = new WeakSet<object>();
+  private tracerSource: (() => readonly { x0: number; y0: number; x1: number; y1: number; z: number }[]) | null = null;
   private frames = new Map<number, TileFrame>();
   private rng = Math.random;
 
@@ -129,12 +142,62 @@ export class HitFx {
     return (px * 2 * Math.tan((cam.fov * Math.PI) / 360) * Math.max(0.3, d)) / lowH;
   }
 
+  /** Draw gun tracers for new entries of PlayerCombat.tracers (and monster guns sharing it). */
+  watchTracers(src: () => readonly { x0: number; y0: number; x1: number; y1: number; z: number }[]): void {
+    this.tracerSource = src;
+  }
+
+  /** A bullet's path as a dotted line of bright pixels, from just in front of the shooter. */
+  tracer(x0: number, y0: number, x1: number, y1: number, z: number): void {
+    const cam = this.renderer.rig.camera.position;
+    const p = this.game.player;
+    const len = Math.hypot(x1 - x0, y1 - y0);
+    if (len < 0.5) return;
+    const fromPlayer = Math.hypot(x0 - p.x, y0 - p.y) < 0.3;
+    // The survivor's rounds leave the muzzle a little under the eye and meet the crosshair.
+    const h0 = fromPlayer ? cam.y - z * LEVEL_HEIGHT - 0.3 : 1.2;
+    const h1 = fromPlayer ? this.impactHeight(x1, y1, 2.5) : 1.2;
+    const start = fromPlayer ? 1.2 : 0.4;
+    const n = Math.min(40, Math.floor((len - start) * 4));
+    for (let i = 0; i < n; i++) {
+      const f = (start + ((len - start) * (i + Math.random() * 0.5)) / n) / len;
+      const x = x0 + (x1 - x0) * f, y = y0 + (y1 - y0) * f;
+      const d = Math.hypot(x - cam.x, y - cam.z);
+      const size = this.pixelSize(d, 1.3);
+      const col = TRACER[i % TRACER.length];
+      const h = this.renderer.sprites.add({ x, y, z, frame: this.frames.get(col)!, height: size, width: size, anchor: 'center', lift: h0 + (h1 - h0) * f });
+      this.tracerDots.push({ h, t: TRACER_LIFE });
+    }
+  }
+
+  /** A dark bullet mark where a round hit a wall, a hand's width in front of it. */
+  private mark(x: number, y: number, z: number): void {
+    const p = this.game.player;
+    const d0 = Math.hypot(x - p.x, y - p.y) || 1;
+    const mx = x - ((x - p.x) / d0) * 0.04, my = y - ((y - p.y) / d0) * 0.04;
+    const cam = this.renderer.rig.camera.position;
+    const size = this.pixelSize(Math.hypot(mx - cam.x, my - cam.z), 2);
+    const h = this.renderer.sprites.add({ x: mx, y: my, z, frame: this.frames.get(HOLE[Math.floor(this.rng() * HOLE.length)])!, height: size, width: size, anchor: 'center', lift: this.impactHeight(x, y, 2.5) });
+    this.marks.push({ h, t: MARK_LIFE });
+    if (this.marks.length > MAX_MARKS) this.marks.shift()!.h.remove();
+  }
+
+  /** Dust (and a little blood) where a falling body lands. */
+  bodyLanded(x: number, y: number, z: number, blood: string | null): void {
+    this.burst(x, y, z, 0.15, DUST, 6, 1.4, false);
+    if (blood) this.burst(x, y, z, 0.2, BLOOD[blood] ?? BLOOD.fd_blood, 6, 1.6, true);
+  }
+
   onAttack(e: AttackEvent): void {
     const m = e.target as Monster | undefined;
     const p = this.game.player;
     if (e.outcome === 'whiff' || e.outcome === 'miss') {
-      // Bullets that hit nothing kick up dust where they stopped; swings through air make none.
-      if (e.kind === 'gun') this.burst(e.x, e.y, e.z, this.impactHeight(e.x, e.y, 1.6), DUST, 5, 1.2, false);
+      // Bullets that hit nothing kick up dust where they stopped (and mark the wall); swings
+      // through air make none.
+      if (e.kind === 'gun') {
+        this.burst(e.x, e.y, e.z, this.impactHeight(e.x, e.y, 1.6), DUST, 5, 1.2, false);
+        this.mark(e.x, e.y, e.z);
+      }
       return;
     }
     if (!m) return;
@@ -152,9 +215,14 @@ export class HitFx {
     const cols = blood ?? (metal ? SPARKS : DUST);
     let n = Math.min(14, 3 + Math.round(e.damage / 3));
     if (crit) n += 6;
+    if (e.outcome === 'kill') n += 10;
     if (e.outcome === 'block') n = 2;
-    this.burst(e.x, e.y, e.z, hgt, cols, n, crit ? 2.4 : 1.6, !!blood, Math.atan2(m.x - p.x, -(m.y - p.y)));
-    if (e.heavy && e.outcome !== 'block') view?.kick(m, p.x, p.y, crit ? 1.4 : 1);
+    this.burst(e.x, e.y, e.z, hgt, cols, n, crit || e.outcome === 'kill' ? 2.4 : 1.6, !!blood, Math.atan2(m.x - p.x, -(m.y - p.y)));
+    // Every blow that hurts rocks the target, in proportion to how much of it the blow took.
+    if (e.outcome !== 'block' && e.outcome !== 'kill' && e.damage > 0) {
+      const share = e.damage / Math.max(1, m.hpMax);
+      view?.kick(m, p.x, p.y, Math.max(0.3, Math.min(1.5, share * 4)) * (crit ? 1.3 : 1));
+    }
   }
 
   /** Where on a sprite of height `top` the crosshair ray is, in metres above its floor. */
@@ -193,6 +261,21 @@ export class HitFx {
   }
 
   update(dt: number): void {
+    for (const t of this.tracerSource?.() ?? []) {
+      if (this.seenTracers.has(t)) continue;
+      this.seenTracers.add(t);
+      this.tracer(t.x0, t.y0, t.x1, t.y1, t.z);
+    }
+    for (let i = this.tracerDots.length - 1; i >= 0; i--) {
+      if ((this.tracerDots[i].t -= dt) > 0) continue;
+      this.tracerDots[i].h.remove();
+      this.tracerDots.splice(i, 1);
+    }
+    for (let i = this.marks.length - 1; i >= 0; i--) {
+      if ((this.marks[i].t -= dt) > 0) continue;
+      this.marks[i].h.remove();
+      this.marks.splice(i, 1);
+    }
     for (let i = this.particles.length - 1; i >= 0; i--) {
       const q = this.particles[i];
       q.t -= dt;
