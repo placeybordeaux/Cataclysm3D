@@ -173,6 +173,49 @@ describe('physics', () => {
     expect(vs.getInReason(v)).toMatch(/closer/);
   });
 
+  it('climb out: stopped, getting out opens the nearest door and puts you outside the car', () => {
+    // Playtest: 'e' ("get out") only let go of the controls; you sat in a closed car.
+    const { game, vs } = world();
+    const v = pristineCar(vs, 10, 10, 0);
+    const c = v.controls()!;
+    const [sx, sy] = v.mountToWorld(c.mx + 0.5, c.my + 0.5);
+    game.player.x = sx;
+    game.player.y = sy + 2.2;
+    vs.openDriverDoor(v);
+    vs.takeControls(v);
+    for (const q of v.parts) q.open = false;
+    vs.releaseControls();
+    const msg = vs.climbOut(v);
+    expect(msg).toMatch(/climb out/);
+    expect(vs.at(Math.floor(game.player.x), Math.floor(game.player.y), 0)).toBe(null);
+    expect(v.parts.some((q) => q.open)).toBe(true);
+    // moving: no climbing out
+    vs.takeControls(v);
+    v.velocity = 10;
+    expect(vs.climbOut(v)).toBe(null);
+  });
+
+  it('a car shoves a bicycle out of the way instead of stopping dead against it', () => {
+    const { game, vs } = world();
+    const v = pristineCar(vs, 10, 10, 0);
+    const bike = vs.spawn('bicycle', 20, 10, 0, 90, { status: 2, rng: new Rng(3) })!;
+    expect(bike.mass()).toBeLessThan(v.mass() * 0.2);
+    game.player.x = 10.5;
+    game.player.y = 10.5;
+    expect(vs.takeControls(v).ok).toBe(true);
+    expect(vs.startEngine(v).ok).toBe(true);
+    vs.driveMode = 'direct';
+    vs.scriptedInput = true;
+    vs.input = { throttle: 1, steer: 0, brake: false };
+    const bx = bike.x, by = bike.y;
+    for (let i = 0; i < 150; i++) game.tick(1 / 30);
+    expect(v.x).toBeGreaterThan(22);
+    expect(Math.hypot(bike.x - bx, bike.y - by)).toBeGreaterThan(0.5);
+    // nothing overlaps afterwards
+    const tiles = new Set(v.occupiedTiles().map((t) => `${t.tx},${t.ty}`));
+    expect(bike.occupiedTiles().some((t) => tiles.has(`${t.tx},${t.ty}`))).toBe(false);
+  });
+
   it('drives: engine start, throttle moves the car forward and burns fuel', () => {
     const { game, vs } = world();
     const v = pristineCar(vs, 10, 10, 0);

@@ -425,6 +425,36 @@ export class VehicleSystem implements GameSystem, MapOverlay {
     return Math.abs(v.velocity) > 1 ? `You let go of the controls of the moving ${v.name}!` : `You let go of the controls of the ${v.name}.`;
   }
 
+  /**
+   * Climb out of a (stopped) vehicle: open the nearest door and step onto free ground beyond
+   * it. The driving HUD says "e get out"; letting go of the controls alone left a newcomer
+   * sitting in a closed car, walking into its walls, with no idea the doors open.
+   * Returns null when there's no way out from here (no door next to you, or it's blocked).
+   */
+  climbOut(v: Vehicle): string | null {
+    if (Math.abs(v.velocity) > 1) return null;
+    const p = this.game.player;
+    const here = this.at(Math.floor(p.x), Math.floor(p.y), p.z);
+    if (!here || here.v !== v) return null;
+    const doors = v.parts.filter((q) => has(q, 'OPENABLE') && !has(q, 'MULTISQUARE') && Math.max(Math.abs(q.mx - here.mx), Math.abs(q.my - here.my)) <= 1);
+    const dist = (q: { mx: number; my: number }) => Math.hypot(q.mx - here.mx, q.my - here.my);
+    doors.sort((a, b) => dist(a) - dist(b));
+    for (const d of doors) {
+      const [dx, dy] = v.mountToWorld(d.mx, d.my);
+      const tx = Math.floor(dx), ty = Math.floor(dy);
+      // A free tile next to the door that isn't part of any vehicle.
+      for (const [ox, oy] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]]) {
+        const x = tx + ox, y = ty + oy;
+        if (this.at(x, y, p.z) || !this.game.map.passable(x, y, p.z)) continue;
+        const opened = d.open ? null : this.toggleDoor(v, d.mx, d.my);
+        p.x = x + 0.5;
+        p.y = y + 0.5;
+        return `${opened ? opened.replace(/\.$/, '') + ' and' : 'You'} climb out of the ${v.name}.`;
+      }
+    }
+    return null;
+  }
+
   private seatPlayer(v: Vehicle): void {
     const s = v.driverSeat();
     if (!s) return;
@@ -912,6 +942,16 @@ export class VehicleSystem implements GameSystem, MapOverlay {
       const fdx = Math.cos(rad) * dir, fdy = Math.sin(rad) * dir;
       // Another vehicle: treat as a heavy obstacle (no momentum transfer yet).
       const other = this.index.get(k);
+      // A much lighter one (a bicycle, a shopping cart) is shoved out of the way instead: a car
+      // that stopped dead against a bike lying on the road felt broken in playtesting.
+      if (other && other.v !== v && other.v !== this.driving && other.v.mass() < mass * 0.2 && Math.abs(v.velocity) > 0.5 && this.shove(other.v, fdx, fdy, poseKeys)) {
+        const r = resolveCollision({ mass, velocity: v.velocity, mass2: other.v.mass(), e: 0.3, partDens: 80 });
+        this.damagePart(other.v, collisionPart(other.v, other.mx, other.my), r.objDmg);
+        this.impactMessage(v, part, `the ${other.v.name}`, 'crash!');
+        this.emitSound(v, 50, 'crash!', ['smash_success', 'hit_vehicle'], 'combat');
+        v.velocity *= mass / (mass + other.v.mass());
+        continue;
+      }
       if (other && other.v !== v) {
         const r = resolveCollision({ mass, velocity: v.velocity, mass2: other.v.mass(), e: 0.3, partDens: 80 });
         this.damagePart(v, part, r.partDmg);
@@ -990,6 +1030,35 @@ export class VehicleSystem implements GameSystem, MapOverlay {
     const dVel = Math.abs(velBefore - v.velocity) * MPH_PER_MS;
     if (dVel > 1 && this.driving === v) this.jolt(v, dVel);
     return stopped;
+  }
+
+  /**
+   * Push a light vehicle 1–3 tiles along (dx, dy), or a tile to either side of that, to the
+   * first spot its whole footprint fits: walkable, clear of other vehicles, creatures, you and
+   * the pushing vehicle's new footprint (`blocked`). False (nothing moved) when pinned.
+   */
+  private shove(o: Vehicle, dx: number, dy: number, blocked: Set<number>): boolean {
+    const map = this.game.map;
+    const p = this.game.player;
+    const sx = Math.round(dx), sy = Math.round(dy);
+    const tries: [number, number][] = [];
+    for (let d = 1; d <= 3; d++) tries.push([sx * d, sy * d], [sx * d - sy, sy * d + sx], [sx * d + sy, sy * d - sx]);
+    for (const [ox, oy] of tries) {
+      if (!ox && !oy) continue;
+      const ok = o.occupiedTiles(o.facing, o.x + ox, o.y + oy).every((t) => {
+        const k = tileKey(t.tx, t.ty, o.z);
+        const there = this.index.get(k);
+        return !blocked.has(k) && (!there || there.v === o) && map.passable(t.tx, t.ty, o.z) && !this.creatureHooks.at(t.tx, t.ty, o.z) && !(p.tileX === t.tx && p.tileY === t.ty && p.z === o.z);
+      });
+      if (!ok) continue;
+      o.x += ox;
+      o.y += oy;
+      o.velocity = 0;
+      this.reindex(o);
+      o.version++;
+      return true;
+    }
+    return false;
   }
 
   /**

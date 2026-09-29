@@ -461,8 +461,11 @@ export async function installVehicles(game: Game, renderer: Renderer, api?: Debu
       // At the wheel, 'e' lets go of the controls — the one obvious way out of driving mode
       // (the vehicle panel on '^' still has info and every control). Letting go while moving
       // is allowed, as in CDDA; releaseControls() warns about it.
+      // Stopped, 'e' also climbs out through the nearest door (what "e get out" promises).
       if (vs.driving) {
-        g.message(vs.releaseControls());
+        const v = vs.driving;
+        const released = vs.releaseControls();
+        g.message(vs.climbOut(v) ?? released);
         return true;
       }
       const t = targetVehicle(g, renderer);
