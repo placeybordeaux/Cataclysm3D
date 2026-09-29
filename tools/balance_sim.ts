@@ -35,7 +35,7 @@ import { installZLevels } from '../src/game/zlevels';
 import { installRest, goToSleep } from '../src/game/rest';
 import { openDoor } from '../src/game/interact';
 import { findPath } from '../src/game/pathfind';
-import { applyDifficultySettings, registerDifficultyTargets, settingsFor, type DifficultySettings, type PresetId } from '../src/game/difficulty';
+import { applyDifficultySettings, DIFFICULTY_PRESETS, formatKnob, KNOBS, registerDifficultyTargets, settingsFor, type DifficultySettings, type PresetId } from '../src/game/difficulty';
 import { Character, BODYTEMP, SLEEPINESS, THIRST } from '../src/game/character';
 import { MAIN_PARTS } from '../src/game/bodyparts';
 import { SECONDS_PER_HOUR } from '../src/core/time';
@@ -53,6 +53,7 @@ const HELP = `balance_sim: headless difficulty-preset simulation (see docs/BALAN
   --set key=value[,key=value]   override preset knobs (e.g. --set spawnScale=0.5,safeRadius=16)
   --out FILE                    append JSON-lines records here
   --from FILE[,FILE]            only summarise existing records (no simulation)
+  --presets                     print the preset table (markdown) and exit
   --quiet                       no per-seed progress lines
   --trace                       day1: print the bot's state every real second and the game log
   -h, --help`;
@@ -70,6 +71,7 @@ const { values: args } = parseArgs({
     quiet: { type: 'boolean', default: false },
     trace: { type: 'boolean', default: false },
     help: { type: 'boolean', short: 'h', default: false },
+    presets: { type: 'boolean', default: false },
   },
 });
 if (args.help) {
@@ -429,7 +431,6 @@ class Newcomer {
     game.input.held.add('KeyW');
     if (this.stuck(dt)) {
       this.path = [];
-      this.stuckT = 0;
       this.badTargets.add(goal);
       return false;
     }
@@ -584,7 +585,7 @@ function needs(): { milestones: Milestone[]; atEnd: Record<string, number | stri
   const { game: gd } = data();
   const c = new Character(gd, { seed: 1 });
   const s = presetSettings();
-  c.balance = { hunger: s.hunger, thirst: s.thirst, fatigue: s.fatigue, healing: s.healing, bleed: s.bleed, cold: s.cold };
+  c.balance = { hunger: s.hunger, thirst: s.thirst, fatigue: s.fatigue, healing: s.healing, bleed: s.bleed, cold: s.cold, damage: s.damageTaken };
   c.thirst = 0;
   c.sleepiness = 0;
   const out: Milestone[] = [];
@@ -672,7 +673,7 @@ function cold(seed: number): Record<string, number | string | boolean> {
     const d = p.bodyTempDescription();
     if (d !== 'Comfortable' && d !== 'Warm' && (feels === 'Comfortable' || d === 'Freezing!' || (d === 'Very cold!' && feels === 'Chilly'))) feels = d;
   }
-  return { blanket, minAirC: +minAir.toFixed(1), minBodyC: +minTemp.toFixed(2), worstFeel: feels, coldWakes: wakes, died: p.dead, sleptTill: +game.clock.hourOfDay.toFixed(1) };
+  return { blanket, minAirC: +minAir.toFixed(1), minBodyC: +minTemp.toFixed(2), worstFeel: feels, coldWakes: wakes, died: p.dead, cause: p.dead ? p.causeOfDeath ?? '?' : '', sleptTill: +game.clock.hourOfDay.toFixed(1) };
 }
 
 // ------------------------------------------------------------------ run + summarise
@@ -733,7 +734,7 @@ function summarise(recs: Rec[]): void {
       const sights = rs.map((r) => r.firstSightS).filter((x): x is number => x !== null);
       const died = rs.filter((r) => r.died);
       console.log(
-        `| ${pr} | ${rs.length} | ${died.length} (${Math.round((100 * died.length) / rs.length)}%)${died.length ? ' ' + died.map((r) => `${r.deathCause}@${r.deathHour?.toFixed(0)}h`).join(', ') : ''} | ${fmtS(median(sights))} | ${fmtS(median(contacts))} / ${fmtS(pctl(contacts, 0.25))}–${fmtS(pctl(contacts, 0.75))} | ${rs.length - contacts.length} | ${median(rs.map((r) => r.zombies40))}, ${Math.max(...rs.map((r) => r.zombies40))} | ${median(rs.map((r) => r.dormant40))} | ${median(rs.map((r) => r.maxNear6))} / ${Math.max(...rs.map((r) => r.maxNear6))} | ${median(rs.map((r) => r.timeCrowdedS)).toFixed(0)} | ${median(rs.map((r) => r.kills))} | ${median(rs.map((r) => r.hpLost))} | ${median(rs.map((r) => r.realMinutes)).toFixed(0)} |`,
+        `| ${pr} | ${rs.length} | ${died.length} (${Math.round((100 * died.length) / rs.length)}%)${died.length ? ` (${[...new Set(died.map((r) => r.deathCause))].map((c) => `${c} ×${died.filter((r) => r.deathCause === c).length}`).join(', ')}; median ${median(died.map((r) => r.deathHour ?? 0)).toFixed(0)}:00)` : ''} | ${fmtS(median(sights))} | ${fmtS(median(contacts))} / ${fmtS(pctl(contacts, 0.25))}–${fmtS(pctl(contacts, 0.75))} | ${rs.length - contacts.length} | ${median(rs.map((r) => r.zombies40))}, ${Math.max(...rs.map((r) => r.zombies40))} | ${median(rs.map((r) => r.dormant40))} | ${median(rs.map((r) => r.maxNear6))} / ${Math.max(...rs.map((r) => r.maxNear6))} | ${median(rs.map((r) => r.timeCrowdedS)).toFixed(0)} | ${median(rs.map((r) => r.kills))} | ${median(rs.map((r) => r.hpLost))} | ${median(rs.map((r) => r.realMinutes)).toFixed(0)} |`,
       );
     }
   }
@@ -756,7 +757,7 @@ function summarise(recs: Rec[]): void {
   const du = recs.filter((r) => r.scenario === 'duel') as unknown as (Record<string, number | string | boolean> & Rec)[];
   if (du.length) {
     console.log('\n## Melee duels on open ground (walk in and swing; no guard, no side-step)\n');
-    console.log('| preset | weapon | zombies | runs | won | died | fight length (median s) | HP lost (median, of 530) | swings/s |');
+    console.log('| preset | weapon | zombies | runs | won | died | fight length (median s) | HP lost (median, all parts) | swings/s |');
     console.log('|---|---|---|---|---|---|---|---|---|');
     const keys = [...new Set(du.map((r) => `${r.preset}|${r.weapon}|${r.foes}`))];
     for (const k of keys) {
@@ -776,13 +777,16 @@ function summarise(recs: Rec[]): void {
       const feels = new Map<string, number>();
       for (const r of rs) feels.set(String(r.worstFeel), (feels.get(String(r.worstFeel)) ?? 0) + 1);
       console.log(
-        `| ${pr} | ${rs.length} | ${rs.filter((r) => r.blanket).length} | ${median(rs.map((r) => r.minAirC as number))} | ${median(rs.map((r) => r.minBodyC as number)).toFixed(1)} / ${Math.min(...rs.map((r) => r.minBodyC as number)).toFixed(1)} | ${[...feels].map(([k, v]) => `${k} ${v}`).join(', ')} | ${median(rs.map((r) => r.coldWakes as number))} | ${rs.filter((r) => r.died).length} |`,
+        `| ${pr} | ${rs.length} | ${rs.filter((r) => r.blanket).length} | ${median(rs.map((r) => r.minAirC as number)).toFixed(1)} | ${median(rs.map((r) => r.minBodyC as number)).toFixed(1)} / ${Math.min(...rs.map((r) => r.minBodyC as number)).toFixed(1)} | ${[...feels].map(([k, v]) => `${k} ${v}`).join(', ')} | ${median(rs.map((r) => r.coldWakes as number))} | ${rs.filter((r) => r.died).length} |`,
       );
     }
   }
 }
 
-if (args.from) {
+if (args.presets) {
+  console.log('| Group | Rule | Accessible | Classic |\n|---|---|---|---|');
+  for (const k of KNOBS) console.log(`| ${k.group} | ${k.name} | ${formatKnob(k, DIFFICULTY_PRESETS.accessible[k.key])} | ${formatKnob(k, DIFFICULTY_PRESETS.classic[k.key])} |`);
+} else if (args.from) {
   const recs = args.from.split(',').flatMap((f) => readFileSync(f, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l) as Rec));
   summarise(recs);
 } else {

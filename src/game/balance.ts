@@ -22,9 +22,14 @@ export interface SurvivorBalance {
    * a 5 °C night feels like BN's ~9 °C. Heat is untouched (summer isn't the newcomer's problem).
    */
   cold: number;
+  /**
+   * Damage from hits (monster and NPC blows, projectiles, run-overs: everything through
+   * Character.takeHit), after armor. Not a BN option: Accessible's answer to real-time fights.
+   */
+  damage: number;
 }
 
-export const NEUTRAL_SURVIVOR: Readonly<SurvivorBalance> = Object.freeze({ hunger: 1, thirst: 1, fatigue: 1, healing: 1, bleed: 1, cold: 1 });
+export const NEUTRAL_SURVIVOR: Readonly<SurvivorBalance> = Object.freeze({ hunger: 1, thirst: 1, fatigue: 1, healing: 1, bleed: 1, cold: 1, damage: 1 });
 
 export interface WorldBalance {
   /** Monster movement speed (BN MONSTER_SPEED / 100, applied to walking only, not to attacks). */

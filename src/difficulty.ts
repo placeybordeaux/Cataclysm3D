@@ -50,13 +50,20 @@ export function installDifficulty(game: Game, o: { spawner: Spawner | null; api?
     save: () => difficultyState(game)!,
     load: (j, ctx) => {
       let settings: DifficultySettings;
-      try {
-        settings = validateSettings(j.settings);
-      } catch (e) {
-        // A damaged section: say so, fall back to the named preset's numbers.
-        const preset = (['accessible', 'classic'] as const).includes(j.preset as 'accessible') ? (j.preset as 'accessible' | 'classic') : 'accessible';
-        ctx.warn(`${(e as Error).message}; using the ${preset} preset`);
-        settings = settingsFor(preset);
+      if (j.preset === 'accessible' || j.preset === 'classic') {
+        // A named preset means "these rules as the game defines them now": retuning a preset
+        // reaches existing worlds too. Only Custom keeps its own numbers.
+        settings = settingsFor(j.preset);
+      } else {
+        try {
+          // Knobs added after this save was written start at Accessible's value.
+          const saved = Object.fromEntries(Object.entries(j.settings ?? {}).filter(([, v]) => v !== undefined));
+          settings = validateSettings({ ...settingsFor('accessible'), ...saved });
+        } catch (e) {
+          // A damaged section: say so, fall back to Accessible.
+          ctx.warn(`${(e as Error).message}; using the Accessible rules`);
+          settings = settingsFor('accessible');
+        }
       }
       applyDifficultySettings(game, j.preset, settings);
       loadedThisPass = true;

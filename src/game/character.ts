@@ -606,8 +606,10 @@ export class Character {
    */
   takeHit(bp: BodyPartId, units: { type: string; amount: number }[]): DamageResult {
     let total = 0, painf = 0;
+    const mul = this.balance.damage;
     for (const u of units) {
-      const amt = Math.floor(u.amount);
+      // balance.damage (difficulty): scaled after armor; exact BN numbers at 1.
+      const amt = mul === 1 ? Math.floor(u.amount) : this.rollRemainder(Math.floor(u.amount) * mul);
       if (amt <= 0) continue;
       total += amt;
       painf += amt / (u.type === 'bash' ? 5 : u.type === 'acid' ? 3 : 4);

@@ -45,6 +45,8 @@ export interface DifficultySettings {
   crashDamage: number;
   /** Chance per turn that a bleeding wound costs HP. */
   bleed: number;
+  /** Damage you take from hits, after armor (not a BN option). */
+  damageTaken: number;
   // --- survival
   hunger: number;
   thirst: number;
@@ -66,14 +68,14 @@ export interface DifficultySettings {
 
 const CLASSIC: DifficultySettings = {
   spawnScale: 0.75, hordeScale: 0.2, safeRadius: 10, dormantSafe: false, monsterSpeed: 1, monsterResilience: 1, itemSpawnRate: 1,
-  feel: 'classic', crashDamage: 1, bleed: 1,
+  feel: 'classic', crashDamage: 1, bleed: 1, damageTaken: 1,
   hunger: 1, thirst: 1, fatigue: 1, healing: 1, cold: 1,
   dayLength: 1, pauseInMenus: false, permadeath: true,
 };
 
 const ACCESSIBLE: DifficultySettings = {
-  spawnScale: 0.45, hordeScale: 0.1, safeRadius: 24, dormantSafe: true, monsterSpeed: 0.9, monsterResilience: 0.7, itemSpawnRate: 1,
-  feel: 'accessible', crashDamage: 0.5, bleed: 0.5,
+  spawnScale: 0.45, hordeScale: 0.1, safeRadius: 32, dormantSafe: true, monsterSpeed: 0.9, monsterResilience: 0.7, itemSpawnRate: 1,
+  feel: 'accessible', crashDamage: 0.5, bleed: 0.5, damageTaken: 0.7,
   hunger: 0.75, thirst: 0.75, fatigue: 1, healing: 2, cold: 0.7,
   dayLength: 1, pauseInMenus: true, permadeath: false,
 };
@@ -110,6 +112,7 @@ export const KNOBS: readonly Knob[] = [
   { key: 'monsterResilience', name: 'Monster toughness', group: 'Monsters & world', newAreasOnly: true, choices: [0.5, 0.6, 0.7, 0.8, 0.9, 1, 1.25, 1.5], format: pct, desc: 'Hit points of monsters that appear from now on (Bright Nights MONSTER_RESILIENCE).  Classic 100%.' },
   { key: 'itemSpawnRate', name: 'Item spawn rate', group: 'Monsters & world', newAreasOnly: true, choices: [0.25, 0.5, 0.75, 1, 1.5, 2, 3], format: pct, desc: 'Items found in newly explored places (Bright Nights ITEM_SPAWNRATE).' },
   { key: 'feel', name: 'Combat timing', group: 'Combat', choices: ['accessible', 'classic'], format: (v) => (v === 'accessible' ? 'forgiving' : 'tight'), desc: 'forgiving: longer enemy wind-ups, wider parry window, bigger side-step dodge bonus.  tight: Bright Nights\' swing rate with short tells.' },
+  { key: 'damageTaken', name: 'Damage you take', group: 'Combat', choices: [0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1, 1.25, 1.5], format: pct, desc: 'Damage from blows, bites and shots after your armor.  Not a Bright Nights option: 100% is Bright Nights.' },
   { key: 'bleed', name: 'Bleeding', group: 'Combat', choices: MULTS.filter((v) => v > 0 && v <= 2), format: pct, desc: 'How quickly bleeding wounds cost health.' },
   { key: 'crashDamage', name: 'Crash damage', group: 'Combat', choices: [0.25, 0.5, 0.75, 1, 1.5], format: pct, desc: 'Damage you take in vehicle crashes and from being run over.' },
   { key: 'hunger', name: 'Hunger rate', group: 'Survival', choices: MULTS.filter((v) => v > 0 && v <= 2), format: pct, desc: 'Calories burned per hour.  100% = Bright Nights (2500 kcal a day).' },
@@ -254,7 +257,7 @@ export function applyDifficultySettings(game: Game, preset: Difficulty, settings
   BALANCE.crashDamage = s.crashDamage;
   BALANCE.monsterResilience = s.monsterResilience;
   setFeelDifficulty(s.feel);
-  game.player.balance = { ...NEUTRAL_SURVIVOR, hunger: s.hunger, thirst: s.thirst, fatigue: s.fatigue, healing: s.healing, bleed: s.bleed, cold: s.cold };
+  game.player.balance = { ...NEUTRAL_SURVIVOR, hunger: s.hunger, thirst: s.thirst, fatigue: s.fatigue, healing: s.healing, bleed: s.bleed, cold: s.cold, damage: s.damageTaken };
   setClockRate(1 / s.dayLength);
   // Legacy (curses-style) windows pause through pauseInMenus; ui2 windows through its setting.
   // The Esc menu pauses either way (src/ui/menus.ts).

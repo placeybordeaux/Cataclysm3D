@@ -68,7 +68,7 @@ describe('difficulty presets', () => {
       for (const k of KNOBS) expect(k.choices, `${id}.${k.key} must be one of its knob choices`).toContain(s[k.key]);
     }
     const c = DIFFICULTY_PRESETS.classic;
-    expect([c.hunger, c.thirst, c.fatigue, c.healing, c.cold, c.bleed, c.monsterSpeed, c.monsterResilience, c.dayLength]).toEqual([1, 1, 1, 1, 1, 1, 1, 1, 1]);
+    expect([c.hunger, c.thirst, c.fatigue, c.healing, c.cold, c.bleed, c.monsterSpeed, c.monsterResilience, c.dayLength, c.damageTaken]).toEqual([1, 1, 1, 1, 1, 1, 1, 1, 1, 1]);
     expect(c.spawnScale).toBe(0.75);
     expect(c.hordeScale).toBe(0.2);
     expect(c.permadeath).toBe(true);
@@ -114,7 +114,7 @@ describe('difficulty presets', () => {
     expect(BALANCE.monsterSpeed).toBe(0.85);
     expect(BALANCE.crashDamage).toBe(s.crashDamage);
     expect(FEEL.telegraph).toBe(FEEL_PRESETS.accessible.telegraph);
-    expect(game.player.balance).toEqual({ hunger: s.hunger, thirst: s.thirst, fatigue: s.fatigue, healing: s.healing, bleed: s.bleed, cold: s.cold });
+    expect(game.player.balance).toEqual({ hunger: s.hunger, thirst: s.thirst, fatigue: s.fatigue, healing: s.healing, bleed: s.bleed, cold: s.cold, damage: s.damageTaken });
     expect(getClockRate()).toBeCloseTo(1 / 1.5);
     expect(game.pauseInMenus).toBe(true);
     expect(ui2Pause).toBe(true);
@@ -166,6 +166,21 @@ describe('knobs in the simulation', () => {
     const hot = c.bodyTempTarget('torso');
     c.balance = { ...c.balance, cold: 1 };
     expect(c.bodyTempTarget('torso')).toBeCloseTo(hot);
+  });
+
+  it('damage taken scales hits after armor; 1 is exact BN', () => {
+    const hit = (mul: number) => {
+      const c = new Character(data, { seed: 2 });
+      c.balance = { ...c.balance, damage: mul };
+      let lost = 0;
+      for (let i = 0; i < 200; i++) {
+        c.hp.torso.cur = c.hp.torso.max;
+        lost += c.takeHit('torso', [{ type: 'bash', amount: 7 }]).damage;
+      }
+      return lost / 200;
+    };
+    expect(hit(1)).toBe(7);
+    expect(hit(0.5)).toBeCloseTo(3.5, 0);
   });
 
   it('healing multiplier speeds natural regeneration', () => {
@@ -246,15 +261,28 @@ describe('difficulty persistence', () => {
     expect(difficultyState(B.game)?.preset).toBe('classic');
   });
 
-  it('a damaged difficulty section falls back to its preset and says so', () => {
+  it('named presets load as currently defined; Custom fills new knobs and survives damage loudly', () => {
     const A = build();
     setWorldDifficulty(A.game, 'classic', settingsFor('classic'));
     const file = serializeGame(A.game, { slot: 's', name: 'x', gen: 'test' });
-    (file.sections.difficulty as { settings: Record<string, unknown> }).settings.hunger = 'much';
+    const sec = file.sections.difficulty as { preset: string; settings: Record<string, unknown> };
+    sec.settings.thirst = 0.25; // an older Classic definition
     const B = build();
-    const res = applySave(B.game, file);
-    expect(res.warnings.join(' ')).toMatch(/hunger/);
+    applySave(B.game, structuredClone(file));
     expect(difficultyState(B.game)).toEqual({ preset: 'classic', settings: settingsFor('classic') });
+
+    sec.preset = 'custom';
+    delete sec.settings.damageTaken; // saved before the knob existed
+    const C = build();
+    applySave(C.game, structuredClone(file));
+    expect(difficultyState(C.game)?.settings.thirst).toBe(0.25);
+    expect(difficultyState(C.game)?.settings.damageTaken).toBe(DIFFICULTY_PRESETS.accessible.damageTaken);
+
+    sec.settings.hunger = 'much';
+    const D = build();
+    const res = applySave(D.game, structuredClone(file));
+    expect(res.warnings.join(' ')).toMatch(/hunger/);
+    expect(difficultyState(D.game)).toEqual({ preset: 'custom', settings: settingsFor('accessible') });
   });
 
   it('without permadeath the last save survives death; with it, it is deleted', async () => {
