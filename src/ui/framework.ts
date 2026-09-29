@@ -259,7 +259,8 @@ export function confirm(question: string): Promise<boolean> {
       footer: `${c('c_light_green', 'y')}es / ${c('c_light_green', 'n')}o`,
       onKey: (e) => {
         if (e.key === 'y' || e.key === 'Y' || e.key === 'Enter') (answered = true), w.close(), resolve(true);
-        else if (e.key === 'n' || e.key === 'N') (answered = true), w.close(), resolve(false);
+        // query_yn: Esc answers no (and must close, or cdda.ui.closeAll() leaves it open)
+        else if (e.key === 'n' || e.key === 'N' || e.key === 'Escape') (answered = true), w.close(), resolve(false);
         return true;
       },
       onClose: () => !answered && resolve(false),
@@ -274,10 +275,8 @@ export function prompt(question: string, initial = ''): Promise<string | null> {
     let done = false;
     const w = openWindow({
       title: question,
-      onKey: (e) => {
-        if (e.key === 'Escape') return false;
-        return false;
-      },
+      // Keys typed into the <input> never reach the capture stack (Input ignores input
+      // targets); Esc sent to the window (closeAll, focus lost) closes via openWindow.
       onClose: () => !done && resolve(null),
     });
     const inp = document.createElement('input');
