@@ -20,7 +20,7 @@ import { missionMarkers } from './logic/missions';
 import { openChatMenu2, pickItem2 } from './chat';
 import type { TextSpeed } from './logic/typewriter';
 import type { BodyMods } from '../game/bodymods';
-import { vehicleScreens } from '../ui/vehicle_ui';
+import { takeControls, vehicleScreens } from '../ui/vehicle_ui';
 import { autodocScreen } from '../mutbio';
 import { driveHud, openCargoPanel, openVehiclePanel, cargoPanel } from './vehicle';
 import { has } from '../game/vehicle';
@@ -115,9 +115,12 @@ export function installScreens(game: Game, renderer: Renderer, deps: ScreensDeps
     const covered = !!door && !door.open && !!cargo && !has(cargo, 'CARGO_PASSABLE');
     const near = Math.hypot(t.x + 0.5 - game.player.x, t.y + 0.5 - game.player.y) <= 2.5;
     const far = near ? undefined : 'Too far away';
+    // Same rule as `e` (vehicle_ui.ts): by the driver's seat, driving is the obvious action.
+    const drive = game.vehicles!.driveOffer(o.v, o.mx, o.my);
     return [
-      { label: `Examine the ${o.v.name}`, primary: !door, time: 0, action: () => void openVehiclePanel(game, o.v, { mx: o.mx, my: o.my }) },
-      ...(door ? [{ label: `${door.open ? 'Close' : 'Open'} the ${door.def.name}`, primary: true, time: 1, disabled: far, action: () => game.message(game.vehicles!.toggleDoor(o.v, o.mx, o.my) ?? '') }] : []),
+      ...(drive ? [{ label: `${o.v.locked ? 'Get in' : 'Drive'} the ${o.v.name}`, primary: true, time: 1, key: 'D', action: () => takeControls(game, o.v) }] : []),
+      { label: `Examine the ${o.v.name}`, primary: !door && !drive, time: 0, action: () => void openVehiclePanel(game, o.v, { mx: o.mx, my: o.my }) },
+      ...(door ? [{ label: `${door.open ? 'Close' : 'Open'} the ${door.def.name}`, primary: !drive, time: 1, disabled: far, action: () => game.message(game.vehicles!.toggleDoor(o.v, o.mx, o.my) ?? '') }] : []),
       ...(cargo ? [{ label: `Look in the ${cargo.def.name} (${cargo.items.length})`, disabled: far ?? (covered ? `The ${door!.def.name} is closed` : undefined), action: () => void (cargoPanel.open ?? openCargoPanel)(game, o.v, cargo) }] : []),
     ];
   });

@@ -173,6 +173,33 @@ describe('physics', () => {
     expect(vs.getInReason(v)).toMatch(/closer/);
   });
 
+  it("'e' by the driver's seat offers to drive; rear doors, the far side and the trunk keep their own action", () => {
+    const { game, vs } = world();
+    const v = pristineCar(vs, 10, 10, 0);
+    const c = v.controls()!;
+    const [sx, sy] = v.mountToWorld(c.mx + 0.5, c.my + 0.5);
+    game.player.x = sx;
+    game.player.y = sy - 2.2; // outside, by the driver's door (mount y -1 is the left side)
+    expect(vs.getInReason(v)).toBe(null);
+    const driverDoor = v.parts.find((q) => q.def.id === 'door_front_left')!;
+    const rearDoor = v.parts.find((q) => q.def.id === 'door_rear_left')!;
+    const farDoor = v.parts.find((q) => q.def.id === 'door_front_right')!;
+    const trunk = v.parts.find((q) => q.def.id === 'trunk')!;
+    expect(vs.driveOffer(v, driverDoor.mx, driverDoor.my)).toBe(true);
+    expect(vs.driveOffer(v, c.mx, c.my)).toBe(true);
+    expect(vs.driveOffer(v, 1, -1)).toBe(true); // the windscreen by the door
+    expect(vs.driveOffer(v, rearDoor.mx, rearDoor.my)).toBe(false);
+    expect(vs.driveOffer(v, farDoor.mx, farDoor.my)).toBe(false);
+    expect(vs.driveOffer(v, trunk.mx, trunk.my)).toBe(false);
+    // Out of reach of the seat, or already driving: no offer.
+    game.player.y = sy - 8;
+    expect(vs.driveOffer(v, driverDoor.mx, driverDoor.my)).toBe(false);
+    game.player.y = sy - 2.2;
+    vs.openDriverDoor(v);
+    vs.takeControls(v);
+    expect(vs.driveOffer(v, c.mx, c.my)).toBe(false);
+  });
+
   it('climb out: stopped, getting out opens the nearest door and puts you outside the car', () => {
     // Playtest: 'e' ("get out") only let go of the controls; you sat in a closed car.
     const { game, vs } = world();

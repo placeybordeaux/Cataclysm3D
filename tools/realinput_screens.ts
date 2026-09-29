@@ -185,6 +185,39 @@ export function screenScenarios(c: ScreensCtx): Scenario[] {
       check('Esc closes it', !v.panels.includes('vehicle'), v.panels);
       await js(`cdda.exitVehicle()`);
     }],
+    ['getin', "vehicle: walking up to the driver's door says '[e] Drive the Car'; e gets in, e gets out; o lists the rest", async () => {
+      await reset();
+      // Setup only: a car on a road with its doors shut, you outside the driver's door looking at it.
+      const name = await js<string | null>(`(() => {
+        const r = cdda.roadTrip('car'); if (!r) return null;
+        const vs = cdda.vehicleSystem, v = vs.driving; vs.releaseControls(); v.velocity = 0; v.engineOn = false;
+        for (const q of v.parts) if (q.def.id.startsWith('door')) q.open = false;
+        const d = v.parts.find((q) => q.def.id === 'door_front_left');
+        const [dx, dy] = v.mountToWorld(d.mx + 0.5, d.my + 0.5), [ox, oy] = v.mountToWorld(d.mx + 0.5, d.my - 1.1);
+        const p = cdda.game.player; Object.assign(p, { x: ox, y: oy, z: v.z, yaw: Math.atan2(dx - ox, -(dy - oy)), pitch: -0.2 });
+        window.__getin = v.uid; return v.name; })()`);
+      check('setup: a car with you by the driver door', !!name, name);
+      await c.toGameplay();
+      await sleep(400);
+      const prompt = await js<string>(`document.querySelector('.hud-prompt')?.textContent ?? ''`);
+      check(`the crosshair prompt says "[e] Drive the ${name}"`, prompt.includes(`Drive the ${name}`), prompt);
+      await shot('getin_prompt');
+      await c.x().key('o');
+      await sleep(300);
+      const menu = (await u()).menu.flat().join(' | ');
+      check('o (context menu) offers Drive and Examine (the parts panel)', /Drive the/.test(menu) && /Examine/.test(menu), menu);
+      await shot('getin_menu');
+      await c.x().key('Escape');
+      await c.toGameplay();
+      await c.x().key('e');
+      await sleep(300);
+      const drv = await js<{ driving: boolean; msgs: string[] }>(`({ driving: cdda.vehicleSystem.driving?.uid === window.__getin, msgs: cdda.ui.log().slice(-3) })`);
+      check('e at the driver door gets in and takes the controls', drv.driving, drv);
+      await c.x().key('e');
+      await sleep(300);
+      const out = await js<{ driving: boolean; inside: boolean }>(`({ driving: !!cdda.vehicleSystem.driving, inside: !!cdda.vehicleAt(0, 0) })`);
+      check('e again (stopped) climbs out onto the road', !out.driving && !out.inside, out);
+    }],
     ['body', 'bionics (p), mutations ([), martial arts (_): panels, switches by mouse', async () => {
       await reset();
       await js(`cdda.installBionic('bio_power_storage'); cdda.installBionic('bio_flashlight'); cdda.givePower(100)`);

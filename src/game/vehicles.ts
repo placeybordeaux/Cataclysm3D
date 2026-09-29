@@ -369,6 +369,23 @@ export class VehicleSystem implements GameSystem, MapOverlay {
     return null;
   }
 
+  /**
+   * Whether `e` on mount (mx, my) of `v` should mean "get in and drive" rather than examining
+   * that part. QA: `e` on a car opened a door or a parts menu, and taking the controls was
+   * `^` (Shift+6), which no newcomer finds. Driving is the obvious action when the driver's
+   * seat is in reach, except on a door or cargo away from the driver (rear doors, the trunk,
+   * the passenger side): those keep their own action, and everything stays in the context menu.
+   */
+  driveOffer(v: Vehicle, mx: number, my: number): boolean {
+    if (this.driving) return false;
+    const c = v.controls();
+    if (!c || c.hp <= 0 || this.getInReason(v) !== null) return false;
+    const parts = v.partsAt(mx, my);
+    const ownAction = parts.some((q) => has(q, 'OPENABLE') || has(q, 'CARGO'));
+    // Manhattan 1: the driver's own door counts, the rear door diagonally behind it doesn't.
+    return !ownAction || Math.abs(mx - c.mx) + Math.abs(my - c.my) <= 1;
+  }
+
   /** The vehicle whose driver's seat the player can take from here (inside or beside it), nearest first. */
   enterableControls(): Vehicle | null {
     const inside = this.reachableControls();

@@ -179,6 +179,11 @@ export function vehicleInteractPrompt(game: Game): string | null {
   const parts = t.v.partsAt(t.mx, t.my);
   const door = parts.find((p) => has(p, 'OPENABLE'));
   const key = game.keys.keyFor('interact');
+  if (vs.driveOffer(t.v, t.mx, t.my)) {
+    // The door, the cargo and the parts panel are one key away (the crosshair's context menu).
+    const more = game.keys.has('world_menu') ? `  [${game.keys.keyFor('world_menu')}] More…` : '';
+    return `[${key}] ${t.v.locked ? 'Get in' : 'Drive'} the ${t.v.name}${more}`;
+  }
   if (door) return `[${key}] ${door.open ? 'Close' : 'Open'} the ${t.v.name}'s ${door.def.name}`;
   const ctrl = parts.find((p) => has(p, 'CONTROLS'));
   if (ctrl && vs.getInReason(t.v) === null) return `[${game.keys.keyFor('control_vehicle')}] Take the controls of the ${t.v.name}  [${key}] Examine`;
@@ -469,6 +474,10 @@ export async function installVehicles(game: Game, renderer: Renderer, api?: Debu
         return true;
       }
       const t = targetVehicle(g, renderer);
+      if (t && vs.driveOffer(t.v, t.mx, t.my)) {
+        takeControls(g, t.v);
+        return true;
+      }
       return t ? examineVehicle(g, t.x, t.y, t.z) : false;
     },
     prompt: vehicleInteractPrompt,
