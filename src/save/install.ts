@@ -213,14 +213,18 @@ export async function installSave(
   // Dev only: snapshot the running game right before Vite reloads the page for a code edit.
   // Kept in sessionStorage (this tab only) and consumed by takePendingLoad on the next boot.
   if (import.meta.hot) {
-    import.meta.hot.on('vite:beforeFullReload', () => {
+    const snapshot = () => {
       if (!mgr.active || game.player.dead) return;
       try {
         sessionStorage.setItem(HOT_KEY, JSON.stringify(mgr.snapshot(mgr.slot ?? 'hot-reload')));
       } catch (e) {
         console.warn(`hot-reload snapshot failed (game will restart): ${(e as Error).message}`);
       }
-    });
+    };
+    import.meta.hot.on('vite:beforeFullReload', snapshot);
+    // A dev-server restart (vite.config change) drops the socket and Vite reloads the page
+    // once the server is back, without beforeFullReload — snapshot on disconnect too.
+    import.meta.hot.on('vite:ws:disconnect', snapshot);
   }
 
   const handle: SaveHandle = {
