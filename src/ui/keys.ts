@@ -61,6 +61,8 @@ export const DEFAULT_BINDINGS: Record<string, string[]> = {
   // --- body modifications (src/ui/mutbio_ui.ts) ---
   bionics: ['p'], // CDDA 'p' view/activate bionics
   mutations: ['['], // CDDA '[' view/activate mutations
+  // --- scores (src/ui/achievements_ui.ts) ---
+  achievements: [')'], // CDDA ')' diary / achievements / scores
 };
 
 export class Keys {

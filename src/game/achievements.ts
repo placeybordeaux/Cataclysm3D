@@ -116,6 +116,7 @@ interface MultiEntry {
 export interface TrackerJSON {
   v: 1;
   seq: number;
+  start?: number;
   events: Record<string, [EventData, number, number, number][]>;
   status: Record<string, AchievementState>;
 }
@@ -134,9 +135,11 @@ export class AchievementTracker {
   /** achievement ids whose requirements depend on each event type */
   private watchers = new Map<string, string[]>();
   private pendingTypes = new Set<string>();
-  /** Game clock (seconds) and game start (seconds), for time constraints. */
+  /** Game clock (seconds), for time constraints. */
   now: () => number = () => 0;
-  startSeconds: () => number = () => 0;
+  /** Game clock at CDDA's game_start event (set by the owner when a character starts; saved). */
+  gameStart = 0;
+  startSeconds: () => number = () => this.gameStart;
   /** Called when an achievement completes (not for conducts) or fails. */
   onCompleted: ((a: AchievementDef) => void) | null = null;
   onFailed: ((a: AchievementDef) => void) | null = null;
@@ -477,12 +480,13 @@ export class AchievementTracker {
   toJSON(): TrackerJSON {
     const events: TrackerJSON['events'] = {};
     for (const [t, ms] of this.events) events[t] = [...ms.values()].map((e) => [e.data, e.count, e.first, e.last]);
-    return { v: 1, seq: this.seq, events, status: Object.fromEntries(this.status) };
+    return { v: 1, seq: this.seq, start: this.gameStart, events, status: Object.fromEntries(this.status) };
   }
 
   load(j: TrackerJSON, warn?: (msg: string) => void): void {
     this.reset();
     this.seq = j.seq;
+    this.gameStart = j.start ?? 0;
     for (const [t, list] of Object.entries(j.events ?? {})) {
       const ms = new Map<string, MultiEntry>();
       for (const [data, count, first, last] of list) ms.set(keyOf(data), { data, count, first, last });

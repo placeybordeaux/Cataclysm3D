@@ -26,7 +26,7 @@ export interface ScenarioDef {
   forced_traits?: string[];
   forbidden_traits?: string[];
   traits?: string[];
-  requirement?: string;
+  requirement?: string | string[];
   start_name?: string;
   flags?: string[];
 }
@@ -40,7 +40,7 @@ export interface ProfessionDef {
   skills?: { level: number; name: string }[];
   traits?: string[];
   items?: { both?: unknown; male?: unknown; female?: unknown };
-  requirement?: string;
+  requirement?: string | string[];
   flags?: string[];
 }
 
