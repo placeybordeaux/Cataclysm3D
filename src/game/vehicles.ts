@@ -128,6 +128,9 @@ const MAX_STEER = 0.6;
 /** Brake deceleration, m/s^2 (CDDA brakes shed ~30% of max speed per turn; 30 mph to 0 in ~1.7 s). */
 const BRAKE_DECEL = 8;
 
+/** How far from the driver's seat "take the controls" still climbs you in (tiles). */
+export const GET_IN_RANGE = 3.2;
+
 export class VehicleSystem implements GameSystem, MapOverlay {
   readonly name = 'vehicles';
   readonly list: Vehicle[] = [];
@@ -348,6 +351,54 @@ export class VehicleSystem implements GameSystem, MapOverlay {
         return o.v;
       }
     return null;
+  }
+
+  /**
+   * Climbing in from beside the vehicle: in first person, standing exactly on the driver's
+   * tile is fiddly, so "take the controls" works within GET_IN_RANGE tiles of the driver's
+   * seat. It opens the closest door by the seat (as the player would) and fails with a
+   * reason when that isn't possible.
+   */
+  getInReason(v: Vehicle): string | null {
+    const c = v.controls();
+    if (!c) return `The ${v.name} has no controls.`;
+    const p = this.game.player;
+    if (this.reachableControls() === v) return null;
+    const [wx, wy] = v.mountToWorld(c.mx + 0.5, c.my + 0.5);
+    if (p.z !== v.z || Math.hypot(wx - p.x, wy - p.y) > GET_IN_RANGE) return `Get closer to the ${v.name}'s driver's seat.`;
+    return null;
+  }
+
+  /** The vehicle whose driver's seat the player can take from here (inside or beside it), nearest first. */
+  enterableControls(): Vehicle | null {
+    const inside = this.reachableControls();
+    if (inside) return inside;
+    let best: Vehicle | null = null;
+    let bestD = Infinity;
+    const p = this.game.player;
+    for (const v of this.list) {
+      const c = v.controls();
+      if (!c || v.z !== p.z) continue;
+      const [wx, wy] = v.mountToWorld(c.mx + 0.5, c.my + 0.5);
+      const d = Math.hypot(wx - p.x, wy - p.y);
+      if (d <= GET_IN_RANGE && d < bestD) (best = v), (bestD = d);
+    }
+    return best;
+  }
+
+  /** Open the door nearest the driver's seat if it's closed (for getting in from outside). */
+  openDriverDoor(v: Vehicle): string | null {
+    const c = v.controls();
+    if (!c) return null;
+    const doors = v.parts.filter((q) => has(q, 'OPENABLE') && !q.open && Math.max(Math.abs(q.mx - c.mx), Math.abs(q.my - c.my)) <= 1);
+    if (!doors.length) return null;
+    const p = this.game.player;
+    doors.sort((a, b) => {
+      const [ax, ay] = v.mountToWorld(a.mx + 0.5, a.my + 0.5);
+      const [bx, by] = v.mountToWorld(b.mx + 0.5, b.my + 0.5);
+      return Math.hypot(ax - p.x, ay - p.y) - Math.hypot(bx - p.x, by - p.y);
+    });
+    return this.toggleDoor(v, doors[0].mx, doors[0].my);
   }
 
   takeControls(v: Vehicle): { ok: boolean; msg: string } {

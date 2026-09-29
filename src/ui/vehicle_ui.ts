@@ -181,7 +181,7 @@ export function vehicleInteractPrompt(game: Game): string | null {
   const key = game.keys.keyFor('interact');
   if (door) return `[${key}] ${door.open ? 'Close' : 'Open'} the ${t.v.name}'s ${door.def.name}`;
   const ctrl = parts.find((p) => has(p, 'CONTROLS'));
-  if (ctrl && vs.reachableControls() === t.v) return `[${game.keys.keyFor('control_vehicle')}] Take the controls of the ${t.v.name}  [${key}] Examine`;
+  if (ctrl && vs.getInReason(t.v) === null) return `[${game.keys.keyFor('control_vehicle')}] Take the controls of the ${t.v.name}  [${key}] Examine`;
   const shown = parts.find((p) => has(p, 'SEAT')) ?? parts.find((p) => has(p, 'CARGO')) ?? parts.find((p) => has(p, 'OBSTACLE')) ?? parts[0];
   return `[${key}] Examine the ${t.v.name}'s ${shown.def.name}`;
 }
@@ -204,7 +204,7 @@ function openPartMenu(game: Game, v: Vehicle, mx: number, my: number): void {
   }
   const ctrl = parts.find((p) => has(p, 'CONTROLS'));
   if (ctrl) {
-    const reach = vs.reachableControls() === v;
+    const reach = vs.getInReason(v) === null;
     entries.push({ label: `Take the controls`, hotkey: '^', disabled: !reach, value: () => takeControls(game, v) });
     if (v.locked) entries.push({ label: 'Hotwire', hotkey: 'h', disabled: !reach || !game.player.inv.hasQuality('SCREW', 1), value: () => hotwire(game, v) });
   }
@@ -296,9 +296,15 @@ function putItemsMenu(game: Game, v: Vehicle, cargo: VehiclePart): void {
 
 export function takeControls(game: Game, v: Vehicle): void {
   const vs = game.vehicles!;
-  if (vs.reachableControls() !== v) {
-    game.message(`You can't reach the controls of the ${v.name} from here.`, 'c_light_gray');
+  const why = vs.getInReason(v);
+  if (why) {
+    game.message(why, 'c_light_gray');
     return;
+  }
+  // From beside the vehicle: open the driver's door on the way in (takeControls seats you).
+  if (vs.reachableControls() !== v) {
+    const door = vs.openDriverDoor(v);
+    if (door) game.message(door);
   }
   const r = vs.takeControls(v);
   game.message(r.msg, r.ok ? undefined : 'c_light_red');
@@ -429,7 +435,7 @@ export async function installVehicles(game: Game, renderer: Renderer, api?: Debu
   };
   game.keys.register('control_vehicle', 'Control vehicle', () => {
     if (vs.driving) return vehicleScreens.controls(game);
-    const v = vs.reachableControls();
+    const v = vs.enterableControls();
     if (!v) {
       game.message('No vehicle controls in reach.', 'c_light_gray');
       return;

@@ -153,6 +153,26 @@ describe('physics', () => {
     expect(v.fuelLeft('gasoline')).toBeCloseTo(before - used.gasoline, 6);
   });
 
+  it('take the controls from beside the car: opens the driver door and seats you', () => {
+    // Playtest: standing next to a van, "Take the controls" was disabled until you found the
+    // exact seat tile inside. Within GET_IN_RANGE of the seat you now climb in.
+    const { game, vs } = world();
+    const v = pristineCar(vs, 10, 10, 0);
+    const c = v.controls()!;
+    const [sx, sy] = v.mountToWorld(c.mx + 0.5, c.my + 0.5);
+    game.player.x = sx;
+    game.player.y = sy + 2.2; // outside, beside the car
+    expect(vs.reachableControls()).toBe(null);
+    expect(vs.getInReason(v)).toBe(null);
+    expect(vs.enterableControls()).toBe(v);
+    vs.openDriverDoor(v);
+    expect(vs.takeControls(v).ok).toBe(true);
+    expect(vs.driving).toBe(v);
+    // too far away still says why
+    game.player.y = sy + 8;
+    expect(vs.getInReason(v)).toMatch(/closer/);
+  });
+
   it('drives: engine start, throttle moves the car forward and burns fuel', () => {
     const { game, vs } = world();
     const v = pristineCar(vs, 10, 10, 0);

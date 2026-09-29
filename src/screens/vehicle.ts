@@ -135,9 +135,11 @@ export function openVehiclePanel(game: Game, v: Vehicle, focus?: { mx: number; m
         button('Let go of the controls', () => (say(vs.releaseControls()), panel.close()), { small: true, tone: 'accent' }),
       );
     } else if (v.controls()) {
-      const reach = vs.reachableControls() === v;
-      controls.push(button('Take the controls', () => (takeControls(game, v), panel.close()), { small: true, tone: 'accent', key: game.keys.keyFor('control_vehicle'), disabled: reach ? undefined : 'Sit in the driver\'s seat first (walk into the vehicle)' }));
-      if (v.locked) controls.push(button('Hotwire', () => (hotwire(game, v), panel.close()), { small: true, disabled: !reach ? 'Sit in the driver\'s seat first' : !game.player.inv.hasQuality('SCREW', 1) ? 'Need: a screwdriver (screw 1)' : undefined }));
+      const whyNot = vs.getInReason(v);
+      const reach = whyNot === null;
+      controls.push(button('Take the controls', () => (takeControls(game, v), panel.close()), { small: true, tone: 'accent', key: game.keys.keyFor('control_vehicle'), disabled: reach ? undefined : whyNot ?? undefined }));
+      // Hotwiring happens from the driver's seat: climb in first, then start on the wiring.
+      if (v.locked) controls.push(button('Hotwire', () => (takeControls(game, v), hotwire(game, v), panel.close()), { small: true, disabled: !reach ? whyNot ?? undefined : !game.player.inv.hasQuality('SCREW', 1) ? 'Need: a screwdriver (screw 1)' : undefined }));
     }
 
     // The selected square: its parts and what you can do there.
