@@ -232,7 +232,18 @@ export async function installSave(
     import.meta.hot.on('vite:beforeFullReload', snapshot);
     // A dev-server restart (vite.config change) drops the socket and Vite reloads the page
     // once the server is back, without beforeFullReload — snapshot on disconnect too.
-    import.meta.hot.on('vite:ws:disconnect', snapshot);
+    // …but not when the page itself is going away: Firefox closes the socket (and Vite reports
+    // a disconnect) on every unload, so a plain Ctrl+R resumed the run instead of reaching the
+    // title, unlike Chromium (realinput --browser firefox --hmr, 'save').
+    // Firefox reports the disconnect before pagehide, so beforeunload marks it too; if the
+    // player then stays on the page ("Leave site?" → Stay), the mark wears off.
+    let leaving = false;
+    window.addEventListener('pagehide', () => (leaving = true));
+    window.addEventListener('beforeunload', () => {
+      leaving = true;
+      setTimeout(() => (leaving = false), 1500);
+    });
+    import.meta.hot.on('vite:ws:disconnect', () => (leaving ? undefined : snapshot()));
   }
 
   const handle: SaveHandle = {
