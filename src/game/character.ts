@@ -1,6 +1,6 @@
 import type { EnchantmentDef, GameData, MutationDef } from '../data/types';
 import { Rng } from '../core/rng';
-import { ACTION_SCALE, CLOCK_SCALE } from '../core/time';
+import { ACTION_SCALE, clockScale } from '../core/time';
 import { ALL_PARTS, BODY_PARTS, MAIN_PARTS, isLimb, type BodyPartId, type MainPartId } from './bodyparts';
 import {
   boundModToVals, Effect, effectActivated, effectAmount, EffectRegistry, EffectSet, effectRollMod, type EffectJSON,
@@ -9,12 +9,14 @@ import { Inventory, type InventoryJSON } from './inventory';
 import { focusEquilibrium, Morale, type MoralePoint } from './morale';
 import { cddaText } from './units';
 import { buffFlat } from './martialarts';
+import { NEUTRAL_SURVIVOR, type SurvivorBalance } from './balance';
 
 // The survivor model (Cataclysm: Bright Nights Character/avatar, simplified). Everything is
 // driven by update(gameDt) in game-clock seconds; BN rates are per game second ("turn"), so they
 // are used directly. Stamina is the one exception: BN regenerates it per turn of *action*, and
 // our action time runs at ACTION_SCALE turns per real second while the clock runs at
-// CLOCK_SCALE, so stamina uses gameDt * ACTION_SCALE / CLOCK_SCALE turns (see update()).
+// clockScale() (CLOCK_SCALE × the day-length rate), so stamina uses gameDt * ACTION_SCALE /
+// clockScale() turns (see update()).
 //
 // BN differs from the DDA 0.G model this file used to implement (see docs/BN_DATA_MODEL.md):
 //   - food is a flat calorie store capped at max_stored_kcal (2500 × 7 kcal); no BMI, body fat,
@@ -314,6 +316,12 @@ export class Character {
   enchantCondition: ((condition: unknown, traitId: string) => boolean) | null = null;
   /** Adjacent monsters holding this character (set by the monster system; BN get_dodge). */
   grabbers: (() => number) | null = null;
+  /**
+   * Difficulty multipliers on needs, healing, bleeding and cold (src/game/balance.ts). All 1 =
+   * BN; the difficulty system sets the survivor's. Not saved here: the difficulty section of
+   * the save re-applies it after load.
+   */
+  balance: SurvivorBalance = { ...NEUTRAL_SURVIVOR };
 
   constructor(readonly data: GameData, opts: { seed?: number } = {}) {
     this.rng = new Rng(opts.seed ?? 12345);
@@ -991,7 +999,9 @@ export class Character {
       case 'bleed': {
         // eff_fun_bleed: one in (36 / intensity) turns you lose some blood: 1 HP on the part and 1 pain.
         const intense = Math.max(1, e.intensity);
-        if (this.rng.oneIn(Math.max(1, Math.trunc(36 / intense)))) {
+        // Difficulty scales the odds (balance.bleed), not the wound: intensity still reads BN's.
+        const odds = Math.max(1, Math.trunc(36 / intense));
+        if (this.balance.bleed === 1 ? this.rng.oneIn(odds) : this.rng.next() < this.balance.bleed / odds) {
           this.msg('You lose some blood.', 'c_red');
           this.modPain(1);
           if (e.bp) this.applyDamage(e.bp, 1);
@@ -1237,7 +1247,10 @@ export class Character {
     }
     heatLow += this.enchantBonus('BODYTEMP_MIN', heatLow * 500) / 500;
     heatHigh += this.enchantBonus('BODYTEMP_MAX', heatHigh * 500) / 500;
-    let conv = BODYTEMP.NORM + (env.temperature - 19) / 5 + windchill + clothing + heatLow + (env.sun ?? 0);
+    // balance.cold eases only what makes you colder (cold air, wind chill), never heat.
+    const coldMul = this.balance.cold;
+    const air = (env.temperature - 19) / 5;
+    let conv = BODYTEMP.NORM + (air < 0 ? air * coldMul : air) + (windchill < 0 ? windchill * coldMul : windchill) + clothing + heatLow + (env.sun ?? 0);
     // adjust_bp_conv_for_bonus_warmth
     const lying = this.canUseFloorWarmth() ? this.floorWarmth() : 0;
     const comfortable = (env.bestFire ?? 0) * 1 + lying;
@@ -1351,7 +1364,7 @@ export class Character {
   update(gameDt: number): void {
     if (this.dead || gameDt <= 0) return;
     // Stamina works in action turns: see the file header.
-    this.updateStamina((gameDt * ACTION_SCALE) / CLOCK_SCALE);
+    this.updateStamina((gameDt * ACTION_SCALE) / clockScale());
     this.acc += gameDt;
     while (this.acc >= 1 && !this.dead) {
       this.acc -= 1;
@@ -1433,8 +1446,8 @@ export class Character {
     const rates = this.needsRates();
     // --- update_stomach: digest, burn calories, get thirsty
     this.digest(1);
-    this.modStoredKcal(-this.rollRemainder((this.metabolicRate() * METABOLIC_BASE_KCALS) / (12 * 24)));
-    this.modThirst(this.rollRemainder(rates.thirst));
+    this.modStoredKcal(-this.rollRemainder((this.metabolicRate() * METABOLIC_BASE_KCALS * this.balance.hunger) / (12 * 24)));
+    this.modThirst(this.rollRemainder(rates.thirst * this.balance.thirst));
     // --- check_needs_extremes
     if (this.storedKcal <= 0) {
       this.msg('You have starved to death.', 'c_red');
@@ -1459,7 +1472,7 @@ export class Character {
     // --- update_needs: fatigue and sleep deprivation
     const wasTired = this.sleepiness > SLEEPINESS.DEAD_TIRED;
     if (this.sleepiness < 1050 && !asleep) {
-      const roll = this.rollRemainder(rates.fatigue);
+      const roll = this.rollRemainder(rates.fatigue * this.balance.fatigue);
       this.sleepiness += roll;
       this.sleepDeprivation = Math.min(SLEEP_DEPRIVATION.MASSIVE, this.sleepDeprivation + roll * 5);
     } else if (asleep && rates.recovery > 0) {
@@ -1502,7 +1515,7 @@ export class Character {
     if (Math.abs(rate) < 0.000007) rate = 0;
     const hpMod = this.mutationValue('hp_modifier');
     if (hpMod < 0) rate *= 1 + hpMod;
-    const natural = rate * FIVE_MINUTES;
+    const natural = rate * FIVE_MINUTES * this.balance.healing;
     const mending = Math.max(0, Math.min(1, 0.25 + this.mutationValue('mending_modifier') + this.enchantBonus('MENDING_MULT', 0.25 + this.mutationValue('mending_modifier'))));
     for (const p of MAIN_PARTS) {
       // healing_rate_medicine: bandaged + disinfected "healing_rate" HP/day, head/torso scaled.
@@ -1517,7 +1530,7 @@ export class Character {
         if (p === 'torso') r *= eff.type.extraValue('healing_torso', false, 1) / 100;
         med += r;
       }
-      med *= (1 + this.mutationValue('healing_resting')) * (1 + rest);
+      med *= (1 + this.mutationValue('healing_resting')) * (1 + rest) * this.balance.healing;
       if (both === 2) med *= 1.25;
       const broken = this.isLimbBroken(p) && !this.inv.worn.some((w) => w.hasFlag('SPLINT'));
       const add = (broken ? 0 : natural) + (broken ? med * FIVE_MINUTES * mending : med * FIVE_MINUTES);

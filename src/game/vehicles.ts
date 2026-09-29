@@ -1,4 +1,5 @@
 import { hashSeed, Rng } from '../core/rng';
+import { BALANCE } from './balance';
 import { bash } from './bash';
 import { ACTION_SCALE } from '../core/time';
 import type { MonsterSystem } from './monai';
@@ -744,7 +745,7 @@ export class VehicleSystem implements GameSystem, MapOverlay {
       if (!riding && p.tileX === t.tx && p.tileY === t.ty && p.z === z && !p.dead) {
         const res = this.hitBody(v, part, {
           name: 'you', mass: 70, damage: (dmg) => {
-            for (const bp of MAIN_PARTS) p.takeHit(bp as BodyPartId, [{ type: 'bash', amount: Math.round(dmg * (0.6 + this.rng.next() * 0.8)) }]);
+            for (const bp of MAIN_PARTS) p.takeHit(bp as BodyPartId, [{ type: 'bash', amount: Math.round(dmg * BALANCE.crashDamage * (0.6 + this.rng.next() * 0.8)) }]);
             return p.dead;
           },
           fling: (force) => {
@@ -869,7 +870,7 @@ export class VehicleSystem implements GameSystem, MapOverlay {
   private jolt(v: Vehicle, dVelMph: number): void {
     const seat = v.driverSeat();
     const belt = seat ? v.partsAt(seat.mx, seat.my).find((q) => has(q, 'SEATBELT') && q.hp > 0) : undefined;
-    const dmg = passengerImpactDamage(dVelMph, belt?.def.bonus ?? 0, this.rng);
+    const dmg = Math.round(passengerImpactDamage(dVelMph, belt?.def.bonus ?? 0, this.rng) * BALANCE.crashDamage);
     if (dmg > 0) {
       this.game.player.takeHit('torso', [{ type: 'bash', amount: dmg }]);
       this.game.message(`You take ${dmg} damage by the power of the impact!`, 'c_red');

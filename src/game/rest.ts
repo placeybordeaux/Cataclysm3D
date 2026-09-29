@@ -1,6 +1,6 @@
 import type { Game } from './game';
 import { hasFlag } from '../world/registry';
-import { SECONDS_PER_DAY, SECONDS_PER_HOUR, CLOCK_SCALE } from '../core/time';
+import { SECONDS_PER_DAY, SECONDS_PER_HOUR, clockScale } from '../core/time';
 import { sunAltitudeAt } from './vision';
 import { BODYTEMP, THIRST } from './character';
 
@@ -191,7 +191,7 @@ function startSleepActivity(game: Game): boolean {
   const ok = game.activities.start({
     name: SLEEP_ACTIVITY,
     duration: 24 * SECONDS_PER_HOUR,
-    warp: SECONDS_PER_HOUR / CLOCK_SCALE / SLEEP_REAL_PER_HOUR,
+    warp: SECONDS_PER_HOUR / clockScale() / SLEEP_REAL_PER_HOUR,
     interruptible: false,
     onProgress: (dt) => {
       const a = game.activities.current;
