@@ -11,6 +11,7 @@ import { initUi } from './ui/framework';
 import { installUi } from './ui/index';
 import { installAudio } from './audio/install';
 import { installCrafting } from './ui/crafting_install';
+import { installVehicles } from './ui/vehicle_ui';
 
 // URL params (all optional): seed=<int>, gen=world|test (default world), debug=1 (render stats overlay),
 // renderer params px/grade/tex/cam/walls (see src/render/renderer.ts), debug=atlas (sprite sheet view
@@ -49,6 +50,7 @@ async function main(): Promise<void> {
   if (worldgen) installWorldgenDebug(api, game, worldgen);
   installAudio(game, api);
   installCrafting(game, api);
+  await installVehicles(game, renderer, api);
   const ui = await installUi(game, renderer, worldgen, api);
 
   let last = performance.now();

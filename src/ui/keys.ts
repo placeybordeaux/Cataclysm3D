@@ -52,6 +52,11 @@ export const DEFAULT_BINDINGS: Record<string, string[]> = {
   help: ['?'],
   menu: ['Escape'],
   save: ['S'],
+  // --- vehicles (src/ui/vehicle_ui.ts); WASD/Space drive while at the controls ---
+  control_vehicle: ['^'], // CDDA '^': take the controls / vehicle controls menu
+  vehicle_engine: ['k'], // ignition (CDDA controls menu 's')
+  vehicle_headlights: ['h'], // CDDA controls menu 'h'
+  vehicle_horn: ['n'], // CDDA controls menu 'n'
 };
 
 export class Keys {
@@ -79,6 +84,11 @@ export class Keys {
   /** For the help screen: [keys, name] for every registered action. */
   list(): [string[], string][] {
     return [...this.actions.values()].map((a) => [DEFAULT_BINDINGS[a.id], a.name]);
+  }
+
+  /** Whether some system registered a handler for the action. */
+  has(id: string): boolean {
+    return this.actions.has(id);
   }
 
   keyFor(id: string): string {

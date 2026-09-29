@@ -54,6 +54,8 @@ export class Renderer {
   source: TileTextureSource;
   /** Resolves once the preferred texture source (UltiCa atlas) is active. */
   readonly ready: Promise<void>;
+  /** Per-frame hooks run at the start of render() (e.g. vehicle meshes following vehicles). */
+  readonly beforeRender: ((dt: number) => void)[] = [];
   private playerSprite: SpriteHandle | null = null;
   private last = performance.now();
   private time = 0;
@@ -197,6 +199,7 @@ export class Renderer {
     this.last = now;
     this.time += dt;
     this.three.info.reset();
+    for (const f of this.beforeRender) f(dt);
     const p = this.game.player;
     const clock = this.game.clock;
 

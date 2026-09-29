@@ -49,7 +49,7 @@ export interface SpawnRequest {
   friendly?: boolean;
 }
 
-/** Vehicle placement requested by mapgen (vehicle system not built yet). Absolute tiles. */
+/** Vehicle placement requested by mapgen (consumed by src/game/vehicles.ts). Absolute tiles. */
 export interface VehicleRequest {
   id: string;
   x: number;
@@ -103,6 +103,18 @@ export class Chunk {
   constructor(readonly cx: number, readonly cy: number, readonly z: number) {}
 }
 
+/**
+ * Something occupying tiles on top of terrain/furniture (vehicles). GameMap consults every
+ * registered overlay in moveCost/opaque, so creatures, physics and vision respect it
+ * without knowing what it is. Return undefined for "nothing of mine here".
+ */
+export interface MapOverlay {
+  /** CDDA move cost replacing terrain+furniture (0 = impassable), like map::move_cost with a vehicle. */
+  moveCost?(x: number, y: number, z: number): number | undefined;
+  /** true = blocks sight (overlays can only add opacity). */
+  opaque?(x: number, y: number, z: number): boolean | undefined;
+}
+
 export interface ChunkGenerator {
   /** Fill a freshly allocated chunk. Must be deterministic for (seed, cx, cy, z). */
   generate(map: GameMap, chunk: Chunk): void;
@@ -117,6 +129,8 @@ export class GameMap {
   itemFactory: ((spawn: ItemSpawn) => MapItem[]) | null = null;
   /** Hooks for systems that must react to spawns during generation (monsters, vehicles). */
   onChunkGenerated: ((chunk: Chunk) => void)[] = [];
+  /** Tile occupants consulted by moveCost/opaque (the vehicle system registers one). */
+  overlays: MapOverlay[] = [];
 
   constructor(readonly seed: number) {}
 
@@ -224,6 +238,10 @@ export class GameMap {
     if (t.move_cost <= 0) return 0;
     const f = this.furnAt(x, y, z);
     if (f.move_cost_mod < 0) return 0;
+    for (const o of this.overlays) {
+      const c = o.moveCost?.(x, y, z);
+      if (c !== undefined) return c;
+    }
     return t.move_cost + f.move_cost_mod;
   }
   passable(x: number, y: number, z: number): boolean {
@@ -231,6 +249,7 @@ export class GameMap {
   }
   /** Blocks sight: opaque terrain/furniture lacking TRANSPARENT, as in CDDA. */
   opaque(x: number, y: number, z: number): boolean {
+    for (const o of this.overlays) if (o.opaque?.(x, y, z)) return true;
     const t = this.terAt(x, y, z);
     if (t.id === 't_null') return false;
     if (!hasFlag(t, 'TRANSPARENT')) return true;

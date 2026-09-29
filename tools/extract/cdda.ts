@@ -485,6 +485,13 @@ export const FAMILY_HOOKS: Record<string, InheritHooks> = {
   uncraft: { notInherited: ['tools', 'qualities', 'components'] },
   // item_factory: a copy-from group only takes its additions from "extend"
   item_group: { ignoreOwnWhenCopying: ['entries', 'items', 'groups'] },
+  // veh_type.cpp vehicle_prototype::load: "parts" always *append* to the inherited list
+  // (e.g. "car" = car_abstract's body + its own engine and tank).
+  vehicle: {
+    post(r, _pid, parent, child) {
+      if (Array.isArray(child.parts) && Array.isArray(parent.parts)) r.parts = [...structuredClone(parent.parts), ...structuredClone(child.parts)];
+    },
+  },
 };
 
 /**

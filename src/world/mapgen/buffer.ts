@@ -131,7 +131,8 @@ export class MapBuffer {
     }
     for (const v of this.vehicles) {
       [v.x, v.y] = rp(v.x, v.y);
-      if (v.rotation !== undefined) v.rotation = (v.rotation + 90 * turns) % 360;
+      // An unrotated vehicle (rotation omitted = 0) still turns with its rotated mapgen.
+      v.rotation = ((v.rotation ?? 0) + 90 * turns) % 360;
     }
     for (const z of this.zones) {
       const [ax, ay] = rp(z.x0, z.y0), [bx, by] = rp(z.x1, z.y1);

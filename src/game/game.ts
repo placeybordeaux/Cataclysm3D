@@ -12,6 +12,7 @@ import { GameStats } from './stats';
 import type { RayHit } from './raycast';
 import type { SpawnedItem } from '../data/itemgroups';
 import type { ItemSpawn } from '../world/map';
+import type { VehicleSystem } from './vehicles';
 
 function toSpawned(sp: ItemSpawn): SpawnedItem {
   return { id: sp.typeId, count: sp.count ?? 1, charges: sp.charges, contents: sp.contents?.map(toSpawned) } as SpawnedItem;
@@ -64,6 +65,10 @@ export class Game {
   save?: () => void | Promise<void>;
   load?: () => boolean | Promise<boolean>;
   hasSave?: () => boolean;
+  /** Vehicles in the world (src/game/vehicles.ts); set by installVehicles. */
+  vehicles: VehicleSystem | null = null;
+  /** When it returns true, WASD doesn't walk the player (e.g. driving: src/game/vehicles.ts). */
+  movementOverride: (() => boolean) | null = null;
   private acc = 0;
   mouseSensitivity = 0.0025;
 
@@ -109,6 +114,7 @@ export class Game {
     const p = this.player;
     const k = this.input.held;
     if (this.input.captured) return;
+    if (this.movementOverride?.()) return;
     let fx = 0, fy = 0;
     if (k.has('KeyW')) fy += 1;
     if (k.has('KeyS')) fy -= 1;

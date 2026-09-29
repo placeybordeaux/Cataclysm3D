@@ -25,6 +25,8 @@ export class CameraRig {
   fovTop = 36;
   topDistance = 22;
   thirdDistance = 2.6;
+  /** Systems that carry the player without walking (driving) switch the head-bob off. */
+  suppressBob = false;
   private bobPhase = 0;
   private bobAmp = 0;
   private lastX = NaN;
@@ -44,7 +46,7 @@ export class CameraRig {
     const moved = Number.isNaN(this.lastX) ? 0 : Math.hypot(p.x - this.lastX, p.y - this.lastY);
     this.lastX = p.x; this.lastY = p.y;
     const speed = dt > 0 ? moved / dt : 0;
-    const targetAmp = Math.min(speed / 3, 1.4) * 0.035;
+    const targetAmp = this.suppressBob ? 0 : Math.min(speed / 3, 1.4) * 0.035;
     this.bobAmp += (targetAmp - this.bobAmp) * Math.min(1, dt * 8);
     this.bobPhase += moved * 2.4;
     this.subPixel.set(0, 0);
