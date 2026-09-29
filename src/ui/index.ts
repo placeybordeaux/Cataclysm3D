@@ -11,7 +11,7 @@ import { itemActionHooks, installInventoryUi, carriedEntries, nearbyEntries, ope
 import { openCharacterSheet } from './charsheet';
 import { openHelp } from './help';
 import { cameraLookAt, describeHit, openLookMode } from './look';
-import { openOvermap, overmapSeenTracker, revealAround } from './overmap_ui';
+import { INITIAL_VISIBILITY, openOvermap, overmapSeenTracker, revealAround } from './overmap_ui';
 import { showDeathScreen } from './death';
 import { openEscMenu, openMessageLog, showMainMenu } from './menus';
 import { applyStoredOptions, openOptions } from './options';
@@ -62,6 +62,7 @@ export async function installUi(game: Game, renderer: Renderer, worldgen: WorldG
     },
   });
   game.systems.push(overmapSeenTracker());
+  revealAround(game, INITIAL_VISIBILITY, 0);
   revealAround(game);
   game.events.on('creatureDied', (e) => {
     if (e.killer !== game.player) return;

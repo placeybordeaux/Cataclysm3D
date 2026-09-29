@@ -28,19 +28,39 @@ export function overmapSeenTracker(): GameSystem {
   };
 }
 
-export function revealAround(game: Game): void {
+/** CDDA scenario distance_initial_visibility (default 15 OMTs): you know your home area. */
+export const INITIAL_VISIBILITY = 15;
+
+/** Mark OMTs within `radius` (default: daylight sight) of the player as seen on level `z`. */
+export function revealAround(game: Game, radius?: number, z = game.player.z): void {
   const p = game.player;
   const ox = Math.floor(p.x / CHUNK), oy = Math.floor(p.y / CHUNK);
   const h = game.clock.hourOfDay;
   const day = h >= 6 && h < 20;
-  const r = p.z < 0 ? 0 : day ? 3 : 1;
+  const r = radius ?? (p.z < 0 ? 0 : day ? 3 : 1);
   for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
     if (dx * dx + dy * dy > r * r + 1) continue;
-    game.overmapSeen.add(seenKey(ox + dx, oy + dy, p.z));
+    game.overmapSeen.add(seenKey(ox + dx, oy + dy, z));
   }
 }
 
-const LINE_GLYPH = ['·', '│', '─', '└', '│', '│', '┌', '├', '─', '┘', '─', '┴', '┐', '┤', '┬', '┼'];
+/** [symbol, CDDA color, road connection bits (LINE_N|E|S|W) for linear terrain]. */
+type Cell = [string, string, number?];
+
+/**
+ * Roads as CSS strokes from the cell centre toward each connected side: box-drawing glyphs
+ * leave gaps in square cells.
+ */
+function roadStyle(line: number, color: string): string {
+  const col = cssColor(color);
+  const g = `linear-gradient(${col},${col})`;
+  const parts: string[] = [];
+  if (line & 1) parts.push(`${g} center top / 2px 50% no-repeat`);
+  if (line & 2) parts.push(`${g} right center / 50% 2px no-repeat`);
+  if (line & 4) parts.push(`${g} center bottom / 2px 50% no-repeat`);
+  if (line & 8) parts.push(`${g} left center / 50% 2px no-repeat`);
+  return parts.length ? `background:${parts.join(',')}` : '';
+}
 const NATURAL = /^(field|forest|forest_thick|forest_water|river|lake|open_air|solid_earth|empty_rock|road)/;
 
 export function openOvermap(ctx: UiContext): UiWindow | null {
@@ -59,12 +79,12 @@ export function openOvermap(ctx: UiContext): UiWindow | null {
   let zoom = 1;
   const terrains = wg.wg.overmap.terrains;
 
-  const glyphAt = (x: number, y: number, z: number): [string, string] | null => {
+  const glyphAt = (x: number, y: number, z: number): Cell | null => {
     if (!game.overmapSeen.has(seenKey(x, y, z))) return null;
     const o = wg.overmap.omtAt(x, y, z);
     const def = terrains[o.type];
     const color = def?.color ?? 'light_gray';
-    if (o.line >= 0) return [LINE_GLYPH[o.line], color];
+    if (o.line >= 0) return [o.line === 0 ? '·' : '', color, o.line];
     let sym = def?.sym?.[0] ?? '?';
     const t = rot.get(sym);
     if (t && o.rot) sym = t[(t.indexOf(sym) + o.rot) % t.length];
@@ -72,9 +92,9 @@ export function openOvermap(ctx: UiContext): UiWindow | null {
   };
 
   /** Representative OMT of a zoomed-out block: prefer buildings, then roads, then land. */
-  const blockGlyph = (bx: number, by: number, z: number): [string, string] | null => {
+  const blockGlyph = (bx: number, by: number, z: number): Cell | null => {
     if (zoom === 1) return glyphAt(bx, by, z);
-    let best: [string, string] | null = null, bestScore = -1;
+    let best: Cell | null = null, bestScore = -1;
     for (let dy = 0; dy < zoom; dy++) for (let dx = 0; dx < zoom; dx++) {
       const x = bx + dx, y = by + dy;
       const g = glyphAt(x, y, z);
@@ -115,15 +135,17 @@ export function openOvermap(ctx: UiContext): UiWindow | null {
   });
   w.body.style.whiteSpace = 'pre';
   w.body.style.overflow = 'hidden';
-  w.body.innerHTML = `<div style="display:flex;height:100%;gap:1ch"><div class="om-map" style="flex:1;overflow:hidden;line-height:1"></div><div class="om-side" style="width:30ch;white-space:pre-wrap"></div></div>`;
+  w.body.innerHTML = `<div style="display:flex;height:100%;gap:1ch"><div class="om-map" style="flex:1;overflow:hidden;line-height:1;position:relative"></div><div class="om-side" style="width:30ch;white-space:pre-wrap"></div></div>`;
   const mapEl = w.body.querySelector('.om-map') as HTMLElement;
   const sideEl = w.body.querySelector('.om-side') as HTMLElement;
 
-  // Measure a character cell once so the grid fills the window at any resolution.
+  // Square cells (unlike curses' tall ones) so distances on the map look right; measure one
+  // so the grid fills the window at any resolution.
   const probe = document.createElement('span');
-  probe.textContent = 'M'.repeat(10);
+  probe.className = 'om-cell';
+  probe.textContent = 'M';
   mapEl.appendChild(probe);
-  const cellW = probe.getBoundingClientRect().width / 10 || 8;
+  const cellW = probe.getBoundingClientRect().width || 16;
   const cellH = probe.getBoundingClientRect().height || 16;
   probe.remove();
 
@@ -134,9 +156,9 @@ export function openOvermap(ctx: UiContext): UiWindow | null {
     const ox = Math.floor((cx - Math.floor(cols / 2) * zoom) / zoom) * zoom;
     const oy = Math.floor((cy - Math.floor(rows / 2) * zoom) / zoom) * zoom;
     const pl = playerOmt(ctx);
-    const grid: [string, string][][] = [];
+    const grid: Cell[][] = [];
     for (let r = 0; r < rows; r++) {
-      const row: [string, string][] = [];
+      const row: Cell[] = [];
       for (let col = 0; col < cols; col++) {
         const x = ox + col * zoom, y = oy + r * zoom;
         const g = blockGlyph(x, y, cz);
@@ -144,12 +166,14 @@ export function openOvermap(ctx: UiContext): UiWindow | null {
       }
       grid.push(row);
     }
-    // City names over their centres (only if the centre is known), CDDA-style.
+    // City names over their centres (only if the centre is known), CDDA-style; drawn as
+    // overlay labels because the grid cells are square.
+    let labels = '';
     for (const city of wg!.overmap.citiesNear(cx, cy, 1)) {
       if (cz !== 0 || !game.overmapSeen.has(seenKey(city.x, city.y, 0))) continue;
-      const r = Math.floor((city.y - oy) / zoom), col = Math.floor((city.x - ox) / zoom) - Math.floor(city.name.length / 2);
-      if (r < 0 || r >= rows) continue;
-      for (let i = 0; i < city.name.length; i++) if (col + i >= 0 && col + i < cols) grid[r][col + i] = [city.name[i], 'city'];
+      const r = Math.floor((city.y - oy) / zoom), col = Math.floor((city.x - ox) / zoom);
+      if (r < 0 || r >= rows || col < 0 || col >= cols) continue;
+      labels += `<div class="pre" style="position:absolute;left:${(col + 0.5) * cellW}px;top:${r * cellH}px;transform:translateX(-50%);color:var(--c-white);background:#000;padding:0 .2em">${city.name.replace(/</g, '&lt;')}</div>`;
     }
     const pr = Math.floor((pl.y - oy) / zoom), pc = Math.floor((pl.x - ox) / zoom);
     const cr = Math.floor((cy - oy) / zoom), cc = Math.floor((cx - ox) / zoom);
@@ -157,16 +181,17 @@ export function openOvermap(ctx: UiContext): UiWindow | null {
     for (let r = 0; r < rows; r++) {
       let line = '';
       for (let col = 0; col < cols; col++) {
-        let [ch, color] = grid[r][col];
-        let style = color === 'city' ? 'color:var(--c-white);background:#000' : `color:${cssColor(color)}`;
+        let [ch, color, road] = grid[r][col];
+        let style = `color:${cssColor(color)}`;
+        if (road) style += ';' + roadStyle(road, color);
         if (r === pr && col === pc && pl.z === cz) (ch = '@'), (style = 'color:var(--c-white);background:var(--c-red)');
         if (r === cr && col === cc) style += ';outline:1px solid var(--c-yellow)';
         const esc = ch === '<' ? '&lt;' : ch === '>' ? '&gt;' : ch === '&' ? '&amp;' : ch;
-        line += `<span style="${style}">${esc}</span>`;
+        line += `<span class="om-cell" style="${style}">${esc}</span>`;
       }
-      html += line + '\n';
+      html += `<div class="om-row">${line}</div>`;
     }
-    mapEl.innerHTML = html;
+    mapEl.innerHTML = html + labels;
     const here = game.overmapSeen.has(seenKey(cx, cy, cz)) ? omtLabel(ctx, cx, cy, cz) : null;
     const city = wg!.overmap.closestCity(cx, cy);
     sideEl.innerHTML = [

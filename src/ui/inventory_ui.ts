@@ -22,7 +22,30 @@ export interface InvEntry {
   depth: number;
   /** For ground items: direction label ("under you", "north"…). */
   dir?: string;
+  /** Identical items shown as one line ("2 canned beans"); item is stack[0]. */
+  stack?: Item[];
 }
+
+/**
+ * Collapse identical top-level items into one entry like CDDA's inventory ("2 cans of
+ * beans"). Only depth-0 carried items and ground items on the same tile merge; charge
+ * stacks (ammo, liquids) are already one item.
+ */
+export function stackEntries(list: InvEntry[]): InvEntry[] {
+  const out: InvEntry[] = [];
+  for (const e of list) {
+    const mergeable = e.depth === 0 && (e.where === 'carried' || e.where === 'ground') && !e.item.countByCharges;
+    const into = mergeable
+      ? out.find((o) => o.depth === 0 && o.where === e.where && o.dir === e.dir && !o.item.countByCharges && o.item.stacksWith(e.item))
+      : undefined;
+    if (into) (into.stack ??= [into.item]).push(e.item);
+    else out.push({ ...e });
+  }
+  return out;
+}
+
+/** Items an entry stands for (the whole stack, or just the item). */
+export const itemsOf = (e: InvEntry): Item[] => e.stack ?? [e.item];
 
 /** Stub hooks other systems fill in (reading lives with crafting/skills). */
 export const itemActionHooks: {
@@ -82,19 +105,26 @@ function sectionOf(e: InvEntry): string {
 }
 
 /** Item name with sprite icon, CDDA-ish coloring, padded to a column. */
-export function itemLabel(ctx: UiContext, e: InvEntry, width = 36, countOverride?: number): string {
+/** Name column width that fits the list pane (half the window) at the current size. */
+export function nameWidth(): number {
+  return window.innerWidth < 1100 ? 26 : window.innerWidth < 1500 ? 32 : 38;
+}
+
+export function itemLabel(ctx: UiContext, e: InvEntry, width = nameWidth()): string {
   const it = e.item;
+  const n = e.stack?.length ?? 1;
   const indent = e.depth > 0 ? '  '.repeat(e.depth - 1) + '> ' : '';
-  let name = indent + (countOverride !== undefined && it.countByCharges ? `${it.baseName(countOverride)} (${countOverride})` : it.name());
+  let name = indent + (n > 1 ? `${n} ${it.name(n)}` : it.name());
   name = fit(name, width);
   let col = 'c_light_gray';
   if (it.goesBad() && it.rotten()) col = 'c_brown';
   else if (e.where === 'wielded' || e.where === 'worn') col = 'c_white';
-  const w = kg(it.weight()).padStart(6), v = liters(it.volume()).padStart(6);
-  return `${spriteImg(ctx.renderer, it.typeId)}${c(col, name)} ${c('c_light_gray', w)} ${c('c_light_gray', v)}`;
+  const w = kg(it.weight() * n).padStart(6), v = liters(it.volume() * n).padStart(6);
+  const icon = spriteImg(ctx.renderer, it.typeId) || '<span class="icon"></span>';
+  return `${icon}${c(col, name)} ${c('c_light_gray', w)} ${c('c_light_gray', v)}`;
 }
 
-const columnHeader = (width = 36) => `<div class="pre" style="color:var(--c-light_blue)">${' '.repeat(2)}${'Name'.padEnd(width + 2)}${'kg'.padStart(6)} ${'L'.padStart(6)}</div>`;
+const columnHeader = (width = nameWidth()) => `<div class="pre" style="color:var(--c-light_blue)">${' '.repeat(2)}<span class="icon"></span>${'Name'.padEnd(width + 1)}${'kg'.padStart(6)} ${'L'.padStart(6)}</div>`;
 
 function statusFooter(ctx: UiContext): string {
   const inv = ctx.game.player.inv;
@@ -228,7 +258,7 @@ export interface PickOpts {
 
 export function openItemPicker(ctx: UiContext, opts: PickOpts): UiWindow | null {
   const build = (): MenuEntry<InvEntry>[] => {
-    const list = [...carriedEntries(ctx), ...(opts.includeNearby ? nearbyEntries(ctx) : [])].filter(opts.filter);
+    const list = stackEntries([...carriedEntries(ctx), ...(opts.includeNearby ? nearbyEntries(ctx) : [])].filter(opts.filter));
     // Group each top-level entry with the nested items listed right after it, then order
     // groups CDDA-style: wielded, worn, pocket contents by category sort_rank, nearby.
     const groups: InvEntry[][] = [];
@@ -278,6 +308,7 @@ export function openItemPicker(ctx: UiContext, opts: PickOpts): UiWindow | null 
     },
   });
   win.body.prepend(Object.assign(document.createElement('div'), { innerHTML: columnHeader() }));
+  widenList(win);
   if (opts.stay) {
     // The `i` screen: after an action, rebuild the list in place.
     (win as any).rebuild = () => {
@@ -315,7 +346,7 @@ export function openMultiSelect(ctx: UiContext, title: string, rows: MultiRow[],
       const mark = r.count === 0 ? '[ ]' : r.count >= r.max ? c('c_light_green', '[X]') : c('c_yellow', '[#]');
       const cnt = r.max > 1 ? c(r.count ? 'c_white' : 'c_dark_gray', `${r.count}/${r.max}`.padStart(9)) : ' '.repeat(9);
       return {
-        label: `${mark} ${itemLabel(ctx, r.entry, 34)} ${cnt}`,
+        label: `${mark} ${itemLabel(ctx, r.entry, nameWidth() - 4)} ${cnt}`,
         value: r,
         header: section,
         detail: () => `${spriteImg(ctx.renderer, r.entry.item.typeId, 'icon-big')}${itemInfo(r.entry.item, ctx.game.player)}`,
@@ -378,44 +409,55 @@ export function openMultiSelect(ctx: UiContext, title: string, rows: MultiRow[],
       return false;
     },
   });
-  win.body.prepend(Object.assign(document.createElement('div'), { innerHTML: `<div class="pre" style="color:var(--c-light_blue)">    ${'Name'.padEnd(36)}${'kg'.padStart(6)} ${'L'.padStart(6)} ${'amount'.padStart(9)}</div>` }));
+  win.body.prepend(Object.assign(document.createElement('div'), { innerHTML: `<div class="pre" style="color:var(--c-light_blue)">      <span class="icon"></span>${'Name'.padEnd(nameWidth() - 3)}${'kg'.padStart(6)} ${'L'.padStart(6)} ${'amount'.padStart(9)}</div>` }));
+  widenList(win);
   return win;
 }
 
-const maxOf = (it: Item) => (it.countByCharges ? it.charges : 1);
+const maxOf = (e: InvEntry) => (e.stack ? e.stack.length : e.item.countByCharges ? e.item.charges : 1);
+
+/** Give the list pane of a detail-pane menu more room than the description. */
+function widenList(win: UiWindow): void {
+  const list = win.body.querySelector('.cols')?.firstElementChild as HTMLElement | null;
+  if (list) list.style.flex = '1.35';
+}
 
 export function openDropMenu(ctx: UiContext): UiWindow | null {
-  const rows = carriedEntries(ctx).map((entry) => ({ entry, max: maxOf(entry.item), count: 0 }));
+  const rows = stackEntries(carriedEntries(ctx)).map((entry) => ({ entry, max: maxOf(entry), count: 0 }));
   if (!rows.length) {
-    ctx.game.message("You have nothing to drop.", 'c_light_gray');
+    ctx.game.message('You have nothing to drop.', 'c_light_gray');
     return null;
   }
-  return openMultiSelect(ctx, 'Drop which items?', rows, 'drop', (chosen) => {
-    const inv = ctx.game.player.inv;
-    // Drop nested items before their containers so we don't drop something twice.
-    for (const r of [...chosen].sort((a, b) => b.entry.depth - a.entry.depth)) {
-      const it = r.entry.item;
-      if (!inv.has(it)) continue;
-      if (it.countByCharges && r.count < it.charges) {
-        const piece = it.split(r.count);
-        placeDropped(ctx, [piece]);
-        ctx.game.message(`You drop ${piece.name()}.`);
-      } else {
-        placeDropped(ctx, inv.drop(it).dropped);
-      }
+  return openMultiSelect(ctx, 'Drop which items?', rows, 'drop', (chosen) => dropRows(ctx, chosen));
+}
+
+export function dropRows(ctx: UiContext, chosen: MultiRow[]): void {
+  const inv = ctx.game.player.inv;
+  // Drop nested items before their containers so we don't drop something twice.
+  for (const r of [...chosen].sort((a, b) => b.entry.depth - a.entry.depth)) {
+    const it = r.entry.item;
+    if (r.entry.stack) {
+      for (const one of r.entry.stack.slice(0, r.count)) if (inv.has(one)) placeDropped(ctx, inv.drop(one).dropped);
+      continue;
     }
-  });
+    if (!inv.has(it)) continue;
+    if (it.countByCharges && r.count < it.charges) {
+      const piece = it.split(r.count);
+      placeDropped(ctx, [piece]);
+      ctx.game.message(`You drop your ${piece.name()}.`);
+    } else placeDropped(ctx, inv.drop(it).dropped);
+  }
 }
 
 export function openPickupMenu(ctx: UiContext): UiWindow | null {
-  const near = nearbyEntries(ctx);
+  const near = stackEntries(nearbyEntries(ctx));
   if (!near.length) {
     ctx.game.message('There is nothing to pick up nearby.', 'c_light_gray');
     return null;
   }
-  const rows = near.map((entry) => ({ entry, max: maxOf(entry.item), count: 0 }));
-  // A single item under you is picked up directly, like CDDA's pickup of a lone item.
-  if (rows.length === 1 && !rows[0].entry.item.countByCharges) {
+  const rows = near.map((entry) => ({ entry, max: maxOf(entry), count: 0 }));
+  // A lone item is picked up directly, like CDDA does when there's only one thing there.
+  if (rows.length === 1 && rows[0].max === 1) {
     pickUpRows(ctx, [{ ...rows[0], count: 1 }]);
     return null;
   }
@@ -427,16 +469,16 @@ export function pickUpRows(ctx: UiContext, chosen: MultiRow[]): void {
   const map = ctx.game.map;
   for (const r of chosen) {
     const e = r.entry;
-    const it = e.item;
     const pos = e.pos!;
-    if (it.countByCharges && r.count < it.charges) {
-      const piece = it.split(r.count);
-      const res = inv.pickUp(piece);
-      if (!res.ok) it.charges += piece.charges;
-    } else {
-      const res = inv.pickUp(it);
-      if (res.ok) map.removeItem(pos.x, pos.y, pos.z, it);
-      else break; // CDDA stops at the first thing that doesn't fit
+    const whole = e.stack ? e.stack.slice(0, r.count) : e.item.countByCharges && r.count < e.item.charges ? [] : [e.item];
+    if (!e.stack && whole.length === 0) {
+      const piece = e.item.split(r.count);
+      if (!inv.pickUp(piece).ok) e.item.charges += piece.charges;
+      continue;
+    }
+    for (const it of whole) {
+      if (!inv.pickUp(it).ok) return; // CDDA stops at the first thing that doesn't fit
+      map.removeItem(pos.x, pos.y, pos.z, it);
     }
   }
 }

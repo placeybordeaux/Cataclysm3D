@@ -298,11 +298,12 @@ export function openCharGen(ctx: UiContext): Promise<Build | null> {
         const g = pr.items?.[key] as ItemGroupDef | undefined;
         if (g) possibleItems(ctx.game.data, g, ids);
       }
-      return [...ids].map((id) => ctx.game.data.items[id]).filter(Boolean).map((d) => `${spriteImg(ctx.renderer, d.id)}${esc(cddaText(d.name))}`);
+      return [...ids].map((id) => ctx.game.data.items[id]).filter(Boolean).map((d) => `${spriteImg(ctx.renderer, d.id) || '<span class="icon"></span>'}${esc(cddaText(d.name))}`);
     }
 
     function render() {
-      const H = Math.max(8, Math.floor((window.innerHeight * 0.92) / 20) - 9);
+      // Rows that fit the list pane: window is 92vh, lines ~1.15 x 16px, minus tabs/footer.
+      const H = Math.max(8, Math.floor((window.innerHeight * 0.92) / 18.4) - 8);
       const tabs = TABS.map((t, i) => `<span class="tab${i === tab ? ' on' : ''}">${t}</span>`).join(' ');
       let left = '', right = '';
       const T = TABS[tab];

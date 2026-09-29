@@ -199,6 +199,24 @@ and wall style). Keys: `V` camera mode, `F` flashlight.
   register `game.activities.dangerChecks.push(() => reason | null)`.
 - **Items on the map** are real `Item` instances (`src/game/item.ts`). Mapgen emits
   `ItemSpawn`s which `GameMap.itemFactory` (set in Game) converts via `fromSpawned`.
+- **Tile raycasts** `src/game/raycast.ts`: `raycastTiles(map, {x,y,h}, dir, {maxDist,
+  creatureAt, throughTransparent})` → first creature / furniture / terrain / floor / ceiling
+  hit (h = metres, x/y tiles; same as three.js X/Z). `dirFromYawPitch(yaw, pitch)`.
+  `game.lookAt(maxDist?)` = ray through the crosshair of the active camera (any mode).
+  Monsters: set `game.creatureAt = (x, y, z) => LookCreature | null` so look mode and rays see them.
+- **HUD** `src/ui/hud.ts`: `hud.setPrompt('[e] Open door' | null)` (sticky) or
+  `hud.addPromptProvider(game => text | null)` (per frame, first non-null wins; returns an
+  unregister fn). `hud.safeMode = {text, color}`. The HUD also draws the activity bar.
+- **Stats** `game.stats` (src/game/stats.ts): `addKill(monId)` (auto-counted from
+  `creatureDied` events whose `killer === game.player`; don't double count), `itemsCrafted`,
+  `distanceWalked` (tracked by the UI), for the memorial screen.
+- **Overmap memory** `game.overmapSeen`: Set of `"omx,omy,z"` (UI reveals ~3 OMTs around you by
+  day, 15 at start). **Save/load hooks**: set `game.save`, `game.load`, `game.hasSave`; the menus
+  grey out until they exist. Modal windows pause the sim (`game.pauseInMenus`).
+- **UI data** `public/data/ui.json` (`npm run extract:ui`): title art, tombstone, names, help.
+  Boot shows the title screen unless `?skipmenu=1` (or under automation without `?menu=1`).
+  `cdda.ui.quickStart()` makes a default Evacuee; `cdda.ui.open('inventory'|'map'|…)`,
+  `cdda.spawnItem(id, dx, dy)`, `cdda.pressKey(key)`, `cdda.ui.lookHit()`.
 
 ## Merge etiquette for parallel agents
 

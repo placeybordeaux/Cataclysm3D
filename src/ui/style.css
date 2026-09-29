@@ -62,3 +62,6 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #000; }
 #ui .tabs .tab.on { background: var(--c-light_gray); color: #000; }
 #ui .pre { white-space: pre; }
 #ui .wrap { white-space: pre-wrap; }
+#ui span.icon { display: inline-block; width: 1.25em; height: 1em; margin-right: .25em; }
+#ui .om-row { height: 1.1em; white-space: nowrap; }
+#ui .om-cell { display: inline-block; width: 1.1em; height: 1.1em; line-height: 1.1em; text-align: center; vertical-align: top; }

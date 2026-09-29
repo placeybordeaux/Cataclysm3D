@@ -1,5 +1,6 @@
 import { getAudioEngine } from '../audio/sfx';
 import type { GradeMode } from '../render/post';
+import { CAMERA_MODES } from '../render/camera';
 import { c, openMenu, type MenuEntry, type UiWindow } from './framework';
 import type { UiContext } from './context';
 
@@ -91,7 +92,7 @@ export function openOptions(ctx: UiContext): UiWindow {
   opts.push({
     name: 'Camera',
     value: () => renderer.cameraMode,
-    change: (d) => renderer.setCameraMode(cycle(['first', 'third', 'top'] as const as unknown as ('first' | 'third' | 'top')[], renderer.cameraMode, d)),
+    change: (d) => renderer.setCameraMode(cycle(CAMERA_MODES, renderer.cameraMode, d)),
     desc: 'First person, over the shoulder, or CDDA-style top-down (also V in game).',
   });
   const audio = getAudioEngine();
