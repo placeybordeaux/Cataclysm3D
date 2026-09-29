@@ -103,8 +103,9 @@ export class Input {
    * chose free-cursor menus: menus are keyboard-driven (CDDA style), and releasing the lock
    * would otherwise need a click to get back into mouse-look after every menu.
    */
-  capture(h: KeyHandler): () => void {
+  capture(h: KeyHandler, opts: { timeFlows?: boolean } = {}): () => void {
     this.captureStack.push(h);
+    if (opts.timeFlows) this.flowing.add(h);
     // Buttons held when a menu opens would otherwise keep swinging once it closes.
     this.mouseButtons = 0;
     return () => {
@@ -150,6 +151,13 @@ export class Input {
   }
   get captured(): boolean {
     return this.captureStack.length > 0;
+  }
+  /** Handlers captured with timeFlows (ui2 windows: the sim runs unless game.tacticalPause). */
+  private flowing = new WeakSet<KeyHandler>();
+  /** The top capture lets game time keep running (a ui2 window, not a legacy menu). */
+  get captureTimeFlows(): boolean {
+    const top = this.captureStack[this.captureStack.length - 1];
+    return !!top && this.flowing.has(top);
   }
   consumeMouse(): [number, number] {
     const r: [number, number] = [this.mouseDX, this.mouseDY];

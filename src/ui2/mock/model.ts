@@ -74,7 +74,9 @@ export class MockInventoryModel implements InventoryModel {
 
   /** Worn containers (backpack, jeans pockets…) in doll order: where picked-up things go. */
   carriedContainers(): ItemView[] {
-    return DOLL_SLOTS.flatMap((s) => this.contents(this.kit.slot(s.id))).filter((it) => it.capacity);
+    // The bag on your back first: it's where a quick move should go before your pockets.
+    const order = ['back', ...DOLL_SLOTS.map((s) => s.id).filter((id) => id !== 'back')];
+    return order.flatMap((id) => this.contents(this.kit.slot(id))).filter((it) => it.capacity);
   }
 
   /** Total carried weight (worn + wielded + everything inside). */

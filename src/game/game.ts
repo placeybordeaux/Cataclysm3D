@@ -53,6 +53,11 @@ export class Game {
   lockPaused = false;
   /** Modal UI (input.captured) pauses the simulation like CDDA's turn-based menus. */
   pauseInMenus = true;
+  /**
+   * Tactical pause: the simulation stops while true. ui2 sets it while inventory-type windows
+   * are open and its setting asks for it (the Accessible preset's default; src/ui2/host.ts).
+   */
+  tacticalPause = false;
   /** Run statistics for the memorial screen (src/game/stats.ts). */
   readonly stats = new GameStats();
   /** Overmap tiles the player has seen, keys "omx,omy,z" (filled by the UI's overmap tracker). */
@@ -113,7 +118,7 @@ export class Game {
       p.yaw += mx * this.mouseSensitivity;
       p.pitch = Math.max(-1.5, Math.min(1.5, p.pitch - my * this.mouseSensitivity));
     }
-    if (this.paused || this.lockPaused || (this.pauseInMenus && this.input.captured)) return;
+    if (this.paused || this.lockPaused || this.tacticalPause || (this.pauseInMenus && this.input.captured && !this.input.captureTimeFlows)) return;
     this.acc = Math.min(this.acc + realDt, 0.25);
     while (this.acc >= TICK) {
       this.tick(TICK);

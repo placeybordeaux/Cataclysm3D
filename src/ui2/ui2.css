@@ -322,6 +322,8 @@ body.ui2-dragging, body.ui2-dragging * { cursor: grabbing !important; }
 #ui2 .ui2-prog-hint { font-size: var(--fs-s); color: var(--p-text-dim); text-align: center; }
 
 /* ---- world hover label (install.ts) ---- */
+/* The crosshair and its "[e] …" prompt mean nothing while the cursor is free. */
+body.ui2-cursor-free #ui .hud-cross, body.ui2-cursor-free #ui .hud-prompt { display: none; }
 #ui2 .ui2-hover-label {
   position: absolute; pointer-events: none; transform: translate(calc(var(--u) * 8), calc(var(--u) * 8)); white-space: nowrap;
   font-size: var(--fs-s); padding: 0 calc(var(--u) * 2); background: rgba(7, 8, 12, .85); border: var(--u) solid var(--p-outline); color: var(--p-text-bright);
