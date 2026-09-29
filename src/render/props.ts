@@ -132,24 +132,25 @@ export function emitProps(geo: Geo, white: TileFrame, x: number, y: number, z: n
     if (!treeTile && def.id.includes('dirt') && h % 41 === 3) puddle(pud, white, x, y, gy(x + 0.5, y + 0.5), r);
   } else {
     // town litter: paper, cans, bottles; puddles on roads
-    if (h % 53 === 0) {
+    // (the game spawns its own litter items on roads; this is only sidewalk dressing)
+    if (kind === 2 && h % 23 === 0) {
       const px = x + 0.15 + r(1) * 0.7, py = y + 0.15 + r(2) * 0.7;
       flake(g, white, px, gy(px, py) + 0.012, py, r(3) * 6.28, 0.22, 0.3, PAPER[Math.floor(r(4) * PAPER.length)]);
     }
-    if (h % 71 === 2) {
+    if (kind === 2 && h % 47 === 2) {
       const px = x + 0.2 + r(5) * 0.6, py = y + 0.2 + r(6) * 0.6;
       const bottle = r(7) < 0.3;
       // lying on its side: long axis horizontal
       orientedBox(g, white, px, gy(px, py), py, r(8) * 6.28, bottle ? 0.24 : 0.12, 0.065, 0.065, bottle ? BOTTLE[Math.floor(r(9) * 2)] : CAN[Math.floor(r(9) * CAN.length)]);
     }
-    if (kind === 3 && h % 61 === 5) puddle(pud, white, x, y, gy(x + 0.5, y + 0.5), r);
+    if (kind === 3 && h % 97 === 5) puddle(pud, white, x, y, gy(x + 0.5, y + 0.5), r);
   }
 }
 
 function puddle(pud: { g: GeomBuilder | undefined }, white: TileFrame, x: number, y: number, gy: number, r: (i: number) => number): void {
   const g = (pud.g ??= new Builder());
   const cx = x + 0.5 + (r(60) - 0.5) * 0.3, cz = y + 0.5 + (r(61) - 0.5) * 0.3;
-  const R = 0.35 + r(62) * 0.45;
+  const R = 0.3 + r(62) * 0.35;
   const n = 9;
   const up: V3 = [0, 1, 0];
   const c: V3 = [cx, gy + 0.008, cz];
@@ -193,11 +194,11 @@ export function puddleMaterial(): THREE.ShaderMaterial {
         vec3 v = normalize(cameraPosition - vWorld);
         vec3 r = reflect(-v, vec3(0.0, 1.0, 0.0));
         // water over asphalt: mostly dark, the sky shows at grazing angles (Fresnel)
-        float fres = 0.06 + 0.94 * pow(1.0 - max(v.y, 0.0), 5.0);
+        float fres = 0.18 + 0.82 * pow(1.0 - max(v.y, 0.0), 5.0);
         vec3 sky = mix(uHorizon, uZenith, pow(clamp(r.y, 0.0, 1.0), 0.6));
         float l = dot(sky, vec3(0.3, 0.59, 0.11));
         sky = mix(vec3(l), sky, 0.6);
-        vec3 col = vec3(0.018, 0.02, 0.022) + sky * fres * 0.7;
+        vec3 col = vec3(0.03, 0.034, 0.038) * (0.3 + 0.7 * (1.0 - uNight)) + sky * fres * 0.6;
         col += uSunColor * pow(max(dot(r, uSunDir), 0.0), 200.0) * 3.0 * (1.0 - uNight);
         gl_FragColor = vec4(col, 1.0);
         ${normalOutputChunk(false, 0)}

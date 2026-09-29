@@ -35,6 +35,8 @@ export const shared = {
   uRimColor: { value: new THREE.Color(0, 0, 0) },
   uBump: { value: 0 },
   uSpriteRound: { value: 0 },
+  /** Interior bounce light colour (look `bounce`); black = off. */
+  uBounce: { value: new THREE.Color(0, 0, 0) },
   /** Pitched roofs (cut >= 1000 + level) vanish while the player is on/above that level. */
   uPlayerLevel: { value: 0 },
 };
@@ -120,6 +122,7 @@ const INDIRECT = /* glsl */ `
 vec4 gLm = vec4(0.0, 0.0, 0.0, -1.0);
 uniform float uRim;
 uniform vec3 uRimColor;
+uniform vec3 uBounce;
 float lmNatural() { return gLm.w >= 0.0 ? gLm.w : SKYVIS; }
 // Sun/moon only reaches where the light map says sky light gets in (beyond the shadow
 // map's range this is what keeps roofs from being see-through to sunlight).
@@ -134,6 +137,13 @@ void RE_IndirectDiffuse_Lambert( const in vec3 irradiance, const in vec3 geometr
     float upN = inverseTransformDirection( geometryNormal, viewMatrix ).y;
     float f = 1.0 - saturate( dot( geometryNormal, geometryViewDir ) );
     reflectedLight.indirectDiffuse += uRimColor * (uRim * f * f * f * (1.0 - max(upN, 0.0)) * lmNatural()) * material.diffuseColor;
+  }
+  if (gLm.w >= 0.0 && uBounce.r + uBounce.g + uBounce.b > 0.0) {
+    // Daylight that came in through windows bounces around a room: ceilings and walls away
+    // from the window get some of it instead of going black (interiors only).
+    float nat = gLm.w;
+    float upB = inverseTransformDirection( geometryNormal, viewMatrix ).y;
+    reflectedLight.indirectDiffuse += uBounce * (smoothstep(0.0, 0.12, nat) * (1.0 - nat) * (0.75 - 0.35 * upB)) * BRDF_Lambert( material.diffuseColor );
   }
   if (gLm.w >= 0.0) {
     // The flat light-map term is strongest on floors: on walls a tile's light may have
@@ -158,6 +168,7 @@ type LmMode = 'world' | 'sprite' | 'none';
 function patchBandedLambert(shader: Shader, lm: LmMode = 'none'): void {
   shader.uniforms.uBands = shared.uBands;
   shader.uniforms.uRim = shared.uRim;
+  shader.uniforms.uBounce = shared.uBounce;
   shader.uniforms.uRimColor = shared.uRimColor;
   const assign = lm === 'world' ? 'gLm = lmSample(vLmPos);\n' : lm === 'sprite' ? 'gLm = vLmS;\n' : '';
   if (lm !== 'none') Object.assign(shader.uniforms, lmUniforms);

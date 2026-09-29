@@ -50,7 +50,7 @@ const server = await createServer({ server: { port: 0, host: '127.0.0.1', hmr: f
 await server.listen();
 const port = (server.httpServer!.address() as { port: number }).port;
 const gl = gpu
-  ? ['--use-angle=vulkan', '--enable-features=Vulkan', '--ignore-gpu-blocklist', '--enable-gpu']
+  ? ['--use-angle=vulkan', '--enable-features=Vulkan', '--ignore-gpu-blocklist', '--enable-gpu', ...(bench ? ['--disable-gpu-vsync', '--disable-frame-rate-limit'] : [])]
   : ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'];
 const browser = await puppeteer.launch({ executablePath: chrome, headless: true, args: ['--no-sandbox', ...gl, `--window-size=${size[0]},${size[1]}`] });
 const views_js = readFileSync(resolve('tools/look-views.js'), 'utf8');
@@ -83,7 +83,11 @@ try {
       await new Promise((r) => setTimeout(r, 400));
       const file = resolve(`${out}/${look}_${v}.png`);
       await page.screenshot({ path: file as `${string}.png` });
-      if (bench) results[look][v] = await page.evaluate('cdda.benchView(4)');
+      if (bench) {
+        // let chunk builds / grass rebuilds triggered by the teleport finish first
+        await new Promise((r) => setTimeout(r, 2500));
+        results[look][v] = await page.evaluate('cdda.benchView(6)');
+      }
       console.log(`  ${v} ${((Date.now() - t0) / 1000).toFixed(1)}s -> ${file}`);
     }
   }
@@ -92,11 +96,11 @@ try {
   await server.close();
 }
 if (bench) {
-  console.log('look       view      fps(p50)  p50ms  p99ms  tris');
+  console.log('look       view      fps(p50)  p50ms  p99ms  work50 work99  tris');
   for (const [l, r] of Object.entries(results))
     for (const [v, b] of Object.entries(r)) {
-      const x = b as { interval: { p50: number; p99: number }; stats: { triangles: number } };
-      console.log(`${l.padEnd(10)} ${v.padEnd(9)} ${(1000 / x.interval.p50).toFixed(0).padStart(8)}  ${String(x.interval.p50).padStart(5)}  ${String(x.interval.p99).padStart(5)}  ${x.stats.triangles}`);
+      const x = b as { interval: { p50: number; p99: number }; work: { p50: number; p99: number }; stats: { triangles: number } };
+      console.log(`${l.padEnd(10)} ${v.padEnd(9)} ${(1000 / x.interval.p50).toFixed(0).padStart(8)}  ${String(x.interval.p50).padStart(5)}  ${String(x.interval.p99).padStart(5)}  ${String(x.work.p50).padStart(6)} ${String(x.work.p99).padStart(6)}  ${x.stats.triangles}`);
     }
   console.log(JSON.stringify(results));
 }

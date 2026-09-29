@@ -116,7 +116,9 @@ function analyse(f: TileFrame, shrub: boolean): TreeShape | null {
           if (op(x, y)) {
             filled++;
             const i = (y * w + x) * 4;
-            if (data[i + 1] > data[i] * 0.95 && data[i + 1] > data[i + 2]) green++;
+            // leaves: green, or saturated and bright (autumn); dead wood is dull brown/grey
+            const mx = Math.max(data[i], data[i + 1], data[i + 2]), mn = Math.min(data[i], data[i + 1], data[i + 2]);
+            if ((data[i + 1] > data[i] * 0.95 && data[i + 1] > data[i + 2]) || (mx - mn > 70 && mx > 110)) green++;
           }
         }
       }
@@ -137,7 +139,7 @@ function analyse(f: TileFrame, shrub: boolean): TreeShape | null {
       res = {
         pal, palLo,
         top, bottom, trunkX, trunkW, trunkCol: tn ? [tr / tn, tg / tn, tb / tn] : [0.05, 0.035, 0.02],
-        cTop, cBot, rows: rowsExt, bare: fill < 0.4 && green / Math.max(1, filled) < 0.3, pine, w, h, px: data,
+        cTop, cBot, rows: rowsExt, bare: green / Math.max(1, filled) < 0.22, pine, w, h, px: data,
       };
     }
   }
@@ -186,19 +188,23 @@ function clumpTexture(): THREE.DataTexture {
 
 /** Daylight share of leaf translucency (renderer sets it from the sky). */
 export const leafGlow = { value: 0.1 };
+/** Sun direction (world) and colour*intensity for backlit leaves (renderer sets them). */
+export const leafSun = { dir: { value: new THREE.Vector3(0, 1, 0) }, color: { value: new THREE.Color() } };
 
 let clumpMats: { mat: THREE.MeshLambertMaterial; depth: THREE.MeshDepthMaterial } | null = null;
 function clumpMaterials(): { mat: THREE.MeshLambertMaterial; depth: THREE.MeshDepthMaterial } {
   if (clumpMats) return clumpMats;
   clumpMats = instancedLitMaterial({ map: clumpTexture(), alphaTest: 0.5, side: THREE.DoubleSide }, {
     key: 'clump',
-    pars: 'attribute vec4 instN;\n',
+    pars: 'attribute vec4 instN;\nuniform vec3 uSunW;\nvarying float vTrans;\n',
     normal: 'vec3 objectNormal = instN.xyz;\n#ifdef USE_TANGENT\nvec3 objectTangent = vec3(1.0, 0.0, 0.0);\n#endif\n',
     vertex: `
       {
         vec3 cR = vec3(viewMatrix[0][0], viewMatrix[1][0], viewMatrix[2][0]);
         vec3 cU = vec3(viewMatrix[0][1], viewMatrix[1][1], viewMatrix[2][1]);
         vec3 ip = (modelMatrix * instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
+        // looking through the crown toward the sun: leaves glow (translucency)
+        vTrans = pow(max(dot(normalize(ip - cameraPosition), uSunW), 0.0), 3.0);
         vec2 sw = vec2(sin(uTime * 1.3 + ip.x * 0.5 + ip.y * 0.7), cos(uTime * 1.1 + ip.z * 0.6)) * 0.03 * max(ip.y - 1.0, 0.0) / 4.0;
         // clumps melt away within a few metres of the eye instead of filling the view
         float near = smoothstep(1.4, 3.6, length(ip - cameraPosition));
@@ -209,10 +215,11 @@ function clumpMaterials(): { mat: THREE.MeshLambertMaterial; depth: THREE.MeshDe
       }
     `,
     lmLift: 0,
-    uniforms: { uLeafGlow: leafGlow },
-    fragPars: 'uniform float uLeafGlow;\n',
-    // light scattered through the crown: undersides never go fully black
-    frag: 'totalEmissiveRadiance += diffuseColor.rgb * uLeafGlow;',
+    uniforms: { uLeafGlow: leafGlow, uSunW: leafSun.dir, uSunC: leafSun.color },
+    fragPars: 'uniform float uLeafGlow;\nuniform vec3 uSunC;\nvarying float vTrans;\n',
+    // light scattered through the crown: undersides never go fully black, and the crown
+    // glows when backlit
+    frag: 'totalEmissiveRadiance += diffuseColor.rgb * (uLeafGlow + uSunC * vTrans * 0.55);',
   });
   return clumpMats;
 }
@@ -247,6 +254,8 @@ function beam(g: GeomBuilder, f: TileFrame, a: V3, b: V3, r0: number, r1: number
 /** Build one chunk's trees: trunk geometry (world material) + clumps (instanced). */
 export function buildTrees(specs: TreeSpec[], ground: GroundField | null, proc: ProceduralTextureSource, white: TileFrame): THREE.Object3D[] {
   const trunkG = new GeomBuilder();
+  // bare crowns: the sprite's own branch drawing on three crossed planes (per atlas page)
+  const planes = new Map<THREE.Texture, GeomBuilder>();
   const inst: number[] = [], nrm: number[] = [], col: number[] = [];
   for (const s of specs) {
     const sh = analyse(s.frame, s.shrub);
@@ -272,7 +281,7 @@ export function buildTrees(specs: TreeSpec[], ground: GroundField | null, proc: 
       beam(trunkG, bark, [s.x, gy - 0.15, s.y], mid, trunkR * 1.15, trunkR * 0.9, tc, 6);
       beam(trunkG, bark, mid, trunkTop, trunkR * 0.9, trunkR * 0.55, tc, 6);
       // branches toward the crown (bare trees: a fan of them, with twigs)
-      const nb = sh.bare ? 7 : sh.pine ? 0 : 4;
+      const nb = sh.bare ? 0 : sh.pine ? 0 : 4;
       for (let b = 0; b < nb; b++) {
         const a = yaw + (b / nb) * Math.PI * 2 + r(10 + b) * 0.8;
         const startT = sh.bare ? 0.35 + r(20 + b) * 0.55 : 0.6 + r(20 + b) * 0.35;
@@ -290,7 +299,21 @@ export function buildTrees(specs: TreeSpec[], ground: GroundField | null, proc: 
         }
       }
     }
-    if (sh.bare) continue;
+    if (sh.bare) {
+      let g = planes.get(s.frame.texture);
+      if (!g) planes.set(s.frame.texture, (g = new GeomBuilder()));
+      const yTop = gy + (sh.bottom + 1) * pxM, yBot = gy + (sh.bottom + 1 - sh.h) * pxM;
+      const uL = -sh.trunkX * pxM, uR = (sh.w - sh.trunkX) * pxM;
+      const up: V3 = [0, 1, 0];
+      for (let k = 0; k < 3; k++) {
+        const a = yaw + (k * Math.PI) / 3;
+        const ca = Math.cos(a), sa = Math.sin(a);
+        const P = (u: number, y: number): V3 => [s.x + ca * u, y, s.y + sa * u];
+        g.quad(P(uL, yBot), P(uR, yBot), P(uR, yTop), P(uL, yTop), up, [0, 0, 1, 1], s.frame, [1, 1, 1, 1]);
+        g.quad(P(uR, yBot), P(uL, yBot), P(uL, yTop), P(uR, yTop), up, [1, 0, 0, 1], s.frame, [1, 1, 1, 1]);
+      }
+      continue;
+    }
     // canopy: revolve the silhouette; cards on the surface plus some inside
     let area = 0;
     for (let y = sh.cTop; y <= sh.cBot; y++) { const e = sh.rows[y]; if (e) area += e[1] - e[0] + 1; }
@@ -340,6 +363,15 @@ export function buildTrees(specs: TreeSpec[], ground: GroundField | null, proc: 
   if (trunkG.vertexCount) {
     const { mat, depth } = worldMaterials(proc.texture);
     const m = new THREE.Mesh(trunkG.build(), mat);
+    m.customDepthMaterial = depth;
+    m.castShadow = true;
+    m.receiveShadow = true;
+    m.matrixAutoUpdate = false;
+    out.push(m);
+  }
+  for (const [page, g] of planes) {
+    const { mat, depth } = worldMaterials(page);
+    const m = new THREE.Mesh(g.build(), mat);
     m.customDepthMaterial = depth;
     m.castShadow = true;
     m.receiveShadow = true;

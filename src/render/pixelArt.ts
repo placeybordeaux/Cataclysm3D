@@ -206,7 +206,10 @@ export function paintSurface(p: Pattern, cddaColorName: string, seed: number, ra
       break;
     }
     case 'sidewalk': case 'concrete': case 'ceiling': {
-      for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) img.set(x, y, pick([0.3, 3, 8, 1]));
+      // ceilings are big calm surfaces seen from up close: little speckle (it read as noise
+      // once interiors were lit and rendered at higher resolution)
+      const w = p === 'ceiling' ? [0.05, 1.2, 12, 0.4] : [0.3, 3, 8, 1];
+      for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) img.set(x, y, pick(w));
       if (p === 'sidewalk') for (let i = 0; i < S; i++) { img.set(i, 0, r[0]); img.set(0, i, r[0]); img.set(i, 8, r[1]); }
       if (p === 'ceiling') for (let i = 0; i < S; i++) img.set(i, 0, r[1]);
       break;
@@ -247,7 +250,7 @@ export function paintSurface(p: Pattern, cddaColorName: string, seed: number, ra
       break;
     }
     case 'plaster': {
-      for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) img.set(x, y, pick([0.2, 2, 8, 0.6]));
+      for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) img.set(x, y, pick([0.1, 1.2, 10, 0.4]));
       if (rng.oneIn(2)) { const x = rng.int(2, S - 3), y = rng.int(2, S - 3); img.set(x, y, r[0]); img.set(x + 1, y, r[1]); }
       break;
     }

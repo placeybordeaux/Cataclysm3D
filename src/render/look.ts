@@ -17,6 +17,8 @@
 // The current look is a module-level singleton because the chunk mesher, sprite layer and
 // materials all consult it and are otherwise free of renderer references.
 
+import type { GradeMode } from './post';
+
 export type LookName = 'classic' | 'crisp' | 'voxel' | 'terrain' | 'full';
 export const LOOK_NAMES: LookName[] = ['classic', 'crisp', 'voxel', 'terrain', 'full'];
 
@@ -26,6 +28,8 @@ export interface LookFeatures {
   // --- A: image quality -------------------------------------------------------------
   /** Pick the integer upscale that gives a ~540-720 px tall image instead of ~360. */
   autoRes: boolean;
+  /** Colour grading: the classic ~100-colour palette snap, or graded + posterized. */
+  grade: GradeMode;
   /** Ordered-dither amplitude (sRGB units). */
   dither: number;
   /** Screen-space ambient occlusion strength (0 = off). */
@@ -38,6 +42,8 @@ export interface LookFeatures {
   rim: number;
   /** Fill light opposite the sun, as a share of the sky light (0 = off). */
   fill: number;
+  /** Interior bounce light (daylight through windows reaching ceilings/far walls). */
+  bounce: number;
   /** Per-texel bump from texture luminance on walls/floors (0 = off). */
   bump: number;
   /** Rounded (inflated) normals on billboards so creatures/props shade like volumes. */
@@ -68,14 +74,14 @@ export interface LookFeatures {
 
 const CLASSIC: LookFeatures = {
   label: 'Classic', desc: 'The original look: chunky ~360 px image, flat billboards, flat ground.',
-  autoRes: false, dither: 0.035, ssao: 0, bloom: 0, atmosphere: 0, rim: 0, fill: 0, bump: 0, spriteRound: 0,
+  autoRes: false, grade: 'palette', dither: 0.035, ssao: 0, bloom: 0, atmosphere: 0, rim: 0, fill: 0, bounce: 0, bump: 0, spriteRound: 0,
   shadowSize: 768, shadowExtent: 30, softShadows: false,
   voxelProps: false, trees3d: false, archDetail: false,
   relief: false, grass: false, props: false, macroTint: false, skyline: false,
 };
 
 const CRISP_A: Partial<LookFeatures> = {
-  autoRes: true, dither: 0.018, ssao: 0.85, bloom: 0.55, atmosphere: 0.6, rim: 0.5, fill: 0.35, bump: 0.9, spriteRound: 0.9,
+  autoRes: true, grade: 'smooth', dither: 0.018, ssao: 0.85, bloom: 0.55, atmosphere: 0.6, rim: 0.5, fill: 0.35, bounce: 1, bump: 0.7, spriteRound: 0.9,
   shadowSize: 2048, shadowExtent: 40, softShadows: true,
 };
 const VOXEL_B: Partial<LookFeatures> = { voxelProps: true, trees3d: true, archDetail: true };

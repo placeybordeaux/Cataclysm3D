@@ -25,7 +25,7 @@ import { puddleUniforms } from './props';
 import { Img, paintSurface, rampAround } from './pixelArt';
 import { paintShingle, paintSolid, type ArchFrames } from './arch';
 import { GrassLayer } from './grass';
-import { buildTrees, leafGlow } from './trees';
+import { buildTrees, leafGlow, leafSun } from './trees';
 import { SkylineLayer } from './skyline';
 import { VoxelFactory } from './voxel';
 
@@ -122,6 +122,8 @@ export class Renderer {
   private sunT: SunTimes = sunTimes(0);
   /** `?px=` pins the render resolution regardless of the look. */
   private pxParam = 0;
+  /** `?grade=` pins the colour grading regardless of the look. */
+  private gradeParam = false;
   /** Per-look scene layers (grass, skyline...) register here; setLook toggles them. */
   readonly lookLayers: { name: string; apply(): void }[] = [];
   /** Smoothed visual ground height under the camera (relief, curbs), metres. */
@@ -132,6 +134,7 @@ export class Renderer {
   constructor(private canvas: HTMLCanvasElement, private game: Game, opts: RendererOptions = {}) {
     const params = typeof location !== 'undefined' ? new URLSearchParams(location.search) : new URLSearchParams();
     this.pxParam = Number(params.get('px')) || opts.targetHeight || 0;
+    this.gradeParam = !!params.get('grade') || !!opts.grade;
     const o: RendererOptions = {
       targetHeight: Number(params.get('px')) || opts.targetHeight || 360,
       grade: (params.get('grade') as GradeMode) || opts.grade || 'palette',
@@ -274,6 +277,7 @@ export class Renderer {
     const po = this.pipeline.options;
     if (!this.pxParam) po.targetHeight = f.autoRes ? 0 : 360;
     po.dither = f.dither;
+    if (!this.gradeParam) po.grade = f.grade;
     po.ssao = f.ssao;
     po.bloom = f.bloom;
     po.atmosphere = f.atmosphere;
@@ -468,6 +472,7 @@ export class Renderer {
     this.adaptExposure(dt);
     this.lights.update(dt, this.skyState, this.rig.focus, cam);
     shared.uRimColor.value.copy(this.skyState.hemiSky).multiplyScalar(this.skyState.hemiIntensity * 0.35);
+    shared.uBounce.value.copy(this.skyState.hemiGround).lerp(this.skyState.hemiSky, 0.4).multiplyScalar(this.skyState.hemiIntensity * 0.9 * look.f.bounce * (1 - this.skyState.night));
     this.pipeline.haze.copy(this.skyState.fog);
     puddleUniforms.uZenith.value.copy(this.skyState.zenith);
     puddleUniforms.uHorizon.value.copy(this.skyState.horizon);
@@ -475,6 +480,8 @@ export class Renderer {
     puddleUniforms.uSunColor.value.copy(this.skyState.sunColor);
     puddleUniforms.uNight.value = this.skyState.night;
     leafGlow.value = 0.075 * this.skyState.hemiIntensity * (1 - 0.85 * this.skyState.night);
+    leafSun.dir.value.copy(this.skyState.sunDir);
+    leafSun.color.value.copy(this.skyState.sunColor).multiplyScalar(this.skyState.sunIntensity * Math.max(0, Math.min(1, this.skyState.sunDir.y * 4)) * (1 - this.skyState.night));
     const su = this.skyline.uniforms;
     su.uSunDir.value.copy(this.skyState.moonLit ? this.skyState.moonDir : this.skyState.sunDir);
     su.uDay.value = 1 - this.skyState.night;
