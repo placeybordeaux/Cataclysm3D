@@ -84,6 +84,24 @@ export interface ResponseView {
   hidden?: boolean;
   reason?: string;
   index: number;
+  /** The words alone: no trial prefix, no failure-explanation prefix, no '&' marker. */
+  plain?: string;
+  /** Trial details for UIs that show odds apart from the text. */
+  trial?: TrialView;
+  /** What choosing it does beyond talking, for UI icons (first match of the effects). */
+  action?: 'hostile' | 'trade' | 'mission' | 'follow' | 'leave' | 'give' | 'action';
+}
+
+export interface TrialView {
+  kind: 'LIE' | 'PERSUADE' | 'INTIMIDATE' | 'SKILL_CHECK' | 'CONDITION';
+  /** Success chance, 0..100. */
+  chance: number;
+  /** What the roll uses, for the player: "Speech, Int, Per" / "Str, your weapon" / "Mechanics 3/4". */
+  uses: string;
+  /** SKILL_CHECK: the skill's name, your level and the difficulty. */
+  skill?: string;
+  have?: number;
+  need?: number;
 }
 
 export interface TopicView {
@@ -416,8 +434,17 @@ export class Dialogue implements MathHost {
     let text = this.responseText(raw, r.topicItem);
     const t = raw.trial;
     const kind = t?.type ?? 'NONE';
-    if (kind === 'LIE' || kind === 'PERSUADE' || kind === 'INTIMIDATE') text = `[${kind} ${this.trialChance(t)}%] ${text}`;
-    else if (kind === 'SKILL_CHECK') text = `[${this.data.misc.skill?.[t.skill_required]?.name ?? t.skill_required} ${Math.min(this.u.getSkill(t.skill_required), t.difficulty ?? 0)}/${t.difficulty ?? 0}] ${text}`;
+    const plain = (text.startsWith('&') ? text.slice(1) : text);
+    let trial: TrialView | undefined;
+    if (kind === 'LIE' || kind === 'PERSUADE' || kind === 'INTIMIDATE') {
+      trial = { kind, chance: this.trialChance(t), uses: kind === 'INTIMIDATE' ? 'Strength, your weapon' : 'Speech, Intelligence, Perception' };
+      text = `[${kind} ${trial.chance}%] ${text}`;
+    } else if (kind === 'SKILL_CHECK') {
+      const name = this.data.misc.skill?.[t.skill_required]?.name ?? t.skill_required;
+      const have = this.u.getSkill(t.skill_required), need = t.difficulty ?? 0;
+      trial = { kind, chance: this.trialChance(t), uses: `${name} ${Math.min(have, need)}/${need}`, skill: name, have, need };
+      text = `[${name} ${Math.min(have, need)}/${need}] ${text}`;
+    } else if (kind === 'CONDITION') trial = { kind, chance: this.trialChance(t), uses: 'circumstances' };
     if (!r.available && r.reason && !r.hidden) text = `*${r.reason}: ${text}`;
     let color = 'c_white';
     const eff = [raw.effect, raw.success?.effect, kind !== 'NONE' ? raw.failure?.effect : undefined].flat().filter((e) => e !== undefined);
@@ -427,7 +454,14 @@ export class Dialogue implements MathHost {
     else if (text.startsWith('&') || names.some((e) => ACTION_EFFECTS.has(e))) color = 'c_green';
     if (!r.available) color = 'c_dark_gray';
     if (text.startsWith('&')) text = text.slice(1);
-    return { text, color, available: r.available, hidden: r.hidden, reason: r.reason, index };
+    const action: ResponseView['action'] = names.some((e) => e === 'hostile' || e === 'insult_combat' || e === 'start_mugging') ? 'hostile'
+      : names.includes('start_trade') ? 'trade'
+      : names.some((e) => e === 'assign_mission' || e === 'mission_reward' || e === 'mission_success' || e === 'mission_failure') || !!r.mission ? 'mission'
+      : names.some((e) => e === 'follow' || e === 'follow_only' || e === 'stop_following' || e === 'assign_guard' || e === 'stop_guard') ? 'follow'
+      : names.some((e) => e === 'npc_gets_item' || e === 'npc_gets_item_to_use' || e === 'give_equipment' || e === 'u_buy_item' || e === 'u_sell_item') ? 'give'
+      : topicId(raw) === 'TALK_DONE' || names.includes('end_conversation') ? 'leave'
+      : names.some((e) => ACTION_EFFECTS.has(e)) ? 'action' : undefined;
+    return { text, color, available: r.available, hidden: r.hidden, reason: r.reason, index, plain, trial, action };
   }
 
   /** talk_trial::calc_chance */
