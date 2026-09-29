@@ -15,6 +15,8 @@ export interface GameEvents {
   creatureDied: { creature: unknown; killer?: unknown };
   mapChanged: { x: number; y: number; z: number };
   playerDied: { cause: string };
+  /** The survivor was hit (renderer: red flash + camera shake). amount = HP lost (0 = blocked). */
+  playerHurt: { amount: number; bp?: string; source?: unknown };
 }
 
 type Handler<T> = (payload: T) => void;

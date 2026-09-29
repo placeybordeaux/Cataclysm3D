@@ -86,6 +86,27 @@ tests/               vitest unit tests (pure logic, no DOM/WebGL)
   encumbrance, armor absorption. Actions return `{ok, msg, moves, dropped?}`.
 - `combat.ts` pure CDDA melee/ranged/monster-attack math taking an Rng.
 - `player.ts` PlayerAvatar = Character + position/view. Game wires `onMessage`/`onDeath`.
+- Terrain `move_cost` is in units of 50 moves (2 = flat ground = 100 moves): multiply by 50
+  before passing to `moveSpeed`.
+
+### Monsters & combat (src/game, wired by src/monsters.ts `installMonsters`)
+
+- `monster.ts` Monster instance (float pos, hp, anger/morale, effects, specials, upgrades);
+  timers are real seconds (`turnsToSeconds`); player effects from monster attacks use
+  `turnsToEffectSeconds` (turns × CLOCK_SCALE / ACTION_SCALE game seconds).
+- `monai.ts` MonsterSystem (`game.monsters`): reality bubble (60 tiles, z±1) — the rest are
+  dormant but drift toward loud noises (hordes); hearing via `sound` events; vision by light;
+  chase/flee/wander/idle; budgeted A* (`pathfind.ts`) over `los.ts` Grid (never generates
+  chunks); `hurt(m, dmg, 'player')`, `die`, corpses (`corpses`, `onDied`, `onCorpseGone`),
+  kills. Emits `playerHurt` and `creatureDied`.
+- `monattack.ts` special attacks: data melee/bite actors (misc.monster_attack), leap, boomer
+  bile, and hardcoded SHRIEK, ACID, RESURRECT, SHOCKSTORM, PARROT, SMASH...
+- `spawner.ts` consumes `chunk.spawns` (then clears them) + CDDA city hordes; tuning knob
+  `cityHordeScale` (0.3 of CDDA's 80 zombies × city size).
+- `playercombat.ts` LMB melee (crosshair cone) / hitscan guns / `G` throw; `butchery.ts`.
+- Seams: `game.bash?.(x, y, z, str)` (bash.ts) lets zombies smash doors;
+  `game.stats?.kills` gets kill counts; `renderer.viewmodel?.attack(kind)` is called on
+  attacks. Rendering: `src/render/monsterView.ts` (sprites, corpses, blood decals).
 
 ### Extension points (prefer these over editing someone else's code)
 

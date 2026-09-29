@@ -94,7 +94,8 @@ export class Game {
     const sin = Math.sin(p.yaw), cos = Math.cos(p.yaw);
     const wx = fy * sin + fx * cos;
     const wy = -fy * cos + fx * sin;
-    const cost = this.map.moveCost(p.tileX, p.tileY, p.z) || 100;
+    // Terrain move_cost is in units of 50 moves (CDDA: 2 = flat ground = 100 moves).
+    const cost = (this.map.moveCost(p.tileX, p.tileY, p.z) || 2) * 50;
     const v = p.moveSpeed(cost) * dt;
     const [ox, oy] = [p.x, p.y];
     [p.x, p.y] = moveWithCollision(this.map, p.x, p.y, p.z, wx * v, wy * v);
