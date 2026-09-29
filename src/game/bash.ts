@@ -7,6 +7,7 @@ import { hasFlag } from '../world/registry';
 import { expandItemGroup } from '../data/itemgroups';
 import { Rng } from '../core/rng';
 import { fromSpawned } from './item';
+import { spawnOnGround } from './moves';
 import { emitSound, soundClock } from './sound';
 import { sfx } from '../audio/sfx';
 import { frontTile, targetTile, type TargetTile } from './targeting';
@@ -109,7 +110,7 @@ function emptiedTerrain(game: Game, x: number, y: number, z: number): string {
 function dropBashItems(game: Game, x: number, y: number, z: number, info: BashInfo): void {
   if (!info.items) return;
   for (const sp of expandItemGroup(game.data, info.items, rng(game)))
-    for (const it of fromSpawned(game.data, sp)) game.map.addItem(x, y, z, it);
+    for (const it of fromSpawned(game.data, sp)) spawnOnGround(game.map, x, y, z, it);
 }
 
 function addFieldIfKnown(game: Game, x: number, y: number, z: number, f: unknown): void {

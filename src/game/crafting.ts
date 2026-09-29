@@ -7,7 +7,8 @@ import type { ActivityManager } from './activity';
 import type { Character } from './character';
 import type { PlayerAvatar } from './player';
 import { CraftingInventory } from './crafting_inv';
-import { asArray, countByCharges, createItem, fromSpawned, Item } from './item';
+import { asArray, countByCharges, createItem, fromSpawned, inNewContainer, Item } from './item';
+import { L, spawnItem, spawnSome } from './moves';
 import { consumeRequirements, evaluateRequirements, itemDisplayName, type RequirementEval } from './requirements';
 import { cddaText } from './units';
 
@@ -370,9 +371,8 @@ export function createResults(data: GameData, r: RecipeDef, batch = 1): Item[] {
   const container = r.container as string | undefined;
   if (container && data.items[container]) {
     return out.map((it) => {
-      const cont = createItem(data, container);
-      const left = cont.put(it);
-      if (left) throw new Error(`recipe ${r.id}: result doesn't fit its container ${container}`);
+      const { container: cont, rest } = inNewContainer(data, it, container);
+      if (rest) throw new Error(`recipe ${r.id}: result doesn't fit its container ${container}`);
       return cont;
     });
   }
@@ -403,7 +403,7 @@ export const liquidHooks: { handle: ((host: CraftHost, liquid: Item) => void) | 
 
 export function giveOrDrop(host: CraftHost, items: Item[], inv?: CraftingInventory): void {
   const p = host.player;
-  const tx = Math.floor(p.x), ty = Math.floor(p.y);
+  const ground = L.ground(host.map, Math.floor(p.x), Math.floor(p.y), p.z);
   for (const it of items) {
     if (it.isLiquid() && liquidHooks.handle) {
       const left = autoStoreLiquid(host, it);
@@ -412,32 +412,28 @@ export function giveOrDrop(host: CraftHost, items: Item[], inv?: CraftingInvento
     }
     if (it.isLiquid()) {
       // Closed containers (bottles, jugs) before open ones (pots) so boiled water doesn't
-      // end up in the cooking pot.
-      const holders = [...p.inv.allItems(), ...(inv?.sources.filter((s) => s.kind === 'map').map((s) => s.item) ?? [])].sort(
-        (a, b) => Number(a.containerPockets().some((pk) => pk.data.open_container)) - Number(b.containerPockets().some((pk) => pk.data.open_container)),
-      );
+      // end up in the cooking pot; carried first, then what lies around.
+      const holders = [...p.inv.allItems(), ...(inv?.sources.filter((s) => s.kind === 'map').map((s) => s.item) ?? [])]
+        .filter((h) => h.isContainer())
+        .sort((a, b) => Number(!a.isWatertight()) - Number(!b.isWatertight()));
       let left: Item | null = it;
       for (const h of holders) {
         if (!left) break;
-        if (h === left || !h.containerPockets().some((pk) => pk.data.watertight)) continue;
-        if (h.containerPockets().some((pk) => pk.contents.some((c) => c.typeId !== left!.typeId))) continue;
-        left = h.put(left);
+        left = spawnSome(left, L.in(h), { actor: p, quiet: true });
       }
       if (left) {
-        host.map.addItem(tx, ty, p.z, left);
+        spawnItem(left, ground, { actor: p, quiet: true, force: true });
         host.message(`You don't have a container for the ${left.name()}, so you pour it onto the ground.`, 'c_yellow');
       }
       continue;
     }
-    const tooHeavy = p.inv.weightCarried() + it.weight() > p.inv.weightCapacity() * 4;
-    if (!tooHeavy && p.inv.canStash(it)) p.inv.stash(it);
-    else if (!tooHeavy && !p.inv.wielded && p.inv.canWield(it).ok && items.length === 1) {
-      p.inv.wielded = it;
+    if (p.inv.stashNew(it) === null) continue;
+    if (!p.inv.wielded && items.length === 1 && spawnItem(it, L.hands(p), { actor: p, quiet: true }).ok) {
       host.message(`You wield your ${it.name()}.`);
-    } else {
-      host.map.addItem(tx, ty, p.z, it);
-      host.message(`You put the ${it.name()} on the ground.`);
+      continue;
     }
+    spawnItem(it, ground, { actor: p, quiet: true, force: true });
+    host.message(`You put the ${it.name()} on the ground.`);
   }
 }
 

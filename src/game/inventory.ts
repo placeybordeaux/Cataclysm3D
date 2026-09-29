@@ -1,40 +1,51 @@
 import type { ArmorPortion, ItemDef } from '../data/types';
 import { applyHealActor, type HealActor } from './healing';
 import type { Rng } from '../core/rng';
-import { BODY_PARTS, isBodyPart, MAIN_PARTS, type BodyPartId, type MainPartId } from './bodyparts';
+import { ALL_PARTS, BODY_PARTS, isBodyPart, MAIN_PARTS, type BodyPartId, type MainPartId } from './bodyparts';
 import type { Character } from './character';
-import { asArray, Item, type ItemJSON, type Pocket } from './item';
+import { asArray, Item, type ItemJSON } from './item';
 import { cddaText, toSeconds } from './units';
 import { unwieldyWarning } from './combat';
+import {
+  bodyLocs, canMove, carriedAs, consumeItem, consumeNew, handlingCost, L, locate, moveItem, registerInventorySlots, spawnItem, transaction,
+  unloadItem, type InvSlots, type Loc, type MoveResult,
+} from './moves';
 
-// Wielded/worn items and everything carried in their pockets (CDDA Character inventory +
-// outfit, simplified). Nothing is carried "loose": like modern CDDA, items live in the
-// pockets of worn clothing/backpacks, or in your hands.
+// A character's belongings on Cataclysm: Bright Nights' model (character.cpp, inventory.cpp,
+// docs/BN_DATA_MODEL.md §4, docs/INVENTORY_MODEL.md):
 //
-// Actions return an ActionResult with CDDA's message wording and a move cost; the message
-// is also sent to the owner's message sink so callers can ignore it.
+//  - hands: the wielded item;
+//  - worn: clothing, sorted innermost layer first. Worn items with `storage` (backpacks,
+//    jeans, vests) don't hold anything themselves: together they give the carrying volume;
+//  - items: the flat carried inventory. Its volume must fit that capacity; worn and wielded
+//    items don't count toward it (they do toward weight).
+//
+// Containers (bottles, cans, bags), holsters, bandoliers and magazines hold their own things.
+// The lists are read-only here: every change goes through src/game/moves.ts. The actions below
+// (pick up, wield, wear, eat, reload...) are the BN actions built on those moves, returning
+// {ok, msg, moves} with BN's wording; the message is also sent to the owner.
 
 export interface ActionResult {
   ok: boolean;
   msg: string;
-  /** CDDA moves the action takes (100 moves = 1 turn); long ones become activities. */
+  /** BN moves the action takes (100 moves = 1 turn); long ones become activities. */
   moves: number;
-  /** Items that had to be put on the ground as a side effect (caller places them). */
-  dropped?: Item[];
-  /**
-   * consume()/use(): the passed item is used up entirely. Items in the inventory are
-   * already removed; if it came from the map the caller removes it there.
-   */
-  usedUp?: boolean;
+  /** Machine-readable reason when !ok (see moves.ts WhyNot). */
+  code?: string;
 }
 
-/** CDDA layer_level order, innermost first. */
-export const LAYERS = ['PERSONAL', 'SKINTIGHT', 'NORMAL', 'WAIST', 'OUTER', 'BELTED', 'AURA'] as const;
+/** BN layer_level order, innermost first. */
+export const LAYERS = ['PERSONAL', 'UNDERWEAR', 'REGULAR', 'WAIST', 'OUTER', 'BELTED', 'AURA'] as const;
 export type Layer = (typeof LAYERS)[number];
+
+/** Worn items per type (game_constants.h MAX_WORN_PER_TYPE). */
+export const MAX_WORN_PER_TYPE = 2;
 
 export interface InventoryJSON {
   wielded: ItemJSON | null;
   worn: ItemJSON[];
+  /** carried inventory (absent in pre-BN saves: their pockets are migrated by src/save/items.ts) */
+  items?: ItemJSON[];
 }
 
 /**
@@ -56,54 +67,43 @@ export function useActions(def: ItemDef): { type: string; [k: string]: any }[] {
   return out;
 }
 
-/** material ids of an item (CDDA allows ["steel"] or [{type, portion}]). */
+/** material ids of an item (["steel"] or [{type, portion}]). */
 export function materialIds(def: ItemDef): string[] {
   return (def.material ?? []).map((m) => (typeof m === 'string' ? m : (m as { type: string }).type));
 }
 
-export function itemLayer(it: Item, portion?: ArmorPortion): Layer {
-  const l = portion?.layers?.[0];
+/** item::get_layer: the type's layer (from flags at load), else the flags. */
+export function itemLayer(it: Item): Layer {
+  const l = it.def.layer;
   if (l && (LAYERS as readonly string[]).includes(l)) return l as Layer;
-  for (const f of ['PERSONAL', 'SKINTIGHT', 'WAIST', 'OUTER', 'BELTED', 'AURA'] as const) if (it.hasFlag(f)) return f;
-  return 'NORMAL';
+  for (const [f, layer] of [['PERSONAL', 'PERSONAL'], ['SKINTIGHT', 'UNDERWEAR'], ['WAIST', 'WAIST'], ['OUTER', 'OUTER'], ['BELTED', 'BELTED'], ['AURA', 'AURA']] as const)
+    if (it.hasFlag(f)) return layer;
+  return 'REGULAR';
 }
 
-/** Parts an armor portion covers (hands/feet listed separately, like CDDA). */
+/** Parts an armor portion covers. */
 function portionCovers(p: ArmorPortion): BodyPartId[] {
-  // Some CDDA items give a single string instead of a list.
   return asArray(p.covers as string | string[] | undefined).filter(isBodyPart);
 }
 
-/**
- * The item's armor data for a whole body part. CDDA splits clothing into sub-location
- * portions (torso_upper/torso_lower, foot_sole...); we merge them per part: the highest
- * coverage and encumbrance, and the materials of the best-covering portion that lists any.
- */
+/** The item's armor portion for a body part (BN armor_portion_data; the last matching wins, like BN). */
 export function armorPortion(it: Item, bp: BodyPartId): ArmorPortion | undefined {
-  const list = (it.def.armor ?? []).filter((p) => portionCovers(p).includes(bp));
-  if (list.length <= 1) return list[0];
-  const enc = (p: ArmorPortion) => asArray(p.encumbrance);
-  const withMat = list.filter((p) => p.material?.length).sort((a, b) => (b.coverage ?? 0) - (a.coverage ?? 0))[0];
-  return {
-    ...list[0],
-    coverage: Math.max(...list.map((p) => p.coverage ?? 0)),
-    // TODO(BN inventory): BN portions carry encumbrance + max_encumbrance separately
-    encumbrance: Math.max(...list.map((p) => enc(p)[0] ?? 0)),
-    max_encumbrance: Math.max(...list.map((p) => p.max_encumbrance ?? enc(p)[1] ?? enc(p)[0] ?? 0)),
-    material: withMat?.material,
-  };
+  let out: ArmorPortion | undefined;
+  for (const p of it.def.armor ?? []) if (portionCovers(p).includes(bp)) out = p;
+  return out;
 }
 
 export function covers(it: Item, bp: BodyPartId): boolean {
   return armorPortion(it, bp) !== undefined;
 }
 
-/** Items whose storage makes them "the" backpack: only one may be worn (our simplification). */
-function isBackpackLike(it: Item): boolean {
-  return it.hasFlag('BELTED') && covers(it, 'torso') && it.containerVolumeCapacity() >= 5000;
+/** item::is_non_rigid for armor: soft, or some portion's encumbrance grows with contents. */
+function isNonRigidArmor(it: Item): boolean {
+  if (!it.def.armor?.length) return false;
+  return !it.def.rigid || it.def.armor.some((p) => p.encumbrance !== p.max_encumbrance);
 }
 
-/** Power draw in W (extractor units) or a raw CDDA string like "1560 mW". */
+/** Power draw in W (extractor units) or a raw string like "1560 mW". */
 function powerDrawW(v: unknown): number {
   if (typeof v === 'number') return v;
   if (typeof v !== 'string') return 0;
@@ -113,9 +113,7 @@ function powerDrawW(v: unknown): number {
 }
 
 export class Inventory {
-  wielded: Item | null = null;
-  /** Worn items, sorted innermost layer first. */
-  worn: Item[] = [];
+  private readonly s: InvSlots;
   private activeAcc = new WeakMap<Item, number>();
   /**
    * use_action handlers owned by other systems, keyed by use_action type (e.g. crafting
@@ -125,8 +123,8 @@ export class Inventory {
   /**
    * Hooks for body modifications (src/game/mutations.ts, bionics.ts): extra reasons an item
    * can't be worn (restricts_gear), extra encumbrance per part, flat natural armor, extra
-   * tool-quality providers (bionic pseudo tools), and checks/effects around consuming
-   * (mutagen vitamins, syringes).
+   * tool-quality providers (bionic pseudo tools), checks/effects around consuming, and carrying
+   * modifiers (mutation packmule_modifier / weight_capacity_modifier, bionic weight bonuses).
    */
   readonly wearChecks: ((it: Item) => string | null)[] = [];
   readonly extraEncumbrance: ((bp: BodyPartId) => number)[] = [];
@@ -134,271 +132,353 @@ export class Inventory {
   readonly qualityProviders: (() => Item[])[] = [];
   readonly consumeChecks: ((food: Item) => string | null)[] = [];
   readonly onConsume: ((portion: Item) => string | void)[] = [];
+  readonly carryModifiers: (() => { volume?: number; weight?: number; weightBonus?: number })[] = [];
 
-  constructor(readonly owner: Character) {}
+  constructor(readonly owner: Character) {
+    const s: InvSlots = { wielded: null, worn: [], items: [], sortWorn: () => this.sortWorn() };
+    this.s = s;
+    registerInventorySlots(this, s);
+  }
 
-  private say(ok: boolean, msg: string, moves = 0, extra: Partial<ActionResult> = {}): ActionResult {
+  /** The wielded item (change it with wield()/unwield() or moves.ts). */
+  get wielded(): Item | null {
+    return this.s.wielded;
+  }
+  /** Worn items, innermost layer first. */
+  get worn(): readonly Item[] {
+    return this.s.worn;
+  }
+  /** The carried inventory (BN `inv`): everything not worn or wielded. */
+  get items(): readonly Item[] {
+    return this.s.items;
+  }
+
+  private say(ok: boolean, msg: string, moves = 0, code?: string): ActionResult {
     if (msg) this.owner.msg(msg, ok ? undefined : 'c_light_red');
-    return { ok, msg, moves, ...extra };
+    return { ok, msg, moves, ...(code ? { code } : {}) };
+  }
+  /** A move's result as an action result (the move already messaged unless quiet). */
+  private res(r: MoveResult, say = true): ActionResult {
+    if (say && r.msg) this.owner.msg(r.msg, r.ok ? undefined : 'c_light_red');
+    return { ok: r.ok, msg: r.msg, moves: r.moves, ...(r.code ? { code: r.code } : {}) };
   }
 
   // ------------------------------------------------------------ queries
-  /** wielded + worn (top-level items). */
+  /** wielded + worn + carried (top-level items). */
   topLevel(): Item[] {
-    return this.wielded ? [this.wielded, ...this.worn] : [...this.worn];
+    return [...(this.s.wielded ? [this.s.wielded] : []), ...this.s.worn, ...this.s.items];
   }
-  /** Every carried item including nested contents (and the top-level ones). */
+  /** Every item on the character, including everything inside (and the top-level ones). */
   allItems(): Item[] {
     const out: Item[] = [];
     for (const t of this.topLevel()) for (const it of t.walk()) out.push(it);
     return out;
   }
-  /** Items stored in worn/wielded container pockets (what CDDA's inventory screen lists). */
-  carried(): Item[] {
-    const out: Item[] = [];
-    for (const t of this.topLevel()) for (const p of t.containerPockets()) out.push(...p.contents);
-    return out;
+  /** The carried inventory (not worn, not wielded). */
+  carried(): readonly Item[] {
+    return this.s.items;
   }
+  /** Does the character have `it` anywhere (hands, worn, inventory, inside any of those)? */
   has(it: Item): boolean {
-    return this.allItems().includes(it);
+    return carriedAs(this.owner, it) !== null;
   }
+  /** `from` as given (null = a new item), or where `it` is on you when omitted. */
+  private source(it: Item, from: Loc | null | undefined): Loc | null | 'missing' {
+    if (from !== undefined) return from;
+    return this.locOf(it) ?? 'missing';
+  }
+  /** Where `it` sits directly (hands, worn, inventory, or inside one of the character's items). */
+  locOf(it: Item): Loc | null {
+    return locate(it, bodyLocs(this.owner));
+  }
+  /** The ground under the owner (set by the game for the player and NPCs). */
+  groundHere(): Loc | null {
+    return this.owner.groundLoc?.() ?? null;
+  }
+
+  /** Character::weight_carried: worn + inventory + wielded. */
   weightCarried(): number {
     let w = 0;
     for (const t of this.topLevel()) w += t.weight();
     return w;
   }
-  /** Creature::weight_capacity (13 kg) + str * 4 kg, × weight_capacity_modifier mutations, + CARRY_WEIGHT enchantments. */
+  /**
+   * Character::weight_capacity: 13 kg + Str x 4 kg, x mutation modifiers, + CARRY_WEIGHT
+   * enchantments, x every worn item's weight_capacity_modifier, + worn weight_capacity_bonus.
+   */
   weightCapacity(): number {
-    const base = (13000 + this.owner.str_base * 4000) * this.owner.mutationValue('weight_capacity_modifier');
-    return Math.max(0, this.owner.byEnchant(base, 'CARRY_WEIGHT'));
+    let w = (13000 + this.owner.str * 4000) * this.owner.mutationValue('weight_capacity_modifier');
+    let bonus = 0;
+    for (const m of this.carryModifiers) {
+      const r = m();
+      w *= r.weight ?? 1;
+      bonus += r.weightBonus ?? 0;
+    }
+    w = this.owner.byEnchant(w, 'CARRY_WEIGHT');
+    for (const it of this.s.worn) {
+      w *= it.def.weight_capacity_modifier ?? 1;
+      bonus += it.def.weight_capacity_bonus ?? 0;
+    }
+    return Math.max(0, w + bonus);
   }
+  /** Character::volume_capacity: Σ worn storage x packmule_modifier + CARRY_STORAGE. */
   volumeCapacity(): number {
     let v = 0;
-    for (const t of this.worn) v += t.containerVolumeCapacity();
-    return v;
+    for (const t of this.s.worn) v += t.def.storage ?? 0;
+    v *= this.owner.mutationValue('packmule_modifier');
+    for (const m of this.carryModifiers) v *= m().volume ?? 1;
+    return Math.max(0, this.owner.byEnchant(v, 'CARRY_STORAGE'));
   }
+  /** Character::volume_carried: the carried inventory only (worn and wielded don't count). */
   volumeCarried(): number {
     let v = 0;
-    for (const t of this.worn) v += t.containerVolumeUsed();
+    for (const t of this.s.items) v += t.volume();
     return v;
+  }
+  /** Would `it` fit in the inventory (volume) and stay within 4x weight capacity? */
+  canCarry(it: Item): boolean {
+    return this.volumeCarried() + it.volume() <= this.volumeCapacity() && this.weightCarried() + it.weight() <= this.weightCapacity() * 4;
   }
   /** Worn items covering a body part, outermost first (the order attacks meet them). */
   wornCovering(bp: BodyPartId): Item[] {
-    return this.worn.filter((w) => covers(w, bp)).reverse();
+    return this.s.worn.filter((w) => covers(w, bp)).reverse();
   }
 
-  // ------------------------------------------------------------ containers
-  /** Where `it` would go (first worn container pocket that fits all of it). */
-  findPocketFor(it: Item): Pocket | null {
-    for (const w of [...this.worn].reverse()) {
-      for (const p of w.containerPockets()) {
-        const r = p.canContain(it);
-        if (r.ok && (!it.countByCharges || (r.charges ?? 0) >= it.charges)) return p;
-      }
+  // ------------------------------------------------------------ taking & placing
+  /**
+   * Put a newly created item (crafting output, a harvest, a gift) into the inventory. Returns
+   * null when it went in, else the item back (still unplaced: the caller drops it). Never pass
+   * an item that is somewhere already: move it with moveItem.
+   */
+  stashNew(it: Item): Item | null {
+    return spawnItem(it, L.inv(this.owner), { actor: this.owner, quiet: true }).ok ? null : it;
+  }
+  /** A new item: inventory, else hands, else the ground under the owner. Returns where it went. */
+  giveNew(it: Item): Loc | null {
+    for (const to of [L.inv(this.owner), L.hands(this.owner), this.groundHere()]) {
+      if (to && spawnItem(it, to, { actor: this.owner, quiet: true }).ok) return to;
     }
     return null;
   }
-  /** Store into worn containers, merging stacks; returns what did not fit. */
-  stash(it: Item): Item | null {
-    const whole = this.findPocketFor(it);
-    if (whole) return whole.insert(it);
-    let left: Item | null = it;
-    for (const w of [...this.worn].reverse()) {
-      if (!left) break;
-      left = w.put(left);
+
+  /**
+   * Pick up (BN pickup): into the inventory, or into your hands if it doesn't fit and they're
+   * free. On failure nothing moves.
+   */
+  pickUp(it: Item, from: Loc, count?: number): ActionResult {
+    const r = moveItem(it, from, L.inv(this.owner), { count, actor: this.owner, quiet: true });
+    if (r.ok) return this.res({ ...r, msg: `You pick up: ${r.item && r.item !== it && it.countByCharges ? `${it.baseName(r.moved)} (${r.moved})` : r.item?.name() ?? it.name()}`, moves: 100 });
+    if (r.code === 'no_room' && !this.s.wielded) {
+      const w = moveItem(it, from, L.hands(this.owner), { count, actor: this.owner, quiet: true });
+      if (w.ok) return this.res(w);
     }
-    return left;
-  }
-  canStash(it: Item): boolean {
-    return this.findPocketFor(it) !== null;
-  }
-  /** Detach an item from wherever it is (hands, body, a pocket). */
-  remove(it: Item): boolean {
-    if (this.wielded === it) {
-      this.wielded = null;
-      return true;
-    }
-    const i = this.worn.indexOf(it);
-    if (i >= 0) {
-      this.worn.splice(i, 1);
-      return true;
-    }
-    for (const t of this.topLevel()) if (t.removeContent(it)) return true;
-    return false;
+    return this.res(r);
   }
 
-  // ------------------------------------------------------------ pick up / drop / wield
-  /** Pick up an item from the map. On failure the item stays where it was. */
-  pickUp(it: Item): ActionResult {
-    const moves = 100 + Math.min(200, Math.floor(it.volume() / 20));
-    if (this.weightCarried() + it.weight() > this.weightCapacity() * 4)
-      return this.say(false, `The ${it.name()} is too heavy to carry.`);
-    if (this.canStash(it)) {
-      this.stash(it);
-      return this.say(true, `You pick up: ${it.name()}`, moves);
-    }
-    if (!this.wielded) {
-      const w = this.canWield(it);
-      if (!w.ok) return this.say(false, w.reason!);
-      this.wielded = it;
-      return this.say(true, `You wield your ${it.name()}.`, moves);
-    }
-    // Like CDDA's pickup "wield it instead" choice: swap hands when what we hold fits a pocket.
-    // Never silently drops the current weapon; that's left to an explicit wield (z).
-    if (this.canWield(it).ok && this.canStash(this.wielded)) return this.wield(it);
-    return this.say(false, `There's no room in your inventory for the ${it.name()}.`);
+  /** Drop an item you carry (anywhere on you) onto the ground under you, or `to`. */
+  drop(it: Item, to: Loc | null = this.groundHere(), count?: number): ActionResult {
+    const from = this.locOf(it);
+    if (!from) return this.say(false, `You don't have that item.`, 0, 'stale');
+    if (it.hasFlag('BIONIC_WEAPON') || it.hasFlag('INTEGRATED') || it.hasFlag('NO_DROP')) return this.say(false, `You cannot drop your ${it.name()}.`, 0, 'not_allowed');
+    if (!to) return this.say(false, `There's nowhere to put your ${it.name()}.`, 0, 'no_room');
+    return this.res(moveItem(it, from, to, { count, actor: this.owner, quiet: true }));
   }
 
-  /** Remove an item so the caller can put it on the map (result.dropped). */
-  drop(it: Item): ActionResult {
-    if (it.hasFlag('NO_DROP') || it.hasFlag('INTEGRATED')) return this.say(false, `You cannot drop your ${it.name()}.`);
-    if (!this.remove(it)) return this.say(false, `You don't have that item.`);
-    return this.say(true, `You drop your ${it.name()}.`, 100, { dropped: [it] });
-  }
-
+  /** Character::can_wield. */
   canWield(it: Item): { ok: boolean; reason?: string } {
-    if (this.wielded?.hasFlag('NO_UNWIELD') && this.wielded !== it) return { ok: false, reason: `You cannot unwield your ${this.wielded.name()}.` };
-    if (it.isLiquid()) return { ok: false, reason: "You can't wield spilt liquids." };
-    if (this.owner.brokenArms() >= 2) return { ok: false, reason: "You can't wield anything with two broken arms." };
-    if (this.owner.brokenArms() === 1 && (it.weight() > this.owner.str * 250 || it.hasFlag('ALWAYS_TWOHAND')))
-      return { ok: false, reason: `You can't wield the ${it.name()} with only one arm.` };
+    const cur = this.s.wielded;
+    if (cur && cur !== it && (cur.hasFlag('NO_UNWIELD') || cur.hasFlag('BIONIC_WEAPON'))) return { ok: false, reason: `You cannot unwield your ${cur.name()}.` };
+    if (it.isLiquid()) return { ok: false, reason: "Can't wield spilt liquids." };
+    if (this.owner.brokenArms() >= 2) return { ok: false, reason: 'You need at least one arm to even consider wielding something.' };
+    if (this.owner.brokenArms() === 1 && (it.hasFlag('ALWAYS_TWOHAND') || it.weight() > this.owner.str * 250))
+      return { ok: false, reason: it.hasFlag('ALWAYS_TWOHAND') ? `The ${it.name()} can't be wielded with only one arm.` : `You are too weak to wield ${it.name()} with only one arm.` };
+    if ((it.hasFlag('ALWAYS_TWOHAND') || it.weight() > this.owner.str * 250) && this.s.worn.some((w) => w.hasFlag('RESTRICT_HANDS')))
+      return { ok: false, reason: 'Something you are wearing hinders the use of both hands.' };
     return { ok: true };
   }
 
-  /** Wield `it` (from inventory or map). The old weapon is stashed, or dropped if no room. */
-  wield(it: Item): ActionResult {
-    if (this.wielded === it) return this.say(false, `You're already wielding the ${it.name()}.`);
+  /**
+   * Wield `it` from `from` (default: wherever it is on you). The current weapon goes to your
+   * inventory, or is dropped at your feet when it doesn't fit (BN dispose_item: store / drop).
+   * All or nothing. `from` defaults to wherever `it` is on you; pass null for a new item.
+   */
+  wield(it: Item, from?: Loc | null): ActionResult {
+    if (this.s.wielded === it) return this.say(false, `You're already wielding the ${it.name()}.`, 0, 'same_place');
+    const src = this.source(it, from);
+    if (src === 'missing') return this.say(false, `You don't have that item.`, 0, 'stale');
     const can = this.canWield(it);
-    if (!can.ok) return this.say(false, can.reason!);
-    const dropped: Item[] = [];
-    this.remove(it);
-    if (this.wielded) {
-      const old = this.wielded;
-      this.wielded = null;
-      if (this.stash(old)) dropped.push(old);
-    }
-    this.wielded = it;
-    // item::on_wield_cost, simplified: base 100 + volume penalty.
-    const moves = 100 + Math.min(200, Math.floor(it.volume() / 20));
-    const res = this.say(
-      true,
-      dropped.length ? `You drop your ${dropped[0].name()} and wield your ${it.name()}.` : `You wield your ${it.name()}.`,
-      moves,
-      dropped.length ? { dropped } : {},
-    );
+    if (!can.ok) return this.say(false, can.reason!, 0, 'cant_wield');
+    let dropped: Item | null = null;
+    let out: MoveResult | null = null;
+    const r = transaction(() => {
+      const old = this.s.wielded;
+      if (old) {
+        let away = moveItem(old, L.hands(this.owner), L.inv(this.owner), { actor: this.owner, quiet: true });
+        const g = this.groundHere();
+        if (!away.ok && away.code === 'no_room' && g) {
+          away = moveItem(old, L.hands(this.owner), g, { actor: this.owner, quiet: true });
+          if (away.ok) dropped = old;
+        }
+        if (!away.ok) return (out = away);
+      }
+      return (out = moveItem(it, src, L.hands(this.owner), { actor: this.owner, quiet: true }));
+    });
+    void r;
+    const res = out as MoveResult | null;
+    if (!res || !res.ok) return this.res(res ?? { ok: false, msg: `You can't wield the ${it.name()}.`, moves: 0, moved: 0 });
+    const d = dropped as Item | null;
+    const msg = d ? `You drop your ${d.name()} and wield your ${it.name()}.` : res.msg;
+    const result = this.say(true, msg, res.moves);
     // Real time leaves no turn to reconsider a bad weapon, so say so up front.
     const warn = unwieldyWarning(this.owner, it);
     if (warn) this.owner.msg(warn, 'c_yellow');
-    return res;
+    return result;
   }
 
+  /** Put the wielded item into the inventory. */
   unwield(): ActionResult {
-    const w = this.wielded;
-    if (!w) return this.say(false, 'You are already empty-handed.');
-    // Bionic weapons are retracted through the bionics menu (BN NO_UNWIELD).
-    if (w.hasFlag('NO_UNWIELD')) return this.say(false, `You cannot unwield your ${w.name()}.`);
-    if (!this.canStash(w)) return this.say(false, `You have no space to store your ${w.name()}.`);
-    this.wielded = null;
-    this.stash(w);
-    return this.say(true, `You put away your ${w.name()}.`, 100);
+    const w = this.s.wielded;
+    if (!w) return this.say(false, 'You are already empty-handed.', 0, 'same_place');
+    const r = moveItem(w, L.hands(this.owner), L.inv(this.owner), { actor: this.owner, quiet: true });
+    if (!r.ok && r.code === 'no_room') return this.say(false, `You have no space to store your ${w.name()}.`, 0, r.code);
+    return this.res(r);
   }
 
   // ------------------------------------------------------------ clothing
-  /** Character::can_wear (the subset that applies to humans without mutations). */
+  /** Character::can_wear (the parts that apply without power armor). */
   canWear(it: Item): { ok: boolean; reason?: string } {
     if (!it.isArmor()) return { ok: false, reason: `Putting on a ${it.name()} would be tricky.` };
-    if (this.worn.includes(it)) return { ok: false, reason: 'You are already wearing that.' };
-    const maxWorn = (it.def.max_worn as number | undefined) ?? 2;
-    const same = this.worn.filter((w) => w.typeId === it.typeId).length;
-    if (maxWorn === 1 && same >= 1) return { ok: false, reason: `Can't wear more than one ${it.name()}!` };
-    if (same >= maxWorn) return { ok: false, reason: `Can't wear ${maxWorn} or more ${it.baseName(2)} at once.` };
-    for (const w of this.worn) {
-      const sharesPart = (it.def.armor ?? []).some((p) => portionCovers(p).some((bp) => covers(w, bp)));
-      if (!sharesPart) continue;
-      const oneLayer = it.hasFlag('ONE_PER_LAYER') || w.hasFlag('ONE_PER_LAYER') || (isBackpackLike(it) && isBackpackLike(w));
-      if (oneLayer && itemLayer(w) === itemLayer(it)) return { ok: false, reason: `${it.name()} conflicts with ${w.name()}!` };
-    }
-    if (it.hasFlag('RESTRICT_HANDS') && this.wielded && (this.wielded.hasFlag('ALWAYS_TWOHAND') || this.wielded.weight() > 5000))
-      return { ok: false, reason: "You don't have a hand free to wear that." };
+    if (this.s.worn.includes(it)) return { ok: false, reason: 'You are already wearing that.' };
     for (const check of this.wearChecks) {
       const reason = check(it);
       if (reason) return { ok: false, reason };
     }
+    if (it.hasFlag('RESTRICT_HANDS') && this.owner.brokenArms() >= 1) return { ok: false, reason: "You don't have enough arms to wear that." };
+    const w = this.s.wielded;
+    if (it.hasFlag('RESTRICT_HANDS') && (this.s.worn.some((x) => x.hasFlag('RESTRICT_HANDS')) || (w && (w.hasFlag('ALWAYS_TWOHAND') || w.weight() > this.owner.str * 250))))
+      return { ok: false, reason: "You don't have a hand free to wear that." };
+    for (const x of this.s.worn) if (x.hasFlag('ONLY_ONE') && x.typeId === it.typeId) return { ok: false, reason: `Can't wear more than one ${it.name()}!` };
+    if (this.s.worn.filter((x) => x.typeId === it.typeId).length >= MAX_WORN_PER_TYPE)
+      return { ok: false, reason: `Can't wear ${MAX_WORN_PER_TYPE + 1} or more ${it.baseName(MAX_WORN_PER_TYPE + 1)} at once.` };
+    const exempt = (f: string[]) => f.some((x) => it.hasFlag(x));
+    const shoeLike = (x: Item, bp: BodyPartId) => covers(x, bp) && !['BELTED', 'PERSONAL', 'AURA', 'SEMITANGIBLE', 'SKINTIGHT'].some((f) => x.hasFlag(f)) && !(x.hasFlag('OVERSIZE') && x.hasFlag('OUTER'));
+    for (const foot of ['foot_l', 'foot_r'] as const) {
+      if (covers(it, foot) && this.s.worn.some((x) => shoeLike(x, foot)) && !(it.hasFlag('OVERSIZE') && it.hasFlag('OUTER')) && !exempt(['SKINTIGHT', 'BELTED', 'PERSONAL', 'AURA', 'SEMITANGIBLE']))
+        return { ok: false, reason: "You're already wearing footwear!" };
+    }
+    const helmet = (x: Item) => covers(x, 'head') && !['HELMET_COMPAT', 'SKINTIGHT', 'PERSONAL', 'AURA', 'SEMITANGIBLE', 'OVERSIZE'].some((f) => x.hasFlag(f));
+    if (helmet(it) && this.s.worn.some(helmet)) return { ok: false, reason: "You can't wear that with other headgear!" };
     return { ok: true };
   }
 
-  wear(it: Item): ActionResult {
-    const can = this.canWear(it);
-    if (!can.ok) return this.say(false, can.reason!);
-    this.remove(it);
-    this.worn.push(it);
-    this.sortWorn();
-    // Character::item_wear_cost: 250 moves scaled by the item's encumbrance (simplified).
-    const moves = 250 + 10 * Math.max(0, ...(it.def.armor ?? []).map((p) => asArray(p.encumbrance)[0] ?? 0));
-    return this.say(true, `You put on your ${it.name()}.`, moves);
+  /** Put on `it` from `from` (default: wherever it is on you; null: a new item). */
+  wear(it: Item, from?: Loc | null): ActionResult {
+    const src = this.source(it, from);
+    if (src === 'missing') return this.say(false, `You don't have that item.`, 0, 'stale');
+    return this.res(moveItem(it, src, L.worn(this.owner), { actor: this.owner, quiet: true }));
   }
 
-  /** Take off: goes to your inventory if it fits, otherwise into your hands, else dropped. */
+  /**
+   * Take off: into the inventory if it still fits once its storage is gone, else into your
+   * hands if they're free, else dropped (BN takeoff: "No room in inventory for your X. Drop it?").
+   */
   takeOff(it: Item): ActionResult {
-    const i = this.worn.indexOf(it);
-    if (i < 0) return this.say(false, 'You are not wearing that item.');
-    if (it.hasFlag('INTEGRATED')) return this.say(false, `You can't take off your ${it.name()}; it's part of you.`);
-    this.worn.splice(i, 1);
-    const dropped: Item[] = [];
-    if (this.canStash(it)) this.stash(it);
-    else if (!this.wielded) this.wielded = it;
-    else dropped.push(it);
-    return this.say(true, `You take off your ${it.name()}.`, 250, dropped.length ? { dropped } : {});
+    if (!this.s.worn.includes(it)) return this.say(false, 'You are not wearing that item.', 0, 'stale');
+    const from = L.worn(this.owner);
+    const tries: Loc[] = [L.inv(this.owner), L.hands(this.owner)];
+    const g = this.groundHere();
+    if (g) tries.push(g);
+    let last: MoveResult | null = null;
+    for (const to of tries) {
+      if (to.kind === 'hands' && this.s.wielded) continue;
+      const r = moveItem(it, from, to, { actor: this.owner, quiet: true });
+      if (r.ok) return this.say(true, to.kind === 'ground' ? `You take off your ${it.name()} and drop it.` : `You take off your ${it.name()}.`, 250);
+      last = r;
+      if (r.code !== 'no_room' && r.code !== 'too_heavy' && r.code !== 'hands_full' && r.code !== 'cant_wield') break;
+    }
+    return this.res(last ?? { ok: false, msg: `You can't take off your ${it.name()}.`, moves: 0, moved: 0 });
+  }
+
+  /** Character::item_wear_cost: handling cost scaled by layer and encumbrance. */
+  wearCost(it: Item): number {
+    let mv = handlingCost(this.owner, it);
+    const l = itemLayer(it);
+    if (l === 'UNDERWEAR') mv *= 1.5;
+    else if (l === 'WAIST' || l === 'OUTER') mv /= 1.5;
+    else if (l === 'BELTED') mv /= 2;
+    const parts = ALL_PARTS.filter((bp) => covers(it, bp));
+    const avg = parts.length ? parts.reduce((s, bp) => s + this.itemEncumbrance(it, bp), 0) / parts.length : 0;
+    mv *= Math.max(avg / 10, 1);
+    return Math.round(mv);
   }
 
   private sortWorn(): void {
     const idx = (w: Item) => LAYERS.indexOf(itemLayer(w));
-    this.worn.sort((a, b) => idx(a) - idx(b));
+    // stable: items on one layer keep the order they were put on in
+    this.s.worn.sort((a, b) => idx(a) - idx(b));
   }
 
-  /** Encumbrance an item adds to a part: [base, full] interpolated by pocket fill. */
+  /**
+   * item::get_encumber: a portion's encumbrance; a worn soft storage item (backpack) also grows
+   * with the carried volume (its share of the storage), and soft items with what they hold.
+   */
   itemEncumbrance(it: Item, bp: BodyPartId): number {
     const p = armorPortion(it, bp);
     if (!p) return 0;
-    const [base, full] = (() => {
-      const e = asArray(p.encumbrance);
-      return [e[0] ?? 0, e[1] ?? e[0] ?? 0];
-    })();
-    let enc = base;
-    const cap = it.containerPockets().filter((q) => !q.data.rigid).reduce((s, q) => s + q.maxVolume, 0);
-    if (full > base && cap > 0 && Number.isFinite(cap)) {
-      const used = it.containerPockets().filter((q) => !q.data.rigid).reduce((s, q) => s + q.volumeUsed(), 0);
-      enc = base + (full - base) * Math.min(1, used / cap);
+    let contents = 0;
+    for (const c of it.contents) contents += c.volume();
+    const nonRigid = isNonRigidArmor(it);
+    if (nonRigid && this.s.worn.includes(it) && p.max_encumbrance !== 0) {
+      let rigid = 0, soft = 0;
+      for (const w of this.s.worn) (isNonRigidArmor(w) ? (soft += w.def.storage ?? 0) : (rigid += w.def.storage ?? 0));
+      const carried = this.volumeCarried();
+      if (carried > rigid && soft > 0) contents += Math.floor(((it.def.storage ?? 0) * (carried - rigid)) / soft);
     }
-    for (const q of it.containerPockets()) if (!q.empty && q.data.extra_encumbrance) enc += q.data.extra_encumbrance;
-    return Math.round(enc);
+    let enc = p.encumbrance;
+    if (nonRigid) {
+      if (p.max_encumbrance === 0) enc += Math.floor(contents / 500);
+      else {
+        const cap = (it.def.storage ?? 0) + it.containerCapacity() + (it.def.holster ? it.def.holster.max_volume * it.def.holster.multi : 0);
+        if (cap > 0) enc += Math.floor(((p.max_encumbrance - p.encumbrance) * contents) / cap);
+      }
+    }
+    if (it.hasFlag('FIT') && it.hasFlag('VARSIZE')) enc = Math.max(Math.floor(enc / 2), enc - 10);
+    return enc;
   }
 
-  /** Total encumbrance on a part: items + CDDA layering penalty (layer_details::layer). */
+  /** Total encumbrance on a part: items + BN layering penalty (Character::item_encumb). */
   encumbrance(bp: BodyPartId): number {
-    let total = 0;
-    const byLayer = new Map<Layer, number[]>();
-    for (const w of this.worn) {
-      const p = armorPortion(w, bp);
-      if (!p) continue;
-      const e = this.itemEncumbrance(w, bp);
-      total += e;
-      const l = itemLayer(w, p);
-      if (!byLayer.has(l)) byLayer.set(l, []);
-      byLayer.get(l)!.push(Math.max(2, e));
+    let armor = 0;
+    let penalty = 0;
+    const perLayer = LAYERS.map(() => ({ max: 0, total: 0 }));
+    let highest = 0;
+    for (const w of this.s.worn) {
+      if (!covers(w, bp)) continue;
+      const layer = LAYERS.indexOf(itemLayer(w));
+      let e = this.itemEncumbrance(w, bp);
+      let layering = Math.min(10, Math.max(2, e));
+      if (w.hasFlag('SEMITANGIBLE')) (e = 0), (layering = 0);
+      if (w.hasFlag('COMPACT') || (w.hasFlag('FIT') && e <= 10)) layering = 0;
+      highest = Math.max(highest, layer);
+      // layer_details::layer: every piece but the most encumbering one counts
+      for (let l = layer; l <= highest; l++) {
+        if (!layering) continue;
+        const d = perLayer[l];
+        const before = d.total;
+        if (layering > d.max) (d.total += d.max), (d.max = layering);
+        else d.total += layering;
+        penalty += d.total - before;
+      }
+      armor += e;
     }
-    // Every item on a layer except the most encumbering one counts double.
-    for (const list of byLayer.values()) {
-      if (list.length < 2) continue;
-      total += list.reduce((a, b) => a + b, 0) - Math.max(...list);
-    }
+    let total = Math.max(0, armor) + penalty;
     for (const f of this.extraEncumbrance) total += f(bp);
     return total;
   }
 
   warmth(bp: BodyPartId): number {
     let w = 0;
-    for (const it of this.worn) if (covers(it, bp)) w += it.def.warmth ?? 0;
+    for (const it of this.s.worn) if (covers(it, bp)) w += it.def.warmth ?? 0;
     return w;
   }
 
@@ -409,7 +489,7 @@ export class Inventory {
       const r = mats[mat]?.resist as Record<string, number> | undefined;
       if (!r) return 0;
       if (r[dtype] !== undefined) return r[dtype];
-      // damage_types.json: stab derives from cut * 0.8 when a material has no stab resist.
+      // stab derives from cut * 0.8 when a material has no stab resist.
       if (dtype === 'stab' && r.cut !== undefined) return r.cut * 0.8;
       return 0;
     };
@@ -425,7 +505,7 @@ export class Inventory {
       const ids = materialIds(it.def);
       if (ids.length) resist = (ids.reduce((s, m) => s + resistOf(m), 0) / ids.length) * (it.def.material_thickness ?? 1);
     }
-    // damage_adjusted_armor_resist: damaged armor protects less (faults ignored).
+    // damage_adjusted_armor_resist: damaged armor protects less.
     return Math.max(0, resist * (1 - 0.1 * Math.max(0, it.damageLevel() - 1)));
   }
 
@@ -450,7 +530,7 @@ export class Inventory {
         u.amount = Math.max(0, u.amount - mitigation);
       }
     }
-    // Mutation/bionic armor is under the clothes (CDDA passive_absorb_hit after worn armor).
+    // Mutation/bionic armor is under the clothes (passive_absorb_hit after worn armor).
     for (const f of this.naturalArmor) {
       for (const u of out) {
         if (u.amount <= 0) continue;
@@ -481,29 +561,42 @@ export class Inventory {
   findByQuality(id: string, level = 1): Item[] {
     return this.qualityItems().filter((it) => it.qualityLevel(id) >= level);
   }
-  /** Count by type: charges for stackables, items otherwise. */
+  /** Items of a type usable as material: the wielded item, the inventory and what's inside them (not worn clothes). */
+  private usable(): { item: Item; loc: Loc }[] {
+    const out: { item: Item; loc: Loc }[] = [];
+    const visit = (loc: Loc, list: readonly Item[]) => {
+      for (const it of list) {
+        out.push({ item: it, loc });
+        if (it.contents.length) visit(L.in(it), it.contents);
+      }
+    };
+    visit(L.hands(this.owner), this.s.wielded ? [this.s.wielded] : []);
+    visit(L.inv(this.owner), this.s.items);
+    // things inside worn holsters/bandoliers are carried too
+    for (const w of this.s.worn) if (w.contents.length) visit(L.in(w), w.contents);
+    return out;
+  }
+  /** Count by type: charges for stackables, items otherwise (not worn clothes). */
   countOf(typeId: string): number {
     let n = 0;
-    for (const it of this.allItems()) if (it.typeId === typeId) n += it.count();
+    for (const { item } of this.usable()) if (item.typeId === typeId) n += item.count();
     return n;
   }
   hasAmount(typeId: string, n: number): boolean {
     return this.countOf(typeId) >= n;
   }
-  /** Remove n of a type (splitting stacks) and return the removed items. */
+  /** Use up n of a type (Character::use_amount): consumed, returned for inspection. */
   useAmount(typeId: string, n: number): Item[] {
     if (!this.hasAmount(typeId, n)) throw new Error(`useAmount: need ${n} ${typeId}, have ${this.countOf(typeId)}`);
     const out: Item[] = [];
-    for (const it of this.allItems()) {
+    for (const { item, loc } of this.usable()) {
       if (n <= 0) break;
-      if (it.typeId !== typeId) continue;
-      if (it.countByCharges && it.charges > n) {
-        out.push(it.split(n));
-        n = 0;
-      } else {
-        this.remove(it);
-        out.push(it);
-        n -= it.count();
+      if (item.typeId !== typeId || item.hasContents()) continue;
+      const take = Math.min(n, item.count());
+      const piece = consumeItem(item, loc, item.countByCharges ? take : undefined);
+      if (piece) {
+        out.push(piece);
+        n -= take;
       }
     }
     return out;
@@ -513,44 +606,43 @@ export class Inventory {
   /** The comestible to consume from `it` (itself, or the contents of a container). */
   comestibleIn(it: Item): Item | null {
     if (it.isComestible()) return it;
-    for (const p of it.containerPockets()) for (const c of p.contents) if (c.isComestible()) return c;
+    for (const c of it.contents) if (c.isComestible()) return c;
     return null;
   }
 
   /**
    * Eat/drink one portion (consumption.cpp, simplified): kcal & water go to the stomach,
-   * "fun" becomes morale, stim/sleepiness_mod apply, consume_drug use_actions add effects.
-   * `it` may be the food itself or a container holding it; empty wrappers stay behind.
+   * "fun" becomes morale, stim/fatigue apply, consume_drug use_actions add effects. `it` may be
+   * the food or a container holding it; `from` is where `it` is (default: found on you).
    */
-  consume(it: Item): ActionResult {
+  consume(it: Item, from?: Loc | null): ActionResult {
     const food = this.comestibleIn(it);
     const c = this.owner;
-    if (!food) return this.say(false, "That doesn't look edible.");
+    if (!food) return this.say(false, "That doesn't look edible.", 0, 'not_allowed');
+    const src = this.source(it, from);
+    if (src === 'missing') return this.say(false, `You don't have that item.`, 0, 'stale');
+    // null: `it` is new (a crafted drink handed straight to your mouth)
+    const foodLoc: Loc | null = food === it ? src : L.in(it);
     for (const check of this.consumeChecks) {
       const reason = check(food);
-      if (reason) return this.say(false, reason);
+      if (reason) return this.say(false, reason, 0, 'not_allowed');
     }
     const liquid = food.isLiquid();
-    const portion = food.countByCharges ? food.split(Math.min(1, food.charges)) : food;
-    const def = portion.def;
+    const def = food.def;
+    const unitVol = food.countByCharges ? Math.ceil(food.unitVolume()) : food.volume();
     const water = (def.quench ?? 0) * 5;
-    const solids = Math.max(0, portion.volume() - (liquid ? portion.volume() : water));
-    if (def.comestible_type !== 'MED' && c.stomachContains() + solids + (liquid ? portion.volume() : 0) > 2500 && c.hungerState() === 'Engorged') {
-      if (food.countByCharges && portion !== food) food.charges += portion.charges;
-      return this.say(false, `You're full already and will be forcing yourself to ${liquid ? 'drink' : 'eat'}.`);
-    }
-    // Remove what we consumed from wherever it was.
-    if (portion === food) {
-      if (!this.remove(food) && it !== food) it.removeContent(food);
-    } else if (food.charges <= 0) {
-      this.remove(food);
-      it.removeContent(food);
-    }
+    const solids = Math.max(0, unitVol - (liquid ? unitVol : water));
+    if (def.comestible_type !== 'MED' && c.stomachContains() + solids + (liquid ? unitVol : 0) > 2500 && c.hungerState() === 'Engorged')
+      return this.say(false, `You're full already and will be forcing yourself to ${liquid ? 'drink' : 'eat'}.`, 0, 'not_allowed');
+    const portion = foodLoc ? consumeItem(food, foodLoc, food.countByCharges ? 1 : undefined) : consumeNew(food, food.countByCharges ? 1 : undefined);
+    if (!portion) return this.say(false, `You don't have that item.`, 0, 'stale');
     // NO_INGEST (mutagens, injected drugs) bypasses the stomach.
-    if (!portion.hasFlag('NO_INGEST')) c.ingest(def.calories ?? 0, solids, liquid ? Math.max(water, portion.volume()) : water);
+    // BN: a drink quenches by its `quench` only (a 250 ml mutagen doesn't count as 250 ml of water)
+    if (!portion.hasFlag('NO_INGEST')) c.ingest(def.calories ?? 0, solids, water);
     if (def.stim) c.stim += def.stim;
-    if (def.sleepiness_mod) c.sleepiness -= def.sleepiness_mod;
-    // Character::fun_for: rot sours taste; morale lasts 2 h, decaying after 1 h.
+    const fatigue = (def.fatigue_mod ?? def.sleepiness_mod) as number | undefined;
+    if (fatigue) c.sleepiness -= fatigue;
+    // fun_for: rot sours taste; morale lasts 2 h, decaying after 1 h.
     let fun = def.fun ?? 0;
     const rel = portion.relativeRot();
     if (rel > 1) {
@@ -576,8 +668,8 @@ export class Inventory {
     }
     if (!msg) msg = `You ${liquid ? 'drink' : 'eat'} your ${portion.name()}${portion.rotten() ? ' (rotten)' : ''}.`;
     if (extra.length) msg = [msg, ...extra].join('  ');
-    const moves = liquid ? 100 : Math.max(100, Math.min(1000, Math.floor(portion.volume() / 5) * 10));
-    return this.say(true, msg, moves, { usedUp: it === food && (portion === food || food.charges <= 0) });
+    const moves = liquid ? 100 : Math.max(100, Math.min(1000, Math.floor(unitVol / 5) * 10));
+    return this.say(true, msg, moves);
   }
 
   // ------------------------------------------------------------ using items
@@ -585,7 +677,11 @@ export class Inventory {
    * Activate/use an item: heal (bandages, disinfectant), transform (flashlight on/off),
    * consume_drug (pills). `bp` targets medical items; otherwise the worst wound is chosen.
    */
-  use(it: Item, bp?: BodyPartId, actionIndex = 0): ActionResult {
+  use(it: Item, bp?: BodyPartId, actionIndex = 0, from?: Loc | null): ActionResult {
+    const src = this.source(it, from);
+    return this.useFrom(it, bp, actionIndex, src === 'missing' ? null : src);
+  }
+  private useFrom(it: Item, bp: BodyPartId | undefined, actionIndex: number, from: Loc | null): ActionResult {
     const acts = useActions(it.def);
     if (acts.length === 0) return this.say(false, `You can't do anything interesting with your ${it.name()}.`);
     // Items with several use_actions (a refillable lighter lights up *or* starts a fire): the
@@ -593,11 +689,11 @@ export class Inventory {
     const ua = acts[Math.min(actionIndex, acts.length - 1)];
     switch (ua.type) {
       case 'heal':
-        return this.useHeal(it, ua, bp);
+        return this.useHeal(it, ua, bp, from);
       case 'transform':
         return this.useTransform(it, ua);
       case 'consume_drug':
-        return this.consume(it);
+        return this.consume(it, from);
       default: {
         for (const a of [ua, ...acts]) {
           const h = this.useHandlers.get(a.type);
@@ -619,22 +715,20 @@ export class Inventory {
   }
 
   /** heal_actor (src/game/healing.ts): treat yourself, then use up the item. */
-  private useHeal(it: Item, ua: { [k: string]: any }, bp?: BodyPartId): ActionResult {
+  private useHeal(it: Item, ua: { [k: string]: any }, bp: BodyPartId | undefined, from: Loc | null): ActionResult {
     const r = applyHealActor(this.owner, it.name(), ua as HealActor, bp);
     if (!r.ok) return this.say(false, r.msg);
-    const usedUp = this.consumeUse(it);
-    return this.say(true, r.msg, r.moves, { usedUp });
+    this.useUp(it, from);
+    return this.say(true, r.msg, r.moves);
   }
 
-  /** Use up one charge or the whole item after a single-use action; true if it's gone. */
-  private consumeUse(it: Item): boolean {
-    if (it.countByCharges && it.charges > 1) it.charges--;
-    else if ((it.def.max_charges ?? 0) > 0 && it.charges > 1 && !it.hasFlag('SINGLE_USE')) it.charges--;
-    else {
-      this.remove(it);
-      return true;
+  /** Use up one charge or the whole item after a single-use action. */
+  private useUp(it: Item, from: Loc | null): void {
+    if (!it.countByCharges && (it.def.max_charges ?? 0) > 0 && it.charges > 1 && !it.hasFlag('SINGLE_USE')) {
+      it.ammoConsume(1);
+      return;
     }
-    return false;
+    if (from) consumeItem(it, from, it.countByCharges ? 1 : undefined);
   }
 
   // ------------------------------------------------------------ reloading
@@ -642,114 +736,124 @@ export class Inventory {
   reloadCost(target: Item, ammo: Item, qty: number): number {
     let mv = Math.min(200, Math.floor(ammo.isMagazine() ? ammo.volume() / 20 : (ammo.unitVolume() * qty) / 20));
     if (ammo.hasFlag('MAG_BULKY')) mv *= 1.5;
-    const cost = target.isGun() ? (target.def.reload ?? 100) * qty : (target.def.reload_time ?? 100) * qty;
+    const perRound = target.isGun() ? (target.def.reload ?? 100) : target.isMagazine() ? (target.def.magazine?.reload_time ?? 100) : 100;
+    const cost = perRound * (ammo.isMagazine() ? 1 : qty);
     const sk = target.isGun() ? (target.def.skill ?? 'gun') : 'gun';
     mv += cost / (1 + Math.min(this.owner.getSkill(sk) * 0.1, 1));
     if (target.hasFlag('STR_RELOAD')) mv -= this.owner.str * 20;
     return Math.max(25, Math.round(mv));
   }
 
-  /** Loose ammo in inventory usable by `target`, preferring what's already loaded. */
-  private looseAmmoFor(target: Item): Item[] {
-    const types = target.ammoTypes();
-    const loaded = target.ammoData()?.id;
-    return this.carried()
-      .flatMap((c) => [...c.walk()])
-      .filter((a) => a.isAmmo() && types.includes(asArray(a.def.ammo_type)[0] ?? '') && a.charges > 0)
-      .sort((a, b) => (b.typeId === loaded ? 1 : 0) - (a.typeId === loaded ? 1 : 0) || b.charges - a.charges);
-  }
-
-  private removeCharges(src: Item, n: number): Item {
-    if (src.charges > n) return src.split(n);
-    this.remove(src);
-    return src;
-  }
-
-  /** Fill an item's own MAGAZINE pockets from loose ammo. Returns rounds loaded. */
-  private fillFromLoose(target: Item): { loaded: number; ammo?: Item } {
-    let loaded = 0;
-    let used: Item | undefined;
-    for (const ammo of this.looseAmmoFor(target)) {
-      for (const p of target.magazinePockets()) {
-        const fit = p.canContain(ammo);
-        if (!fit.ok || !fit.charges) continue;
-        const n = fit.charges;
-        const part = this.removeCharges(ammo, n);
-        const left = p.insert(part);
-        if (left) this.stash(left);
-        loaded += n;
-        used ??= part;
+  /** Everything carried with where it sits (for picking ammo and magazines). */
+  private everything(): { item: Item; loc: Loc }[] {
+    const out: { item: Item; loc: Loc }[] = [];
+    const visit = (loc: Loc, list: readonly Item[]) => {
+      for (const it of list) {
+        out.push({ item: it, loc });
+        if (it.contents.length) visit(L.in(it), it.contents);
+        if (it.magazine) visit(L.mag(it), [it.magazine]);
       }
+    };
+    visit(L.hands(this.owner), this.s.wielded ? [this.s.wielded] : []);
+    visit(L.worn(this.owner), this.s.worn);
+    visit(L.inv(this.owner), this.s.items);
+    return out;
+  }
+
+  /** Loose rounds you carry that `target` takes, loaded type first, then biggest stack. */
+  private looseAmmoFor(target: Item): { item: Item; loc: Loc }[] {
+    const loaded = target.ammoData()?.id;
+    return this.everything()
+      // rounds already in a magazine stay there, except a speedloader's: that's what it is for
+      .filter(({ item, loc }) => item.isAmmo() && item.charges > 0 && target.acceptsAmmo(item) && !(loc.kind === 'in' && (loc.host === target || (loc.host.isMagazine() && !loc.host.hasFlag('SPEEDLOADER')))))
+      .filter(({ item }) => !loaded || target.ammoRemaining() === 0 || item.typeId === loaded)
+      .sort((a, b) => Number(b.item.typeId === loaded) - Number(a.item.typeId === loaded) || b.item.charges - a.item.charges);
+  }
+
+  /** Fill `target` (magazine, integral magazine, bandolier) from loose rounds you carry. */
+  private fillFromLoose(target: Item): { loaded: number; ammo?: Item; moves: number } {
+    let loaded = 0, moves = 0;
+    let used: Item | undefined;
+    for (const { item, loc } of this.looseAmmoFor(target)) {
+      if (target.ammoRemaining() >= target.ammoCapacity()) break;
+      const probe = item;
+      const r = moveItem(item, loc, L.in(target), { partial: true, actor: this.owner, quiet: true });
+      if (!r.ok) continue;
+      loaded += r.moved;
+      moves += this.reloadCost(target, probe, r.moved);
+      used ??= probe;
     }
-    return { loaded, ammo: used };
+    return { loaded, ammo: used, moves };
   }
 
   /**
-   * Reload a gun or magazine ('r'). Guns with a magazine well swap in the fullest
-   * compatible magazine you carry (stashing the old one), or top up the inserted
-   * magazine from loose rounds; guns/magazines with internal storage load loose rounds.
+   * Reload a gun, tool or magazine ('r'). Magazine-fed items get the fullest compatible
+   * magazine you carry (filling an empty one from loose rounds first); the old magazine goes to
+   * your inventory (or your feet). Integral magazines and magazines load loose rounds.
    */
-  reload(target: Item | null = this.wielded): ActionResult {
+  reload(target: Item | null = this.s.wielded): ActionResult {
     if (!target) return this.say(false, "You're not wielding anything.");
-    const well = target.magazineWell();
-    if (well) {
-      const cur = target.magazineCurrent();
-      const mags = this.carried()
-        .flatMap((c) => [...c.walk()])
-        .filter((m) => m !== cur && m.isMagazine() && target.acceptsMagazine(m))
-        .sort((a, b) => b.ammoRemaining() - a.ammoRemaining());
+    if (target.takesMagazines() && !target.isMagazine()) {
+      const cur = target.magazine;
+      const mags = this.everything().filter(({ item }) => item !== cur && item.isMagazine() && target.acceptsMagazine(item) && item !== target);
+      mags.sort((a, b) => b.item.ammoRemaining() - a.item.ammoRemaining());
       const best = mags[0];
-      // An empty gun and only empty magazines: fill one from loose rounds first, so one `r`
-      // leaves the gun loaded instead of holding an empty magazine.
       let fillCost = 0;
-      if (best && best.ammoRemaining() === 0 && !cur?.ammoRemaining()) {
-        const { loaded, ammo } = this.fillFromLoose(best);
-        if (loaded && ammo) fillCost = this.reloadCost(best, ammo, loaded);
+      if (best && best.item.ammoRemaining() === 0 && !cur?.ammoRemaining()) {
+        const f = this.fillFromLoose(best.item);
+        fillCost = f.moves;
       }
-      if (best && best.ammoRemaining() > (cur?.ammoRemaining() ?? -1)) {
-        const dropped: Item[] = [];
-        this.remove(best);
-        if (cur) {
-          well.remove(cur);
-          if (this.stash(cur)) dropped.push(cur);
-        }
-        well.insert(best);
-        return this.say(true, `You reload the ${target.baseName()}.`, fillCost + this.reloadCost(target, best, 1), dropped.length ? { dropped } : {});
+      if (best && best.item.ammoRemaining() > (cur?.ammoRemaining() ?? -1)) {
+        let dropped = false;
+        const r = transaction(() => {
+          if (cur) {
+            let away = moveItem(cur, L.mag(target), L.inv(this.owner), { actor: this.owner, quiet: true, force: false });
+            const g = this.groundHere();
+            if (!away.ok && g) {
+              away = moveItem(cur, L.mag(target), g, { actor: this.owner, quiet: true });
+              dropped = away.ok;
+            }
+            if (!away.ok) return away;
+          }
+          // re-locate: moving the old magazine may have changed nothing about the new one's spot
+          const from = locate(best.item, bodyLocs(this.owner)) ?? best.loc;
+          return moveItem(best.item, from, L.mag(target), { actor: this.owner, quiet: true });
+        });
+        if (!r.ok) return this.res(r);
+        void dropped;
+        return this.say(true, `You reload the ${target.baseName()}.`, fillCost + this.reloadCost(target, best.item, 1));
       }
       if (cur && cur.ammoRemaining() < cur.ammoCapacity()) return this.reloadMagazine(cur);
       if (cur) return this.say(false, `The ${target.baseName()} is already fully loaded!`);
       return this.say(false, `You don't have a magazine to reload your ${target.baseName()}!`);
     }
-    if (target.magazinePockets().length) return this.reloadMagazine(target);
+    if (target.isMagazine() || target.hasIntegralMagazine() || target.isBandolier()) return this.reloadMagazine(target);
     return this.say(false, `You can't reload the ${target.baseName()}.`);
   }
 
   private reloadMagazine(target: Item): ActionResult {
     if (target.ammoRemaining() >= target.ammoCapacity()) return this.say(false, `The ${target.baseName()} is already fully loaded!`);
-    const { loaded, ammo } = this.fillFromLoose(target);
+    const { loaded, ammo, moves } = this.fillFromLoose(target);
     if (!loaded || !ammo) return this.say(false, `You don't have any ammo to reload your ${target.baseName()}!`);
-    return this.say(true, `You reload the ${target.baseName()} with ${ammo.baseName(2)}.`, this.reloadCost(target, ammo, loaded));
+    return this.say(true, `You reload the ${target.baseName()} with ${ammo.baseName(2)}.`, moves);
   }
 
-  /** Take the magazine out of a gun, or the rounds out of a magazine, into inventory. */
-  unload(target: Item): ActionResult {
-    const dropped: Item[] = [];
-    const mag = target.magazineCurrent();
-    if (mag) {
-      target.magazineWell()!.remove(mag);
-      if (this.stash(mag)) dropped.push(mag);
-      return this.say(true, `You unload your ${target.baseName()}.`, 100, dropped.length ? { dropped } : {});
-    }
-    let any = false;
-    for (const p of target.magazinePockets()) {
-      for (const a of [...p.contents]) {
-        p.remove(a);
-        if (this.stash(a)) dropped.push(a);
-        any = true;
-      }
-    }
-    if (!any) return this.say(false, `Your ${target.baseName()} isn't loaded.`);
-    return this.say(true, `You unload your ${target.baseName()}.`, 100, dropped.length ? { dropped } : {});
+  /**
+   * Unload (BN unload_item): a container's contents, a gun's magazine or the rounds in a
+   * magazine go to your inventory, else your feet. Liquids are returned for the liquid menu.
+   */
+  unload(target: Item): ActionResult & { liquids: Item[] } {
+    const dests: Loc[] = [L.inv(this.owner)];
+    const g = this.groundHere();
+    if (g) dests.push(g);
+    const r = unloadItem(target, dests, { actor: this.owner, quiet: true });
+    if (r.msg) this.owner.msg(r.msg, r.ok ? undefined : 'c_light_red');
+    return { ok: r.ok, msg: r.msg, moves: r.moves, liquids: r.liquids, ...(r.code ? { code: r.code } : {}) };
+  }
+
+  /** Could `it` move from `from` to `to` for this character? (UI: "why can't I".) */
+  canMoveTo(it: Item, from: Loc | null, to: Loc): MoveResult {
+    return canMove(it, from, to, { actor: this.owner });
   }
 
   // ------------------------------------------------------------ time
@@ -766,7 +870,7 @@ export class Inventory {
         // Turns off as soon as the last charge is spent (or if it had none to begin with).
         if (it.ammoConsume(1) === 0 || it.ammoRemaining() === 0) {
           const revert = it.def.revert_to;
-          const name = it.name();
+          const name = it.label();
           if (revert && this.owner.data.items[revert]) it.convert(revert);
           it.active = false;
           this.owner.msg(`Your ${name} runs out of power.`);
@@ -784,11 +888,14 @@ export class Inventory {
   }
 
   toJSON(): InventoryJSON {
-    return { wielded: this.wielded?.toJSON() ?? null, worn: this.worn.map((w) => w.toJSON()) };
+    return { wielded: this.s.wielded?.toJSON() ?? null, worn: this.s.worn.map((w) => w.toJSON()), items: this.s.items.map((i) => i.toJSON()) };
   }
+  /** Replace everything with saved state (the old belongings are discarded: this is a load). */
   load(j: InventoryJSON): void {
     const data = this.owner.data;
-    this.wielded = j.wielded ? Item.fromJSON(data, j.wielded) : null;
-    this.worn = j.worn.map((w) => Item.fromJSON(data, w));
+    this.s.wielded = j.wielded ? Item.fromJSON(data, j.wielded) : null;
+    this.s.worn.splice(0, this.s.worn.length, ...j.worn.map((w) => Item.fromJSON(data, w)));
+    this.s.items.splice(0, this.s.items.length, ...(j.items ?? []).map((w) => Item.fromJSON(data, w)));
+    this.sortWorn();
   }
 }

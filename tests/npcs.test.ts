@@ -14,7 +14,8 @@ import { generateNpc, rollClassSkills, rollDistribution, type NpcData } from '..
 import { Rng } from '../src/core/rng';
 import { Dialogue, parseDuration } from '../src/game/talk';
 import { evalMath, type MathHost } from '../src/game/talkmath';
-import { createItem, fromSpawned } from '../src/game/item';
+import { createItem, fromSpawned, inNewContainer } from '../src/game/item';
+import { census, L, spawnItem } from '../src/game/moves';
 import { expandItemGroup } from '../src/data/itemgroups';
 import { TradeSession, adjustedPrice, priceAdjustment, tradingPrice } from '../src/game/trade';
 
@@ -56,7 +57,7 @@ function world(seed = 11) {
   for (let y = -2; y <= 2; y++) for (let x = -2; x <= 2; x++) game.map.chunk(x, y, 0);
   const mons = new MonsterSystem(game);
   const npcs = new NpcSystem(game, nd, mons);
-  game.player.inv.wear(createItem(data, 'backpack'));
+  game.player.inv.wear(createItem(data, 'backpack'), null);
   game.systems.push(mons, npcs);
   game.clock.seconds = 12 * 3600;
   const msgs: string[] = [];
@@ -197,7 +198,7 @@ describe('dialogue on real talk topics', () => {
     expect(v.responses.some((r) => r.text === notes)).toBe(false);
     // responses from later definitions of the same topic are appended, but hidden by their conditions
     expect(v.responses.some((r) => r.text.startsWith('Are you interested in buying any processed lumber'))).toBe(false);
-    game.player.inv.pickUp(createItem(data, 'FMCNote'));
+    game.player.inv.giveNew(createItem(data, 'FMCNote'));
     const again = new Dialogue(npcs, n);
     again.start();
     expect(again.view().responses.some((r) => r.text === notes)).toBe(true);
@@ -262,7 +263,7 @@ describe('dialogue on real talk topics', () => {
     expect(d.cond({ compare_string: ['yes', { u_val: 'x' }] })).toBe(true);
     expect(d.cond({ not: { compare_string: ['yes', { npc_val: 'x' }] } })).toBe(true);
     expect(d.cond({ u_has_items: { item: 'FMCNote', count: 2 } })).toBe(false);
-    for (let i = 0; i < 5; i++) game.player.inv.pickUp(createItem(data, 'FMCNote'));
+    for (let i = 0; i < 5; i++) game.player.inv.giveNew(createItem(data, 'FMCNote'));
     expect(d.cond({ u_has_items: { item: 'FMCNote', count: 2 } })).toBe(true);
     expect(d.cond({ is_season: 'SPRING' })).toBe(true);
     d.effect({ npc_add_effect: 'asked_to_follow', duration: 3600 });
@@ -311,7 +312,7 @@ describe('missions', () => {
     d.choose(yes.index);
     expect(inst.status).toBe('active');
     expect(npcs.missions.isComplete(inst, n)).toBe(false);
-    for (let i = 0; i < (def.count ?? 1); i++) game.player.inv.pickUp(createItem(data, def.item!));
+    for (let i = 0; i < (def.count ?? 1); i++) game.player.inv.giveNew(createItem(data, def.item!));
     expect(npcs.missions.isComplete(inst, n)).toBe(true);
     const d2 = npcs.talkTo(n)!;
     expect(d2.view().id).toBe('TALK_MISSION_INQUIRE');
@@ -371,21 +372,18 @@ describe('trade', () => {
     expect(priceAdjustment(9)).toBeCloseTo(priceAdjustment(5), 5);
   });
 
-  // TODO(BN): written for DDA data/behaviour; fails on Bright Nights core data (TypeError: Cannot read properties of undefined (reading 'typeId')). Port with its system.
-  it.skip('prices a box of ammo by its rounds and names its variant', () => {
+  it('prices a container by its contents too', () => {
     const { npcs, game } = world();
     const n = npcs.spawn({ template: 'evac_merchant' }, 14, 12, 0)!;
     const p = game.player;
-    const [box] = expandItemGroup(data, 'boxed_77x58', new Rng(1)).flatMap((sp) => fromSpawned(data, sp));
-    expect(box.typeId).toBe('45_ammo_box_50');
-    expect(box.name()).toMatch(/^7\.7x58mm Arisaka ammo box/);
-    const rounds = box.allContents()[0];
+    const box = inNewContainer(data, createItem(data, '9mm', { count: 20 }), 'bag_canvas').container;
+    const rounds = box.contents[0];
     expect(rounds.charges).toBe(20);
     const boxOnly = adjustedPrice(data, nd, n, p, box, 1, true);
     const price = tradingPrice(data, nd, n, p, box, true);
     expect(price).toBe(boxOnly + adjustedPrice(data, nd, n, p, rounds, rounds.charges, true));
     expect(price).toBeGreaterThan(0);
-    n.stock.push(box);
+    spawnItem(box, L.stock(n));
     const row = new TradeSession(data, nd, p, n).theirs.find((e) => e.item === box)!;
     expect(row.price).toBe(price);
   });
@@ -408,7 +406,7 @@ describe('trade', () => {
     const note = createItem(data, 'FMCNote');
     expect(adjustedPrice(data, nd, n, p, note, 1, true)).toBe(adjustedPrice(data, nd, n, p, note, 1, false));
 
-    for (let i = 0; i < 3; i++) p.inv.pickUp(createItem(data, 'FMCNote'));
+    for (let i = 0; i < 3; i++) p.inv.giveNew(createItem(data, 'FMCNote'));
     n.stock.push(knife);
     const s = new TradeSession(data, nd, p, n);
     const notes = s.yours.find((e) => e.item.typeId === 'FMCNote')!;
@@ -430,6 +428,25 @@ describe('trade', () => {
     } else {
       expect(s.canAccept().ok).toBe(false);
     }
+  });
+
+  it('selling a wielded bag hands over the bag with its contents, once (v1 sold the contents twice)', () => {
+    const { npcs, game } = world();
+    const n = npcs.spawn({ cls: 'NC_SCAVENGER' }, 14, 12, 0)!;
+    new Dialogue(npcs, n).effect('follow'); // friends swap freely
+    const p = game.player;
+    const bag = inNewContainer(data, createItem(data, '9mm', { count: 40 }), 'bag_canvas').container;
+    expect(p.inv.wield(bag, null).ok).toBe(true);
+    const scope = [L.hands(p), L.worn(p), L.inv(p), L.hands(n), L.worn(n), L.inv(n), L.stock(n), L.ground(game.map, p.tileX, p.tileY, p.z)];
+    const before = census(scope).counts;
+    const s = new TradeSession(data, nd, p, n);
+    // the rounds are inside the bag, not separate goods
+    expect(s.yours.filter((e) => e.item.typeId === '9mm')).toEqual([]);
+    s.toggle(s.yours.find((e) => e.item === bag)!);
+    expect(s.commit()).toBe(true);
+    expect(p.inv.wielded).toBeNull();
+    expect(census(scope).counts).toEqual(before);
+    expect(census(scope).aliased).toEqual([]);
   });
 
   it('refuses a lopsided deal, followers trade freely', () => {
@@ -505,8 +522,8 @@ describe('npc AI', () => {
     game.player.x = 2.5;
     game.player.y = 2.5;
     const n = npcs.spawn({ cls: 'NC_SCAVENGER' }, 30, 30, 0)!;
-    n.inv.wielded = null;
-    n.inv.wield(createItem(data, 'machete'));
+    if (n.inv.wielded) n.inv.drop(n.inv.wielded);
+    n.inv.wield(createItem(data, 'machete'), null);
     n.personality.bravery = 8;
     const hp0 = Object.values(n.hp).reduce((s, p) => s + p.cur, 0);
     const z = mons.spawnById('mon_zombie', 32.5, 30.5, 0)!;
@@ -530,8 +547,8 @@ describe('npc AI', () => {
   it('a KILL-attitude bandit attacks the survivor', () => {
     const { npcs, step, game } = world(23);
     const n = npcs.spawn({ template: 'thug' }, 16, 12, 0, { attitude: 'KILL' })!;
-    n.inv.wielded = null;
-    n.inv.wield(createItem(data, 'bat'));
+    if (n.inv.wielded) n.inv.drop(n.inv.wielded);
+    n.inv.wield(createItem(data, 'bat'), null);
     const hp0 = game.player.hpPercent();
     step(10);
     expect(game.player.hpPercent()).toBeLessThan(hp0);

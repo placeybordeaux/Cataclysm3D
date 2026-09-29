@@ -5,6 +5,7 @@ import { warnOnce } from '../data/warn';
 import type { MissionDef, Npc, NpcData } from './npc';
 import type { Dialogue, TalkPlayer } from './talk';
 import { omtMatches, parseDuration } from './talk';
+import { L, spawnItem } from './moves';
 
 // NPC missions (mission.cpp / missiondef.cpp), a subset of goals:
 //   MGOAL_FIND_ITEM / FIND_ANY_ITEM   bring `count` of `item` (handed over on success)
@@ -277,10 +278,8 @@ export class MissionSystem {
       const n = def.count ?? 1;
       if (h.player.inv.countOf(def.item) >= n) {
         const items = h.player.inv.useAmount(def.item, n);
-        if (npc) for (const it of items) {
-          const left = npc.inv.stash(it);
-          if (left) npc.stock.push(left);
-        }
+        // handed over: used up here, the same quantity made again in the NPC's hands
+        if (npc) for (const it of items) if (npc.inv.stashNew(it)) spawnItem(it, L.stock(npc), { quiet: true });
         h.message(`You hand over ${n > 1 ? `${n} ` : ''}${h.data.items[def.item] ? itemName(h.data.items[def.item], n) : def.item}.`);
       }
     }

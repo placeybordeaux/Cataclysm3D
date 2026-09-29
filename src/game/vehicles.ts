@@ -13,6 +13,7 @@ import { chunkKey, chunkOf } from '../world/coords';
 import { registerSaveable } from '../save/registry';
 import { chunkTracker } from '../save/tracking';
 import { loadItemSafe } from '../save/items';
+import { L, moveItem } from './moves';
 import type { Item, ItemJSON } from './item';
 import type { Game, GameSystem } from './game';
 import {
@@ -891,8 +892,8 @@ export class VehicleSystem implements GameSystem, MapOverlay {
       // Cargo of a destroyed part falls to the ground.
       if (part.items.length) {
         const [wx, wy] = v.mountToWorld(part.mx, part.my);
-        for (const it of part.items) this.game.map.addItem(Math.floor(wx), Math.floor(wy), v.z, it);
-        part.items = [];
+        const to = L.ground(this.game.map, Math.floor(wx), Math.floor(wy), v.z);
+        for (const it of [...part.items]) moveItem(it, L.cargo(part, v), to, { force: true, quiet: true });
       }
     }
   }

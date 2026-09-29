@@ -252,6 +252,15 @@ export class GameMap {
     list.push(item);
     a[0].version++;
   }
+  /** Put `item` back at position `index` of the tile's list (undoing a removal exactly). */
+  insertItemAt(x: number, y: number, z: number, index: number, item: MapItem): void {
+    const a = this.at(x, y, z);
+    if (!a) return;
+    let list = a[0].items.get(a[1]);
+    if (!list) a[0].items.set(a[1], (list = []));
+    list.splice(Math.min(index, list.length), 0, item);
+    a[0].version++;
+  }
   removeItem(x: number, y: number, z: number, item: MapItem): boolean {
     const a = this.at(x, y, z);
     if (!a) return false;

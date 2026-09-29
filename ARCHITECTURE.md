@@ -100,7 +100,14 @@ tests/               vitest unit tests (pure logic, no DOM/WebGL)
 
 ### Survivor simulation (src/game, UI-free)
 
-- `item.ts` Item/Pocket (charges, damage, rot, pockets, magazines), `createItem`, `fromSpawned`.
+- `item.ts` BN Item (charges / integral-magazine `ammoId`, one-load container `contents`, `magazine`
+  slot, gunmods, damage, rot), `createItem`, `fromSpawned`, `inNewContainer`. See docs/INVENTORY_MODEL.md.
+- `moves.ts` **the only place items change location**: `Loc` (`L.hands/worn/inv/in/mag/mod/ground/
+  cargo/stock`), `moveItem(item, from, to, opts)`, `spawnItem`/`spawnOnGround` (creation),
+  `consumeItem` (use-up), `unloadItem`, `transaction`, `census`. Never edit item lists directly
+  (tests/moves_lint.test.ts); conservation is property-tested (tests/conservation.test.ts).
+- `inventory_view.ts` UI-free data for inventory screens: `inventoryView`, loc/item keys, `verdict`
+  (drop checks with reasons), `itemActions`.
 - `character.ts` Character: stats, skills, body-part HP, pain, stamina, needs, sleep,
   morale/focus, body temperature, traits. `update(gameDt)` in game seconds. BN rules (file
   header lists the DDA differences): `storedKcal` capped at `maxStoredKcal()` (17500), a
@@ -110,8 +117,10 @@ tests/               vitest unit tests (pure logic, no DOM/WebGL)
   `enchantProviders`). `sleepComfort` (set by rest.ts) feeds `rollCanSleep`.
 - `healing.ts` BN heal_actor (`applyHealActor`), used by Inventory.use for `heal` actions.
 - `effects.ts` data-driven effect_type (misc.effect_type, with built-in fallbacks).
-- `inventory.ts` `character.inv`: wield/wear/pick up/drop/consume/use/reload, qualities,
-  encumbrance, armor absorption. Actions return `{ok, msg, moves, dropped?}`.
+- `inventory.ts` `character.inv`: BN carrying (flat `items` inventory vs worn `storage`, weight
+  capacity), wield/wear/take off/pick up/drop/consume/use/reload/unload built on moves (they take
+  the item's `from` location; `null` = a new item), qualities, encumbrance, armor absorption.
+  Actions return `{ok, msg, moves, code?}`. `Character.groundLoc` says where drops land.
 - `combat.ts` pure CDDA melee/ranged/monster-attack math taking an Rng.
 - `player.ts` PlayerAvatar = Character + position/view. Game wires `onMessage`/`onDeath`.
 - Terrain `move_cost` is in units of 50 moves (2 = flat ground = 100 moves): multiply by 50
@@ -404,7 +413,7 @@ tests/               vitest unit tests (pure logic, no DOM/WebGL)
   (radius 6, z±2, biased along the velocity) in `requestIdleCallback` slack; `stats.sync` counts chunks
   someone generated synchronously (hitch candidates), `stats.slowest`. `?prefetch=0` disables.
   `cdda.benchRun({seconds, speed, yawDeg})` ghost-sprints and returns frame-time percentiles
-  (`src/perfDebug.ts`). Keep item spawning linear: `placeContents` batches pocket totals.
+  (`src/perfDebug.ts`). Keep item spawning linear.
 - `playerAttack` event (events.ts) per attack: outcome hit/crit/kill/block/miss/whiff, impact point,
   `heavy`, blood field id. `src/render/hitFx.ts` (pixel blood/sparks/dust, crit flash, stagger via
   `MonsterView.kick`), HUD hit marker. `nearClamp` (monsterView.ts) draws creatures closer than
@@ -415,10 +424,9 @@ tests/               vitest unit tests (pure logic, no DOM/WebGL)
   key `zombieDensity`). Spawner: `CITY_HORDE_REALTIME` 0.2, `SPAWN_REALTIME` 0.75; spawns are held
   (`spawner.hold/release`) while the title screen runs. Outside the bubble only `Monster.horde`
   members hear (`hordeSignal`, CDDA get_signal_for_hordes).
-- Liquids: `src/game/liquid.ts` (targets, auto-store, pour, drink) + `src/ui/liquid_ui.ts` menu, wired
-  through `liquidHooks` (crafting.ts) and Unload on containers.
-- E-files: `E_FILE_STORAGE` pockets take books/E_STORABLE items (`Item.efiles()`); `efileDevice`,
-  `ereaderProblem` (reading.ts) require a charged phone/laptop.
+- Liquids: `src/game/liquid.ts` (targets, auto-store, pour, drink; all moves with an explicit `from`)
+  + `src/ui/liquid_ui.ts` menu (the liquid stays in its container until a choice moves it), wired
+  through `liquidHooks` (crafting.ts) and Unload on containers. (DDA e-file storage is gone: BN has none.)
 
 ### Progression & onboarding (src/progression, docs/DESIGN_V2.md decision 6)
 - Title: **Start** = quick start (named Evacuee, BN `unemployed` kit, one name field, difficulty
@@ -634,7 +642,8 @@ Keys: `V` camera mode, `F` flashlight.
   The survivor's own state (freezing, dehydrated) goes in `activities.distractionChecks`: it
   interrupts only when it newly arises, never blocks starting (CDDA's "ignore" semantics).
 - **Items on the map** are real `Item` instances (`src/game/item.ts`). Mapgen emits
-  `ItemSpawn`s which `GameMap.itemFactory` (set in Game) converts via `fromSpawned`.
+  `ItemSpawn`s which `GameMap.itemFactory` (set in Game) converts via `fromSpawned`. Game code puts
+  items on tiles with `spawnOnGround` / `moveItem` (src/game/moves.ts), never `map.addItem`.
 - **Tile raycasts** `src/game/raycast.ts`: `raycastTiles(map, {x,y,h}, dir, {maxDist,
   creatureAt, throughTransparent})` → first creature / furniture / terrain / floor / ceiling
   hit (h = metres, x/y tiles; same as three.js X/Z). `dirFromYawPitch(yaw, pitch)`.

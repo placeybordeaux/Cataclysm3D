@@ -12,6 +12,7 @@ import { techniqueMessage, type TargetInfo } from './techniques';
 import { tickMartialArts } from './martialarts';
 import { turnsToEffectSeconds } from './monster';
 import { createItem, type Item } from './item';
+import { consumeItem, itemsAt, L, moveItem, spawnItem } from './moves';
 import type { Monster } from './monster';
 import type { MonsterSystem, MonsterTarget } from './monai';
 import { applyTechniqueToMonster, meleeVerb, monsterTargetInfo } from './playercombat';
@@ -154,8 +155,9 @@ export class NpcSystem implements GameSystem, TalkWorld, MissionHost {
   dialogueFor(npc: Npc | undefined): Dialogue | null {
     return npc ? new Dialogue(this, npc) : null;
   }
+  /** Put a new item (a gift, a mission reward that didn't fit) on the ground. */
   dropItem(it: Item, x: number, y: number, z: number): void {
-    this.game.map.addItem(x, y, z, it);
+    spawnItem(it, L.ground(this.game.map, x, y, z), { force: true, quiet: true });
   }
   alliesNear(): Npc[] {
     const p = this.player;
@@ -214,6 +216,7 @@ export class NpcSystem implements GameSystem, TalkWorld, MissionHost {
     }
     if (opts.spawnKey) this.spawnedKeys.add(opts.spawnKey);
     this.npcs.push(n);
+    this.placeNpc(n);
     for (const f of this.onSpawned) f(n);
     return n;
   }
@@ -764,8 +767,7 @@ export class NpcSystem implements GameSystem, TalkWorld, MissionHost {
     const r = this.muted(n, () => n.inv.reload(gun));
     if (!r.ok) {
       // Out of ammo: put the gun away and fight with fists (npc::wield_better_weapon, simplified).
-      n.inv.wielded = null;
-      if (n.inv.stash(gun)) n.inv.wielded = gun;
+      this.muted(n, () => n.inv.unwield());
       return;
     }
     n.attackCooldown = Math.max(0.5, (r.moves || 100) / 100 / ACTION_SCALE);
@@ -853,15 +855,18 @@ export class NpcSystem implements GameSystem, TalkWorld, MissionHost {
     if (this.visible(n)) this.message(`${n.name} dies!`, killer === 'player' ? 'c_light_green' : 'c_red');
     // Drop everything plus a corpse item (CDDA npc::die -> place_corpse).
     const map = this.game.map;
-    const items: Item[] = [...(n.inv.wielded ? [n.inv.wielded] : []), ...n.inv.worn];
-    for (const it of items) map.addItem(n.tileX, n.tileY, n.z, it);
-    n.inv.wielded = null;
-    n.inv.worn = [];
+    const here = L.ground(map, n.tileX, n.tileY, n.z);
+    for (const from of [L.hands(n), L.worn(n), L.inv(n)])
+      for (const it of [...itemsAt(from)]) {
+        // things that were part of them (bionic weapons, integrated armor) die with them
+        if (it.hasFlag('NO_DROP') || it.hasFlag('INTEGRATED') || it.hasFlag('BIONIC_WEAPON')) consumeItem(it, from);
+        else moveItem(it, from, here, { force: true, quiet: true });
+      }
     if (this.data.items.corpse) {
       const c = createItem(this.data, 'corpse');
       c.vars.name = `corpse of ${n.name}`;
       c.vars.npc = n.uid;
-      map.addItem(n.tileX, n.tileY, n.z, c);
+      spawnItem(c, here, { force: true, quiet: true });
     }
     map.addField(n.tileX, n.tileY, n.z, 'fd_blood', 2);
     this.game.events.emit('creatureDied', { creature: n, killer: killer === 'player' ? this.player : killer });
@@ -931,10 +936,8 @@ export class NpcSystem implements GameSystem, TalkWorld, MissionHost {
       if (o.downTurns > 0) n.addEffect('downed', turnsToEffectSeconds(o.downTurns));
       if (o.stunTurns > 0) n.addEffect('stunned', turnsToEffectSeconds(o.stunTurns));
       if (o.disarms && n.inv.wielded) {
-        const dropped = n.inv.wielded;
-        n.inv.wielded = null;
-        this.game.map.addItem(n.tileX, n.tileY, n.z, dropped);
-        this.message(`You disarm ${n.name}!`);
+        const r = moveItem(n.inv.wielded, L.hands(n), L.ground(this.game.map, n.tileX, n.tileY, n.z), { quiet: true });
+        if (r.ok) this.message(`You disarm ${n.name}!`);
       }
     }
     let dom = 'bash', best = 0;
@@ -1031,12 +1034,18 @@ export class NpcSystem implements GameSystem, TalkWorld, MissionHost {
     };
   }
 
+  /** An NPC's drops land on its tile (src/game/moves.ts). */
+  private placeNpc(n: Npc): void {
+    n.groundLoc = () => L.ground(this.game.map, n.tileX, n.tileY, n.z);
+  }
+
   fromJSON(j: NpcSystemJSON): void {
     for (const n of [...this.npcs]) this.remove(n);
     for (const nj of j.npcs) {
       const n = Npc.fromJSON(this.data, nj);
       n.onMessage = null;
       this.npcs.push(n);
+      this.placeNpc(n);
       for (const f of this.onSpawned) f(n);
     }
     this.missions.fromJSON(j.missions);

@@ -3,6 +3,7 @@ import { warnOnce } from '../data/warn';
 import { turnsToEffectSeconds, type Monster } from './monster';
 import type { CorpseRecord, MonsterSystem } from './monai';
 import { createItem } from './item';
+import { spawnOnGround } from './moves';
 
 // Bright Nights death functions (mondeath.cpp). A MONSTER's `death_function` is a list of
 // named mdeath functions run in order when it dies (default ["NORMAL"]); only NORMAL leaves
@@ -81,7 +82,7 @@ export function runDeathFunctions(sys: MonsterSystem, m: Monster): CorpseRecord 
         }
         const it = createItem(sys.game.data, id);
         it.damage = Math.floor(Math.min(4, overflowDamage(m).corpseDamage) * 1000);
-        sys.game.map.addItem(tx, ty, m.z, it);
+        spawnOnGround(sys.game.map, tx, ty, m.z, it);
         break;
       }
       case 'EXPLODE':

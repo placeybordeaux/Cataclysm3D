@@ -2,6 +2,7 @@ import type { GameData } from '../data/types';
 import { BODY_PARTS, isBodyPart, MAIN_PARTS, type BodyPartId, type MainPartId } from './bodyparts';
 import type { Character } from './character';
 import { createItem, type Item } from './item';
+import { consumeItem, L, moveItem, spawnItem } from './moves';
 import { cddaText } from './units';
 
 // Compact Bionic Modules, Cataclysm: Bright Nights rules (bionics.cpp, iexamine.cpp autodoc,
@@ -448,22 +449,22 @@ export class BionicState {
         this.msg(`Deactivate your ${inv.wielded.name()} first!`, 'c_light_red');
         return false;
       }
-      if (inv.wielded) {
-        const old = inv.wielded;
-        inv.wielded = null;
-        const left = inv.stash(old);
-        if (left) {
-          inv.wielded = old;
-          this.msg(`You don't have room to put away your ${old.name()}.`, 'c_light_red');
-          return false;
-        }
+      // The weapon in hand goes to the inventory; the bionic weapon is then created in hand
+      // (and destroyed again on withdrawal: it never exists anywhere else).
+      if (inv.wielded && !inv.canMoveTo(inv.wielded, L.hands(this.c), L.inv(this.c)).ok) {
+        this.msg(`You don't have room to put away your ${inv.wielded.name()}.`, 'c_light_red');
+        return false;
       }
     }
     if (!free) this.power -= cost;
     b.powered = !!d.flags?.includes('BIONIC_TOGGLED') || (d.time ?? 0) > 0;
     if ((d.time ?? 0) > 0) b.chargeTimer = d.time!;
     if (!free) this.msg(`You activate your ${this.name(id)}.`);
-    if (weapon) this.c.inv.wielded = createItem(this.c.data, d.fake_item!);
+    if (weapon) {
+      const inv = this.c.inv;
+      if (inv.wielded) moveItem(inv.wielded, L.hands(this.c), L.inv(this.c), { actor: this.c, quiet: true });
+      spawnItem(createItem(this.c.data, d.fake_item!), L.hands(this.c), { actor: this.c, quiet: true, force: true });
+    }
     this.onChanged?.();
     return true;
   }
@@ -495,7 +496,7 @@ export class BionicState {
     if (d.flags?.includes('BIONIC_WEAPON') && d.fake_item) {
       const w = this.c.inv.wielded;
       if (w && w.typeId === d.fake_item) {
-        this.c.inv.wielded = null;
+        consumeItem(w, L.hands(this.c));
         this.msg(`You withdraw your ${w.name()}.`);
       }
     }

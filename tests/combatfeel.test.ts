@@ -90,7 +90,7 @@ describe('swing phase timing', () => {
 
   it('a phased swing resolves at contact, not on the click, and plays out its recovery', () => {
     const { game, sys, combat, events } = world();
-    game.player.inv.wield(createItem(data, 'bat'));
+    game.player.inv.wield(createItem(data, 'bat'), null);
     game.player.hit_bonus = 40;
     const z = sys.spawnById('mon_zombie', 12.5, 11.3, 0)!;
     z.hp = 10000;
@@ -118,7 +118,7 @@ describe('swing phase timing', () => {
 
   it('a swing at air whiffs once its active window closes', () => {
     const { game, combat, events } = world();
-    game.player.inv.wield(createItem(data, 'bat'));
+    game.player.inv.wield(createItem(data, 'bat'), null);
     combat.attack();
     step(game, 1);
     expect(events).toEqual(['player:whiff']);
@@ -228,7 +228,7 @@ describe('guard and side-step map onto CDDA block / dodge', () => {
     expect(guardScoreBonus({ guarding: true, guardAge: 0 })).toEqual({ bonus: FEEL.guardBlockBonus + FEEL.parryBonus, parry: true });
 
     const c = survivor();
-    c.inv.wield(createItem(data, 'bat'));
+    c.inv.wield(createItem(data, 'bat'), null);
     const rng = new Rng(7);
     // Melee 0: never blocks unguarded...
     refreshDefenses(c);
@@ -290,7 +290,7 @@ describe('guard and side-step map onto CDDA block / dodge', () => {
   it('a parried grab never takes hold and staggers the grabber (BN mattack::grab)', () => {
     const { game, sys } = world();
     tough(game);
-    game.player.inv.wield(createItem(data, 'bat'));
+    game.player.inv.wield(createItem(data, 'bat'), null);
     const z = sys.spawnById('mon_zombie', 12.5, 11.4, 0)!;
     for (const s of z.specials) s.cooldown = s.def.id === 'GRAB' ? 0 : 999;
     z.type = { ...z.type, melee_skill: 20 }; // make sure it connects

@@ -6,6 +6,7 @@ import { GameMap } from '../world/map';
 import { PlayerAvatar } from './player';
 import { moveWithCollision } from './physics';
 import { fromSpawned } from './item';
+import { L } from './moves';
 import { ActivityManager } from './activity';
 import { Keys } from '../ui/keys';
 import { GameStats } from './stats';
@@ -97,6 +98,8 @@ export class Game {
     this.player = new PlayerAvatar(data, { seed });
     this.player.onMessage = (text, color) => this.message(text, color);
     this.player.onDeath = (cause) => this.events.emit('playerDied', { cause });
+    // What the survivor drops lands on the tile they stand on (src/game/moves.ts).
+    this.player.groundLoc = () => L.ground(this.map, this.player.tileX, this.player.tileY, this.player.z);
     for (const t of Object.values(data.terrain)) this.map.terrain.add(t);
     for (const f of Object.values(data.furniture)) this.map.furniture.add(f);
     this.map.itemFactory = (sp) => fromSpawned(data, (sp.spawned as SpawnedItem | undefined) ?? toSpawned(sp));

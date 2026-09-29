@@ -4,6 +4,8 @@ import { hasFlag } from '../world/registry';
 import { CraftingInventory } from './crafting_inv';
 import { giveOrDrop, hasCraftingLight, type CraftHost } from './crafting';
 import { fromSpawned } from './item';
+import { L, moveItem, spawnOnGround } from './moves';
+import type { Item } from './item';
 import { consumeRequirements, evaluateRequirements, type RequirementEval } from './requirements';
 import { cddaText } from './units';
 
@@ -184,13 +186,11 @@ function applyPost(host: CraftHost, con: ConstructionDef, x: number, y: number, 
   const data = host.data;
   // Items in the way get moved to a neighbouring tile unless the construction keeps them.
   if (!(con.post_flags ?? []).includes('keep_items')) {
-    const items = [...host.map.itemsAt(x, y, z)];
+    const items = [...host.map.itemsAt(x, y, z)] as Item[];
     if (items.length) {
       const p = host.player;
-      for (const it of items) {
-        host.map.removeItem(x, y, z, it);
-        host.map.addItem(Math.floor(p.x), Math.floor(p.y), p.z, it);
-      }
+      const to = L.ground(host.map, Math.floor(p.x), Math.floor(p.y), p.z);
+      for (const it of items) moveItem(it, L.ground(host.map, x, y, z), to, { force: true, quiet: true });
     }
   }
   if (con.post_terrain) {
@@ -204,13 +204,13 @@ function applyPost(host: CraftHost, con: ConstructionDef, x: number, y: number, 
       if (!d) continue;
       if (f.id !== 'f_null') host.map.setFurn(x, y, z, d.furn_set ?? 'f_null');
       else if (d.ter_set) host.map.setTer(x, y, z, d.ter_set);
-      if (d.items) for (const sp of expandItemGroup(data, d.items, host.player.rng)) for (const it of fromSpawned(data, sp)) host.map.addItem(x, y, z, it);
+      if (d.items) for (const sp of expandItemGroup(data, d.items, host.player.rng)) for (const it of fromSpawned(data, sp)) spawnOnGround(host.map, x, y, z, it);
       host.message(`You disassemble the ${cddaText((f.id !== 'f_null' ? f : host.map.terAt(x, y, z)).name)}.`);
     }
   }
   if (con.byproducts) {
     const p = host.player;
-    for (const sp of expandItemGroup(data, con.byproducts, p.rng)) for (const it of fromSpawned(data, sp)) host.map.addItem(Math.floor(p.x), Math.floor(p.y), p.z, it);
+    for (const sp of expandItemGroup(data, con.byproducts, p.rng)) for (const it of fromSpawned(data, sp)) spawnOnGround(host.map, Math.floor(p.x), Math.floor(p.y), p.z, it);
   }
   host.events?.emit('mapChanged', { x, y, z });
 }

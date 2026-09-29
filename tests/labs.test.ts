@@ -242,7 +242,7 @@ describe('lab machinery', () => {
     const cr = cardreaderOf(game.map.terAt(12, 10, 0))!;
     expect(cr.flags).toContain('SCIENCE_CARD');
     expect(await useCardreader(game, 12, 10, 0, cr, autoUi(game))).toBe('none');
-    game.player.inv.pickUp(createItem(data, 'id_science'));
+    game.player.inv.giveNew(createItem(data, 'id_science'));
     expect(await useCardreader(game, 12, 10, 0, cr, autoUi(game))).toBe('opened');
     expect(game.map.terAt(13, 11, 0).id).toBe('t_door_metal_c');
     // outside radius 3: untouched

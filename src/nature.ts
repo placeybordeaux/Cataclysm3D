@@ -263,10 +263,9 @@ function installNatureDebug(game: Game, api: DebugApi, sys: NatureSystem): void 
   };
   const give = (id: string) => {
     const it = createItem(game.data, id);
-    // debug convenience: a survivor with no pockets gets a backpack to carry things in
-    if (!p().inv.canStash(it) && !p().inv.worn.some((w) => w.typeId === 'backpack') && game.data.items.backpack) p().inv.wear(createItem(game.data, 'backpack'));
-    const left = p().inv.stash(it);
-    if (left) p().inv.wielded ? game.map.addItem(p().tileX, p().tileY, p().z, left) : (p().inv.wielded = left);
+    // debug convenience: a survivor with no carrying space gets a backpack
+    if (!p().inv.canCarry(it) && !p().inv.worn.some((w) => w.typeId === 'backpack') && game.data.items.backpack) p().inv.wear(createItem(game.data, 'backpack'), null);
+    p().inv.giveNew(it);
     return it;
   };
   const nearest = (pred: (x: number, y: number, z: number) => boolean, r = 60) => {

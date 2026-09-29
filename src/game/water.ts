@@ -8,6 +8,7 @@ import { hasFlag } from '../world/registry';
 import { warnOnce } from '../data/warn';
 import { MAIN_PARTS } from './bodyparts';
 import { createItem, type Item } from './item';
+import { canMove, consumeItem, L, spawnOnGround, spawnSome } from './moves';
 import { emitSound } from './sound';
 import { MAX_VIEW_DISTANCE } from './vision';
 
@@ -35,23 +36,21 @@ export function fillableContainers(game: Game, liquidId: string): [Item, number]
   if (!def) return [];
   const probe = createItem(game.data, liquidId, { charges: 100000 });
   const out: [Item, number][] = [];
-  for (const it of game.player.inv.allItems()) {
-    if (it.sealed || !it.containerPockets().some((p) => p.data.watertight)) continue;
-    let room = 0;
-    for (const p of it.containerPockets()) {
-      const r = p.canContain(probe);
-      if (r.ok) room += r.charges ?? 0;
-    }
-    if (room > 0) out.push([it, room]);
+  const p = game.player;
+  for (const it of p.inv.allItems()) {
+    if (!it.isContainer()) continue;
+    const r = canMove(probe, null, L.in(it), { partial: true, actor: p });
+    if (r.ok && r.moved > 0) out.push([it, r.moved]);
   }
   return out;
 }
 
 /** liquid_handler: pour as much of the source's liquid as fits into `container`. Returns charges added. */
 export function fillContainer(game: Game, container: Item, liquidId: string): number {
+  // the source is effectively endless: make more than any container holds, keep what fits
   const w = createItem(game.data, liquidId, { charges: 100000 });
   const before = w.charges;
-  const left = container.put(w);
+  const left = spawnSome(w, L.in(container), { actor: game.player, quiet: true });
   const added = before - (left ? left.charges : 0);
   if (added > 0) game.message(`You fill the ${container.baseName(1)} with ${w.baseName(added)}.`, 'c_light_gray');
   else game.message(`The ${container.baseName(1)} can't hold any more ${w.baseName(2)}.`, 'c_light_gray');
@@ -156,7 +155,7 @@ export function catchFish(game: Game, fishables: Monster[]): string | null {
     const it = createItem(game.data, 'corpse');
     it.vars.corpse = def.id;
     it.vars.corpse_name = name;
-    game.map.addItem(p.tileX, p.tileY, p.z, it);
+    spawnOnGround(game.map, p.tileX, p.tileY, p.z, it);
   }
   game.message(`You caught a ${name}.`, 'c_green');
   return def.id;
@@ -251,18 +250,17 @@ export function isDeepWater(game: Game, x: number, y: number, z: number): boolea
   return hasFlag(t, 'DEEP_WATER') && hasFlag(t, 'SWIMMABLE');
 }
 
-/** Items diving would ruin (check_water_affect_items): not inside a watertight pocket. */
+/** Items diving would ruin (check_water_affect_items): everything not inside a watertight container. */
 export function waterAffectedItems(game: Game): { dissolve: Item[]; destroy: Item[] } {
   const dissolve: Item[] = [], destroy: Item[] = [];
-  const walk = (it: Item, protectedByPocket: boolean) => {
-    if (!protectedByPocket) {
+  const walk = (it: Item, protectedByContainer: boolean) => {
+    if (!protectedByContainer) {
       if (it.hasFlag('WATER_DISSOLVE')) dissolve.push(it);
       else if (it.hasFlag('WATER_BREAK') && !it.vars.water_broken) destroy.push(it);
     }
-    for (const pk of it.pockets) for (const c of pk.contents) walk(c, protectedByPocket || !!pk.data.watertight);
+    for (const c of it.allContents()) walk(c, protectedByContainer || it.isWatertight());
   };
-  const inv = game.player.inv;
-  for (const it of [...(inv.wielded ? [inv.wielded] : []), ...inv.worn]) walk(it, false);
+  for (const it of game.player.inv.topLevel()) walk(it, false);
   return { dissolve, destroy };
 }
 
@@ -271,7 +269,9 @@ export function soakItems(game: Game): void {
   const { dissolve, destroy } = waterAffectedItems(game);
   const inv = game.player.inv;
   for (const it of dissolve) {
-    inv.remove(it);
+    const loc = inv.locOf(it);
+    if (!loc) continue;
+    consumeItem(it, loc);
     game.message(`Your ${it.name()} dissolves in the water!`, 'c_light_red');
   }
   for (const it of destroy) {

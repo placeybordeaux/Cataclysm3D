@@ -4,6 +4,7 @@ import { createItem, type Item } from '../game/item';
 import { BODY_PARTS, isBodyPart } from '../game/bodyparts';
 import { cddaText } from '../game/units';
 import { c, colorize, confirm, openMenu, type MenuEntry, type UiWindow } from './framework';
+import { consumeItem } from '../game/moves';
 
 // Screens for body modifications: the `[` mutations menu, the `p` bionics menu (CDDA
 // bionics_ui.cpp look: power bar header, activatable list with letters, detail pane), the
@@ -195,7 +196,8 @@ export async function installCbmFlow(game: Game, mods: BodyMods, it: Item, opts:
   if (anesthesia) bio.consumeAnesthesia(need);
   const difficulty = bio.idx.difficulty(it.typeId);
   opts.consumeItem(it);
-  if (programItem) p.inv.remove(programItem);
+  const programLoc = programItem ? p.inv.locOf(programItem) : null;
+  if (programItem && programLoc) consumeItem(programItem, programLoc, programItem.countByCharges ? 1 : undefined);
   const itemId = it.typeId;
   if (opts.autodoc) {
     game.message('You set up the operation step-by-step, configuring the Autodoc to manipulate a CBM.');
