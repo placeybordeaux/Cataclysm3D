@@ -267,8 +267,15 @@ describe('mutagen (BN mutagen_actor / mutagen_iv_actor)', () => {
     expect(dropped).toContain(mask);
   });
 
-  it('night vision comes from night_vision_range', () => {
-    const { mut } = survivor();
+  it('claws make unarmed attacks cut (cut_dmg_bonus); night vision comes from night_vision_range', () => {
+    const { c, mut } = survivor();
+    const rng = new Rng(3);
+    const cut = () => rollMeleeDamage(c, null, false, rng, true).find((d) => d.type === 'cut')?.amount ?? 0;
+    expect(cut()).toBe(0);
+    let n = 0;
+    while (!c.hasTrait('CLAWS') && n++ < 10) mut.mutateTowards('CLAWS');
+    expect(c.hasTrait('CLAWS')).toBe(true);
+    expect(cut()).toBeGreaterThan(0);
     expect(mut.nightVisionRange()).toBe(0);
     mut.setMutation('NIGHTVISION');
     expect(mut.nightVisionRange()).toBe(2);
