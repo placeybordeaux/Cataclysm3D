@@ -3,6 +3,7 @@ import type { MapItem } from '../world/map';
 import type { SpawnedItem } from '../data/itemgroups';
 import { warnOnce } from '../data/warn';
 import { cddaText, toGrams, toMl, toSeconds } from './units';
+import { legacyPocketData } from '../data/bncompat';
 
 // Item instances (CDDA item.cpp / item_pocket.cpp, simplified). An Item is one ItemDef plus
 // mutable state: charges (stack size for count-by-charges items like ammo and liquids),
@@ -49,6 +50,8 @@ export function asArray<T>(v: T | T[] | undefined): T[] {
 
 /** CDDA itype::count_by_charges: ammo, non-solid comestibles, or "stackable". */
 export function countByCharges(def: ItemDef): boolean {
+  // BN extractor output carries itype::count_by_charges; DDA-shaped fixtures fall through
+  if (typeof def.count_by_charges === 'boolean') return def.count_by_charges;
   if (def.stackable) return true;
   if (hasSubtype(def, 'AMMO')) return true;
   if (hasSubtype(def, 'COMESTIBLE') && def.phase !== undefined && def.phase !== 'solid') return true;
@@ -295,7 +298,8 @@ export class Item implements MapItem {
   constructor(readonly data: GameData, def: ItemDef) {
     this.typeId = def.id;
     this.def = def;
-    this.pockets = (def.pocket_data ?? []).map((p) => new Pocket(p, this));
+    // TODO(BN inventory): BN has no pockets; bncompat derives DDA-style ones meanwhile
+    this.pockets = legacyPocketData(def).map((p) => new Pocket(p, this));
     this.charges = defaultCharges(def);
     this.sealed = !!def.sealed && this.pockets.some((p) => p.type === 'CONTAINER');
   }
@@ -681,7 +685,8 @@ export class Item implements MapItem {
     const old = this.pockets;
     this.def = def;
     this.typeId = newId;
-    this.pockets = (def.pocket_data ?? []).map((p) => new Pocket(p, this));
+    // TODO(BN inventory): BN has no pockets; bncompat derives DDA-style ones meanwhile
+    this.pockets = legacyPocketData(def).map((p) => new Pocket(p, this));
     // Carry contents across pockets of the same kind (e.g. the battery in a flashlight).
     for (const p of old) for (const c of p.contents) {
       const dst = this.pockets.find((q) => q.type === p.type && q.canContain(c).ok);
