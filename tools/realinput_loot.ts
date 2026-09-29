@@ -216,7 +216,7 @@ export function lootScenarios(c: LootCtx): Scenario[] {
       check('census unchanged through quick loot', sameCounts(c0, await js(CENSUS)).length === 0, sameCounts(c0, await js(CENSUS)));
       // Step back and look at the wall of cupboards: what the markers say from across the room.
       await standAt(-1, 1);
-      await aim(-1, -3, 1.6);
+      await aim(-1, -3, 2.4);
       await sleep(600);
       const marks = await js<{ key: string; text: string }[]>('cdda.loot.markers()');
       check('markers: the other cupboards show as "not searched", the emptied one as empty', marks.some((m) => /not searched/.test(m.text)) && marks.some((m) => /empty/.test(m.text)), marks);
@@ -282,6 +282,8 @@ export function lootScenarios(c: LootCtx): Scenario[] {
       check('quick loot needs fewer inputs than the inventory tabs', by.quick < by.tabs, by);
       check('area loot needs fewer inputs than the inventory tabs', by.area < by.tabs, by);
       await setStyle('quick');
+      // The scenarios after this one expect a fresh survivor, not one with two bags of loot.
+      await c.fresh();
     }],
   ];
 }

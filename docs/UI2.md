@@ -268,6 +268,7 @@ All styles:
 - The Area window sets `input.menuWalk` (src/core/input.ts), which lets `Game` keep moving the
   survivor while a window has the keyboard.
 
+Screenshots: `docs/screenshots/ui2/loot/` (1920×1080 and 3440×1304, from the real-input run).
 Automation: `cdda.loot.{style(), setStyle(s), panel(), area(), searchState(x, y, z), memory(),
 markers(), model}`. Real input: `tools/realinput.ts --only lootquick,lootarea,lootsweep`
 (`tools/realinput_loot.ts`); `lootsweep` sweeps the shelter (3 cupboards, a pile, 2 lockers)

@@ -49,6 +49,7 @@ export function installMarkers(game: Game, renderer: Renderer, memory: () => Loo
   layer.appendChild(box);
   const marks = new Map<string, Mark>();
   const v = new THREE.Vector3();
+  let promptEl: HTMLElement | null = null;
 
   const scan = () => {
     const p = game.player;
@@ -100,13 +101,18 @@ export function installMarkers(game: Game, renderer: Renderer, memory: () => Loo
     const r = canvas.getBoundingClientRect();
     const hide = o.hiddenKey();
     cam.updateMatrixWorld();
+    // The crosshair's "[e] …" prompt names what it's on: a badge under it would garble both.
+    const pe = promptEl ??= document.querySelector<HTMLElement>('#ui .hud-prompt');
+    const pr = pe && pe.style.display !== 'none' && pe.textContent ? pe.getBoundingClientRect() : null;
     for (const m of marks.values()) {
       v.set(m.x + 0.5, m.z * LEVEL_HEIGHT + m.lift, m.y + 0.5).project(cam);
-      const on = v.z < 1 && Math.abs(v.x) < 1.05 && Math.abs(v.y) < 1.05 && m.key !== hide;
+      const sx = Math.round(r.left + ((v.x + 1) / 2) * r.width), sy = Math.round(r.top + ((1 - v.y) / 2) * r.height);
+      const underPrompt = !!pr && sx > pr.left - 24 && sx < pr.right + 24 && sy > pr.top - 8 && sy < pr.bottom + 48;
+      const on = v.z < 1 && Math.abs(v.x) < 1.05 && Math.abs(v.y) < 1.05 && m.key !== hide && !underPrompt;
       m.el.style.display = on ? '' : 'none';
       if (!on) continue;
-      m.el.style.left = `${Math.round(r.left + ((v.x + 1) / 2) * r.width)}px`;
-      m.el.style.top = `${Math.round(r.top + ((1 - v.y) / 2) * r.height)}px`;
+      m.el.style.left = `${sx}px`;
+      m.el.style.top = `${sy}px`;
     }
   };
 
