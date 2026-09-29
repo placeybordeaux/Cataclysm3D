@@ -1,10 +1,12 @@
 import * as THREE from 'three';
 import { normalOutputChunk } from './materials';
+import { lmUniforms } from './lightmap';
 
 // Precipitation as GPU-animated particles in a box that wraps around the camera: the CPU
 // only updates two uniforms per frame. Rain = short streaks (line segments), snow = single
 // points; both land on the low-res grid so they read as pixel particles.
-// Known gap: no roof occlusion, it rains indoors too (needs a roof mask texture).
+// Roofs: the light map's cover texture holds, per tile, the height of the highest floor/roof
+// over the player's level; particles below it are culled, so it doesn't rain indoors.
 
 export type WeatherKind = 'clear' | 'rain' | 'storm' | 'snow';
 
@@ -18,6 +20,8 @@ uniform float uTime;
 uniform float uSpeed;
 uniform float uLen;
 uniform vec2 uWind;
+uniform highp sampler2D tCover;
+uniform vec4 uLmRect;
 varying float vAlpha;
 void main() {
   vec3 p = position;
@@ -32,6 +36,11 @@ void main() {
   p.xz -= aEnd * uWind * uLen * 0.3;
   vAlpha = 1.0;
   gl_Position = projectionMatrix * viewMatrix * vec4(p, 1.0);
+  if (uLmRect.w > 0.5) {
+    ivec2 c = ivec2(floor(p.xz - uLmRect.xy));
+    int n = int(uLmRect.z);
+    if (c.x >= 0 && c.y >= 0 && c.x < n && c.y < n && p.y < texelFetch(tCover, c, 0).r) gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+  }
   gl_PointSize = 1.0;
 }`;
 
@@ -74,6 +83,7 @@ export class Weather {
       uniforms: {
         uCam: { value: new THREE.Vector3() }, uTime: { value: 0 }, uSpeed: { value: speed },
         uLen: { value: len }, uWind: { value: new THREE.Vector2(0.6, 0.2) }, uColor: { value: new THREE.Color(color) },
+        tCover: lmUniforms.tCover, uLmRect: lmUniforms.uLmRect,
       },
       transparent: false,
       depthWrite: false,

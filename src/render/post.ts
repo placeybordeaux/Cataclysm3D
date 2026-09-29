@@ -25,6 +25,15 @@ export interface PipelineOptions {
   fogFar: number;
   /** 0..1 cap of fog opacity. */
   fogMax: number;
+  /**
+   * What the ordered dither pattern is fixed to. 'screen': low-res pixel grid (classic).
+   * 'view': the screen grid shifted by the camera's yaw/pitch in whole pixel-angles, so
+   * when the camera turns the pattern scrolls with the image (exactly at the screen
+   * centre, where a snapped turn moves content by whole pixels) instead of the image
+   * crawling under a fixed pattern. (Anchoring to true view angles was tried too: it
+   * distorts the Bayer cells toward the screen edges.)
+   */
+  ditherAnchor: 'screen' | 'view';
 }
 
 const FULLSCREEN_VERT = /* glsl */ `
@@ -52,6 +61,8 @@ uniform float uOutline;
 uniform float uCrease;
 uniform float uLutSize;
 uniform float uExposure;
+uniform float uHurt;
+uniform vec2 uDitherOffset;
 varying vec2 vUv;
 
 float linDepth(vec2 uv) {
@@ -118,9 +129,16 @@ void main() {
     col = mix(col, uFogColor, fog);
   }
 
+  // hurt flash: red vignette, strongest at the edges, before grading so it gets dithered
+  if (uHurt > 0.0) {
+    vec2 q = (vUv - 0.5) * vec2(uRes.x / uRes.y, 1.0);
+    float v = smoothstep(0.25, 0.8, length(q));
+    col = mix(col, vec3(0.55, 0.02, 0.015), uHurt * (0.06 + 0.6 * v));
+  }
+
   vec3 s = toSrgb(col);
   if (uMode != 2) {
-    s += (bayer4(gl_FragCoord.xy) - 0.5) * uDither;
+    s += (bayer4(gl_FragCoord.xy + uDitherOffset) - 0.5) * uDither;
     s = clamp(s, 0.0, 1.0);
     vec3 lc = s * ((uLutSize - 1.0) / uLutSize) + 0.5 / uLutSize;
     if (uMode == 0) s = texture(tLutPal, lc).rgb;
@@ -131,6 +149,8 @@ void main() {
   }
   gl_FragColor = vec4(s, 1.0);
 }`;
+
+const _euler = new THREE.Euler();
 
 const BLIT_FRAG = /* glsl */ `
 precision highp float;
@@ -159,7 +179,8 @@ function lut3d(data: Uint8Array, size: number, filter: THREE.MagnificationTextur
 export class PixelPipeline {
   readonly options: PipelineOptions;
   scene!: THREE.WebGLRenderTarget;
-  private postTarget!: THREE.WebGLRenderTarget;
+  /** @internal graded low-res image (read back by the shimmer test) */
+  postTarget!: THREE.WebGLRenderTarget;
   private postMat: THREE.ShaderMaterial;
   private blitMat: THREE.ShaderMaterial;
   private quad: THREE.Mesh;
@@ -172,11 +193,16 @@ export class PixelPipeline {
   /** Sub-pixel shift (in low-res pixels) applied at blit time; set by the camera rig. */
   readonly subPixel = new THREE.Vector2();
   exposure = 1;
+  /** 0..1 red hurt vignette (renderer.hurtFlash decays it). */
+  hurt = 0;
+  /** @internal signs of the view-anchored dither offset (verified with cdda.shimmerTest) */
+  dirX = 1;
+  dirY = 1;
 
   constructor(private three: THREE.WebGLRenderer, opts: Partial<PipelineOptions> = {}) {
     this.options = {
       targetHeight: 360, grade: 'palette', dither: 0.035, outline: 0.55, crease: 0.22,
-      fogNear: 22, fogFar: 78, fogMax: 0.92, ...opts,
+      fogNear: 28, fogFar: 96, fogMax: 0.92, ditherAnchor: 'view', ...opts,
     };
     const LUT = 32;
     const pal = lut3d(buildLut(LUT, 'palette'), LUT, THREE.NearestFilter);
@@ -190,7 +216,8 @@ export class PixelPipeline {
         uRes: { value: new THREE.Vector2() }, uNear: { value: 0.1 }, uFar: { value: 300 },
         uFogColor: { value: new THREE.Color() }, uFogNear: { value: 20 }, uFogFar: { value: 80 }, uFogMax: { value: 1 },
         uMode: { value: 0 }, uDither: { value: 0.05 }, uOutline: { value: 0.5 }, uCrease: { value: 0.2 },
-        uExposure: { value: 1 },
+        uExposure: { value: 1 }, uHurt: { value: 0 },
+        uDitherOffset: { value: new THREE.Vector2() },
       },
       depthTest: false,
       depthWrite: false,
@@ -241,12 +268,24 @@ export class PixelPipeline {
     return this.lowW / this.lowH;
   }
 
-  render(scene: THREE.Scene, camera: THREE.PerspectiveCamera, fogColor: THREE.Color): void {
+  /**
+   * `overlay` (the first-person viewmodel) is drawn into the same low-res target after the
+   * world with depth cleared, so it is outlined, dithered and graded like everything else.
+   */
+  render(scene: THREE.Scene, camera: THREE.PerspectiveCamera, fogColor: THREE.Color,
+    overlay?: { scene: THREE.Scene; camera: THREE.Camera }): void {
     const r = this.three;
     const o = this.options;
     r.setRenderTarget(this.scene);
     r.clear();
     r.render(scene, camera);
+    if (overlay) {
+      const auto = r.autoClear;
+      r.autoClear = false;
+      r.clearDepth();
+      r.render(overlay.scene, overlay.camera);
+      r.autoClear = auto;
+    }
 
     const u = this.postMat.uniforms;
     u.tColor.value = this.scene.textures[0];
@@ -264,6 +303,13 @@ export class PixelPipeline {
     u.uOutline.value = o.outline;
     u.uCrease.value = o.crease;
     u.uExposure.value = this.exposure;
+    u.uHurt.value = this.hurt;
+    if (o.ditherAnchor === 'view') {
+      // camera yaw/pitch in pixel-angles (rotation order YXZ: y = -yaw, x = pitch)
+      const q = (2 * Math.tan((camera.fov * Math.PI) / 360)) / this.lowH;
+      _euler.setFromQuaternion(camera.quaternion, 'YXZ');
+      u.uDitherOffset.value.set(Math.round(-_euler.y / q) * this.dirX, Math.round(_euler.x / q) * this.dirY);
+    } else u.uDitherOffset.value.set(0, 0);
     this.quad.material = this.postMat;
     r.setRenderTarget(this.postTarget);
     r.render(this.quadScene, this.quadCam);

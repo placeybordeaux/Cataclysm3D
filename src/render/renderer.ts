@@ -7,6 +7,7 @@ import { CameraRig, type CameraMode } from './camera';
 import { ChunkManager } from './chunkManager';
 import { INDOOR_SKY } from './chunkMesh';
 import { LightManager, SkyState } from './lights';
+import { LightMap, naturalLightLevel } from './lightmap';
 import { patchNormalOutput, shared } from './materials';
 import { PixelPipeline, type GradeMode } from './post';
 import { ProceduralTextureSource } from './proceduralSource';
@@ -14,6 +15,10 @@ import { Sky } from './sky';
 import { SpriteLayer, type SpriteHandle } from './sprites';
 import type { TileTextureSource } from './textureSource';
 import { Weather, type WeatherKind } from './weather';
+import { Viewmodel } from './viewmodel';
+import { DecorLayer } from './decor';
+import { displayIrradiance } from './lightfield';
+import type { LightHandle } from './lights';
 
 export { CDDA_COLORS, cddaColor } from './colors';
 
@@ -22,12 +27,14 @@ export { CDDA_COLORS, cddaColor } from './colors';
 // dithered, outlined and integer-upscaled (see post.ts). Sub-systems:
 //   chunks   ChunkManager    merged per-chunk geometry, budgeted rebuilds
 //   sprites  SpriteLayer     billboards API for creatures/items/effects
-//   lights   LightManager    sun/moon, ambient, point-light pool, flashlight
+//   lights   LightManager    sun/moon, ambient, flash point lights, flashlight
+//   lightmap LightMap        CDDA-style shadowcast tile light (lamps, fire, windows)
 //   rig      CameraRig       first / third / top-down camera modes
 //   pipeline PixelPipeline   low-res target + post + blit
 //
 // URL params: px=<target height> grade=palette|smooth|off tex=atlas|procedural
 //             cam=first|third|top walls=tinted|sprite debug=1 (stats overlay)
+//             radius=<chunks drawn, default 4> dither=view|screen
 // Keys: V camera mode, F flashlight; with debug=1 also F6 grade mode, F7 wall style.
 
 export interface RendererOptions {
@@ -37,6 +44,10 @@ export interface RendererOptions {
   camera?: CameraMode;
   debug?: boolean;
   wallStyle?: WallStyle;
+  /** Chunks drawn around the player (default 4). */
+  radius?: number;
+  /** Dither anchoring, see PipelineOptions.ditherAnchor. */
+  dither?: 'screen' | 'view';
 }
 
 export class Renderer {
@@ -50,6 +61,11 @@ export class Renderer {
   readonly rig = new CameraRig();
   readonly pipeline: PixelPipeline;
   readonly chunks: ChunkManager;
+  readonly lightmap: LightMap;
+  /** Grass tufts around the player (cosmetic ground clutter). */
+  readonly decor: DecorLayer;
+  /** First-person wielded-item view (typed nullable so other systems call it with `?.`). */
+  readonly viewmodel: Viewmodel | null;
   readonly procedural: ProceduralTextureSource;
   source: TileTextureSource;
   /** Resolves once the preferred texture source (UltiCa atlas) is active. */
@@ -61,6 +77,17 @@ export class Renderer {
   private fps = 0;
   private frames = 0;
   private fpsT = 0;
+  private trauma = 0;
+  private muzzleLight: LightHandle;
+  private muzzleT = 0;
+  private playerLook = '';
+  private snapExposure = true;
+  private shadowT = 1;
+  /** Max sun shadow-map re-renders per second (the shadow pass is the priciest part of a
+   *  frame in software GL; sun shadows are world-anchored, so a stale map stays correct
+   *  except for moving casters, which then update at this rate). */
+  shadowHz = 20;
+  private playerLookT = 0;
 
   constructor(private canvas: HTMLCanvasElement, private game: Game, opts: RendererOptions = {}) {
     const params = typeof location !== 'undefined' ? new URLSearchParams(location.search) : new URLSearchParams();
@@ -71,24 +98,40 @@ export class Renderer {
       camera: (params.get('cam') as CameraMode) || opts.camera || 'first',
       debug: params.get('debug') === '1' || opts.debug,
       wallStyle: (params.get('walls') as WallStyle) || opts.wallStyle || 'tinted',
+      radius: Number(params.get('radius')) || opts.radius,
+      dither: (params.get('dither') as 'screen' | 'view') || opts.dither,
     };
     this.three = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' });
     this.three.setPixelRatio(window.devicePixelRatio || 1);
     this.three.shadowMap.enabled = true;
     // Hard shadow edges: soft PCF blurs into mush at 360p and fights the banded lighting.
     this.three.shadowMap.type = THREE.BasicShadowMap;
+    this.three.shadowMap.autoUpdate = false;
     this.three.info.autoReset = false;
     this.three.autoClear = true;
 
-    this.pipeline = new PixelPipeline(this.three, { targetHeight: o.targetHeight, grade: o.grade });
+    this.pipeline = new PixelPipeline(this.three, { targetHeight: o.targetHeight, grade: o.grade, ...(o.dither ? { ditherAnchor: o.dither } : {}) });
     this.rig.mode = o.camera!;
     this.procedural = new ProceduralTextureSource(game.data);
     this.source = this.procedural;
     this.sprites = new SpriteLayer(() => this.source);
     this.chunks = new ChunkManager(game.map, this.sprites, this.source);
+    if (o.radius) this.chunks.radius = o.radius;
+    this.lightmap = new LightMap(game.map);
     this.sprites.skyVisAt = (x, y, z) => (this.chunks.covered(Math.floor(x), Math.floor(y), Math.round(z)) ? INDOOR_SKY : 1);
+    this.decor = new DecorLayer(() => this.source);
+    this.decor.sprites.skyVisAt = this.sprites.skyVisAt;
 
-    this.scene.add(this.sky.mesh, this.lights.group, this.chunks.group, this.sprites.group, this.weather.group);
+    this.viewmodel = new Viewmodel();
+    this.muzzleLight = this.lights.add({ x: 0, y: 0, z: 0, color: 0xffc070, intensity: 0, radius: 7, height: 1.4 });
+    this.viewmodel.onMuzzleFlash = (sec) => { this.muzzleT = sec; };
+    game.events.on('playerHurt', (e) => {
+      const k = Math.min(1, e.amount / 20);
+      this.shake(0.25 + k * 0.6);
+      this.hurtFlash(0.35 + k * 0.65);
+    });
+
+    this.scene.add(this.sky.mesh, this.lights.group, this.chunks.group, this.sprites.group, this.decor.sprites.group, this.weather.group);
     this.scene.matrixWorldAutoUpdate = true;
 
     this.ready = o.texture === 'atlas'
@@ -149,11 +192,23 @@ export class Renderer {
     this.playerSprite?.setVisible(needPlayer);
   }
 
+  /** Camera shake, 0..1 (accumulates; decays in ~0.5 s). */
+  shake(amount: number): void {
+    this.trauma = Math.min(1, this.trauma + Math.max(0, amount));
+  }
+
+  /** Red vignette flash in the post pass, 0..1 (decays in ~0.6 s). */
+  hurtFlash(amount: number): void {
+    this.pipeline.hurt = Math.min(1, this.pipeline.hurt + Math.max(0, amount));
+  }
+
   /** Swap where tile art comes from (procedural <-> atlas); rebuilds all chunks. */
   setTextureSource(src: TileTextureSource): void {
     this.source = src;
     this.chunks.source = src;
     this.chunks.invalidateAll();
+    this.decor.invalidate();
+    this.playerLook = '';
     if (this.playerSprite) this.playerSprite.setFrame(src.sprite('player'), 1.75);
   }
 
@@ -180,10 +235,22 @@ export class Renderer {
     this.pipeline.setSize(buf.x, buf.y);
   }
 
+  /**
+   * CDDA-style light level at a tile in CDDA luminance units (daylight ~100, lit room >= 10,
+   * LIGHT_AMBIENT_LOW = 3.5 is "too dark to see"). Accurate (shadowcast) on the player's
+   * level within 64 tiles; elsewhere an outdoors/indoors estimate. For vision and stealth.
+   */
+  lightAt(x: number, y: number, z: number): number {
+    return this.lightmap.lightAt(x, y, z);
+  }
+
   /** Build every pending chunk now (tests/screenshots; normal play is budgeted). */
   flushChunks(): void {
     const p = this.game.player;
     this.chunks.update(p.x, p.y, p.z, (z) => this.zVisible(z), true);
+    this.lightmap.invalidate();
+    this.snapExposure = true;
+    this.shadowT = 1;
   }
 
   private zVisible(z: number): boolean {
@@ -210,6 +277,8 @@ export class Renderer {
     this.rig.update(dt, p, this.game.map, this.pipeline.aspect, this.pipeline.lowH);
     this.pipeline.subPixel.copy(this.rig.subPixel);
     const cam = this.rig.camera;
+    this.applyShake(dt, cam);
+    this.pipeline.hurt = Math.max(0, this.pipeline.hurt - dt * 1.7);
 
     // top-down: cut walls on the current level down to waist height
     const top = this.rig.mode === 'top';
@@ -217,21 +286,114 @@ export class Renderer {
     shared.uCutTo.value = top ? p.z * LEVEL_HEIGHT + 1.1 : 1e6;
     shared.uSpriteTilt.value = top ? 0.55 : 0;
     shared.uTime.value = this.time;
-    if (this.playerSprite) this.playerSprite.set(p.x, p.y, p.z);
+    if (this.playerSprite) {
+      this.playerSprite.set(p.x, p.y, p.z);
+      this.updatePlayerLook(dt);
+    }
 
     this.sprites.update(dt);
+    this.decor.update(this.game.map, p.x, p.y, p.z, clock.season, this.source);
     this.skyState.update(clock.hourOfDay);
-    if (this.chunks.lightsDirty) {
-      this.lights.setChunkLights(this.chunks.lightLists());
-      this.chunks.lightsDirty = false;
-    }
+    this.lightmap.naturalLevel = naturalLightLevel(Math.asin(this.skyState.sunDir.y));
+    this.lightmap.update(p.x, p.y, p.z, dt, this.time, this.lights.handles(), this.lights.handlesDirty);
+    this.lights.handlesDirty = false;
+    this.lights.setStaticLights(this.lightmap.statics);
+    this.adaptExposure(dt);
     this.lights.update(dt, this.skyState, this.rig.focus, cam);
+    // the flashlight's shadow moves with the camera, so it can't be rate limited
+    this.shadowT += dt;
+    if (this.shadowT >= 1 / this.shadowHz || this.lights.flashlightOn) {
+      this.three.shadowMap.needsUpdate = true;
+      this.shadowT = 0;
+    }
     this.sky.update(this.skyState, cam.position, this.time);
     this.weather.update(dt, cam.position);
     this.autoPatch();
 
-    this.pipeline.render(this.scene, cam, this.skyState.fog);
+    const vm = this.viewmodel!;
+    vm.enabled = this.rig.mode === 'first';
+    this.muzzleT = Math.max(0, this.muzzleT - dt);
+    this.muzzleLight.set(p.x, p.y, p.z);
+    this.muzzleLight.intensity = this.muzzleT > 0 ? 2.5 : 0;
+    let overlay: { scene: THREE.Scene; camera: THREE.Camera } | undefined;
+    if (vm.enabled) {
+      this.viewmodelTint(vm.tint);
+      vm.update(dt, p.inv.wielded, p.x, p.y, p.yaw, this.pipeline.lowW, this.pipeline.lowH, (id) => this.source.item(id));
+      overlay = vm;
+    }
+    this.pipeline.render(this.scene, cam, this.skyState.fog, overlay);
     this.updateDebug(dt);
+  }
+
+  /**
+   * Eye adaptation, daytime only: a room lit through its windows reads clearly while the
+   * windows themselves blow out; outdoors stays at 1. At night nothing is boosted, so the
+   * dark stays dark (CDDA) and lamps/fire carry the scene.
+   */
+  private adaptExposure(dt: number): void {
+    const p = this.game.player;
+    const lum = this.lightmap.lightAt(p.x, p.y, p.z);
+    const day = 1 - this.skyState.night;
+    // relative to the light outdoors right now: only the indoor/outdoor difference adapts
+    const ratio = Math.max(this.lightmap.naturalLevel, 1) / Math.max(lum, 1);
+    // top-down mostly shows the outdoors around the player's building: adapt only a little
+    const k = day * (this.rig.mode === 'top' ? 0.3 : 1);
+    const target = 1 + (Math.min(2.2, Math.max(1, Math.sqrt(ratio))) - 1) * k;
+    const pl = this.pipeline;
+    pl.exposure = this.snapExposure ? target : pl.exposure + (target - pl.exposure) * Math.min(1, dt * 1.5);
+    this.snapExposure = false;
+  }
+
+  /** Trauma-style shake: smooth pseudo-noise rotation offsets scaled by trauma squared. */
+  private applyShake(dt: number, cam: THREE.PerspectiveCamera): void {
+    if (this.trauma <= 0) return;
+    const k = this.trauma * this.trauma;
+    const t = this.time * 38;
+    const n = (a: number) => Math.sin(t + a) * 0.6 + Math.sin(t * 1.93 + a * 3.1) * 0.4;
+    cam.rotation.x += k * 0.045 * n(0);
+    cam.rotation.y += k * 0.045 * n(11);
+    cam.rotation.z += k * 0.03 * n(23);
+    cam.position.y += k * 0.04 * n(37);
+    cam.updateMatrixWorld();
+    this.trauma = Math.max(0, this.trauma - dt * 2);
+  }
+
+  /** Light on the first-person hands: the light map at the player (sky share + lamps). */
+  private viewmodelTint(out: THREE.Color): void {
+    const p = this.game.player;
+    const f = this.lightmap.field;
+    const tx = Math.floor(p.x), ty = Math.floor(p.y);
+    const onLevel = p.z === this.lightmap.z;
+    let nat = onLevel ? f.naturalAt(tx, ty) : -1;
+    if (nat < 0) nat = this.chunks.covered(tx, ty, p.z) ? f.indoorAmbient : 1;
+    const sky = this.skyState;
+    const i = onLevel ? f.index(tx, ty) : -1;
+    const art = i >= 0 ? [f.disp[i * 3], f.disp[i * 3 + 1], f.disp[i * 3 + 2]] : [0, 0, 0];
+    const m = Math.max(...art);
+    const ak = m > 0 ? displayIrradiance(m, 3.2) / m : 0;
+    const gate = Math.min(1, Math.max(0, (nat - 0.02) / 0.18));
+    const fl = this.lights.flashlightOn ? 0.5 : 0;
+    const ch = (c: 'r' | 'g' | 'b', a: number) =>
+      ((sky.hemiSky[c] * 0.6 + sky.hemiGround[c] * 0.4) * sky.hemiIntensity * nat + sky.sunColor[c] * sky.sunIntensity * 0.35 * gate + a * ak + fl) / Math.PI;
+    out.setRGB(Math.min(1.2, ch('r', art[0])), Math.min(1.2, ch('g', art[1])), Math.min(1.2, ch('b', art[2])));
+  }
+
+  /** Third-person/top-down sprite: CDDA body + worn-item overlays, rebuilt when gear changes. */
+  private updatePlayerLook(dt: number): void {
+    this.playerLookT -= dt;
+    if (this.playerLookT > 0) return;
+    this.playerLookT = 0.25;
+    const inv = this.game.player.inv;
+    const look = [...inv.worn.map((w) => w.typeId), '|', inv.wielded?.typeId ?? ''].join(',');
+    if (look === this.playerLook) return;
+    this.playerLook = look;
+    const src = this.source;
+    if (!(src instanceof AtlasTextureSource)) return;
+    // Until character creation hands out clothes the survivor wears nothing; show the
+    // default outfit rather than a naked sprite in that case.
+    const worn = inv.worn.length ? inv.worn.map((w) => w.typeId) : ['jeans', 'tshirt', 'sneakers', 'jacket_flannel'];
+    src.playerLayers = src.layersFor(worn, inv.wielded?.typeId ?? null);
+    this.playerSprite!.setFrame(src.sprite('player'), 1.75);
   }
 
   /** Other systems may add plain three.js objects to `scene`; give them the MRT output. */
@@ -256,7 +418,11 @@ export class Renderer {
       pending: this.chunks.stats.pending,
       buildMs: +this.chunks.stats.lastBuildMs.toFixed(2),
       sprites: this.sprites.count,
+      decor: this.decor.count,
       lights: this.lights.activeCount,
+      exposure: +this.pipeline.exposure.toFixed(2),
+      lmSources: this.lightmap.stats.sources,
+      lmMs: `${this.lightmap.stats.naturalMs.toFixed(1)}/${this.lightmap.stats.artificialMs.toFixed(1)}`,
       mode: this.rig.mode,
       grade: this.pipeline.options.grade,
       textures: this.source === this.procedural ? 'procedural' : 'atlas',

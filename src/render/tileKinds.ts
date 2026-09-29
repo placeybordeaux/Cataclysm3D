@@ -22,6 +22,9 @@ export type TerrainShape =
 
 export function terrainShape(t: TerrainDef): TerrainShape {
   if (t.id === 't_null') return 'none';
+  // CDDA puts tree canopies on the level above (t_treetop*); the tree billboard already
+  // draws the canopy, and a floor slab up there would roof the forest over.
+  if (t.id.startsWith('t_treetop')) return 'none';
   const f = (flag: string) => hasFlag(t, flag);
   if (f('TREE')) return 'tree';
   if (f('SHRUB') || f('YOUNG')) return 'shrub';
@@ -68,4 +71,22 @@ export function furnitureShape(fd: FurnitureDef): FurnitureShape {
 /** Light a terrain/furniture emits, in CDDA luminance units (0 = none). */
 export function lightEmitted(def: TerrainDef | FurnitureDef): number {
   return def.light_emitted ?? 0;
+}
+
+/**
+ * How a CDDA field type is drawn: 'decal' = flat splat on the floor (liquids, gore,
+ * debris), 'cloud' = translucent dithered billboard (smoke, gases), 'fire' = animated
+ * billboard + light, 'none' = not drawn (invisible fields like fd_hot_air). `color` is the
+ * procedural stand-in colour.
+ */
+export function fieldStyle(type: string): { kind: 'decal' | 'cloud' | 'fire' | 'none'; color: number } {
+  if (type === 'fd_fire' || /incendiary|flame/.test(type)) return { kind: 'fire', color: 0xff8030 };
+  if (/blood|gibs|bile|acid|sludge|slime|sap|oil|mechanical_fluid|gore|puke|vomit|rubble|glass|shards|splinters|ash|web|mud|dust/.test(type)) {
+    const color = /bile|acid|slime/.test(type) ? 0x6a8a20 : /blood|gibs|gore/.test(type) ? 0x6a0a0a : /oil|mechanical|sludge/.test(type) ? 0x1e1a14 : 0x7a7064;
+    return { kind: 'decal', color };
+  }
+  if (/smoke|gas|haze|fog|mist|steam|spores|toxic|nuke|tear|cloud/.test(type)) {
+    return { kind: 'cloud', color: /toxic|nuke|fungal|spores/.test(type) ? 0x7a8a50 : /tear/.test(type) ? 0xb0b0a0 : 0x7a7a7e };
+  }
+  return { kind: 'none', color: 0 };
 }

@@ -123,6 +123,25 @@ export class AtlasTextureSource implements TileTextureSource {
   private composites = new Map<string, TileFrame>();
 
   /**
+   * CDDA sprite layering for a survivor: body, then each worn item's overlay in wear order
+   * (inner to outer), then the wielded item's. Tries the gendered overlay id first like CDDA
+   * (overlay_male_worn_X, then overlay_worn_X); items without art are skipped.
+   */
+  layersFor(worn: string[], wielded: string | null, gender: 'male' | 'female' = 'male'): string[] {
+    const pick = (...ids: string[]) => ids.find((id) => this.atlas.has(id));
+    const out = [`player_${gender}`];
+    for (const id of worn) {
+      const o = pick(`overlay_${gender}_worn_${id}`, `overlay_worn_${id}`);
+      if (o) out.push(o);
+    }
+    if (wielded) {
+      const o = pick(`overlay_${gender}_wielded_${wielded}`, `overlay_wielded_${wielded}`);
+      if (o) out.push(o);
+    }
+    return out;
+  }
+
+  /**
    * Stack several atlas sprites (CDDA-style body + clothing overlays) into one frame on its
    * own small texture. Missing ids are skipped. Memoised by the id list.
    */
@@ -153,8 +172,9 @@ export class AtlasTextureSource implements TileTextureSource {
   sprite(name: string): TileFrame {
     if (name === 'player') return this.composite(this.playerLayers) ?? this.fallback.sprite(name);
     const id = name === 'fire' ? 'fd_fire' : name;
-    const hit = this.atlas.lookup(id);
-    return this.conv(hit?.fg, false) ?? this.fallback.sprite(name);
+    // fields come as fd_x_int<n>; UltiCa has per-intensity sprites for some, one for others
+    const hit = this.atlas.lookup(id) ?? (id.startsWith('fd_') ? this.atlas.lookup(id.replace(/_int\d$/, '')) : null);
+    return this.conv(hit?.fg ?? hit?.bg, false) ?? this.fallback.sprite(name);
   }
 
   /** Average opaque colour of an id's atlas sprite (memoised), for tinting procedural faces. */
