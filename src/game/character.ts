@@ -312,6 +312,8 @@ export class Character {
    * needs the mutation powered, DAY/NIGHT/INSIDE…). Unset: always true.
    */
   enchantCondition: ((condition: unknown, traitId: string) => boolean) | null = null;
+  /** Adjacent monsters holding this character (set by the monster system; BN get_dodge). */
+  grabbers: (() => number) | null = null;
 
   constructor(readonly data: GameData, opts: { seed?: number } = {}) {
     this.rng = new Rng(opts.seed ?? 12345);
@@ -1198,9 +1200,9 @@ export class Character {
     ret -= (this.inv.encumbrance('leg_l') + this.inv.encumbrance('leg_r')) / 20 + this.inv.encumbrance('torso') / 10;
     const max = this.staminaMax();
     if (this.stamina < max / 2) ret *= (this.stamina / max) * 2;
-    // Each grabbing monster costs a quarter (the grab effect's intensity counts grabbers).
-    const grab = this.effects.get('grabbed');
-    if (grab) ret *= Math.max(0, 1 - 0.25 * Math.max(1, grab.intensity));
+    // Each adjacent grabbing monster costs a quarter (the grab effect's intensity is grab
+    // strength, not a head count: the monster system counts them through `grabbers`).
+    if (this.effects.has('grabbed')) ret *= Math.max(0, 1 - 0.25 * Math.max(1, this.grabbers?.() ?? 1));
     return Math.max(0, ret);
   }
 

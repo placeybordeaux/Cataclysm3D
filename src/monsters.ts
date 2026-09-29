@@ -41,6 +41,8 @@ export function installMonsters(game: Game, renderer: Renderer | null, worldgen:
   const spawner = new Spawner(sys, worldgen ? overmapView(worldgen) : null);
   const combat = new PlayerCombat(game, sys);
   game.systems.push(sys, combat);
+  // BN Character::get_dodge counts the grabbing monsters within one tile.
+  game.player.grabbers = () => sys.all.filter((m) => !m.dead && m.hasEffect('grabbing') && m.z === game.player.z && Math.max(Math.abs(m.tileX - game.player.tileX), Math.abs(m.tileY - game.player.tileY)) <= 1).length;
   // Zombie density (CDDA SPAWN_DENSITY): the remembered choice until character creation
   // or a loaded save says otherwise. In the browser, spawns wait for the game to start so
   // the chunks generated behind the title screen use the density picked for the new game.
