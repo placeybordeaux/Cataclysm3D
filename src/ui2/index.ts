@@ -12,7 +12,7 @@ export { makeDraggable, registerDropTarget, targetAt, dragging, flashNote, type 
 export { openContextMenu, closeMenu, menuOpen, type MenuItem } from './menu';
 export { attachTooltip, hideTooltip, itemTooltip, suppressTooltips, type TipContent } from './tooltip';
 export { toast, toastState } from './toast';
-export { confirmModal, countPrompt } from './modal';
+export { confirmModal, countPrompt, textPrompt } from './modal';
 export { startProgress, type ProgressHandle } from './progress';
 export { Hotbar, HOTBAR_KEYS, type HotbarBinding } from './hotbar';
 export { paperDollView, type DollSlot } from './paperdoll';

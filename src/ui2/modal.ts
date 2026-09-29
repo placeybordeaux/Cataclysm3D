@@ -180,3 +180,52 @@ export function countPrompt(o: CountOpts): Promise<number | null> {
     }, 0);
   });
 }
+
+export interface TextPromptOpts {
+  title: string;
+  label?: string;
+  initial?: string;
+  placeholder?: string;
+  ok?: string;
+  maxLength?: number;
+  icon?: IconRef;
+}
+
+/**
+ * A one-line text field (map notes, names): resolves to the text, or null on cancel. Keys typed
+ * in the field never reach the game (src/core/input.ts ignores keydowns aimed at inputs), so
+ * Enter/Esc are handled on the field itself.
+ */
+export function textPrompt(o: TextPromptOpts): Promise<string | null> {
+  return new Promise((resolve) => {
+    let done = false;
+    const answer = (v: string | null) => {
+      if (done) return;
+      done = true;
+      d.close();
+      resolve(v);
+    };
+    const field = h('input', { class: 'ui2-num', attrs: { type: 'text', maxlength: String(o.maxLength ?? 80), placeholder: o.placeholder ?? '', 'data-testid': 'text-prompt' } });
+    field.value = o.initial ?? '';
+    field.style.textAlign = 'left';
+    field.style.width = '100%';
+    field.style.userSelect = 'text';
+    field.addEventListener('keydown', (e) => {
+      e.stopPropagation();
+      if (e.key === 'Enter') (e.preventDefault(), answer(field.value));
+      else if (e.key === 'Escape') (e.preventDefault(), answer(null));
+    });
+    const d = openDialog(
+      o.title,
+      [o.label ? h('div', { class: 'ui2-dim ui2-small', text: o.label }) : h('span'), field],
+      [button('Cancel', () => answer(null), { key: 'Esc' }), button(o.ok ?? 'OK', () => answer(field.value), { tone: 'accent', key: 'Enter' })],
+      (e) => {
+        if (e.key === 'Enter' && !e.repeat) return answer(field.value), true;
+        return false;
+      },
+      () => answer(null),
+      o.icon,
+    );
+    setTimeout(() => (field.focus(), field.select()), 0);
+  });
+}
