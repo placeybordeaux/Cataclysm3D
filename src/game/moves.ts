@@ -742,6 +742,13 @@ export function spawnSome(it: Item, to: Loc, opts: MoveOpts = {}): Item | null {
  */
 export function consumeItem(it: Item, from: Loc, count?: number): Item | null {
   if (!isAt(it, from)) return null;
+  // a stack already used up in place (burnt, fired) is only cleaned away
+  if (it.countByCharges && it.charges <= 0 && count === undefined) {
+    const log: Undo[] = [];
+    rawDetach(from, it, log);
+    txStack[txStack.length - 1]?.push(...log);
+    return it;
+  }
   const n = count ?? it.count();
   if (!Number.isInteger(n) || n <= 0 || n > it.count()) throw new Error(`consumeItem: bad count ${count} of ${it.typeId} x${it.count()}`);
   const log: Undo[] = [];

@@ -59,6 +59,8 @@ const materials = Object.fromEntries(
 // effects.json: a data-side override to prove misc.effect_type is read (same as CDDA).
 const effectTypes: Record<string, EffectTypeDef> = {
   winded: { id: 'winded', name: ['Winded'], apply_message: 'Your breath gives out!', remove_message: 'You catch your breath.', rating: 'bad', max_duration: '30 s', base_mods: { per_mod: [-1], speed_mod: [-10], pain_min: [1], pain_chance: [5], pain_max_val: [20] } },
+  // BN aspirin's painkiller (effects.json pkill1)
+  pkill1: structuredClone(realMisc.effect_type.pkill1) as EffectTypeDef,
 };
 
 const skills = Object.fromEntries(

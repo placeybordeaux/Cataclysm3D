@@ -339,7 +339,7 @@ describe('skills, morale, focus', () => {
   it('tasty food adds morale (fun), which raises focus equilibrium', () => {
     const { c } = survivor();
     c.inv.consume(createItem(data, 'chocolate'), null);
-    expect(c.morale.level()).toBe(20);
+    expect(c.morale.level()).toBe(10); // BN chocolate: fun 10
     passTime(c, 3600);
     expect(c.focus).toBeGreaterThan(100);
     passTime(c, 3 * 3600);
@@ -352,7 +352,7 @@ describe('skills, morale, focus', () => {
     c.update(1);
     expect(c.morale.level()).toBe(10); // trunc(9 x 1.2)
     c.inv.consume(createItem(data, 'chocolate'), null);
-    expect(c.morale.level()).toBe(Math.trunc(Math.sqrt(10 * 10 + 24 * 24)));
+    expect(c.morale.level()).toBe(Math.trunc(Math.sqrt(10 * 10 + 12 * 12)));
     c.removeTrait('OPTIMISTIC');
     c.update(1);
     expect(c.morale.has('morale_perm_optimist')).toBe(false);
@@ -395,6 +395,6 @@ describe('serialization', () => {
     const d = new Character(data);
     d.load(j);
     expect(d.toJSON()).toEqual(c.toJSON());
-    expect(d.inv.countOf('can_beans')).toBe(1);
+    expect(d.inv.countOf('can_beans')).toBe(2); // BN: a can of beans is 2 portions
   });
 });

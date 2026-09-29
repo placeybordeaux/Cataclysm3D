@@ -14,6 +14,14 @@ import { makeData } from './fixtures/gamedata';
 
 const data = makeData();
 const zombie = data.monsters.mon_zombie;
+// These tests pin the combat formulas on the weapon numbers they were written with (the DDA
+// pipe, combat knife, Glock and 9mm, leather jacket), independent of how BN balances those items;
+// the item fixture itself is real BN data (tests/fixtures/gamedata.ts).
+Object.assign(data.items.pipe, { volume: 370, weight: 600, bashing: 10, cutting: 0, melee_damage: { bash: 10 }, to_hit: 0, count_by_charges: false, stackable: false, stack_size: undefined, qualities: [['HAMMER', 1]] });
+Object.assign(data.items.knife_combat, { volume: 184, weight: 270, bashing: 0, cutting: 21, melee_damage: { stab: 21 }, to_hit: -1 });
+Object.assign(data.items.glock_19, { name: 'Glock 19 pistol', volume: 386, weight: 600, dispersion: 480, sight_dispersion: 60, reload: 150, ranged_damage: [], recoil: 0, handling: undefined });
+Object.assign(data.items['9mm'], { weight: 12, volume: 115, damage: [{ damage_type: 'bullet', amount: 23 }], recoil: 500, loudness: undefined, range: 14, dispersion: 60 });
+Object.assign(data.items.jacket_leather, { material_thickness: 1 });
 
 function survivor(): Character {
   return new Character(data, { seed: 11 });
@@ -82,11 +90,11 @@ describe('melee: to-hit and crits', () => {
     c.setSkill('bashing', 3);
     c.setSkill('melee', 2);
     expect(meleeHitBase(c, createItem(data, 'pipe'))).toBe(2 + 1 + 1);
-    // BN: torso encumbrance 20 scales accuracy by 1 - 20/100 (DDA subtracted enc/10)
+    // BN: torso encumbrance scales accuracy by 1 - enc/100 (DDA subtracted enc/10)
     const d = survivor();
     d.inv.wear(createItem(data, 'hoodie'), null);
     d.inv.wear(createItem(data, 'jacket_leather'), null);
-    expect(meleeHitBase(d, null)).toBeCloseTo(2 * 0.8);
+    expect(meleeHitBase(d, null)).toBeCloseTo(2 * (1 - d.inv.encumbrance('torso') / 100));
   });
 
   it('hit chance vs an undodging zombie matches normal(10, 25) >= 0', () => {

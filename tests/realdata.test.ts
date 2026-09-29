@@ -11,6 +11,7 @@ import { createItem, fromSpawned, Item } from '../src/game/item';
 import { BODY_PARTS, ALL_PARTS } from '../src/game/bodyparts';
 import { itemsOf, stackEntries, type InvEntry } from '../src/ui/inventory_ui';
 import { L, spawnItem } from '../src/game/moves';
+import { expandItemGroup } from '../src/data/itemgroups';
 
 const dir = path.join(__dirname, '../public/data');
 const load = (f: string) => JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8'));
@@ -38,9 +39,11 @@ describe('real data: items', () => {
     const [bottle, ...rest] = fromSpawned(data, { id: 'condiment_bottle_sealed', count: 1, contents: [{ id: 'ketchup', count: 1, charges: 32 }] });
     expect(rest).toEqual([]);
     expect(bottle.allContents().map((c) => `${c.typeId}x${c.charges}`)).toEqual(['ketchupx32']);
-    // ... while a loose liquid in a bag still gets bottled
-    const [bag] = fromSpawned(data, { id: 'bag_plastic', count: 1, contents: [{ id: 'water_clean', count: 1, charges: 2 }] });
-    expect(bag.allContents().map((c) => c.typeId)).toEqual(['bottle_plastic']);
+    // ... while an item group entry without one gets its default container (Item_modifier::modify)
+    const spawned = expandItemGroup(data, { subtype: 'collection', entries: [{ item: 'water_clean' }] } as never, new Rng(1));
+    const [bottle2] = spawned.flatMap((s) => fromSpawned(data, s));
+    expect(bottle2.typeId).toBe('bottle_plastic');
+    expect(bottle2.contents.map((c) => `${c.typeId}x${c.charges}`)).toEqual(['water_cleanx2']);
   });
 
   it('bows, crossbows and flamethrowers make their own shot sounds (ranged.cpp gun_noise)', () => {

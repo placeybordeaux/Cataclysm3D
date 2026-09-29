@@ -322,10 +322,11 @@ export class Item implements MapItem {
     for (const t of this.ammoTypes()) out.push(...(this.def.magazines?.[t] ?? []));
     return [...new Set(out)].filter((id) => !this.data.items[id]?.flags.includes('SPEEDLOADER'));
   }
-  /** item::magazine_default for the first ammo type. */
+  /** item::magazine_default for the first ammo type (never a speedloader / stripper clip). */
   magazineDefault(): string | undefined {
     const t = this.ammoTypes()[0];
-    return t ? this.def.magazine_default?.[t] : undefined;
+    const m = t ? this.def.magazine_default?.[t] : undefined;
+    return m && !this.data.items[m]?.flags.includes('SPEEDLOADER') ? m : undefined;
   }
   /** item::magazine_integral: rounds sit in the item itself (gun clip_size / tool max_charges, no magazine). */
   hasIntegralMagazine(): boolean {
@@ -782,8 +783,10 @@ export function inNewContainer(data: GameData, it: Item, containerId: string): {
  * count > 1 become several Items; stackable ones become one stack. `contents` go into the
  * item: a compatible magazine into the magazine slot, everything else into its contents.
  * Guns, tools and magazines with `charges` get that many rounds of `ammo` (or the default).
+ * A loose liquid at the top level goes into its default container, as many as it takes (BN
+ * map::spawn_item -> item::in_its_container); inside an explicit container it stays as given.
  */
-export function fromSpawned(data: GameData, s: SpawnedItem): Item[] {
+export function fromSpawned(data: GameData, s: SpawnedItem, topLevel = true): Item[] {
   const def = data.items[s.id];
   if (!def) {
     warnOnce('item', s.id);
@@ -801,6 +804,17 @@ export function fromSpawned(data: GameData, s: SpawnedItem): Item[] {
     it.charges = (s.charges ?? defaultCharges(def)) * Math.max(1, s.count);
     if (it.charges <= 0) return [];
     apply(it);
+    if (topLevel && it.isLiquid() && def.container && data.items[def.container]?.container_data) {
+      let left: Item | null = it;
+      for (let guard = 0; left && guard < 100; guard++) {
+        const w = inNewContainer(data, left, def.container);
+        if (!w.container.hasContents()) break;
+        out.push(w.container);
+        left = w.rest;
+      }
+      if (left) out.push(left);
+      return out;
+    }
     out.push(it);
     return out;
   }
@@ -808,7 +822,7 @@ export function fromSpawned(data: GameData, s: SpawnedItem): Item[] {
     const it = new Item(data, def);
     apply(it);
     for (const cs of s.contents ?? []) {
-      for (const c of fromSpawned(data, cs)) {
+      for (const c of fromSpawned(data, cs, false)) {
         if (!it._magazine && c.isMagazine() && it.acceptsMagazine(c)) it._magazine = c;
         else it._contents.push(c);
       }
