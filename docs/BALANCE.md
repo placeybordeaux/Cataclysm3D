@@ -161,6 +161,10 @@ doors, and sleep. Every run is deterministic per seed.
 - `duel`: the same melee against 1 or 2 zombies on open ground, per weapon.
 - `needs`: the timelines above. `cold`: the first night in the shelter.
 
+The tables below were measured on 2026-09-29, before the inventory rewrite was merged. That
+rewrite changed encumbrance values: the Evacuee now walks at 2.9 tiles/s instead of 2.8. Re-run
+the sim after changes like that.
+
 `tsx tools/balance_sim.ts --preset accessible --seeds 20 --out runs.jsonl` writes JSON-lines
 records. `--from runs.jsonl` prints the tables again without simulating. `--trace` prints the
 bot's state and the game log every second.
