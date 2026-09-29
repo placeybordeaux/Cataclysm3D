@@ -1,0 +1,110 @@
+# Cataclysm: Dark Days Ahead — 3D
+
+A real-time, first-person 3D remake of [Cataclysm: Dark Days Ahead](https://cataclysmdda.org),
+running in the browser. It loads **CDDA's own JSON content** (10k items, 1.2k monsters, 5.6k
+recipes, 2.3k mapgen layouts, 3.2k dialogue topics…) and builds the world out of the
+**UltiCa pixel-art tileset**, rendered in the "3D pixel art" style of *Project Shadowglass*:
+a low-resolution, point-filtered image of a real 3D world with banded lighting, a limited
+palette, ordered dithering and outlines.
+
+## Running
+
+```sh
+nix-shell               # node 22, chromium, ffmpeg, imagemagick (see shell.nix)
+npm install             # first time only
+npm run dev             # → http://localhost:5173
+```
+
+Production build: `npm run build` (output in `dist/`, static files, serve with anything).
+
+Useful URL parameters: `seed=<n>` (world seed), `skipmenu=1` (straight into the game),
+`gen=test` (small test scene), `debug=1` (render stats; F6 cycles colour grading),
+`px=<n>` (internal render height), `radius=<chunks>`, `debug=atlas` (sprite atlas viewer).
+
+## Controls
+
+Movement is first-person: **WASD** to move, **mouse** to look (click to capture), **Shift**
+to run, **c** to crouch, **LMB** to attack or fire, **RMB** to aim, and **v** to cycle the
+camera between first person, over the shoulder, and top-down (classic CDDA view).
+Everything else uses CDDA's keys, moved where WASD collides with them:
+
+| Key | Action | Key | Action |
+|---|---|---|---|
+| `e` | examine / open / use | `g` `,` | pick up |
+| `i` | inventory | `q` | drop |
+| `z` | wield | `W` / `T` | wear / take off |
+| `E` | eat / drink | `A` | apply / activate |
+| `r` / `U` | reload / unload | `f` | fire |
+| `b` | fire mode | `G` | throw |
+| `X` | smash | `B` | butcher / dissect |
+| `&` | craft | `*` | construct |
+| `(` | disassemble | `R` | read |
+| `F` | flashlight | `<` `>` | stairs |
+| `x` | look | `m` | overmap |
+| `@` | character sheet | `P` | message log |
+| `|` / `$` | wait / sleep | `C` / `M` | chat / missions |
+| `^` | vehicle controls | `k` `h` `n` | engine / headlights / horn |
+| `p` | bionics | `[` | mutations |
+| `_` | martial arts | `)` | achievements & scores |
+| `S` | save | `?` | help |
+
+## What's in it
+
+- **World**: overmap with towns grown on CDDA's street algorithm, roads, forests, rivers,
+  lakes and wilderness specials. Every building comes from CDDA's JSON mapgen, including
+  palettes, nested chunks, rotations, roofs and basements. The world also has the evac
+  shelter start, the refugee center, underground labs (to z-7) and microlabs.
+- **Survival**: CDDA body-part HP, pain, stamina, hunger/thirst/kcal, sleep, body
+  temperature with clothing, wind and wetness, effects (bleeding, infection, …), morale,
+  skills, weather, seasons with real Boston sunrise and sunset, and food that spoils.
+- **Items**: pockets and containers, liquids, guns with magazines, gunmods and fire modes,
+  armor with coverage, encumbrance and layering, and item info in CDDA's format.
+- **Monsters**: CDDA stats and special attacks (grab, bite, shriek, acid, leap, boomer,
+  necromancer…). They hear noise and hordes converge on gunfire. They see by light level,
+  bash doors, evolve over days, and turrets shoot.
+- **Combat**: CDDA to-hit and damage, weapon techniques (sweeps, knockback, stuns), blocking
+  and dodging, martial arts styles with buffs, weapon durability, aim levels, burst fire,
+  pellets and explosive ammo. Monsters can be butchered and dissected.
+- **Crafting**: CDDA recipes, tools, qualities and components (nearby items and fires
+  count), construction, disassembly, reading and learning from books, and lighting fires.
+- **Nature**: foraging, harvesting and woodcutting, farming with growth that continues
+  while you're away, fishing, swimming and water.
+- **NPCs**: survivors and bandits, the Free Merchants at the refugee center, CDDA dialogue
+  (trials, conditions, effects), trading, missions and followers.
+- **Vehicles**: cars from mapgen with CDDA parts, fuel and batteries. You can hotwire them,
+  drive them in real time with cruise control, crash them, run over zombies, use
+  headlights, and hear engine audio.
+- **Body mods**: mutagen, mutations and thresholds (vitamin-based), CBM installation
+  (Autodoc or self-install), and bionic power.
+- **Meta**: title screen, character creation (scenarios, professions, traits, stats),
+  save/load (IndexedDB, autosave, permadeath), the memorial, and CDDA's 231 achievements.
+- **Audio**: 3D positional sound effects, ambience and music from the CDDA soundpacks.
+
+## Development
+
+The code was written by a team of AI agents working in parallel; `ARCHITECTURE.md` is the
+map: conventions, subsystem APIs and extension points. Handy commands:
+
+```sh
+npm run typecheck && npm test        # strict TS + ~500 vitest tests
+npm run data:all                     # re-extract public/data from ~/code/Cataclysm-DDA
+npm run atlas                        # recompile the UltiCa sprite atlas
+npm run audio                        # rebuild the soundpack subset
+npm run shot -- --help               # headless screenshots / scripted checks
+npx tsx tools/drive.ts --help        # persistent headless session (optionally on the GPU)
+```
+
+## Credits and licences
+
+- **Cataclysm: Dark Days Ahead** data and text: © the CDDA contributors, licensed
+  CC-BY-SA 3.0. This project is a derivative work under the same licence.
+- **UltiCa tileset** (I-am-Erk/CDDA-Tilesets): CC-BY-SA 3.0.
+- **Sound effects**: CDDA "CC-Sounds" soundpack. Per-file authors and licences are in
+  `public/audio/CREDITS.md`.
+- **Music**: CO.AG tracks from the CDDA music packs. They are used with the composer's
+  informal permission to redistribute with credit, as recorded in that repository. Drop them
+  with `npm run audio -- --music-tracks 0` if that's not enough for your use.
+- **Fonts**: Terminus (SIL OFL, `public/fonts/LICENSE-OFL-Terminus-Font.txt`) and GNU
+  Unifont, both as shipped with CDDA.
+- The visual style is inspired by Starhelm Studios' *Project Shadowglass*. No assets or code
+  from that game are used.
