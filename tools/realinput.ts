@@ -446,6 +446,23 @@ const scenarios: Scenario[] = [
     s = await until((t) => t.lock, 3000);
     v = await u();
     check('Tab closes it and re-captures the mouse', !v.surfaces && s.lock && !v.tacticalPause, { v, lock: s.lock });
+    // Classic: time keeps running with the inventory open.
+    await js('cdda.ui2.settings.pauseInInventory = false; cdda.ui2.saveSettings()');
+    await x.key('Tab');
+    const t0 = await js<number>('cdda.game.clock.seconds');
+    await sleep(1200);
+    const t1 = await js<number>('cdda.game.clock.seconds');
+    v = await u();
+    check('with Pause in inventory off, game time runs while it is open', v.surfaces > 0 && !v.tacticalPause && t1 > t0, { t0, t1, v });
+    await x.key('Tab');
+    await js('cdda.ui2.settings.pauseInInventory = true; cdda.ui2.saveSettings()');
+    const p0 = await js<number>('cdda.game.clock.seconds');
+    await x.key('Tab');
+    await sleep(1200);
+    const p1 = await js<number>('cdda.game.clock.seconds');
+    check('with it on (default), game time stops', p1 === p0, { p0, p1 });
+    await x.key('Tab');
+    await until((t) => t.lock, 3000);
   }],
   ['save', 'F5 saves; leaving the page asks first; title Load/Memorial screens', async () => {
     await toGameplay();

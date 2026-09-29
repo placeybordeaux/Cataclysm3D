@@ -188,6 +188,9 @@ export function installUi2(game: Game, renderer: Renderer, ctx: UiContext, api: 
       return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2), w: Math.round(r.width), h: Math.round(r.height) };
     },
     mock: () => mock,
+    /** ui2 settings (pauseInInventory); call saveSettings() after changing. */
+    settings,
+    saveSettings,
   };
   return { toggleInventory: inventory };
 }
