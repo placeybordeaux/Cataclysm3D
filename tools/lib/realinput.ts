@@ -136,3 +136,65 @@ export class XInput {
     execFileSync('setxkbmap', [name]);
   }
 }
+
+export type BrowserKind = 'chromium' | 'firefox';
+const FIREFOX = '/run/current-system/sw/bin/firefox';
+
+/**
+ * A windowed browser on the Xvfb display, placed at 0,0. Chromium through CDP (CHROME_PATH from
+ * shell.nix); Firefox through WebDriver BiDi, because the human playtests in Firefox and its
+ * pointer lock / Esc / WebSocket-on-unload behaviour differs from Chromium's.
+ */
+export async function launchBrowser(kind: BrowserKind, width: number, height: number, o: { gpu?: boolean } = {}): Promise<import('puppeteer-core').Browser> {
+  const puppeteer = (await import('puppeteer-core')).default;
+  if (kind === 'firefox') {
+    const exe = process.env.FIREFOX_PATH ?? FIREFOX;
+    if (!existsSync(exe)) throw new Error(`firefox not found at ${exe} (set FIREFOX_PATH)`);
+    return puppeteer.launch({
+      browser: 'firefox',
+      executablePath: exe,
+      headless: false,
+      defaultViewport: null,
+      args: [`--width=${width}`, `--height=${height + 120}`],
+      extraPrefsFirefox: {
+        // No "press Esc to leave" banners over the page, no first-run tabs.
+        'full-screen-api.warning.timeout': 0,
+        'full-screen-api.transition-duration.enter': '0 0',
+        'full-screen-api.transition-duration.leave': '0 0',
+        'browser.shell.checkDefaultBrowser': false,
+        'browser.startup.homepage_override.mstone': 'ignore',
+        'datareporting.policy.dataSubmissionEnabled': false,
+      },
+      protocolTimeout: 10 * 60_000,
+    });
+  }
+  return puppeteer.launch({
+    executablePath: process.env.CHROME_PATH,
+    headless: false,
+    defaultViewport: null,
+    // --gpu: the real GPU through ANGLE/Vulkan (works under Xvfb). SwiftShader renders on the CPU:
+    // the default "full" look then runs at a few fps on a busy machine, and time-based checks
+    // (walking, clocks) starve.
+    args: ['--no-sandbox', ...(o.gpu ? ['--use-angle=vulkan', '--enable-features=Vulkan', '--ignore-gpu-blocklist', '--enable-gpu'] : ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist']), `--window-size=${width},${height + 120}`, '--window-position=0,0', '--no-first-run'],
+    protocolTimeout: 10 * 60_000,
+  });
+}
+
+/** Resize the real window so the page viewport is exactly w×h (the toolbar height varies). */
+export async function fitWindow(page: Page, kind: BrowserKind, w: number, h: number): Promise<void> {
+  const d = await page.evaluate(() => ({ dw: window.outerWidth - window.innerWidth, dh: window.outerHeight - window.innerHeight }));
+  if (kind === 'chromium') {
+    const cdp = await page.createCDPSession();
+    const { windowId } = (await cdp.send('Browser.getWindowForTarget')) as { windowId: number };
+    await cdp.send('Browser.setWindowBounds', { windowId, bounds: { left: 0, top: 0, width: w + d.dw, height: h + d.dh } });
+  } else {
+    // No CDP: move the X window itself. Without a window manager every mapped firefox
+    // top-level is the browser window.
+    const ids = execFileSync('xdotool', ['search', '--onlyvisible', '--class', 'firefox'], { encoding: 'utf8' }).trim().split('\n').filter(Boolean);
+    for (const id of ids) {
+      execFileSync('xdotool', ['windowmove', id, '0', '0']);
+      execFileSync('xdotool', ['windowsize', id, String(w + d.dw), String(h + d.dh)]);
+    }
+  }
+  await sleep(500);
+}

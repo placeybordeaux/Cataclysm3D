@@ -8,6 +8,10 @@
 //   options: --only title,esc,azerty   run some scenarios (names in the list at the bottom)
 //            --shots shots/realinput   screenshot every menu it opens
 //            --size 960x540            viewport (default)
+//            --browser firefox         Firefox (WebDriver BiDi) instead of Chromium; the human plays in it
+//            --hmr                     dev server with hot reload on, like `npm run dev`
+//            --gpu                     Chromium on the real GPU (run via heavy --kind gpu); else SwiftShader
+//            --params "look=classic"   extra URL parameters for the game page
 //            --list                    print scenario names
 //            --dry-run                 print what would run, start nothing
 //
@@ -15,18 +19,23 @@
 
 import { createServer } from 'vite';
 import puppeteer, { type Page } from 'puppeteer-core';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, utimesSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { startXvfb, XInput } from './lib/realinput';
+import { fitWindow, launchBrowser, startXvfb, XInput, type BrowserKind } from './lib/realinput';
 import { screenScenarios } from './realinput_screens';
 
 const argv = process.argv.slice(2);
 const opt = (n: string, d: string) => (argv.includes(n) ? argv[argv.indexOf(n) + 1] : d);
 if (argv.includes('--help') || argv.includes('-h')) {
-  console.log('usage: tsx tools/realinput.ts [--only a,b] [--shots dir] [--size WxH] [--list] [--dry-run]  (see header)');
+  console.log('usage: tsx tools/realinput.ts [--only a,b] [--shots dir] [--size WxH] [--browser chromium|firefox] [--hmr] [--gpu] [--params k=v&...] [--list] [--dry-run]  (see header)');
   process.exit(0);
 }
 const [W, H] = opt('--size', '960x540').split('x').map(Number);
+const browserKind = opt('--browser', 'chromium') as BrowserKind;
+if (browserKind !== 'chromium' && browserKind !== 'firefox') throw new Error(`--browser ${browserKind}: expected chromium or firefox`);
+const hmr = argv.includes('--hmr');
+const gpu = argv.includes('--gpu');
+const extraParams = opt('--params', '');
 const shotsDir = argv.includes('--shots') ? opt('--shots', 'shots/realinput') : '';
 const only = argv.includes('--only') ? new Set(opt('--only', '').split(',')) : null;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -258,7 +267,10 @@ const scenarios: Scenario[] = [
   }],
   ['newgame', 'New Game: start picker, locked cards, Classic mode opens the full creator', async () => {
     // Setup only: a clean profile, back at the title.
-    await js(`(() => { cdda.progression.reset(); localStorage.removeItem('cdda3d.achievements'); return 1; })()`);
+    // Straight to storage: progression.reset() re-evaluates unlocks against the running page's
+    // in-memory achievements (the onboarding kill) and unlocked the Security Guard again.
+    // Cleared again on pagehide, after the game's own flush of a (dirty) profile.
+    await js(`(() => { const wipe = () => { localStorage.removeItem('cdda3d.progression'); localStorage.removeItem('cdda3d.achievements'); }; wipe(); addEventListener('pagehide', wipe); return 1; })()`);
     dialogs.length = 0;
     await page.goto(page.url());
     await page.waitForFunction('window.cdda?.ready', { timeout: 240_000 });
@@ -1182,8 +1194,128 @@ const scenarios: Scenario[] = [
     await x.key('Enter');
     await page.waitForFunction('window.cdda?.ready', { timeout: 240_000 }).catch(() => {});
     check('Enter returns to the title without a "Leave site?" prompt', !dialogs.includes('beforeunload'), dialogs);
+    const t = await atTitle();
+    check('…and the title screen is up (not a resumed game)', t.title && !t.playing, t);
+  }],
+  ['quit', 'Esc > Quit to main menu reaches the title: after play, after driving, after a load (human report)', async () => {
+    // From wherever the previous scenario left off (death leaves the title): a quick start.
+    if (!(await js<boolean>('!!cdda.game.input.wantLock'))) await quickStart();
+    await toGameplay();
+    // Play a little: walk, open and close the inventory, look around.
+    await x.hold('w', 800);
+    await x.move(200, 0);
+    await x.key('i');
+    await until((t) => t.panels.includes('Equipment'), 2000);
+    await x.key('i');
+    await until((t) => t.lock, 3000);
+    let r = await quitToMenu('after walking about');
+    check('Quit to main menu → Quit: the title screen', r.title && !r.playing, r);
+    // Driving: a car on a road, at the wheel (setup), then Esc > Quit.
+    await quickStart();
+    await toGameplay();
+    await js(`JSON.stringify(cdda.roadTrip('car'))`);
+    await x.hold('w', 1200);
+    r = await quitToMenu('while driving');
+    check('…while driving too', r.title && !r.playing, r);
+    // After a load: F5 saves, title > Load > the save, then quit.
+    await quickStart();
+    await toGameplay();
+    await x.key('F5');
+    await sleep(1500);
+    await x.hold('w', 500);
+    r = await quitToMenu('before loading');
+    await x.click(W / 2, 20);
+    await x.key('l');
+    await until((t) => t.windows.includes('Load game'), 3000);
+    await x.key('Return');
+    await page.waitForFunction('window.cdda?.ready && cdda.game.input.wantLock', { timeout: 240_000 }).catch(() => {});
+    await sleep(800);
+    const loaded = await js<boolean>('!!cdda.game.input.wantLock');
+    check('title > Load > Enter loads the save into the game', loaded, await atTitle());
+    if (loaded) {
+      await toGameplay();
+      r = await quitToMenu('after a load');
+      check('…and quitting after a load reaches the title', r.title && !r.playing, r);
+    }
+    if (!hmr) return;
+    // --hmr: a code edit mid-game (Vite full reload → the dev snapshot resumes the run), then quit.
+    // The dev-only resume must not also swallow the deliberate quit.
+    await quickStart();
+    await toGameplay();
+    await x.hold('w', 500);
+    const name = await js<string>('cdda.game.player.name');
+    await js('window.__beforeHot = 1');
+    const now = new Date();
+    utimesSync(resolve('src/main.ts'), now, now);
+    await sleep(2500);
+    await page.waitForFunction('window.cdda?.ready && cdda.game.input.wantLock', { timeout: 240_000 }).catch(() => {});
+    await sleep(800);
+    const resumed = await js<string>('cdda.game?.player.name ?? ""');
+    const reloaded = await js<boolean>('!window.__beforeHot');
+    check('a hot reload mid-game resumes the same survivor', reloaded && resumed === name, { reloaded, name, resumed });
+    await toGameplay();
+    r = await quitToMenu('after a hot reload');
+    check('…and Quit to main menu after it reaches the title', r.title && !r.playing, r);
+    // A newcomer's keyboard path: Q opens the confirm; Enter must not quit (destructive), y does.
+    await quickStart();
+    await toGameplay();
+    await x.key('Escape');
+    await until((t) => t.panelIds.includes('scr.esc'), 3000);
+    await x.key('Q');
+    await sleep(300);
+    await x.key('Return');
+    await sleep(600);
+    const still = await js<boolean>('!!cdda.game.input.wantLock');
+    const modal = await js<string>(`document.querySelector('#ui2 .ui2-layer-modal')?.textContent ?? ''`);
+    await shot('quit_confirm_enter');
+    check('Q then Enter keeps the confirm up (Enter never confirms a destructive choice)', still && /Quit to main menu\?/.test(modal), { still, modal });
+    check('…and says how to confirm instead of doing nothing', /Press Y/.test(modal), modal);
+    await x.key('y');
+    await sleep(1500);
+    await page.waitForFunction('window.cdda?.ready', { timeout: 240_000 }).catch(() => {});
+    await sleep(800);
+    const t = await atTitle();
+    check('…y quits to the title', t.title && !t.playing, t);
   }],
 ];
+
+/** Is the title screen up, with no game being played behind it? */
+async function atTitle(): Promise<{ title: boolean; playing: boolean; windows: string[]; panels: string[] }> {
+  const s = await state();
+  return {
+    title: await js<boolean>(`!!document.querySelector('.mm-item')`),
+    playing: await js<boolean>('!!cdda.game?.input.wantLock'),
+    windows: s.windows,
+    panels: s.panels,
+  };
+}
+
+/** Esc → pause menu → "Quit to main menu" (a real click) → Quit in the confirm (real click). */
+async function quitToMenu(when: string): Promise<{ title: boolean; playing: boolean; windows: string[]; panels: string[]; dialogs: string[] }> {
+  await x.key('Escape');
+  let s = await until((t) => t.panelIds.includes('scr.esc'), 3000);
+  if (!s.panelIds.includes('scr.esc')) {
+    // Some state swallowed the first Esc (a menu was open): once more.
+    await sleep(1400);
+    await x.key('Escape');
+    s = await until((t) => t.panelIds.includes('scr.esc'), 3000);
+  }
+  check(`${when}: Esc opens the pause menu`, s.panelIds.includes('scr.esc'), [s.panelIds, s.windows]);
+  await shot(`quit_${when}`);
+  const q = await js<{ x: number; y: number } | null>('cdda.ui2.textRect("Quit to main menu")');
+  if (q) await x.click(q.x, q.y);
+  await sleep(400);
+  const modal = await js<string>(`document.querySelector('#ui2 .ui2-layer-modal')?.textContent ?? ''`);
+  check(`${when}: it asks to confirm`, /Quit to main menu\?/.test(modal), modal);
+  dialogs.length = 0;
+  const ok = await js<{ x: number; y: number } | null>(`(() => { const e = [...document.querySelectorAll('#ui2 .ui2-layer-modal button')].find((b) => /^Quit/.test(b.textContent.trim())); if (!e) return null; const r = e.getBoundingClientRect(); return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) }; })()`);
+  if (ok) await x.click(ok.x, ok.y);
+  // The page reloads to the title: wait for the new page to be up.
+  await sleep(1500);
+  await page.waitForFunction('window.cdda?.ready', { timeout: 240_000 }).catch(() => {});
+  await sleep(1000);
+  return { ...(await atTitle()), dialogs: [...dialogs] };
+}
 
 // Interaction screens (dialogue, trade, missions, vehicles, body, Autodoc, scores): before 'death'.
 scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...screenScenarios({ page: () => page, x: () => x, js, check, shot, toGameplay, sleep }));
@@ -1196,16 +1328,12 @@ if (argv.includes('--list') || argv.includes('--dry-run')) {
 // ------------------------------------------------------------------ run
 const { display } = await startXvfb(W + 40, H + 200);
 console.log(`Xvfb ${display}`);
-const vite = await createServer({ server: { port: 0, host: '127.0.0.1', hmr: false }, logLevel: 'error' });
+// --hmr: the dev server as `npm run dev` runs it (hot reload on, the dev-only snapshot/resume
+// code in src/save/install.ts active), which is what the human playtests against.
+const vite = await createServer({ server: { port: 0, host: '127.0.0.1', hmr: hmr ? undefined : false }, logLevel: 'error' });
 await vite.listen();
 const port = (vite.httpServer!.address() as { port: number }).port;
-const browser = await puppeteer.launch({
-  executablePath: process.env.CHROME_PATH,
-  headless: false,
-  defaultViewport: null,
-  args: ['--no-sandbox', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', `--window-size=${W},${H + 120}`, '--window-position=0,0', '--no-first-run'],
-  protocolTimeout: 10 * 60_000,
-});
+const browser = await launchBrowser(browserKind, W, H, { gpu });
 page = (await browser.pages())[0] ?? (await browser.newPage());
 x = new XInput(page);
 const errors: string[] = [];
@@ -1214,16 +1342,10 @@ page.on('dialog', (d) => {
   dialogs.push(d.type());
   void d.accept();
 });
-gameUrl = `http://127.0.0.1:${port}/?seed=1&realinput=1&menu=1`;
+gameUrl = `http://127.0.0.1:${port}/?seed=1&realinput=1&menu=1${extraParams ? `&${extraParams}` : ''}`;
 await page.goto(gameUrl);
 await page.waitForFunction('window.cdda?.ready || window.cddaError', { timeout: 240_000 });
-{
-  const cdp = await page.createCDPSession();
-  const { windowId } = (await cdp.send('Browser.getWindowForTarget')) as { windowId: number };
-  const d = await page.evaluate(() => ({ dw: window.outerWidth - window.innerWidth, dh: window.outerHeight - window.innerHeight }));
-  await cdp.send('Browser.setWindowBounds', { windowId, bounds: { left: 0, top: 0, width: W + d.dw, height: H + d.dh } });
-  await sleep(500);
-}
+await fitWindow(page, browserKind, W, H);
 await page.evaluate(() => localStorage.clear());
 // The title scenario starts the game; running others alone needs a quick start instead.
 const runTitle = !only || only.has('title');
