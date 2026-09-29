@@ -8,6 +8,8 @@ import { moveWithCollision } from './physics';
 import { fromSpawned } from './item';
 import { ActivityManager } from './activity';
 import { Keys } from '../ui/keys';
+import { GameStats } from './stats';
+import type { RayHit } from './raycast';
 import type { SpawnedItem } from '../data/itemgroups';
 import type { ItemSpawn } from '../world/map';
 
@@ -27,6 +29,15 @@ export interface GameSystem {
   update(game: Game, realDt: number, gameDt: number): void;
 }
 
+/** Minimal creature shape the UI needs for look mode; monsters may carry more. */
+export interface LookCreature {
+  name: string;
+  /** Extra look-mode lines (CDDA-tagged), e.g. "It is uninjured." */
+  describe?: () => string;
+  symbol?: string;
+  color?: string;
+}
+
 export class Game {
   readonly events = new EventBus();
   readonly clock = new GameClock();
@@ -36,6 +47,23 @@ export class Game {
   readonly activities: ActivityManager;
   readonly keys: Keys;
   paused = false;
+  /** Modal UI (input.captured) pauses the simulation like CDDA's turn-based menus. */
+  pauseInMenus = true;
+  /** Run statistics for the memorial screen (src/game/stats.ts). */
+  readonly stats = new GameStats();
+  /** Overmap tiles the player has seen, keys "omx,omy,z" (filled by the UI's overmap tracker). */
+  readonly overmapSeen = new Set<string>();
+  /**
+   * Creature standing in a tile, for raycasts/look mode. The monster system replaces this;
+   * return null for empty tiles and never the player.
+   */
+  creatureAt: (x: number, y: number, z: number) => LookCreature | null = () => null;
+  /** What the crosshair points at (set by the UI from the active camera; null until then). */
+  lookAt: (maxDist?: number) => RayHit<LookCreature> | null = () => null;
+  /** Save/load hooks for a future save system; the UI greys out Save/Load while unset. */
+  save?: () => void | Promise<void>;
+  load?: () => boolean | Promise<boolean>;
+  hasSave?: () => boolean;
   private acc = 0;
   mouseSensitivity = 0.0025;
 
@@ -62,7 +90,7 @@ export class Game {
     const p = this.player;
     p.yaw += mx * this.mouseSensitivity;
     p.pitch = Math.max(-1.5, Math.min(1.5, p.pitch - my * this.mouseSensitivity));
-    if (this.paused) return;
+    if (this.paused || (this.pauseInMenus && this.input.captured)) return;
     this.acc = Math.min(this.acc + realDt, 0.25);
     while (this.acc >= TICK) {
       this.tick(TICK);

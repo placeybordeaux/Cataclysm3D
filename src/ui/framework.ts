@@ -1,4 +1,5 @@
 import type { Input } from '../core/input';
+import { sfx } from '../audio/sfx';
 
 // Shared building blocks for CDDA-style curses screens. Every modal screen (inventory,
 // crafting, construction, character sheet, …) should be made from these so the whole UI
@@ -72,6 +73,8 @@ export interface WindowOpts {
   /** Called for key presses; return true if handled. Esc closes by default. */
   onKey?: (e: KeyboardEvent) => boolean | void;
   onClose?: () => void;
+  /** Skip the menu_open/menu_close sounds (full-screen overlays that manage their own). */
+  silent?: boolean;
 }
 
 export interface UiWindow {
@@ -102,6 +105,7 @@ export function openWindow(opts: WindowOpts): UiWindow {
   footer.innerHTML = opts.footer ?? '';
   footer.style.display = opts.footer ? '' : 'none';
   root.appendChild(el);
+  if (!opts.silent) sfx.ui('menu_open');
   let closed = false;
   const release = input!.capture((e) => {
     if (opts.onKey && opts.onKey(e) === true) return true;
@@ -124,6 +128,7 @@ export function openWindow(opts: WindowOpts): UiWindow {
       closed = true;
       release();
       el.remove();
+      if (!opts.silent) sfx.ui('menu_close');
       opts.onClose?.();
     },
     get closed() {
@@ -194,12 +199,18 @@ export function openMenu<T>(opts: MenuOpts<T>): UiWindow & { refresh(entries?: M
 
   function move(d: number) {
     if (!entries.length) return;
-    sel = Math.max(0, Math.min(entries.length - 1, sel + d));
+    const next = Math.max(0, Math.min(entries.length - 1, sel + d));
+    if (next !== sel) sfx.ui('menu_move');
+    sel = next;
     render();
   }
   function choose(i: number) {
     const e = entries[i];
-    if (!e || e.disabled) return;
+    if (!e || e.disabled) {
+      sfx.ui('menu_error');
+      return;
+    }
+    sfx.ui('menu_select');
     sel = i;
     if (opts.onSelect(e.value, e) !== false) win.close();
     else render();

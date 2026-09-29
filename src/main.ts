@@ -8,6 +8,7 @@ import { loadWorldgenData } from './world/worldgen_data';
 import { installWorldgenDebug } from './world/worldgen_debug';
 import { installDebugApi } from './debug';
 import { initUi } from './ui/framework';
+import { installUi } from './ui/index';
 import { installAudio } from './audio/install';
 
 // URL params (all optional): seed=<int>, gen=world|test (default world), debug=1 (render stats overlay),
@@ -46,6 +47,7 @@ async function main(): Promise<void> {
   const api = installDebugApi(game, renderer);
   if (worldgen) installWorldgenDebug(api, game, worldgen);
   installAudio(game, api);
+  const ui = await installUi(game, renderer, worldgen, api);
 
   let last = performance.now();
   const loop = (now: number) => {
@@ -57,6 +59,8 @@ async function main(): Promise<void> {
   };
   requestAnimationFrame(loop);
   api.ready = true;
+  // Title screen / character creation (skipped with ?skipmenu=1 and under automation).
+  await ui.boot();
 }
 
 main().catch((e) => {

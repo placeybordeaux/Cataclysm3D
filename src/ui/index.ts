@@ -1,0 +1,142 @@
+import type { Game } from '../game/game';
+import type { Renderer } from '../render/renderer';
+import type { WorldGenerator } from '../world/worldgen';
+import type { DebugApi } from '../debug';
+import { createItem } from '../game/item';
+import { getUiRoot } from './framework';
+import { Hud, hud } from './hud';
+import { loadUiData, type UiContext } from './context';
+import { installInventoryUi, carriedEntries, nearbyEntries, openPickupMenu, openDropMenu, openItemPicker, showItemInfo } from './inventory_ui';
+import { openCharacterSheet } from './charsheet';
+import { openHelp } from './help';
+import { cameraLookAt, describeHit, openLookMode } from './look';
+import { openOvermap, overmapSeenTracker, revealAround } from './overmap_ui';
+import { showDeathScreen } from './death';
+import { openEscMenu, openMessageLog, showMainMenu } from './menus';
+import { applyStoredOptions, openOptions } from './options';
+import { applyBuild, defaultBuild, openCharGen } from './chargen';
+
+// Wires the whole UI into the game: HUD, key bindings for every screen, the trackers the
+// screens need (distance walked, overmap exploration, kills), the death screen, and the
+// boot flow (title screen unless ?skipmenu=1).
+//
+// Boot flow: the title screen shows by default. `?skipmenu=1` skips it (automated tests);
+// so does running under automation (navigator.webdriver, e.g. tools/shot.ts) unless
+// `?menu=1` asks for it, so existing screenshot scripts keep working unchanged.
+
+export interface UiHandle {
+  ctx: UiContext;
+  hud: Hud;
+  /** Show the title screen (or skip it per URL params). Resolves when gameplay starts. */
+  boot(): Promise<void>;
+}
+
+export async function installUi(game: Game, renderer: Renderer, worldgen: WorldGenerator | null, api: DebugApi): Promise<UiHandle> {
+  const data = await loadUiData();
+  const ctx: UiContext = { game, renderer, worldgen, data };
+  const h = new Hud(ctx, getUiRoot());
+  applyStoredOptions(ctx);
+
+  game.lookAt = (maxDist) => cameraLookAt(ctx, maxDist);
+  installInventoryUi(ctx);
+  game.keys.register('character', 'View character sheet', () => void openCharacterSheet(ctx));
+  game.keys.register('help', 'Help', () => void openHelp(ctx));
+  game.keys.register('map', 'View map', () => void openOvermap(ctx));
+  game.keys.register('look', 'Look around', () => void openLookMode(ctx));
+  game.keys.register('messages', 'View message log', () => void openMessageLog(ctx, h));
+  game.keys.register('menu', 'Main menu', () => void openEscMenu(ctx, () => location.reload()));
+  if (game.save) game.keys.register('save', 'Save game', () => void game.save!());
+
+  // --- trackers for the memorial screen and the overmap
+  let lx = game.player.x, ly = game.player.y, lz = game.player.z;
+  game.systems.push({
+    name: 'ui-stats',
+    update(g) {
+      const p = g.player;
+      const d = Math.hypot(p.x - lx, p.y - ly);
+      // Teleports (debug, stairs) aren't walking.
+      if (p.z === lz && d < 2) g.stats.distanceWalked += d;
+      lx = p.x, ly = p.y, lz = p.z;
+    },
+  });
+  game.systems.push(overmapSeenTracker());
+  revealAround(game);
+  game.events.on('creatureDied', (e) => {
+    if (e.killer !== game.player) return;
+    const cr = e.creature as { type?: { id?: string }; typeId?: string; id?: string } | null;
+    game.stats.addKill(cr?.type?.id ?? cr?.typeId ?? cr?.id ?? 'unknown');
+  });
+  let dead = false;
+  game.events.on('playerDied', (e) => {
+    if (dead) return;
+    dead = true;
+    // A beat so the killing blow and "You die…" register before the screen fades in.
+    setTimeout(() => showDeathScreen(ctx, h, e.cause), 1200);
+  });
+
+  // --- automation helpers (window.cdda)
+  api.hud = hud;
+  api.ui = {
+    ctx,
+    open: (name: string, ...args: unknown[]) => {
+      const screens: Record<string, () => unknown> = {
+        inventory: () => api.pressKey('i'),
+        character: () => openCharacterSheet(ctx),
+        help: () => openHelp(ctx),
+        map: () => openOvermap(ctx),
+        look: () => openLookMode(ctx),
+        messages: () => openMessageLog(ctx, h),
+        options: () => openOptions(ctx),
+        escmenu: () => openEscMenu(ctx, () => location.reload()),
+        pickup: () => openPickupMenu(ctx),
+        drop: () => openDropMenu(ctx),
+        iteminfo: () => {
+          const all = [...carriedEntries(ctx), ...nearbyEntries(ctx)];
+          const e = all.find((x) => x.item.typeId === args[0]) ?? all[0];
+          return e && showItemInfo(ctx, e.item);
+        },
+        wield: () => openItemPicker(ctx, { title: 'Wield what?', none: 'You have nothing to wield.', filter: () => true, includeNearby: true, onPick: () => {} }),
+      };
+      const f = screens[name];
+      if (!f) throw new Error(`cdda.ui.open: unknown screen ${name} (${Object.keys(screens).join(', ')})`);
+      f();
+    },
+    /** Close every open window (Esc repeatedly). */
+    closeAll: () => {
+      for (let i = 0; i < 10 && game.input.captured; i++) window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape' }));
+    },
+    lookText: () => describeHit(ctx, game.lookAt()).replace(/<[^>]+>/g, ''),
+    lookHit: () => {
+      const hit = game.lookAt();
+      return hit && { kind: hit.kind, x: hit.x, y: hit.y, z: hit.z, dist: +hit.dist.toFixed(2), terrain: hit.terrain.id, furniture: hit.furniture.id };
+    },
+    chargen: () => openCharGen(ctx).then((b) => b && applyBuild(ctx, b)),
+    /** Apply a default (random-named Evacuee survivor) build without the UI. */
+    quickStart: () => applyBuild(ctx, defaultBuild(ctx)),
+    log: () => h.log.entries.map((e) => (e.count > 1 ? `${e.text} x${e.count}` : e.text)),
+  };
+  /** Put an item on the map relative to the player (dx, dy tiles). For pickup/look tests. */
+  api.spawnItem = (id: string, dx = 0, dy = 0, opts: { count?: number; ammo?: string } = {}) => {
+    const p = game.player;
+    const it = createItem(game.data, id, opts);
+    game.map.addItem(p.tileX + dx, p.tileY + dy, p.z, it);
+    return it.name();
+  };
+  /** Simulate a key press through the normal input path (keys.ts / open windows). */
+  api.pressKey = (key: string, code?: string) => {
+    window.dispatchEvent(new KeyboardEvent('keydown', { key, code: code ?? (key.length === 1 ? `Key${key.toUpperCase()}` : key) }));
+    window.dispatchEvent(new KeyboardEvent('keyup', { key, code: code ?? (key.length === 1 ? `Key${key.toUpperCase()}` : key) }));
+  };
+
+  return {
+    ctx,
+    hud: h,
+    async boot() {
+      const params = new URLSearchParams(location.search);
+      const automated = typeof navigator !== 'undefined' && navigator.webdriver;
+      const skip = params.get('skipmenu') === '1' || (automated && params.get('menu') !== '1');
+      if (skip) return;
+      await showMainMenu(ctx, h);
+    },
+  };
+}
