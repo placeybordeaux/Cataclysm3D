@@ -16,8 +16,9 @@ export interface PrefetchStats {
   prefetched: number;
   /** chunks generated synchronously by someone else (renderer, game) — hitch candidates */
   sync: number;
-  /** slowest prefetched generation, ms */
+  /** slowest prefetched generation, ms, and which chunk ("cx,cy,z omt") */
   maxMs: number;
+  slowest?: string;
   queue: number;
 }
 
@@ -102,7 +103,11 @@ export class ChunkPrefetcher {
       this.inPrefetch = false;
     }
     this.stats.prefetched++;
-    this.stats.maxMs = Math.max(this.stats.maxMs, performance.now() - t0);
+    const ms = performance.now() - t0;
+    if (ms > this.stats.maxMs) {
+      this.stats.maxMs = ms;
+      this.stats.slowest = `${cx},${cy},${z} ${this.map.chunk(cx, cy, z)?.omt?.id ?? ''}`;
+    }
     return true;
   }
 

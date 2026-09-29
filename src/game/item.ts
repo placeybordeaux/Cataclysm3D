@@ -92,17 +92,39 @@ export class Pocket {
     for (const it of this.contents) n += it.ememorySize();
     return n;
   }
+  /**
+   * Running content totals while placeContents fills this pocket, so each insert doesn't
+   * re-sum everything already in it (a garbage bag of 150 things). Null = sum on demand;
+   * only valid while nothing but insert() touches the contents.
+   */
+  private sums: { vol: number; wt: number } | null = null;
+  beginBatch(): void {
+    this.sums = null;
+    this.sums = { vol: this.volumeUsed(), wt: this.rawWeight() };
+  }
+  endBatch(): void {
+    this.sums = null;
+  }
+  /** Account for items pushed straight into `contents` during a batch. */
+  batchAdded(vol: number, wt: number): void {
+    if (this.sums) (this.sums.vol += vol), (this.sums.wt += wt);
+  }
   volumeUsed(): number {
     if (this.type === 'E_FILE_STORAGE') return 0;
+    if (this.sums) return this.sums.vol;
     let v = 0;
     for (const it of this.contents) v += it.volume();
     return v;
   }
-  weightUsed(): number {
-    if (this.type === 'E_FILE_STORAGE') return 0;
+  private rawWeight(): number {
+    if (this.sums) return this.sums.wt;
     let w = 0;
     for (const it of this.contents) w += it.weight();
-    return w * (this.data.weight_multiplier ?? 1);
+    return w;
+  }
+  weightUsed(): number {
+    if (this.type === 'E_FILE_STORAGE') return 0;
+    return this.rawWeight() * (this.data.weight_multiplier ?? 1);
   }
   volumeRemaining(): number {
     return this.maxVolume - this.volumeUsed();
@@ -207,8 +229,15 @@ export class Pocket {
     if (it.countByCharges && fit.charges !== undefined && this.type !== 'MAGAZINE_WELL') {
       const n = fit.charges;
       const target = this.contents.find((c) => c.stacksWith(it));
-      if (target) target.charges += n;
-      else this.contents.push(n === it.charges ? it : it.split(n));
+      if (target) {
+        const [v0, w0] = this.sums ? [target.volume(), target.weight()] : [0, 0];
+        target.charges += n;
+        if (this.sums) this.batchAdded(target.volume() - v0, target.weight() - w0);
+      } else {
+        const moved = n === it.charges ? it : it.split(n);
+        this.contents.push(moved);
+        if (this.sums) this.batchAdded(moved.volume(), moved.weight());
+      }
       if (n === it.charges) {
         if (target) it.charges = 0;
         return null;
@@ -217,6 +246,7 @@ export class Pocket {
       return it;
     }
     this.contents.push(it);
+    if (this.sums) this.batchAdded(it.volume(), it.weight());
     return null;
   }
 
@@ -812,10 +842,10 @@ export function fromSpawned(data: GameData, s: SpawnedItem): Item[] {
   for (let i = 0; i < Math.max(1, s.count); i++) {
     const it = new Item(data, def);
     if (it.hasFlag('SPAWN_ACTIVE')) it.active = true;
-    for (const cs of s.contents ?? []) {
-      for (const c of placeContents(it, fromSpawned(data, cs)))
-        warnOnce('fit', `${c.typeId}>${it.typeId}`, `fromSpawned: ${c.typeId} does not fit in ${it.typeId}`);
-    }
+    // One placement pass for all contents (a garbage bag rolls ~150 separate entries).
+    const contents = (s.contents ?? []).flatMap((cs) => fromSpawned(data, cs));
+    for (const c of placeContents(it, contents))
+      warnOnce('fit', `${c.typeId}>${it.typeId}`, `fromSpawned: ${c.typeId} does not fit in ${it.typeId}`);
     if (s.charges !== undefined && s.charges > 0) {
       if ((def.max_charges ?? 0) > 0 && !it.magazineWell() && it.magazinePockets().length === 0) it.charges = Math.min(s.charges, def.max_charges!);
       else {
@@ -833,7 +863,8 @@ export function placeContent(into: Item, it: Item): Item | null {
   let left: Item | null = it;
   for (const p of into.pockets) {
     if (!left) break;
-    if (p.canContain(left).ok) left = p.insert(left);
+    // insert() checks canContain itself and hands back what didn't fit.
+    left = p.insert(left);
   }
   return left;
 }
@@ -845,6 +876,15 @@ export function placeContent(into: Item, it: Item): Item | null {
  * identical empty non-charge items are therefore sized once per pocket and pushed in bulk.
  */
 export function placeContents(into: Item, items: Item[]): Item[] {
+  for (const p of into.pockets) p.beginBatch();
+  try {
+    return placeContentsBatched(into, items);
+  } finally {
+    for (const p of into.pockets) p.endBatch();
+  }
+}
+
+function placeContentsBatched(into: Item, items: Item[]): Item[] {
   const left: Item[] = [];
   const plain = (x: Item) => !x.countByCharges && x.pockets.every((p) => p.empty);
   let i = 0;
@@ -871,6 +911,7 @@ export function placeContents(into: Item, items: Item[]): Item[] {
       if (v > 0) n = Math.min(n, Math.floor(volLeft / v + 1e-9));
       if (w > 0) n = Math.min(n, Math.floor(wtLeft / w + 1e-9));
       for (let m = 0; m < n; m++) p.contents.push(items[k++]);
+      p.batchAdded(n * v, n * w);
     }
     // Identical items: if the next one doesn't fit anywhere, none of the rest will either.
     for (; k < j; k++) {
