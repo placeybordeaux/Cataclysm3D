@@ -387,6 +387,33 @@ tests/               vitest unit tests (pure logic, no DOM/WebGL)
 - E-files: `E_FILE_STORAGE` pockets take books/E_STORABLE items (`Item.efiles()`); `efileDevice`,
   `ereaderProblem` (reading.ts) require a charged phone/laptop.
 
+### Progression & onboarding (src/progression, docs/DESIGN_V2.md decision 6)
+- Title: **Start** = quick start (named Evacuee, BN `unemployed` kit, one name field, difficulty
+  stub), **New Game** = start picker (ui2 cards: profession + scenario, pitch, kit preview,
+  trade-off; locked cards show requirement + progress; the old chargen is the "Custom survivor"
+  card once unlocked), **Journal**; a banner announces unlocks earned since the last title visit.
+  The "Show hints at start" popup is now off by default (discovery tips replace it).
+- `profile.ts` (UI-free): lifetime stats + unique sets, earned unlocks, tips shown, options
+  (Classic mode, hints); localStorage `cdda3d.progression`, export/import validated (throws).
+- `unlocks.ts` + `public/data/unlocks.json` (hand-authored ladder): requirements = BN achievement
+  ids and/or stat thresholds (`{any: [...]}` for either); grants = profession / scenario / title /
+  creator only (sidegrades). Classic mode makes everything available without recording it.
+- `placement.ts`: scenarios we can place (`evacuee` shelter, `missed` town house, `wilderness`
+  forest); the catalogue validator refuses others. The first second of a new game removes
+  hostiles within 10 tiles of the start.
+- `discovery.ts` (UI-free): `NUDGES` (first zombie, hunger, night, bleeding, locked door…),
+  `NudgeQueue` (once per profile, >= 20 s apart, never while fighting or over a window),
+  `craftableDiff` + grouped "You could craft" nudge; HUD badge on the crafting key.
+- `install.ts` feeds stats (kills, deaths, days, distance, books, towns, labs, vehicles, crafts via
+  `craftedHooks` in crafting.ts, butchering via a wrap of `activities.start`), evaluates unlocks,
+  saves the run's journal state (section `progression`, order 65). Journal: key `J` (`journal.ts`).
+- `difficulty.ts`: `Difficulty` stub + `difficultyHooks` for the balance work (applied on new
+  game and on load).
+- Hooks for other systems: `progressionOf(game)?.bump(stat)`, `.note(set, id)`, `.discover(tipId)`.
+- Debug: `cdda.progression.{profile(), stat(id), bump(stat,n), unlock(id), classic(on), hints(on),
+  discover(id), queue(), checkCraftable(), run(), export(), import(json), reset()}`. Tests:
+  tests/progression.test.ts; real input: `tools/realinput.ts --only title,onboarding,newgame`.
+
 ### Combat feel layer (src/game/combatfeel.ts, wired by src/feel.ts; see docs/COMBAT_FEEL.md)
 - All feel constants live in `FEEL` (presets `FEEL_PRESETS.accessible|classic`, `setFeelDifficulty(d, overrides)`
   is the difficulty hook). The CDDA/BN math stays underneath; this layer only times and targets it.
