@@ -589,6 +589,15 @@ export class Dialogue implements MathHost {
         return `$${((d?.price_postapoc ?? d?.price ?? 0) / 100).toFixed(2)}`;
       }
       case 'interval': return 'a few days';
+      case 'restock_time_point': {
+        // CDDA: "<season> <day>, <time of day>" of the trader's next restock.
+        const t = n.restockAt;
+        if (!t) return 'the future';
+        const day = Math.floor(t / SECONDS_PER_DAY);
+        const season = ['Spring', 'Summer', 'Autumn', 'Winter'][Math.floor(day / DAYS_PER_SEASON) % 4];
+        const h = Math.floor((t % SECONDS_PER_DAY) / 3600), m = Math.floor((t % 3600) / 60);
+        return `${season} ${(day % DAYS_PER_SEASON) + 1}, ${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+      }
       case 'city': return this.w.cityName?.() ?? 'town';
       case 'time_survived': return `${Math.floor(this.w.now() / SECONDS_PER_DAY)} days`;
       case 'total_kills': return String(this.w.totalKills?.() ?? 0);

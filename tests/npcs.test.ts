@@ -169,6 +169,8 @@ describe('dialogue on real talk topics', () => {
     const d = npcs.talkTo(n)!;
     expect(d.parseTags('I gotta go<punc.…>')).toMatch(/^I gotta go[.…]$/);
     expect(d.parseTags('Go<punc…!>')).toMatch(/^Go[…!]$/);
+    n.restockAt = 3 * 86400 + 8 * 3600;
+    expect(d.parseTags('Come back after <restock_time_point>.')).toBe('Come back after Spring 4, 08:00.');
     // TALK_DONE says a CDDA <end_talking_bye> line, never a raw "<bye>" tag.
     const bye = (d as unknown as { byeMessage(): string }).byeMessage();
     expect(bye).not.toMatch(/[<>]/);
