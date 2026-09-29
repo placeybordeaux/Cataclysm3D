@@ -37,6 +37,30 @@ interface CorpseView {
   t: number;
 }
 
+/**
+ * Billboards closer than this (horizontal metres from the camera) are drawn as if they stood
+ * at this distance, so a zombie in your face stays a readable sprite instead of a wall of
+ * giant texels.
+ */
+export const NEAR_CLAMP = { dist: 1.2 };
+
+/**
+ * Point-blank sprite handling: scale a billboard about the eye point so it projects exactly
+ * like the same sprite pushed back to NEAR_CLAMP.dist along the view ray, while keeping its real
+ * depth (it never sinks into the wall behind it). Returns the height scale and how far (m)
+ * to lift the sprite's foot. cam = camera position in three.js coords (x, height, y).
+ */
+export function nearClamp(cam: { x: number; y: number; z: number }, x: number, y: number, floorH: number): { scale: number; lift: number } {
+  const d = Math.hypot(x - cam.x, y - cam.z);
+  if (d >= NEAR_CLAMP.dist) return { scale: 1, lift: 0 };
+  const s = Math.max(d, 0.2) / NEAR_CLAMP.dist;
+  return { scale: s, lift: (cam.y - floorH) * (1 - s) };
+}
+
+/** Knock-back/stagger: how far a hard-hit sprite is shoved, and for how long (s). */
+const KICK_DIST = 0.28;
+const KICK_TIME = 0.3;
+
 function toFrame(r: FrameRef, flip = false): TileFrame {
   const uv: [number, number, number, number] = flip ? [r.uv.u1, r.uv.v0, r.uv.u0, r.uv.v1] : [r.uv.u0, r.uv.v0, r.uv.u1, r.uv.v1];
   return { texture: r.texture, uv, w: r.w, h: r.h, ppm: 32 };
@@ -53,6 +77,7 @@ export class MonsterView implements GameSystem {
   private muzzleT = 0;
   private lastShots = 0;
   private corpseCheck = 0;
+  private kicks = new Map<Monster, { dx: number; dy: number; t: number; amt: number }>();
 
   constructor(readonly game: Game, readonly renderer: Renderer, readonly sys: MonsterSystem, readonly combat: PlayerCombat | null) {
     loadAtlas().then(
@@ -75,6 +100,25 @@ export class MonsterView implements GameSystem {
       const v = this.views.get(m);
       if (v && v.typeId !== m.type.id) this.refresh(m, v);
     });
+  }
+
+  /**
+   * Visual stagger: shove the sprite away from (fx, fy) and let it rock back. Purely
+   * cosmetic — CDDA only moves monsters on specific techniques.
+   */
+  kick(m: Monster, fx: number, fy: number, strength = 1): void {
+    const d = Math.hypot(m.x - fx, m.y - fy) || 1;
+    this.kicks.set(m, { dx: (m.x - fx) / d, dy: (m.y - fy) / d, t: 0, amt: KICK_DIST * Math.min(1.5, strength) });
+  }
+
+  /** A monster's current billboard frame and height (m), or undefined without one. */
+  spriteOf(m: Monster): { frame: TileFrame; height: number } | undefined {
+    const v = this.views.get(m);
+    return v && { frame: v.frame, height: v.height };
+  }
+
+  flash(m: Monster, color: number, seconds: number): void {
+    this.views.get(m)?.h.flash(color, seconds);
   }
 
   /** Sprite frame + height for a monster type (atlas sprite, looks_like chain, glyph fallback). */
@@ -138,6 +182,7 @@ export class MonsterView implements GameSystem {
 
   update(game: Game, dt: number): void {
     const p = game.player;
+    const cam = this.renderer.rig.camera.position;
     // Live monsters: only those in the bubble have sprites.
     for (const m of this.sys.active) {
       if (m.dead) continue;
@@ -147,11 +192,28 @@ export class MonsterView implements GameSystem {
       const bob = m.moving ? Math.abs(Math.sin(m.walkPhase * Math.PI)) * 0.07 : 0;
       const sway = m.has('STUMBLES') && m.moving ? Math.sin(m.wobble) * 0.06 : 0;
       const downed = m.hasEffect('downed');
-      v.h.set(m.x + sway * Math.cos(p.yaw), m.y + sway * Math.sin(p.yaw), m.z + bob / LEVEL_HEIGHT);
+      // Stagger: out fast, back slowly, with a slight squash at the peak of the shove.
+      let kx = 0, ky = 0, squash = 1;
+      const k = this.kicks.get(m);
+      if (k) {
+        k.t += dt;
+        const u = k.t / KICK_TIME;
+        if (u >= 1) this.kicks.delete(m);
+        else {
+          const a = k.amt * (u < 0.25 ? u / 0.25 : 1 - (u - 0.25) / 0.75);
+          kx = k.dx * a;
+          ky = k.dy * a;
+          squash = 1 - 0.08 * Math.sin(Math.min(1, u * 2) * Math.PI);
+        }
+      }
+      const x = m.x + sway * Math.cos(p.yaw) + kx, y = m.y + sway * Math.sin(p.yaw) + ky;
+      const near = nearClamp(cam, x, y, m.z * LEVEL_HEIGHT);
+      v.h.set(x, y, m.z + (bob * near.scale + near.lift) / LEVEL_HEIGHT);
       v.h.setVisible(Math.abs(m.z - p.z) <= 1);
-      v.h.setFrame(v.frame, downed ? v.height * 0.5 : v.height);
+      v.h.setFrame(v.frame, (downed ? v.height * 0.5 : v.height) * squash * near.scale);
     }
     for (const [m] of this.views) if (m.dead || m.dormant) this.drop(m);
+    for (const [m] of this.kicks) if (m.dead || m.dormant) this.kicks.delete(m);
 
     // Corpses: crumple animation, then persist until the item is gone.
     this.corpseCheck -= dt;

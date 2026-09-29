@@ -76,6 +76,8 @@ export class Hud {
   private cross: HTMLElement;
   private promptEl: HTMLElement;
   private actEl: HTMLElement;
+  private hitEl: HTMLElement;
+  private hitUntil = 0;
   private visible = true;
   private lastSide = 0;
   private raf = 0;
@@ -84,13 +86,20 @@ export class Hud {
     this.el = document.createElement('div');
     this.el.className = 'hud';
     this.el.innerHTML = `<div class="hud-side"></div><div class="hud-log"></div>
-      <div class="hud-cross"><i></i><b></b></div><div class="hud-prompt"></div><div class="hud-activity"></div>`;
+      <div class="hud-cross"><i></i><b></b><s class="hud-hit"><u></u><u></u><u></u><u></u></s></div><div class="hud-prompt"></div><div class="hud-activity"></div>`;
     root.appendChild(this.el);
     this.side = this.el.querySelector('.hud-side')!;
     this.logEl = this.el.querySelector('.hud-log')!;
     this.cross = this.el.querySelector('.hud-cross')!;
     this.promptEl = this.el.querySelector('.hud-prompt')!;
     this.actEl = this.el.querySelector('.hud-activity')!;
+    this.hitEl = this.el.querySelector('.hud-hit')!;
+    // Hit marker: four diagonal ticks around the crosshair, coloured by how the blow landed.
+    ctx.game.events.on('playerAttack', (e) => {
+      if (e.outcome === 'whiff' || e.outcome === 'miss') return;
+      this.hitEl.className = `hud-hit on ${e.outcome}`;
+      this.hitUntil = performance.now() + (e.outcome === 'hit' || e.outcome === 'block' ? 140 : 260);
+    });
     ctx.game.events.on('message', (m) => {
       this.log.add(m.text, m.color, performance.now(), ctx.game.clock.seconds);
       this.renderLog();
@@ -119,6 +128,10 @@ export class Hud {
     const g = this.ctx.game;
     // Crosshair only makes sense in first/third person; top-down aims with the mouse later.
     this.cross.style.display = this.ctx.renderer.cameraMode === 'top' ? 'none' : '';
+    if (this.hitUntil && now > this.hitUntil) {
+      this.hitUntil = 0;
+      this.hitEl.className = 'hud-hit';
+    }
     this.renderPrompt();
     this.renderActivity();
     if (now - this.lastSide > 200) {

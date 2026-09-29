@@ -17,6 +17,22 @@ export interface GameEvents {
   playerDied: { cause: string };
   /** The survivor was hit (renderer: red flash + camera shake). amount = HP lost (0 = blocked). */
   playerHurt: { amount: number; bp?: string; source?: unknown };
+  /**
+   * One of the survivor's attacks resolved (src/game/playercombat.ts) — hit feedback hooks:
+   * impact particles + stagger (render/hitFx.ts), the crosshair hit marker (ui/hud.ts).
+   * outcome: 'whiff' = swung at nothing, 'miss' = target dodged, 'block' = hit for 0.
+   * x/y/z = impact point (tiles; z level), `heavy` = hard enough to stagger.
+   */
+  playerAttack: {
+    kind: 'melee' | 'gun' | 'throw';
+    outcome: 'hit' | 'crit' | 'kill' | 'block' | 'miss' | 'whiff';
+    x: number; y: number; z: number;
+    damage: number;
+    heavy: boolean;
+    target?: unknown;
+    /** CDDA field id the target bleeds (fd_blood...), null = sparks/dust */
+    blood?: string | null;
+  };
   /** A save was loaded into this game (renderer: rebuild chunk meshes; UI: refresh). */
   gameLoaded: { slot: string | null };
 }

@@ -431,6 +431,29 @@ describe('player attacks', () => {
     expect(game.player.getSkill('bashing')).toBeGreaterThanOrEqual(0);
   });
 
+  it('every swing reports a playerAttack outcome for hit feedback, ending in a kill', () => {
+    const { game, sys, combat } = world(3);
+    game.player.inv.wield(createItem(data, 'bat'));
+    const seen: string[] = [];
+    game.events.on('playerAttack', (e) => {
+      seen.push(e.outcome);
+      if (e.outcome !== 'whiff') expect(e.target).toBe(z);
+      if (e.outcome !== 'whiff' && e.outcome !== 'miss') expect(e.blood).toBe(sys.bloodType(z.type));
+    });
+    game.player.yaw = Math.PI / 2; // facing away: nothing to hit
+    combat.melee();
+    expect(seen).toEqual(['whiff']);
+    const z = sys.spawnById('mon_zombie', 12.5, 11.3, 0)!;
+    for (let i = 0; i < 30 * 60 && !z.dead; i++) {
+      game.player.yaw = Math.atan2(z.x - game.player.x, -(z.y - game.player.y));
+      if (combat.cooldown <= 0) combat.melee();
+      game.tick(1 / 30);
+    }
+    expect(z.dead).toBe(true);
+    expect(seen[seen.length - 1]).toBe('kill');
+    expect(seen.filter((o) => o === 'kill')).toHaveLength(1);
+  });
+
   it('bullets hit the first monster on the ray and stop at walls', () => {
     const { game, sys, combat } = world(4);
     const gun = createItem(data, 'glock_19');

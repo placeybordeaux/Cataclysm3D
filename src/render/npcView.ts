@@ -1,3 +1,4 @@
+import { nearClamp } from './monsterView';
 import type { Game, GameSystem } from '../game/game';
 import type { Npc } from '../game/npc';
 import type { NpcSystem } from '../game/npcai';
@@ -134,10 +135,12 @@ export class NpcView implements GameSystem {
         this.views.set(n, v);
       } else if (outfitCheck) this.refresh(n, v);
       const bob = n.moving ? Math.abs(Math.sin(n.walkPhase * Math.PI)) * 0.06 : 0;
-      v.h.set(n.x, n.y, n.z + bob / LEVEL_HEIGHT);
+      // Point-blank: draw as if at NEAR_CLAMP (see monsterView.ts nearClamp).
+      const near = nearClamp(this.renderer.rig.camera.position, n.x, n.y, n.z * LEVEL_HEIGHT);
+      v.h.set(n.x, n.y, n.z + (bob * near.scale + near.lift) / LEVEL_HEIGHT);
       v.h.setVisible(Math.abs(n.z - p.z) <= 1);
       const downed = n.effects.has('downed') || n.isAsleep();
-      v.h.setFrame(v.frame, HEIGHT * (downed ? 0.5 : 1));
+      v.h.setFrame(v.frame, HEIGHT * (downed ? 0.5 : 1) * near.scale);
     }
     // Bodies: fall over, then stay while the corpse item lies there.
     for (let i = this.bodies.length - 1; i >= 0; i--) {

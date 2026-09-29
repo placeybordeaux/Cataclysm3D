@@ -5,7 +5,8 @@ import type { WorldGenerator } from './world/worldgen';
 import { MonsterSystem } from './game/monai';
 import { Spawner, type OvermapView } from './game/spawner';
 import { PlayerCombat, type ViewModelHook } from './game/playercombat';
-import { MonsterView } from './render/monsterView';
+import { MonsterView, NEAR_CLAMP } from './render/monsterView';
+import { HitFx } from './render/hitFx';
 import { butcherSeconds, butcherToolQuality, butcherYield, type ButcherKind } from './game/butchery';
 import { monsterSize, type Monster } from './game/monster';
 import { createItem, loadAmmo, type Item } from './game/item';
@@ -42,6 +43,8 @@ export function installMonsters(game: Game, renderer: Renderer | null, worldgen:
     view = new MonsterView(game, renderer, sys, combat);
     game.systems.push(view);
     combat.viewmodel = () => (renderer as unknown as { viewmodel?: ViewModelHook }).viewmodel;
+    const fx = new HitFx(game, renderer, view);
+    if (api) Object.assign(api, { hitFx: fx, nearClamp: NEAR_CLAMP });
   }
   (game as unknown as { monsters: MonsterSystem }).monsters = sys;
 

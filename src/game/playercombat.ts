@@ -145,13 +145,17 @@ export class PlayerCombat implements GameSystem {
       // Swinging at nothing still costs the swing (and a little stamina).
       this.cooldown = attackCooldownSeconds(p, w);
       p.modStamina(-20);
+      this.feedback('melee', 'whiff', null, p.x + Math.sin(p.yaw) * reach, p.y - Math.cos(p.yaw) * reach, 0);
       return false;
     }
     const res = meleeAttack(p, { dodge: m.dodge(), armor: m.type.armor, sizeMeleePenalty: m.sizeMeleePenalty() }, this.sys.rng, m.theName());
     this.cooldown = res.cooldownSeconds;
     // Hostility: animals remember who hit them even on a miss.
     m.aggroCharacter = true;
-    if (!res.hit) return false;
+    if (!res.hit) {
+      this.feedback('melee', 'miss', m, m.x, m.y, 0);
+      return false;
+    }
     let dominant = 'bash', best = 0;
     for (const d of res.damage) if (d.amount > best) (best = d.amount), (dominant = d.type);
     const verb = meleeVerb(dominant, res.total, (a, b) => this.sys.rng.int(a, b));
@@ -160,7 +164,28 @@ export class PlayerCombat implements GameSystem {
     sfx.meleeHit(m.type.material[0] ?? 'flesh', m, ws);
     this.sys.emitSound(m.x, m.y, m.z, 8, 'Smack!', 'player', '');
     this.sys.hurt(m, res.total, 'player');
+    this.feedback('melee', res.crit ? 'crit' : 'hit', m, m.x, m.y, res.total);
     return true;
+  }
+
+  /**
+   * Tell hit-feedback listeners (particles, stagger, crosshair marker) how an attack went.
+   * The impact point is the near side of the target (what the camera sees get hit).
+   */
+  private feedback(kind: 'melee' | 'gun' | 'throw', outcome: 'hit' | 'crit' | 'miss' | 'whiff', m: Monster | null, x: number, y: number, damage: number): void {
+    const p = this.game.player;
+    if (m) {
+      const d = Math.hypot(m.x - p.x, m.y - p.y) || 1;
+      x = m.x - ((m.x - p.x) / d) * m.radius * 0.8;
+      y = m.y - ((m.y - p.y) / d) * m.radius * 0.8;
+    }
+    const final = m?.dead ? 'kill' : outcome !== 'miss' && outcome !== 'whiff' && damage <= 0 ? 'block' : outcome;
+    this.game.events.emit('playerAttack', {
+      kind, outcome: final, x, y, z: p.z, damage, target: m ?? undefined,
+      // A hit that takes a third of its health (or a crit that hurts) visibly rocks the target.
+      heavy: !!m && damage > 0 && (damage >= m.hpMax * 0.3 || outcome === 'crit' || damage >= 20),
+      blood: m ? this.sys.bloodType(m.type) : undefined,
+    });
   }
 
   // ------------------------------------------------------------------ guns
@@ -229,6 +254,7 @@ export class PlayerCombat implements GameSystem {
     this.tracers.push({ x0: p.x, y0: p.y, x1: hit.x, y1: hit.y, z: p.z, t: 0.08 });
     if (!hit.hit) {
       sfx.bulletHit('wall', { x: hit.x, y: hit.y, z: p.z });
+      this.game.events.emit('playerAttack', { kind: 'gun', outcome: 'whiff', x: hit.x, y: hit.y, z: p.z, damage: 0, heavy: false, blood: null });
       return true;
     }
     const m = hit.hit;
@@ -257,6 +283,7 @@ export class PlayerCombat implements GameSystem {
     game.message(total > 0 ? `You shoot ${m.theName()} for ${total} damage.${tag}` : `You shoot ${m.theName()} but do no damage.`);
     sfx.bulletHit('flesh', m);
     this.sys.hurt(m, total, 'player');
+    this.feedback('gun', tag.startsWith('  Critical') ? 'crit' : 'hit', m, m.x, m.y, total);
     return true;
   }
 
@@ -312,6 +339,7 @@ export class PlayerCombat implements GameSystem {
         game.message(`The ${it.baseName()} hits ${m.theName()} for ${total} damage.`);
         m.aggroCharacter = true;
         this.sys.hurt(m, total, 'player');
+        this.feedback('throw', 'hit', m, m.x, m.y, total);
       },
     });
     this.sys.emitSound(land.x + 0.5, land.y + 0.5, p.z, 4, 'a thud.', 'player', '');

@@ -42,6 +42,18 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #000; }
 #ui .hud-cross i, #ui .hud-cross b { position: absolute; background: rgba(255,255,255,.8); box-shadow: 0 0 0 1px rgba(0,0,0,.6); }
 #ui .hud-cross i { left: 6px; top: 0; width: 1px; height: 13px; }
 #ui .hud-cross b { top: 6px; left: 0; height: 1px; width: 13px; }
+/* hit marker (hud.ts): diagonal ticks just outside the crosshair */
+#ui .hud-hit { display: none; position: absolute; inset: -5px; text-decoration: none; }
+#ui .hud-hit.on { display: block; }
+#ui .hud-hit u { position: absolute; width: 4px; height: 1px; background: #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.6); }
+#ui .hud-hit u:nth-child(1) { left: 0; top: 1px; transform: rotate(45deg); }
+#ui .hud-hit u:nth-child(2) { right: 0; top: 1px; transform: rotate(-45deg); }
+#ui .hud-hit u:nth-child(3) { left: 0; bottom: 1px; transform: rotate(-45deg); }
+#ui .hud-hit u:nth-child(4) { right: 0; bottom: 1px; transform: rotate(45deg); }
+#ui .hud-hit.crit { inset: -8px; }
+#ui .hud-hit.crit u { background: var(--c-yellow); width: 5px; }
+#ui .hud-hit.kill u { background: var(--c-light_red); width: 5px; }
+#ui .hud-hit.block u { background: var(--c-light_gray); opacity: .6; }
 #ui .hud-prompt { position: absolute; left: 50%; top: calc(50% + 18px); transform: translateX(-50%); background: rgba(0,0,0,.6);
   padding: .1em .5em; color: var(--c-white); white-space: pre; text-shadow: 1px 1px 0 #000; }
 #ui .hud-activity { position: absolute; left: 50%; bottom: 18%; transform: translateX(-50%); background: rgba(0,0,0,.7);
