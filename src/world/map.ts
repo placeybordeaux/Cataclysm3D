@@ -145,6 +145,11 @@ export class GameMap {
   itemFactory: ((spawn: ItemSpawn) => MapItem[]) | null = null;
   /** Hooks for systems that must react to spawns during generation (monsters, vehicles). */
   onChunkGenerated: ((chunk: Chunk) => void)[] = [];
+  /**
+   * After an existing chunk was changed by mapgen again (update_mapgen): consume any new
+   * `spawns` / `vehicles` / `npcSpawns` it now carries. Not for one-time generation work.
+   */
+  onChunkUpdated: ((chunk: Chunk) => void)[] = [];
   /** Tile occupants consulted by moveCost/opaque (the vehicle system registers one). */
   overlays: MapOverlay[] = [];
   /**

@@ -67,6 +67,8 @@ export interface Voice {
   readonly sound: ResolvedSound;
   readonly pos?: Vec3;
   setPosition(pos: Vec3): void;
+  /** Playback rate (pitch), glided over `glideSec` (engine revs). */
+  setRate(rate: number, glideSec?: number): void;
   stop(fadeSec?: number): void;
   readonly ended: boolean;
 }
@@ -104,6 +106,10 @@ class VoiceImpl implements Voice {
   setPosition(pos: Vec3): void {
     this.pos = pos;
     this.engine.spatialize(this, false);
+  }
+  setRate(rate: number, glideSec = 0.15): void {
+    if (this.ended) return;
+    this.source.playbackRate.setTargetAtTime(Math.max(0.25, Math.min(4, rate)), this.engine.ctx.currentTime, glideSec / 3);
   }
   stop(fadeSec = 0.05): void {
     if (this.ended || this.fading) return;

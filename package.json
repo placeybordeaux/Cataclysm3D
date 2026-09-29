@@ -9,6 +9,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "extract": "tsx tools/extract/index.ts",
+    "data:all": "tsx tools/extract/all.ts",
     "extract:mapgen": "tsx tools/extract/mapgen.ts",
     "worldgen": "tsx tools/worldgen.ts",
     "extract:ui": "tsx tools/extract/ui.ts",

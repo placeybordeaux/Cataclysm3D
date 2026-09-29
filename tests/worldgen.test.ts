@@ -123,3 +123,48 @@ describe('world generator', () => {
     expect(gen.stats.unknownIds.size).toBe(0);
   });
 });
+
+describe('update_mapgen on live chunks', () => {
+  /** The refugee center's back bay (evac_center_8) in world `seed`. */
+  function backBay(seed: number) {
+    const w = world(seed);
+    const sp = w.gen.overmap.findSpecial('evac_center', { x: 0, y: 0 }, 3)!;
+    expect(sp).toBeDefined();
+    for (let dy = -1; dy < 18; dy++)
+      for (let dx = -1; dx < 18; dx++) {
+        const o = w.gen.overmap.omtAt(sp.x + dx, sp.y + dy, 0);
+        if (o.type === 'evac_center_8') return { ...w, omx: sp.x + dx, omy: sp.y + dy, rot: o.rot };
+      }
+    throw new Error('no evac_center_8');
+  }
+
+  it("takes down Smokes' back bay barricade (furniture cleared, version bumped, hooks fired)", () => {
+    const { map, gen, omx, omy } = backBay(5);
+    const c = map.chunk(omx, omy, 0)!;
+    const furnCount = () => Array.from(c.furn).filter((f) => f !== 0).length;
+    const before = furnCount();
+    const v = c.version;
+    const updated: string[] = [];
+    map.onChunkUpdated.push((ch) => updated.push(`${ch.cx},${ch.cy},${ch.z}`));
+    expect(gen.applyUpdate(map, 'smokes_take_down_back_bay_barricade', omx, omy, 0)).toBe(true);
+    expect(c.version).toBeGreaterThan(v);
+    expect(furnCount()).toBeLessThan(before);
+    // f_clear means "no furniture", never a furniture of its own
+    expect(Array.from(c.furn).some((f) => f !== 0 && map.furniture.get(f).id === 'f_clear')).toBe(false);
+    expect(updated).toEqual([`${omx},${omy},0`]);
+    expect(gen.applyUpdate(map, 'no_such_update', omx, omy, 0)).toBe(false);
+  });
+
+  it('applies inline mission update_mapgen in the OMT rotation, keeping existing items', () => {
+    const { map, gen, omx, omy, rot } = backBay(5);
+    const c = map.chunk(omx, omy, 0)!;
+    const items = [...c.items.values()].reduce((n, l) => n + l.length, 0);
+    gen.applyUpdate(map, { set: [{ point: 'terrain', id: 't_floor_red', x: 1, y: 0 }], place_monster: [{ monster: 'mon_zombie', x: 5, y: 5, target: true }] }, omx, omy, 0, { dropMissionTargets: true });
+    // (1, 0) in north coordinates, turned like MapBuffer.rotate
+    let x = 1, y = 0;
+    for (let t = 0; t < (rot & 3); t++) [x, y] = [23 - y, x];
+    expect(map.terrain.get(c.ter[y * 24 + x]).id).toBe('t_floor_red');
+    expect([...c.items.values()].reduce((n, l) => n + l.length, 0)).toBe(items);
+    expect(c.spawns.length).toBe(0);
+  });
+});

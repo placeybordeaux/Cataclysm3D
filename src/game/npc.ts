@@ -422,18 +422,8 @@ export interface NpcSpec {
 function itemsFromGroup(data: GameData, group: string, rng: Rng): Item[] {
   if (!data.itemGroups[group]) return [];
   const out: Item[] = [];
-  for (const s of expandItemGroup(data, group, rng)) out.push(...fromSpawned(data, capContents(s)));
+  for (const s of expandItemGroup(data, group, rng)) out.push(...fromSpawned(data, s));
   return out;
-}
-
-/**
- * Shop groups put hundreds of loose pieces into one container (a tube of 500 welding rods);
- * inserting them one by one is quadratic in the pocket code and took seconds for a single
- * shop. Cap non-stacking contents per container: the trade screen can't show 500 rods anyway.
- */
-function capContents(s: SpawnedItem, cap = 40): SpawnedItem {
-  if (!s.contents?.length) return s;
-  return { ...s, contents: s.contents.map((c) => capContents({ ...c, count: Math.min(c.count, cap) }, cap)) };
 }
 
 /** random_item_from: "<class>_<what>" or the fallback group; may be empty. */

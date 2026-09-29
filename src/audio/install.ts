@@ -51,7 +51,9 @@ export function installAudio(game: Game, debugApi?: Record<string, any>): AudioH
 
       // Footsteps: one per stride of distance actually travelled (collisions don't count).
       const moved = Math.hypot(p.x - lastX, p.y - lastY);
-      if (p.z !== lastZ || moved > 2) strideAcc = 0; // teleport / stairs
+      // Carried by a vehicle (driving or riding along): the engine is the sound, not your feet.
+      const riding = !!g.vehicles?.driving || !!g.vehicles?.at(tx, ty, p.z)?.v.velocity;
+      if (p.z !== lastZ || moved > 2 || riding) strideAcc = 0; // teleport / stairs / vehicle
       else if (moved > 0) {
         strideAcc += moved;
         const stride = strideLength(p.running, p.crouching);

@@ -295,6 +295,30 @@ describe('missions', () => {
     expect(npcs.missions.isComplete(inst, n)).toBe(true);
     delete nd.missions.TEST_KILL;
   });
+
+  it("Smokes' Clear Back Bay runs its mapgen updates: barricade effect, inline start/end update_mapgen", () => {
+    const { npcs } = world();
+    const n = npcs.spawn({ cls: 'NC_SCAVENGER' }, 14, 12, 0)!;
+    const calls: { src: unknown; at: { x: number; y: number; z: number }; drop?: boolean }[] = [];
+    // A fake overmap: evac_center_8 two OMTs east, evac_center_9 three.
+    npcs.findOmt = (pred) => (pred('evac_center_8') ? { x: 2, y: 0 } : pred('evac_center_9') ? { x: 3, y: 0 } : null);
+    npcs.mapgenUpdate = (src, at, opts) => (calls.push({ src, at, drop: opts?.dropMissionTargets }), true);
+    const inst = npcs.missions.create('MISSION_FREE_MERCHANTS_EVAC_1', n)!;
+    npcs.missions.assign(inst, npcs.dialogueFor(n));
+    const ids = calls.map((c) => (typeof c.src === 'string' ? c.src : 'inline'));
+    expect(ids).toContain('smokes_take_down_back_bay_barricade');
+    expect(calls.find((c) => c.src === 'smokes_take_down_back_bay_barricade')!.at).toEqual({ x: 2, y: 0, z: 0 });
+    const start = calls.find((c) => typeof c.src !== 'string')!;
+    expect(start.drop).toBe(true);
+    expect(start.at).toEqual({ x: 3, y: 0, z: 0 });
+    // the boss zombie the start update places is the mission target, spawned by the mission system
+    expect(inst.targetMonster?.name).toBe('Sean McLaughlin');
+    calls.length = 0;
+    inst.targetMonster!.dead = true;
+    npcs.missions.succeed(inst, null);
+    expect(calls.length).toBe(1);
+    expect((calls[0].src as { set: unknown[] }).set.length).toBe(1);
+  });
 });
 
 describe('trade', () => {

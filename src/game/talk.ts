@@ -6,7 +6,7 @@ import { warnOnce } from '../data/warn';
 import type { Character } from './character';
 import { createItem, fromSpawned, type Item } from './item';
 import { FACTION_FOLLOWERS, FACTION_NONE, type Npc, type NpcData, type TalkTopicDef } from './npc';
-import type { MissionInstance, MissionSystem } from './missions';
+import type { MissionHost, MissionInstance, MissionSystem } from './missions';
 import { evalMath, evalMathArray, type MathHost, type MathValue, type VarScope } from './talkmath';
 import type { BodyPartId } from './bodyparts';
 import { MAIN_PARTS } from './bodyparts';
@@ -56,6 +56,8 @@ export interface TalkWorld {
   dropItem?(it: Item, x: number, y: number, z: number): void;
   /** Allied NPCs near the survivor (npc_allies, give_aid_all). */
   alliesNear?(): Npc[];
+  /** Run an update_mapgen on the live map at an OMT (effect mapgen_update). */
+  mapgenUpdate?: MissionHost['mapgenUpdate'];
   /** Overmap terrain id at an OMT (npc_at_om_location). */
   omtAt?(omx: number, omy: number, z: number): string | undefined;
   cityName?(): string;
@@ -1307,6 +1309,19 @@ export class Dialogue implements MathHost {
         if (inst) this.w.missions.assign(inst, this);
         return;
       }
+      case 'mapgen_update': case 'u_mapgen_update': {
+        // talk_effect_fun::f_mapgen_update: one id or a list, at the OMT the mission-target
+        // params name (om_terrain near the survivor / origin_npc, offsets; none = here).
+        if (!this.w.mapgenUpdate) return;
+        if (o.target_var !== undefined) {
+          warnOnce('talk_effect', 'mapgen_update.target_var', '[talk] mapgen_update with target_var (location variables) is unsupported');
+          return;
+        }
+        if (o.time_in_future !== undefined) warnOnce('talk_effect', 'mapgen_update.time_in_future', '[talk] mapgen_update time_in_future runs immediately');
+        const at = this.w.missions.findTarget(o, n);
+        for (const id of Array.isArray(v) ? v : [v]) this.w.mapgenUpdate(String(this.varFrom(id) ?? id), at);
+        return;
+      }
       case 'u_set_guard_pos': case 'npc_set_guard_pos': n.guardPos = { x: n.tileX, y: n.tileY, z: n.z }; return;
       case 'give_equipment': this.after.push(() => this.w.startTrade?.(n, 0)); return;
       case 'npc_die': this.simpleEffect('npc_die'); return;
@@ -1387,7 +1402,7 @@ export class Dialogue implements MathHost {
 const IGNORED_EFFECTS = new Set([
   'npc_rules_menu', 'set_npc_pickup', 'basecamp_mission', 'start_camp', 'distribute_food_auto', 'revert_activity', 'goto_location',
   'find_mount', 'dismount', 'drop_items_in_place', 'remove_stolen_status', 'toggle_npc_rule', 'set_npc_rule', 'clear_npc_rule',
-  'set_npc_engagement_rule', 'set_npc_aim_rule', 'mapgen_update', 'u_location_variable', 'npc_location_variable', 'u_assign_activity',
+  'set_npc_engagement_rule', 'set_npc_aim_rule', 'u_location_variable', 'npc_location_variable', 'u_assign_activity',
   'bionic_install', 'bionic_remove', 'u_add_bionic', 'u_lose_bionic', 'companion_mission', 'u_set_fac_relation', 'u_transform_radius',
   'u_teleport', 'npc_teleport', 'u_spawn_npc', 'assign_camp', 'return_to_camp_duties', 'abandon_camp', 'lead_to_safety',
   'start_training', 'start_training_npc', 'start_training_seminar', 'sort_loot', 'do_construction', 'do_mining', 'do_mopping',
@@ -1402,6 +1417,9 @@ const EFFECT_ARGS = new Set([
   'value', 'count', 'cost', 'container', 'duration', 'true_eocs', 'false_eocs', 'intensity', 'target_var', 'use_item_group',
   'suppress_message', 'popup', 'flags', 'bodypart', 'force', 'charges', 'possible_values', 'time', 'type', 'bonus', 'max_bonus',
   'decay_start', 'capped', 'then', 'else', 'cases', 'success', 'time_in_future', 'om_terrain', 'target', 'range',
+  // mission_target_params (mapgen_update)
+  'om_special', 'om_terrain_match_type', 'origin_npc', 'offset_x', 'offset_y', 'offset_z', 'reveal_radius', 'search_range',
+  'min_distance', 'z', 'key',
 ]);
 
 /** condition.cpp parsers_simple keys: string conditions usable as dynamic-line keys. */

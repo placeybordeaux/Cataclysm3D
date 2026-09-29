@@ -142,3 +142,24 @@ describe('real data: items', () => {
     warn.mockRestore();
   });
 });
+
+describe('filling containers (fromSpawned)', () => {
+  it('batched inserts give the same result as one-by-one and stay fast', () => {
+    const spec = { id: 'bag_canvas', count: 1, contents: [{ id: 'rock', count: 200 }, { id: 'nail', count: 1, charges: 500 }, { id: 'box_small', count: 3 }] };
+    const t0 = performance.now();
+    const [bag] = fromSpawned(data, spec as never);
+    const ms = performance.now() - t0;
+    // reference: the same items inserted without the batch totals
+    const ref = createItem(data, 'bag_canvas');
+    for (const cs of spec.contents) {
+      for (const c of fromSpawned(data, cs as never)) {
+        let left: Item | null = c;
+        for (const p of ref.pockets) if (left && p.canContain(left).ok) left = p.insert(left);
+      }
+    }
+    const summary = (it: Item) => it.pockets.map((p) => ({ n: p.contents.length, v: p.volumeUsed(), w: p.weightUsed() }));
+    expect(summary(bag)).toEqual(summary(ref));
+    expect(bag.pockets.reduce((n, p) => n + p.contents.reduce((k, c) => k + c.count(), 0), 0)).toBeGreaterThan(20);
+    expect(ms).toBeLessThan(200);
+  });
+});

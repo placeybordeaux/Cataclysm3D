@@ -31,7 +31,7 @@ if (argv.includes('--help') || argv.includes('-h')) {
   --out DIR          output directory (default public/audio)
   --music-tracks N   how many CO.AG tracks of the "title" playlist to ship (default 6, 0 = none)
   --budget-mb N      fail if the output would exceed N MB (default 25)
-  --exclude-ids a,b  CDDA sound_effect ids to skip (default: engine/vehicle ids, no vehicles yet)
+  --exclude-ids a,b  CDDA sound_effect ids to skip (default: none)
   --jobs N           parallel ffmpeg processes (default 4)`);
   process.exit(0);
 }
@@ -47,8 +47,8 @@ const MUSIC_TRACKS = Number(arg('--music-tracks') ?? 6);
 const BUDGET_MB = Number(arg('--budget-mb') ?? 25);
 const JOBS = Number(arg('--jobs') ?? 4);
 const EXCLUDE_IDS = new Set(
-  (arg('--exclude-ids') ??
-    'engine_start,engine_stop,engine_working_external,engine_working_internal,vehicle,vehicle_open,vehicle_close')
+  // Vehicles exist now (src/game/vehicles.ts), so engine/horn/door/gear sounds ship too.
+  (arg('--exclude-ids') ?? '')
     .split(',')
     .filter(Boolean),
 );

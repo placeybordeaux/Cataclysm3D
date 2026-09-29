@@ -22,8 +22,7 @@ export function installCrafting(game: Game, api?: DebugApi): void {
     const [x, y, z] = fireTarget(game);
     return useFirestarter(game, it, ua, x, y, z);
   });
-  // The activity progress bar lives in the HUD (src/ui/hud.ts); installActivityBar stays
-  // available for standalone use.
+  // The activity progress bar lives in the HUD (src/ui/hud.ts).
   if (api) installCraftingDebug(game, api);
 }
 

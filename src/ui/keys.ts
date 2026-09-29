@@ -20,7 +20,6 @@ export const DEFAULT_BINDINGS: Record<string, string[]> = {
   interact: ['e'], // CDDA 'e' examine; also opens/closes doors under the crosshair
   pickup: ['g', ','],
   drop: ['q'], // CDDA 'd' (taken by strafe)
-  attack_mode_toggle: ['t'],
   fire: ['f'], // CDDA 'f' fire (also LMB when wielding a gun)
   reload: ['r'],
   unload: ['U'],

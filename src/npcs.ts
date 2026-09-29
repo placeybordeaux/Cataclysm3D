@@ -6,6 +6,7 @@ import type { MonstersHandle } from './monsters';
 import type { Chunk } from './world/map';
 import { Rng, hashSeed } from './core/rng';
 import { CHUNK, chunkKey } from './world/coords';
+import { oterRotation } from './world/overmap/oter';
 import { NpcSystem, type NpcSystemJSON } from './game/npcai';
 import type { Npc, NpcData } from './game/npc';
 import type { Dialogue } from './game/talk';
@@ -56,7 +57,8 @@ export async function installNpcs(game: Game, renderer: Renderer | null, worldge
   if (worldgen) {
     const om = worldgen.overmap;
     sys.omtAt = (x, y, z) => om.omtAt(x, y, z).id;
-    sys.omtRotation = (x, y, z) => om.omtAt(x, y, z).rot;
+    sys.omtRotation = (x, y, z) => oterRotation(om.omtAt(x, y, z), worldgen.wg.overmap.terrains);
+    sys.mapgenUpdate = (src, at, opts) => worldgen.applyUpdate(game.map, src, at.x, at.y, at.z, opts);
     sys.cityName = () => om.closestCity(Math.floor(game.player.x / CHUNK), Math.floor(game.player.y / CHUNK))?.name ?? 'town';
     sys.findOmt = (pred, from, opts) => {
       const min = opts.minDist ?? 0, max = Math.min(opts.maxDist ?? 80, 160);
@@ -142,7 +144,7 @@ export async function installNpcs(game: Game, renderer: Renderer | null, worldge
   hud.addPromptProvider(() => {
     const n = npcUnderCrosshair();
     if (!n || n.isEnemy()) return null;
-    return `[e] Talk to ${n.displayName()}`;
+    return `[${game.keys.keyFor('interact')}] Talk to ${n.displayName()}`;
   });
 
   // ---------------------------------------------------------------- keys
@@ -174,6 +176,10 @@ export async function installNpcs(game: Game, renderer: Renderer | null, worldge
     if (!prior && worldgen && c.z === 0) randomSurvivor(sys, worldgen, c, startOmt);
   };
   game.map.onChunkGenerated.push(onChunk);
+  game.map.onChunkUpdated.push((c) => {
+    for (const s of c.npcSpawns) spawnMapgenNpc(sys, s.template, s.x, s.y, s.z, s.addTrait);
+    c.npcSpawns = [];
+  });
   // Chunks generated before this install (the start area) get their placements too.
   for (const c of game.map.loadedChunks()) if (c.npcSpawns.length) onChunk(c);
 
@@ -308,6 +314,9 @@ function installDebug(api: DebugApi, game: Game, sys: NpcSystem, wg: WorldGenera
     if (m) sys.missions.assign(m, n ? sys.dialogueFor(n) : null);
     return m?.uid ?? null;
   };
+  /** Run an update_mapgen id on an OMT (default: the one the survivor stands in). */
+  api.mapgenUpdate = (id: string, omx = Math.floor(p().x / CHUNK), omy = Math.floor(p().y / CHUNK), z = p().z) =>
+    sys.mapgenUpdate?.(id, { x: omx, y: omy, z }) ?? false;
   /** Teleport next to the refugee center's front door (the evac_center special). */
   api.teleportRefugeeCenter = (where: 'outside' | 'merchant' | 'lobby' = 'lobby') => {
     if (!wg) return null;

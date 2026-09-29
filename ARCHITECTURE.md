@@ -41,7 +41,7 @@ tileset, rendered in the "3D pixel art" style of *Project Shadowglass*.
   `127.0.0.1:9555/eval`); page scripts can `await shot(path)`. `--gpu` renders on the real GPU.
 - `window.cdda` (src/debug.ts) is the automation API. Register helpers for anything you
   add (`cdda.spawnMonster(id, dx, dy)`, `cdda.giveItem(id)`, …) so others can test.
-- Generated data lives in `public/data/` (by `npm run extract`) and `public/atlas/`
+- Generated data lives in `public/data/` (by `npm run data:all`, which runs every extractor) and `public/atlas/`
   (by `npm run atlas`). Both are **committed** so worktrees run without regenerating.
 
 ## Coordinates & units (see src/world/coords.ts, src/data/types.ts)
@@ -138,7 +138,8 @@ tests/               vitest unit tests (pure logic, no DOM/WebGL)
 
 - Data: `public/data/vehicles.json` from `npm run extract:vehicles` (prototypes with CDDA's
   copy-from "parts append" rule, slimmed vehicle parts, vehicle groups, fuel kJ/charge).
-  `misc.vehicle` predates the append fix; use vehicles.json.
+  `npm run data:all` regenerates every public/data file in order (core, npcs, mapgen, vehicles,
+  ui). Vehicle types are no longer in misc.json.
 - `vehicle.ts` `Vehicle`: parts on CDDA mount points (+x forward, +y right), world pose
   `x,y` (centre of mount 0,0) + `facing` deg (0 east, clockwise). `occupiedTiles()`,
   `mountAtTile`, `moveCostAt/opaqueAt` (CDDA obstacle/aisle rules, open doors), mass,
@@ -149,7 +150,9 @@ tests/               vitest unit tests (pure logic, no DOM/WebGL)
   index registered as a `GameMap.overlays` entry (so `map.moveCost/passable/opaque`,
   physics and monster `Grid` see vehicles), driving physics per tick, collisions (terrain via
   bash.ts, monsters via `monsterCreatureHooks`, the player, other vehicles), engine/horn/
-  alarm noise via `emitSound`, save section `vehicles` (order 30).
+  alarm noise via `emitSound` (with CDDA sfx id/variant), save section `vehicles` (order 30).
+  Audio: `src/audio/vehicleAudio.ts` `EngineSounds` (running-engine loop per nearby vehicle,
+  internal while driving, rate by CDDA gear, gear-shift clunks) and CDDA variant pickers.
 - Keys: `^` take controls / controls menu, `k` engine, `h` headlights, `n` horn; at the
   controls WASD drive (S brakes then reverses), Space handbrake. `e` on a vehicle part goes
   through `interactOverrides` in interact.ts (doors toggle, else a part menu: cargo get/put,
@@ -179,6 +182,12 @@ tests/               vitest unit tests (pure logic, no DOM/WebGL)
   warn once, false/no-op); `talkmath.ts` evaluates `math` expressions. `missions.ts`
   `MissionSystem` (FIND_ITEM, KILL_MONSTER_TYPE/SPEC, KILL_MONSTER target, GO_TO(_TYPE),
   ASSASSINATE, CONDITION). `trade.ts` `TradeSession` (npctrade.cpp prices, balance, credit).
+- **update_mapgen**: `worldgen.applyUpdate(map, idOrObject, omx, omy, z)` runs an update_mapgen
+  on the live chunk (rotated like CDDA, existing items kept, `chunk.version` bumped, new
+  spawns/vehicles/NPCs via `map.onChunkUpdated`). mapgen.json `update` holds the ids npcs.json
+  references (so `extract:npcs` runs before `extract:mapgen`). Dialogue `mapgen_update` and
+  mission start/end/fail `update_mapgen` go through `NpcSystem.mapgenUpdate`;
+  `cdda.mapgenUpdate(id, omx?, omy?, z?)`.
 - Mapgen `npcs`/`place_npcs` fill `chunk.npcSpawns` (consumed + cleared by installNpcs, skipped
   for chunks generated before a loaded save); the `evac_center` refugee center special is placed
   near the start town (overmap.ts). Towns get a few random survivors / bandits.
@@ -307,7 +316,10 @@ Keys: `V` camera mode, `F` flashlight.
 - **Light queries**: `renderer.lightAt(x, y, z)` → CDDA light level in luminance units
   (daylight ~100, lit room ≥10, `LIGHT_AMBIENT_LOW` 3.5 = too dark to see) — use it for
   vision/stealth. Exact on the player's level within 64 tiles, an indoor/outdoor estimate
-  elsewhere.
+  elsewhere. **Gameplay code calls `vision.ts lightAt(game, x, y, z)`**, which reads this
+  light map through `game.lightProvider` (`renderer.exactLightAt`, set in main.ts) where it is
+  exact, adds the survivor's flashlight beam (a spotlight, not in the map), and falls back to
+  vision's own estimate elsewhere and in headless tests.
 - **Viewmodel** (first person only): `renderer.viewmodel?.attack('melee'|'fire'|'throw')`
   animates the wielded item (`player.inv.wielded`, atlas sprite composited with a pixel
   fist; bare fists when unarmed): swing/punch, recoil + muzzle flash + light, throw.
@@ -328,9 +340,10 @@ Keys: `V` camera mode, `F` flashlight.
 - Map edits need no renderer calls: chunk meshes rebuild when `chunk.version` changes.
 - Debug API: `cdda.setCameraMode`, `cdda.flashlight`, `cdda.setWeather`, `cdda.settle()`
   (build all chunks + render; call before screenshots), `cdda.renderStats()`,
-  `cdda.lightAt(dx,dy)`, `cdda.lightmapAscii(r)`, `cdda.addLight(dx,dy,{…})`,
-  `cdda.addField(type,dx,dy,n)`, `cdda.placeItem(id,dx,dy)`, `cdda.lookAt(x,y)`,
-  `cdda.findFurniture(re)`, `cdda.attack(kind)`, `cdda.viewmodelPose(kind,t)` (freeze an
+  `cdda.lightAt(x?,y?,z?)` (absolute tile, gameplay light = this light map where exact),
+  `cdda.lightmapAscii(r)`, `cdda.addLight(dx,dy,{…})`, `cdda.addField(x,y,z,type,n)`,
+  `cdda.placeItem(id,dx,dy,count?)`, `cdda.lookAt(x,y)`, `cdda.findFurniture(re)`,
+  `cdda.viewmodelAttack(kind)` (animation only; `cdda.attack()` really attacks), `cdda.viewmodelPose(kind,t)` (freeze an
   attack pose), `cdda.shake(a)`, `cdda.hurtFlash(a)`, `cdda.benchRender(n)` (ms/frame),
   `cdda.shimmerTest(frames, px/frame)` (pixel-stability metric for a slow pan).
   `tools/render-shots.sh <prefix>` renders the regression screenshot set.
@@ -385,6 +398,9 @@ Keys: `V` camera mode, `F` flashlight.
   hit (h = metres, x/y tiles; same as three.js X/Z). `dirFromYawPitch(yaw, pitch)`.
   `game.lookAt(maxDist?)` = ray through the crosshair of the active camera (any mode).
   Monsters: set `game.creatureAt = (x, y, z) => LookCreature | null` so look mode and rays see them.
+  `game.creatureAt` is a chain: installNpcs wraps the monsters' version (NPC first, else
+  monster). Vehicles block rays via `vehicleAt` (kind `'vehicle'`); look mode lists the vehicle
+  name, condition and the parts at that spot (`describeVehicleAt` in src/ui/vehicle_ui.ts).
 - **HUD** `src/ui/hud.ts`: `hud.setPrompt('[e] Open door' | null)` (sticky) or
   `hud.addPromptProvider(game => text | null)` (per frame, first non-null wins; returns an
   unregister fn). `hud.safeMode = {text, color}`. The HUD also draws the activity bar.

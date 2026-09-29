@@ -86,15 +86,38 @@ export class Pocket {
   get empty(): boolean {
     return this.contents.length === 0;
   }
+  /**
+   * Running totals while a batch of inserts is in progress (see beginBatch). Summing the
+   * contents on every canContain made filling one container quadratic: a shop's 500
+   * welding rods took seconds. Only valid between beginBatch/endBatch, when nothing but
+   * insert() touches the contents.
+   */
+  private batch: { v: number; w: number; liquid: boolean } | null = null;
   volumeUsed(): number {
+    if (this.batch) return this.batch.v;
     let v = 0;
     for (const it of this.contents) v += it.volume();
     return v;
   }
-  weightUsed(): number {
+  private rawWeightUsed(): number {
+    if (this.batch) return this.batch.w;
     let w = 0;
     for (const it of this.contents) w += it.weight();
-    return w * (this.data.weight_multiplier ?? 1);
+    return w;
+  }
+  weightUsed(): number {
+    return this.rawWeightUsed() * (this.data.weight_multiplier ?? 1);
+  }
+  hasLiquid(): boolean {
+    return this.batch ? this.batch.liquid : this.contents.some((c) => c.isLiquid());
+  }
+  /** Start caching volume/weight totals for a run of insert() calls (fromSpawned). */
+  beginBatch(): void {
+    this.batch = null;
+    this.batch = { v: this.volumeUsed(), w: this.rawWeightUsed(), liquid: this.hasLiquid() };
+  }
+  endBatch(): void {
+    this.batch = null;
   }
   volumeRemaining(): number {
     return this.maxVolume - this.volumeUsed();
@@ -152,7 +175,7 @@ export class Pocket {
     const liquid = it.isLiquid();
     if (liquid && !d.watertight) return { ok: false, reason: "can't contain liquid" };
     // A liquid pocket holds one liquid and nothing else, as in CDDA.
-    if (this.contents.some((c) => c.isLiquid()) && (!liquid || this.contents.some((c) => c.typeId !== it.typeId)))
+    if (this.hasLiquid() && (!liquid || this.contents.some((c) => c.typeId !== it.typeId)))
       return { ok: false, reason: "can't mix liquid with contained item" };
     if (liquid && this.contents.some((c) => !c.isLiquid())) return { ok: false, reason: "can't put liquid into container with items" };
     if (d.item_restriction && !d.item_restriction.includes(it.typeId)) return { ok: false, reason: 'item restricted' };
@@ -194,8 +217,12 @@ export class Pocket {
     if (it.countByCharges && fit.charges !== undefined && this.type !== 'MAGAZINE_WELL') {
       const n = fit.charges;
       const target = this.contents.find((c) => c.stacksWith(it));
-      if (target) target.charges += n;
-      else this.contents.push(n === it.charges ? it : it.split(n));
+      if (target) {
+        const b = this.batch;
+        const v0 = b ? target.volume() : 0, w0 = b ? target.weight() : 0;
+        target.charges += n;
+        if (b) (b.v += target.volume() - v0), (b.w += target.weight() - w0);
+      } else this.push(n === it.charges ? it : it.split(n));
       if (n === it.charges) {
         if (target) it.charges = 0;
         return null;
@@ -203,8 +230,18 @@ export class Pocket {
       if (target) it.charges -= n;
       return it;
     }
-    this.contents.push(it);
+    this.push(it);
     return null;
+  }
+
+  private push(it: Item): void {
+    this.contents.push(it);
+    const b = this.batch;
+    if (b) {
+      b.v += it.volume();
+      b.w += it.weight();
+      if (it.isLiquid()) b.liquid = true;
+    }
   }
 
   remove(it: Item): boolean {
@@ -779,10 +816,18 @@ export function fromSpawned(data: GameData, s: SpawnedItem): Item[] {
   for (let i = 0; i < Math.max(1, s.count); i++) {
     const it = new Item(data, def);
     if (it.hasFlag('SPAWN_ACTIVE')) it.active = true;
-    for (const cs of s.contents ?? []) {
-      for (const c of fromSpawned(data, cs)) {
-        const left = placeContent(it, c);
-        if (left) warnOnce('fit', `${c.typeId}>${it.typeId}`, `fromSpawned: ${c.typeId} does not fit in ${it.typeId}`);
+    if (s.contents?.length) {
+      // Nothing else sees `it` until it's built, so the pockets can keep running totals.
+      for (const p of it.pockets) p.beginBatch();
+      try {
+        for (const cs of s.contents) {
+          for (const c of fromSpawned(data, cs)) {
+            const left = placeContent(it, c);
+            if (left) warnOnce('fit', `${c.typeId}>${it.typeId}`, `fromSpawned: ${c.typeId} does not fit in ${it.typeId}`);
+          }
+        }
+      } finally {
+        for (const p of it.pockets) p.endBatch();
       }
     }
     if (s.charges !== undefined && s.charges > 0) {

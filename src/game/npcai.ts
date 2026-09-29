@@ -97,6 +97,7 @@ export class NpcSystem implements GameSystem, TalkWorld, MissionHost {
   findOmt?: MissionHost['findOmt'];
   omtRotation?: MissionHost['omtRotation'];
   reveal?: MissionHost['reveal'];
+  mapgenUpdate?: MissionHost['mapgenUpdate'];
 
   private lastPlayerZ = NaN;
   private lastPX = 0;

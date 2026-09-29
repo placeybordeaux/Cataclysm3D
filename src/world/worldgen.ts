@@ -1,4 +1,5 @@
-import { Rng, hashSeed } from '../core/rng';
+import { Rng, hashSeed, hashString } from '../core/rng';
+import { warnOnce } from '../data/warn';
 import type { GameData } from '../data/types';
 import { expandItemGroup } from '../data/itemgroups';
 import { CHUNK } from './coords';
@@ -41,6 +42,8 @@ export class WorldGenerator implements ChunkGenerator {
   /** CDDA ter_furn_migration: obsolete ids still used by some mapgen -> current ids */
   private terMigration = new Map<string, { ter: string; furn?: string }>();
   private furnMigration = new Map<string, string>();
+  /** update_mapgen runs so far (salts their RNG so repeated updates differ) */
+  private updates = 0;
 
   constructor(readonly seed: number, readonly wg: WorldgenData, readonly game: GameData) {
     this.overmap = new Overmap(seed, wg.overmap);
@@ -141,6 +144,62 @@ export class WorldGenerator implements ChunkGenerator {
       }
     }
     this.stats.chunkDone(source, performance.now() - t0, c.z);
+  }
+
+  /**
+   * CDDA run_mapgen_update_func: apply an update_mapgen (id from mapgen.json `update`, or an
+   * inline object like a mission's "update_mapgen") to the live chunk of OMT (omx, omy, z),
+   * generating it first if needed. Like update_mapgen_function_json::update_map the chunk is
+   * rotated back to north, the pieces applied in the usual phases, and rotated again, so the
+   * JSON's coordinates mean the same as in the OMT's own mapgen. Items, fields and traps
+   * already there survive unless the update removes them. New monster/vehicle/NPC requests
+   * go through `map.onChunkUpdated`. Returns false for an unknown id.
+   */
+  applyUpdate(map: GameMap, src: string | Record<string, unknown>, omx: number, omy: number, z: number, opts: { dropMissionTargets?: boolean } = {}): boolean {
+    this.map = map;
+    let obj: any;
+    if (typeof src === 'string') {
+      const idx = this.wg.mapgen.update?.[src];
+      if (idx === undefined) {
+        warnOnce('update_mapgen', src, `[mapgen] unknown update_mapgen "${src}" (not referenced by npcs.json when extracted?)`);
+        return false;
+      }
+      obj = this.wg.mapgen.objects[idx];
+    } else obj = src;
+    // Mission targets ("target": true) are spawned by the mission system, which tracks them.
+    if (opts.dropMissionTargets && Array.isArray(obj.place_monster)) obj = { ...obj, place_monster: obj.place_monster.filter((p: any) => !p.target) };
+    const c = map.chunk(omx, omy, z);
+    if (!c) return false;
+    const compiled = { ...this.runner.compiler.build(obj, 0, 0, false), fillTer: undefined, predecessor: undefined, fallbackPredecessor: undefined };
+    const omt = this.overmap.omtAt(omx, omy, z);
+    const dat = this.makeDat(omx, omy, z, omt);
+    const rng = new Rng(hashSeed(this.seed, omx, omy, z, hashString(typeof src === 'string' ? src : JSON.stringify(src)), this.updates++));
+    const d: MapgenDat = { ...dat, rng, params: new ParamCtx(dat.params.stores, new Map(), rng) };
+    const base = this.readChunk(map, c);
+    // Requests the chunk already handed out must not be made twice.
+    base.spawns = [];
+    base.vehicles = [];
+    base.npcs = [];
+    const levels: Levels = new Map([[0, base]]);
+    this.runner.runTop(compiled, d, levels);
+    const onUnknown = (id: string) => this.stats.unknownId('region', id);
+    for (const b of levels.values()) resolveRegional(b, this.wg.overmap.region, rng, onUnknown);
+    const changed: Chunk[] = [c];
+    this.writeChunk(map, c, base);
+    for (const [dz, b] of levels) {
+      if (dz === 0) continue;
+      const target = map.chunk(omx, omy, z + dz);
+      if (!target) continue;
+      const tmp = this.readChunk(map, target);
+      tmp.spawns = [];
+      tmp.vehicles = [];
+      tmp.npcs = [];
+      applyOverlay(tmp, b);
+      this.writeChunk(map, target, tmp);
+      changed.push(target);
+    }
+    for (const ch of changed) for (const fn of map.onChunkUpdated) fn(ch);
+    return true;
   }
 
   /**
@@ -271,6 +330,8 @@ export class WorldGenerator implements ChunkGenerator {
       }
       const mf = this.furnMigration.get(b.furn[i]);
       if (mf) b.furn[i] = mf;
+      // map::furn_set: "f_clear" means "remove the furniture" (update_mapgen uses it a lot)
+      if (b.furn[i] === 'f_clear') b.furn[i] = '';
       let t = map.terrain.tryIndex(b.ter[i] || 't_open_air');
       if (t === undefined) {
         this.stats.unknownId('terrain', b.ter[i], 'chunk write');

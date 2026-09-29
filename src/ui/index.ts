@@ -4,7 +4,7 @@ import type { WorldGenerator } from '../world/worldgen';
 import type { DebugApi } from '../debug';
 import { createItem } from '../game/item';
 import { startReading } from '../game/reading';
-import { getUiRoot } from './framework';
+import { confirm, getUiRoot, prompt } from './framework';
 import { Hud, hud } from './hud';
 import { loadUiData, type UiContext } from './context';
 import { itemActionHooks, installInventoryUi, carriedEntries, nearbyEntries, openPickupMenu, openDropMenu, openItemPicker, showItemInfo } from './inventory_ui';
@@ -123,6 +123,9 @@ export async function installUi(game: Game, renderer: Renderer, worldgen: WorldG
       if (!f) throw new Error(`cdda.ui.open: unknown screen ${name} (${Object.keys(screens).join(', ')})`);
       f();
     },
+    /** Framework popups for automation: resolve to the answer (Esc = false / null). */
+    confirm: (q: string) => confirm(q),
+    prompt: (q: string, initial = '') => prompt(q, initial),
     /** Close every open window (Esc repeatedly). */
     closeAll: () => {
       for (let i = 0; i < 10 && game.input.captured; i++) window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape' }));

@@ -24,6 +24,15 @@ licence is non-commercial, no-derivatives, Sampling+ or unattributed were not in
 | sfx/deal_damage/hurt_m/hurt_m_2.ogg | micahlg | CC0 1.0 | https://freesound.org/people/micahlg/sounds/413183/ |
 | sfx/deal_damage/hurt_m/hurt_m_3.ogg | micahlg | CC0 1.0 | https://freesound.org/people/micahlg/sounds/413184/ |
 | sfx/deal_damage/hurt_m/hurt_m_4.ogg | micahlg | CC0 1.0 | https://freesound.org/people/micahlg/sounds/413185/ |
+| sfx/engine_start/combustion/engine_start_combustion.ogg | Frederik_Sunne | CC-BY | https://freesound.org/people/Frederik_Sunne/sounds/324138/ |
+| sfx/engine_start/electric/motor_start_ping.ogg | CogFireStudios | CC0 1.0 | https://freesound.org/s/619835/ |
+| sfx/engine_start/v8/engine_start_v8.ogg | Frederik_Sunne | CC-BY | https://freesound.org/people/Frederik_Sunne/sounds/324138/ |
+| sfx/engine_stop/combustion/engine_stop_combustion.ogg | GiocoSound | CC0 | https://freesound.org/people/GiocoSound/sounds/401553/ |
+| sfx/engine_stop/v8/engine_stop_v8.ogg | GiocoSound | CC0 | https://freesound.org/people/GiocoSound/sounds/401553/ |
+| sfx/engine_working_external/combustion/engine_working_external_combustion.ogg | Frederik_Sunne | CC-BY | https://freesound.org/people/Frederik_Sunne/sounds/324138/ |
+| sfx/engine_working_external/v8/engine_working_external_v8.ogg | Frederik_Sunne | CC-BY | https://freesound.org/people/Frederik_Sunne/sounds/324138/ |
+| sfx/engine_working_internal/combustion/engine_working_internal_combustion.ogg | nhaudio | CC-BY | https://freesound.org/people/nhaudio/sounds/275402/ |
+| sfx/engine_working_internal/v8/engine_working_internal_v8.ogg | nhaudio | CC-BY | https://freesound.org/people/nhaudio/sounds/275402/ |
 | sfx/environment/ambient/alarm.ogg | kyles | CC0 1.0 | https://freesound.org/people/kyles/sounds/452175/ |
 | sfx/environment/ambient/church_bells.ogg | Nox_Sound | CC0 1.0 | https://freesound.org/people/Nox_Sound/sounds/563885/ |
 | sfx/environment/ambient/indoors.ogg | blouhond | CC BY 3.0 | https://freesound.org/people/blouhond/sounds/163604/ |
@@ -383,6 +392,18 @@ licence is non-commercial, no-derivatives, Sampling+ or unattributed were not in
 | sfx/tool/pickaxe_2.ogg | TechspiredMinds | CC BY 4.0 | https://freesound.org/s/728757/ |
 | sfx/tool/pickaxe_3.ogg | TechspiredMinds | CC BY 4.0 | https://freesound.org/s/728758/ |
 | sfx/tool/shovel_1.ogg | f3bbbo | CC0 1.0 | https://freesound.org/s/651294/ |
+| sfx/vehicle_close/door_internal/close_car_door_internal.ogg | pagancow | CC0 | https://freesound.org/people/pagancow/sounds/15316/ |
+| sfx/vehicle_close/door/close_car_door.ogg | monotraum | CC0 | https://freesound.org/people/monotraum/sounds/208695/ |
+| sfx/vehicle_close/trunk/close_car_trunk.ogg | jackthemurray | CC0 | https://freesound.org/people/jackthemurray/sounds/433591/ |
+| sfx/vehicle_open/door_internal/open_car_door_internal.ogg | pagancow | CC0 | https://freesound.org/people/pagancow/sounds/15316/ |
+| sfx/vehicle_open/door/open_car_door.ogg | j1987 | CC0 1.0 | https://freesound.org/people/j1987/sounds/123020/ |
+| sfx/vehicle_open/trunk/open_car_trunk.ogg | Tokyoshowdown | CC0 | https://freesound.org/people/Tokyoshowdown/sounds/264892/ |
+| sfx/vehicle/car_alarm/car_alarm.ogg | InspectorJ | CC-BY | https://freesound.org/people/InspectorJ/sounds/422051/ |
+| sfx/vehicle/gear_shift/gear_shift1.ogg | JaimeLopes | CC-BY | https://freesound.org/people/JaimeLopes/sounds/442766/ |
+| sfx/vehicle/gear_shift/gear_shift2.ogg | JaimeLopes | CC-BY | https://freesound.org/people/JaimeLopes/sounds/442766/ |
+| sfx/vehicle/gear_shift/gear_shift3.ogg | JaimeLopes | CC-BY | https://freesound.org/people/JaimeLopes/sounds/442766/ |
+| sfx/vehicle/horn_medium/horn_medium.ogg | Legnalegna55 | CC0 1.0 | https://freesound.org/people/Legnalegna55/sounds/545015/ |
+| sfx/vehicle/rear_beeper/rear_beeper.ogg | florianreichelt | CC0 | https://freesound.org/people/florianreichelt/sounds/459993/ |
 
 ## Music
 
