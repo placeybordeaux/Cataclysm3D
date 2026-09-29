@@ -249,13 +249,13 @@ export class Inventory {
 
   /** Remove an item so the caller can put it on the map (result.dropped). */
   drop(it: Item): ActionResult {
-    if (it.hasFlag('BIONIC_WEAPON') || it.hasFlag('INTEGRATED')) return this.say(false, `You cannot drop your ${it.name()}.`);
+    if (it.hasFlag('NO_DROP') || it.hasFlag('INTEGRATED')) return this.say(false, `You cannot drop your ${it.name()}.`);
     if (!this.remove(it)) return this.say(false, `You don't have that item.`);
     return this.say(true, `You drop your ${it.name()}.`, 100, { dropped: [it] });
   }
 
   canWield(it: Item): { ok: boolean; reason?: string } {
-    if (this.wielded?.hasFlag('BIONIC_WEAPON') && this.wielded !== it) return { ok: false, reason: `You cannot unwield your ${this.wielded.name()}.` };
+    if (this.wielded?.hasFlag('NO_UNWIELD') && this.wielded !== it) return { ok: false, reason: `You cannot unwield your ${this.wielded.name()}.` };
     if (it.isLiquid()) return { ok: false, reason: "You can't wield spilt liquids." };
     if (this.owner.brokenArms() >= 2) return { ok: false, reason: "You can't wield anything with two broken arms." };
     if (this.owner.brokenArms() === 1 && (it.weight() > this.owner.str * 250 || it.hasFlag('ALWAYS_TWOHAND')))
@@ -293,8 +293,8 @@ export class Inventory {
   unwield(): ActionResult {
     const w = this.wielded;
     if (!w) return this.say(false, 'You are already empty-handed.');
-    // Bionic weapons are retracted through the bionics menu (CDDA NO_UNWIELD).
-    if (w.hasFlag('BIONIC_WEAPON')) return this.say(false, `You cannot unwield your ${w.name()}.`);
+    // Bionic weapons are retracted through the bionics menu (BN NO_UNWIELD).
+    if (w.hasFlag('NO_UNWIELD')) return this.say(false, `You cannot unwield your ${w.name()}.`);
     if (!this.canStash(w)) return this.say(false, `You have no space to store your ${w.name()}.`);
     this.wielded = null;
     this.stash(w);

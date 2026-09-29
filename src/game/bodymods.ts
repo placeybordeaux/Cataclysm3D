@@ -1,10 +1,10 @@
 import type { Character } from './character';
 import { BionicState } from './bionics';
-import { isMutagenVitamin, MutationState, mutagenVitamins, toolsNeeded } from './mutations';
+import { mutagenAction, MutationState, PURIFIER_ACTIONS, useActionTypes } from './mutations';
 
 // Attaches mutations + bionics to a Character through its hook points (no Game needed, so
 // unit tests use this directly): enchantment sources/conditions, wear restrictions,
-// encumbrance, natural armor, pseudo tool qualities, and mutagen consumption.
+// encumbrance, natural armor, pseudo tool qualities, and mutagen / purifier consumption.
 
 export interface BodyMods {
   mut: MutationState;
@@ -34,39 +34,41 @@ export function attachBodyMods(c: Character, opts: { isDay?: () => boolean } = {
   inv.naturalArmor.push((bp, dt) => mut.armor(bp, dt) + bio.armor(bp, dt));
   inv.qualityProviders.push(() => bio.pseudoItems());
 
-  // Injected mutagens need a syringe (consume_drug tools_needed).
   inv.consumeChecks.push((food) => {
-    for (const tool of toolsNeeded(food)) {
-      if (!inv.allItems().some((it) => it.typeId === tool)) return `You need a ${c.data.items[tool]?.name ?? tool} to use that.`;
+    // Character::can_eat: a comestible's `tool` (syringe for serums, lighter for cigarettes)
+    // must be at hand. Bionic syringe (bio_syringe) stands in for a syringe (consume_med).
+    const tool = food.def.tool as string | undefined;
+    if (tool && !(tool === 'syringe' && bio.has('bio_syringe')) && !inv.allItems().some((it) => it.typeId === tool)) {
+      return `You need a ${c.data.items[tool]?.name ?? tool} to consume that!`;
+    }
+    // try_reject_mutagen: refusals keep the dose.
+    const types = useActionTypes(food);
+    if (mutagenAction(food) || types.some((t) => (PURIFIER_ACTIONS as readonly string[]).includes(t))) {
+      const rej = mut.rejection(food, false);
+      if (rej && !rej.destroyed) return rej.msg;
     }
     return null;
   });
-  // Mutagen vitamins: consume_drug "vitamins" and the mutagenic ones in a food's own vitamins.
+  // BN invokes a comestible's use_action as it is eaten (Character::eat / consume_med).
   inv.onConsume.push((portion) => {
-    const fromDrug = mutagenVitamins(portion);
-    if (fromDrug) mut.addVitaminsFrom(fromDrug);
-    const own = (portion.def.vitamins as [string, number][] | undefined) ?? [];
-    const mutagenic = own.filter(([id]) => isMutagenVitamin(id));
-    if (mutagenic.length) mut.addVitaminsFrom(mutagenic);
+    const ua = mutagenAction(portion);
+    if (ua) {
+      if (ua.type === 'mutagen') mut.useMutagen(portion, ua);
+      else mut.useMutagenIv(portion, ua);
+      return;
+    }
+    for (const t of useActionTypes(portion)) {
+      if ((PURIFIER_ACTIONS as readonly string[]).includes(t)) {
+        const rej = mut.rejection(portion, false);
+        if (rej) c.msg(rej.msg, 'c_light_red');
+        else mut.purify(t as (typeof PURIFIER_ACTIONS)[number]);
+        return;
+      }
+    }
   });
 
-  // Bionic ↔ mutation conflicts: canceled_mutations block a mutation outright; a mutation in
-  // mutation_conflicts strains against the CBM (handle_bio_mut_conflict, simplified to pain).
-  mut.bionicBlockers.push((id) => {
-    for (const b of bio.bionics) {
-      const d = bio.def(b.id);
-      if (d?.canceled_mutations?.includes(id)) {
-        c.msg(`Your churning flesh strains painfully against your ${bio.name(b.id)} for a moment, then the feeling fades.`, 'c_light_red');
-        return false;
-      }
-      if (d?.mutation_conflicts?.includes(id)) {
-        c.msg(`Your body strains against your ${bio.name(b.id)} and it hurts!`, 'c_red');
-        c.modPain(c.rng.int(5, 15));
-        return false;
-      }
-    }
-    return null;
-  });
+  // Bionic canceled_mutations keep those mutations from ever developing (mutation_ok).
+  mut.bionicBlockers.push((id) => bio.bionics.some((b) => bio.def(b.id)?.canceled_mutations?.includes(id)));
   bio.cancelMutation = (id) => mut.removeMutation(id);
   return mods;
 }

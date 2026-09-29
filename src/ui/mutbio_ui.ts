@@ -117,6 +117,8 @@ export function openBionicsMenu(game: Game, mods: BodyMods): UiWindow {
   return m;
 }
 
+const partLabel = (bp: string) => (isBodyPart(bp) ? BODY_PARTS[bp].name : bp);
+
 function bionicDetail(mods: BodyMods, id: string): string {
   const { bio } = mods;
   const d = bio.def(id);
@@ -126,13 +128,16 @@ function bionicDetail(mods: BodyMods, id: string): string {
   if (occ.length) lines.push('', c('c_dark_gray', `Occupies: ${occ.join(', ')}`));
   const costs: string[] = [];
   if (d.act_cost) costs.push(`${energy(d.act_cost)} to activate`);
-  if (d.react_cost) costs.push(`${energy(d.react_cost)} every ${d.time ?? 1} s while on`);
+  if (d.react_cost) costs.push(`${energy(d.react_cost)} every ${d.time ?? 1} turn(s) while on`);
   if (d.trigger_cost) costs.push(`${energy(d.trigger_cost)} per trigger`);
   if (d.capacity) costs.push(`stores ${d.capacity} kJ`);
   if (costs.length) lines.push(c('c_dark_gray', `Power: ${costs.join(', ')}`));
-  if (d.protec?.length) lines.push(c('c_dark_gray', `Protection: ${d.protec.map(([bp, r]) => `${bp} ${Object.entries(r).map(([k, v]) => `${k} ${v}`).join('/')}`).join('; ')}`));
-  if (d.fake_weapon) lines.push(c('c_dark_gray', 'Weapon: extends while active.'));
-  if (d.passive_pseudo_items?.length) lines.push(c('c_dark_gray', `Provides: ${d.passive_pseudo_items.map((p) => bio.c.data.items[p]?.name ?? p).join(', ')}`));
+  const protec = (['bash', 'cut', 'bullet'] as const).flatMap((k) => (d[`${k}_protec`] ?? []).map(([bp, v]) => `${partLabel(bp)} ${k} ${v}`));
+  if (protec.length) lines.push(c('c_dark_gray', `Protection: ${protec.join('; ')}`));
+  if (d.stat_bonus?.length) lines.push(c('c_dark_gray', `Stats: ${d.stat_bonus.map(([s, n]) => `${s} ${n > 0 ? '+' : ''}${n}`).join(', ')}`));
+  const weapon = d.flags?.includes('BIONIC_WEAPON');
+  if (d.fake_item && weapon) lines.push(c('c_dark_gray', 'Weapon: extends while active.'));
+  else if (d.fake_item) lines.push(c('c_dark_gray', `Provides: ${bio.c.data.items[d.fake_item]?.name ?? d.fake_item}${d.flags?.includes('BIONIC_TOGGLED') ? ' (while active)' : ''}`));
   return lines.join('\n');
 }
 
@@ -156,9 +161,11 @@ export interface InstallFlowOpts {
 }
 
 /**
- * Character::can_install_bionics + install_bionics as an activity: checks, the CDDA failure
- * warning, anesthesia (or the choice to stay awake and suffer), the operation time
- * (difficulty × 20 min) and the roll at the end.
+ * BN can_install_bionics + install_bionics as an activity (iexamine::autodoc for the
+ * Autodoc): checks, the complication warning, anesthesia (required unless the patient feels
+ * no pain; BN refuses without it), an install program (`installation_data` item: skill
+ * override 10, consumed), the operation time (difficulty × 20 min) and the roll at the end.
+ * BN always installs the CBM; a failed roll adds complications.
  */
 export async function installCbmFlow(game: Game, mods: BodyMods, it: Item, opts: InstallFlowOpts): Promise<boolean> {
   const { bio } = mods;
@@ -168,39 +175,43 @@ export async function installCbmFlow(game: Game, mods: BodyMods, it: Item, opts:
     game.message(blocker, 'c_light_red');
     return false;
   }
-  const chance = bio.successChance(it.typeId, opts.autodoc);
+  const bid = bio.idx.bionicOf(it.typeId);
+  const program = it.def.installation_data as string | undefined;
+  const programItem = program ? p.inv.allItems().find((x) => x.typeId === program) : undefined;
+  const skillLevel = programItem ? 10 : -1;
+  const chance = bio.successChance(it.typeId, opts.autodoc, skillLevel);
+  const conflicts = (bio.def(bid)?.canceled_mutations ?? []).filter((m) => p.hasTrait(m));
+  if (conflicts.length && !(await confirm(`Installing this bionic will remove the conflicting traits: ${conflicts.map((m) => p.traitName(m)).join(', ')}.  Continue anyway?`, { destructive: true }))) return false;
   const q = chance >= 100 ? 'Are you sure you wish to install the selected bionic?'
-    : `WARNING: ${100 - chance} percent chance of failure that may result in damage, pain, or a faulty installation!  Continue anyway?`;
-  if (!(await confirm(`${opts.autodoc ? 'Autodoc Mk. XI.  ' : ''}Install <color_white>${bio.name(it.typeId)}</color>?\n${q}`, { destructive: true }))) return false;
+    : opts.autodoc ? `WARNING: There is a ${100 - chance} percent chance of complications, such as damage or faulty installation!  Continue anyway?`
+      : `WARNING: There is a ${100 - chance} percent chance of complications, such as damage or faulty installation!  The following skills affect self-installation: First Aid, Electronics, and Mechanics.\n\nContinue anyway?`;
+  if (!(await confirm(`${opts.autodoc ? 'Autodoc Mk. XI.  ' : ''}Install <color_white>${bio.name(bid)}</color>?\n${q}`, { destructive: true }))) return false;
   const need = bio.anesthesiaNeeded(it.typeId);
-  let awake = false;
-  if (bio.needsAnesthesia()) {
-    if (bio.anesthesiaAvailable() >= need) bio.consumeAnesthesia(need);
-    else {
-      awake = await confirm(`You don't have enough anesthetic to perform the installation (${need} needed in an anesthesia kit).\n<color_light_red>Operate without anesthesia?</color>  You will feel every cut.`, { destructive: true });
-      if (!awake) return false;
-    }
+  const anesthesia = opts.autodoc && bio.needsAnesthesia();
+  if (anesthesia && bio.anesthesiaAvailable() < need) {
+    game.message(`You don't have enough anesthetic for this operation (${need} charges in anesthesia kits needed).`, 'c_light_red');
+    return false;
   }
+  if (anesthesia) bio.consumeAnesthesia(need);
   const difficulty = bio.idx.difficulty(it.typeId);
   opts.consumeItem(it);
+  if (programItem) p.inv.remove(programItem);
   const itemId = it.typeId;
-  game.message(opts.autodoc ? 'The Autodoc begins the operation.' : `You begin installing your ${bio.name(itemId)}.`, 'c_white');
+  if (opts.autodoc) {
+    game.message('You set up the operation step-by-step, configuring the Autodoc to manipulate a CBM.');
+    if (anesthesia) {
+      game.message("You settle into position, sliding your right wrist into the couch's strap.");
+      game.message('You feel a tiny pricking sensation in your right arm, and lose all sensation before abruptly blacking out.', 'c_pink');
+    } else game.message('You stay very, very still, intently staring off into space, as the Autodoc slices painlessly into you.', 'c_pink');
+  }
   const started = game.activities.start({
-    name: `installing ${bio.name(itemId)}`,
+    name: `installing ${bio.name(bid)}`,
     duration: Math.max(1, difficulty) * 20 * 60,
     interruptible: false,
     onComplete: () => {
-      if (awake) {
-        // Not CDDA (it refuses without anesthetic): an awake operation costs a lot of pain.
-        p.modPain(Math.min(150, p.rng.int(difficulty * 10, difficulty * 20)));
-        game.message('The pain of the operation was excruciating.', 'c_red');
-      }
-      const r = bio.install(itemId, { autodoc: opts.autodoc });
-      if (r.dropCbm) {
-        const back = it;
-        back.vars.cbm_salvaged = 1;
-        opts.dropItem(back);
-      }
+      const r = bio.install(itemId, { autodoc: opts.autodoc, skillLevel });
+      if (r.success > 0) game.message(opts.autodoc ? 'The Autodoc returns to its resting position after successfully performing the operation.' : 'The operation is a success.', 'c_light_green');
+      else game.message(opts.autodoc ? 'The Autodoc completes installation and activates bionic but reports about complications during operation.' : 'Bionic was installed and activated but a complication happened during operation!', 'c_yellow');
     },
   });
   if (!started) opts.dropItem(it);

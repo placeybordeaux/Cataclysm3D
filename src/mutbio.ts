@@ -40,7 +40,8 @@ export function installMutBio(game: Game, renderer: Renderer | null, api?: Debug
       if (moved > 0 && moved < 2) bio.onMoved(moved);
       // Bionic weapon gone from the hands some other way (thrown, swapped): power it down.
       for (const b of bio.bionics) {
-        const fw = b.powered ? bio.def(b.id)?.fake_weapon : undefined;
+        const d = bio.def(b.id);
+        const fw = b.powered && d?.flags?.includes('BIONIC_WEAPON') ? d.fake_item : undefined;
         if (fw && p.inv.wielded?.typeId !== fw) bio.deactivate(b.id, true);
       }
     },
@@ -70,8 +71,10 @@ export function installMutBio(game: Game, renderer: Renderer | null, api?: Debug
     charsheetSections.push(() => bionicsSheetBox(mods));
   }
 
-  // CBMs: `A`pply = self-install (CDDA needs an Autodoc; we allow it with the manual odds).
+  // CBMs: `A`pply = self-install, only with BN's MANUAL_BIONIC_INSTALLATION option (off by
+  // default: an Autodoc does it).
   p.inv.useHandlers.set('install_bionic', (it) => {
+    if (!bio.idx.manualInstall && !p.hasTrait('DEBUG_BIONICS')) return { ok: false, msg: "You can't self-install bionics.  An Autodoc can install it.", moves: 0 };
     if (!hasDom) return { ok: false, msg: 'No UI to confirm the operation.', moves: 0 };
     void installCbmFlow(game, mods, it, {
       autodoc: false,
@@ -108,8 +111,8 @@ export function installMutBio(game: Game, renderer: Renderer | null, api?: Debug
       bio.load(data.bio, ctx.warn);
     },
     missing: () => {
-      mut.load({ vitamins: {}, powered: [], base: [...p.traits], time: 0, nextChangingCheck: 1800, nextChangingMutate: 0 });
-      bio.load({ bionics: [], power: 0 });
+      mut.load({ powered: [], base: [...p.traits] });
+      bio.load({ bionics: [], power: 0, maxPower: 0 });
     },
   });
 
@@ -143,31 +146,33 @@ function installDebug(game: Game, api: DebugApi, mods: BodyMods): void {
   const { mut, bio } = mods;
   const p = game.player;
   /**
-   * Mutate: a trait id mutates towards it (prerequisites first, like CDDA's debug menu); a
-   * category id (LIZARD, HUMAN …) does one mutate_category step without vitamins; no
-   * argument = one random vitamin-weighted mutate(). Returns the visible mutations after.
+   * Mutate: a trait id mutates towards it (prerequisites first, like BN's debug menu); a
+   * category id (LIZARD, ANY …) does one mutate_category step; no argument = one
+   * Character::mutate (spends accumulated mutagen). Returns the mutations after.
    */
   api.mutate = (idOrCat?: string, n = 1) => {
     if (idOrCat && !mut.idx.categories.has(idOrCat) && mut.idx.def(idOrCat)) {
       // Keep stepping up the prerequisite chain until the trait is there (debug menu style);
       // stepping again once present would undo it (mutate_towards removes children).
-      for (let i = 0; i < 12 && !p.hasTrait(idOrCat); i++) if (!mut.mutateTowards(idOrCat, 'ANY', false)) break;
+      for (let i = 0; i < 12 && !p.hasTrait(idOrCat); i++) if (!mut.mutateTowards(idOrCat)) break;
       return api.mutations();
     }
     for (let i = 0; i < n; i++) {
-      if (!idOrCat) mut.mutate(0, true);
-      else if (mut.idx.categories.has(idOrCat)) mut.mutateCategory(idOrCat, false);
+      if (!idOrCat) mut.mutate();
+      else if (mut.idx.categories.has(idOrCat)) mut.mutateCategory(idOrCat);
       else throw new Error(`cdda.mutate: unknown mutation or category ${idOrCat}`);
     }
     return api.mutations();
   };
   api.mutations = () => ({
     traits: [...p.traits].map((id) => ({ id, name: mut.name(id), visible: mut.idx.visible(id), powered: mut.isPowered(id), base: mut.isBase(id) })),
-    vitamins: Object.fromEntries(Object.entries(mut.vitamins).filter(([, v]) => v)),
+    accumulatedMutagenDays: (p.effects.get('accumulated_mutagen')?.duration ?? 0) / 86400,
     levels: Object.fromEntries(mut.categoryLevels()),
     threshold: mut.thresholdCategory(),
+    threshTier: mut.threshTier,
   });
-  api.addVitamin = (id: string, n: number) => mut.vitaminMod(id, n);
+  /** Try crossing a category's threshold like an IV serum does (test_crossing_threshold). */
+  api.crossThreshold = (cat: string, tier = 1) => mut.testCrossingThreshold(cat, tier);
   api.removeMutation = (id: string) => mut.removeMutation(id);
   api.toggleMutation = (id: string) => mut.toggle(id);
   /** Install without surgery (debug); `roll` < chance runs the real odds instead. */
