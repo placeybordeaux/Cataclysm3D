@@ -1,7 +1,9 @@
 import * as THREE from 'three';
 import type { Chunk, GameMap } from '../world/map';
 import { CHUNK } from '../world/coords';
-import { buildChunkMesh, ShapeTable, type ChunkMeshData, type MeshExtras } from './chunkMesh';
+import { buildChunkMeshSteps, ShapeTable, type ChunkMeshData, type MeshExtras } from './chunkMesh';
+import { stepUntil } from './steps';
+import { frameStats } from '../perfDebug';
 import { puddleMaterial } from './props';
 import { worldMaterials } from './materials';
 import type { SpriteLayer, StaticSpriteGroup } from './sprites';
@@ -13,8 +15,11 @@ import { terrainShape } from './tileKinds';
 //  - desired set = chunks within `radius` (circular) on levels [z - below, z + above]
 //  - an entry is rebuilt when its signature (own + 6 neighbour chunk versions) changes,
 //    since wall faces and slab edges depend on neighbours
-//  - rebuilds are nearest-first under a per-frame time budget, so walking into new
-//    territory spreads the work over frames instead of hitching
+//  - rebuilds are nearest-first (chunks behind the camera later) under a strict per-frame
+//    time budget: a build is a generator (chunkMesh/trees yield per row / per tree) that
+//    may span several frames, the old mesh staying on screen until the new one is done.
+//    One volumetric chunk near the player is 5-15 ms of meshing; built in one go it was the
+//    30-60 ms frame when sprinting or driving through town under the "full" look.
 //  - entries beyond radius + 1 are disposed (hysteresis avoids thrash at borders)
 
 interface Entry {
@@ -32,6 +37,10 @@ interface Entry {
   d2: number;
   /** inside lodRadius (volumetric trees/props) at the last signature */
   near: boolean;
+  /** in-progress (time-sliced) build and the signature it started from */
+  job: { gen: Generator<void, void>; sig: number; ver: number; ms: number } | null;
+  /** own chunk version at the last finished build (edits vs. LOD/neighbour changes) */
+  builtVer: number;
 }
 
 export interface ChunkStats {
@@ -49,6 +58,12 @@ export interface ChunkStats {
   /** of which: mesh data, 3D trees (ms, cumulative) */
   meshMs: number;
   treeMs: number;
+  /** most meshing time spent in one frame (ms, cumulative max) and builds finished */
+  maxFrameMs: number;
+  builds: number;
+  /** longest single uninterrupted step (ms) and its phase: the slicing granularity */
+  maxStepMs: number;
+  maxStep: string;
 }
 
 const key = (cx: number, cy: number, z: number) => ((z + 16) * 4096 + (cx + 2048)) * 4096 + (cy + 2048);
@@ -59,11 +74,16 @@ export class ChunkManager {
   radius = 6;
   levelsBelow = 1;
   levelsAbove = 1;
-  /** Max milliseconds of meshing per frame (at least one chunk is always built). */
+  /** Max milliseconds of meshing per frame (builds are sliced; at least one step runs). */
   budgetMs = 4;
+  /** Budget when the player's own surroundings changed (a door opened, a wall smashed):
+   *  those should show within a frame or two. */
+  urgentBudgetMs = 10;
+  /** Camera forward on the ground plane (x, y in tile space), for build priority. */
+  readonly forward = { x: 0, y: -1 };
   /** Distance (tiles) inside which a chunk appearing counts as visible pop-in (set by the renderer from the fog). */
   visibleDist = 1e9;
-  readonly stats: ChunkStats = { entries: 0, pending: 0, builtThisFrame: 0, lastBuildMs: 0, skippedEmpty: 0, lateBuilds: 0, maxBuildMs: 0, slowBuilds: 0, meshMs: 0, treeMs: 0 };
+  readonly stats: ChunkStats = { entries: 0, pending: 0, builtThisFrame: 0, lastBuildMs: 0, skippedEmpty: 0, lateBuilds: 0, maxBuildMs: 0, slowBuilds: 0, meshMs: 0, treeMs: 0, maxFrameMs: 0, builds: 0, maxStepMs: 0, maxStep: '' };
   private entries = new Map<number, Entry>();
   private dirty: Entry[] = [];
   private shapes: ShapeTable;
@@ -72,8 +92,8 @@ export class ChunkManager {
   extras: ((near: boolean) => MeshExtras | undefined) | null = null;
   /** Chunks within this many chunk widths get the near-only volumes (0 = none). */
   lodRadius = 0;
-  /** Builds extra per-chunk objects from mesh data (3D trees); added to the chunk group. */
-  extraObjects: ((data: ChunkMeshData, cx: number, cy: number, z: number) => THREE.Object3D[]) | null = null;
+  /** Builds extra per-chunk objects from mesh data (3D trees; time-sliced); added to the chunk group. */
+  extraObjects: ((data: ChunkMeshData, cx: number, cy: number, z: number) => Generator<void, THREE.Object3D[]>) | null = null;
 
   constructor(private map: GameMap, private sprites: SpriteLayer, public source: TileTextureSource) {
     this.group.name = 'chunks';
@@ -84,6 +104,8 @@ export class ChunkManager {
   invalidateAll(): void {
     for (const e of this.entries.values()) {
       e.builtSig = -1;
+      // a half-built job read the old source/look/season: start over
+      e.job = null;
       e.deps = this.depsOf(e.cx, e.cy, e.z);
       e.chunk = e.deps[0]!;
     }
@@ -113,9 +135,10 @@ export class ChunkManager {
         created++;
         this.entries.set(k, {
           cx, cy, z, chunk: deps[0], deps, sig: 0, builtSig: -1, group: null, sprites: null,
-          visible: true, d2: 0, near: false,
+          visible: true, d2: 0, near: false, job: null, builtVer: -1,
         });
       }
+    frameStats.lap('chunks.create');
     // 2. signatures, visibility, eviction
     const dirty = this.dirty;
     dirty.length = 0;
@@ -136,31 +159,67 @@ export class ChunkManager {
         sig = (sig * 31 + (e.near ? 7 : 3)) | 0;
       }
       e.sig = sig;
-      if (sig !== e.builtSig && inLevels) {
-        e.d2 = ddx * ddx + ddy * ddy + (e.z === pz ? 0 : 0.5);
+      if ((sig !== e.builtSig || e.job) && inLevels) {
+        e.d2 = this.priority(e, px, py, pz);
         dirty.push(e);
       }
     }
-    // 3. rebuild nearest first under budget
+    // 3. rebuild in priority order under budget; a build may take several frames
     dirty.sort((a, b) => a.d2 - b.d2);
+    frameStats.lap('chunks.sig');
     let built = 0;
+    const pctx = Math.floor(px / CHUNK), pcty = Math.floor(py / CHUNK);
     for (const e of dirty) {
-      if (!unlimited && (built > 0 || created > 0) && performance.now() - t0 > this.budgetMs) break;
-      if (e.builtSig === -1 && e.z === pz) {
+      // the player's own chunk or a neighbour was edited (a door, a smashed wall): show it
+      // promptly. LOD flips (near/far volumes) while moving are not urgent.
+      const urgent = e.builtSig !== -1 && e.chunk.version !== e.builtVer && e.z === pz && Math.abs(e.cx - pctx) <= 1 && Math.abs(e.cy - pcty) <= 1;
+      const budget = urgent ? this.urgentBudgetMs : this.budgetMs;
+      const now = performance.now();
+      if (!unlimited && (built > 0 || created > 0) && now - t0 > budget) break;
+      if (e.builtSig === -1 && e.z === pz && !e.job) {
         const nx = Math.max(e.cx * CHUNK, Math.min(px, e.cx * CHUNK + CHUNK));
         const ny = Math.max(e.cy * CHUNK, Math.min(py, e.cy * CHUNK + CHUNK));
         if (Math.hypot(nx - px, ny - py) < this.visibleDist) this.stats.lateBuilds++;
       }
+      if (!e.job) e.job = { gen: this.buildSteps(e), sig: e.sig, ver: e.chunk.version, ms: 0 };
+      const job = e.job;
       const b0 = performance.now();
-      this.build(e);
-      this.stats.lastBuildMs = performance.now() - b0;
-      this.stats.maxBuildMs = Math.max(this.stats.maxBuildMs, this.stats.lastBuildMs);
-      if (this.stats.lastBuildMs > 8) this.stats.slowBuilds++;
+      const r = stepUntil(job.gen, unlimited ? Infinity : t0 + budget);
+      job.ms += performance.now() - b0;
       built++;
+      if (!r.done) break;
+      // A stale result (the map changed mid-build) still replaces the old mesh; builtSig
+      // keeps the job's signature so the entry goes dirty again and rebuilds.
+      e.builtSig = job.sig;
+      e.builtVer = job.ver;
+      e.job = null;
+      this.stats.builds++;
+      this.stats.lastBuildMs = job.ms;
+      this.stats.maxBuildMs = Math.max(this.stats.maxBuildMs, job.ms);
+      if (job.ms > 8) this.stats.slowBuilds++;
     }
+    this.stats.maxFrameMs = Math.max(this.stats.maxFrameMs, performance.now() - t0);
     this.stats.builtThisFrame = built;
     this.stats.pending = dirty.length - built;
     this.stats.entries = this.entries.size;
+  }
+
+  /**
+   * Build order: squared chunk distance, other levels a little later, and chunks behind the
+   * camera (beyond the player's own ring) later still: they're off screen, while the ones
+   * ahead are what a sprint or a car runs into.
+   */
+  private priority(e: Entry, px: number, py: number, pz: number): number {
+    const ccx = e.cx * CHUNK + CHUNK / 2 - px, ccy = e.cy * CHUNK + CHUNK / 2 - py;
+    let d2 = (ccx * ccx + ccy * ccy) / (CHUNK * CHUNK) + (e.z === pz ? 0 : 0.5);
+    const len = Math.hypot(ccx, ccy);
+    if (len > CHUNK * 1.2) {
+      const dot = (ccx * this.forward.x + ccy * this.forward.y) / len;
+      if (dot < 0) d2 *= 1 + 2.5 * -dot;
+    }
+    // finish what's started before starting a peer: half-built jobs hold their data
+    if (e.job) d2 *= 0.8;
+    return d2;
   }
 
   private offsets: [number, number][] = [];
@@ -178,19 +237,39 @@ export class ChunkManager {
     return [m.chunk(cx, cy, z), m.chunk(cx, cy - 1, z), m.chunk(cx + 1, cy, z), m.chunk(cx, cy + 1, z), m.chunk(cx - 1, cy, z), m.chunk(cx, cy, z + 1), m.chunk(cx, cy, z - 1)];
   }
 
-  private build(e: Entry): void {
-    this.dispose(e);
+  /** Charge one uninterrupted build step (since t0) to a phase; tracks the longest step. */
+  private stat(phase: 'mesh' | 'geom' | 'tree', t0: number): void {
+    const ms = performance.now() - t0;
+    if (phase === 'mesh') this.stats.meshMs += ms;
+    else if (phase === 'tree') this.stats.treeMs += ms;
+    if (ms > this.stats.maxStepMs) {
+      this.stats.maxStepMs = ms;
+      this.stats.maxStep = phase;
+    }
+  }
+
+  /** A chunk build as steps: mesh data (per row), 3D trees (per tree), then the swap. */
+  private *buildSteps(e: Entry): Generator<void, void> {
     const c = e.chunk;
     // Open sky (most chunks above ground): nothing to mesh. `empty` is maintained by
     // worldgen/setTer; items and fields are checked because addItem/addField don't clear it.
     if (c.empty && c.items.size === 0 && c.fields.size === 0 && c.furn.every((f) => f === 0)) {
-      e.builtSig = e.sig;
+      this.dispose(e);
       this.stats.skippedEmpty++;
       return;
     }
-    const t0 = performance.now();
-    const data = buildChunkMesh(this.map, this.shapes, this.source, e.chunk, this.season, undefined, this.extras?.(e.near));
-    this.stats.meshMs += performance.now() - t0;
+    let t0 = performance.now();
+    const gen = buildChunkMeshSteps(this.map, this.shapes, this.source, e.chunk, this.season, undefined, this.extras?.(e.near));
+    let data: ChunkMeshData;
+    for (;;) {
+      const r = gen.next();
+      if (r.done) { data = r.value; break; }
+      this.stat('mesh', t0);
+      yield;
+      t0 = performance.now();
+    }
+    this.stat('mesh', t0);
+    t0 = performance.now();
     const g = new THREE.Group();
     g.name = `chunk ${e.cx},${e.cy},${e.z}`;
     for (const [page, gb] of data.pages) {
@@ -208,11 +287,22 @@ export class ChunkManager {
       pm.matrixAutoUpdate = false;
       g.add(pm);
     }
+    this.stat('geom', t0);
     if (this.extraObjects) {
-      const t1 = performance.now();
-      for (const o of this.extraObjects(data, e.cx, e.cy, e.z)) g.add(o);
-      this.stats.treeMs += performance.now() - t1;
+      yield;
+      t0 = performance.now();
+      const tg = this.extraObjects(data, e.cx, e.cy, e.z);
+      for (;;) {
+        const r = tg.next();
+        if (r.done) { for (const o of r.value) g.add(o); break; }
+        this.stat('tree', t0);
+        yield;
+        t0 = performance.now();
+      }
+      this.stat('tree', t0);
     }
+    // swap: the old mesh stayed up while this one was built
+    this.dispose(e);
     g.matrixAutoUpdate = false;
     g.visible = e.visible;
     this.group.add(g);
@@ -228,7 +318,6 @@ export class ChunkManager {
       })), bounds);
       if (!e.visible) e.sprites.setVisible(false);
     }
-    e.builtSig = e.sig;
   }
 
   private setVisible(e: Entry, v: boolean): void {

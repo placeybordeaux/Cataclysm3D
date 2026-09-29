@@ -16,18 +16,52 @@ export class FrameStats {
   work: number[] = [];
   /** requestAnimationFrame intervals, ms */
   interval: number[] = [];
+  /** our own callback only (begin() to frame()), ms: `work` also counts the delay between
+   *  the rAF timestamp and the callback, which is other tasks' time */
+  loop: number[] = [];
+  private beginT = 0;
   recording = false;
+  /** Frames over `slowMs` of work with their per-section split (who caused the hitch). */
+  slow: { ms: number; sec: Record<string, number> }[] = [];
+  slowMs = 16;
+  /** Cumulative per-section ms while recording (where the average frame goes). */
+  totals: Record<string, number> = {};
   private last = 0;
+  private sec: Record<string, number> = {};
+  private lapT = 0;
+  /** Start timing sections of a frame (called at the top of the main loop). */
+  begin(rafNow?: number): void {
+    this.lapT = this.beginT = performance.now();
+    // time between the frame's rAF timestamp and our callback: other tasks (idle-time
+    // mapgen, GC, input) that ran first and delayed this frame
+    this.sec = rafNow !== undefined ? { wait: this.lapT - rafNow } : {};
+  }
+  /** Charge the time since the previous lap/begin to `name`. Cheap enough to leave on. */
+  lap(name: string): void {
+    const t = performance.now();
+    this.sec[name] = (this.sec[name] ?? 0) + (t - this.lapT);
+    this.lapT = t;
+  }
   frame(workMs: number, now: number): void {
     if (this.recording) {
       this.work.push(workMs);
+      if (this.beginT) this.loop.push(performance.now() - this.beginT);
       if (this.last) this.interval.push(now - this.last);
+      for (const [k, v] of Object.entries(this.sec)) this.totals[k] = (this.totals[k] ?? 0) + v;
+      if (workMs > this.slowMs && this.slow.length < 400) {
+        const sec: Record<string, number> = {};
+        for (const [k, v] of Object.entries(this.sec)) if (v >= 0.5) sec[k] = +v.toFixed(1);
+        this.slow.push({ ms: +workMs.toFixed(1), sec });
+      }
     }
     this.last = now;
   }
   reset(): void {
     this.work = [];
     this.interval = [];
+    this.loop = [];
+    this.slow = [];
+    this.totals = {};
     this.last = 0;
   }
 }
@@ -83,8 +117,13 @@ export function installPerfDebug(api: DebugApi, game: Game, cities?: () => { x: 
     await new Promise((r) => setTimeout(r, seconds * 1000));
     frameStats.recording = false;
     game.systems.splice(game.systems.indexOf(sys), 1);
+    const n = Math.max(1, frameStats.work.length);
     return {
       work: summarize(frameStats.work),
+      loop: summarize(frameStats.loop),
+      // mean ms/frame per section, and the slowest frames' splits
+      sections: Object.fromEntries(Object.entries(frameStats.totals).map(([k, v]) => [k, +(v / n).toFixed(2)])),
+      slowest: [...frameStats.slow].sort((a, b) => b.ms - a.ms).slice(0, 12),
       interval: summarize(frameStats.interval),
       tiles: Math.round(Math.hypot(p.x - x0, p.y - y0)),
       prefetch: pf ? { ...pf, maxMs: +pf.maxMs.toFixed(1) } : undefined,

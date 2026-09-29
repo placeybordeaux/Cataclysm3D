@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { runSteps, stepUntil } from './steps';
 import { CHUNK } from '../world/coords';
 import { hash2 } from './ground';
 
@@ -81,6 +82,8 @@ export class SkylineLayer {
     const on = this.enabled && !!this.overmap && pz >= 0;
     this.group.visible = on;
     if (!on) return;
+    this.stepJob();
+    if (this.job) return;
     const ox = Math.floor(px / CHUNK), oy = Math.floor(py / CHUNK);
     // rebuild only after moving a few OMTs: the ring is far away, and a rebuild walks
     // hundreds of overmap tiles
@@ -88,19 +91,25 @@ export class SkylineLayer {
     this.key = `${radius}`;
     this.bx = ox;
     this.by = oy;
-    this.rebuild(ox, oy, radius);
+    // sliced (a rebuild walks ~900 overmap tiles: 10-20 ms at once); the old ring stays
+    // up meanwhile, and the very first one is built at once
+    this.job = this.rebuild(ox, oy, radius);
+    if (!this.mesh) runSteps(this.job);
+  }
+
+  /** Max ms per frame spent rebuilding. */
+  budgetMs = 1;
+  private job: Generator<void, void> | null = null;
+  private stepJob(): void {
+    if (this.job && stepUntil(this.job, performance.now() + this.budgetMs).done) this.job = null;
   }
 
   invalidate(): void {
     this.key = '';
+    this.job = null;
   }
 
-  private rebuild(ox: number, oy: number, radius: number): void {
-    if (this.mesh) {
-      this.group.remove(this.mesh);
-      this.mesh.geometry.dispose();
-      this.mesh = null;
-    }
+  private *rebuild(ox: number, oy: number, radius: number): Generator<void, void> {
     const pos: number[] = [], nrm: number[] = [], col: number[] = [];
     const quad = (a: number[], b: number[], c: number[], d: number[], n: number[], k: number[]) => {
       for (const p of [a, b, c, a, c, d]) { pos.push(p[0], p[1], p[2]); nrm.push(n[0], n[1], n[2]); col.push(k[0], k[1], k[2]); }
@@ -138,7 +147,8 @@ export class SkylineLayer {
     };
     // inner edge one ring further out than the drawn chunks: the centre lags up to 2 OMTs
     const inner = radius + 2.6, outer = radius + 13;
-    for (let dy = -Math.ceil(outer); dy <= Math.ceil(outer); dy++)
+    for (let dy = -Math.ceil(outer); dy <= Math.ceil(outer); dy++) {
+      yield;
       for (let dx = -Math.ceil(outer); dx <= Math.ceil(outer); dx++) {
         const d = Math.hypot(dx, dy);
         if (d < inner || d > outer) continue;
@@ -188,6 +198,12 @@ export class SkylineLayer {
           if (r(70) < 0.5) crown(bx + r(71) * 24, bz + r(72) * 24, 2.5, 1.5, 6 + r(73) * 3, [0.04, 0.06, 0.03], false);
         }
       }
+    }
+    if (this.mesh) {
+      this.group.remove(this.mesh);
+      this.mesh.geometry.dispose();
+      this.mesh = null;
+    }
     if (!pos.length) return;
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));

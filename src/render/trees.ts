@@ -7,6 +7,7 @@ import { instancedLitMaterial, worldMaterials } from './materials';
 import { paintSurface, rampAround } from './pixelArt';
 import type { ProceduralTextureSource } from './proceduralSource';
 import type { TileFrame } from './textureSource';
+import { runSteps } from './steps';
 
 // 3D trees (look.ts `trees3d`), built from the tree's own UltiCa sprite so species, colour
 // and season all carry over:
@@ -262,11 +263,19 @@ export function isBareTree(f: TileFrame, shrub: boolean): boolean {
 
 /** Build one chunk's trees: trunk geometry (world material) + clumps (instanced). */
 export function buildTrees(specs: TreeSpec[], ground: GroundField | null, proc: ProceduralTextureSource, white: TileFrame): THREE.Object3D[] {
+  return runSteps(buildTreesSteps(specs, ground, proc, white));
+}
+
+/** buildTrees yielding after each tree (a forest chunk is ~10 ms of trees; see chunkManager). */
+export function* buildTreesSteps(specs: TreeSpec[], ground: GroundField | null, proc: ProceduralTextureSource, white: TileFrame): Generator<void, THREE.Object3D[]> {
   const trunkG = new GeomBuilder();
   // bare crowns: the sprite's own branch drawing on three crossed planes (per atlas page)
   const planes = new Map<THREE.Texture, GeomBuilder>();
   const inst: number[] = [], nrm: number[] = [], col: number[] = [];
+  let first = true;
   for (const s of specs) {
+    if (!first) yield;
+    first = false;
     const sh = analyse(s.frame, s.shrub);
     if (!sh) continue;
     const r = (i: number) => hash2(s.seed, i, 31) / 4294967296;
