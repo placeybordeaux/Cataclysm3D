@@ -28,6 +28,7 @@ import { installSave, takePendingLoad } from './save/install';
 import { frameStats, installPerfDebug } from './perfDebug';
 import { ChunkPrefetcher } from './world/prefetch';
 import { installAchievements } from './achievements';
+import { installProgression } from './progression/install';
 import { installChunkEviction } from './save/eviction';
 
 // URL params (all optional): seed=<int>, gen=world|test (default world), debug=1 (render stats overlay),
@@ -101,6 +102,8 @@ async function main(): Promise<void> {
   installCombatFeel(game, renderer, monsters, api);
   // After installMonsters (wraps PlayerCombat for attack events) and installSave (its saveable).
   const achievements = await installAchievements(game, worldgen, api);
+  // Unlocks, discovery tips, the journal; the title screen's Start / New Game use it.
+  const progression = await installProgression(game, ui.ctx, worldgen, achievements, api);
 
   // Mapgen ahead of the player in idle time (see src/world/prefetch.ts); ?prefetch=0 disables.
   const prefetch = new ChunkPrefetcher(game.map, () => game.player);
@@ -136,6 +139,7 @@ async function main(): Promise<void> {
   monsters.spawner.release();
   save.startSession();
   achievements.begin(loaded);
+  progression.begin(loaded);
 }
 
 main().catch((e) => {

@@ -1,0 +1,172 @@
+{
+  "version": 1,
+  "_doc": "Hand-authored unlock ladder (src/progression/unlocks.ts). Requirements: BN achievement ids (public/data/achievements.json) or lifetime stats (src/progression/profile.ts). Grants are choices, never bonuses. Validated by tests/progression.test.ts.",
+  "unlocks": [
+    {
+      "id": "start_evacuee", "kind": "start", "tier": 0, "name": "Evacuee",
+      "requirement": [],
+      "grants": { "profession": "unemployed", "scenario": "evacuee" },
+      "icon": "mbag",
+      "pitch": "You made it to an evac shelter. Nobody else did.",
+      "tradeoff": "No skills, no weapon: a pocket knife, a lighter and a bag."
+    },
+    {
+      "id": "prof_convict", "kind": "profession", "tier": 1, "name": "Convict",
+      "requirement": [{ "stat": "deaths", "gte": 1, "hint": "Die once (everyone does)" }],
+      "grants": { "profession": "convict", "scenario": "missed" },
+      "icon": "glass_shiv",
+      "pitch": "The Cataclysm opened your cell. Start in town with a glass shiv.",
+      "tradeoff": "Prison stripes, no bag, no lighter, and the town is full of them."
+    },
+    {
+      "id": "prof_security", "kind": "profession", "tier": 1, "name": "Security Guard",
+      "requirement": [{ "achievement": "achievement_kill_zombie", "hint": "Kill your first zombie" }],
+      "grants": { "profession": "security", "scenario": "evacuee" },
+      "icon": "m9",
+      "pitch": "A baton, a flashlight and a pistol you've never fired in anger.",
+      "tradeoff": "Fifteen rounds, and every shot rings the dinner bell."
+    },
+    {
+      "id": "prof_fastfood", "kind": "profession", "tier": 1, "name": "Fast Food Cook",
+      "requirement": [{ "stat": "foods_eaten", "gte": 10 }],
+      "grants": { "profession": "fastfoodcook", "scenario": "evacuee" },
+      "icon": "knife_steak",
+      "pitch": "You know your way around a kitchen, and a steak knife.",
+      "tradeoff": "Cooking skill instead of a bag: carry less from day one."
+    },
+    {
+      "id": "prof_handy", "kind": "profession", "tier": 1, "name": "Handy Man",
+      "requirement": [{ "stat": "items_crafted", "gte": 5 }],
+      "grants": { "profession": "construction_worker", "scenario": "evacuee" },
+      "icon": "hammer",
+      "pitch": "A tool belt, a hammer and a nail gun: build your way out.",
+      "tradeoff": "Heavy tools, no food, no fighting skill."
+    },
+    {
+      "id": "scen_missed", "kind": "scenario", "tier": 1, "name": "Missed the evacuation",
+      "requirement": [{ "stat": "towns_visited", "gte": 2 }],
+      "grants": { "scenario": "missed" },
+      "icon": "smart_phone",
+      "pitch": "Start in a house in town: loot is close, so are the dead.",
+      "tradeoff": "No shelter, no locker of supplies, zombies next door."
+    },
+    {
+      "id": "prof_cop", "kind": "profession", "tier": 2, "name": "Police Officer",
+      "requirement": [{ "stat": "zombie_kills", "gte": 10 }],
+      "grants": { "profession": "cop", "scenario": "evacuee" },
+      "icon": "usp_45",
+      "pitch": "A small-town deputy with a .45, a taser and a radio.",
+      "tradeoff": "Guns are loud. The badge won't impress anyone any more."
+    },
+    {
+      "id": "prof_firefighter", "kind": "profession", "tier": 2, "name": "Firefighter",
+      "requirement": [{ "any": [{ "achievement": "achievement_survive_one_day" }, { "stat": "best_days", "gte": 1 }], "hint": "Survive a whole day" }],
+      "grants": { "profession": "firefighter", "scenario": "evacuee" },
+      "icon": "halligan",
+      "pitch": "Bunker gear and a halligan bar: doors are a suggestion.",
+      "tradeoff": "Heavy, hot turnout gear; no food, no bag."
+    },
+    {
+      "id": "prof_mechanic", "kind": "profession", "tier": 2, "name": "Home Mechanic",
+      "requirement": [{ "stat": "vehicles_driven", "gte": 1 }],
+      "grants": { "profession": "mechanic", "scenario": "evacuee" },
+      "icon": "wrench",
+      "pitch": "Wrench, screwdrivers and a welder: every wreck is a parts store.",
+      "tradeoff": "Mechanics skill, not fighting skill."
+    },
+    {
+      "id": "prof_scholar", "kind": "profession", "tier": 2, "name": "Library Nerd",
+      "requirement": [{ "stat": "books_read", "gte": 3 }],
+      "grants": { "profession": "student_with_books", "scenario": "evacuee" },
+      "icon": "textbook_chemistry",
+      "pitch": "You grabbed the library's return box. Reading is learning.",
+      "tradeoff": "A box of books is heavy, and books don't stop teeth."
+    },
+    {
+      "id": "prof_medic", "kind": "profession", "tier": 2, "name": "Medical Resident",
+      "requirement": [{ "stat": "hp_healed", "gte": 100 }],
+      "grants": { "profession": "medic", "scenario": "evacuee" },
+      "icon": "1st_aid_deluxe",
+      "pitch": "A deluxe first aid kit and the know-how to use it.",
+      "tradeoff": "Dress shoes and a lab coat are not armor."
+    },
+    {
+      "id": "prof_bow_hunter", "kind": "profession", "tier": 2, "name": "Bow Hunter",
+      "requirement": [{ "stat": "corpses_butchered", "gte": 3 }],
+      "grants": { "profession": "bow_hunter", "scenario": "wilderness" },
+      "icon": "compbow",
+      "pitch": "Start in the woods with a compound bow and a hunting knife.",
+      "tradeoff": "Quiet but slow to learn; far from any town's loot."
+    },
+    {
+      "id": "scen_wilderness", "kind": "scenario", "tier": 2, "name": "Wilderness",
+      "requirement": [{ "stat": "towns_visited", "gte": 4 }],
+      "grants": { "scenario": "wilderness" },
+      "icon": "pointy_stick",
+      "pitch": "Start among the trees: few zombies, fewer supplies.",
+      "tradeoff": "No building, no loot nearby, and nights are dark and cold."
+    },
+    {
+      "id": "cos_unlucky", "kind": "cosmetic", "tier": 2, "name": "Title: the Unlucky",
+      "requirement": [{ "stat": "deaths", "gte": 3 }],
+      "grants": { "title": "the Unlucky" },
+      "icon": "shovel",
+      "pitch": "For those who keep coming back."
+    },
+    {
+      "id": "prof_camper", "kind": "profession", "tier": 3, "name": "Camper",
+      "requirement": [{ "stat": "best_days", "gte": 3 }],
+      "grants": { "profession": "camper", "scenario": "wilderness" },
+      "icon": "hatchet",
+      "pitch": "A hiking pack, a hatchet and a mess kit, out in the woods.",
+      "tradeoff": "Built for the trail, not for a fight in town."
+    },
+    {
+      "id": "prof_labtech", "kind": "profession", "tier": 3, "name": "Lab Technician",
+      "requirement": [{ "stat": "labs_reached", "gte": 1 }],
+      "grants": { "profession": "labtech", "scenario": "evacuee" },
+      "icon": "chemistry_set",
+      "pitch": "Computers, electronics and chemistry at level 4.",
+      "tradeoff": "A lab coat and safety glasses; no weapon at all."
+    },
+    {
+      "id": "prof_hitchhiker", "kind": "profession", "tier": 3, "name": "Hitchhiker",
+      "requirement": [{ "stat": "distance_m", "gte": 42195, "hint": "Walk a marathon (42.2 km, over any number of lives)" }],
+      "grants": { "profession": "hitchhiker", "scenario": "evacuee" },
+      "icon": "towel",
+      "pitch": "A bathrobe, slippers, a guidebook and, crucially, a towel.",
+      "tradeoff": "Don't panic."
+    },
+    {
+      "id": "prof_guard", "kind": "profession", "tier": 3, "name": "National Guard",
+      "requirement": [{ "any": [{ "achievement": "achievement_kill_zombie_50" }, { "stat": "zombie_kills", "gte": 50 }], "hint": "Kill 50 zombies" }],
+      "grants": { "profession": "national_guard", "scenario": "evacuee" },
+      "icon": "canteen",
+      "pitch": "Called up on your day off: a full go-bag and gym shorts.",
+      "tradeoff": "The go-bag is survival kit, not firepower."
+    },
+    {
+      "id": "prof_survivalist", "kind": "profession", "tier": 3, "name": "Survivalist",
+      "requirement": [{ "stat": "best_days", "gte": 5 }],
+      "grants": { "profession": "survivalist", "scenario": "wilderness" },
+      "icon": "knife_rambo",
+      "pitch": "You prepared for this. Survival 6, and a very big knife.",
+      "tradeoff": "Alone in the wilderness, a long walk from anything."
+    },
+    {
+      "id": "cos_undertaker", "kind": "cosmetic", "tier": 3, "name": "Title: the Undertaker",
+      "requirement": [{ "stat": "zombie_kills", "gte": 100 }],
+      "grants": { "title": "the Undertaker" },
+      "icon": "shovel",
+      "pitch": "A hundred of them put back in the ground."
+    },
+    {
+      "id": "creator", "kind": "creator", "tier": 4, "name": "Custom survivor",
+      "requirement": [{ "any": [{ "achievement": "achievement_survive_7_days" }, { "stat": "best_days", "gte": 7 }], "hint": "Survive 7 days in one life" }],
+      "grants": { "creator": true },
+      "icon": "smart_phone",
+      "pitch": "The full character creator: every profession, trait and stat.",
+      "tradeoff": "Point-buy: every advantage costs something."
+    }
+  ]
+}

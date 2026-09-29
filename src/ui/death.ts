@@ -7,6 +7,7 @@ import type { UiContext } from './context';
 import { achievementsOf } from '../achievements';
 import { GameClock } from '../core/time';
 import { saveHandle } from '../save/install';
+import { deathLines, titledName } from '../progression/memorial';
 
 // Death: CDDA's end screen (end_screen.json "death_tombstone" over the ascii_tombstone
 // picture, with name / time survived / kills stamped onto the stone), then the memorial
@@ -58,7 +59,7 @@ export function showDeathScreen(ctx: UiContext, hud: Hud, cause: string, diedAt 
     .map(([id, n]) => `  ${c('c_white', String(n).padStart(3))} ${c('c_light_gray', ctx.game.data.monsters[id]?.name ?? id)}`);
   const lastMsgs = hud.log.recent(10).map((e) => `  ${colorize(`<color_${(e.color ?? 'c_light_gray').replace(/^c_/, '')}>${logLine(e)}</color>`)}`);
   const summary = [
-    c('c_light_red', 'In memory of ') + c('c_white', p.name),
+    c('c_light_red', 'In memory of ') + c('c_white', titledName(game)),
     '',
     `${c('c_light_gray', 'Cause of death:')} ${c('c_red', cause)}`,
     `${c('c_light_gray', 'Survived:')} ${c('c_white', survived)}  ${c('c_dark_gray', `(${deathClock.format()})`)}`,
@@ -71,6 +72,7 @@ export function showDeathScreen(ctx: UiContext, hud: Hud, cause: string, diedAt 
     `${c('c_light_gray', 'Items crafted:')} ${c('c_white', String(game.stats.itemsCrafted))}`,
     '',
     ...achievementLines(ctx),
+    ...deathLines(game),
     c('c_light_gray', 'Last messages:'),
     ...lastMsgs,
   ].join('\n');

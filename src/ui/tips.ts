@@ -14,9 +14,11 @@ const STORAGE_KEY = 'cdda3d.hints';
 
 export function hintsEnabled(): boolean {
   try {
-    return localStorage.getItem(STORAGE_KEY) !== 'off';
+    // v2: off unless asked for; discovery tips (src/progression/discovery.ts) teach the same
+    // things one at a time, when they matter.
+    return localStorage.getItem(STORAGE_KEY) === 'on';
   } catch {
-    return true;
+    return false;
   }
 }
 
@@ -105,6 +107,6 @@ export function installTipsOption(): void {
     name: 'Show hints at start',
     value: () => (hintsEnabled() ? 'on' : 'off'),
     change: () => setHintsEnabled(!hintsEnabled()),
-    desc: 'Show the Hints popup (keys, where to find gear, how noise works) when a new game starts.',
+    desc: 'Show the Hints popup (keys, where to find gear, how noise works) when a new game starts.  Off by default: discovery tips explain things as you meet them.',
   });
 }

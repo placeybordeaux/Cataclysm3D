@@ -45,6 +45,8 @@ let x: XInput;
 interface State {
   lock: boolean; focus: boolean; fullscreen: boolean; windows: string[]; captured: boolean; held: string[];
   lockPaused: boolean; hint: boolean; x: number; y: number; yaw: number; running: boolean; deathScreen: boolean;
+  /** ui2 window titles (progression's Start / New Game / Journal) and visible toast titles. */
+  panels: string[]; toasts: string[];
 }
 const state = (): Promise<State> =>
   page.evaluate(() => {
@@ -57,6 +59,8 @@ const state = (): Promise<State> =>
       hint: !!hint && hint.style.display !== 'none',
       x: g?.player.x ?? 0, y: g?.player.y ?? 0, yaw: g?.player.yaw ?? 0, running: !!g?.player.running,
       deathScreen: !!document.querySelector('.death-screen'),
+      panels: [...document.querySelectorAll('#ui2 .ui2-win .ui2-title-text')].map((t) => t.textContent ?? ''),
+      toasts: [...document.querySelectorAll('#ui2 .ui2-toast:not(.leaving) .ui2-toast-title')].map((t) => t.textContent ?? ''),
     };
   });
 const js = <T>(code: string): Promise<T> => page.evaluate(code) as Promise<T>;
@@ -102,33 +106,143 @@ const center = async (sel: string): Promise<[number, number] | null> =>
     return [Math.round(r.x + Math.min(40, r.width / 2)), Math.round(r.y + r.height / 2)] as [number, number];
   }, sel);
 
+/** Title → Start → Enter: the quick start (named Evacuee). Returns the state in gameplay. */
+async function quickStart(): Promise<State> {
+  // The click gives the page keyboard focus (xdotool types into whatever has it).
+  await x.click(W / 2, 20);
+  await x.key('s');
+  await until((t) => t.panels.includes('Start'), 3000);
+  await x.key('Return');
+  const s = await until((t) => !t.panels.length && t.lock, 8000);
+  if (s.panels.length || !s.lock) console.log('quick start did not reach the game:', s);
+  return s;
+}
+
 // ------------------------------------------------------------------ scenarios
 type Scenario = [name: string, what: string, run: () => Promise<void>];
 const scenarios: Scenario[] = [
-  ['title', 'title screen → new character → gameplay captures the mouse; hints close with Bksp', async () => {
+  ['title', 'title screen → Start (quick start) → typed name → gameplay captures the mouse; first tip shows', async () => {
     let s = await state();
     check('title screen has a free cursor', !s.lock && s.captured, s);
     const nb = await center('.mm-item[data-i="0"]');
     await x.click(nb![0], nb![1]);
-    s = await until((t) => t.windows.includes('New Character'));
-    check('clicking New Game opens character creation', s.windows.includes('New Character'), s.windows);
-    await shot('chargen');
+    s = await until((t) => t.panels.includes('Start'), 3000);
+    check('clicking Start opens the quick start (no character creator)', s.panels.includes('Start') && !s.windows.includes('New Character'), s);
+    await shot('quickstart');
+    const focused = await js<boolean>(`document.activeElement?.dataset?.testid === 'name'`);
+    check('the name field has focus', focused);
+    await x.key('ctrl+a');
+    await x.type('Ada Tester');
+    await x.key('Return');
+    s = await until((t) => !t.panels.length && t.lock, 8000);
+    check('Enter starts the game and captures the mouse', !s.panels.length && s.lock, s);
+    check('no hints popup in the way', !s.windows.length, s.windows);
+    const name = await js<string>('cdda.game.player.name');
+    check('the typed name is the survivor', name === 'Ada Tester', name);
+    const kit = await js<string[]>('cdda.game.player.inv.allItems().map((i) => i.typeId)');
+    check('the Evacuee kit is carried (pocket knife, lighter, bag)', ['pockknife', 'lighter', 'mbag'].every((k) => kit.includes(k)), kit);
+    s = await until((t) => t.toasts.includes('Search for supplies'), 6000);
+    check('the first discovery tip shows', s.toasts.includes('Search for supplies'), s.toasts);
+    await shot('first_tip');
+  }],
+  ['onboarding', 'first minutes: tips wait out fights, unlock toast, craft nudge + badge, journal (J)', async () => {
+    await toGameplay();
+    await js(`cdda.godMode(true)`);
+    // Setup: a zombie a few steps away (a fight: the tip must wait).
+    // (hp lowered so a few fist blows finish it; the fight itself is the combat suites' job)
+    await js(`(() => { const uid = cdda.spawnMonster('mon_zombie', 0, -3); const m = cdda.game.monsters.all.find((z) => z.uid === uid); if (m) m.hp = 6; return uid; })()`);
+    await sleep(1500);
+    const q = await js<{ queue: string[]; blocked: boolean }>('cdda.progression.queue()');
+    check('a zombie close by blocks tips (queued, not shown)', q.blocked && !(await state()).toasts.includes('Zombie!'), q);
+    // Kill it with real clicks (aiming is setup: face it).
+    for (let i = 0; i < 60 && (await js<number>('cdda.game.monsters.visibleHostiles(8).length')) > 0; i++) {
+      await js(`(() => { const m = cdda.game.monsters.visibleHostiles(8)[0]; if (m) { const p = cdda.game.player; p.yaw = Math.atan2(m.x - p.x, -(m.y - p.y)); p.pitch = -0.1; } })()`);
+      await x.click(W / 2, H / 2);
+      await sleep(400);
+    }
+    const kills = await js<number>(`cdda.progression.stat('zombie_kills')`);
+    check('killing a zombie counts toward unlocks', kills >= 1, kills);
+    let s = await until((t) => t.toasts.some((m) => /Security Guard/.test(m)), 4000);
+    check('the unlock toasts in-run', s.toasts.some((m) => /Security Guard/.test(m)), s.toasts);
+    await shot('unlock_toast');
+    // Setup: a long stick makes a recipe craftable; the nudge waits for calm and the 20 s gap.
+    await js(`cdda.giveItem('stick_long')`);
+    await js(`cdda.progression.checkCraftable()`);
+    // Up to three 20 s gaps: other first-time tips (zombie, cold…) may be queued ahead.
+    s = await until((t) => t.toasts.some((m) => /craft|recipes/i.test(m)), 75000);
+    check('a "you could craft" nudge shows (after the calm/gap)', s.toasts.some((m) => /craft|recipes/i.test(m)), { toasts: s.toasts, q: await js('cdda.progression.queue()') });
+    const badge = await js<number>('cdda.progression.queue().badge');
+    check('the crafting key gets a badge', badge >= 1, badge);
+    await shot('craft_nudge');
+    await x.key('ampersand');
+    s = await until((t) => t.windows.length > 0, 1500);
+    check('& opens crafting', s.windows.includes('Crafting'), s.windows);
+    check('…and clears the badge', (await js<number>('cdda.progression.queue().badge')) === 0);
+    await x.key('ampersand');
+    await until((t) => !t.windows.length, 1500);
+    await x.key('J');
+    s = await until((t) => t.panels.includes('Survival Journal'), 2000);
+    check('J opens the survival journal', s.panels.includes('Survival Journal'), s.panels);
+    const tips = await js<string>(`document.querySelector('[data-testid=journal-list]')?.textContent ?? ''`);
+    check('the journal lists the tips met so far', /Search for supplies/.test(tips) && /Zombie!/.test(tips), tips.slice(0, 160));
+    await shot('journal');
+    await x.key('Right');
+    await x.key('Right');
+    await x.key('Right');
+    await sleep(200);
+    const unl = await js<string>(`document.querySelector('[data-testid=journal-list]')?.textContent ?? ''`);
+    check('the Unlocks tab shows progress ("Kill 10 zombies 1/10")', /Kill 10 zombies/.test(unl) && /1\/10/.test(unl), unl.slice(0, 200));
+    await shot('journal_unlocks');
+    await x.key('J');
+    s = await until((t) => !t.panels.length && t.lock, 2000);
+    check('J closes it and mouse-look is back', !s.panels.length && s.lock, s);
+    await js(`cdda.godMode(false)`);
+  }],
+  ['newgame', 'New Game: start picker, locked cards, Classic mode opens the full creator', async () => {
+    // Setup only: a clean profile, back at the title.
+    await js(`(() => { cdda.progression.reset(); localStorage.removeItem('cdda3d.achievements'); return 1; })()`);
+    dialogs.length = 0;
+    await page.goto(page.url());
+    await page.waitForFunction('window.cdda?.ready', { timeout: 240_000 });
+    await x.click(W / 2, 20);
+    await x.key('n');
+    let s = await until((t) => t.panels.includes('New Game'), 3000);
+    check('n opens the start picker', s.panels.includes('New Game'), s);
+    await shot('picker');
+    const cards = await js<{ id: string; locked: boolean }[]>(`[...document.querySelectorAll('#ui2 .pg-card')].map((c) => ({ id: c.dataset.unlock, locked: c.classList.contains('locked') }))`);
+    check('only the Evacuee is open on a fresh profile', cards.filter((c) => !c.locked).map((c) => c.id).join() === 'start_evacuee', cards);
+    check('locked starts are shown (what to aim for)', cards.filter((c) => c.locked).length > 10, cards.length);
+    const cop = await center('#ui2 .pg-card[data-unlock="prof_cop"]');
+    await x.click(cop![0], cop![1]);
+    await sleep(200);
+    const detail = await js<string>(`document.querySelector('#ui2 .pg-detail')?.textContent ?? ''`);
+    check('a locked card shows its requirement with progress', /Kill 10 zombies/.test(detail) && /0\/10/.test(detail), detail.slice(0, 200));
+    await x.key('Return');
+    s = await state();
+    check('Enter on a locked card does nothing', s.panels.includes('New Game'), s.panels);
+    await x.key('Escape');
+    s = await until((t) => !t.panels.length, 2000);
+    check('Esc backs out to the title', !s.panels.length && !s.lock, s);
+    // Setup: Classic mode through the profile (Options has the same toggle).
+    await js(`cdda.progression.classic(true)`);
+    await x.key('n');
+    await until((t) => t.panels.includes('New Game'), 3000);
+    const open = await js<number>(`document.querySelectorAll('#ui2 .pg-card:not(.locked)').length`);
+    check('Classic mode opens every start', open >= 17, open);
+    await x.key('End');
+    await x.key('Return');
+    s = await until((t) => t.windows.includes('New Character'), 3000);
+    check('the Custom survivor card opens the full character creator', s.windows.includes('New Character'), s.windows);
+    await shot('creator');
     await x.key('F');
-    s = await until((t) => t.windows.includes('Confirm'));
-    check('F finishes from the first tab (asks to confirm)', s.windows.includes('Confirm'), s.windows);
+    await until((t) => t.windows.includes('Confirm'), 3000);
     await x.key('y');
     await sleep(300);
     s = await state();
     if (s.windows.includes('Confirm')) await x.key('y');
-    s = await until((t) => t.windows.includes('Hints'), 8000);
-    check('new game shows the hints', s.windows.includes('Hints'), s.windows);
-    check('the confirming key press captured the mouse', s.lock, s);
-    await shot('hints');
-    const fits = await js<boolean>(`(() => { const b = document.querySelector('.cdda-window .body'); return b.scrollHeight <= b.clientHeight + 2; })()`);
-    check(`hints fit without scrolling at ${W}x${H}`, fits);
-    await x.key('Backspace');
-    s = await state();
-    check('Backspace closes the hints and keeps mouse-look', !s.windows.length && s.lock, s);
+    s = await until((t) => !t.windows.length && t.lock, 8000);
+    check('finishing the creator starts the game with the mouse captured', !s.windows.length && s.lock, s);
+    await js(`cdda.progression.classic(false)`);
   }],
   ['move', 'Shift+W runs (never opens Wear), mouse looks, WASD never trigger actions', async () => {
     await toGameplay();
@@ -484,13 +598,7 @@ const scenarios: Scenario[] = [
     s = await state();
     check('Backspace leaves it', !s.windows.length, s.windows);
     // Back into a game for the scenarios that follow.
-    await x.key('n');
-    await x.key('F');
-    await x.key('y');
-    await sleep(300);
-    await x.key('y');
-    await until((t) => t.windows.includes('Hints'), 8000);
-    await x.key('Backspace');
+    await quickStart();
   }],
   ['death', 'dying: menus close, the mouse is freed, last words can be typed at once', async () => {
     await toGameplay();
@@ -554,17 +662,8 @@ const runTitle = !only || only.has('title');
 for (const [name, what, run] of scenarios) {
   if (only && !only.has(name)) continue;
   if (name !== 'title' && !runTitle && !(await js<boolean>('!!cdda.game.input.wantLock'))) {
-    // Setup only: skip character creation (tested in the title scenario). The click gives
-    // the page keyboard focus (xdotool types into whatever has it).
-    await x.click(W / 2, 20);
-    await x.key('n');
-    await x.key('F');
-    await x.key('y');
-    await sleep(300);
-    await x.key('y');
-    const s = await until((t) => t.windows.includes('Hints'), 8000);
-    if (!s.windows.includes('Hints')) console.log('quick start did not reach the game:', s);
-    await x.key('Backspace');
+    // Setup only: the quick start (tested in the title scenario).
+    await quickStart();
   }
   scenario = name;
   console.log(`\n\x1b[1m${name}\x1b[0m — ${what}`);
