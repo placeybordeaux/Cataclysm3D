@@ -442,7 +442,9 @@ export class NpcSystem implements GameSystem, TalkWorld, MissionHost {
       return;
     }
     if (n.isFollower() && n.following && !n.guardPos) {
-      if (dP > 3.2) {
+      // Close but on the other side of a wall still means "catch up" (they'd otherwise stand
+      // inside the shelter while you walk off down the street).
+      if (dP > 3.2 || (dP < Infinity && !this.sees(n, p.x, p.y, p.z, 8))) {
         g.kind = 'follow';
         g.x = p.x;
         g.y = p.y;
@@ -549,7 +551,7 @@ export class NpcSystem implements GameSystem, TalkWorld, MissionHost {
         return;
       case 'follow':
         this.moveToward(n, g.x, g.y, dt, Math.hypot(g.x - n.x, g.y - n.y) > 8 ? 1.5 : 1);
-        if (Math.hypot(this.player.x - n.x, this.player.y - n.y) < 2.5) (g.kind = 'none'), (n.moving = false);
+        if (Math.hypot(this.player.x - n.x, this.player.y - n.y) < 2.5 && this.sees(n, this.player.x, this.player.y, this.player.z, 3)) (g.kind = 'none'), (n.moving = false);
         return;
       case 'approach':
         if (Math.hypot(g.x - n.x, g.y - n.y) < 1.4) {

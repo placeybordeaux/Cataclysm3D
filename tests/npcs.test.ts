@@ -101,6 +101,22 @@ describe('npc generation', () => {
     expect(n.getSkill('pistol')).toBeGreaterThanOrEqual(2);
   });
 
+  it('gunmen wield the gun (not a spare magazine) and it is loaded, magazine included', () => {
+    let guns = 0;
+    for (let seed = 1; seed <= 40; seed++) {
+      const n = generateNpc(data, nd, { template: 'bandit' }, seed);
+      const w = n.inv.wielded;
+      if (!w) continue;
+      expect(w.def.type, `seed ${seed}: wields ${w.typeId}`).not.toBe('MAGAZINE');
+      expect((w.def.subtypes as string[] | undefined) ?? []).not.toContain('MAGAZINE');
+      // modular guns (ammo "NULL") take their caliber from gunmods, which aren't modelled
+      if (!w.isGun() || !w.ammoTypes().some((a) => a !== 'NULL')) continue;
+      guns++;
+      expect(w.ammoRemaining(), `seed ${seed}: ${w.typeId} is empty`).toBeGreaterThan(0);
+    }
+    expect(guns).toBeGreaterThan(10);
+  });
+
   it('round-trips through toJSON/fromJSON', () => {
     const { npcs, game } = world();
     const n = npcs.spawn({ template: 'free_merchants_merchant' }, 14, 12, 0)!;

@@ -533,18 +533,21 @@ function equipNpc(data: GameData, n: Npc, cls: NpcClassDef | undefined, classId:
   try {
     for (const it of worn) if (n.inv.canWear(it).ok) n.inv.wear(it);
     // Weapon: override group, else the group for the NPC's best weapon skill.
-    let weapon: Item | undefined;
-    if (cls?.weapon_override && data.itemGroups[cls.weapon_override]) weapon = itemsFromGroup(data, cls.weapon_override, rng)[0];
+    let weaponRoll: Item[] = [];
+    if (cls?.weapon_override && data.itemGroups[cls.weapon_override]) weaponRoll = itemsFromGroup(data, cls.weapon_override, rng);
     else {
       let best = '', bl = 0;
       for (const s of WEAPON_SKILLS) if (n.getSkill(s) > bl) (bl = n.getSkill(s)), (best = s);
-      if (best) weapon = randomItemFrom(data, classId, best, rng, WEAPON_FALLBACK[best])[0];
+      if (best) weaponRoll = randomItemFrom(data, classId, best, rng, WEAPON_FALLBACK[best]);
     }
+    // Gun groups roll the gun together with spare magazines/ammo, not always gun first: wield
+    // the gun (an NPC "wielding" a Glock magazine was the result) and carry the rest.
+    const weapon: Item | undefined = weaponRoll.find((it) => it.isGun()) ?? weaponRoll[0];
     if (weapon) {
       loadGun(data, weapon);
       n.inv.wield(weapon);
     }
-    const carried: Item[] = [];
+    const carried: Item[] = weaponRoll.filter((it) => it !== weapon);
     if (cls?.carry_override && data.itemGroups[cls.carry_override]) carried.push(...itemsFromGroup(data, cls.carry_override, rng));
     else {
       let qty = rng.int(2, 6);

@@ -705,7 +705,9 @@ export function loadAmmo(it: Item, ammoId: string, n = Infinity): number {
   }
   const well = it.magazineWell();
   if (well && well.empty && it.magazinePockets().length === 0) {
-    const dm = well.data.default_magazine;
+    // CDDA pocket_data::load: without an explicit default_magazine the first item_restriction
+    // entry is the default (most guns only list item_restriction).
+    const dm = well.data.default_magazine ?? (well.data.item_restriction as string[] | undefined)?.[0];
     if (dm && data.items[dm]) well.insert(new Item(data, data.items[dm]));
   }
   const cap = it.ammoCapacity() - it.ammoRemaining();
