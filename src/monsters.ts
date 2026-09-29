@@ -8,7 +8,7 @@ import { Spawner, type OvermapView } from './game/spawner';
 import { PlayerCombat, type ViewModelHook } from './game/playercombat';
 import { MonsterView, NEAR_CLAMP } from './render/monsterView';
 import { HitFx } from './render/hitFx';
-import { butcherSeconds, butcherToolQuality, butcherYield, type ButcherKind, canDissect, dissectPracticeCap, dissectSeconds, dissectToolMessage, dissectToolQuality, dissectYield } from './game/butchery';
+import { butcherPracticeCap, butcherSeconds, butcherToolQuality, butcherYield, type ButcherKind, canDissect, dissectPracticeCap, dissectSeconds, dissectToolMessage, dissectToolQuality, dissectYield, readDissectables } from './game/butchery';
 import { monsterSize, type Monster } from './game/monster';
 import { createItem, loadAmmo, type Item } from './game/item';
 import { snippet } from './data/index';
@@ -41,6 +41,8 @@ export function installMonsters(game: Game, renderer: Renderer | null, worldgen:
   const spawner = new Spawner(sys, worldgen ? overmapView(worldgen) : null);
   const combat = new PlayerCombat(game, sys);
   game.systems.push(sys, combat);
+  // BN Character::get_dodge counts the grabbing monsters within one tile.
+  game.player.grabbers = () => sys.all.filter((m) => !m.dead && m.hasEffect('grabbing') && m.z === game.player.z && Math.max(Math.abs(m.tileX - game.player.tileX), Math.abs(m.tileY - game.player.tileY)) <= 1).length;
   // Zombie density (CDDA SPAWN_DENSITY): the remembered choice until character creation
   // or a loaded save says otherwise. In the browser, spawns wait for the game to start so
   // the chunks generated behind the title screen use the density picked for the new game.
@@ -173,6 +175,11 @@ export function corpsesNear(game: Game): CorpseAt[] {
   return out;
 }
 
+/** item::damage_level(4) of a corpse (0 intact … 4 pulped). */
+function corpseDamageLevel(it: Item): number {
+  return Math.max(0, Math.min(4, Math.ceil(it.damage / 1000)));
+}
+
 /** Start a butchering activity on a corpse. Returns false (with a message) when impossible. */
 export function startButcher(game: Game, sys: MonsterSystem, c: CorpseAt, kind: ButcherKind): boolean {
   const p = game.player;
@@ -192,7 +199,7 @@ export function startButcher(game: Game, sys: MonsterSystem, c: CorpseAt, kind: 
     duration: secs,
     onComplete: () => {
       if (!game.map.itemsAt(c.x, c.y, c.z).includes(c.item as any)) return game.message('The corpse is gone.');
-      const res = butcherYield(game.data, p, def, q, kind, sys.rng);
+      const res = butcherYield(game.data, p, def, q, kind, sys.rng, corpseDamageLevel(c.item));
       const h = def.harvest ? game.data.misc.harvest?.[def.harvest] : undefined;
       const tag = typeof h?.message === 'string' ? /^<(.+)>$/.exec(h.message) : null;
       const flavour = tag ? snippet(game.data, tag[1], sys.rng) : (h?.message as string | undefined);
@@ -201,8 +208,7 @@ export function startButcher(game: Game, sys: MonsterSystem, c: CorpseAt, kind: 
       if (!res.ok) return;
       sys.removeCorpseItem(c.item, c.x, c.y, c.z);
       for (const it of res.items) game.map.addItem(c.x, c.y, c.z, it);
-      const cap = Math.max(0, { tiny: 0, small: 1, medium: 2, large: 3, huge: 4 }[monsterSize(def)] - 2) + 4;
-      p.practice('survival', res.practice, cap);
+      p.practice('survival', res.practice, butcherPracticeCap(def));
       game.message(`You finish butchering the ${def.name}.`);
     },
   });
@@ -232,14 +238,13 @@ export function startDissect(game: Game, sys: MonsterSystem, c: CorpseAt): boole
     duration: dissectSeconds(def, q),
     onComplete: () => {
       if (!game.map.itemsAt(c.x, c.y, c.z).includes(c.item as any)) return game.message('The corpse is gone.');
-      const res = dissectYield(game.data, p, def, q, sys.rng, c.item.damageLevel());
-      const h = def.dissect ? game.data.misc.harvest?.[def.dissect] : undefined;
-      if (typeof h?.message === 'string' && res.ok) game.message(h.message);
+      const hidden = readDissectables(c.item);
+      const res = dissectYield(game.data, p, def, q, sys.rng, corpseDamageLevel(c.item), hidden);
       for (const msg of res.messages) game.message(msg, /^You discover/.test(msg) ? 'c_light_green' : undefined);
       if (!res.ok) return;
       sys.removeCorpseItem(c.item, c.x, c.y, c.z);
       for (const it of res.items) game.map.addItem(c.x, c.y, c.z, it);
-      p.practice('firstaid', res.practice, dissectPracticeCap(def, q));
+      p.practice('firstaid', res.practice, dissectPracticeCap(def, hidden.length));
       game.message(`You finish dissecting the ${def.name}.`);
     },
   });

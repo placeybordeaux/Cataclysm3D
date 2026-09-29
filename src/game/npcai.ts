@@ -7,7 +7,7 @@ import type { Game, GameSystem } from './game';
 import { Grid, clearWalk, hasLOS } from './los';
 import { findPath } from './pathfind';
 import { moveWithCollision, CREATURE_RADIUS } from './physics';
-import { applyFlatArmor, characterDefend, fireGun, hitMessage, meleeAttack, selectBodyPart, tryDodgeRoll, type ShotResult } from './combat';
+import { applyFlatArmor, characterDefend, fireGun, hitMessage, meleeAttack, onDodged, selectBodyPart, tryDodgeRoll, type ShotResult } from './combat';
 import { techniqueMessage, type TargetInfo } from './techniques';
 import { tickMartialArts } from './martialarts';
 import { turnsToEffectSeconds } from './monster';
@@ -738,6 +738,7 @@ export class NpcSystem implements GameSystem, TalkWorld, MissionHost {
     const res = this.muted(n, () => meleeAttack(n, { dodge: tryDodgeRoll(target) / 5 }, this.rng, foe.kind === 'npc' ? foe.n.name : 'you'));
     n.attackCooldown = res.cooldownSeconds;
     if (!res.hit) {
+      onDodged(target, n.getSkill('melee'));
       if (foe.kind === 'player') this.message(`${n.name} misses you.`);
       else if (this.narrates(n)) this.message(`${n.name} misses ${target.name}.`, 'c_light_gray');
       return;
@@ -915,6 +916,7 @@ export class NpcSystem implements GameSystem, TalkWorld, MissionHost {
     sfx.meleeSwing(undefined, { id: w?.typeId, skill: w ? w.meleeSkill() : 'unarmed' });
     this.lastPlayerSwing = res.cooldownSeconds;
     if (!res.hit) {
+      onDodged(n, p.getSkill('melee'));
       this.afterHit(n, 0, { kind: 'player' });
       return true;
     }

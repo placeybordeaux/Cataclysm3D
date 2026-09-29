@@ -57,7 +57,7 @@ const items: ItemDef[] = ([
     use_action: { type: 'consume_drug', activation_message: 'You take some %s.', effects: [{ id: 'pkill1_nsaid', duration: 9000 }] } },
   // tool/med.json
   { ...base, id: 'bandages', type: 'ITEM', subtypes: [], name: 'bandage', weight: 70, volume: 27, material: ['cotton'], flags: ['SINGLE_USE'],
-    use_action: { type: 'heal', bandages_power: 4, bleed: 15, move_cost: 6000 } },
+    use_action: { type: 'heal', bandages_power: 4, bleed: 0.9, move_cost: 300 } },
   { ...base, id: 'disinfectant', type: 'ITEM', subtypes: ['COMESTIBLE'], comestible_type: 'MED', name: 'disinfectant', weight: 27, volume: 25, charges: 10, phase: 'liquid', material: ['alcohol'],
     use_action: { type: 'heal', disinfectant_power: 4, bite: 0.95, move_cost: 3000 } },
   // armor/storage.json

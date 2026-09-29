@@ -198,6 +198,19 @@ describe('achievements (BN achievements.json semantics)', () => {
     expect(done).toContain('test_visit_refugees');
   });
 
+  it('mutation thresholds and skill_requirements achievements are tracked', () => {
+    const { t, done } = tracker();
+    t.emit('crosses_mutation_threshold', { character: 'avatar', category: 'LIZARD' });
+    t.flush();
+    const lizard = Object.values(ach.achievements).find((a) => a.requirements.some((r) => r.event_statistic === 'num_avatar_mutation_threshold_lizard'))!;
+    expect(done).toContain(lizard.id);
+    const skill = Object.values(ach.achievements).find((a) => a.skill_requirements?.some((s) => s.skill === 'melee'))!;
+    expect(t.achievementSupported(skill)).toBe(true);
+    // BN tracks the Mycus threshold through its own event.
+    const mycus = Object.values(ach.achievements).find((a) => a.requirements.some((r) => r.event_statistic === 'num_avatar_mutation_threshold_mycus'))!;
+    expect(t.achievementSupported(mycus)).toBe(true);
+  });
+
   it('the BN avatar_id statistic comes from game_start, which the port supports', () => {
     expect(ach.statistics.avatar_id.event_type).toBe('game_start');
     const t = new AchievementTracker(ach, queries());
@@ -206,7 +219,7 @@ describe('achievements (BN achievements.json semantics)', () => {
 
   it('marks achievements fed by events this port never emits as unsupported', () => {
     const d = withExtra({
-      transformations: { t_headshots: { id: 't_headshots', event_type: 'character_gets_headshot' } },
+      transformations: { t_headshots: { id: 't_headshots', event_type: 'character_triggers_trap' } },
       statistics: { num_headshots: { id: 'num_headshots', stat_type: 'count', event_transformation: 't_headshots' } },
       achievements: { test_headshots: { id: 'test_headshots', name: 'Headshots', requirements: [{ event_statistic: 'num_headshots', is: '>=', target: 1 }] } },
     });

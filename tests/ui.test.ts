@@ -34,9 +34,11 @@ describe('CDDA bars (output.cpp get_bar / get_hp_bar)', () => {
 });
 
 describe('need colors (display.cpp)', () => {
-  it('maps hunger/thirst/temperature/pain to CDDA colors', () => {
+  it('maps hunger/thirst/temperature/pain to BN colors', () => {
     expect(hungerColor('Famished')).toBe('c_light_red');
-    expect(hungerColor('Satisfied')).toBe('c_green');
+    expect(hungerColor('Sated')).toBe('c_green');
+    expect(hungerColor('Engorged')).toBe('c_pink');
+    expect(thirstColor('Very Thirsty')).toBe('c_yellow');
     expect(thirstColor('Parched')).toBe('c_light_red');
     expect(thirstColor('Thirsty')).toBe('c_yellow');
     expect(tempColor('Freezing!')).toBe('c_blue');

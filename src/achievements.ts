@@ -21,7 +21,7 @@ import { DATA_BASE } from './core/assets';
 // when gameplay starts.
 //
 // Event sources (CDDA event names/fields):
-//   game_avatar_new / game_avatar_death      begin() / playerDied
+//   game_start / game_avatar_death           begin() / playerDied
 //   character_kills_monster / _character     creatureDied with killer === player
 //   character_takes_damage                   playerHurt
 //   avatar_moves / avatar_enters_omt         per tile / per OMT the survivor steps into
@@ -35,7 +35,7 @@ export interface AchievementsHandle {
   data: AchievementsData;
   tracker: AchievementTracker;
   global: GlobalAchievements;
-  /** Start tracking: a fresh character (emits game_avatar_new) or a loaded one. */
+  /** Start tracking: a fresh character (emits BN game_start) or a loaded one. */
   begin(loaded: boolean): void;
   /** Achievements completed by this character, in order. */
   completedThisRun(): AchievementDef[];
@@ -94,6 +94,7 @@ export async function installAchievements(game: Game, worldgen: WorldGenerator |
     if (cr?.type?.id) emit('character_kills_monster', { killer: AV, victim_type: cr.type.id });
     else emit('character_kills_character', { killer: AV, victim: 'npc', victim_name: cr?.name ?? '' });
   });
+  game.events.on('playerHeadshot', () => emit('character_gets_headshot', { character: AV }));
   game.events.on('playerHurt', (e) => {
     if (e.amount > 0) emit('character_takes_damage', { character: AV, damage: Math.round(e.amount) });
   });
@@ -206,8 +207,10 @@ export async function installAchievements(game: Game, worldgen: WorldGenerator |
       if (s.traits.has(t)) continue;
       emit('gains_mutation', { character: AV, trait: t });
       if ((misc.mutation?.[t] as { threshold?: boolean } | undefined)?.threshold) {
-        for (const c of Object.values((misc.mutation_category ?? {}) as Record<string, { id: string; threshold_mut?: string }>))
-          if (c.threshold_mut === t) emit('crosses_mutation_threshold', { character: AV, category: c.id });
+        // BN threshold_muts (tiers) or the single threshold_mut. Mycus is its own event.
+        if (t === 'THRESH_MYCUS') emit('crosses_mycus_threshold', { character: AV });
+        for (const c of Object.values((misc.mutation_category ?? {}) as Record<string, { id: string; threshold_mut?: string; threshold_muts?: string[] }>))
+          if (c.threshold_mut === t || c.threshold_muts?.includes(t)) emit('crosses_mutation_threshold', { character: AV, category: c.id });
       }
     }
     s.traits = new Set(p.traits);
@@ -295,7 +298,6 @@ export async function installAchievements(game: Game, worldgen: WorldGenerator |
       // Old saves (and fresh characters) need the avatar id every "avatar_*" statistic keys on.
       if (tracker.value('avatar_id') === '') {
         tracker.emit('game_start', { avatar_id: AV });
-        tracker.emit('game_avatar_new', { avatar_id: AV, is_new_game: !loaded, is_debug: false });
         enterOmt(snap.omt);
       }
       tracker.flush();

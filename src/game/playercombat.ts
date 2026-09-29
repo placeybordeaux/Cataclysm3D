@@ -11,6 +11,7 @@ import { Grid, hasLOS } from './los';
 import { sfx, type MeleeSkill } from '../audio/sfx';
 import { FEEL, arcFor, defenseOf, hitStopSeconds, sweptArcTarget, swingTiming, type SwingStyle, type SwingTiming } from './combatfeel';
 import { moveWithCollision } from './physics';
+import { projectileHit } from './projectile';
 
 // The survivor's attacks in real time: LMB / `f` swings or fires, RMB aims a gun (or guards
 // with a melee weapon / bare hands), Space or a double-tapped strafe side-steps, `G` throws.
@@ -103,7 +104,8 @@ export function monsterTargetInfo(m: Monster): TargetInfo {
     flags: m.type.flags,
     hasEffect: (id) => m.hasEffect(id as MonEffect),
     isMonster: true,
-    hasWeapon: false,
+    // BN disarm techniques work on monsters that carry a monster_weapon (feral humans).
+    hasWeapon: !!(m.type as { monster_weapon?: string }).monster_weapon && !m.hasEffect('monster_disarmed' as MonEffect),
     volumeMl: m.type.volume,
     grabStrength: typeof m.type.grab_strength === 'number' ? m.type.grab_strength : undefined,
   };
@@ -627,31 +629,30 @@ export class PlayerCombat implements GameSystem {
     }
     const m = hit.hit;
     m.aggroCharacter = true;
-    // Creature::deal_projectile_attack: goodhit = missed_by + partial dodge; damage bands.
-    const dodge = Math.min(1, (m.dodge() * 5 * rng.next()) / Math.max(1, rng.dice(10, 50)));
-    const goodhit = hit.missedBy * 0.9 + dodge;
-    const hitRoll = goodhit + rng.next() * (1 - Math.min(1, goodhit));
-    let mult = 1, tag = '';
-    if (goodhit < 0.1 && rng.oneIn(3) && !m.has('NOHEAD')) {
-      mult = (0.95 + 0.1 * rng.next()) * 2;
-      tag = '  Critical!!';
-    } else if (goodhit < 0.2 && hitRoll * 0.5 < 0.2) {
-      mult = (1 - 0.25 * hitRoll) * 2;
-      tag = '  Critical!';
-    } else if (goodhit < 0.5) {
-      mult = (1 - 0.5 * hitRoll) * 2;
-      tag = '  Good hit!';
-    } else if (goodhit < 0.8) mult = 1.5 - hitRoll;
-    else {
-      mult = Math.max(0.05, 1.05 - hitRoll);
-      tag = '  Grazing hit.';
+    // BN Creature::deal_projectile_attack (src/game/projectile.ts): severity multiplier and
+    // hit location from how well the round landed and how steady the shooter is.
+    const gun = p.inv.wielded;
+    const skill = gun?.def.skill ? p.getSkill(String(gun.def.skill)) : 0;
+    const r = projectileHit(
+      { dodgeRoll: m.dodge() * 5, isCharacter: false, flags: m.type.flags },
+      { missedBy: hit.missedBy, shooter: { dex: p.dex, per: p.per, skill, steadiness: Math.max(1, p.stamina) / Math.max(1, p.staminaMax()), isPlayer: true } },
+      rng,
+    );
+    if (!r.hit) {
+      game.message(`${m.TheName()} avoids your projectile.`);
+      this.feedback('gun', 'miss', m, m.x, m.y, 0);
+      if (primary) this.ammoEffectsAt(shot, hit.x, hit.y, null, 0);
+      return;
     }
-    const units = damage.map((d) => ({ type: d.type, amount: d.amount * mult, armor_penetration: d.armor_penetration, armor_multiplier: 1 }));
+    // Grazes multiply before armor; other hits scale the armor reduction too (damage_multiplier).
+    const units = damage.map((d) => ({ type: d.type, amount: d.amount * r.severity, armor_penetration: d.armor_penetration, armor_multiplier: 1, multiplier: r.graze ? 1 : r.severity }));
     const total = Math.floor(applyFlatArmor(units, m.type.armor).reduce((s, d) => s + d.amount, 0));
-    game.message(total > 0 ? `You shoot ${m.theName()} for ${total} damage.${tag}` : `You shoot ${m.theName()} but do no damage.`);
+    if (r.tag) game.message(r.tag, 'c_light_green');
+    game.message(total > 0 ? `You hit ${m.theName()} for ${total} damage.` : `The shot reflects off ${m.theName()}'s ${m.type.material.length ? 'armor' : 'skin'}!`);
+    if (r.headshot) this.game.events.emit('playerHeadshot', { target: m });
     sfx.bulletHit('flesh', m);
     this.sys.hurt(m, total, 'player');
-    this.feedback('gun', tag.startsWith('  Critical') ? 'crit' : 'hit', m, m.x, m.y, total);
+    this.feedback('gun', r.tag === 'Critical!' ? 'crit' : 'hit', m, m.x, m.y, total);
     if (primary) this.ammoEffectsAt(shot, m.x, m.y, m, total);
   }
 

@@ -38,7 +38,7 @@ export interface AchievementDef {
   hidden_by?: string[];
   time_constraint?: { since: 'game_start' | 'cataclysm'; is: AchievementReq['is']; target: string };
   manually_given?: boolean;
-  /** Legacy CDDA fields (not in current data; supported for mods). */
+  /** BN kill/skill requirements (achievement.cpp kill_req_completed / skill_req_completed). */
   skill_requirements?: { skill: string; is: AchievementReq['is']; level: number }[];
   kill_requirements?: ({ monster?: string; species?: string; is: AchievementReq['is']; count: number })[];
 }
@@ -89,8 +89,7 @@ export interface WorldQueries {
 
 /** Event types this port feeds (src/achievements_install.ts). Anything else is untracked. */
 export const SUPPORTED_EVENTS = new Set([
-  // game_start: BN's avatar_id statistic reads it (DDA uses game_avatar_new).
-  'game_start', 'game_avatar_new', 'game_avatar_death', 'character_kills_monster', 'character_kills_character',
+  'game_start', 'crosses_mycus_threshold', 'character_gets_headshot', 'game_avatar_new', 'game_avatar_death', 'character_kills_monster', 'character_kills_character',
   'character_takes_damage', 'character_heals_damage', 'character_wakes_up', 'avatar_moves', 'avatar_enters_omt',
   'gains_skill_level', 'gains_mutation', 'crosses_mutation_threshold', 'installs_cbm', 'installs_faulty_cbm',
   'broken_bone', 'reads_book', 'character_wields_item', 'character_wears_item', 'character_consumes_item',
@@ -398,17 +397,39 @@ export class AchievementTracker {
     }
   }
 
-  private legacySatisfied(a: AchievementDef): boolean {
-    for (const s of a.skill_requirements ?? []) if (!this.reqSatisfied({ event_statistic: '', is: s.is, target: s.level }, this.world.skillLevel?.(s.skill) ?? 0)) return false;
+  /** The avatar's kills per monster type (BN kill_tracker), from character_kills_monster events. */
+  private avatarKills(): Map<string, number> {
+    const avatar = this.value('avatar_id');
+    const out = new Map<string, number>();
+    for (const e of this.events.get('character_kills_monster')?.values() ?? []) {
+      if (e.data.killer !== avatar) continue;
+      const id = String(e.data.victim_type);
+      out.set(id, (out.get(id) ?? 0) + e.count);
+    }
+    return out;
+  }
+
+  /**
+   * BN kill_req_completed / skill_req_completed: a ">=" requirement not yet met is pending, a
+   * "<=" one exceeded has failed for good (kills and skills don't go down).
+   */
+  legacyCompletion(a: AchievementDef): Completion {
+    let out: Completion = 'completed';
+    const judge = (is: AchievementReq['is'], target: number, v: number) => {
+      if (out === 'failed' || this.reqSatisfied({ event_statistic: '', is, target }, v)) return;
+      if (is === '>=') out = 'pending';
+      else if (is === '<=') out = 'failed';
+    };
+    for (const s of a.skill_requirements ?? []) judge(s.is, s.level, this.world.skillLevel?.(s.skill) ?? 0);
     if (a.kill_requirements) {
-      const kills = this.world.kills?.() ?? {};
+      const kills = this.avatarKills();
       for (const k of a.kill_requirements) {
         let n = 0;
-        for (const [id, c] of Object.entries(kills)) if ((k.monster && id === k.monster) || (k.species && this.world.speciesOf(id).includes(k.species)) || (!k.monster && !k.species)) n += c;
-        if (!this.reqSatisfied({ event_statistic: '', is: k.is, target: k.count }, n)) return false;
+        for (const [id, c] of kills) if ((k.monster && id === k.monster) || (k.species && this.world.speciesOf(id).includes(k.species)) || (!k.monster && !k.species)) n += c;
+        judge(k.is, k.count, n);
       }
     }
-    return true;
+    return out;
   }
 
   /** achievement_tracker::set_requirement for every requirement at once. */
@@ -417,11 +438,12 @@ export class AchievementTracker {
     const values = a.requirements.map((r) => this.value(r.event_statistic));
     const sat = a.requirements.map((r, i) => this.reqSatisfied(r, values[i]));
     const time = this.timeCompletion(a);
-    if (sat.every(Boolean) && this.legacySatisfied(a) && time === 'completed' && !a.conduct) {
+    const legacy = this.legacyCompletion(a);
+    if (sat.every(Boolean) && legacy === 'completed' && time === 'completed' && !a.conduct) {
       this.report(a, 'completed', values);
       return;
     }
-    if (time === 'failed' || a.requirements.some((r, i) => !sat[i] && this.becomesFalse(r))) this.report(a, 'failed', values);
+    if (time === 'failed' || legacy === 'failed' || a.requirements.some((r, i) => !sat[i] && this.becomesFalse(r))) this.report(a, 'failed', values);
   }
 
   private report(a: AchievementDef, completion: Completion, values: EvValue[]): void {

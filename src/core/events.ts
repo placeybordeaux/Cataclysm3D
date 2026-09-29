@@ -35,6 +35,8 @@ export interface GameEvents {
     /** Freeze-frame seconds the blow earned (feel layer); the struck sprite holds too. */
     hitStop?: number;
   };
+  /** BN character_gets_headshot: the survivor's projectile landed with missed_by ≤ 0.1. */
+  playerHeadshot: { target: unknown };
   /**
    * A monster's attack on the survivor changed phase (src/game/monai.ts, feel layer in
    * combatfeel.ts): 'windup' = it started telegraphing (`seconds` until it lands), then one of

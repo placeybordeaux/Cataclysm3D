@@ -1,4 +1,5 @@
 import type { ArmorPortion, ItemDef } from '../data/types';
+import { applyHealActor, type HealActor } from './healing';
 import type { Rng } from '../core/rng';
 import { BODY_PARTS, isBodyPart, MAIN_PARTS, type BodyPartId, type MainPartId } from './bodyparts';
 import type { Character } from './character';
@@ -166,9 +167,10 @@ export class Inventory {
     for (const t of this.topLevel()) w += t.weight();
     return w;
   }
-  /** Creature::weight_capacity (13 kg) + str * 4 kg, times CARRY_WEIGHT enchantments. */
+  /** Creature::weight_capacity (13 kg) + str * 4 kg, × weight_capacity_modifier mutations, + CARRY_WEIGHT enchantments. */
   weightCapacity(): number {
-    return Math.max(0, this.owner.byEnchant(13000 + this.owner.str_base * 4000, 'CARRY_WEIGHT'));
+    const base = (13000 + this.owner.str_base * 4000) * this.owner.mutationValue('weight_capacity_modifier');
+    return Math.max(0, this.owner.byEnchant(base, 'CARRY_WEIGHT'));
   }
   volumeCapacity(): number {
     let v = 0;
@@ -249,13 +251,13 @@ export class Inventory {
 
   /** Remove an item so the caller can put it on the map (result.dropped). */
   drop(it: Item): ActionResult {
-    if (it.hasFlag('BIONIC_WEAPON') || it.hasFlag('INTEGRATED')) return this.say(false, `You cannot drop your ${it.name()}.`);
+    if (it.hasFlag('NO_DROP') || it.hasFlag('INTEGRATED')) return this.say(false, `You cannot drop your ${it.name()}.`);
     if (!this.remove(it)) return this.say(false, `You don't have that item.`);
     return this.say(true, `You drop your ${it.name()}.`, 100, { dropped: [it] });
   }
 
   canWield(it: Item): { ok: boolean; reason?: string } {
-    if (this.wielded?.hasFlag('BIONIC_WEAPON') && this.wielded !== it) return { ok: false, reason: `You cannot unwield your ${this.wielded.name()}.` };
+    if (this.wielded?.hasFlag('NO_UNWIELD') && this.wielded !== it) return { ok: false, reason: `You cannot unwield your ${this.wielded.name()}.` };
     if (it.isLiquid()) return { ok: false, reason: "You can't wield spilt liquids." };
     if (this.owner.brokenArms() >= 2) return { ok: false, reason: "You can't wield anything with two broken arms." };
     if (this.owner.brokenArms() === 1 && (it.weight() > this.owner.str * 250 || it.hasFlag('ALWAYS_TWOHAND')))
@@ -293,8 +295,8 @@ export class Inventory {
   unwield(): ActionResult {
     const w = this.wielded;
     if (!w) return this.say(false, 'You are already empty-handed.');
-    // Bionic weapons are retracted through the bionics menu (CDDA NO_UNWIELD).
-    if (w.hasFlag('BIONIC_WEAPON')) return this.say(false, `You cannot unwield your ${w.name()}.`);
+    // Bionic weapons are retracted through the bionics menu (BN NO_UNWIELD).
+    if (w.hasFlag('NO_UNWIELD')) return this.say(false, `You cannot unwield your ${w.name()}.`);
     if (!this.canStash(w)) return this.say(false, `You have no space to store your ${w.name()}.`);
     this.wielded = null;
     this.stash(w);
@@ -616,75 +618,12 @@ export class Inventory {
     return this.say(true, cddaText(ua.msg) || `You activate your ${it.name()}.`, (ua.moves as number | undefined) ?? 0);
   }
 
-  /** heal_actor::finish_using, simplified to the player treating themselves. */
-  private useHeal(it: Item, ua: { [k: string]: any }, target?: BodyPartId): ActionResult {
-    const c = this.owner;
-    const skill = c.getSkill('firstaid');
-    const bleed = (ua.bleed as number) ?? 0;
-    const bite = (ua.bite as number) ?? 0;
-    const infect = (ua.infect as number) ?? 0;
-    const bandages = (ua.bandages_power as number) ?? 0;
-    const disinfectant = (ua.disinfectant_power as number) ?? 0;
-    const limbPower = (ua.limb_power as number) ?? 0;
-    // Pick the part: most bleeding, then bitten/infected, then most damaged main part.
-    let part: MainPartId | undefined = target ? BODY_PARTS[target].main : undefined;
-    if (!part) {
-      const score = (p: MainPartId) =>
-        (bleed ? c.effects.intensity('bleed', p) * 100 : 0) +
-        (bite && c.effects.has('bite', p) ? 50 : 0) + (infect && c.effects.has('infected', p) ? 50 : 0) +
-        (c.hp[p].max - c.hp[p].cur);
-      part = [...MAIN_PARTS].sort((a, b) => score(b) - score(a))[0];
-    }
-    const msgs: string[] = [];
-    let did = false;
-    const bleedEff = c.effects.get('bleed', part);
-    if (bleed > 0 && bleedEff) {
-      // get_stopbleed_level: CDDA scales by first aid skill / 2, which makes bandages useless
-      // at skill 0; we treat skill 0 as a multiplier of 1 so unskilled survivors can bandage.
-      const level = Math.round(bleed * Math.max(1, skill / 2));
-      if (3 * level > bleedEff.intensity) {
-        bleedEff.setDuration(bleedEff.duration - level * bleedEff.type.intDurFactor);
-        if (bleedEff.duration <= 0) {
-          c.effects.remove('bleed', part);
-          msgs.push('You stop the bleeding.');
-        } else msgs.push("You reduce the bleeding, but it's not stopped yet.");
-      } else msgs.push('Your dressing is too ineffective for a bleeding of this extent, and you fail to stop it.');
-      did = true;
-    }
-    if (bite > 0 && c.effects.has('bite', part) && c.rng.next() < bite) {
-      c.effects.remove('bite', part);
-      msgs.push('You clean the wound.');
-      did = true;
-    }
-    if (infect > 0 && c.effects.has('infected', part) && c.rng.next() < infect) {
-      c.effects.remove('infected', part);
-      msgs.push('You disinfect the wound.');
-      did = true;
-    }
-    const hurt = c.hp[part].max - c.hp[part].cur;
-    if (bandages > 0 && hurt > 0 && !c.effects.has('bandaged', part)) {
-      const level = Math.round(bandages + ((ua.bandages_scaling as number) ?? 0.25 * bandages) * skill);
-      const e = c.addEffect('bandaged', 1, { bp: part });
-      e.setDuration(e.type.intDurFactor * level);
-      msgs.push(`You bandage your ${BODY_PARTS[part].name}.`);
-      did = true;
-    }
-    if (disinfectant > 0 && hurt > 0 && !c.effects.has('disinfected', part)) {
-      const e = c.addEffect('disinfected', 1, { bp: part });
-      e.setDuration(e.type.intDurFactor * disinfectant);
-      msgs.push(`You disinfect your ${BODY_PARTS[part].name}.`);
-      did = true;
-    }
-    if (limbPower > 0 && hurt > 0) {
-      const power = part === 'head' ? ((ua.head_power as number) ?? 0.8 * limbPower) : part === 'torso' ? ((ua.torso_power as number) ?? 1.5 * limbPower) : limbPower;
-      const scaling = ((ua.limb_scaling as number) ?? 0.25 * limbPower) * skill;
-      c.heal(part, power + scaling);
-      did = true;
-    }
-    if (!did) return this.say(false, `Your ${BODY_PARTS[part].name} doesn't need treatment with the ${it.name()}.`);
-    c.practice('firstaid', 3 + bleed / 3);
+  /** heal_actor (src/game/healing.ts): treat yourself, then use up the item. */
+  private useHeal(it: Item, ua: { [k: string]: any }, bp?: BodyPartId): ActionResult {
+    const r = applyHealActor(this.owner, it.name(), ua as HealActor, bp);
+    if (!r.ok) return this.say(false, r.msg);
     const usedUp = this.consumeUse(it);
-    return this.say(true, msgs.join(' ') || `You use your ${it.name()}.`, (ua.move_cost as number) ?? 500, { usedUp });
+    return this.say(true, r.msg, r.moves, { usedUp });
   }
 
   /** Use up one charge or the whole item after a single-use action; true if it's gone. */

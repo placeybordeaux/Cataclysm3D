@@ -9,7 +9,11 @@ Status: the core data (terrain, furniture, items, item groups, monsters, monster
 recipes, misc) is BN. The item/inventory runtime (`src/game/item.ts`, `inventory.ts`) is
 still the DDA pocket model, kept alive by `src/data/bncompat.ts` (TODO(BN inventory)).
 Gameplay tests that encode DDA behaviour are `it.skip`ped with `TODO(BN)` notes
-(`grep -rn "TODO(BN)" tests`).
+(`grep -rn "TODO(BN)" tests`). Ported to BN rules since: the Character (calorie store, thirst,
+stamina, pain, body temperature, effects, healing), mutations (mutagen actors, accumulated
+mutagen, threshold tiers, purifiers), bionics, martial arts/techniques/melee, monsters (special
+attacks, death functions, harvest/dissection, factions), projectile severity, professions'
+starting kit, and achievements (see ARCHITECTURE.md for each).
 
 ## 1. Pipeline and loader API
 

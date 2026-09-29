@@ -101,8 +101,14 @@ tests/               vitest unit tests (pure logic, no DOM/WebGL)
 ### Survivor simulation (src/game, UI-free)
 
 - `item.ts` Item/Pocket (charges, damage, rot, pockets, magazines), `createItem`, `fromSpawned`.
-- `character.ts` Character: stats, skills, body-part HP, pain, stamina, needs, sleep, blood,
-  morale/focus, body temperature, traits. `update(gameDt)` in game seconds.
+- `character.ts` Character: stats, skills, body-part HP, pain, stamina, needs, sleep,
+  morale/focus, body temperature, traits. `update(gameDt)` in game seconds. BN rules (file
+  header lists the DDA differences): `storedKcal` capped at `maxStoredKcal()` (17500), a
+  calorie-only `stomach`, instant thirst, flat 10000 stamina. Traits act through
+  `mutationValue(field)` (BN mutation_branch floats, BN aggregation) and BN enchantments
+  (`enchant(value)` / `enchantBonus(value, base)` = add + base × multiply + max; providers in
+  `enchantProviders`). `sleepComfort` (set by rest.ts) feeds `rollCanSleep`.
+- `healing.ts` BN heal_actor (`applyHealActor`), used by Inventory.use for `heal` actions.
 - `effects.ts` data-driven effect_type (misc.effect_type, with built-in fallbacks).
 - `inventory.ts` `character.inv`: wield/wear/pick up/drop/consume/use/reload, qualities,
   encumbrance, armor absorption. Actions return `{ok, msg, moves, dropped?}`.
@@ -125,8 +131,18 @@ tests/               vitest unit tests (pure logic, no DOM/WebGL)
   and leave `sys.all` (back within 6 OMTs); unnamed/non-friendly only, so don't hold references to
   far monsters. Spawner dormant corpses are chunk baseline (rebaselined), stashed on eviction and
   re-laid on regeneration; saved in the `monsters` section's `stash`. `cdda.monsterStash()`.
-- `monattack.ts` special attacks: data melee/bite actors (misc.monster_attack), leap, boomer
-  bile, and hardcoded SHRIEK, ACID, RESURRECT, SHOCKSTORM, PARROT, SMASH...
+- `monattack.ts` special attacks, BN rules: melee/bite actors (named JSON `monster_attack`s like
+  `scratch` merge under the monster's entry; min_mul 0, `body_parts`, effects only on damage; a bite
+  infects only a grabbed target), leap/gun actors, and the hardcoded monattack.cpp ids GRAB (dodge_check,
+  martial-art grab break, `grabbed` intensity += grab_strength; a parried grab never takes hold),
+  GRAB_DRAG, SMASH (fling dice×sides×3), LUNGE, LONGSWIPE, SHRIEK(_ALERT/_STUN), ACID(_BARF), BOOMER(_GLOW),
+  RESURRECT (charge-up), SHOCKSTORM, PARROT. `isMeleeSpecial(def)` = spends a swing. No dialogue conditions.
+- `mondeath.ts` BN `death_function` lists: NORMAL (corpse; pulverized when 2.5×overkill/max hp > 5),
+  SPLATTER, BOOMER (no corpse, 15 bile tiles, boomered if adjacent), ACID, BROKEN (`broken_<id>` item),
+  MELT, DISINTEGRATE, EXPLODE/SMOKEBURST/GAS, WORM/BLOBSPLIT. Corpses get overkill damage and
+  `vars.dissectables` (the harvest's bionic / bionic_group entries, rolled at death). `monfaction.ts`
+  `monsterFactionAttitude(data, a, b)` (BN monfaction.cpp, base_faction inheritance) for future
+  monster-vs-monster fights. Upgrades: half_life × MONSTER_UPGRADE_FACTOR 2, EVOLVE_MAX_ITERS 5.
 - `spawner.ts` consumes `chunk.spawns` (then clears them) + CDDA city hordes; tuning knob
   `cityHordeScale` (0.3 of CDDA's 80 zombies × city size).
 - `playercombat.ts` LMB melee (crosshair cone) / hitscan guns / `G` throw; `butchery.ts`.
@@ -143,14 +159,17 @@ tests/               vitest unit tests (pure logic, no DOM/WebGL)
 
 ### Combat depth (src/game/{techniques,martialarts,gunmods,monguns,explosion}.ts, wired by src/combatdepth.ts)
 - `meleeAttack(c, {dodge, armor, info?: TargetInfo}, rng, name, {allowSpecial, aoeTargets, forceTechnique})`
-  picks a weapon/style technique (melee.cpp pick_technique: dummy/defensive skipped, crit_tec,
-  `condition` via a small dialogue-condition evaluator, skill/weapon requirements, weighting, AoE
-  needing victims) and returns `technique` + `outcome` (stun/down turns, knockback, aoe, disarm);
+  picks a weapon/style technique (BN melee.cpp get_valid_techniques: dummy/defensive skipped, crit_tec,
+  downed/stunned/human_target, BN ma_requirements (req_buffs, skills, weapon damage/flags/categories,
+  mutations_required, wall_adjacent via `maWorld`), weighting, AoE needing victims; no DDA dialogue
+  conditions) and returns `technique` + `outcome` (stun/down turns, knockback, aoe, disarm);
+  Rolled damage carries BN's `multiplier` (armor comes off before it: `applyFlatArmor`).
   the world layer applies it (`applyTechniqueToMonster` in playercombat.ts: monster effects +
   dash knockback; `PlayerCombat.swingAt`/`aoeVictims` for wide/spin/impale follow-ups). Messages
   use the technique text (`techniqueMessage`, `hitMessage`: "You sweep the zombie for 12 damage.").
   No `info` = no techniques (legacy callers). Glass shattering + `handleMeleeWear` happen inside.
-- Defense: `monsterMeleeAttack` uses `tryDodgeRoll` (one dodge per combat turn, stamina cost) and
+- Defense: `monsterMeleeAttack` uses `tryDodgeRoll` (BN: always rolls, each dodge already spent this
+  turn costs 2 dodge; `onDodged(c, attackerSkill)` spends it when the attack misses) and
   `blockHit` (WBLOCK_1/2/3 weapons, style arm/leg blocks, logarithmic_range(0,40,score) of physical
   damage gets through, "You block most of the damage with your baseball bat!"); NPC-vs-character
   melee uses `characterDefend`. A combat turn is `COMBAT_TURN` = 1/MELEE_SCALE real s; dodges/blocks
@@ -261,23 +280,36 @@ tests/               vitest unit tests (pure logic, no DOM/WebGL)
 ### Mutations & bionics (src/game/mutations.ts, bionics.ts, bodymods.ts; wired by src/mutbio.ts)
 - `attachBodyMods(character)` → `{ mut: MutationState, bio: BionicState }` (UI-free, unit-tested in
   tests/mutbio.test.ts); `bodyMods(c)` fetches them. Mutations live in `Character.traits` (so trait
-  enchantments apply); `MutationState` adds CDDA's vitamin system (mutagen = `mutagen` catalyst +
-  category primer vitamins, slurry decays_into, excess effects), the CHANGING EOC timers,
-  mutate / mutate_category / mutate_towards / remove_mutation, thresholds, purifier dummies,
-  integrated armor (worn INTEGRATED items), restricts_gear, encumbrance, activation.
-- `BionicState`: installed CBMs, power (kJ), slots, install odds (`bionicSuccessChance`) and failure
-  consequences, act/react/trigger costs, fake weapons, pseudo tools, enchantments, protec, fuel.
+  enchantments apply). `MutationState` follows **BN** (no vitamins/CHANGING): mutagen use actions
+  (`useMutagen` = mutagen_actor, `useMutagenIv` = mutagen_iv_actor, `purify` = PURIFIER/PURIFY_IV/
+  PURIFY_SMART, `rejection` = try_reject_mutagen) run from `Inventory.onConsume`; BALANCED_MUTATIONS
+  `mutate()` spends the `accumulated_mutagen` effect via `mutationChances()` (`startGame()` gives BN's
+  27 days); `mutateCategory` / `mutateTowards` / `removeMutation`; `categoryLevels()` =
+  set_highest_cat_level; `testCrossingThreshold(cat, tier)` with `threshTier`/`threshCategory`
+  (threshold_muts index = tier); restricts_gear pushes gear off; BN `armor` resistances,
+  `night_vision_range`, activation costs/cooldowns.
+- `BionicState` (BN): stored `maxPowerLevel` (capacity on install), `fake_item` (BIONIC_WEAPON →
+  wielded; otherwise a crafting pseudo tool while passive/powered), `stat_bonus`, bash/cut/
+  bullet_protec, `bio_enchantments` (add/multiply/max: LUMINATION, NIGHT_VISION), MULTIINSTALL,
+  INITIALLY_ACTIVATE, required_bionics, slots only with CBM_SLOTS_ENABLED; `install()` always installs
+  and adds BN complications on a failed roll; `anesthesiaNeeded` = requirement "anesthetic" ×
+  difficulty × 2 × 7. Self-install needs MANUAL_BIONIC_INSTALLATION (off): use an Autodoc.
+- Starting kit: `professionItems(data, prof, male, traits, rng)` (src/game/profession.ts: groups,
+  trait substitutions/bonuses, FIT); chargen's `applyBuild` also installs profession `CBMs` (power
+  full), spawns tame `pets`, powers starts_active mutations and calls `mut.startGame()`.
 - Hooks other code can use: `Character.enchantProviders` / `enchantCondition`; `Inventory.wearChecks`,
   `extraEncumbrance`, `naturalArmor`, `qualityProviders` (also fed into CraftingInventory),
-  `consumeChecks`, `onConsume`; `visionHooks(game).lights / .nightVision` (src/game/vision.ts,
-  `visionThreshold`, `bodyLight`); `renderer.nightVision`, `renderer.playerMutationOverlays`;
-  `hud.addSidebarProvider`; `charsheetSections` (src/ui/charsheet.ts). Unarmed damage uses the
-  outermost worn item on the hand (claws). Keys: `[` mutations, `p` bionics; CBMs `A`pply to
-  self-install; `e` on an Autodoc. Save section `bodymods` (order 15). Debug: `cdda.mutate(id|cat)`,
-  `cdda.mutations()`, `cdda.addVitamin(id,n)`, `cdda.installBionic(id,{surgery})`, `cdda.bionics()`,
-  `cdda.givePower(kj)`, `cdda.toggleBionic(id)`, `cdda.spawnAutodoc(dx,dy)`, `cdda.giveCbm(id)`.
+  `consumeChecks` (comestible `tool`, mutagen refusal), `onConsume`; `visionHooks(game).lights /
+  .nightVision` (src/game/vision.ts, `visionThreshold`, `bodyLight`); `renderer.nightVision`,
+  `renderer.playerMutationOverlays`; `hud.addSidebarProvider`; `charsheetSections`
+  (src/ui/charsheet.ts). Keys: `[` mutations, `p` bionics; `e` on an Autodoc. Save section
+  `bodymods` (order 15). Debug: `cdda.mutate(id|cat)`, `cdda.mutations()`, `cdda.crossThreshold(cat)`,
+  `cdda.installBionic(id,{surgery})`, `cdda.bionics()`, `cdda.givePower(kj)`, `cdda.toggleBionic(id)`,
+  `cdda.spawnAutodoc(dx,dy)`, `cdda.giveCbm(id)`.
+- Projectiles: `projectileHit` (src/game/projectile.ts) = BN deal_projectile_attack severity/hit
+  location, used by the survivor's shots and monster gun actors.
 ### Scores & achievements (src/game/achievements.ts, src/achievements.ts, src/ui/achievements_ui.ts)
-- Data: `public/data/achievements.json` (`npm run extract:achievements`, part of `data:all`): CDDA
+- Data: `public/data/achievements.json` (`npm run extract:achievements`, part of `data:all`): BN
   achievements + conducts, event_statistics, event_transformations, scores; loaded by the install.
 - `AchievementTracker` (UI-free, tests/achievements.test.ts) = CDDA stats_tracker + achievements_tracker:
   `emit(type, fields, count?)` with CDDA event names/fields, `flush()` re-checks watching achievements,
@@ -313,10 +345,11 @@ tests/               vitest unit tests (pure logic, no DOM/WebGL)
   climbing CLIMBABLE barriers (boom barriers, chain fences). IMMOBILE monsters (turrets) never move.
 - `interact.ts` `examineHandlers` (examine_action → interactions) is the hook they use; consoles come
   through `interactionProviders`.
-- Dissection (`B` menu → Dissect): CUT_FINE tool, 6× cutting time, the monster's `dissect` harvest —
-  item-group entries (zomborg CBMs, mutagen glands) recovered per check_butcher_dissect roll (failed CBMs
-  burn out), per-drop-type harvest_skills, first-aid practice. `dissectYield`/`dissectSeconds` in
-  butchery.ts, `startDissect` in src/monsters.ts.
+- Dissection (`B` menu → Dissect, BN): CUT_FINE tool, 4× the size cutting time / the CUT_FINE tool
+  factor, yields like full butchery plus the corpse's `vars.dissectables` (implants), each recovered on
+  x_in_y(roll, 10) with roll = firstaid/2 + electronics/2 + CUT_FINE + dex shift − corpse damage (failed
+  CBMs burn out). Butchery (quick/full) follows BN butchery_drops_harvest; blood only from bleeding.
+  `dissectYield`/`dissectSeconds`/`corpseDissectables` in butchery.ts, `startDissect` in src/monsters.ts.
 - Debug: `cdda.labs()`, `cdda.labMap(special?)`, `cdda.teleportLab(z, special?)`, `cdda.faceLabLoot(z)`,
   `cdda.labLoot(r)`, `cdda.rideElevator(z?)`, `cdda.useComputer(picks?)`, `cdda.swipeCard()`,
   `cdda.dissect()`. Probes: `tsx tools/dev/probe_lab.ts <seed> [special] [z]` (OMTs, stairs, loot),

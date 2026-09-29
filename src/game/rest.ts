@@ -2,7 +2,7 @@ import type { Game } from './game';
 import { hasFlag } from '../world/registry';
 import { SECONDS_PER_DAY, SECONDS_PER_HOUR, CLOCK_SCALE } from '../core/time';
 import { sunAltitudeAt } from './vision';
-import { BODYTEMP } from './character';
+import { BODYTEMP, THIRST } from './character';
 
 // Waiting and sleeping, after CDDA's wait menu (game.cpp wait()) and sleep flow
 // (Character::can_sleep, comfort_data in sleep.cpp). Both are game.activities with a clock
@@ -13,7 +13,6 @@ import { BODYTEMP } from './character';
 
 /** CDDA comfort_level values. */
 export const COMFORT = { impossible: -999, uncomfortable: -7, neutral: 0, slightly_comfortable: 3, comfortable: 5, very_comfortable: 10 } as const;
-const SLEEPINESS_TIRED = 191;
 /** Real seconds per game hour while asleep (≈ 16 real seconds for 8 hours). */
 const SLEEP_REAL_PER_HOUR = 2;
 
@@ -44,15 +43,14 @@ export function comfortMessage(ci: ComfortInfo): { text: string; good: boolean }
   return { text: `It's hard to get to sleep on this ${ci.on}.`, good: false };
 }
 
-/** Character::can_sleep roll (without the 30-minute rate limit, which callers apply). */
+/**
+ * character_funcs::roll_can_sleep for the survivor's spot (without the 30-minute limiter, which
+ * Character.rollCanSleep applies when the lying_down effect rolls).
+ */
 export function canSleepRoll(game: Game): boolean {
   const p = game.player;
-  let sleepy = comfortAt(game, p.tileX, p.tileY, p.z).comfort;
-  if (p.sleepiness < SLEEPINESS_TIRED + 1) sleepy -= Math.trunc((SLEEPINESS_TIRED + 1 - p.sleepiness) / 4);
-  else sleepy += Math.trunc((p.sleepiness - SLEEPINESS_TIRED + 1) / 16);
-  sleepy -= 2 * Math.max(0, p.stim);
-  sleepy += p.rng.int(-8, 8);
-  return sleepy > 0;
+  p.sleepComfort = comfortAt(game, p.tileX, p.tileY, p.z).comfort;
+  return p.rateSleepSpot() + p.rng.int(-8, 8) > 0;
 }
 
 // ------------------------------------------------------------------ waiting
@@ -143,6 +141,7 @@ export function goToSleep(game: Game): boolean {
     game.message("You can't sleep here.");
     return false;
   }
+  p.sleepComfort = ci.comfort;
   p.tryToSleep();
   const m = comfortMessage(ci);
   game.message(m.text, m.good ? 'c_green' : 'c_light_red');
@@ -187,7 +186,6 @@ function sleepHints(game: Game, ci: ComfortInfo): void {
 
 function startSleepActivity(game: Game): boolean {
   const p = game.player;
-  let sinceCheck = 1800; // check immediately
   let awakeFor = 0;
   let slept = false;
   const ok = game.activities.start({
@@ -214,11 +212,9 @@ function startSleepActivity(game: Game): boolean {
         return;
       }
       awakeFor += dt;
-      sinceCheck += dt;
-      if (sinceCheck >= 1800) {
-        sinceCheck = 0;
-        if (canSleepRoll(game)) p.fallAsleep();
-      }
+      // lying_down rolls roll_can_sleep itself (Character.rollCanSleep, every 30 minutes);
+      // keep the comfort of the spot it rates current.
+      p.sleepComfort = comfortAt(game, p.tileX, p.tileY, p.z).comfort;
       if (awakeFor > 2 * SECONDS_PER_HOUR && !p.isAsleep()) {
         game.message("You try to sleep, but you just can't.", 'c_yellow');
         p.removeEffect('lying_down');
@@ -237,7 +233,7 @@ function startSleepActivity(game: Game): boolean {
 
 /**
  * player_activity::get_distractions for the survivor's own body: freezing / overheating
- * (any part past VERY_COLD / VERY_HOT) and dangerous dehydration (thirst > 520). CDDA's
+ * (any part past VERY_COLD / VERY_HOT) and dangerous dehydration (BN Parched, thirst > 600). CDDA's
  * starvation distraction needs its starvation counter, which we don't model.
  */
 export function survivalDistraction(game: Game): string | null {
@@ -248,7 +244,7 @@ export function survivalDistraction(game: Game): string | null {
     if (t > BODYTEMP.VERY_HOT) return 'You are overheating!';
     if (t < BODYTEMP.VERY_COLD) return 'You are freezing!';
   }
-  if (p.thirst > 520) return 'You are dangerously dehydrated!';
+  if (p.thirst > THIRST.PARCHED) return 'You are dangerously dehydrated!';
   return null;
 }
 
