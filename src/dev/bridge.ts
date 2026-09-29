@@ -56,7 +56,11 @@ export function installDevBridge(game: Game, renderer: Renderer, api: DebugApi):
       errors: recentErrors.slice(-10),
     };
   };
+  // Several tabs may be open on the dev server; only the one the human is looking at reports
+  // and answers requests (hidden/background tabs stay quiet).
+  const active = () => document.visibilityState === 'visible';
   const push = () => {
+    if (!active()) return;
     try {
       hot.send('cdda:state', state());
     } catch (e) {
@@ -66,6 +70,7 @@ export function installDevBridge(game: Game, renderer: Renderer, api: DebugApi):
   setInterval(push, 2000);
 
   hot.on('cdda:eval', async ({ id, code }: { id: number; code: string }) => {
+    if (!active()) return;
     try {
       let fn: () => Promise<unknown>;
       try {
@@ -82,6 +87,7 @@ export function installDevBridge(game: Game, renderer: Renderer, api: DebugApi):
   });
 
   hot.on('cdda:shot', ({ id }: { id: number }) => {
+    if (!active()) return;
     // The WebGL buffer is only readable right after a frame is drawn, so capture from the
     // main loop's post-render hook on the next frame.
     api.__onFrame = () => {
