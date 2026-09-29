@@ -12,6 +12,7 @@ import { GameStats } from './stats';
 import type { RayHit } from './raycast';
 import type { SpawnedItem } from '../data/itemgroups';
 import type { ItemSpawn } from '../world/map';
+import type { WeatherState } from './weather';
 
 function toSpawned(sp: ItemSpawn): SpawnedItem {
   return { id: sp.typeId, count: sp.count ?? 1, charges: sp.charges, contents: sp.contents?.map(toSpawned) } as SpawnedItem;
@@ -64,6 +65,8 @@ export class Game {
   save?: () => void | Promise<void>;
   load?: () => boolean | Promise<boolean>;
   hasSave?: () => boolean;
+  /** Current weather (src/game/weather.ts); null until installWeather runs. Read by HUD/sound/vision. */
+  weather: WeatherState | null = null;
   private acc = 0;
   mouseSensitivity = 0.0025;
 

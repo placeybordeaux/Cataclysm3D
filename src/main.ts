@@ -11,6 +11,8 @@ import { initUi } from './ui/framework';
 import { installUi } from './ui/index';
 import { installAudio } from './audio/install';
 import { installCrafting } from './ui/crafting_install';
+import { installWorldInteraction } from './worldInteraction';
+import { lightAt } from './game/vision';
 
 // URL params (all optional): seed=<int>, gen=world|test (default world), debug=1 (render stats overlay),
 // renderer params px/grade/tex/cam/walls (see src/render/renderer.ts), debug=atlas (sprite sheet view
@@ -49,6 +51,9 @@ async function main(): Promise<void> {
   if (worldgen) installWorldgenDebug(api, game, worldgen);
   installAudio(game, api);
   installCrafting(game, api);
+  installWorldInteraction(game, renderer, api);
+  // Crafting/reading probe `game.lightAt` for "too dark" checks; back it with real vision light.
+  (game as unknown as { lightAt: (x: number, y: number, z: number) => number }).lightAt = (x, y, z) => lightAt(game, x, y, z);
   const ui = await installUi(game, renderer, worldgen, api);
 
   let last = performance.now();
