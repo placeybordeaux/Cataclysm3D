@@ -5,6 +5,7 @@ window.lookViews = ['shelter', 'street', 'house', 'forest', 'night', 'top'];
 window.lookView = async (name) => {
   const c = window.cdda;
   c.godMode(true);
+  if (c.vehicleSystem?.driving) c.exitVehicle();
   c.setWeather('clear');
   c.flashlight(false);
   c.setCameraMode('first');
@@ -66,6 +67,55 @@ window.lookView = async (name) => {
     c.teleportOmt(town.x, town.y);
     c.setCameraMode('top');
     c.renderer.rig.topDistance = 40;
+  } else if (name === 'drive' || name === 'drivechase') {
+    // night driving on a straight road, headlights on (docs/QA_V2.md #20)
+    c.setHour(23.2);
+    c.teleportOmt(town.x, town.y);
+    c.roadTrip('car', 4, 40);
+    c.vehicleLights(true);
+    c.renderer.rig.driveCam = name === 'drive' ? 'cockpit' : 'chase';
+  } else if (name === 'sky') {
+    // clouds (QA_V2 #23): looking up over open ground
+    c.setHour(10);
+    c.setWeather('clear');
+    c.renderer.sky.cloudiness = 0.6;
+    c.teleportOmt(town.x, town.y);
+    const f = c.findOmt('field', 30) ?? c.findOmt('forest', 30);
+    c.teleportOmt(f.x, f.y, 0, 12, 12);
+    c.look(30, 22);
+  } else if (name === 'zombie' || name === 'zombie2') {
+    // a zombie at arm's length / two tiles, dead ahead at eye level (QA_V2 #24)
+    c.setHour(12);
+    c.teleportOmt(town.x, town.y);
+    const h = c.findOmt('house', 40);
+    c.teleportOmt(h.x, h.y, 0, 18, -1);
+    c.clearMonsters();
+    c.look(-90, 0);
+    // friendly: it stays put and never swings (no hit shake in the shot)
+    c.spawnMonster('mon_zombie', name === 'zombie' ? -1 : -2, 0, { friendly: true });
+  } else if (name === 'zproxy') {
+    // monsters without tileset art (QA_V2 #25: a floating green "Z" by the road)
+    c.setHour(12);
+    c.teleportOmt(town.x, town.y);
+    const h = c.findOmt('house', 40);
+    c.teleportOmt(h.x, h.y, 0, 18, -1);
+    c.clearMonsters();
+    c.look(-90, -3);
+    c.spawnMonster('mon_zombie_soldier_camo_1', -4, -1);
+    c.spawnMonster('mon_zombie_nurse', -5, 1);
+    c.spawnMonster('mon_zombie_dancer', -7, 0);
+  } else if (name === 'snow') {
+    c.setSeason('winter', 20);
+    c.setHour(13);
+    c.setWeather('snow');
+    c.teleportOmt(town.x, town.y);
+    const h = c.findOmt('house', 40);
+    c.teleportOmt(h.x, h.y, 0, 18, -1);
+    c.look(-95, -4);
+  } else if (name === 'indoornight') {
+    await window.lookView('house');
+    c.setHour(23.2);
+    c.flashlight(true);
   } else if (name.startsWith('at:')) {
     // probe form for picking viewpoints: at:<omt text|town>:<lx>:<ly>:<yaw>:<pitch>:<hour>[:top]
     const [, what, lx, ly, yaw, pitch, hour, mode] = name.split(':');
