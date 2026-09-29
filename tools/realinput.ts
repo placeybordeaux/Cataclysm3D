@@ -421,18 +421,19 @@ const scenarios: Scenario[] = [
     let s = await until((t) => t.fullscreen, 2000);
     check('F11 enters fullscreen', s.fullscreen, s);
     await x.key('Escape');
-    s = await until((t) => t.windows.length > 0);
-    check('Esc opens the pause menu and keeps the mouse captured', s.windows.length === 1 && s.lock, s);
+    s = await until((t) => t.panelIds.includes('scr.esc'));
+    // The pause menu is a ui2 window: it frees the cursor on purpose (click the buttons).
+    check('Esc opens the pause menu (cursor free to click it)', s.panelIds.join() === 'scr.esc' && !s.lock, s);
     await x.key('Escape');
-    s = await until((t) => !t.windows.length);
-    check('Esc closes it, still captured', !s.windows.length && s.lock, s);
+    s = await until((t) => !t.panels.length && t.lock);
+    check('Esc closes it and the mouse is captured again', !s.panels.length && s.lock, s);
     await x.key('i');
     await x.key('Escape');
     s = await state();
     check('Esc closes the inventory, still captured', !s.windows.length && s.lock, s);
     await x.hold('Escape', 2700);
     s = await until((t) => !t.fullscreen, 1500);
-    check('holding Esc leaves fullscreen (menu opened once, no flicker)', !s.fullscreen && s.windows.length === 1, s);
+    check('holding Esc leaves fullscreen (menu opened once, no flicker)', !s.fullscreen && s.panelIds.join() === 'scr.esc', s);
     await toGameplay();
   }],
   ['freecursor', 'Options > Menu cursor = free: menus show the cursor and take clicks', async () => {
