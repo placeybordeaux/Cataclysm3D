@@ -1,4 +1,5 @@
 import type { Game, GameSystem } from './game';
+import { clockScale } from '../core/time';
 
 // Long actions (crafting, reading, butchering, constructing, waiting, sleeping) in CDDA take
 // minutes to hours of game time. In real time we play them as a short progress bar while the
@@ -23,6 +24,14 @@ export interface ActivitySpec {
   warp?: number;
   /** Whether danger interrupts it (sleeping is interrupted by noise via other means). */
   interruptible?: boolean;
+  /** What kind of work ('craft', 'construction', 'read', 'disassemble'…), for UIs that show more. */
+  kind?: string;
+  /** The thing being worked on (the in-progress craft item, the book…). */
+  target?: unknown;
+  /** Map tile the work happens at (a construction site), for an in-world progress bar. */
+  at?: { x: number; y: number; z: number };
+  /** A richer UI draws this activity's progress; the plain HUD bar can stay out of the way. */
+  customUi?: boolean;
 }
 
 export class Activity {
@@ -119,8 +128,8 @@ export class ActivityManager implements GameSystem {
 
 /** Warp so an activity of `duration` game seconds takes ~2–8 real seconds. */
 export function defaultWarp(duration: number): number {
-  const CLOCK = 24; // mirrors CLOCK_SCALE; kept local to avoid a cycle with time.ts consumers
-  const realAtNormal = duration / CLOCK;
+  // clockScale() (not CLOCK_SCALE): with a longer day the activity still takes ~2–8 real s.
+  const realAtNormal = duration / clockScale();
   const target = Math.min(8, Math.max(2, Math.sqrt(realAtNormal)));
   return Math.max(1, realAtNormal / target);
 }

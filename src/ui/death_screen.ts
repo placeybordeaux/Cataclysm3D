@@ -10,6 +10,7 @@ import { achievementsOf } from '../achievements';
 import { GameClock } from '../core/time';
 import { saveHandle } from '../save/install';
 import { deathLines, titledName } from '../progression/memorial';
+import { permadeath } from '../game/difficulty';
 import { stampTombstone } from './death';
 import './screens2.css';
 
@@ -52,6 +53,7 @@ export function showDeathScreen(ctx: UiContext, hud: Hud, cause: string, diedAt 
     extra.length ? h('div', { class: 'ui2-small', html: extra.map((l) => l || '&nbsp;').join('<br>') }) : '',
     h('div', { class: 'ui2-section', text: 'Last messages' }),
     h('div', { class: 'dt-msgs' }, ...hud.log.recent(8).map((e) => h('div', { class: `tone-${messageTone(e.color)}`, html: colorize(logLine(e)) }))),
+    permadeath(game) ? '' : h('div', { class: 'tone-good', text: 'Permadeath is off: your last save is kept. Load it from the main menu to try again.' }),
     h('div', { class: 'dt-words' }, h('span', { class: 'ui2-dim', text: ctx.data.tombstone.last_words_label ?? 'Last Words:' }), words),
     h('div', { class: 'tone-accent ui2-small', text: 'Type your last words if you like, then press Enter to return to the main menu.' }),
   );

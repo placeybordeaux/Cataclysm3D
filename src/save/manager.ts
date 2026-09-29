@@ -1,4 +1,5 @@
 import type { Game } from '../game/game';
+import { permadeath } from '../game/difficulty';
 import { SECONDS_PER_DAY } from '../core/time';
 import { applySave, decodeSave, encodeJson, encodeSave, SaveError, serializeGame, storedSize, type ApplyResult, type SaveFile, type SaveMeta, type StoredSave } from './format';
 import type { KVBackend, SyncStorage } from './storage';
@@ -177,13 +178,16 @@ export class SaveManager {
     return (await this.backend.get<MemorialEntry[]>('memorial')) ?? [];
   }
 
-  /** CDDA deletes a dead character's save and adds them to the memorial. */
+  /**
+   * CDDA deletes a dead character's save and adds them to the memorial. Without permadeath
+   * (the difficulty's rule, src/game/difficulty.ts) the last save stays loadable.
+   */
   async onDeath(cause: string): Promise<void> {
     const wasActive = this.active;
     this.active = false;
     const slot = this.slot;
     this.slot = null;
-    if (slot) await this.delete(slot);
+    if (slot && permadeath(this.game)) await this.delete(slot);
     // A character that never started (title screen backdrop) isn't memorialized.
     if (!wasActive && !slot) return;
     const g = this.game;

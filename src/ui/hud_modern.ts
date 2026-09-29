@@ -42,6 +42,8 @@ export interface BannerSpec {
   /** Second line, smaller ("Space to resume"). */
   sub?: string;
   tone?: 'warn' | 'bad' | 'info' | 'good' | 'accent';
+  /** A quiet one-line note instead of a big banner (a menu's own pause). */
+  small?: boolean;
 }
 
 export interface HudPrefs {
@@ -214,8 +216,8 @@ export class ModernHud {
     if (spec) this.bannerMap.set(id, spec);
     else this.bannerMap.delete(id);
     this.banners.replaceChildren(
-      ...[...this.bannerMap.values()].map((b) =>
-        h('div', { class: `hud2-banner tone-${b.tone ?? 'warn'}` }, h('div', { class: 'hud2-banner-text', text: b.text }), b.sub ? h('div', { class: 'hud2-banner-sub', text: b.sub }) : null),
+      ...[...this.bannerMap].map(([id, b]) =>
+        h('div', { class: `hud2-banner tone-${b.tone ?? 'warn'}${b.small ? ' small' : ''}`, data: { banner: id } }, h('div', { class: 'hud2-banner-text', text: b.text }), b.sub ? h('div', { class: 'hud2-banner-sub', text: b.sub }) : null),
       ),
     );
   }
@@ -507,7 +509,8 @@ export class ModernHud {
 
   private renderActivity(): void {
     const a = this.ctx.game.activities.current;
-    if (!a) {
+    // Activities with their own progress UI (crafting, construction, reading: src/ui/craft2).
+    if (!a || a.spec.customUi) {
       if (this.activity.style.display !== 'none') this.activity.style.display = 'none';
       return;
     }

@@ -29,7 +29,7 @@ import { registerSaveable } from '../save/registry';
 import { registerOption } from '../ui/options';
 import { profile as browserProfile, type CounterStat, type Profile, type SetId } from './profile';
 import { available, newlyEarned, validateCatalogue, type Catalogue, type UnlockDef, type UnlockEnv } from './unlocks';
-import { NUDGES, NudgeQueue, craftableDiff, reachSignature, recipeNudgeText } from './discovery';
+import { NUDGES, NudgeQueue, craftableDiff, newRecipes, reachSignature, recipeNudgeText } from './discovery';
 import { SCENARIO_PLACEMENT } from './placement';
 import { applyDifficulty, DEFAULT_DIFFICULTY, type Difficulty } from './difficulty';
 import { CraftBadge, nudgeToast, unlockToast, withKeys } from './ui';
@@ -163,6 +163,7 @@ export async function installProgression(
       const t = recipeNudgeText(names);
       nudgeToast(game, { title: t.title, body: t.body, key: `craft:${now()}`, icon: pendingRecipes[0].result });
       for (const r of pendingRecipes) prof.mark('recipesNotified', r.id);
+      for (const r of pendingRecipes) newRecipes.add(r.id);
       run.recipes.push(...names);
       badge.add(names.length);
       pendingRecipes = [];

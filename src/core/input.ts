@@ -52,6 +52,8 @@ export class Input {
       if (e.key === 'Escape') this.lastEscape = performance.now();
       this.held.add(e.code);
       if (MOVEMENT_CODES.has(e.code) && !e.repeat) this.onMovementKey?.(e.code, e.key);
+      // Keys that work in every state, menus included (the tactical pause).
+      for (const h of this.priorityHandlers) if (h(e) === true) return void e.preventDefault();
       const top = this.captureStack[this.captureStack.length - 1];
       if (top) {
         if (top(e) !== false) e.preventDefault();
@@ -93,6 +95,15 @@ export class Input {
     window.addEventListener('mouseup', (e) => (this.mouseButtons &= ~(1 << e.button)));
     canvas.addEventListener('contextmenu', (e) => e.preventDefault());
   }
+
+  /**
+   * Runs before menus see a key, even while one is captured (the tactical pause works inside the
+   * inventory). Return true to consume. Keep these few: they shadow every menu's hotkeys.
+   */
+  onPriorityPress(h: KeyHandler): void {
+    this.priorityHandlers.push(h);
+  }
+  private priorityHandlers: KeyHandler[] = [];
 
   /** Global (non-modal) key press listener. Return true to consume. */
   onPress(h: KeyHandler): void {

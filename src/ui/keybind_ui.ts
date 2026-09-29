@@ -2,6 +2,7 @@ import type { Game } from '../game/game';
 import { h, confirmModal, type Panel } from '../ui2';
 import { openScreen } from './screen2';
 import { addBinding, applyBinding, checkBinding, keyLabel } from './keymap';
+import { Keys } from './keys';
 
 // Options > Key bindings (CDDA's keybinding screen, reduced; a ui2 window): every action with
 // its keys. Enter (or a click on the selected row) waits for a new key and replaces the action's
@@ -18,6 +19,7 @@ export function openKeybindings(game: Game): Panel {
   let flash: { text: string; tone: string } | null = null;
   let busy = false;
 
+  Keys.rebinding++;
   const win = openScreen(game, {
     id: 'scr.keys',
     title: 'Key bindings',
@@ -27,6 +29,8 @@ export function openKeybindings(game: Game): Panel {
     height: 'min(calc(var(--fs) * 34), 90vh)',
     closeLabel: 'done',
     legend: [['↑↓', 'move'], ['Enter', 'rebind'], ['+', 'add key'], ['-', 'unbind'], ['R', 'reset all']],
+    // Any key may be the new binding: global keys (tactical pause) stand down meanwhile.
+    onClose: () => void Keys.rebinding--,
     onKey: (e) => {
       if (busy) return true;
       if (capturing) {

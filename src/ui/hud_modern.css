@@ -69,6 +69,8 @@ body.ui2-cursor-free #ui2 .hud2 .hud2-feed { cursor: pointer; }
 #ui2 .hud2-banner.tone-bad { --tone: var(--p-bad); } #ui2 .hud2-banner.tone-info { --tone: var(--p-info); }
 #ui2 .hud2-banner.tone-good { --tone: var(--p-good); } #ui2 .hud2-banner.tone-accent { --tone: var(--p-accent); }
 #ui2 .hud2-banner-text { font-size: var(--fs-l); letter-spacing: .15em; }
+#ui2 .hud2-banner.small { padding: 0 calc(var(--u) * 4); border-width: var(--u); }
+#ui2 .hud2-banner.small .hud2-banner-text { font-size: var(--fs-s); letter-spacing: .1em; }
 #ui2 .hud2-banner-sub { font-size: var(--fs-s); color: var(--p-text-dim); }
 
 /* ---- top right: clock ---- */

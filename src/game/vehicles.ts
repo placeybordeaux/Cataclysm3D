@@ -1,8 +1,11 @@
 import { hashSeed, Rng } from '../core/rng';
+import { BALANCE } from './balance';
 import { bash } from './bash';
 import { ACTION_SCALE } from '../core/time';
 import type { MonsterSystem } from './monai';
-import type { Monster } from './monster';
+import { turnsToEffectSeconds, type Monster } from './monster';
+import type { Npc } from './npc';
+import type { NpcSystem } from './npcai';
 import { emitSound, type SoundCategory } from './sound';
 import { EngineSounds, engineVariant, hornVariant, pickVariant } from '../audio/vehicleAudio';
 import { MAIN_PARTS, type BodyPartId } from './bodyparts';
@@ -41,11 +44,53 @@ export interface DriveInput {
 }
 
 /**
- * How W/S drive. 'cruise' is CDDA's model: each press moves the cruise target by 4 mph and
- * the engine accelerates/brakes toward it (vehicle::cruise_thrust + thrust). 'direct' is a
- * plain accelerator pedal: W accelerates while held, S brakes then reverses.
+ * How W/S drive. 'direct' (the default) is a plain accelerator pedal: W accelerates while
+ * held, releasing it coasts, S brakes then reverses, and the cruise-control key locks the
+ * current speed. 'cruise' is CDDA's model: each press moves the cruise target by 4 mph and
+ * the engine accelerates/brakes toward it (vehicle::cruise_thrust + thrust). In real time
+ * CDDA's model felt indirect and laggy (the target lags the key), so it's an option only.
  */
 export type DriveMode = 'cruise' | 'direct';
+
+// --- direct-driving feel ----------------------------------------------------------------
+// CDDA's ground_acceleration is power / (mass * v): turn-based it never mattered that a car
+// hits 30 mph in ~2 s and a sports car in 0.5 s, but in real time that's a slingshot. The
+// launch acceleration is compressed toward a car-like figure (0-30 mph in ~4 s) keeping the
+// ordering between vehicles and the CDDA falloff with speed.
+/** Felt launch acceleration (m/s^2) of a CDDA reference car (CDDA acceleration ~6.5 at rest). */
+const FELT_ACC_REF = 3.4;
+const CDDA_ACC_REF = 6.5;
+/** Throttle pedal ramp (per second): quick, but not a step. */
+const THROTTLE_RAMP_UP = 6;
+const THROTTLE_RAMP_DOWN = 10;
+/** Off-throttle deceleration (engine braking + drivetrain), m/s^2, on top of CDDA drag. */
+const COAST_DECEL = 0.8;
+/** S held at a standstill this long before it engages reverse (so braking to a stop doesn't
+ *  shoot straight into reverse). */
+const REVERSE_DELAY = 0.25;
+/** Lateral acceleration the steering allows (m/s^2): caps the wheel angle at speed. */
+const LAT_ACC_MAX = 5.5;
+/** Seconds to reach full available lock / to recentre. */
+const STEER_IN_TIME = 0.45;
+const STEER_OUT_TIME = 0.25;
+
+/**
+ * Launch acceleration the driver feels for a vehicle whose CDDA acceleration at rest is
+ * `cddaAcc` (m/s^2): a gentle power curve through the reference car, clamped so a semi
+ * isn't hopeless and a sports car isn't a catapult.
+ */
+export function feltAcceleration(cddaAcc: number): number {
+  if (cddaAcc <= 0) return 0;
+  return Math.max(1.2, Math.min(5, FELT_ACC_REF * Math.pow(cddaAcc / CDDA_ACC_REF, 0.3)));
+}
+
+/** Largest front-wheel angle (rad) at `speed` m/s for a wheelbase: full lock when slow,
+ *  narrowing so the lateral acceleration stays under LAT_ACC_MAX (no twitchiness at speed). */
+export function maxSteerAt(speed: number, wheelbase: number): number {
+  const v2 = speed * speed;
+  if (v2 < 1e-6) return MAX_STEER;
+  return Math.min(MAX_STEER, Math.atan((LAT_ACC_MAX * Math.max(0.5, wheelbase)) / v2));
+}
 
 /**
  * Held W/S repeat the cruise step after this delay, then every CRUISE_REPEAT seconds (8 mph/s):
@@ -64,6 +109,8 @@ export interface CreatureHooks {
   /** Put a flung creature down at world point (x, y) (the system picks a free spot). */
   place(c: unknown, x: number, y: number): void;
   name(c: unknown): string;
+  /** How messages refer to it ("the zombie", "Bernard Andrews"); default `the ${name}`. */
+  title?(c: unknown): string;
 }
 
 export interface VehicleOccupant {
@@ -78,8 +125,8 @@ const tileKey = (x: number, y: number, z: number): number => ((x + 1048576) * 20
 const STOP_EPS = 0.05;
 /** Max front-wheel angle, rad. */
 const MAX_STEER = 0.6;
-/** Brake deceleration, m/s^2 (CDDA brakes shed ~30% of max speed per turn). */
-const BRAKE_DECEL = 7;
+/** Brake deceleration, m/s^2 (CDDA brakes shed ~30% of max speed per turn; 30 mph to 0 in ~1.7 s). */
+const BRAKE_DECEL = 8;
 
 export class VehicleSystem implements GameSystem, MapOverlay {
   readonly name = 'vehicles';
@@ -94,7 +141,13 @@ export class VehicleSystem implements GameSystem, MapOverlay {
   /** When true, `input` is not overwritten from the keyboard (cdda.drive, tests). */
   scriptedInput = false;
   /** Driving model (options screen "Driving controls"). */
-  driveMode: DriveMode = 'cruise';
+  driveMode: DriveMode = 'direct';
+  /** Direct driving: cruise control engaged (the cruise key); holds v.cruiseVelocity. */
+  cruiseOn = false;
+  /** Direct driving: the pedal position, ramping toward the held W. */
+  private pedal = 0;
+  /** Direct driving: seconds S has been held at a standstill (reverse engages after REVERSE_DELAY). */
+  private reverseHeld = 0;
   /** Cruise-key state: sign of the held W/S and seconds until it repeats. */
   private cruiseHeld = 0;
   private cruiseRepeatIn = 0;
@@ -313,6 +366,11 @@ export class VehicleSystem implements GameSystem, MapOverlay {
     if (!v) return 'You are not driving.';
     this.driving = null;
     this.input = { throttle: 0, steer: 0, brake: false };
+    this.pedal = 0;
+    if (this.cruiseOn) {
+      this.cruiseOn = false;
+      v.cruiseVelocity = 0;
+    }
     return Math.abs(v.velocity) > 1 ? `You let go of the controls of the moving ${v.name}!` : `You let go of the controls of the ${v.name}.`;
   }
 
@@ -568,41 +626,31 @@ export class VehicleSystem implements GameSystem, MapOverlay {
       const r = this.cruiseStep(v, dt, offroad, dragDv, wheelsOk && hasPower);
       nv = r.nv;
       load = Math.max(load, r.load);
+    } else if (driven) {
+      const r = this.directStep(v, inp, dt, offroad, dragDv, wheelsOk && hasPower);
+      nv = r.nv;
+      load = Math.max(load, r.load);
     } else {
-      let a = 0;
-      if (wheelsOk && hasPower && inp.throttle > 0) {
-        if (vel >= -0.5) {
-          const acc = v.acceleration(vel, offroad);
-          a += inp.throttle * acc;
-          load = Math.min(1, inp.throttle);
-        } else a += BRAKE_DECEL;
-      } else if (inp.throttle < 0) {
-        if (vel > 0.5) a -= BRAKE_DECEL;
-        else if (wheelsOk && hasPower) {
-          // Combustion engines are weak in reverse (max_reverse_velocity = max / 4).
-          const maxRev = -v.maxReverseVelocity(offroad);
-          if (-vel < maxRev) a -= v.acceleration(vel, offroad) * 0.6;
-          load = 0.5;
-        }
-      }
-      if (inp.brake) a -= Math.sign(vel) * BRAKE_DECEL * 1.3;
-      // Brakes (and the handbrake) only ever bring the vehicle to a stop, never reverse it.
-      const braking = inp.brake || (inp.throttle < 0 && vel > 0.5) || (inp.throttle > 0 && vel < -0.5);
-      nv = vel + a * dt;
+      // Nobody at the wheel: rolls to a stop on drag alone.
+      nv = vel;
       if (nv > 0) nv = Math.max(0, nv - dragDv);
       else if (nv < 0) nv = Math.min(0, nv + dragDv);
-      if (braking && vel !== 0 && Math.sign(nv) !== Math.sign(vel)) nv = 0;
-      if (Math.abs(nv) < STOP_EPS && inp.throttle === 0) nv = 0;
+      if (Math.abs(nv) < STOP_EPS) nv = 0;
     }
     if (hasPower && Math.abs(nv) > 0.1) load = Math.max(load, Math.min(1, ((cAir * nv * nv + cRoll * (33.3 + Math.abs(nv))) * Math.abs(nv)) / v.totalPower()));
     v.velocity = nv;
 
-    // Steering: bicycle model; the wheel angle eases toward the input and narrows with speed.
+    // Steering: bicycle model. The wheel angle eases toward the input (a fraction of a second
+    // to full lock, quicker back to centre) and the lock narrows with speed so a held A/D at
+    // 50 mph is a firm curve, not a spin.
     const steerable = v.steerable() && wheelsOk;
-    const maxSteer = MAX_STEER * Math.min(1, 9 / Math.max(1, Math.abs(nv)));
+    const maxSteer = maxSteerAt(Math.abs(nv), v.wheelbase());
     const target = steerable ? inp.steer * maxSteer : 0;
-    const rate = 2.5 * dt;
+    const outward = Math.abs(target) > Math.abs(v.steer) && Math.sign(target) === Math.sign(v.steer || target);
+    const rate = (maxSteer / (outward ? STEER_IN_TIME : STEER_OUT_TIME)) * dt;
     v.steer += Math.max(-rate, Math.min(rate, target - v.steer));
+    // The lock shrinks as speed builds even with the key held.
+    v.steer = Math.max(-maxSteer, Math.min(maxSteer, v.steer));
     const yawRate = (nv * Math.tan(v.steer)) / v.wheelbase();
     const dFacing = (yawRate * dt * 180) / Math.PI;
 
@@ -625,6 +673,89 @@ export class VehicleSystem implements GameSystem, MapOverlay {
         this.soundAcc.set(v, 0);
       } else this.soundAcc.set(v, acc);
     }
+  }
+
+  /**
+   * One physics step of direct driving: W is an accelerator pedal (ramped, felt acceleration
+   * from CDDA power/mass), off-throttle coasts with engine braking, S brakes to a stop and
+   * then, held a moment longer, reverses; Space is the handbrake. With cruise control on and
+   * no pedal input the engine holds `v.cruiseVelocity`; W past it raises the set speed on
+   * release, S or Space cancel it.
+   */
+  private directStep(v: Vehicle, inp: DriveInput, dt: number, offroad: number, dragDv: number, canThrust: boolean): { nv: number; load: number } {
+    const vel = v.velocity;
+    const want = Math.max(0, inp.throttle);
+    this.pedal += Math.max(-THROTTLE_RAMP_DOWN * dt, Math.min(THROTTLE_RAMP_UP * dt, want - this.pedal));
+    if (this.cruiseOn && (inp.throttle < 0 || inp.brake || !canThrust)) {
+      this.cruiseOn = false;
+      v.cruiseVelocity = 0;
+      if (inp.throttle < 0 || inp.brake) this.say('Cruise control off.', 'c_light_gray');
+    }
+    if (this.cruiseOn && inp.throttle === 0) return this.cruiseStep(v, dt, offroad, dragDv, canThrust);
+    // Accelerating past the set speed carries it along (released W then holds the new speed).
+    if (this.cruiseOn && inp.throttle > 0) v.cruiseVelocity = Math.max(v.cruiseVelocity, Math.round(vel * VMIPH_PER_MS));
+    const scale = (() => {
+      const a0 = v.acceleration(0, offroad);
+      return a0 > 0 ? feltAcceleration(a0) / a0 : 0;
+    })();
+    let a = 0, load = 0;
+    let braking = false;
+    if (inp.throttle < 0 && vel > STOP_EPS) {
+      a -= BRAKE_DECEL;
+      braking = true;
+      this.reverseHeld = 0;
+    } else if (inp.throttle < 0) {
+      this.reverseHeld += dt;
+      if (canThrust && this.reverseHeld >= REVERSE_DELAY) {
+        const electric = v.engines.some((e) => e.enabled && e.hp > 0 && e.def.fuel_type === 'battery');
+        const maxRev = -v.maxReverseVelocity(offroad);
+        if (-vel < maxRev) a -= v.acceleration(vel, offroad) * scale * (electric ? 1 : 0.6);
+        load = 0.5;
+      }
+    } else {
+      this.reverseHeld = 0;
+      if (this.pedal > 0 && vel < -0.3) {
+        // W while rolling backwards: brake first.
+        a += BRAKE_DECEL;
+        braking = true;
+      } else if (this.pedal > 0 && canThrust) {
+        a += this.pedal * v.acceleration(vel, offroad) * scale;
+        load = Math.min(1, this.pedal);
+      }
+    }
+    if (inp.brake) {
+      a -= Math.sign(vel) * BRAKE_DECEL * 1.3;
+      braking = true;
+    }
+    let nv = vel + a * dt;
+    // Drag and, off the pedal, engine braking: always toward zero.
+    const coast = dragDv + (this.pedal < 0.05 && !braking && inp.throttle >= 0 ? COAST_DECEL * dt : 0);
+    if (nv > 0) nv = Math.max(0, nv - coast);
+    else if (nv < 0) nv = Math.min(0, nv + coast);
+    // Brakes (and the handbrake) only ever bring the vehicle to a stop, never reverse it.
+    if (braking && vel !== 0 && Math.sign(nv) !== Math.sign(vel)) nv = 0;
+    if (Math.abs(nv) < STOP_EPS && this.pedal < 0.05 && !(inp.throttle < 0 && this.reverseHeld >= REVERSE_DELAY)) nv = 0;
+    return { nv, load };
+  }
+
+  /**
+   * Cruise control key (direct driving): lock the current forward speed, or release it.
+   * Returns the message for the driver.
+   */
+  toggleCruise(): string {
+    const v = this.driving;
+    if (!v) return "You're not driving.";
+    if (this.driveMode === 'cruise') return 'Cruise control is always on in the CDDA driving model (Options > Driving controls).';
+    if (this.cruiseOn) {
+      this.cruiseOn = false;
+      v.cruiseVelocity = 0;
+      return 'Cruise control off.';
+    }
+    if (!v.engineOn) return `The ${v.name}'s engine isn't on!`;
+    if (v.velocity < 2) return 'Get moving first: cruise control holds your current speed.';
+    this.cruiseOn = true;
+    v.cruiseVelocity = Math.round(v.velocity * VMIPH_PER_MS);
+    return `Cruise control set to ${Math.round(v.velocity * MPH_PER_MS)} mph.`;
   }
 
   /**
@@ -745,7 +876,7 @@ export class VehicleSystem implements GameSystem, MapOverlay {
       if (!riding && p.tileX === t.tx && p.tileY === t.ty && p.z === z && !p.dead) {
         const res = this.hitBody(v, part, {
           name: 'you', mass: 70, damage: (dmg) => {
-            for (const bp of MAIN_PARTS) p.takeHit(bp as BodyPartId, [{ type: 'bash', amount: Math.round(dmg * (0.6 + this.rng.next() * 0.8)) }]);
+            for (const bp of MAIN_PARTS) p.takeHit(bp as BodyPartId, [{ type: 'bash', amount: Math.round(dmg * BALANCE.crashDamage * (0.6 + this.rng.next() * 0.8)) }]);
             return p.dead;
           },
           fling: (force) => {
@@ -765,7 +896,7 @@ export class VehicleSystem implements GameSystem, MapOverlay {
       if (c) {
         const h = this.creatureHooks;
         const res = this.hitBody(v, part, {
-          name: `the ${h.name(c)}`, mass: h.mass(c), damage: (dmg) => h.damage(c, dmg, v),
+          name: h.title ? h.title(c) : `the ${h.name(c)}`, mass: h.mass(c), damage: (dmg) => h.damage(c, dmg, v),
           fling: (force) => {
             const spot = this.flingSpot(t.tx + 0.5, t.ty + 0.5, fdx, fdy, force, free);
             if (!spot) return false;
@@ -870,7 +1001,7 @@ export class VehicleSystem implements GameSystem, MapOverlay {
   private jolt(v: Vehicle, dVelMph: number): void {
     const seat = v.driverSeat();
     const belt = seat ? v.partsAt(seat.mx, seat.my).find((q) => has(q, 'SEATBELT') && q.hp > 0) : undefined;
-    const dmg = passengerImpactDamage(dVelMph, belt?.def.bonus ?? 0, this.rng);
+    const dmg = Math.round(passengerImpactDamage(dVelMph, belt?.def.bonus ?? 0, this.rng) * BALANCE.crashDamage);
     if (dmg > 0) {
       this.game.player.takeHit('torso', [{ type: 'bash', amount: dmg }]);
       this.game.message(`You take ${dmg} damage by the power of the impact!`, 'c_red');
@@ -953,6 +1084,79 @@ export function monsterCreatureHooks(ms: MonsterSystem): CreatureHooks {
       m.addEffect('downed', 1);
     },
     name: (c) => (c as Monster).displayName(),
+  };
+}
+
+/**
+ * Run-over hooks for NPCs (src/game/npcai.ts `game.npcs`, looked up per call because the NPC
+ * system is installed after vehicles). CDDA vehicle::part_collision on a character: the impact
+ * damage goes to the torso unmitigated (apply_damage), a hard hit stuns and the body is flung
+ * and downed like a monster; npcai's afterHit does the rest (death drops, anger, the faction
+ * turning on you). No confirmation for friendlies: at speed there's no time to ask, and CDDA
+ * doesn't either.
+ */
+export function npcCreatureHooks(game: Game, vs: VehicleSystem): CreatureHooks {
+  const sys = () => (game as unknown as { npcs?: NpcSystem }).npcs;
+  return {
+    at: (x, y, z) => sys()?.npcAt(x, y, z) ?? null,
+    mass: (c) => Math.max(1, (c as Npc).bodyweightKg()),
+    damage: (c, dmg, v) => {
+      const n = c as Npc;
+      const s = sys();
+      const byPlayer = vs.driving === v;
+      const r = n.takeHit('torso', [{ type: 'bash', amount: dmg }]);
+      if (byPlayer) game.message(`You hit ${n.name} with your ${v.name}!`, 'c_yellow');
+      if (!n.dead) {
+        // CDDA: stunned for (rng(0, dam) > 10) + (rng(0, dam) > 40) turns.
+        const stun = (vs.rng.int(0, dmg) > 10 ? 1 : 0) + (vs.rng.int(0, dmg) > 40 ? 1 : 0);
+        if (stun) n.addEffect('stunned', turnsToEffectSeconds(stun));
+      }
+      // Anything but a player-driven car is an accident with nobody to blame.
+      if (s) s.afterHit(n, r.damage, (byPlayer ? { kind: 'player' } : { kind: 'npc', n }) as Parameters<NpcSystem['afterHit']>[2]);
+      else n.checkDeath();
+      return n.dead;
+    },
+    place: (c, x, y) => {
+      const n = c as Npc;
+      n.x = x;
+      n.y = y;
+      n.addEffect('downed', turnsToEffectSeconds(1));
+    },
+    name: (c) => (c as Npc).name,
+    title: (c) => (c as Npc).name,
+  };
+}
+
+/**
+ * Several creature populations as one CreatureHooks: `at` asks each in turn and remembers who
+ * answered, so damage/place/name go to the system that owns that creature.
+ */
+export function composeCreatureHooks(list: CreatureHooks[]): CreatureHooks {
+  const owner = new WeakMap<object, CreatureHooks>();
+  const of = (c: unknown): CreatureHooks => {
+    const h = owner.get(c as object);
+    if (!h) throw new Error('composeCreatureHooks: creature not found through at()');
+    return h;
+  };
+  return {
+    at: (x, y, z) => {
+      for (const h of list) {
+        const c = h.at(x, y, z);
+        if (c) {
+          if (typeof c === 'object') owner.set(c as object, h);
+          return c;
+        }
+      }
+      return null;
+    },
+    mass: (c) => of(c).mass(c),
+    damage: (c, dmg, v) => of(c).damage(c, dmg, v),
+    place: (c, x, y) => of(c).place(c, x, y),
+    name: (c) => of(c).name(c),
+    title: (c) => {
+      const h = of(c);
+      return h.title ? h.title(c) : `the ${h.name(c)}`;
+    },
   };
 }
 

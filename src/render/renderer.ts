@@ -162,7 +162,7 @@ export class Renderer {
       )
       : Promise.resolve();
 
-    game.keys.register('camera_mode', 'Cycle camera (first person / shoulder / top-down)', () => this.setCameraMode(this.rig.cycle()));
+    game.keys.register('camera_mode', 'Cycle camera (first person / shoulder / top-down; driving: chase / cockpit / top-down)', () => this.setCameraMode(this.rig.cycle()));
     // Mouse wheel zooms the top-down view (CDDA's zoom), from a room to a few blocks of town.
     canvas.addEventListener?.(
       'wheel',
@@ -210,7 +210,16 @@ export class Renderer {
 
   setCameraMode(mode: CameraMode): void {
     this.rig.mode = mode;
-    const needPlayer = mode !== 'first';
+    this.syncPlayerSprite();
+  }
+
+  /** The player billboard shows outside first person, except at the wheel (you're inside the
+   *  car). Checked every frame: taking/leaving the controls switches the camera mode too. */
+  private spriteShown: boolean | null = null;
+  private syncPlayerSprite(): void {
+    const needPlayer = this.rig.mode !== 'first' && !this.rig.drive;
+    if (needPlayer === this.spriteShown) return;
+    this.spriteShown = needPlayer;
     if (needPlayer && !this.playerSprite) {
       this.playerSprite = this.sprites.add({ x: 0, y: 0, z: 0, frame: this.source.sprite('player'), height: 1.75 });
     }
@@ -310,6 +319,7 @@ export class Renderer {
     this.source.flush?.();
 
     this.rig.update(dt, p, this.game.map, this.pipeline.aspect, this.pipeline.lowH);
+    this.syncPlayerSprite();
     this.pipeline.subPixel.copy(this.rig.subPixel);
     const cam = this.rig.camera;
     this.applyShake(dt, cam);

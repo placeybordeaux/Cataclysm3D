@@ -14,8 +14,28 @@ export const ACTION_SCALE = 3;
  * you could react; at 2 you still out-walk it but a fight reads blow by blow.
  */
 export const MELEE_SCALE = 2;
-/** Game seconds per real second while playing normally. */
+/** Game seconds per real second while playing normally (at day-length rate 1). */
 export const CLOCK_SCALE = 24;
+
+/**
+ * Day-length multiplier on CLOCK_SCALE, set by the difficulty preset (src/game/difficulty.ts;
+ * 1 = a game day in an hour of play). Module-level like the other scales: one game per page.
+ * Code converting real seconds to game seconds (effect durations from monster attacks, the
+ * stamina clock, activity warps) must use clockScale(), not CLOCK_SCALE, so a longer day doesn't
+ * make a 2-turn stun last longer on screen.
+ */
+let clockRate = 1;
+export function setClockRate(r: number): void {
+  if (!(r > 0) || !Number.isFinite(r)) throw new Error(`clock rate must be a positive number, got ${r}`);
+  clockRate = r;
+}
+export function getClockRate(): number {
+  return clockRate;
+}
+/** Game seconds per real second right now (CLOCK_SCALE × day-length rate). */
+export function clockScale(): number {
+  return CLOCK_SCALE * clockRate;
+}
 
 export const SECONDS_PER_MINUTE = 60;
 export const SECONDS_PER_HOUR = 3600;
@@ -30,7 +50,7 @@ export class GameClock {
   warp = 1;
 
   advanceReal(realDt: number): number {
-    const dt = realDt * CLOCK_SCALE * this.warp;
+    const dt = realDt * clockScale() * this.warp;
     this.seconds += dt;
     return dt;
   }
