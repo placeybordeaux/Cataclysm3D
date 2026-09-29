@@ -9,6 +9,7 @@ import { installWorldgenDebug } from './world/worldgen_debug';
 import { installDebugApi } from './debug';
 import { initUi } from './ui/framework';
 import { installPointerPolicy } from './ui/pointer';
+import { installDevBridge } from './dev/bridge';
 import { installUi } from './ui/index';
 import { installAudio } from './audio/install';
 import { installCrafting } from './ui/crafting_install';
@@ -108,6 +109,7 @@ async function main(): Promise<void> {
     game.frame(dt);
     prefetch.observe(now);
     renderer.render();
+    api.__onFrame?.();
     frameStats.frame(performance.now() - now, now);
     requestAnimationFrame(loop);
   };
@@ -116,6 +118,8 @@ async function main(): Promise<void> {
   // unless the previous page asked to load a save.
   const loaded = pending ? await save.applyPending(pending) : false;
   api.ready = true;
+  // Dev only: live view/eval bridge for the terminal (tools/live.ts).
+  installDevBridge(game, renderer, api);
   if (!loaded) await ui.boot();
   // Gameplay proper: capture the mouse from here on (title/chargen use it as a pointer).
   const pointer = installPointerPolicy(game);
