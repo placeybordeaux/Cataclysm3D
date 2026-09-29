@@ -54,6 +54,8 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #000; }
 /* full-screen curses screens (main menu, death, overmap, character creation) */
 #ui .screen { position: absolute; inset: 0; pointer-events: auto; font-size: var(--hud-size); }
 #ui .screen.dim { background: rgba(0,0,0,.55); }
+/* The live world behind the title can be bright daylight; keep the logo and menu legible. */
+#ui .screen.dim.main-menu { background: radial-gradient(ellipse at center, rgba(0,0,0,.82) 0%, rgba(0,0,0,.6) 70%, rgba(0,0,0,.45) 100%); }
 #ui .screen.black { background: #000; }
 #ui .cdda-box { border: 1px solid var(--c-light_gray); background: rgba(0,0,0,.88); }
 #ui .cdda-box > .box-title { color: var(--c-light_red); padding: 0 .5em; white-space: pre; }

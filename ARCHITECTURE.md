@@ -36,6 +36,9 @@ tileset, rendered in the "3D pixel art" style of *Project Shadowglass*.
   headless screenshots (see `tools/shot.ts --help`). **Look at your screenshots with the
   Read tool**; visual features are not done until you've seen them working.
   `--print "<expr>"` prints JSON from the page for scripted assertions.
+- `tools/drive.ts` keeps one Vite + headless Chromium session alive for long playtests:
+  `tsx tools/drive.ts serve [--gpu]` (via `heavy`), then `drive.ts eval|shot|load|log` (or curl
+  `127.0.0.1:9555/eval`); page scripts can `await shot(path)`. `--gpu` renders on the real GPU.
 - `window.cdda` (src/debug.ts) is the automation API. Register helpers for anything you
   add (`cdda.spawnMonster(id, dx, dy)`, `cdda.giveItem(id)`, …) so others can test.
 - Generated data lives in `public/data/` (by `npm run extract`) and `public/atlas/`
