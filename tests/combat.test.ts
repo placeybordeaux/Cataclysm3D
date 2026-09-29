@@ -216,20 +216,23 @@ describe('monsters vs the survivor', () => {
     expect(hits / N).toBeLessThan(0.56);
   });
 
-  it('hits land on body parts by hit_size (anatomy::select_body_part)', () => {
+  it('hits land on body parts by BN hit_size_relative (anatomy::select_body_part)', () => {
     const rng = new Rng(8);
     const counts: Record<string, number> = {};
     for (let i = 0; i < 20000; i++) {
       const bp = selectBodyPart(rng);
       counts[bp] = (counts[bp] ?? 0) + 1;
     }
-    // total hit_size 100: torso 36, each arm/leg 13, head 4
-    expect(counts.torso / 20000).toBeCloseTo(0.36, 1);
-    expect(counts.arm_l / 20000).toBeCloseTo(0.13, 1);
-    expect(counts.head / 20000).toBeCloseTo(0.04, 1);
+    // same size, BN body_parts.json hit_size_relative[1]: torso 33.33, arms 20, legs 12,
+    // head 2.33, eyes 0.33 (total 100); hands, feet and mouth are never picked
+    expect(counts.torso / 20000).toBeCloseTo(0.3333, 1);
+    expect(counts.arm_l / 20000).toBeCloseTo(0.2, 1);
+    expect(counts.leg_r / 20000).toBeCloseTo(0.12, 1);
+    expect(counts.head / 20000).toBeCloseTo(0.0233, 1);
+    expect(counts.hand_l ?? 0).toBe(0);
   });
 
-  it("small monsters can't reach high: no head/torso-less upper hits, legs x3", () => {
+  it("smaller attackers can't reach the head and mostly hit legs (hit_size_relative[0])", () => {
     const rng = new Rng(8);
     for (let i = 0; i < 2000; i++) expect(['head', 'eyes', 'mouth']).not.toContain(selectBodyPart(rng, { canAttackHigh: false }));
     expect(sizeFromVolume(62500)).toBe('medium');

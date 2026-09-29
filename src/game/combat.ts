@@ -568,20 +568,21 @@ export function pelletAngle(shotSpreadMoa: number, rng: Rng): number {
 // ---------------------------------------------------------------- monsters vs characters
 
 /**
- * anatomy::select_body_part: weight by hit_size; attackers that can't reach high skip
- * LIMB_UPPER parts and triple LIMB_LOWER weights; good rolls favour hard-to-hit parts
- * (weight *= hitRoll ^ hit_difficulty).
+ * anatomy::select_body_part (BN): weight each part by hit_size_relative for the size
+ * difference between attacker and target (index 1 + clamp(diff, -1, 1)); a smaller attacker
+ * mostly hits legs and never the head (`canAttackHigh: false` = one size smaller). Good rolls
+ * favour hard-to-hit parts (weight *= hitRoll ^ hit_difficulty). `minHitSize` keeps parts
+ * whose plain hit_size is at least that big (grabs want limbs, not eyes).
  */
-export function selectBodyPart(rng: Rng, opts: { canAttackHigh?: boolean; hitRoll?: number; minHitSize?: number } = {}): BodyPartId {
+export function selectBodyPart(rng: Rng, opts: { canAttackHigh?: boolean; hitRoll?: number; minHitSize?: number; sizeDiff?: number } = {}): BodyPartId {
+  const diff = opts.sizeDiff ?? (opts.canAttackHigh === false ? -1 : 0);
+  const idx = 1 + Math.max(-1, Math.min(1, Math.trunc(diff)));
   const entries: [BodyPartId, number][] = [];
   for (const id of ALL_PARTS) {
     const bp = BODY_PARTS[id];
-    let w = bp.hit_size;
-    if (opts.minHitSize !== undefined && w < opts.minHitSize) continue;
-    if (opts.canAttackHigh === false) {
-      if (bp.upper) continue;
-      if (bp.lower) w *= 3;
-    }
+    let w = bp.hit_size_relative[idx];
+    if (w <= 0) continue;
+    if (opts.minHitSize !== undefined && bp.hit_size < opts.minHitSize) continue;
     if ((opts.hitRoll ?? 0) > 0) w *= Math.pow(opts.hitRoll!, bp.hit_difficulty);
     entries.push([id, w]);
   }

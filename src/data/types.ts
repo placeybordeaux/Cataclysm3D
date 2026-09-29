@@ -311,6 +311,8 @@ export interface EffectTypeDef {
   show_in_info?: boolean;
   flags?: string[];
   miss_messages?: [string, number][];
+  /** BN effect_type "permanent": instances never lose duration. */
+  permanent?: boolean;
   [extra: string]: unknown;
 }
 
@@ -318,6 +320,19 @@ export interface EnchantmentValue {
   value: string;
   add?: number;
   multiply?: number;
+  /** BN enchantment "max" (added on top for can_max values like LUMINATION). */
+  max?: number;
+}
+
+/** BN enchantment object (enchantment.cpp load): `conditions` ids all hold → values apply. */
+export interface EnchantmentDef {
+  id?: string;
+  values?: EnchantmentValue[];
+  conditions?: string[];
+  /** Legacy single condition ("has"/"condition" keys). */
+  condition?: unknown;
+  flags?: string[];
+  [extra: string]: unknown;
 }
 
 /** CDDA mutation/trait. Only a few fields are interpreted (see character.ts traitMod). */
@@ -327,7 +342,10 @@ export interface MutationDef {
   description?: string;
   points?: number;
   starting_trait?: boolean;
-  enchantments?: ({ values?: EnchantmentValue[]; condition?: unknown } | string)[];
+  /** BN: ids of standalone `enchantment` objects (or inline objects in fallbacks). */
+  enchantments?: (EnchantmentDef | string)[];
+  /** BN inline enchantments (mutation_data.cpp "mut_enchantments"). */
+  mut_enchantments?: EnchantmentDef[];
   flags?: string[];
   [extra: string]: unknown;
 }
