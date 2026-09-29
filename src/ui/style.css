@@ -1,0 +1,7 @@
+/* CDDA's look is a curses terminal: black panels, monospace, 16 named colors. The UI keeps
+   that identity on top of the 3D view. */
+@import url('https://fonts.googleapis.com/css2?family=VT323&display=swap');
+html, body { margin: 0; height: 100%; overflow: hidden; background: #000; }
+#view { position: fixed; inset: 0; width: 100vw; height: 100vh; image-rendering: pixelated; display: block; }
+#ui { position: fixed; inset: 0; pointer-events: none; font-family: 'VT323', 'DejaVu Sans Mono', monospace; font-size: 18px; color: #c0c0c0; }
+#ui .panel { pointer-events: auto; background: rgba(0,0,0,0.85); border: 1px solid #969696; padding: 4px 8px; }

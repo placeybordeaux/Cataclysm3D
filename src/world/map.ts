@@ -1,0 +1,171 @@
+import { CHUNK, chunkKey, chunkOf, localOf, MIN_Z, MAX_Z } from './coords';
+import { hasFlag, IdRegistry, NULL_FURN, NULL_TER } from './registry';
+import type { FurnitureDef, TerrainDef } from '../data/types';
+
+// The map is an unbounded set of lazily generated chunks. Generation is deterministic
+// from the world seed, but once a chunk is generated it becomes authoritative state
+// (the player may have smashed walls, dropped items) and is saved/loaded as such.
+
+/** Minimal shape the map needs from an item; the full Item class lives in src/game/item.ts. */
+export interface MapItem {
+  typeId: string;
+}
+
+export interface Field {
+  /** CDDA field_type id, e.g. "fd_fire", "fd_blood", "fd_smoke" */
+  type: string;
+  intensity: number; // 1..3 like CDDA
+  age: number; // game seconds
+}
+
+export class Chunk {
+  readonly ter = new Uint16Array(CHUNK * CHUNK);
+  readonly furn = new Uint16Array(CHUNK * CHUNK);
+  readonly items = new Map<number, MapItem[]>();
+  readonly fields = new Map<number, Field[]>();
+  readonly traps = new Map<number, string>();
+  /** Bumped on every mutation so the renderer can rebuild meshes lazily. */
+  version = 0;
+  /** Cached "has any tile on this chunk" hint for renderers skipping empty sky levels. */
+  empty = true;
+  constructor(readonly cx: number, readonly cy: number, readonly z: number) {}
+}
+
+export interface ChunkGenerator {
+  /** Fill a freshly allocated chunk. Must be deterministic for (seed, cx, cy, z). */
+  generate(map: GameMap, chunk: Chunk): void;
+}
+
+export class GameMap {
+  readonly terrain = new IdRegistry<TerrainDef>(NULL_TER);
+  readonly furniture = new IdRegistry<FurnitureDef>(NULL_FURN);
+  private chunks = new Map<string, Chunk>();
+  generator: ChunkGenerator | null = null;
+  /** Hooks for systems that must react to spawns during generation (monsters, vehicles). */
+  onChunkGenerated: ((chunk: Chunk) => void)[] = [];
+
+  constructor(readonly seed: number) {}
+
+  hasChunk(cx: number, cy: number, z: number): boolean {
+    return this.chunks.has(chunkKey(cx, cy, z));
+  }
+
+  /** Returns the chunk, generating it if needed. z outside [MIN_Z, MAX_Z] returns null. */
+  chunk(cx: number, cy: number, z: number): Chunk | null {
+    if (z < MIN_Z || z > MAX_Z) return null;
+    const key = chunkKey(cx, cy, z);
+    let c = this.chunks.get(key);
+    if (!c) {
+      c = new Chunk(cx, cy, z);
+      this.chunks.set(key, c);
+      if (this.generator) this.generator.generate(this, c);
+      for (const fn of this.onChunkGenerated) fn(c);
+    }
+    return c;
+  }
+
+  loadedChunks(): IterableIterator<Chunk> {
+    return this.chunks.values();
+  }
+
+  /** Used by save/load to restore an authoritative chunk without regenerating. */
+  putChunk(c: Chunk): void {
+    this.chunks.set(chunkKey(c.cx, c.cy, c.z), c);
+  }
+
+  private at(x: number, y: number, z: number): [Chunk, number] | null {
+    const c = this.chunk(chunkOf(x), chunkOf(y), z);
+    if (!c) return null;
+    return [c, localOf(y) * CHUNK + localOf(x)];
+  }
+
+  terAt(x: number, y: number, z: number): TerrainDef {
+    const a = this.at(x, y, z);
+    return a ? this.terrain.get(a[0].ter[a[1]]) : NULL_TER;
+  }
+  furnAt(x: number, y: number, z: number): FurnitureDef {
+    const a = this.at(x, y, z);
+    return a ? this.furniture.get(a[0].furn[a[1]]) : NULL_FURN;
+  }
+  setTer(x: number, y: number, z: number, id: string): void {
+    const a = this.at(x, y, z);
+    if (!a) return;
+    a[0].ter[a[1]] = this.terrain.index(id);
+    a[0].empty = false;
+    a[0].version++;
+  }
+  setFurn(x: number, y: number, z: number, id: string): void {
+    const a = this.at(x, y, z);
+    if (!a) return;
+    a[0].furn[a[1]] = this.furniture.index(id);
+    a[0].version++;
+  }
+
+  itemsAt(x: number, y: number, z: number): MapItem[] {
+    const a = this.at(x, y, z);
+    if (!a) return [];
+    return a[0].items.get(a[1]) ?? [];
+  }
+  addItem(x: number, y: number, z: number, item: MapItem): void {
+    const a = this.at(x, y, z);
+    if (!a) return;
+    let list = a[0].items.get(a[1]);
+    if (!list) a[0].items.set(a[1], (list = []));
+    list.push(item);
+    a[0].version++;
+  }
+  removeItem(x: number, y: number, z: number, item: MapItem): boolean {
+    const a = this.at(x, y, z);
+    if (!a) return false;
+    const list = a[0].items.get(a[1]);
+    const i = list ? list.indexOf(item) : -1;
+    if (i < 0) return false;
+    list!.splice(i, 1);
+    if (list!.length === 0) a[0].items.delete(a[1]);
+    a[0].version++;
+    return true;
+  }
+
+  fieldsAt(x: number, y: number, z: number): Field[] {
+    const a = this.at(x, y, z);
+    if (!a) return [];
+    return a[0].fields.get(a[1]) ?? [];
+  }
+  addField(x: number, y: number, z: number, type: string, intensity = 1): void {
+    const a = this.at(x, y, z);
+    if (!a) return;
+    let list = a[0].fields.get(a[1]);
+    if (!list) a[0].fields.set(a[1], (list = []));
+    const f = list.find((f) => f.type === type);
+    if (f) f.intensity = Math.min(3, Math.max(f.intensity, intensity));
+    else list.push({ type, intensity, age: 0 });
+    a[0].version++;
+  }
+
+  // --- derived queries used by movement, vision and AI ---
+
+  /** CDDA move cost of the tile (terrain + furniture); 0 = impassable. */
+  moveCost(x: number, y: number, z: number): number {
+    const t = this.terAt(x, y, z);
+    if (t.move_cost <= 0) return 0;
+    const f = this.furnAt(x, y, z);
+    if (f.move_cost_mod < 0) return 0;
+    return t.move_cost + f.move_cost_mod;
+  }
+  passable(x: number, y: number, z: number): boolean {
+    return this.moveCost(x, y, z) > 0;
+  }
+  /** Blocks sight: opaque terrain/furniture lacking TRANSPARENT, as in CDDA. */
+  opaque(x: number, y: number, z: number): boolean {
+    const t = this.terAt(x, y, z);
+    if (t.id === 't_null') return false;
+    if (!hasFlag(t, 'TRANSPARENT')) return true;
+    const f = this.furnAt(x, y, z);
+    return f.id !== 'f_null' && !hasFlag(f, 'TRANSPARENT');
+  }
+  /** Tile has a floor you can stand on (not open air). */
+  hasFloor(x: number, y: number, z: number): boolean {
+    const t = this.terAt(x, y, z);
+    return t.id !== 't_null' && !hasFlag(t, 'NO_FLOOR');
+  }
+}
