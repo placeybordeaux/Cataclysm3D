@@ -655,7 +655,7 @@ Keys: `V` camera mode, `F` flashlight.
 - **ui2 (v2 UI toolkit)** `src/ui2/`, documented in **docs/UI2.md**: mouse-first pixel-art
   windows, drag & drop, context menus (+ `worldContextProviders` for world objects), tooltips,
   toasts, hotbar, paper doll, integer UI scaling. New and ported screens are built from it.
-  Opening a ui2 surface frees the cursor and may set `game.tacticalPause`; `?debug=ui2` is the
+  Opening a ui2 surface frees the cursor and may add a tactical-pause hold (src/game/pause.ts); `?debug=ui2` is the
   showcase; Tab opens the (mock) preview inventory, `o` the crosshair's context menu.
 - **Key bindings** `src/ui/keys.ts`: all default keys live in `DEFAULT_BINDINGS`; systems call
   `game.keys.register(actionId, 'Description', handler)`. To add an action, add it to the

@@ -48,9 +48,10 @@ arrows / Enter / → ← / letters; grids and lists take arrows / Home / End / E
   window *with Esc* (outside F11 fullscreen) leaves the usual resume hint; Tab, a click on ×, or
   Enter re-capture directly.
 - **Time**: ui2 captures don't pause the game by themselves. Inventory-type windows open with
-  `pauses: true` and set `game.tacticalPause` when `settings.pauseInInventory` is on (Options >
-  "Pause in inventory"; default on = the Accessible preset; the difficulty-preset agent should
-  set it from the preset). While ui2 is open the survivor doesn't walk either way.
+  `pauses: true` and add the `'menus'` tactical-pause hold (src/game/pause.ts) while
+  `settings.pauseInInventory` is on. The difficulty preset sets it (Options > Difficulty > Pause in
+  menus: Accessible on, Classic off; docs/BALANCE.md). The player's own pause key (`` ` ``) works
+  inside ui2 too. While ui2 is open the survivor doesn't walk either way.
 - **World while the cursor is free**: the object under the cursor gets a 3D pixel outline (a
   `LineSegments` box in `renderer.scene`, so it goes through the post pass and looks like the
   world) plus its name next to the cursor. Right-click → `worldMenu(target)`; left-click → its

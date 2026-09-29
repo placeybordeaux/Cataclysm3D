@@ -92,7 +92,8 @@ Progression calls `applyDifficulty(game, d)` in `src/progression/difficulty.ts`.
 - **Classic:** time runs in the inventory, crafting and other menus. The **Esc menu** pauses in
   both presets, and so do Options and Help opened from it.
 
-Verified with OS-level input (xdotool, `tools/drive.ts --headful`):
+Checked with OS-level input (xdotool): `tsx tools/realinput.ts --only pause` runs 8 checks that
+cover everything below. The first manual pass with `tools/drive.ts --headful` found:
 - `` ` `` froze the clock (29270 s → 29270 s over 2 s) while mouse motion turned the view
   (yaw 0.36 → 0.84).
 - `` ` `` pressed inside the legacy inventory toggled the pause.

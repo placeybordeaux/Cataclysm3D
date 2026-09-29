@@ -578,6 +578,59 @@ const scenarios: Scenario[] = [
     await x.key('Tab');
     await until((t) => t.lock, 3000);
   }],
+  ['pause', 'tactical pause: ` freezes time but not the view, works inside menus; Classic menus run, the Esc menu pauses', async () => {
+    await toGameplay();
+    await js(`cdda.setDifficulty('accessible')`);
+    const clock = () => js<number>('cdda.game.clock.seconds');
+    await x.key('grave');
+    await sleep(300);
+    let tp = await js<{ paused: boolean; manual: boolean }>('cdda.tacticalPause()');
+    const banner = await js<string>(`document.querySelector('.tactical-pause-banner')?.style.display ?? 'missing'`);
+    check('` pauses (manual) and shows the PAUSED banner', tp.paused && tp.manual && banner === '', { tp, banner });
+    const c0 = await clock(), yaw0 = await js<number>('cdda.game.player.yaw');
+    await x.move(250, 0);
+    await sleep(800);
+    const c1 = await clock(), yaw1 = await js<number>('cdda.game.player.yaw');
+    check('…time stands still', c1 === c0, { c0, c1 });
+    check('…but the mouse still turns the view', Math.abs(yaw1 - yaw0) > 0.05, { yaw0, yaw1 });
+    await x.key('i');
+    await sleep(400);
+    await x.key('grave');
+    await sleep(200);
+    tp = await js('cdda.tacticalPause()');
+    check('` inside the inventory toggles the pause off', !tp.manual, tp);
+    await x.key('i');
+    await sleep(300);
+    // Accessible ui2 inventory holds the pause; a manual pause survives closing it.
+    await x.key('Tab');
+    await sleep(300);
+    await x.key('grave');
+    await x.key('Tab');
+    await sleep(300);
+    tp = await js('cdda.tacticalPause()');
+    check('a pause started in the ui2 inventory survives closing it', tp.paused && tp.manual, tp);
+    await x.key('grave');
+    await until((t) => t.lock, 3000);
+    // Classic: time runs in menus, the Esc menu still stops it.
+    await js(`cdda.setDifficulty('classic')`);
+    await x.key('i');
+    await sleep(300);
+    const m0 = await clock();
+    await sleep(1000);
+    const m1 = await clock();
+    check('Classic: time runs with the inventory open', m1 > m0, { m0, m1 });
+    await x.key('i');
+    await sleep(300);
+    await x.key('Escape');
+    await until((t) => t.windows.length > 0, 2000);
+    const e0 = await clock();
+    await sleep(1000);
+    const e1 = await clock();
+    const paused = await js<boolean>('cdda.game.paused');
+    check('Classic: the Esc menu stops time (game.paused, not only the lost mouse)', e1 === e0 && paused, { e0, e1, paused, windows: (await state()).windows });
+    await js(`cdda.setDifficulty('accessible')`);
+    await toGameplay();
+  }],
   ['save', 'F5 saves; leaving the page asks first; title Load/Memorial screens', async () => {
     await toGameplay();
     const before = (await log()).length;
