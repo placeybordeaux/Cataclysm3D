@@ -447,7 +447,7 @@ export async function installProgression(
         // Automation's quick start (cdda.ui.quickStart) skips newRun: still apply the preset.
         if (!chosen) applyDifficulty(game, run.difficulty);
         setTimeout(() => discover('welcome'), 3000);
-        clearUntil = now() + 3000;
+        clearUntil = now() + 1000;
       }
       evaluate();
     },
