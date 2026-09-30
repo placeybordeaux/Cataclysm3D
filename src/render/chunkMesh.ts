@@ -15,6 +15,7 @@ import type { VoxelProps } from './voxel';
 import { runSteps } from './steps';
 import { isBareTree, type TreeSpec } from './trees';
 import type { ModelFactory } from './furniture';
+import type { SurfacePainter } from './surfaces';
 
 // Builds the static geometry of one chunk at one z-level: merged quads grouped by texture
 // page (one draw call per page), plus the billboards the chunk contributes. Light sources
@@ -83,6 +84,8 @@ export interface MeshExtras {
   near: boolean;
   /** furniture style 'model' (furniture/): modelled pieces replace voxels and billboards */
   models?: ModelFactory;
+  /** painted surfaces (surfaces.ts) active: interior wall finishes, baseboards, crown */
+  surfaces?: SurfacePainter;
 }
 
 const SHAPES: TerrainShape[] = ['none', 'floor', 'liquid', 'wall', 'halfwall', 'window', 'door', 'door_open', 'fence', 'tree', 'shrub', 'stairs_up', 'stairs_down'];
@@ -100,6 +103,10 @@ function renderShape(id: string): TerrainShape | null {
   // (boarded/reinforced frames stay walls of boards: tileKinds)
   if (BROKEN_WINDOW.test(id) && !/boarded|reinforced|enhanced/.test(id)) return 'window';
   if (BROKEN_DOOR.test(id)) return 'door';
+  // locked doors carry no DOOR flag (you can't open them) and stained glass is flagged WALL:
+  // both classified as plain walls, so a locked front door was a brick in the wall
+  if (/^t_(door|rdoor|mdoor)(_[a-z]+)*_(locked|pickable)(_[a-z]+)*$/.test(id) && !/_o(_|$)/.test(id)) return 'door';
+  if (/^t_window_stained_/.test(id)) return 'window';
   return null;
 }
 
@@ -168,6 +175,9 @@ export function* buildChunkMeshSteps(
   const glassB = { g: undefined as GeomBuilder | undefined };
   const glassGeo = () => (glassB.g ??= new GeomBuilder());
   const MD = LF?.voxelProps ? extras?.models : undefined;
+  const SP = extras?.surfaces?.active() ? extras.surfaces : undefined;
+  // interior finishes are chosen per building: one seed per chunk (≈ one OMT, one house)
+  const buildingSeed = (Math.imul(chunk.cx, 73856093) ^ Math.imul(chunk.cy, 19349663)) >>> 0;
   const A = LF?.archDetail ? extras?.arch : undefined;
   // pitched roofs: shingle/thatch/tile roof regions get a hipped roof (arch.ts)
   const pitched = (tx: number, ty: number) => PITCHED.test(terDefs[here.ter(tx, ty)].id);
@@ -330,6 +340,14 @@ export function* buildChunkMeshSteps(
       /** Face toward d looks at open outdoor ground (plinths/cornices go there). */
       const outdoorFace = (d: number) => z >= 0 && (nShape[d] === S.floor || nShape[d] === S.tree || nShape[d] === S.shrub || nShape[d] === S.fence) &&
         skyOf(x + DX[d], y + DY[d]) >= 1;
+      /** Box face bits (of `faces`) that look into a room: interior finish with painted surfaces. */
+      const roomBits = (faces: number) => {
+        if (!SP || z < 0) return 0;
+        const bits = [32, 1, 16, 2];
+        let m = 0;
+        for (let d = 0; d < 4; d++) if (faces & bits[d] && floorish(nShape[d]) && skyOf(x + DX[d], y + DY[d]) < 1) m |= bits[d];
+        return m;
+      };
       const ownSky = skyOf(x, y);
       curSky = ownSky;
 
@@ -414,7 +432,16 @@ export function* buildChunkMeshSteps(
             if (isWall(nShape[d])) continue;
             // a wall face is lit like the space it faces (street vs. room)
             curSky = skyOf(x + DX[d], y + DY[d]);
-            sideFace(geo(side), x, y, d, base, base + top, side, base, 1);
+            // painted surfaces: a room-facing side gets the building's interior finish,
+            // with a baseboard and a crown moulding
+            const roomSide = !!SP && curSky < 1 && z >= 0 && floorish(nShape[d]);
+            const face = roomSide ? src.terrain(def.id, 'wall', { connections: conn, indoor: true, variantSeed: buildingSeed }) : side;
+            sideFace(geo(face), x, y, d, base, base + top, face, base, 1);
+            if (roomSide && SP) {
+              const trim = SP.trim();
+              wallBand(geo(trim), trim, x, y, d, base, base + 0.1, 0.014, base);
+              if (shape === S.wall) wallBand(geo(trim), trim, x, y, d, base + WALL_TOP - 0.07, base + WALL_TOP, 0.022, base);
+            }
             if (A && shape === S.wall && outdoorFace(d)) {
               wallBand(geo(A.plinth), A.plinth, x, y, d, base, base + 0.32, 0.06, base);
               // cornice on the top storey, just under the roof slab
@@ -438,8 +465,15 @@ export function* buildChunkMeshSteps(
           const g = geo(side);
           const faces = exposedFaces(nShape, isWall);
           // sill and lintel as full-depth blocks so the window reads as a hole in a thick wall
-          g.box(x, base, y, x + 1, base + SILL_H, y + 1, faces | 4, side, cap, base, 1);
-          g.box(x, base + DOOR_H, y, x + 1, base + WALL_TOP, y + 1, faces | 8, side, cap, base, 1);
+          // painted surfaces: the room-facing sides of sill and lintel get the interior finish
+          const rb = roomBits(faces);
+          g.box(x, base, y, x + 1, base + SILL_H, y + 1, (faces & ~rb) | 4, side, cap, base, 1);
+          g.box(x, base + DOOR_H, y, x + 1, base + WALL_TOP, y + 1, (faces & ~rb) | 8, side, cap, base, 1);
+          if (rb) {
+            const inner = src.terrain(wallId, 'wall', { indoor: true, variantSeed: buildingSeed });
+            geo(inner).box(x, base, y, x + 1, base + SILL_H, y + 1, rb, inner, cap, base, 1);
+            geo(inner).box(x, base + DOOR_H, y, x + 1, base + WALL_TOP, y + 1, rb, inner, cap, base, 1);
+          }
           // modelled look: real glass / shards / curtains instead of the textured pane
           if (!(MD && MD.window(geo, glassGeo, src, def.id, x, y, base + SILL_H, base + DOOR_H, alongX, indoorSide(here, terDefs, x, y, alongX))) && !BROKEN_WINDOW.test(def.id))
             paneQuads(geo(pane), x, y, alongX, base + SILL_H, base + DOOR_H, pane, base + SILL_H);
@@ -454,11 +488,19 @@ export function* buildChunkMeshSteps(
           const floorId = neighborFloor(x, y);
           if (floorId) emitFloor(x, y, floorId, seed);
           const alongX = wallLike(nShape[1]) || wallLike(nShape[3]) || !(wallLike(nShape[0]) || wallLike(nShape[2]));
-          const wallId = findWallId(here, shapes, terDefs, x, y) ?? 't_wall';
+          const foundWall = findWallId(here, shapes, terDefs, x, y);
+          const wallId = foundWall ?? 't_wall';
           const side = src.terrain(wallId, 'wall');
           const cap = src.terrain(wallId, 'top');
-          geo(side).box(x, base + DOOR_H, y, x + 1, base + WALL_TOP, y + 1, exposedFaces(nShape, isWall) | 8, side, cap, base, 1);
-          if (A) doorCasing(geo, A, x, y, alongX, base, base + DOOR_H);
+          const dfaces = exposedFaces(nShape, isWall), drb = roomBits(dfaces);
+          // a gate in a fence line has no wall above it (modelled look: no floating lintel)
+          const freeGate = !!MD && !foundWall && /gate|fence/.test(def.id);
+          if (!freeGate) geo(side).box(x, base + DOOR_H, y, x + 1, base + WALL_TOP, y + 1, (dfaces & ~drb) | 8, side, cap, base, 1);
+          if (drb && !freeGate) {
+            const inner = src.terrain(wallId, 'wall', { indoor: true, variantSeed: buildingSeed });
+            geo(inner).box(x, base + DOOR_H, y, x + 1, base + WALL_TOP, y + 1, drb, inner, cap, base, 1);
+          }
+          if (A && !freeGate) doorCasing(geo, A, x, y, alongX, base, base + DOOR_H);
           const slab = src.terrain(def.id, 'pane');
           const T = 0.08;
           const g = geo(slab);
@@ -495,9 +537,11 @@ export function* buildChunkMeshSteps(
             furn: (dx, dy) => map.furnAt(x + dx, y + dy, z).id,
             wallAt: (dx, dy) => wallLike(shapeAt(here, x + dx, y + dy)),
           })) break;
+          const conn = (s: number) => s === S.fence || wallLike(s);
+          // modelled fences / railings (furniture/fences.ts)
+          if (MD && MD.fence(geo, glassGeo, src, def.id, x, y, base + raiseOf(x, y), [0, 1, 2, 3].map((d) => conn(nShape[d])))) break;
           const pane = src.terrain(def.id, 'pane');
           const h = /chain|wire|bars/.test(def.id) ? 2.0 : 1.1;
-          const conn = (s: number) => s === S.fence || wallLike(s);
           const g = geo(pane);
           const kind = /chain|wire/.test(def.id) ? 'chain' : /rail|bars|metal|iron|steel/.test(def.id) ? 'metal' : 'wood';
           if (A) {

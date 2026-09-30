@@ -14,6 +14,9 @@ export interface Ctx {
   pal: SpritePalette;
   /** same-group neighbours in local directions (BACK, RIGHT, FRONT, LEFT) */
   conn: [boolean, boolean, boolean, boolean];
+  /** same-group neighbours in all four local directions, before 'side' pieces drop front/back
+   *  (an L-shaped counter run's corner piece has one in front) */
+  connAll?: [boolean, boolean, boolean, boolean];
   /** walls in local directions */
   wall: [boolean, boolean, boolean, boolean];
   /** stable per-id number for small variations */

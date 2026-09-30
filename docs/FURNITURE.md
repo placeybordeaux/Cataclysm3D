@@ -74,22 +74,22 @@ pixel-art textures at a fixed texel density**. That is what this pass builds.
 Default is **model**. Models need a look with volumes (`full` or `voxel`); `classic`,
 `crisp` and `terrain` are unchanged apart from the broken-window/door fix.
 
-## Screenshots (1600x900, RTX 5080, seed 1)
+## Screenshots (1600x900 JPEG, RTX 5080, seed 1)
 
 | view | voxel (before) | model (after) |
 | --- | --- | --- |
-| house | ![](screenshots/wave3/furniture/house_voxel.png) | ![](screenshots/wave3/furniture/house_model.png) |
-| kitchen | ![](screenshots/wave3/furniture/kitchen_voxel.png) | ![](screenshots/wave3/furniture/kitchen_model.png) |
-| bedroom | ![](screenshots/wave3/furniture/bedroom_voxel.png) | ![](screenshots/wave3/furniture/bedroom_model.png) |
-| bathroom | ![](screenshots/wave3/furniture/bathroom_voxel.png) | ![](screenshots/wave3/furniture/bathroom_model.png) |
-| broken window | ![](screenshots/wave3/furniture/broken_window_voxel.png) | ![](screenshots/wave3/furniture/broken_window_model.png) |
-| starting shelter | ![](screenshots/wave3/furniture/shelter_voxel.png) | ![](screenshots/wave3/furniture/shelter_model.png) |
-| street (mailbox, windows) | ![](screenshots/wave3/furniture/street_voxel.png) | ![](screenshots/wave3/furniture/street_model.png) |
+| house | ![](screenshots/wave3/furniture/house_voxel.jpg) | ![](screenshots/wave3/furniture/house_model.jpg) |
+| kitchen | ![](screenshots/wave3/furniture/kitchen_voxel.jpg) | ![](screenshots/wave3/furniture/kitchen_model.jpg) |
+| bedroom | ![](screenshots/wave3/furniture/bedroom_voxel.jpg) | ![](screenshots/wave3/furniture/bedroom_model.jpg) |
+| bathroom | ![](screenshots/wave3/furniture/bathroom_voxel.jpg) | ![](screenshots/wave3/furniture/bathroom_model.jpg) |
+| broken window | ![](screenshots/wave3/furniture/broken_window_voxel.jpg) | ![](screenshots/wave3/furniture/broken_window_model.jpg) |
+| starting shelter | ![](screenshots/wave3/furniture/shelter_voxel.jpg) | ![](screenshots/wave3/furniture/shelter_model.jpg) |
+| street (mailbox, windows) | ![](screenshots/wave3/furniture/street_voxel.jpg) | ![](screenshots/wave3/furniture/street_model.jpg) |
 
-Showroom shots (`gallery` views): ![](screenshots/wave3/furniture/gallery_living.png)
-![](screenshots/wave3/furniture/gallery_kitchen_bath.png)
-![](screenshots/wave3/furniture/gallery_storage_shop.png)
-![](screenshots/wave3/furniture/gallery_items.png)
+Showroom shots (`gallery` views): ![](screenshots/wave3/furniture/gallery_living.jpg)
+![](screenshots/wave3/furniture/gallery_kitchen_bath.jpg)
+![](screenshots/wave3/furniture/gallery_storage_shop.jpg)
+![](screenshots/wave3/furniture/gallery_items.jpg)
 
 Regenerate: `tools/look-views.js` has close-up views —
 `furn:<id regex>[:<nth>[:<dist>[:<pitch>[:<hour>[:<replace id>]]]]]`, `ter:...` (same; the
@@ -143,14 +143,85 @@ Also fixed on the way (playtest report): standing over a climbable counter / tab
 cupboard (they're passable in CDDA) the look card and `e` skipped your own tile and picked
 the piece next to it; looking down into it now targets it (`raycast.ts`, `targeting.ts`).
 
+## Surfaces (round 2): walls, floors, ceilings, roofs, trim, fences
+
+The architecture was the weakest thing in the frame next to the models: wall faces used a
+16 texel/m procedural pattern tinted from the UltiCa sprite (bricks ~30 cm tall in blotchy
+pixels), ceilings and plaster were noisy camo. `src/render/surfaces.ts` repaints them like
+the furniture: procedural, **32 texels/m**, nearest filtered, real-world scale, colours
+from each terrain id's UltiCa sprite.
+
+- **Walls** (`wallMat`): brick (8 x 3 texel courses = 25 x 8 cm, half bond, mortar from
+  the sprite's light colour), adobe blocks, stucco/render, lap siding (14 cm boards with a
+  shadow line), concrete block (50 x 17 cm), logs, corrugated metal, stone, rock, concrete.
+  Frames are one metre of wall and tile exactly (some are 35-36 texels tall so whole
+  courses fit and the bond parity survives the wrap).
+- **Interior finishes**: the room-facing side of brick, stucco, siding, block and concrete
+  walls (and of window sills / lintels and door heads) gets an interior finish instead of
+  the outside material — flat drywall paint, striped or damask wallpaper, or painted block
+  in commercial buildings — chosen **per building** (one seed per OMT chunk). Coloured
+  walls (`t_wall_r/_y/_b...`) keep their colour. Flat on purpose: the renderer's luminance
+  bump turned even 1-2 % texel variation into blotches.
+- **Trim**: a baseboard (10 cm) along every room-facing wall foot and a crown moulding
+  under the ceiling. The corner shade comes from the existing SSAO.
+- **Floors** (`floorMat`): 12.5 cm planks with staggered joints (3 variants), carpet,
+  linoleum (25 cm), ceramic tile with grout, troweled concrete with metre joints, sidewalk
+  slabs, asphalt, tar roofs, diamond plate. Natural ground and marked roads (`_y`, stripes)
+  keep the tileset sprite.
+- **Ceilings**: flat plaster in houses, 50 cm drop-ceiling tiles under commercial concrete
+  slabs.
+- **Roofs**: hipped roofs get 32 texel/m shingles (staggered tabs, shadow lines); flat
+  roofs a tar/gravel surface.
+- **Fences, railings and gates** (`furniture/fences.ts`): picket fences with pointed
+  pickets, privacy board fences, split rail, chain-link and chicken wire as a see-through
+  wire mesh texture on galvanised posts and rails, barbed wire, metal balusters, glass
+  railings, concrete balustrades; gates as leaves of the same kind (swing open like doors),
+  and no floating wall lintel over a gate in a fence line.
+- **Openings**: locked doors (no DOOR flag in CDDA) were drawn as a plain wall, and stained
+  glass (flagged WALL) too; both now render as the door / window they are.
+- **L-shaped counters**: the corner piece of a counter run fills its tile to the front edge
+  (plain panel) so the two runs' worktops meet.
+
+Switch: Options > **Surfaces** (Painted / Tileset, persisted), `?surfaces=painted|sprite`,
+`cdda.setSurfaceStyle('sprite')`. Active in the looks with architectural detail (full,
+voxel), like the models. The tileset variant is the previous look unchanged.
+
+| view | tileset (before) | painted (after) |
+| --- | --- | --- |
+| house | ![](screenshots/wave3/furniture/surfaces_house_tileset.jpg) | ![](screenshots/wave3/furniture/surfaces_house_painted.jpg) |
+| kitchen | ![](screenshots/wave3/furniture/surfaces_kitchen_tileset.jpg) | ![](screenshots/wave3/furniture/surfaces_kitchen_painted.jpg) |
+| bedroom | ![](screenshots/wave3/furniture/surfaces_bedroom_tileset.jpg) | ![](screenshots/wave3/furniture/surfaces_bedroom_painted.jpg) |
+| bathroom | ![](screenshots/wave3/furniture/surfaces_bathroom_tileset.jpg) | ![](screenshots/wave3/furniture/surfaces_bathroom_painted.jpg) |
+| counter run | ![](screenshots/wave3/furniture/surfaces_counter_run_tileset.jpg) | ![](screenshots/wave3/furniture/surfaces_counter_run_painted.jpg) |
+| storeroom | ![](screenshots/wave3/furniture/surfaces_storeroom_tileset.jpg) | ![](screenshots/wave3/furniture/surfaces_storeroom_painted.jpg) |
+| shelter | ![](screenshots/wave3/furniture/surfaces_shelter_tileset.jpg) | ![](screenshots/wave3/furniture/surfaces_shelter_painted.jpg) |
+| street, roofs | ![](screenshots/wave3/furniture/surfaces_street_roofs_tileset.jpg) | ![](screenshots/wave3/furniture/surfaces_street_roofs_painted.jpg) |
+| chain-link | ![](screenshots/wave3/furniture/surfaces_chainlink_tileset.jpg) | ![](screenshots/wave3/furniture/surfaces_chainlink_painted.jpg) |
+| picket fence | ![](screenshots/wave3/furniture/surfaces_picket_fence_tileset.jpg) | ![](screenshots/wave3/furniture/surfaces_picket_fence_painted.jpg) |
+
+Fences and gates showroom: ![](screenshots/wave3/furniture/gallery_fences_gates.jpg)
+
+Code: `src/render/surfaces.ts` (materials, painters, `SurfacePainter`), consulted first by
+`AtlasTextureSource.terrain` (`surfaces` field) for wall/side/ceiling/floor faces;
+`furniture/install.ts` `installSurfaces` (Options, state, mesher extras, shingles);
+`chunkMesh.ts` room-facing wall faces (`indoor` in `SurfaceQuery`), baseboards/crown,
+sills/lintels/door heads, fence and gate hooks. Painted frames share the furniture atlas
+pages (no extra draw calls). `look-shots.ts --format jpg` for JPEG screenshots.
+
+Perf (1080p, RTX 5080, tileset -> painted): render 1.8 -> 2.0 ms (street), 2.3 -> 2.3 ms
+(house); triangles +6-8 % (baseboards, crown, fence parts); streaming sprint meshing
+924 -> 991 ms total, loop p99 12.4 -> 12.4 ms, longest step 2.7 -> 2.9 ms.
+
+Known gaps (surfaces): window reveals (the neighbouring wall's face into the opening) still
+show the outside material; porches count as indoors for interior finishes; wallpaper choice
+is per chunk, not per room.
+
 ## Known gaps / next
 
 - Wild flowers and a few rare pieces (statues, mannequins) still use the voxel path.
 - Glass dither reads as glass but is a fixed 4x4 pattern; a softer look (blue-noise or a
   real blended pass) could come with the post-processing work.
-- Counter corners (L-shaped runs) draw a door front against the other run's side.
 - Items don't stack vertically (three per tile side by side); piles of many identical
   items (warehouses) could use a crate/pallet stand-in.
-- Fences, gates and railings still use arch.ts parts (vertex-coloured, no pixel texture).
 - Model LOD: every chunk gets full models; if far chunks become a cost, a box-only LOD is
   the obvious next step.
