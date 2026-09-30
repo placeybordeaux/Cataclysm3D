@@ -102,21 +102,6 @@ export function paintFringe(r: Ramp4, seed: number, dots?: { cols: RGB[]; n: num
   return img;
 }
 
-/** Hanging strands of leaves (willow): cutout, strands of varying length from the top. */
-export function paintDrape(r: Ramp4, seed: number): Img {
-  const img = new Img(T, T);
-  const rng = new Rng(seed);
-  for (let x = 0; x < T; x += rng.int(1, 3)) {
-    const len = rng.int(14, T - 1);
-    for (let y = 0; y < len; y++) {
-      const c = y % 3 === 0 ? r[2] : rng.next() < 0.3 ? r[0] : r[1];
-      img.set(x + (y > len * 0.6 && rng.next() < 0.3 ? 1 : 0), y, c);
-    }
-    img.set(x, len, r[3]);
-  }
-  return img;
-}
-
 /** Forking twigs (bare crowns): cutout, bark-coloured. */
 export function paintTwigs(bark: RGB, seed: number): Img {
   const img = new Img(T, T);

@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { Rng, hashString } from '../core/rng';
 import { LEVEL_HEIGHT } from '../world/coords';
 import type { RGB } from './colors';
-import { FloraAtlas, paintBark, paintDrape, paintFringe, paintLeaves, paintNeedles, paintSnow, paintTwigs, type BarkKind, type Ramp4 } from './floraArt';
+import { FloraAtlas, paintBark, paintFringe, paintLeaves, paintNeedles, paintSnow, paintTwigs, type BarkKind, type Ramp4 } from './floraArt';
 import { framePixels, frameKey } from './framePixels';
 import { GeomBuilder, type V3 } from './geometry';
 import type { GroundField } from './ground';
@@ -168,8 +168,6 @@ export interface Layout {
   cones: Cone[];
   /** twig cutout cards (bare crowns): centre and size */
   twigs: Lump[];
-  /** hanging leaf curtains (willow): top-centre, half width, drop */
-  drapes: Lump[];
   crown: V3;
 }
 
@@ -187,7 +185,7 @@ export function layoutOf(family: Family, variant: number, bare: boolean): Layout
 function makeLayout(family: Family, variant: number, bare: boolean): Layout {
   const rng = new Rng(hashString(family) ^ (variant * 0x9e3779b1));
   const j = (a: number) => (rng.next() - 0.5) * 2 * a;
-  const L: Layout = { trunk: null, limbs: [], lumps: [], cones: [], twigs: [], drapes: [], crown: [0, 0.65, 0] };
+  const L: Layout = { trunk: null, limbs: [], lumps: [], cones: [], twigs: [], crown: [0, 0.65, 0] };
   const trunk = (top: number, r: number, lean = 0.03): V3 => {
     const lx = j(lean), lz = j(lean);
     const pts: V3[] = [[0, -0.03, 0], [0, 0.04, 0], [lx * 0.3, top * 0.45, lz * 0.3], [lx, top, lz]];
@@ -234,14 +232,16 @@ function makeLayout(family: Family, variant: number, bare: boolean): Layout {
       break;
     }
     case 'willow': {
-      // a low wide dome with curtains of hanging leaves (drapes) around its rim
+      // a low wide dome whose rim lumps hang down in long drooping tongues. (Hanging strand
+      // cards were tried: magnified up close they were floating confetti.)
       const top = trunk(0.42, 0.05, 0.05);
-      crownOf([0, 0.64, 0], [0.4, 0.26, 0.4], 9, [0.36, 0.48], 0.8);
-      if (bare) bareCrown(top, 0.05, 0.1);
-      else {
-        for (let i = 1; i < L.lumps.length; i += 2) limb(top, L.lumps[i].c, 0.022);
-        for (const l of L.lumps.slice(1)) L.drapes.push({ c: [l.c[0] * 1.15, l.c[1] - l.r[1] * 0.2, l.c[2] * 1.15], r: [l.r[0] * 1.1, 0.3, l.r[2] * 1.1] });
+      crownOf([0, 0.66, 0], [0.4, 0.24, 0.4], 9, [0.34, 0.44], 0.8);
+      for (const l of L.lumps.slice(1)) if (l.c[1] < 0.7) {
+        l.c = [l.c[0] * 1.12, l.c[1] - 0.1, l.c[2] * 1.12];
+        l.r = [l.r[0] * 0.8, l.r[1] * 2.1, l.r[2] * 0.8];
       }
+      if (bare) bareCrown(top, 0.05, 0.1);
+      else for (let i = 1; i < L.lumps.length; i += 2) limb(top, L.lumps[i].c, 0.022);
       break;
     }
     case 'birch': {
@@ -360,7 +360,9 @@ export function paletteOf(f: TileFrame): Palette | null {
     const at = (arr: RGB[], t: number): RGB => arr[Math.min(arr.length - 1, Math.floor(arr.length * t))];
     const bare = green / Math.max(1, filled) < 0.22;
     const ramp: Ramp4 = leaf.length > 8
-      ? [darken(at(leaf, 0.15), 0.8), at(leaf, 0.42), brighten(at(leaf, 0.74), 1.05), brighten(at(leaf, 0.96), 1.15)]
+      // brightened: the sprite's colours are drawn with its own shading baked in, while the
+      // model gets real (toon) shading on top; unbrightened, crowns read dark olive
+      ? [darken(at(leaf, 0.15), 0.85), brighten(at(leaf, 0.42), 1.15), brighten(at(leaf, 0.74), 1.22), brighten(at(leaf, 0.96), 1.3)]
       : [[26, 40, 20], [52, 78, 34], [78, 108, 46], [118, 146, 64]];
     const barkC: RGB = bark.length ? at(bark, 0.5) : [70, 52, 38];
     const q = (c: RGB) => c.map((v) => Math.round(v / 20)).join('.');
@@ -550,11 +552,6 @@ function paintImpostor(L: Layout, axis: 0 | 1, pal: Palette, leafTex: Img, barkT
         img.set(x, y, v > 0.55 ? pal.leaf[0] : texAt(leafTex, x, y));
       }
   }
-  for (const d of L.drapes) {
-    const cx = X(d.c), cy = Y(d.c[1]), hw = d.r[axis === 0 ? 0 : 2] * IMP_PX, drop = d.r[1] * IMP_PX;
-    for (let x = Math.floor(cx - hw); x <= cx + hw; x += 2)
-      for (let y = 0; y < drop * (0.6 + 0.4 * (((x * 7) & 3) / 3)); y++) img.set(x, cy + y, y % 3 ? pal.leaf[1] : pal.leaf[2]);
-  }
   for (const t of L.twigs) {
     const cx = X(t.c), cy = Y(t.c[1]), r = t.r[0] * IMP_PX;
     for (let k = 0; k < 6; k++) {
@@ -635,14 +632,6 @@ export function* buildFloraSteps(specs: TreeSpec[], ground: GroundField | null):
       lump(g, leafF, c, r, crownW, near ? 9 : 6, near ? 5 : 3, s.seed + i * 17);
       // ragged leaf-mass cards through the lump: only their rim shows outside it
       if (fringeF) cards(g, fringeF, c, r[0] * 1.32, r[1] * 1.32, crownW, yaw + i, 3);
-    }
-    if (L.drapes.length && lod === 0) {
-      const drapeF = A.frame(`drape|${pal.key}`, false, () => paintDrape(pal.leaf, 13));
-      for (const d of L.drapes) {
-        const c = X(d.c);
-        // cards hang from the lump's waist: centre half the drop below it
-        cards(g, drapeF, c, d.r[0] * H, d.r[1] * H * 0.5, crownW, yaw + c[0], 2, -d.r[1] * H * 0.5);
-      }
     }
     if (L.twigs.length) {
       const twigF = A.frame(`twig|${barkBase.map((v) => Math.round(v / 10)).join('.')}`, false, () => paintTwigs(barkBase, 9));
