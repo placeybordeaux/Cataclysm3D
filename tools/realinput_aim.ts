@@ -34,7 +34,7 @@ const WEAPONS: Record<string, { gun: string; mag?: string; ammo: string; skill: 
 };
 
 /** An open stretch, the weapon at `skill`, a zombie `d` m north that stays put (hp high so it takes every shot). */
-const SETUP = (weapon: string, skill: number, d: number, model: string) => `(() => {
+const SETUP = (weapon: string, skill: number, d: number, model: string, mon = 'mon_zombie', facing: number | null = null) => `(() => {
   const g = cdda.game, p = g.player, grid = g.monsters.grid;
   cdda.setAimModel('${model}');
   cdda.clearMonsters(60);
@@ -59,9 +59,9 @@ const SETUP = (weapon: string, skill: number, d: number, model: string) => `(() 
   }
   p.x = window.__aimSpot[0]; p.y = window.__aimSpot[1]; p.stamina = p.staminaMax(); p.recoil = 3000; p.crouching = false;
   if (cdda.aimHud) cdda.aimHud.trail = 1.5;
-  const uid = cdda.spawnMonster('mon_zombie', 0, -${d});
+  const uid = cdda.spawnMonster('${mon}', 0, -${d}); window.__uid = uid;
   const m = g.monsters.all.find((z) => z.uid === uid); m.hp = 100000; window.__m = m;
-  const mx = m.x, my = m.y; clearInterval(window.__pin); window.__pin = setInterval(() => { if (!m.dead) { m.x = mx; m.y = my; m.attackCooldown = 5; m.windup = null; } }, 16);
+  const mx = m.x, my = m.y; clearInterval(window.__pin); window.__pin = setInterval(() => { if (!m.dead) { m.x = mx; m.y = my; m.attackCooldown = 5; m.windup = null; ${facing === null ? '' : `m.facing = ${facing}; m.aggroCharacter = false; m.anger = 0;`} } }, 16);
   return { gun: gun?.typeId ?? null, ammo: gun?.isGun() ? gun.ammoRemaining() : -1, d: Math.hypot(m.x - p.x, m.y - p.y) };
 })()`;
 
@@ -85,11 +85,24 @@ const LOOK = `(() => {
   return { cx: r.left + r.width / 2, cy: r.top + r.height / 2, tx, ty, rad };
 })()`;
 
+/** Point the drawn camera's centre at a world point (game coords; iterate: an over-the-shoulder camera moves as it turns). */
+const AIM_POINT = (pt: string) => `(() => {
+  const P = ${pt}; if (!P) return false;
+  const p = cdda.game.player, cam = cdda.renderer.rig.camera;
+  for (let i = 0; i < 4; i++) {
+    cdda.renderer.render(0);
+    const c = cam.position; const dx = P.x - c.x, dy = P.y - c.z, dh = P.h - c.y;
+    p.yaw = Math.atan2(dx, -dy); p.pitch = Math.atan2(dh, Math.hypot(dx, dy));
+  }
+  return true;
+})()`;
+
 export function aimScenarios(c: AimCtx): Scenario[] {
   const { js, check, shot, sleep } = c;
   const x = () => c.x();
   const why = () => js<string>(`(() => { const w = document.querySelector('.combat-why'); return w && w.style.display !== 'none' ? w.textContent : ''; })()`);
-  const listen = () => js(`window.__ev = []; window.__evOn || (window.__evOn = cdda.game.events.on('playerAttack', (e) => window.__ev.push({ k: e.kind, o: e.outcome, r: e.reason ?? '', d: e.damage, landed: !!e.landed })))`);
+  // Own globals (the archery suite has its own listener on window.__ev), re-hooked if the game object was replaced.
+  const listen = () => js(`window.__aimEv = []; if (window.__aimEvGame !== cdda.game) { window.__aimEvGame = cdda.game; cdda.game.events.on('playerAttack', (e) => window.__aimEv.push({ k: e.kind, o: e.outcome, r: e.reason ?? '', d: e.damage, landed: !!e.landed })); }`);
 
   /** Free aim: wait (up to maxMs) until the drawn crosshair sits on the chest, then click. Returns ms waited. */
   const clickWhenOn = async (maxMs: number, share = 0.6) => {
@@ -144,7 +157,7 @@ export function aimScenarios(c: AimCtx): Scenario[] {
       }
     }
     await sleep(300);
-    const ev = await js<{ k: string; o: string; r: string; d: number; landed: boolean }[]>('window.__ev');
+    const ev = await js<{ k: string; o: string; r: string; d: number; landed: boolean }[]>('window.__aimEv');
     const mine = ev.filter((e) => (w.melee ? e.k === 'melee' : e.k === 'gun'));
     const hits = mine.filter((e) => e.o === 'hit' || e.o === 'crit' || e.o === 'kill');
     const shots = w.melee ? n : (await js<number>('cdda.combat.shots')) - shots0;
@@ -190,6 +203,134 @@ export function aimScenarios(c: AimCtx): Scenario[] {
       check('a shot with the crosshair on the head is a headshot, and the crosshair says ×2', head?.zone === 'head' && /HEADSHOT ×2/.test(head.text), head);
       console.log('\n    | model | weapon | skill | hit | missed | dmg/hit | aiming ms |');
       for (const r of rows) console.log(`    | ${r.model} | ${r.weapon} | ${r.skill} | ${r.hits}/${r.attempts} | ${r.misses} | ${r.dmgPerHit} | ${r.waitMs} |`);
+    }],
+    ['aimzones', 'free aim round 2: hit zones on the 3D models (zombie head, dog head side-on), third-person crosshair, the dodge hop', async () => {
+      await c.toGameplay();
+      const shootAtPart = async (part: string, n: number) => {
+        const zones: string[] = [];
+        for (let i = 0; i < n; i++) {
+          await js(AIM_POINT(`cdda.modelPart(window.__uid, '${part}')`));
+          await x().buttonDown(3);
+          await sleep(700);
+          await js(AIM_POINT(`cdda.modelPart(window.__uid, '${part}')`));
+          await x().clickHere(1);
+          await sleep(200);
+          zones.push((await js<{ zone: string } | null>('cdda.aimState().lastHit'))?.zone ?? 'none');
+          await js('cdda.combat.lastHit = null');
+          await x().buttonUp(3);
+          await sleep(500);
+        }
+        return zones;
+      };
+      // Zombie at 8 m, a skilled shooter (small weave): the model's head box is the head.
+      await js(SETUP('rifle', 10, 8, 'sway'));
+      await sleep(600);
+      const zHead = await shootAtPart('head', 4);
+      check('zombie: shots at the drawn head are headshots', zHead.every((z) => z === 'head'), zHead);
+      await shot('zones_zombie_head');
+      const zLeg = await shootAtPart('shinL', 3);
+      check('zombie: shots at a drawn shin hit the legs', zLeg.every((z) => z === 'legs'), zLeg);
+      // A dog side-on at 7 m: its head is out in front, low.
+      await js(SETUP('rifle', 10, 7, 'sway', 'mon_dog', Math.PI / 2));
+      await sleep(800);
+      const dHead = await shootAtPart('head', 4);
+      check('dog side-on: shots at its drawn head are headshots', dHead.every((z) => z === 'head'), dHead);
+      await shot('zones_dog_head');
+      const dBody = await shootAtPart('body', 3);
+      check('dog side-on: shots at its body hit the torso', dBody.every((z) => z === 'torso'), dBody);
+
+      // --- third person: the crosshair is where the round goes.
+      await js(SETUP('rifle', 10, 7, 'sway'));
+      await sleep(400);
+      await x().key('v');
+      await sleep(400);
+      const mode = await js<string>('cdda.renderer.cameraMode');
+      check('V switches to the over-the-shoulder camera', mode === 'third', mode);
+      await listen();
+      let hits = 0;
+      const lines: string[] = [];
+      for (let i = 0; i < 5; i++) {
+        await js(AIM_POINT(`(() => { const m = window.__m; return { x: m.x, y: m.y, h: 1.1 }; })()`));
+        await x().buttonDown(3);
+        await sleep(600);
+        await js(AIM_POINT(`(() => { const m = window.__m; return { x: m.x, y: m.y, h: 1.1 }; })()`));
+        await x().clickHere(1);
+        await sleep(200);
+        const h = await js<{ zone: string } | null>('cdda.aimState().lastHit');
+        if (h) hits++;
+        lines.push(h?.zone ?? 'miss');
+        await js('cdda.combat.lastHit = null');
+        await x().buttonUp(3);
+        await sleep(400);
+      }
+      await shot('third_person');
+      check('third person: shots with the crosshair on the chest hit (the round converges on the crosshair)', hits === 5, lines);
+      // Beside it: a crosshair 0.6 m right of the body misses.
+      await js(AIM_POINT(`(() => { const m = window.__m, p = cdda.game.player; const d = Math.hypot(m.x - p.x, m.y - p.y); return { x: m.x + (-(m.y - p.y) / d) * -0.7, y: m.y + ((m.x - p.x) / d) * -0.7, h: 1.1 }; })()`));
+      await x().buttonDown(3);
+      await sleep(600);
+      await x().clickHere(1);
+      await sleep(200);
+      check('third person: the crosshair beside the body misses', !(await js('cdda.aimState().lastHit')));
+      await x().buttonUp(3);
+      await x().key('v');
+      await x().key('v');
+      await sleep(300);
+      check('back in first person', (await js<string>('cdda.renderer.cameraMode')) === 'first');
+
+      // --- dodge hop: a nimble zombie (dodge 30, setup) at arm's length; swing a bat.
+      await js(SETUP('bat', 0, 1.0, 'sway'));
+      await js(`(() => { const m = window.__m; m.type = { ...m.type, dodge: 30 }; clearInterval(window.__pin); m.attackCooldown = 99; })()`);
+      await sleep(400);
+      await js(AIM);
+      await js(`window.__dodged = 0; window.__dOn || (window.__dOn = cdda.game.events.on('monsterDodge', () => window.__dodged++))`);
+      let peak = 0;
+      for (let i = 0; i < 6 && peak < 0.1; i++) {
+        await js(AIM);
+        await x().clickHere(1);
+        for (let k = 0; k < 20; k++) {
+          const l = await js<{ lift: number; fall: number } | null>('cdda.modelLift(window.__uid)');
+          if (l && l.fall > 0.2) {
+            peak = Math.max(peak, l.lift);
+            await js('cdda.game.tacticalPause = true');
+            await shot('dodge_hop');
+            await js('cdda.game.tacticalPause = false');
+            break;
+          }
+          await sleep(15);
+        }
+        await sleep(900);
+        await js(`(() => { const m = window.__m, p = cdda.game.player; m.x = p.x; m.y = p.y - 1.0; })()`);
+      }
+      const dodged = await js<number>('window.__dodged');
+      check('a dodge is a visible hop on the model (it springs up and leans away)', dodged > 0 && peak > 0.1, { dodged, peak });
+    }],
+    ['aimwide', 'free aim HUD at the ultrawide size (run with --size 3440x1304): crosshair, weave circle, readout, timing marks', async () => {
+      await c.toGameplay();
+      await js(SETUP('pistol', 0, 12, 'timing'));
+      await sleep(500);
+      await js(AIM);
+      await x().buttonDown(3);
+      await sleep(900);
+      const geo = await js<{ W: number; H: number; cross: number[]; readout: number[] | null; env: number[] | null }>(`(() => {
+        const r = (e) => { if (!e) return null; const b = e.getBoundingClientRect(); return [Math.round(b.left), Math.round(b.top), Math.round(b.width), Math.round(b.height)]; };
+        return { W: innerWidth, H: innerHeight, cross: r(document.querySelector('.hud-cross')), readout: r(document.querySelector('.aim-level')), env: r(document.querySelector('.aim-hud circle[stroke-dasharray]')) };
+      })()`);
+      console.log('    geometry', JSON.stringify(geo));
+      const cx = geo.cross[0] + geo.cross[2] / 2, cy = geo.cross[1] + geo.cross[3] / 2;
+      check('the crosshair weaves near the screen centre (within 8 % of the height)', Math.abs(cx - geo.W / 2) < geo.H * 0.08 && Math.abs(cy - geo.H / 2) < geo.H * 0.08, geo);
+      check('the aim readout sits under the (weaving) crosshair, clear of it, on screen', !!geo.readout && geo.readout[1] >= geo.cross[1] + geo.cross[3] && geo.readout[1] < geo.H * 0.7, [geo.cross, geo.readout]);
+      await shot('wide_pistol_aim');
+      await x().down('Shift_L');
+      for (let i = 0; i < 60 && !/NOW/.test(await js<string>(`document.querySelector('.aim-level')?.textContent ?? ''`)); i++) await sleep(10);
+      await js('cdda.game.tacticalPause = true');
+      await shot('wide_breath_now');
+      await js('cdda.game.tacticalPause = false');
+      await x().up('Shift_L');
+      await x().clickHere(1);
+      await sleep(250);
+      await shot('wide_hit_line');
+      await x().buttonUp(3);
     }],
     ['aimtiming', 'timing model by real input: hold breath with Shift while aiming (flash), active reload, bow release ring, melee beat', async () => {
       await c.toGameplay();
@@ -265,9 +406,14 @@ export function aimScenarios(c: AimCtx): Scenario[] {
         if (!ring) await sleep(8);
       }
       await x().clickHere(1);
+      // The arrow in the air carries the bonus (whether it then lands depends on the weave).
+      let loosed: { perfect: boolean } | null = null;
+      for (let i = 0; i < 40 && !loosed; i++) {
+        loosed = await js<{ perfect: boolean } | null>('(() => { const f = cdda.combat.flights[0]; return f ? { perfect: !!f.perfect } : null; })()');
+        if (!loosed) await sleep(10);
+      }
       await sleep(900);
-      const bowHit = await js<{ perfect: boolean; text: string } | null>('cdda.aimState().lastHit');
-      check('a bow loosed as the ring meets the reticle is perfect', !!bowHit?.perfect, bowHit);
+      check('a bow loosed as the ring meets the reticle is perfect', !!loosed?.perfect, loosed);
       await x().buttonUp(3);
       await sleep(600);
       await x().buttonDown(3);

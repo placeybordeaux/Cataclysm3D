@@ -178,8 +178,9 @@ function installPresenter(game: Game, renderer: Renderer, monsters: MonstersHand
     },
     desc: 'Free aim: a faint trail behind the crosshair showing how it has been weaving over the last second (helps you time shots).',
   });
-  installModelHooks(game, renderer, monsters);
+  installModelHooks(game, renderer, monsters, api);
   let cross: HTMLElement | null = null;
+  let readout: HTMLElement | null = null;
   let linger = 0;
   let last = performance.now();
   let fitT = 0;
@@ -207,6 +208,10 @@ function installPresenter(game: Game, renderer: Renderer, monsters: MonstersHand
     const px = offsetToPixels(rel, fov, H);
     cross ??= root.querySelector('.hud-cross');
     if (cross) cross.style.transform = on && (px.x || px.y) ? `translate(calc(-50% + ${px.x.toFixed(1)}px), calc(-50% + ${px.y.toFixed(1)}px))` : '';
+    // The aim readout (combatdepth.ts, 18 px under the centre) rides along under the reticle, a
+    // little lower, so the weaving crosshair never sits on its text.
+    readout ??= root.querySelector('.aim-level');
+    if (readout) readout.style.transform = on ? `translate(calc(-50% + ${px.x.toFixed(1)}px), ${(Math.max(0, px.y) + 8).toFixed(1)}px)` : 'translateX(-50%)';
     (api?.combatHud as { setReticle?: (x: number, y: number) => void } | undefined)?.setReticle?.(px.x, px.y);
     const vm = renderer.viewmodel;
     if (vm) {
@@ -271,7 +276,7 @@ function installPresenter(game: Game, renderer: Renderer, monsters: MonstersHand
  * from the model's own head/limb boxes), and the dodge hop — a monster that dodges a swing
  * (monsterDodge) springs up and leans away over 0.3 s on top of the slide the simulation gives it.
  */
-function installModelHooks(game: Game, renderer: Renderer, monsters: MonstersHandle): void {
+function installModelHooks(game: Game, renderer: Renderer, monsters: MonstersHandle, api?: DebugApi): void {
   const p = game.player;
   const view = monsters.view;
   const cam = renderer.rig.camera;
@@ -296,6 +301,23 @@ function installModelHooks(game: Game, renderer: Renderer, monsters: MonstersHan
     if (!r) return r;
     return { t: r.t, part: r.part, zone: zoneOfPart(r.part, mon.type.flags.includes('NOHEAD')) };
   };
+  if (api) {
+    /** Debug/setup: the drawn world centre (game coords) of a monster's model part, e.g. to aim at its head. */
+    api.modelPart = (uid: number, name: string) => {
+      const m = monsters.sys.active.find((q) => q.uid === uid);
+      const inst = m && view.modelOf(m);
+      if (!inst) return null;
+      const i = inst.rig.parts.findIndex((q) => q.name === name);
+      if (i < 0) return null;
+      const e = inst.mats.subarray(i * 16, i * 16 + 16);
+      return { x: e[12], y: e[14], h: e[13], parts: inst.rig.parts.map((q) => q.name) };
+    };
+    api.modelLift = (uid: number) => {
+      const m = monsters.sys.active.find((q) => q.uid === uid);
+      const inst = m && view.modelOf(m);
+      return inst ? { lift: inst.lift, fall: inst.fall } : null;
+    };
+  }
 
   // --- dodge hop (additive over what the monster view set this tick; see the header)
   const HOP = 0.3;
