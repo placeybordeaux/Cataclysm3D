@@ -1,4 +1,4 @@
-// Real-input streaming check (docs/PERF.md): drive a real car through the densest town road with
+// Real-input streaming check (docs/PERF.md): drive a real car down the densest city road with
 // the keyboard — W to accelerate, C to lock the speed (cruise control) — with the F3 overlay up,
 // then Shift+F3 to save the log, and judge what the telemetry saw: unbuilt chunks in view,
 // runway ahead of the car, frame times. `cdda.*` only sets the scene (the car at the start of the
@@ -33,10 +33,12 @@ export function perfScenarios(c: PerfCtx): Scenario[] {
   const seconds = Number(process.env.PERF_SECONDS ?? 14);
   const mph = () => js<number>(`Math.abs(cdda.vehicleSystem.driving?.velocity ?? 0) * 2.23694`);
   return [
-    ['perfdrive', `drive through town with the keyboard at ${speeds.join('/')} mph: F3 overlay, cruise control, Shift+F3 saves the log; the world streams in ahead of the car`, async () => {
+    ['perfdrive', `drive through the city with the keyboard at ${speeds.join('/')} mph: F3 overlay, cruise control, Shift+F3 saves the log; the world streams in ahead of the car`, async () => {
       await js(PERF_PAGE);
       for (const target of speeds) {
-        const route = await js<{ x: number; y: number; town?: string; len: number }>(`__perfBench.pick('town')`);
+        // the densest straight road of the biggest nearby city, starting on the road itself: the
+        // benchmark's 10-OMT run-up crosses fields a real car can't drive through (long grass)
+        const route = { ...(await js<{ x: number; y: number; town?: string; len: number }>(`__perfBench.pick('city')`)), lead: 0 };
         await js(`__perfBench.place(${JSON.stringify(route)})`);
         await js(`__perfBench.clearRoute(150)`);
         await c.toGameplay();
