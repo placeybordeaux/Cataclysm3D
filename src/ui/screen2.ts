@@ -1,10 +1,11 @@
 // Shared plumbing for the status screens built on ui2 (character sheet, map, help, options,
-// key bindings, Esc menu, message log): a ui2 panel that closes on the key that opened it and
-// on Backspace (the legacy convention: players never need Esc, which also frees the mouse),
-// a close legend in the footer, and CDDA colour tags remapped to the palette (.ui2-cdda).
+// key bindings, Esc menu, message log): a ui2 panel that closes on the close key (Space), the
+// key that opened it and Backspace (the legacy convention: players never need Esc, which also
+// frees the mouse — so the legend never advertises it), a close legend in the footer, and CDDA
+// colour tags remapped to the palette (.ui2-cdda).
 
 import type { Game } from '../game/game';
-import { h, openPanel, type Panel, type PanelOpts } from '../ui2';
+import { closeKeyLabel, h, openPanel, type Panel, type PanelOpts } from '../ui2';
 import { rememberedPosition } from '../ui2/window';
 import './screens2.css';
 
@@ -19,12 +20,16 @@ export interface ScreenOpts extends Omit<PanelOpts, 'onKey' | 'footer'> {
   closeLabel?: string;
 }
 
-/** Footer legend: "wheel zoom · m / Bksp / Esc close" with the keys highlighted. */
-export function legendEl(game: Game | null, items: [string, string][], action?: string, closeLabel = 'close'): HTMLElement {
+/**
+ * Footer legend: "wheel zoom · Space / m close" with the keys highlighted: the close key, then
+ * the opening key (Bksp instead of the close key when the screen gives Space another meaning).
+ */
+export function legendEl(game: Game | null, items: [string, string][], action?: string, closeLabel = 'close', closeKey = true): HTMLElement {
   const el = h('div', { class: 'scr-legend' });
   const key = (k: string) => h('span', { class: 'scr-key', text: k });
-  const openKey = action && game ? game.keys.label(action) : null;
-  const all: [string, string][] = [...items, [[...new Set([openKey, 'Bksp', 'Esc'].filter(Boolean))].join(' / '), closeLabel]];
+  const openKey = action && game && game.keys.keyFor(action) !== 'Escape' ? game.keys.label(action) : null;
+  const ck = (closeKey && closeKeyLabel()) || 'Bksp';
+  const all: [string, string][] = [...items, [[...new Set([ck, openKey].filter(Boolean))].join(' / '), closeLabel]];
   all.forEach(([k, what], i) => {
     if (i) el.append(h('span', { class: 'ui2-dim', text: '  ·  ' }));
     el.append(key(k), h('span', { text: ` ${what}` }));
@@ -36,7 +41,7 @@ export function openScreen(game: Game | null, o: ScreenOpts): Panel {
   const { action, onKey, legend, closeLabel, ...rest } = o;
   const panel: Panel = openPanel({
     ...rest,
-    footer: legendEl(game, legend ?? [], action, closeLabel),
+    footer: legendEl(game, legend ?? [], action, closeLabel, o.closeKey !== false),
     onKey: (e) => {
       if (onKey?.(e)) return true;
       if (e.repeat) return false;

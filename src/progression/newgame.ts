@@ -162,7 +162,7 @@ export function openQuickStart(ctx: UiContext, prog: ProgressionHandle): Promise
       form.el,
       ...(more ? [h('div', { class: 'pg-new', text: `${more} more start${more === 1 ? '' : 's'} unlocked: choose one from New Game.` })] : []),
       h('div', { class: 'pg-actions' },
-        button('Back', () => finish(null), { key: 'Esc' }),
+        button('Back', () => finish(null)),
         button('Start', choose, { tone: 'accent', key: 'Enter' }),
       ),
     );
@@ -345,7 +345,7 @@ export function openStartPicker(ctx: UiContext, prog: ProgressionHandle): Promis
       // Actions stay pinned under the scrolling details: Start must never scroll out of view.
       detail.replaceChildren(
         h('div', { class: 'pg-detail-scroll' }, ...parts.filter((x): x is HTMLElement => !!x)),
-        h('div', { class: 'pg-actions' }, button('Back', () => finish(null), { key: 'Esc' }), startBtn),
+        h('div', { class: 'pg-actions' }, button('Back', () => finish(null)), startBtn),
       );
       panel.setFooter(classic ? 'Classic mode: everything is unlocked (Options).' : `${cards.filter((x) => x.available).length} of ${cards.length} starts unlocked.  Unlocks are choices, never bonuses.`);
     }

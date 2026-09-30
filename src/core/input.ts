@@ -50,6 +50,9 @@ export class Input {
   /** Movement key pressed with the character it typed (lets Keys learn the keyboard layout). */
   onMovementKey: ((code: string, key: string) => void) | null = null;
 
+  /** Codes whose keydown closed the last menu; ignored until their keyup. */
+  private readonly swallowed = new Set<string>();
+
   /** The key whose keydown handlers are running right now (see tryLock), else null. */
   private dispatching: string | null = null;
 
@@ -68,6 +71,13 @@ export class Input {
       if (key !== e.key) Object.defineProperty(e, 'key', { value: key });
       this.keySeq++;
       if (e.key === 'Escape') this.lastEscape = performance.now();
+      // The key that closed the last menu, still held (auto-repeat): not gameplay input yet.
+      // A fresh press means it was released even if its keyup never arrived (the browser eats
+      // keys around pointer-lock changes), so it never stays swallowed.
+      if (this.swallowed.has(e.code)) {
+        if (e.repeat) return void e.preventDefault();
+        this.swallowed.delete(e.code);
+      }
       this.held.add(e.code);
       if (MOVEMENT_CODES.has(e.code) && !e.repeat) this.onMovementKey?.(e.code, e.key);
       // Keys that work in every state, menus included (the tactical pause).
@@ -75,6 +85,12 @@ export class Input {
       const top = this.captureStack[this.captureStack.length - 1];
       if (top) {
         if (top(e) !== false) e.preventDefault();
+        // This key closed the last menu (Space, i, Enter on a picker…): gameplay must not also
+        // see it as newly held — Space would side-step, or brake at the wheel — until released.
+        if (!this.captured && e.key !== 'Escape') {
+          this.held.delete(e.code);
+          this.swallowed.add(e.code);
+        }
         return;
       }
       // Back in gameplay after losing the lock (Esc closed a menu, alt-tab): any key is a user
@@ -85,10 +101,14 @@ export class Input {
     });
     // Runs right after the listener above for the same event (whatever it returned early from).
     window.addEventListener('keydown', () => (this.dispatching = null));
-    window.addEventListener('keyup', (e) => this.held.delete(e.code));
+    window.addEventListener('keyup', (e) => {
+      this.held.delete(e.code);
+      this.swallowed.delete(e.code);
+    });
     // Focus loss eats the keyups and mouseups of whatever was held: forget it all.
     const release = () => {
       this.held.clear();
+      this.swallowed.clear();
       this.mouseButtons = 0;
     };
     window.addEventListener('blur', release);

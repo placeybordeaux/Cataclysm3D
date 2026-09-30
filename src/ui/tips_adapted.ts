@@ -128,7 +128,7 @@ export const PORT_TIPS: string[] = [
   'A "?" floating over furniture means you haven\'t looked inside yet.',
   'No weapon?  Smash a young tree for a long stick; it beats bare hands.',
   'Zombies follow noise.  A smashed window is heard for blocks; a closed door is not.',
-  'Menus pause the game.  Take your time in the inventory.',
+  'Menus pause the game.  {key:close_menu} closes any of them and keeps the mouse in the game.',
   'Running burns stamina.  Watch the stamina bar and stop before you are winded.',
 ];
 

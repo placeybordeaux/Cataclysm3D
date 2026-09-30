@@ -1,10 +1,11 @@
 // Windows (panels): draggable by the title bar, closable, stacked (click brings to front),
 // positions remembered per id in localStorage and kept on screen when the viewport shrinks.
 // Windows can belong to a *group* (a screen made of several panels, e.g. the inventory:
-// equipment + backpack + ground); Esc closes the top window's whole group.
+// equipment + backpack + ground); the close key (Space, host.ts isCloseKey) or Esc closes the
+// top window's whole group.
 
 import { h, ui2Layers, viewport } from './dom';
-import { acquireSurface, pushKeys } from './host';
+import { acquireSurface, closeKeyLabel, isCloseKey, pushKeys } from './host';
 import { iconEl } from './icons';
 import { snapPx } from './theme';
 import { clampRect, cascade } from './logic/layout';
@@ -28,8 +29,13 @@ export interface PanelOpts {
   /** Extra title-bar elements (buttons, a view toggle). */
   titleExtras?: HTMLElement[];
   footer?: HTMLElement | string;
-  /** Keys while this is the top window; true = handled. Esc is handled after this. */
+  /** Keys while this is the top window; true = handled. Esc and the close key are handled after this. */
   onKey?: (e: KeyboardEvent) => boolean;
+  /**
+   * The close key (Space) closes this window (default). False where Space means something
+   * inside it; Esc, Bksp and the opening key (screen2 / the owner's onKey) still close.
+   */
+  closeKey?: boolean;
   onClose?: () => void;
 }
 
@@ -103,7 +109,7 @@ export function openPanel(opts: PanelOpts): Panel {
   }
   const L = ui2Layers();
   const titleText = h('span', { class: 'ui2-title-text', text: opts.title });
-  const closeBtn = opts.closable === false ? null : h('button', { class: 'ui2-close', title: 'Close (Esc)', attrs: { 'aria-label': 'Close' } });
+  const closeBtn = opts.closable === false ? null : h('button', { class: 'ui2-close', title: `Close (${closeKeyLabel() || 'Esc'})`, attrs: { 'aria-label': 'Close' } });
   const titlebar = h('div', { class: 'ui2-titlebar' }, opts.icon ? iconEl(opts.icon, 'row') : null, titleText, ...(opts.titleExtras ?? []), closeBtn);
   const body = h('div', { class: 'ui2-body' });
   const footer = h('div', { class: 'ui2-footer' });
@@ -232,7 +238,7 @@ function windowKeys(e: KeyboardEvent): boolean {
   const top = open[open.length - 1];
   if (!top) return false;
   if (top.opts.onKey?.(e)) return true;
-  if (e.key === 'Escape' && !e.repeat) {
+  if ((e.key === 'Escape' && !e.repeat) || (top.opts.closeKey !== false && isCloseKey(e))) {
     if (top.group) closeGroup(top.group);
     else top.close();
     return true;

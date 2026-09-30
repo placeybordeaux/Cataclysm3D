@@ -3,7 +3,7 @@ import type { Item } from '../game/item';
 import type { LookCreature } from '../game/game';
 import { raycastTiles, type RayHit } from '../game/raycast';
 import { cddaText } from '../game/units';
-import { c, colorize } from './framework';
+import { c, colorize, isCloseKey } from './framework';
 import { spriteImg, omtLabel, type UiContext } from './context';
 import { CHUNK, LEVEL_HEIGHT } from '../world/coords';
 import { describeVehicleAt, vehicleSolidHeight } from './vehicle_ui';
@@ -19,7 +19,7 @@ import './screens2.css';
 //  - Hover: with the cursor free (any ui2 window, the context menu…), resting on an object
 //    shows its card after a moment; moving off hides it.
 //  - `x` (look): the card for what the crosshair points at, with the cursor freed so you can
-//    click an action or hover other things; arrows still turn the view, x / Esc / Bksp close.
+//    click an action or hover other things; arrows still turn the view, x / Space / Bksp close (Esc too).
 //    Time stops while you look (CDDA's look mode is free).
 //
 // describeHit() (the old text description) stays for automation (cdda.ui.lookText).
@@ -252,7 +252,7 @@ export function openLookCard(ctx: UiContext, target: WorldTarget | null): { clos
     else if (/^[1-6]$/.test(k)) {
       const btn = cur.el.querySelectorAll<HTMLButtonElement>('.lk-act')[Number(k) - 1];
       if (btn && !btn.disabled) btn.click();
-    } else if (!e.repeat && (k === 'Escape' || k === 'Backspace' || k === g.keys.keyFor('look'))) close();
+    } else if (!e.repeat && (k === 'Escape' || k === 'Backspace' || k === g.keys.keyFor('look') || isCloseKey(e))) close();
     else return true; // look is modal: other gameplay keys do nothing while it's up
     if (k.startsWith('Arrow') || 'hjkl'.includes(k)) {
       // Turning re-aims at whatever the crosshair now points at.

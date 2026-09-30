@@ -15,7 +15,7 @@ import { EFFECTS_SHOWN_AS_NEEDS, needStates, runDay, type NeedSource } from '../
 import { ringText } from '../src/ui/activity_ring';
 
 const bnTips: string[] = JSON.parse(readFileSync(new URL('../public/data/ui.json', import.meta.url), 'utf8')).tips;
-const label = (id: string) => ({ tactical_pause: '`', interact: 'E' })[id] ?? `?${id}`;
+const label = (id: string) => ({ tactical_pause: '`', interact: 'E', close_menu: 'Space' })[id] ?? `?${id}`;
 
 describe('adapted tips', () => {
   it('every BN tip has been reviewed (kept, rewritten or dropped)', () => {

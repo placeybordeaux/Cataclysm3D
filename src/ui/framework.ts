@@ -6,7 +6,9 @@ import { keyLabel } from './keymap';
 // Shared building blocks for CDDA-style curses screens. Every modal screen (inventory,
 // crafting, construction, character sheet, …) should be made from these so the whole UI
 // looks and behaves consistently: black bordered windows, CDDA color tags, letter hotkeys,
-// Esc to close, arrow keys / j k to move, Enter to select.
+// Space (the player's `close_menu` key) or the opening key to close, arrow keys / j k to move,
+// Enter to select. Esc also closes but is never advertised: outside fullscreen the browser takes
+// it to release the captured mouse, so players who learn "Esc closes" keep losing the mouse.
 
 let uiRoot: HTMLElement | null = null;
 let input: Input | null = null;
@@ -73,7 +75,7 @@ export interface WindowOpts {
   anchor?: 'center' | 'left' | 'right';
   footer?: string;
   /**
-   * What closing does, for the footer legend the framework appends ("i/Esc/Bksp close"):
+   * What closing does, for the footer legend the framework appends ("Space/i close"):
    * 'close' by default; e.g. 'back', 'cancel', 'leave'. null leaves the legend out (the
    * window explains its own keys, e.g. a yes/no prompt).
    */
@@ -82,6 +84,12 @@ export interface WindowOpts {
   mouseLook?: boolean;
   /** The key that opened the window closes it (default). False where it means something inside (dialogue letters). */
   closeOnOpenKey?: boolean;
+  /**
+   * The close key (`close_menu`, Space) closes it (default). False where Space means something
+   * inside (multi-select toggles, chargen traits): Bksp and the opening key still close, and
+   * the legend says so instead.
+   */
+  closeKey?: boolean;
   /** Called for key presses; return true if handled. Esc closes by default. */
   onKey?: (e: KeyboardEvent) => boolean | void;
   onClose?: () => void;
@@ -110,11 +118,24 @@ function markTopWindow(): void {
   if (input) input.menuMouseLook = openWindows[openWindows.length - 1]?.mouseLook ?? false;
 }
 
-/** Footer legend for closing: "i/Esc/Bksp close" (the opening key first, when there is one). */
-export function closeLegend(openKey: string | null, label = 'close'): string {
-  const keys = [...(openKey && openKey !== 'Escape' ? [keyLabel(openKey)] : []), 'Esc', 'Bksp'];
+/**
+ * Footer legend for closing: "Space/i close" — the close key, then the opening key. Never Esc
+ * (see the header); Bksp only where Space means something else in the window.
+ */
+export function closeLegend(openKey: string | null, label = 'close', closeKey = true): string {
+  const ck = closeKey ? Keys.closeKeys()[0] : undefined;
+  const keys = [...new Set([...(ck !== undefined ? [keyLabel(ck)] : ['Bksp']), ...(openKey && openKey !== 'Escape' ? [keyLabel(openKey)] : [])])];
   return `${keys.map((k) => c('c_light_green', k)).join('/')} ${label}`;
 }
+
+/** The close key for legends ("Space"), or Bksp when close_menu is unbound. */
+export function closeKeyLabel(): string {
+  const ck = Keys.closeKeys()[0];
+  return ck === undefined ? 'Bksp' : keyLabel(ck);
+}
+
+/** A fresh press of the player's close key (`close_menu`, Space by default). */
+export const isCloseKey = (e: KeyboardEvent) => !e.repeat && Keys.closeKeys().includes(e.key);
 
 /**
  * Hover only counts when the mouse really moved: when a menu opens under a resting cursor (the
@@ -164,10 +185,11 @@ export function openWindow(opts: WindowOpts): UiWindow {
   const body = el.querySelector('.body') as HTMLElement;
   const footer = el.querySelector('.footer') as HTMLElement;
   title.textContent = opts.title;
-  // The key that opened this window (e.g. "i", "&") closes it again, as does Backspace, so
-  // players never need Esc — which in a browser also releases the captured mouse.
+  // The close key (Space), the key that opened this window (e.g. "i", "&") and Backspace close
+  // it, so players never need Esc — which in a browser also releases the captured mouse.
   const openKey = opts.closeOnOpenKey === false ? null : Keys.openingKey();
-  const legend = opts.closeLabel === null ? '' : closeLegend(openKey, opts.closeLabel ?? 'close');
+  const useCloseKey = opts.closeKey !== false;
+  const legend = opts.closeLabel === null ? '' : closeLegend(openKey, opts.closeLabel ?? 'close', useCloseKey);
   const setFooter = (h: string) => {
     const html = [h, legend].filter(Boolean).join('  ');
     footer.innerHTML = html;
@@ -187,7 +209,7 @@ export function openWindow(opts: WindowOpts): UiWindow {
     }
     // Held keys repeat: without this, holding i (or Esc) would flicker the window shut and open.
     if (e.repeat) return true;
-    if (e.key === 'Escape' || e.key === 'Backspace' || (openKey !== null && e.key === openKey)) {
+    if (e.key === 'Escape' || e.key === 'Backspace' || (openKey !== null && e.key === openKey) || (useCloseKey && isCloseKey(e))) {
       win.close();
       return true;
     }
@@ -384,12 +406,13 @@ export function confirm(question: string, opts: { destructive?: boolean } = {}):
     const w = openWindow({
       title: 'Confirm',
       closeLabel: null,
-      footer: `${legendKey('y', 'yes')}  ${legendKey('n/Esc', 'no')}${opts.destructive ? '' : `  ${legendKey('Enter', 'yes')}`}`,
+      footer: `${legendKey('y', 'yes')}  ${legendKey(`n/${closeKeyLabel()}`, 'no')}${opts.destructive ? '' : `  ${legendKey('Enter', 'yes')}`}`,
       onKey: (e) => {
         if (e.repeat) return true;
         if (e.key === 'y' || e.key === 'Y' || (e.key === 'Enter' && !opts.destructive)) answer(true);
-        // query_yn: Esc answers no (and must close, or cdda.ui.closeAll() leaves it open)
-        else if (e.key === 'n' || e.key === 'N' || e.key === 'Escape' || e.key === 'Backspace') answer(false);
+        // query_yn: Esc answers no (and must close, or cdda.ui.closeAll() leaves it open). The
+        // close key (Space) is always "no", never "yes", destructive or not.
+        else if (e.key === 'n' || e.key === 'N' || e.key === 'Escape' || e.key === 'Backspace' || isCloseKey(e)) answer(false);
         return true;
       },
       onClose: () => !answered && resolve(false),
@@ -399,14 +422,17 @@ export function confirm(question: string, opts: { destructive?: boolean } = {}):
   });
 }
 
-/** Number / text prompt (CDDA string_input_popup). Resolves null on Esc. */
+/**
+ * Number / text prompt (CDDA string_input_popup). Resolves null on cancel: Bksp in the empty
+ * field (Space types a space here, so it can't be the close key), or Esc.
+ */
 export function prompt(question: string, initial = ''): Promise<string | null> {
   return new Promise((resolve) => {
     let done = false;
     const w = openWindow({
       title: question,
       closeLabel: null,
-      footer: `${legendKey('Enter', 'ok')}  ${legendKey('Esc', 'cancel')}`,
+      footer: `${legendKey('Enter', 'ok')}  ${legendKey('Bksp', 'cancel (empty field)')}`,
       // Keys typed into the <input> never reach the capture stack (Input ignores input
       // targets); Esc sent to the window (closeAll, focus lost) closes via openWindow.
       onClose: () => !done && resolve(null),
@@ -418,6 +444,8 @@ export function prompt(question: string, initial = ''): Promise<string | null> {
       e.stopPropagation();
       if (e.key === 'Enter') (done = true), w.close(), resolve(inp.value);
       else if (e.key === 'Escape') w.close();
+      // A fresh press on an already-empty field: holding Bksp to clear the text doesn't cancel.
+      else if (e.key === 'Backspace' && !e.repeat && inp.value === '') w.close();
     };
     w.body.appendChild(inp);
     setTimeout(() => inp.focus(), 0);

@@ -9,6 +9,7 @@ import type { Game } from '../../game/game';
 import type { Item } from '../../game/item';
 import { LOOT_CATEGORIES, LOOT_CATEGORY_NAMES, lootCategory, lootValue, type LootCategory, type LootMemory } from '../../game/loot';
 import { h } from '../dom';
+import { closeKeyLabel } from '../host';
 import { flashNote } from '../dragdrop';
 import { iconEl } from '../icons';
 import { fmtVolume, fmtWeight, type IconRef, type ItemView } from '../logic/items';
@@ -122,7 +123,7 @@ export function openArea(env: AreaEnv, focus: string | null = null): void {
   const vol = capacityBar('Volume', fmtVolume);
   const wt = capacityBar('Weight', fmtWeight);
   const foot = h('div', { class: 'la-foot' });
-  foot.innerHTML = `<kbd>WASD</kbd> walk · hold <kbd>right mouse</kbd> on the world to look · click a row: take that kind · <kbd>${env.keys.takeAllLabel()}</kbd> take all · <kbd>${env.keys.closeLabel()}</kbd>/<kbd>Esc</kbd> close`;
+  foot.innerHTML = `<kbd>WASD</kbd> walk · hold <kbd>right mouse</kbd> on the world to look · click a row: take that kind · <kbd>${env.keys.takeAllLabel()}</kbd> take all · <kbd>${[closeKeyLabel(), env.keys.closeLabel()].filter(Boolean).join('</kbd>/<kbd>')}</kbd> close`;
 
   const vw = innerWidth;
   const p = openPanel({

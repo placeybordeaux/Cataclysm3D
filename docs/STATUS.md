@@ -69,6 +69,8 @@ Screenshots for every area: `docs/screenshots/wave3/<area>/` (before/after pairs
    `power_draw` is mW (flashlights died in a second), wheel sizes are cm (1.4 m tyres).
 4. **Parallel agents in worktrees, small additive edits to hot files, lead merges.** When
    two branches rewrite the same flow, send the merge back to the agent that knows it.
+5. **Advertise Space (the `close_menu` key) or the opening key for closing, never Esc** — outside
+   fullscreen Esc also frees the mouse; Esc still works, it just never appears in a hint (docs/UX_REVIEW.md).
 
 ## Documentation map
 
@@ -102,7 +104,8 @@ crosshair: wheel select, `e` take, `r` take all · `g` pick up / Area loot · `1
 `` ` `` tactical pause · `&` craft · `*` construct · `@` character · `m` map · `J` journal ·
 `M` missions · `C` chat · `p` bionics · `[` mutations · `_` martial arts · `)` achievements ·
 `F` flashlight · `r` reload · `b` fire mode · `X` smash (or just hit things) · `F5` save ·
-`F11` fullscreen · `?` help · Esc menu.
+`F11` fullscreen · `?` help · Esc pause menu · **Space closes any menu** (so does the key that
+opened it; rebindable as `close_menu`) and keeps the mouse captured.
 
 ## What v2 delivered
 

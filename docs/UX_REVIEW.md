@@ -22,6 +22,45 @@ Last run: 161/161 at 960×540; title/menus/rebind/death also at 1920×1080.
 
 Severity: **S1** blocks or loses progress · **S2** confusing / wrong · **S3** polish.
 
+## Closing menus: Space, never advertise Esc (2026-09-30)
+
+**Rule for every screen, hint and doc:** advertise **Space** (the rebindable `close_menu` action,
+Options > Key bindings) and/or **the key that opened the screen** for closing. **Never advertise
+Esc for closing** — outside fullscreen the browser takes Esc to release the captured mouse, so
+a player who learns "Esc closes menus" loses the mouse every time. Esc still works everywhere
+(and still opens the pause menu from play); it just never appears in a footer, button, tooltip,
+tip or help line as the way out. Read key names from the bindings (`closeKeyLabel()` in ui2,
+`closeLegend()` / `closeKeyLabel()` in the legacy framework, `game.keys.label('close_menu')`),
+so a rebind updates every hint.
+
+How it works: `close_menu` is a *menu-scope* action (`keymap.ts MENU_ACTIONS`): it never fires in
+play (Space side-steps there), doesn't conflict with gameplay keys, and refuses letters/digits
+(menu hotkeys), menu keys and the tactical pause. Legacy windows (`openWindow`), ui2 panels
+(`openPanel`, after the window's own `onKey`), context menus, modals (always cancel/"no" —
+never "yes", destructive or not), drags and tooltips all take it. Closing from a key press
+re-captures the mouse inside that key (a user gesture, unlike Esc); the key that closed the last
+menu is ignored by gameplay until released, so Space-to-close never also side-steps or brakes.
+
+Where Space already meant something it keeps that meaning, and the footer says **Bksp** instead:
+
+| Screen | Space means | Close with |
+|---|---|---|
+| Multi-select pickup/drop (v1) | toggle the row | Bksp / opening key |
+| NPC trade (v1 and ui2) | mark / move the row | Bksp |
+| Dialogue (ui2 and v1) | skip the NPC's typing | Bksp |
+| Character creation | toggle a trait | Bksp (back a tab) |
+| Crafting / construction search | a space in the query | Space while the search is empty, or `&` / `*` |
+| Text prompts (names, map notes, filters) | a space | a fresh Bksp in the empty field |
+| Rebinding "press a key" | the new key | Bksp cancels |
+
+Space's old duplicate-of-Enter meanings were dropped so closing can never act: context menu
+(activated the entry) and bionics/mutations (toggled the power).
+
+Tested with real input (`tools/realinput.ts --only spaceclose`, Chromium GPU and `--browser firefox`):
+i / & / m / z / E / R / @ / * / ? / P / ) / x each close on Space, back in play with the lock re-acquired,
+no side-step, no view jump; the pause menu resumes on Space; Esc still closes. Footers:
+`docs/screenshots/wave3/menu-close/`.
+
 ## Input model
 
 | # | Issue | Sev | Status | Fix |
@@ -70,7 +109,7 @@ dialogue, trade, vehicle controls, death, Load menu.
 | 26 | `&` didn't close crafting (its key handler swallowed every key) | S2 | fixed | unhandled keys fall through |
 | 27 | Same for `*` construction — and Backspace/Esc-with-filter; it trapped the old test harness | S2 | fixed | same |
 | 28 | Hints popup ignored Esc and Backspace (swallowed every key) though its footer said Esc | S1 | fixed | only Enter/Space/d/arrows handled |
-| 29 | Footers said "Esc close" everywhere (and nothing on several screens) | S3 | fixed | framework appends the real legend, e.g. `i/Esc/Bksp close`, `C`-opened dialogue shows `Esc/Bksp leave` (its letters answer) |
+| 29 | Footers said "Esc close" everywhere (and nothing on several screens) | S3 | fixed | framework appends the real legend, e.g. `i/Esc/Bksp close`, `C`-opened dialogue shows `Esc/Bksp leave` (its letters answer). Since 2026-09-30: `Space/i close`, `Bksp leave` (see the Space rule above) |
 | 30 | Chargen: new players didn't know how to start (only `F` on the last tab); Backspace discarded the whole character without asking | S1 | fixed | `F finish & play` from any tab, clickable tabs, Bksp = Esc (back a tab), leaving to the menu asks and warns |
 | 31 | Destructive confirms took Enter as yes (quit without saving, delete save, surgery, attack a neutral) | S2 | fixed | `confirm(q, {destructive: true})`: y only; all confirms have clickable Yes/No |
 | 32 | Item action menu used CDDA letters (`W` wear, `a` activate) that differ from the game keys (`O`, `u`) | S3 | fixed | uses the bound keys (falls back to CDDA's letter if unbound) |

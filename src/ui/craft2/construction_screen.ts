@@ -3,7 +3,7 @@
 // it becomes, skills, time, tools and materials as icon chips); "Place" closes the window and
 // puts a ghost of the result on the tile under your crosshair — green where it can go, red
 // where it can't, with the reason and the requirements in a card at the side. Left click
-// builds there, right click or Esc cancels. The work shows a progress bar over the site.
+// builds there, right click or Bksp (or Esc) cancels. The work shows a progress bar over the site.
 
 import * as THREE from 'three';
 import type { Game } from '../../game/game';
@@ -18,7 +18,7 @@ import { evaluateRequirements } from '../../game/requirements';
 import { cddaText } from '../../game/units';
 import { LEVEL_HEIGHT } from '../../world/coords';
 import { hasFlag } from '../../world/registry';
-import { attachTooltip, button, h, iconEl, openPanel, palette, ui2Layers, type Panel } from '../../ui2';
+import { attachTooltip, button, closeKeyLabel, h, iconEl, isCloseKey, openPanel, palette, ui2Layers, type Panel } from '../../ui2';
 import { itemIconRef, mapIconRef, rememberedWindow, requirementSections, searchField } from './common';
 import { shortfall } from './craft_model';
 import { effectiveSkills, effectiveTime } from '../../game/adaptation_rules';
@@ -120,7 +120,7 @@ export function openConstructionScreen(game: Game, renderer: Renderer): Construc
     pauses: true,
     // Keys while focus isn't in the search field: letters go there, the rest to the screen.
     onKey: (e) => routeKeys(e),
-    footer: 'Type to search · ↑↓ pick · Enter place in the world · Tab category · Esc or * close',
+    footer: `Type to search · ↑↓ pick · Enter place in the world · Tab category · ${closeKeyLabel() ? `${closeKeyLabel()} (empty search) or ` : ''}* close`,
     onClose: () => void (screen = null),
   });
   panel.body.classList.add('c2-build');
@@ -199,7 +199,8 @@ export function openConstructionScreen(game: Game, renderer: Renderer): Construc
   };
   const onKey = (e: KeyboardEvent): boolean => {
     const i = rows.findIndex((g) => g.id === sel);
-    if (e.key === 'Escape' || e.key === '*') panel.close();
+    // Space (the close key) only while the search is empty: a query may contain spaces.
+    if (e.key === 'Escape' || e.key === '*' || (isCloseKey(e) && search.value === '')) panel.close();
     else if (e.key === 'ArrowDown') select(rows[Math.min(rows.length - 1, i + 1)]?.id ?? null);
     else if (e.key === 'ArrowUp') select(rows[Math.max(0, i - 1)]?.id ?? null);
     else if (e.key === 'Enter') place();
@@ -214,7 +215,7 @@ export function openConstructionScreen(game: Game, renderer: Renderer): Construc
     if (onKey(e)) (e.preventDefault(), e.stopPropagation());
   });
   routeKeys = (e) => {
-    if (e.key.length === 1 && e.key !== '*' && !e.ctrlKey && !e.altKey) {
+    if (e.key.length === 1 && e.key !== '*' && !e.ctrlKey && !e.altKey && !(isCloseKey(e) && search.value === '')) {
       search.focus();
       search.value += e.key;
       query = search.value.toLowerCase();
@@ -351,7 +352,7 @@ export function startPlacement(game: Game, renderer: Renderer, group: Constructi
       h('div', { class: 'c2-place-title' }, iconEl(mapIconRef(data, post ?? ''), 'row'), h('span', { text: group.name })),
       h('div', { class: `c2-place-state ${ok ? 'tone-good' : 'tone-bad'}`, text: ok ? `Ready: ${post ? terOrFurnName(data, post) : 'build here'} (${formatDuration(effectiveTime(con))})` : why ?? "Can't build here" }),
       ...requirementSections(data, check.req, {}, { tools: 'Tools', comps: 'Materials' }),
-      h('div', { class: 'c2-place-keys', html: '<kbd>Left click</kbd> build here · <kbd>Right click</kbd> / <kbd>Esc</kbd> cancel' }),
+      h('div', { class: 'c2-place-keys', html: '<kbd>Left click</kbd> build here · <kbd>Right click</kbd> / <kbd>Bksp</kbd> cancel' }),
     );
   };
 
@@ -378,7 +379,8 @@ export function startPlacement(game: Game, renderer: Renderer, group: Constructi
   canvas.addEventListener('mousedown', onDown, { capture: true });
   if (!escHooked.has(game)) {
     escHooked.add(game);
-    // Esc while placing cancels (a browser-eaten Esc arrives as the lock loss below).
+    // Bksp or Esc while placing cancels (a browser-eaten Esc arrives as the lock loss below).
+    // Not Space: placing happens in play, where Space side-steps.
     game.input.onPress((e) => (placement && (e.key === 'Escape' || e.key === 'Backspace') ? (placement.cancel(), true) : false));
   }
   const onLock = () => {

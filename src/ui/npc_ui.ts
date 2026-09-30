@@ -73,8 +73,10 @@ export function openDialogue(ctx: NpcUiCtx, d: Dialogue, onClose?: () => void): 
     height: '82vh',
     footer: `${c('c_light_green', 'a-z')} respond  ${c('c_light_green', '↑↓/Enter')} select  ${c('c_light_green', '?')} show unavailable`,
     closeLabel: 'leave',
-    // e (talk) and C (chat) open this, but letters answer here.
+    // e (talk) and C (chat) open this, but letters answer here. Leaving goes through finish()
+    // (its onKey), so the framework's own close key stays out of it: Bksp leaves.
     closeOnOpenKey: false,
+    closeKey: false,
     onKey: (e) => {
       const v = d.view();
       if (e.key === 'Escape' || e.key === 'Backspace') {
@@ -211,6 +213,8 @@ export function openTrade(ctx: NpcUiCtx, n: Npc, cost = 0, onDone?: (traded: boo
     height: '84vh',
     footer: `${c('c_light_green', 'Tab/←→')} switch side  ${c('c_light_green', 'a-Z')} mark  ${c('c_light_green', 'Space')} mark selected  ${c('c_light_green', '+ -')} amount  ${c('c_light_green', '< >')} page  ${c('c_light_green', '/')} filter  ${c('c_light_green', 'Enter')} trade`,
     closeLabel: 'cancel',
+    // Space marks the selected row here: Bksp cancels (the legend says so).
+    closeKey: false,
     onKey: (e) => {
       const list = view(side);
       const at = (k: number) => Math.max(0, Math.min(list.length - 1, k));

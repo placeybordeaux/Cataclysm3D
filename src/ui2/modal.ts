@@ -4,7 +4,7 @@
 // Destructive confirms never take Enter as yes (same rule as the legacy confirm()).
 
 import { h, ui2Layers } from './dom';
-import { acquireSurface, pushKeys } from './host';
+import { acquireSurface, closeKeyLabel, isCloseKey, pushKeys } from './host';
 import { iconEl } from './icons';
 import type { IconRef } from './logic/items';
 import { suppressTooltips } from './tooltip';
@@ -33,7 +33,9 @@ function openDialog(title: string, content: HTMLElement[], buttons: HTMLElement[
   scrim.addEventListener('contextmenu', (e) => e.preventDefault());
   const removeKeys = pushKeys((e) => {
     if (onKey(e)) return true;
-    if (e.key === 'Escape' && !e.repeat) onDismiss();
+    // The close key (Space) dismisses = cancel, never "yes" (a focused OK button would otherwise
+    // take Space as a click; the dialog is gone before the keyup that would click it).
+    if ((e.key === 'Escape' && !e.repeat) || isCloseKey(e)) onDismiss();
     // Modal: everything stops here.
     return true;
   }, { overlay: true });
@@ -70,7 +72,7 @@ export function confirmModal(o: ConfirmOpts): Promise<boolean> {
       resolve(v);
     };
     const okBtn = button(o.ok ?? 'OK', () => answer(true), { tone: o.danger ? 'bad' : 'accent', key: o.danger ? 'Y' : 'Enter' });
-    const cancelBtn = button(o.cancel ?? 'Cancel', () => answer(false), { key: 'Esc' });
+    const cancelBtn = button(o.cancel ?? 'Cancel', () => answer(false), { key: closeKeyLabel() || 'Esc' });
     const body = typeof o.body === 'string' ? h('div', { text: o.body }) : o.body ?? h('div');
     // Destructive: Enter is not "yes" — but it must visibly say so. Playtest: the focused Quit
     // button read as the default, Enter did nothing, and "Quit to main menu doesn't work".
@@ -83,7 +85,7 @@ export function confirmModal(o: ConfirmOpts): Promise<boolean> {
         if (e.repeat) return true;
         if (e.key === 'Enter' && !o.danger) answer(true);
         else if (e.key === 'Enter' && o.danger) {
-          hint.textContent = `Press Y or click ${o.ok ?? 'OK'} to confirm (Esc cancels).`;
+          hint.textContent = `Press Y or click ${o.ok ?? 'OK'} to confirm (${closeKeyLabel() || 'N'} cancels).`;
           okBtn.classList.remove('shake');
           void okBtn.offsetWidth;
           okBtn.classList.add('shake');
@@ -112,7 +114,8 @@ export interface CountOpts {
 
 /**
  * How many? Slider + number field + quick buttons (1 / half / all). ↑↓ ±1, PgUp/PgDn ±10,
- * Home/End min/max, the wheel adjusts, typing digits edits, Enter accepts, Esc cancels.
+ * Home/End min/max, the wheel adjusts, typing digits edits, Enter accepts, the close key
+ * (Space; a count has no spaces) or Esc cancels.
  */
 export function countPrompt(o: CountOpts): Promise<number | null> {
   if (!Number.isInteger(o.max) || o.max < 1) throw new Error(`countPrompt: bad max ${o.max}`);
@@ -138,11 +141,11 @@ export function countPrompt(o: CountOpts): Promise<number | null> {
       if (!Number.isNaN(v)) set(v);
     });
     // Keys typed into the field never reach the game's Input (it ignores <input> targets),
-    // so the field handles Enter/Esc itself.
+    // so the field handles Enter/Esc/the close key itself.
     num.addEventListener('keydown', (e) => {
       e.stopPropagation();
       if (e.key === 'Enter') finish(value);
-      else if (e.key === 'Escape') finish(null);
+      else if (e.key === 'Escape' || isCloseKey(e)) (e.preventDefault(), finish(null));
       else if (e.key === 'ArrowUp') (set(value + 1), e.preventDefault());
       else if (e.key === 'ArrowDown') (set(value - 1), e.preventDefault());
     });
@@ -161,7 +164,7 @@ export function countPrompt(o: CountOpts): Promise<number | null> {
     const d = openDialog(
       o.title,
       content,
-      [button('Cancel', () => finish(null), { key: 'Esc' }), button(o.ok ?? 'OK', () => finish(value), { tone: 'accent', key: 'Enter' })],
+      [button('Cancel', () => finish(null), { key: closeKeyLabel() || 'Esc' }), button(o.ok ?? 'OK', () => finish(value), { tone: 'accent', key: 'Enter' })],
       (e) => {
         const steps: Record<string, number> = { ArrowUp: 1, ArrowRight: 1, ArrowDown: -1, ArrowLeft: -1, PageUp: 10, PageDown: -10 };
         if (steps[e.key] !== undefined) set(value + steps[e.key]);
@@ -203,7 +206,8 @@ export interface TextPromptOpts {
 /**
  * A one-line text field (map notes, names): resolves to the text, or null on cancel. Keys typed
  * in the field never reach the game (src/core/input.ts ignores keydowns aimed at inputs), so
- * Enter/Esc are handled on the field itself.
+ * Enter/Esc are handled on the field itself. Space types a space here, so cancelling is a fresh
+ * Bksp in the empty field (or Esc, or the Cancel button).
  */
 export function textPrompt(o: TextPromptOpts): Promise<string | null> {
   return new Promise((resolve) => {
@@ -223,11 +227,12 @@ export function textPrompt(o: TextPromptOpts): Promise<string | null> {
       e.stopPropagation();
       if (e.key === 'Enter') (e.preventDefault(), answer(field.value));
       else if (e.key === 'Escape') (e.preventDefault(), answer(null));
+      else if (e.key === 'Backspace' && !e.repeat && field.value === '') (e.preventDefault(), answer(null));
     });
     const d = openDialog(
       o.title,
       [o.label ? h('div', { class: 'ui2-dim ui2-small', text: o.label }) : h('span'), field],
-      [button('Cancel', () => answer(null), { key: 'Esc' }), button(o.ok ?? 'OK', () => answer(field.value), { tone: 'accent', key: 'Enter' })],
+      [button('Cancel', () => answer(null), { key: 'Bksp' }), button(o.ok ?? 'OK', () => answer(field.value), { tone: 'accent', key: 'Enter' })],
       (e) => {
         if (e.key === 'Enter' && !e.repeat) return answer(field.value), true;
         return false;

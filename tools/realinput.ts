@@ -391,7 +391,8 @@ const scenarios: Scenario[] = [
       if (!s.look && (!ui2 || hit)) {
         const win = hit ? `#ui2 .ui2-win[data-id="${s.panelIds[s.panels.indexOf(hit)] ?? hit}"]` : '';
         const legend = await js<string>(`(() => { const w = ${hit ? `document.querySelector('${win}')` : 'null'}; return (w ? w.querySelector('.ui2-footer') : [...document.querySelectorAll('.cdda-window .footer')].pop())?.textContent ?? ''; })()`);
-        check(`${k}: footer names the close keys`, /Esc/.test(legend), legend);
+        // Space (close_menu) is the advertised way out; Esc also frees the mouse, so no footer names it.
+        check(`${k}: footer names the close keys (Space, not Esc)`, /Space|Bksp/.test(legend) && !/\bEsc\b/.test(legend), legend);
       }
       if (!s.look) {
         const overflowX = await js<boolean>(`(() => { for (const w of document.querySelectorAll('.cdda-window, #ui2 .ui2-win')) { const r = w.getBoundingClientRect(); if (r.right > innerWidth + 1 || r.bottom > innerHeight + 1 || r.left < -1 || r.top < -1) return true; } return false; })()`);
@@ -463,6 +464,64 @@ const scenarios: Scenario[] = [
     await x.key('w');
     s = await until((t) => t.lock, 2500);
     check('a key pressed right after Esc resumes once Chrome allows it', s.lock, { s, refusals: await js('cdda.game.input.lockRefusals') });
+  }],
+  ['spaceclose', 'Space (close_menu) closes every kind of menu and puts the mouse back in the game; no side-step', async () => {
+    await toGameplay();
+    // Setup only: something for the pickers and the read window.
+    await js(`(() => { for (const id of ['granola', 'manual_mechanics', 'crowbar']) cdda.giveItem(id); })()`);
+    const opened = (t: State) => t.windows.length + t.panels.length + Number(t.look);
+    const footers = () => js<string>(`[...document.querySelectorAll('.cdda-window .footer, #ui2 .ui2-win .ui2-footer')].map((f) => f.textContent).join(' | ')`);
+    const cases: [key: string, what: string][] = [
+      ['i', 'inventory'], ['&', 'crafting'], ['m', 'map'], ['z', 'wield picker'], ['E', 'eat picker'], ['R', 'read window (v1)'],
+      ['@', 'character sheet'], ['*', 'construction'], ['?', 'help'], ['P', 'message log'], [')', 'achievements'], ['x', 'look card'],
+    ];
+    for (const [k, what] of cases) {
+      await x.key(k);
+      let s = await until((t) => opened(t) > 0, 1500);
+      if (!check(`${k} opens the ${what}`, opened(s) > 0, s)) {
+        await toGameplay();
+        continue;
+      }
+      await sleep(250);
+      if (!s.look) {
+        const f = await footers();
+        check(`${what}: the footer advertises Space, never Esc`, /Space/.test(f) && !/\bEsc\b/.test(f), f);
+      }
+      await shot(`space_${what}`);
+      // A free cursor parked in a corner: re-capturing must not report its trip to the centre
+      // as mouse-look (the view snapped ~49° before bn 7da0d71).
+      if (!s.lock) await x.moveTo(40, 40, 4);
+      await sleep(100);
+      s = await state();
+      const at = [s.x, s.y], yaw0 = s.yaw;
+      await x.key('space');
+      s = await until((t) => !opened(t) && t.lock && !t.hint, 2500);
+      check(`Space closes the ${what}: back in play, mouse captured, no resume hint`, !opened(s) && s.lock && !s.hint, { s, refusals: await js('cdda.game.input.lockRefusals') });
+      await sleep(350);
+      s = await state();
+      check(`…and that Space didn't also side-step`, Math.hypot(s.x - at[0], s.y - at[1]) < 0.05, { from: at, to: [s.x, s.y] });
+      check(`…and the view didn't jump as the mouse was re-captured`, Math.abs(s.yaw - yaw0) < 0.02, { yaw0, yaw: s.yaw });
+    }
+    // The pause menu: Esc opens it (the browser frees the mouse); Space resumes and re-captures,
+    // even pressed inside Chrome's ~1.25 s re-lock cooldown (Input retries a non-Esc key).
+    await x.key('Escape');
+    let s = await until((t) => t.panelIds.includes('scr.esc'));
+    check('Esc still opens the pause menu', s.panelIds.includes('scr.esc'), s);
+    const f = await footers();
+    check('pause menu: "Space resume", no Esc in the footer', /Space/.test(f) && !/\bEsc\b/.test(f), f);
+    await sleep(300);
+    await x.key('space');
+    s = await until((t) => !t.panels.length && t.lock, 3000);
+    check('Space resumes from the pause menu and re-captures the mouse', !s.panels.length && s.lock, { s, refusals: await js('cdda.game.input.lockRefusals') });
+    // Esc keeps working for closing (just not advertised).
+    await sleep(300);
+    await x.key('i');
+    await until((t) => opened(t) > 0);
+    await sleep(300);
+    await x.key('Escape');
+    s = await until((t) => !opened(t));
+    check('Esc still closes a menu', !opened(s), s);
+    await toGameplay();
   }],
   ['keys', 'held keys, repeats, stuck keys, CapsLock', async () => {
     await toGameplay();
@@ -804,6 +863,11 @@ const scenarios: Scenario[] = [
     await x.key('Escape');
     v = await u();
     check('Esc closes the menu, the windows stay', !v.menu.length && v.panels.includes('inv.equip'), v);
+    await x.click(cell!.x, cell!.y, 3);
+    await sleep(250);
+    await x.key('space');
+    v = await u();
+    check('Space closes the context menu too (never activates an entry), the windows stay', !v.menu.length && v.panels.includes('inv.equip') && (await whereIs('pipe')).some((l) => l.startsWith('inv')), v);
     sameCensus('census unchanged after the drag', c0, await censusNow());
     await x.key('Tab');
     s = await until((t) => t.lock, 3000);
@@ -1068,9 +1132,9 @@ const scenarios: Scenario[] = [
     let s = await until((t) => t.panels.includes('Wield what?'), 2000);
     check('z opens the "Wield what?" picker', s.panels.includes('Wield what?'), s.panels);
     await shot('invkeys_wield_picker');
-    await x.key('Escape');
+    await x.key('space');
     s = await until((t) => !t.panels.length, 2000);
-    check('Esc closes it', !s.panels.length, s.panels);
+    check('Space closes it', !s.panels.length, s.panels);
     // Hungry again (earlier scenarios fed the survivor until "Your stomach is full").
     await js('cdda.game.player.stomach.kcal = 0; cdda.game.player.storedKcal = 5000');
     await x.key('E');
