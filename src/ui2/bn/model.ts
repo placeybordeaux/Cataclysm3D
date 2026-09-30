@@ -259,6 +259,12 @@ export class BnInventoryModel implements InventoryModel {
     return null;
   }
 
+  /** The item a location key is inside ("in:" / magazine well), or null for hands, worn, ground… */
+  hostOf(key: string): Item | null {
+    const l = this.resolve(key);
+    return l && (l.kind === 'in' || l.kind === 'mag') ? l.host : null;
+  }
+
   private resolve(key: string): Loc | null {
     if (key.startsWith('worn:')) return L.worn(this.who);
     return resolveLocKey(key, this.scope);

@@ -20,7 +20,7 @@
 import type { Game } from '../game/game';
 import { MAIN_PARTS, BODY_PARTS, type MainPartId } from '../game/bodyparts';
 import type { MonsterSystem } from '../game/monai';
-import { lightAt } from '../game/vision';
+import { isDay, lightAt } from '../game/vision';
 import { recentHeard } from '../game/sound';
 import { attackCooldownSeconds, attackSpeedMoves, swingSpeedRating } from '../game/combat';
 import { currentMode } from '../game/gunmods';
@@ -461,7 +461,8 @@ export class ModernHud {
     const p = g.player;
     const clk = g.clock;
     const hour = clk.hourOfDay;
-    const day = hour >= 6 && hour < 20;
+    // The real sun, not 06–20: "Wait until dusk" ended at 18:43 under a sun icon (docs/ADAPTATION.md).
+    const day = isDay(clk);
     const hh = String(Math.floor(hour)).padStart(2, '0'), mm = String(Math.floor((hour % 1) * 60)).padStart(2, '0');
     const dayN = Math.floor((clk.seconds - g.stats.startSeconds) / 86400) + 1;
     const w = g.weather;

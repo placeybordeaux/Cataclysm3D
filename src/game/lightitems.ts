@@ -1,7 +1,7 @@
 import type { Game } from './game';
 import type { Item } from './item';
 import { useActions } from './inventory';
-import { bodyLight, isDirectionalLight, itemLight } from './vision';
+import { bodyLight, defLight, isDirectionalLight, itemLight } from './vision';
 
 // Portable light: the renderer's flashlight follows the player's shining item. Turning a
 // flashlight on/off is CDDA's `transform` use_action (flashlight ↔ flashlight_on), handled
@@ -12,12 +12,12 @@ import { bodyLight, isDirectionalLight, itemLight } from './vision';
 
 /** The item's `light` once turned on (via its transform target), for off-state items. */
 export function lightWhenOn(game: Game, it: Item): number {
-  const own = Number(it.def.light ?? 0);
+  const own = defLight(it.def);
   if (own > 0) return own;
   for (const ua of useActions(it.def)) {
     if (ua.type !== 'transform' || typeof ua.target !== 'string') continue;
     const t = game.data.items[ua.target];
-    const l = Number(t?.light ?? 0);
+    const l = defLight(t);
     if (l > 0) return l;
   }
   return 0;
@@ -51,7 +51,8 @@ export function toggleLight(game: Game): boolean {
   const lit = items.find((it) => itemLight(it) > 0);
   const target = lit ?? items[0];
   if (!target) {
-    game.message("You don't have a light source.", 'c_light_gray');
+    // Say where to get one: a newcomer in the dark doesn't know flashlights are loot.
+    game.message("You don't have a light source.  Flashlights turn up in lockers, drawers and cars; a fire lights a room too.", 'c_light_gray');
     return false;
   }
   // A smartphone's first use_action is the e-book reader; the light is its `transform`

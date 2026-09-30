@@ -4,6 +4,13 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { adaptedTips, PORT_TIPS, sleepSpotText, unknownTips } from '../src/ui/tips_adapted';
 import { summaryTitle } from '../src/ui2/loot/summary';
+import { Rng } from '../src/core/rng';
+import type { GameData } from '../src/data/types';
+import { createItem, fromSpawned } from '../src/game/item';
+import { expandItemGroup } from '../src/data/itemgroups';
+import { adaptEatRows, eatLabel } from '../src/ui2/bn/eat_rows';
+import { tirednessText } from '../src/ui/rest_ui';
+import { defLight, itemLight } from '../src/game/vision';
 import { EFFECTS_SHOWN_AS_NEEDS, needStates, type NeedSource } from '../src/ui/hud_logic';
 import { ringText } from '../src/ui/activity_ring';
 
@@ -84,5 +91,52 @@ describe('wording', () => {
   it('take-all counts what it left behind in things, like what it took', () => {
     const r = { taken: [{ name: 'emergency jackets', count: 2 }], left: [{ name: 'emergency jackets', count: 8, reason: 'no room' }] };
     expect(summaryTitle(r as never)).toBe('Took 2 emergency jackets. 8 left behind:');
+  });
+});
+
+// --- round 2: eat picker rows, rest window text, BN item light --------------------------------
+
+const load = (f: string) => JSON.parse(readFileSync(new URL(`../public/data/${f}`, import.meta.url), 'utf8'));
+const realData: GameData = { terrain: {}, furniture: {}, items: load('items.json'), itemGroups: load('item_groups.json'), monsters: {}, monsterGroups: {}, recipes: [], misc: load('misc.json') } as never;
+
+describe('eat picker: one row per thing, in words', () => {
+  const [bottle] = expandItemGroup(realData, { subtype: 'collection', entries: [{ item: 'water_clean' }] } as never, new Rng(1)).flatMap((s) => fromSpawned(realData, s));
+  const water = bottle.contents[0];
+
+  it('a bottle of water is named after the water, with servings, not "(2/2)"', () => {
+    expect(bottle.name()).toMatch(/\(\d+\/\d+\)$/);
+    expect(eatLabel(bottle)).toBe(`clean water (plastic bottle) · ${water.charges} servings`);
+    expect(eatLabel(bottle)).not.toMatch(/\/\d/);
+  });
+
+  it('the water inside a listed bottle is not listed again; loose food still is', () => {
+    const jerky = createItem(realData, 'jerky', { charges: 3 });
+    const rows = adaptEatRows([
+      { row: 'bottle', item: bottle, host: null },
+      { row: 'water', item: water, host: bottle },
+      { row: 'jerky', item: jerky, host: null },
+    ]);
+    expect(rows.map((r) => r.row)).toEqual(['bottle', 'jerky']);
+    expect(rows[1].label).toBe('meat jerky · 3 servings');
+  });
+});
+
+describe('rest window', () => {
+  it('says what tiredness means for sleeping now', () => {
+    expect(tirednessText('').tone).toBe('dim');
+    expect(tirednessText('').text).toMatch(/lie awake/);
+    expect(tirednessText('Tired').text).toMatch(/fall asleep soon/);
+    expect(tirednessText('Dead Tired').tone).toBe('warn');
+  });
+});
+
+describe('BN item light (light_emission)', () => {
+  it('a flashlight turned on shines; turned off it does not', () => {
+    expect(defLight(realData.items.flashlight_on)).toBeGreaterThan(0);
+    expect(itemLight(createItem(realData, 'flashlight_on', { ammo: 'default' }))).toBeGreaterThan(0);
+    expect(itemLight(createItem(realData, 'flashlight', { ammo: 'default' }))).toBe(0);
+  });
+  it('the smartphone flashlight app is a light too', () => {
+    expect(defLight(realData.items.smart_phone_flashlight)).toBe(20);
   });
 });

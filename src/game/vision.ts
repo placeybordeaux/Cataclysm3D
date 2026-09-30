@@ -120,10 +120,27 @@ export function fieldLight(game: Game, type: string, intensity: number): number 
   return v;
 }
 
-/** Luminance of an item that is currently shining (CDDA `light` on active tools). */
+/**
+ * The luminance an item type gives off. BN keeps it in `light_emission` (LIGHT_<n> flags are
+ * folded in by the extractor); the DDA-era `light` field no longer exists in the data, which
+ * left every flashlight dark on Bright Nights (found in the wave-3 first-night playtest).
+ */
+export function defLight(def: { light_emission?: number; light?: unknown } | undefined): number {
+  return Number(def?.light_emission ?? def?.light ?? 0);
+}
+
+/**
+ * item::getlight_emit: the type's light_emission (an "on" item is its own type, e.g.
+ * flashlight_on, so no active check), dimmed by CHARGEDIM below a fifth of the charge.
+ */
 export function itemLight(it: Item): number {
-  const l = Number(it.def?.light ?? 0);
-  return l > 0 && it.active ? l : 0;
+  let l = defLight(it.def);
+  if (l <= 0) return 0;
+  if (it.hasFlag('CHARGEDIM') && !it.hasFlag('USE_UPS')) {
+    const cap = it.ammoCapacity(), rem = it.ammoRemaining();
+    if (cap && rem < cap / 5) l *= (rem * 5) / cap;
+  }
+  return l;
 }
 
 const chunkLights = new WeakMap<Chunk, { version: number; list: LightSource[] }>();

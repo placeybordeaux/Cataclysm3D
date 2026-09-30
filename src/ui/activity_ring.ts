@@ -112,6 +112,9 @@ export function installActivityRing(game: Game, lastMessage: () => string | null
       lastKey = '';
     }
     prev = a;
+    // The interaction prompt ("[e] Go down the stairs") sits just under the crosshair where the
+    // ring is; while you're standing still at a job it's noise, so the ring hides it.
+    document.body.classList.toggle('act-ring-on', el.classList.contains('on'));
     if (mode === 'bar' || !visible()) {
       el.classList.remove('on');
       return;
