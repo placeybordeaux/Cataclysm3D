@@ -8,6 +8,7 @@ import { sfx } from '../audio/sfx';
 import { hasFlag } from '../world/registry';
 import { invalidateNaturalLight } from './vision';
 import { pryInfo, pryAttempt } from './pry';
+import { clockScale } from '../core/time';
 
 // Curtained windows, after BN iexamine::curtains and the terrain chains in
 // data/json/furniture_and_terrain/terrain-windows.json. BN encodes curtains purely as terrain:
@@ -88,7 +89,7 @@ export function applyCurtainMove(game: Game, x: number, y: number, z: number, m:
   return null;
 }
 
-/** Seconds a peek holds the curtains apart (BN's look-around mode, here a short activity). */
+/** Real seconds a peek holds the curtains apart (BN's look-around mode, here a short activity). */
 export const PEEK_SECONDS = 6;
 
 /**
@@ -114,7 +115,8 @@ export function peekThroughCurtains(game: Game, x: number, y: number, z: number)
   game.message('You carefully peek through the curtains.', 'c_light_gray');
   const started = game.activities.start({
     name: 'peeking through the curtains',
-    duration: PEEK_SECONDS,
+    // game time runs clockScale()× real time; a peek is for looking, so it lasts in real seconds
+    duration: PEEK_SECONDS * clockScale(),
     warp: 1,
     onComplete: letFall,
     onCancel: letFall,

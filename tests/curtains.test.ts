@@ -14,6 +14,7 @@ import { curtainMoves, curtainsClosed, hasCurtains, PEEK_SECONDS } from '../src/
 import { lineOfSight, naturalLightAt } from '../src/game/vision';
 import { windowState } from '../src/render/furniture/openings';
 import { hasFlag } from '../src/world/registry';
+import { clockScale } from '../src/core/time';
 
 const dir = path.join(__dirname, '../public/data');
 const load = (f: string) => JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8'));
@@ -146,7 +147,7 @@ describe('curtains: from inside', () => {
     run(game, WX, WY, 'peek');
     expect(log.at(-1)).toMatch(/peek through the curtains/);
     expect(game.map.opaque(WX, WY, 0)).toBe(false);
-    expect(game.activities.current?.spec.duration).toBe(PEEK_SECONDS);
+    expect(game.activities.current?.spec.duration).toBe(PEEK_SECONDS * clockScale());
     finish(game);
     expect(game.map.terAt(WX, WY, 0).id).toBe('t_curtains');
   });

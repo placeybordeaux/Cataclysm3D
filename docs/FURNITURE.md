@@ -293,6 +293,51 @@ wrecked from round 3):
 Views: `house:<level>[:<n>]` (0 kept, 1 dirty, 2 wrecked) and `wfurn:<id regex>[:<n>...]`
 (close-ups in wrecked houses) in `tools/look-views.js`; `cdda.buildingLevel(omtX, omtY)`.
 
+## Curtains (curtained windows you can work)
+
+User report: "there doesn't seem to be a way to open and close curtains, just the windows they
+are on". BN keeps curtains in terrain (`terrain-windows.json`):
+
+    t_curtains  --open-->  t_window_domestic  --open-->  t_window_open
+    (drawn, opaque)        (curtains open, shut)         (window open)
+                <--close--                    <--close--
+
+so `open` on `t_window_domestic` opens the *window* and `close` draws the *curtains*. Our `e`
+listed both as "Open/Close the window with curtains" and ran the first ("open") directly, so
+the curtains were unreachable. `src/game/curtains.ts` now names every step from the data (a step
+that changes `TRANSPARENT` moves the curtains, one that keeps it moves the window) and `e` on a
+curtained window opens a menu:
+
+| Where | Entries (BN iexamine::curtains, locked_object) |
+|---|---|
+| inside, curtains open | Close the curtains · Open/Close the window · Tear down the curtains |
+| inside, curtains drawn | Open the curtains · Peek through the curtains · Tear down the curtains |
+| outside | Examine ("the curtains are drawn on the inside…") or, with a PRY tool, Pry open (BN `pry`, `src/game/pry.ts`) |
+
+- Drawn curtains block sight and daylight straight from the data (`t_curtains` lacks
+  `TRANSPARENT`): monsters and you can't see through, the renderer's light map rebuilds on the
+  chunk version, and the gameplay daylight cache (`vision.ts`, 30 s) is invalidated on every
+  window change so the room darkens at once.
+- Peek parts the curtains for 6 s (an activity: moving ends it) and lets them fall back.
+- Tear down: 10 s, leaves `curtain_transform` (`t_window_no_curtains`) and 2 sheets, a stick,
+  a string and 4 nails, like BN.
+- The context menu (`o`, or right-click with a free cursor) lists the same tile actions for
+  any terrain/furniture in reach (`worldInteraction.ts`).
+- Sounds: a synthesized curtain swish with rings on the rod (`synth_curtain`), window slides use
+  CC-Sounds' window samples for every window type (not the wooden door).
+- The modelled window (`openings.ts windowState`) now keeps its curtains on `t_window_open` and
+  `t_window_bars_domestic`; a unit test checks the model draws curtains closed exactly when the
+  data blocks sight, for all 43 curtained terrains.
+- Saved with the terrain, so a save/load keeps them drawn.
+- Pry (`pry.ts`) also fixes locked doors: the old code read DDA's `prying`, which no BN terrain
+  has, so "Pry open" never appeared.
+
+Tests: `tests/curtains.test.ts`; real input: `tools/realinput.ts --only curtains` (and
+`--only smashsound` for docs/AUDIO.md). Shots (seed 1, evac shelter, GPU) in
+`docs/screenshots/wave3/curtains-sounds/`: open from inside with the new prompt, drawn (the room
+drops from Bright to Lit), drawn seen from outside, the window itself opened, a smashed door and
+window.
+
 ## Known gaps / next
 
 - Rooms are scanned 14 tiles around a chunk; a room bigger than that (warehouses) can pick
