@@ -69,10 +69,15 @@ function shooter(sys: MonsterSystem, m: Monster, d: Record<string, any>): Charac
 }
 
 /** Ammo the actor fires: its ammo_type item, else the gun's default ammo; null for ammo-less guns. */
-function ammoFor(sys: MonsterSystem, gun: ItemDef, d: Record<string, any>): ItemDef | null {
+function ammoFor(sys: MonsterSystem, gun: ItemDef, d: Record<string, any>, m?: Monster): ItemDef | null {
   const items = sys.game.data.items;
   if (typeof d.ammo_type === 'string' && items[d.ammo_type]) return items[d.ammo_type];
-  const t = asArray(gun.ammo).filter((a) => a && a !== 'NULL')[0];
+  const types = asArray(gun.ammo).filter((a) => a && a !== 'NULL');
+  // The monster's own starting ammo when it fits the gun (a light turret carries 9mmfmj, not the
+  // 9mm default): otherwise it would "click" empty with a full belt.
+  const carried = Object.keys((m?.type.starting_ammo as Record<string, number> | undefined) ?? {}).find((id) => types.includes(String(items[id]?.ammo_type)));
+  if (carried) return items[carried];
+  const t = types[0];
   const id = t ? defaultAmmoId(sys.game.data, t) : undefined;
   return id ? items[id] ?? null : null;
 }
@@ -145,7 +150,7 @@ export function gunActor(sys: MonsterSystem, m: Monster, sa: SpecialAttackState,
     m.busy = Math.max(m.busy, turnsToSeconds((typeof d.targeting_cost === 'number' ? d.targeting_cost : 100) / 100));
     return true;
   }
-  const ammo = ammoFor(sys, gun, d);
+  const ammo = ammoFor(sys, gun, d, m);
   const needsAmmo = asArray(gun.ammo).some((a) => a && a !== 'NULL') || !!d.ammo_type;
   const ammoKey = ammo?.id ?? String(d.ammo_type ?? '');
   const have = needsAmmo ? Math.min(st.ammo[ammoKey] ?? 0, typeof d.max_ammo === 'number' ? d.max_ammo : Infinity) : Infinity;

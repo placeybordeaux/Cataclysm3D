@@ -341,6 +341,8 @@ function installModelHooks(game: Game, renderer: Renderer, monsters: MonstersHan
       const e = inst.mats.subarray(i * 16, i * 16 + 16);
       return { x: e[12], y: e[14], h: e[13], parts: inst.rig.parts.map((q) => q.name) };
     };
+    /** The enemy-fire system (rounds in flight), for setup and checks. */
+    api.enemyFire = () => enemyFireOf(game);
     api.modelLift = (uid: number) => {
       const m = monsters.sys.active.find((q) => q.uid === uid);
       const inst = m && view.modelOf(m);

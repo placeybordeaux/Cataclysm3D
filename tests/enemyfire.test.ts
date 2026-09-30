@@ -124,6 +124,21 @@ describe('enemy rounds fly', () => {
   });
 });
 
+describe('monster ammo', () => {
+  it('a light turret fires its own starting ammo (9mmfmj) instead of clicking empty', () => {
+    const { game, sys, fire } = world();
+    const p = game.player;
+    const t = sys.spawnById('mon_turret_light', p.x + 3, p.y - 12, 0)!;
+    t.aggroCharacter = true;
+    let rounds = 0;
+    for (let i = 0; i < 30 * 12 && rounds === 0; i++) {
+      game.tick(1 / 30);
+      rounds = fire.rounds.length;
+    }
+    expect(rounds).toBeGreaterThan(0);
+  });
+});
+
 describe("the survivor's arrows hit NPCs", () => {
   it('an NPC (a follower too) in the line takes the arrow before the zombie behind', () => {
     const { game, sys, combat, input } = world();

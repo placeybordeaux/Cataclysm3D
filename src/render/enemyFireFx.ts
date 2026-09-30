@@ -15,7 +15,7 @@ const COLORS = { hot: 0xfff2b0, warm: 0xffb040, shaft: 0x5a3a1c, head: 0xd8d8d0,
 
 /** Per kind: dot count, streak length (m) and colour of each dot from the tail to the tip. */
 const LOOK: Record<EnemyRound['kind'], { n: number; len: number; col: (i: number, n: number) => number; px: number }> = {
-  bullet: { n: 7, len: 2.2, col: (i, n) => (i >= n - 2 ? COLORS.hot : COLORS.warm), px: 1.4 },
+  bullet: { n: 10, len: 3.2, col: (i, n) => (i >= n - 3 ? COLORS.hot : COLORS.warm), px: 2.2 },
   arrow: { n: 6, len: 0.75, col: (i, n) => (i === n - 1 ? COLORS.head : COLORS.shaft), px: 1.6 },
   stone: { n: 1, len: 0, col: () => COLORS.stone, px: 3 },
 };

@@ -339,6 +339,141 @@ export function aimScenarios(c: AimCtx): Scenario[] {
       await shot('wide_hit_line');
       await x().buttonUp(3);
     }],
+    ['combat3', 'combat round 3: melee picks the zombie you visibly hit in a crowd, with zones; enemy rounds fly and whizz past; cover stops them; first-fight hints', async () => {
+      await c.toGameplay();
+      const frozenShot = async (name: string) => {
+        await js('cdda.game.tacticalPause = true');
+        await shot(name);
+        await js('cdda.game.tacticalPause = false');
+      };
+      // --- a crowd of three at arm's length, a bat.
+      await js(SETUP('bat', 0, 1.1, 'sway'));
+      const uids = await js<number[]>(`(() => {
+        const g = cdda.game, p = g.player; const uids = [window.__uid];
+        for (const dx of [-0.75, 0.75]) uids.push(cdda.spawnMonster('mon_zombie', dx, -1.0));
+        const ms = uids.map((u) => g.monsters.all.find((m) => m.uid === u));
+        clearInterval(window.__pin);
+        const pos = ms.map((m) => [m.x, m.y]);
+        window.__crowd = ms;
+        window.__pin = setInterval(() => ms.forEach((m, i) => { if (!m.dead) { m.x = pos[i][0]; m.y = pos[i][1]; m.hp = 100000; m.attackCooldown = 5; m.windup = null; m.facing = Math.atan2(p.x - m.x, -(p.y - m.y)); } }), 16);
+        return uids;
+      })()`);
+      await sleep(700);
+      await js(`window.__hitUids = []; window.__hitOn || (window.__hitOn = cdda.game.events.on('playerAttack', (e) => e.kind === 'melee' && window.__hitUids.push({ uid: e.target?.uid ?? null, r: e.reason ?? '', o: e.outcome })))`);
+      const swingAt = async (uid: number, part: string) => {
+        await js(AIM_POINT(`cdda.modelPart(${uid}, '${part}')`));
+        await sleep(80);
+        await js('window.__hitUids = []');
+        await x().clickHere(1);
+        await sleep(700);
+        return js<{ uid: number | null; r: string; o: string }[]>('window.__hitUids');
+      };
+      const picks: string[] = [];
+      let right = 0;
+      for (const [i, part] of [[2, 'torso'], [1, 'torso'], [0, 'torso'], [2, 'torso'], [1, 'torso']] as const) {
+        const h = await swingAt(uids[i], part);
+        picks.push(`${i}:${h.map((e) => uids.indexOf(e.uid ?? -1)).join('/')}`);
+        if (h.length && h[0].uid === uids[i]) right++;
+      }
+      check('in a crowd of three, the swing hits the zombie under the crosshair', right === 5, picks);
+      const head = await swingAt(uids[0], 'head');
+      await frozenShot('melee_crowd_head');
+      check('a bat to the drawn head: HEAD ×1.5 on the crosshair', head.some((e) => /HEAD ×1\.5/.test(e.r)), head);
+      let legs: { r: string }[] = [];
+      for (let i = 0; i < 3 && !legs.length; i++) {
+        await js(AIM_POINT(`cdda.modelPart(${uids[1]}, 'shinL')`));
+        await js('cdda.game.player.pitch -= 0.02');
+        await js('window.__hitUids = []');
+        await x().clickHere(1);
+        await sleep(700);
+        legs = (await js<{ r: string }[]>('window.__hitUids')).filter((e) => /legs/.test(e.r));
+      }
+      check('a blow to the drawn legs: legs ×0.8 and it stumbles or goes down', legs.some((e) => /legs ×0\.8 · (stumbles|knocked down)/.test(e.r)), legs);
+      await js('clearInterval(window.__pin); cdda.clearMonsters(60)');
+
+      // --- enemy fire: a rifle turret 16 m off, god mode; its rounds fly (visible), miss, whizz past.
+      await js(SETUP('pistol', 0, 3, 'sway'));
+      await js(`(() => { clearInterval(window.__pin); cdda.clearMonsters(60); cdda.godMode(true);
+        window.__near = 0; window.__nearOn || (window.__nearOn = cdda.game.events.on('nearMiss', () => window.__near++));
+        window.__hurt = 0; window.__hurtOn || (window.__hurtOn = cdda.game.events.on('playerHurt', () => window.__hurt++));
+        const uid = cdda.spawnMonster('mon_turret_rifle', 3, -16); const m = cdda.game.monsters.all.find((q) => q.uid === uid); m.aggroCharacter = true; window.__turret = m; })()`);
+      await js(AIM_POINT('(() => { const m = window.__turret; return { x: m.x, y: m.y, h: 1.0 }; })()'));
+      let seen = 0, pausedShot = false;
+      const t0 = Date.now();
+      while (Date.now() - t0 < 9000) {
+        const n = await js<number>('cdda.enemyFire().rounds.length');
+        seen = Math.max(seen, n);
+        // Freeze with a round about half way (a streak you can see between it and you).
+        if (n > 0 && !pausedShot && (await js<boolean>('cdda.enemyFire().rounds.some((r) => r.s > 5 && r.s < 11)'))) {
+          await frozenShot('enemy_rounds_in_flight');
+          pausedShot = true;
+        }
+        await sleep(20);
+      }
+      const near = await js<number>('window.__near'), hurt = await js<number>('window.__hurt');
+      console.log(`    turret: rounds in the air at once (max) ${seen}, near misses ${near}, hits ${hurt}`);
+      if (!seen) console.log('    diag', await js<string>(`(() => { const m = window.__turret, g = cdda.game; return JSON.stringify({ dead: m.dead, active: g.monsters.active.includes(m), sees: m.seesPlayer, aggro: m.aggroCharacter, att: m.attitude(), friendly: m.friendly, clear: g.monsters.clearLine(m, g.player.x, g.player.y), specials: m.specials.map((s) => [s.def.id ?? s.def.type, +s.cooldown.toFixed(2)]), d: Math.hypot(m.x - g.player.x, m.y - g.player.y) }); })()`));
+      check('the turret\'s rounds are in the air (not hitscan)', seen > 0, seen);
+      check('some rounds hit, some visibly miss and whizz past (near-miss cue)', near > 0 && hurt > 0, { near, hurt });
+      // Behind cover: a wall between you and the turret stops every round.
+      await js(`(() => { const p = cdda.game.player, m = window.__turret; const d = Math.hypot(m.x - p.x, m.y - p.y);
+        const wx = p.x + (m.x - p.x) / d * 1.5, wy = p.y + (m.y - p.y) / d * 1.5;
+        window.__walls = [];
+        for (let i = -1; i <= 1; i++) { const x = Math.floor(wx) + i, y = Math.floor(wy); window.__walls.push([x, y, p.z, cdda.game.map.terAt(x, y, p.z).id]); cdda.game.map.setTer(x, y, p.z, 't_brick_wall'); }
+        window.__hurt = 0; window.__near = 0; })()`);
+      await sleep(5000);
+      const coverHurt = await js<number>('window.__hurt');
+      check('behind a wall, no round gets through', coverHurt === 0, coverHurt);
+      await js('cdda.clearMonsters(60); cdda.godMode(false); for (const [x, y, z, id] of window.__walls) cdda.game.map.setTer(x, y, z, id)');
+
+      // --- first-fight hints, as a new player: fresh hint state.
+      await js(`localStorage.removeItem('cdda3d.combatHints'); (() => { const r = cdda.combatHints.rules; r.state = { shown: {}, learned: {} }; r.current = null; })()`);
+      await js(SETUP('pistol', 0, 12, 'sway'));
+      await sleep(400);
+      await js(AIM);
+      const hint = () => js<string>(`(() => { const e = document.querySelector('.combat-hint'); return e && e.style.display !== 'none' ? e.textContent : ''; })()`);
+      await x().buttonDown(3);
+      let h1 = '';
+      for (let i = 0; i < 30 && !h1; i++) {
+        await sleep(50);
+        h1 = await hint();
+      }
+      await frozenShot('hint_sway');
+      if (!/sways/.test(h1)) console.log('    diag', await js<string>(`JSON.stringify({ hints: cdda.progression?.profile().options.hints, amp: cdda.aimState().ampDeg, target: !!cdda.combat.rangedTarget(35), rules: cdda.combatHints.rules.current, shown: cdda.combatHints.rules.state, rmb: cdda.game.input.mouseButtons })`));
+      check('first time aiming a gun at a zombie: "Your aim sways" by the crosshair', /sways/.test(h1), h1);
+      await sleep(3200);
+      await js(AIM);
+      let h2 = '';
+      for (let i = 0; i < 6 && !/head/.test(h2); i++) {
+        await js(AIM);
+        await x().clickHere(1);
+        await sleep(250);
+        h2 = await hint();
+        if (!/head/.test(h2)) await sleep(400);
+      }
+      if (/head/.test(h2)) await frozenShot('hint_headshot');
+      check('after a body hit: "Aim for the head"', /head/.test(h2), h2);
+      await x().buttonUp(3);
+      // Melee: a zombie winds up at arm's length.
+      await js(SETUP('bat', 0, 1.1, 'sway'));
+      await js(`(() => { clearInterval(window.__pin); const m = window.__m; m.attackCooldown = 0; })()`);
+      await js(AIM);
+      let h3 = '';
+      for (let i = 0; i < 80 && !/guard/.test(h3); i++) {
+        await sleep(40);
+        h3 = await hint();
+      }
+      if (/guard/.test(h3)) await frozenShot('hint_guard');
+      check('a zombie winding up at arm\'s length: "Hold right mouse: guard"', /guard/.test(h3), h3);
+      await x().buttonDown(3);
+      await sleep(150);
+      const after = await hint();
+      check('raising the guard clears the hint', !/guard/.test(after), after);
+      await x().buttonUp(3);
+      const shown = await js<Record<string, number>>('cdda.combatHints.rules.state.shown');
+      console.log('    hints shown', JSON.stringify(shown));
+      await js('cdda.clearMonsters(60)');
+    }],
     ['aimtiming', 'timing model by real input: hold breath with Shift while aiming (flash), active reload, bow release ring, melee beat', async () => {
       await c.toGameplay();
       // Screenshots need ~0.4 s, longer than a timing window: they're taken in a second pass with
