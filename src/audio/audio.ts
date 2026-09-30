@@ -301,14 +301,20 @@ export class AudioEngine {
     return this.playResolved(sound, opts);
   }
 
-  /** Last 64 sounds started, newest last (debugging / headless assertions). */
-  readonly history: { seq: number; t: number; id: string; variant: string; file: string; pos?: Vec3; bus: Bus }[] = [];
+  /**
+   * Last 64 sounds started, newest last (debugging / headless assertions). `outcome` says
+   * whether the sample actually reached the speakers: 'pending' while it loads, 'playing'
+   * once started, 'stale' when it arrived too late and was dropped, 'failed' on a load error.
+   * Real-input tests read this (cdda.audio.history) to prove a player action made a sound.
+   */
+  readonly history: { seq: number; t: number; id: string; variant: string; file: string; pos?: Vec3; bus: Bus; outcome: 'pending' | 'playing' | 'stale' | 'failed'; waitMs?: number }[] = [];
   /** Total sounds started so far; history entries carry their sequence number. */
   playSeq = 0;
 
   playResolved(sound: ResolvedSound, opts: PlayOptions = {}): Voice {
     const ctx = this.ctx;
-    this.history.push({ seq: ++this.playSeq, t: ctx.currentTime, id: sound.id, variant: sound.variant, file: sound.file, pos: opts.pos, bus: opts.bus ?? 'sfx' });
+    const entry = { seq: ++this.playSeq, t: ctx.currentTime, id: sound.id, variant: sound.variant, file: sound.file, pos: opts.pos, bus: opts.bus ?? 'sfx', outcome: 'pending' as 'pending' | 'playing' | 'stale' | 'failed', waitMs: undefined as number | undefined };
+    this.history.push(entry);
     if (this.history.length > 64) this.history.shift();
     const source = ctx.createBufferSource();
     const filter = ctx.createBiquadFilter();
@@ -344,13 +350,19 @@ export class AudioEngine {
 
     const requested = performance.now();
     const start = (buffer: AudioBuffer) => {
-      if (v.ended) return;
+      if (v.ended) {
+        entry.outcome = 'stale';
+        return;
+      }
       // stopped (e.g. an ambient bed crossfaded away) before its sample arrived
       if (v.fading || (!opts.loop && performance.now() - requested > STALE_MS)) {
         v.ended = true;
         this.voices.delete(v);
+        entry.outcome = 'stale';
         return;
       }
+      entry.outcome = 'playing';
+      entry.waitMs = Math.round(performance.now() - requested);
       source.buffer = buffer;
       this.spatialize(v, true, opts.fadeIn ?? 0);
       const when = ctx.currentTime + (opts.delay ?? 0);
@@ -361,6 +373,7 @@ export class AudioEngine {
     if (have) start(have);
     else this.loadBuffer(sound.file).then(start, (e) => {
       warnOnce('audio-load', sound.file, `audio: failed to load ${sound.file}: ${e}`);
+      entry.outcome = 'failed';
       v.ended = true;
       this.voices.delete(v);
     });

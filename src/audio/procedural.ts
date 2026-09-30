@@ -156,6 +156,40 @@ const GENERATORS: Record<string, Gen> = {
     mix(x, env(bandpass(noise(buf(sr, 0.1), rnd), sr, 900, 2), sr, 0.001, 0.015), 0.4);
     return normalize(x, 0.85);
   },
+  // Cloth, curtains, tents, bushes giving way (BN "rrrrip!", "whish.", "brush."): a tearing
+  // crackle of bright noise, no body. CC-Sounds has nothing soft, and a thud reads as wood.
+  smash_soft(sr, rnd) {
+    const sec = 0.3 + rnd() * 0.2, x = bandpass(noise(buf(sr, sec), rnd), sr, 2200 + rnd() * 1500, 0.8);
+    // fibres snapping: jagged amplitude, dense at the start
+    let g = 0;
+    for (let i = 0; i < x.length; i++) {
+      if (i % 64 === 0) g = rnd() < 0.55 * (1 - i / x.length) + 0.15 ? 0.4 + rnd() * 0.6 : 0.08;
+      x[i] *= g;
+    }
+    env(x, sr, 0.004, sec * 0.45);
+    return normalize(x, 0.8);
+  },
+  // Wet and organic (BN "splorch!", "splat!", "squelch."): a low slap with a falling formant.
+  smash_wet(sr, rnd) {
+    const x = env(lowpass(noise(buf(sr, 0.35), rnd), sr, (i) => 1400 * Math.exp(-i / (sr * 0.08)) + 200), sr, 0.002, 0.07);
+    mix(x, env(bandpass(noise(buf(sr, 0.2), rnd), sr, 500 + rnd() * 200, 4), sr, 0.003, 0.04), 1.5, Math.round(sr * 0.02));
+    return normalize(x, 0.85);
+  },
+  // Curtains pulled along a rod: a fabric swish with the rings ticking along the rail.
+  // Open and close use different seeds so drawing them back and forth isn't one sample.
+  curtain(sr, rnd) {
+    const sec = 0.55 + rnd() * 0.15, x = bandpass(noise(buf(sr, sec), rnd), sr, 1600 + rnd() * 800, 0.7);
+    for (let i = 0; i < x.length; i++) {
+      const t = i / x.length;
+      x[i] *= Math.sin(Math.PI * Math.min(1, t * 1.15)) ** 1.5 * 0.5;
+    }
+    const rings = 5 + Math.floor(rnd() * 4);
+    for (let k = 0; k < rings; k++) {
+      const tick = env(partials(sr, 0.05, 3200 + rnd() * 1800, [1, 1.7, 2.9], 0.012, rnd), sr, 0.0005, 0.008);
+      mix(x, tick, 0.35 + rnd() * 0.25, Math.round(sr * (0.03 + (k / rings) * sec * 0.8 + rnd() * 0.02)));
+    }
+    return normalize(x, 0.7);
+  },
   metal_door_slam(sr, rnd) {
     const x = env(lowpass(noise(buf(sr, 0.9), rnd), sr, 200), sr, 0.002, 0.07);
     mix(x, partials(sr, 0.9, 180 + rnd() * 40, [1, 2.1, 3.3, 5.2], 0.25, rnd), 0.35);
@@ -391,8 +425,15 @@ export const SYNTH_EFFECTS: SoundEffectDef[] = [
   { id: 'melee_hit_metal', variants: ['default'], volume: 90, files: files('melee_metal', 3) },
   { id: 'smash_success', variants: ['default'], volume: 90, files: files('smash_break', 3) },
   { id: 'smash_fail', variants: ['default'], volume: 90, files: files('smash_thud', 3) },
+  // soft / wet bash materials (src/audio/bashSounds.ts); the fail is the same sound, quieter
+  { id: 'smash_success', variants: ['soft'], volume: 80, files: files('smash_soft', 3) },
+  { id: 'smash_fail', variants: ['soft'], volume: 55, files: files('smash_soft', 3) },
+  { id: 'smash_success', variants: ['wet'], volume: 85, files: files('smash_wet', 3) },
+  { id: 'smash_fail', variants: ['wet'], volume: 65, files: files('smash_wet', 3) },
   { id: 'close_door', variants: ['t_door_metal_o', 'metal'], volume: 80, files: files('metal_door_slam', 2) },
   { id: 'synth_door_locked', variants: ['default'], volume: 70, files: files('door_locked', 2) },
+  { id: 'synth_curtain', variants: ['open', 'default'], volume: 60, files: files('curtain', 2) },
+  { id: 'synth_curtain', variants: ['close'], volume: 60, files: [`${SYNTH_PREFIX}curtain/2`, `${SYNTH_PREFIX}curtain/3`] },
   { id: 'synth_growl', variants: ['default'], volume: 80, files: files('growl', 4) },
   { id: 'synth_monster_step', variants: ['default'], volume: 50, files: files('shuffle', 4) },
   { id: 'synth_heartbeat', variants: ['default'], volume: 80, files: files('heartbeat', 1) },

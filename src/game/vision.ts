@@ -245,6 +245,10 @@ function sourceLight(game: Game, s: LightSource, x: number, y: number, z: number
 // ------------------------------------------------------------------ light at a tile
 
 const naturalCache = new WeakMap<Game, Map<string, { v: number; t: number }>>();
+/** Forget cached daylight: a window was covered or uncovered (curtains, a door, a smashed wall). */
+export function invalidateNaturalLight(game: Game): void {
+  naturalCache.delete(game);
+}
 const NATURAL_TTL = 30; // game seconds
 
 /** Natural (sun/moon) light reaching a tile, including light through windows indoors. */

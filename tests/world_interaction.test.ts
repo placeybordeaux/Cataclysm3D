@@ -243,7 +243,9 @@ describe('examine / doors', () => {
     expect(openDoor(game, 4, 9, 0)).toMatch(/from outside/);
     place(game, 5, 9);
     const ids = interactionsAt(game, 4, 9, 0).map((i) => i.id);
-    expect(ids).toContain('open');
+    // (tests/curtains.test.ts covers curtains vs window in detail)
+    expect(ids).toContain('window_open');
+    expect(ids).toContain('curtains_close');
     expect(ids).toContain('tear_curtains');
   });
 
