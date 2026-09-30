@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { setupPixelTexture } from './atlas';
 import { normalOutputChunk } from './materials';
 import type { TileFrame } from './textureSource';
+import { bowFrame, type DrawnKind } from './bowArt';
 
 // Doom/Daggerfall-style first-person view of the wielded item.
 //
@@ -22,6 +23,19 @@ import type { TileFrame } from './textureSource';
 // the hands when you're hit, `reload()` dips the gun for the reload time, `ads` centres it.
 
 export type AttackKind = 'melee' | 'fire' | 'throw' | 'sweep';
+
+/** What PlayerCombat.bowPose reports for drawn / whirled weapons. */
+export interface BowPose {
+  style: 'draw' | 'whirl' | 'trigger';
+  cls: string;
+  draw: number;
+  nocked: boolean;
+  shake: number;
+  whirl: number;
+}
+
+/** Draw stages pre-rendered per drawn weapon (the displayed draw snaps to the nearest). */
+const BOW_STAGES = 7;
 
 export interface ViewmodelItem {
   typeId: string;
@@ -306,6 +320,16 @@ export class Viewmodel {
   private lastPose: [number, number, number] = [0, 0, 0];
   /** Brief light for muzzle flashes (renderer wires this to a mode:'point' light). */
   onMuzzleFlash: ((seconds: number) => void) | null = null;
+  /**
+   * Draw state of a bow / slingshot / sling (PlayerCombat.bowPose, wired by feel.ts): bows and
+   * slingshots are drawn procedurally (render/bowArt.ts) instead of the item icon held like a gun.
+   */
+  bowSource: (() => BowPose | null) | null = null;
+  private bow: { key: string; part: Part; tex: THREE.CanvasTexture[]; meta: { grip: { x: number; y: number }; head: { x: number; y: number } }[] } | null = null;
+  /** Release kick of a bow (s left), and a displayed draw that eases (the string snaps back fast). */
+  private bowKick = 0;
+  private bowDraw = 0;
+  private shakeT = 0;
 
   constructor() {
     this.scene.name = 'viewmodel';
@@ -386,13 +410,26 @@ export class Viewmodel {
   }
 
   /** Gun kick scaled by the shot's recoil (1 = a typical pistol round). */
-  recoil(k: number): void {
+  recoil(k: number, o: { flash?: boolean; cls?: string } = {}): void {
     this.frozen = false;
-    const a = Math.max(0.4, Math.min(2.2, k));
+    // A drawn bow/slingshot: the string snaps forward and the bow jumps in the hand.
+    if (this.bow && this.bowSource?.()?.style === 'draw') {
+      this.bowKick = 0.22;
+      this.bowDraw = 0;
+      return;
+    }
+    // A sling: the whirling hand throws forward.
+    if (o.cls === 'sling') {
+      this.attack('throw');
+      return;
+    }
+    const a = Math.max(0.15, Math.min(2.2, k));
     this.anim = {
       kind: 'fire', t: 0, dur: 0.16 + 0.08 * a, hand: 1,
       keys: [[0, 0, 0, 0, 1], [0.1, 0.02 * a, 0.045 * a, 0.12 * a, 1], [0.35, 0.012 * a, 0.03 * a, 0.07 * a, 1], [1, 0, 0, 0, 1]],
     };
+    // Only burning powder flashes (rangedfeel.hasMuzzleFlash): a crossbow or air rifle just kicks.
+    if (o.flash === false) return;
     this.flashT = 0.06;
     this.onMuzzleFlash?.(0.08);
   }
@@ -405,10 +442,83 @@ export class Viewmodel {
   }
 
   /** Lower the gun out of view and bring it back over the reload time. */
-  reload(seconds: number): void {
+  reload(seconds: number, how: 'dip' | 'crank' = 'dip'): void {
     this.frozen = false;
     const d = Math.max(0.35, seconds);
+    if (how === 'crank') {
+      // A crossbow tipped nose-down and cranked: the stock rocks with each turn of the handle.
+      const keys: Key[] = [[0, 0, 0, 0, 1], [0.15, 0.02, -0.16, 0.9, 1]];
+      const turns = Math.max(3, Math.round(d * 4));
+      for (let i = 1; i <= turns; i++) keys.push([0.15 + (0.7 * i) / turns, 0.02 + (i % 2 ? 0.015 : -0.01), -0.16 + (i % 2 ? -0.02 : 0.015), 0.9, 1]);
+      keys.push([1, 0, 0, 0, 1]);
+      this.anim = { kind: 'fire', t: 0, dur: d, hand: 1, keys };
+      return;
+    }
     this.anim = { kind: 'fire', t: 0, dur: d, hand: 1, keys: [[0, 0, 0, 0, 1], [0.22, 0.05, -0.3, -0.45, 1], [0.78, 0.05, -0.3, -0.45, 1], [1, 0, 0, 0, 1]] };
+  }
+
+  /** Pre-render the drawn weapon's stages (bowArt.ts) for this low-res height. */
+  private buildBow(kind: DrawnKind, lowH: number): void {
+    const key = `${kind}:${lowH}`;
+    if (this.bow?.key === key) return;
+    this.disposeBow();
+    // Smaller hands than the gun grip: a bow is held at arm's length, and a big fist would hide the arrowhead.
+    const hs = Math.max(2, Math.round(Viewmodel.handScale(lowH) * 0.6));
+    const hand = upscale(handCanvas(18), hs);
+    const tex: THREE.CanvasTexture[] = [];
+    const meta: { grip: { x: number; y: number }; head: { x: number; y: number } }[] = [];
+    let part: Part | null = null;
+    for (const nocked of [true, false]) {
+      for (let i = 0; i < BOW_STAGES; i++) {
+        const f = bowFrame(kind, lowH, i / (BOW_STAGES - 1), nocked, hand, hs);
+        if (!part) part = this.makePart(f.canvas, f.grip.x, f.grip.y);
+        const t = i === 0 && nocked ? (part.mat.uniforms.map.value as THREE.CanvasTexture) : new THREE.CanvasTexture(f.canvas);
+        if (t !== part.mat.uniforms.map.value) setupPixelTexture(t);
+        tex.push(t);
+        meta.push({ grip: f.grip, head: f.head });
+      }
+    }
+    this.bow = { key, part: part!, tex, meta };
+  }
+
+  private disposeBow(): void {
+    if (!this.bow) return;
+    const shown = this.bow.part.mat.uniforms.map.value;
+    for (const t of this.bow.tex) if (t !== shown) t.dispose();
+    this.disposePart(this.bow.part);
+    this.bow = null;
+  }
+
+  /**
+   * A drawn weapon, per frame: canted low at rest, rising as the draw grows until at full draw
+   * the arrowhead sits just under the crosshair; a shake when the arms tire; a jump on release.
+   */
+  private placeBow(dt: number, pose: BowPose, lowW: number, lowH: number, bobX: number, bobY: number): void {
+    const b = this.bow!;
+    // The string follows the draw; after a release it snaps back at once (bowDraw was zeroed).
+    this.bowDraw += (pose.draw - this.bowDraw) * Math.min(1, dt * 18);
+    if (pose.draw < this.bowDraw) this.bowDraw = pose.draw;
+    this.bowKick = Math.max(0, this.bowKick - dt);
+    const d = this.bowDraw;
+    const stage = Math.round(d * (BOW_STAGES - 1));
+    const idx = (pose.nocked && this.bowKick <= 0.12 ? 0 : BOW_STAGES) + stage;
+    b.part.mat.uniforms.map.value = b.tex[idx];
+    const m = b.meta[idx];
+    const rot = -0.2 * (1 - d) - 0.04 * d;
+    // Where the grip goes so the arrowhead meets the crosshair (just under it) at full draw.
+    const hx = m.head.x - m.grip.x, hy = -(m.head.y - m.grip.y);
+    const c = Math.cos(rot), s = Math.sin(rot);
+    const aimX = lowW * 0.5 - lowH * 0.015 - (hx * c - hy * s), aimY = lowH * 0.5 - lowH * 0.04 - (hx * s + hy * c);
+    const restX = lowW * 0.5 - lowH * 0.16, restY = lowH * 0.36;
+    this.shakeT += dt;
+    const shake = pose.shake * lowH * 0.006;
+    const kick = this.bowKick > 0 ? Math.sin((this.bowKick / 0.22) * Math.PI) * lowH * 0.025 : 0;
+    // bobX/bobY already carry the knock from being hit (jolt).
+    const x = restX + (aimX - restX) * ease(d) + (bobX + this.sway) * lowH * (1 - 0.7 * d) + Math.sin(this.shakeT * 37) * shake;
+    const y = restY + (aimY - restY) * ease(d) + bobY * lowH * (1 - 0.7 * d) + Math.cos(this.shakeT * 29) * shake + kick;
+    b.part.mesh.visible = this.enabled;
+    b.part.mesh.position.set(Math.round(x), Math.round(y), 0);
+    b.part.mesh.rotation.z = rot - (this.bowKick > 0 ? 0.05 * Math.sin((this.bowKick / 0.22) * Math.PI) : 0);
   }
 
   /** Raise the weapon (or both fists) to block; never cuts a swing short. */
@@ -553,6 +663,28 @@ export class Viewmodel {
 
     const [fl, fr] = this.fists!;
     const g = this.guardBlend;
+    // Bows and slingshots: the procedural drawn weapon instead of the icon held like a gun.
+    const bowPose = wielded ? this.bowSource?.() ?? null : null;
+    const drawn: DrawnKind | null = bowPose?.style === 'draw' ? (bowPose.cls === 'bow' ? 'bow' : 'slingshot') : null;
+    if (drawn) {
+      this.buildBow(drawn, lowH);
+      if (this.weapon) this.weapon.mesh.visible = false;
+      fl.mesh.visible = fr.mesh.visible = false;
+      this.flash!.mesh.visible = false;
+      this.placeBow(dt, bowPose!, lowW, lowH, bobX, bobY);
+      return;
+    }
+    if (this.bow) this.bow.part.mesh.visible = false;
+    // A sling whirls overhead while the release builds (the hand circles, the sling spins).
+    if (bowPose?.style === 'whirl' && bowPose.whirl > 0 && this.weapon && !this.anim) {
+      const w = bowPose.whirl * 15;
+      const wx = lowW * 0.5 + lowH * (0.3 + Math.cos(w) * 0.05 + bobX);
+      const wy = lowH * (0.3 + Math.sin(w) * 0.05 + bobY);
+      place(this.weapon, wx, wy, w, true);
+      fl.mesh.visible = fr.mesh.visible = false;
+      this.flash!.mesh.visible = false;
+      return;
+    }
     if (this.weapon) {
       const a = this.anim ? pose(this.anim.keys, this.anim.t) : { dx: GUARD_POSE[0] * g, dy: GUARD_POSE[1] * g, rot: GUARD_POSE[2] * g, vis: true };
       this.lastPose = [a.dx, a.dy, a.rot];

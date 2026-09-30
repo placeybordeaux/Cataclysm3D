@@ -429,7 +429,8 @@ export class MonsterView implements GameSystem {
     for (const h of this.tracerSprites) h.remove();
     this.tracerSprites.length = 0;
     const tracers = this.combat?.tracers ?? [];
-    const shots = this.combat?.shots ?? 0;
+    // Only burning powder lights the room: bows, slings, crossbows and air guns don't flash.
+    const shots = this.combat?.flashShots ?? 0;
     if (shots > this.lastShots) {
       this.muzzle ??= this.renderer.lights.add({ x: p.x, y: p.y, z: p.z, color: 0xffd080, intensity: 2, radius: 8, height: 1.4 });
       this.muzzle.set(p.x, p.y, p.z);

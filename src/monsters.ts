@@ -8,6 +8,7 @@ import { Spawner, type OvermapView } from './game/spawner';
 import { PlayerCombat, type ViewModelHook } from './game/playercombat';
 import { MELEE_AIM, MonsterView, NEAR_CLAMP } from './render/monsterView';
 import { HitFx } from './render/hitFx';
+import { ArrowFx } from './render/arrowFx';
 import { butcherPracticeCap, butcherSeconds, butcherToolQuality, butcherYield, type ButcherKind, canDissect, dissectPracticeCap, dissectSeconds, dissectToolMessage, dissectToolQuality, dissectYield, readDissectables } from './game/butchery';
 import { monsterSize, type Monster } from './game/monster';
 import { createItem, loadAmmo, type Item } from './game/item';
@@ -72,7 +73,8 @@ export function installMonsters(game: Game, renderer: Renderer | null, worldgen:
     game.systems.push(view);
     combat.viewmodel = () => (renderer as unknown as { viewmodel?: ViewModelHook }).viewmodel;
     const fx = new HitFx(game, renderer, view);
-    if (api) Object.assign(api, { hitFx: fx, nearClamp: NEAR_CLAMP, meleeAim: MELEE_AIM });
+    const arrows = new ArrowFx(game, renderer, combat, sys, view);
+    if (api) Object.assign(api, { hitFx: fx, arrowFx: arrows, nearClamp: NEAR_CLAMP, meleeAim: MELEE_AIM });
   }
   (game as unknown as { monsters: MonsterSystem }).monsters = sys;
 

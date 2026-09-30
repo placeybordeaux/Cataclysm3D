@@ -5,7 +5,10 @@ import type { MonstersHandle } from './monsters';
 import type { Character } from './game/character';
 import { createItem, defaultLoad, loadAmmo, type Item } from './game/item';
 import { L, spawnOnGround } from './game/moves';
-import { aimState, meleeHooks } from './game/combat';
+import { aimState, dispersionBreakdown, meleeHooks } from './game/combat';
+import { drawStyle, effectiveRange, strDrawRangeMod } from './game/rangedfeel';
+import { FEEL } from './game/combatfeel';
+import { modSum } from './game/gunmods';
 import { bodyMods } from './game/bodymods';
 import {
   activeBuffSummary, autolearnStyles, currentStyle, learnStyle, maOf, maWorld, selectStyle, styleBuffs, styleDef, styleWeaponValid,
@@ -184,7 +187,26 @@ export function installCombatDepth(game: Game, renderer: Renderer | null, monste
           const aiming = (game.input.mouseButtons & 4) !== 0;
           const lvl = aimState(p, w);
           const col = { Immediate: 'c_light_gray', Regular: 'c_yellow', Careful: 'c_light_green', Precise: 'c_light_cyan' }[lvl];
-          if (aiming || lvl !== 'Immediate') html = `<span style="color:${cssColor(col)}">${lvl}</span>`;
+          const style = drawStyle(w);
+          const d = combat.draw;
+          const parts: string[] = [];
+          // Bows: the draw comes first (aim only builds at full draw), then the aim level.
+          if (style !== 'trigger' && d && d.t < d.full) parts.push(`<span style="color:${cssColor('c_yellow')}">${style === 'whirl' ? 'Whirling…' : 'Drawing…'}</span>`);
+          else if (aiming || lvl !== 'Immediate' || d) parts.push(`<span style="color:${cssColor(col)}">${lvl}</span>`);
+          if (d && d.style === 'draw' && d.t >= d.full && d.heldFull > FEEL.drawHoldSteady) parts.push(`<span style="color:${cssColor('c_light_red')}">arms shaking</span>`);
+          // Distance to what's under the crosshair against the range and the distance at which
+          // your current spread still lands on a body (rangedfeel.effectiveRange).
+          if (aiming || d) {
+            const t = combat.rangedTarget(60);
+            if (t) {
+              const range = Math.max(1, gunRange(w, p));
+              const eff = effectiveRange(dispersionBreakdown(p, w), t.m.radius);
+              const far = t.dist > range ? 'c_light_red' : t.dist > eff ? 'c_yellow' : 'c_light_green';
+              const effTxt = t.dist > range ? `out of range (${Math.round(range)} m)` : `likely hit ≤ ${eff >= 99 ? '99+' : Math.max(1, Math.round(eff))} m`;
+              parts.push(`<span style="color:${cssColor(far)}">${Math.round(t.dist)} m · ${effTxt}</span>`);
+            }
+          }
+          html = parts.join(' ');
           if (isJammed(w)) html += ` <span style="color:${cssColor('c_red')}">JAMMED</span>`;
         }
         if (html !== last) {
@@ -197,6 +219,13 @@ export function installCombatDepth(game: Game, renderer: Renderer | null, monste
   }
 
   if (api) installDebug(api, game, monsters);
+}
+
+/** A gun's range with what it has loaded (or would nock), as fireGun computes it, in tiles. */
+function gunRange(w: Item, p: Character): number {
+  // An empty bow has no ammo data: arrows add no range of their own, so the bow's is right.
+  const ammo = w.ammoData();
+  return ((ammo?.range ?? 0) + (w.def.range ?? 0) + modSum(w, 'range_modifier')) * strDrawRangeMod(w, p) || 30;
 }
 
 // ------------------------------------------------------------------ martial arts menu

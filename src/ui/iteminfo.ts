@@ -3,6 +3,7 @@ import { ALL_PARTS, BODY_PARTS, type BodyPartId } from '../game/bodyparts';
 import { armorPortion, covers, materialIds } from '../game/inventory';
 import { asArray, type Item } from '../game/item';
 import { cddaText } from '../game/units';
+import { drawStyle, rangedClass, strRequirementLine } from '../game/rangedfeel';
 import { c, colorize } from './framework';
 import { durationText, kg, liters } from './format';
 
@@ -117,6 +118,14 @@ export function itemInfo(it: Item, who: Character): string {
     const types = it.ammoTypes();
     if (types.length) L.push(`Ammunition: ${c('c_yellow', types.join(', '))}   Loaded: ${num(it.ammoRemaining())}/${num(it.ammoCapacity())}`);
     if (d.skill) L.push(`Skill used: ${c('c_cyan', who.skillName(d.skill))}`);
+    // BN item::info BASE_REQUIREMENTS for STR_DRAW bows: what drawing it takes and what a weak
+    // draw costs (rangedfeel.ts strRequirementLine), plus how it's worked.
+    const str = strRequirementLine(it, who);
+    if (str) L.push(c(str.color, str.text));
+    const style = drawStyle(it);
+    if (style === 'draw') L.push(c('c_light_gray', 'Hold RMB to draw and aim, LMB to loose. Arrows can be picked up again unless they break.'));
+    else if (style === 'whirl') L.push(c('c_light_gray', 'LMB whirls and slings; hold RMB to aim first. Stones can be picked up again.'));
+    else if (rangedClass(it) === 'crossbow') L.push(c('c_light_gray', 'Crank a bolt in with reload; bolts can be picked up again unless they break.'));
   } else if (it.isMagazine()) {
     L.push(SEP);
     L.push(`Capacity: ${num(it.ammoCapacity())} rounds of ${c('c_yellow', it.ammoTypes().join(', '))}   Loaded: ${num(it.ammoRemaining())}`);
