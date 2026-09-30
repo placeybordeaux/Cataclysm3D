@@ -366,7 +366,10 @@ export function paletteOf(f: TileFrame): Palette | null {
     const ramp: Ramp4 = leaf.length > 8
       // brightened: the sprite's colours are drawn with its own shading baked in, while the
       // model gets real (toon) shading on top; unbrightened, crowns read dark olive
-      ? [darken(at(leaf, 0.2), 0.85), brighten(at(leaf, 0.45), 1.12), brighten(at(leaf, 0.75), 1.2), brighten(at(leaf, 0.96), 1.3)]
+      // Lifted in value, not in hue: multiplying sRGB channels pushes a green with some red
+      // toward yellow (round 4's sun side read as yellow), so the top steps lift luminance and
+      // pull red back toward the mid tone's red/green ratio.
+      ? [darken(at(leaf, 0.2), 0.85), brighten(at(leaf, 0.45), 1.08), cool(brighten(at(leaf, 0.75), 1.12), at(leaf, 0.45)), cool(brighten(at(leaf, 0.96), 1.18), at(leaf, 0.45))]
       : [[26, 40, 20], [52, 78, 34], [78, 108, 46], [118, 146, 64]];
     const barkC: RGB = bark.length ? at(bark, 0.5) : [70, 52, 38];
     const q = (c: RGB) => c.map((v) => Math.round(v / 20)).join('.');
@@ -376,6 +379,14 @@ export function paletteOf(f: TileFrame): Palette | null {
   return out;
 }
 const darken = (c: RGB, k: number): RGB => [c[0] * k, c[1] * k, c[2] * k];
+/** Keep c's value but give it `ref`'s red/green balance where c is redder (less yellow). */
+const cool = (c: RGB, ref: RGB): RGB => {
+  const rg = ref[0] / Math.max(1, ref[1]);
+  const d: RGB = c[0] / Math.max(1, c[1]) > rg ? [c[1] * rg * 1.04, c[1], c[2]] : c;
+  // and a little less chroma: toon light (warm sun) plus leaf glow saturate it again
+  const l = 0.3 * d[0] + 0.59 * d[1] + 0.11 * d[2];
+  return [l + (d[0] - l) * 0.8, l + (d[1] - l) * 0.8, l + (d[2] - l) * 0.8];
+};
 const brighten = (c: RGB, k: number): RGB => [Math.min(255, c[0] * k), Math.min(255, c[1] * k), Math.min(255, c[2] * k)];
 
 // --- geometry ----------------------------------------------------------------------------
@@ -722,7 +733,7 @@ if (vFolDist < 2.0) {
   int bm[16] = int[16](0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5);
   if ((float(bm[bi.x + bi.y * 4]) + 0.5) / 16.0 >= smoothstep(0.9, 2.0, vFolDist)) discard;
 }`)
-      .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance += diffuseColor.rgb * (uLeafGlow * 0.6 + uSunC * vFolTrans * 0.3);');
+      .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance += diffuseColor.rgb * (uLeafGlow * 0.45 + uSunC * vFolTrans * 0.25);');
   };
   m.customProgramCacheKey = () => 'cdda-foliage';
   (m.userData as { mrt?: boolean }).mrt = true;
