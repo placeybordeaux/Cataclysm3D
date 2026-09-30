@@ -28,6 +28,7 @@ import { GrassLayer } from './grass';
 import { buildTreesSteps, leafGlow, leafSun } from './trees';
 import { SkylineLayer } from './skyline';
 import { VoxelFactory } from './voxel';
+import { ModelFactory, furnitureState } from './furniture';
 import { frameStats } from '../perfDebug';
 
 export { CDDA_COLORS, cddaColor } from './colors';
@@ -77,6 +78,7 @@ export class Renderer {
   /** Dense 3D grass cards (look `grass`). */
   readonly grass: GrassLayer;
   private readonly voxels = new VoxelFactory();
+  readonly models = new ModelFactory();
   private readonly tmpV = new THREE.Vector3();
   /** Distant silhouettes from the overmap (look `skyline`); lookInstall gives it the overmap. */
   readonly skyline = new SkylineLayer();
@@ -161,6 +163,7 @@ export class Renderer {
     this.pipeline = new PixelPipeline(this.three, { targetHeight: o.targetHeight, grade: o.grade, ...(o.dither ? { ditherAnchor: o.dither } : {}) });
     this.rig.mode = o.camera!;
     this.procedural = new ProceduralTextureSource(game.data);
+    this.models.itemDefs = game.data.items;
     this.source = this.procedural;
     this.sprites = new SpriteLayer(() => this.source);
     this.chunks = new ChunkManager(game.map, this.sprites, this.source);
@@ -171,7 +174,7 @@ export class Renderer {
     this.chunks.extraObjects = (data) => (data.trees ? buildTreesSteps(data.trees, this.ground.active ? this.ground : null, this.procedural, this.whiteFrame()) : noTrees());
     this.chunks.extras = (near) => {
       if (look.name === 'classic') return undefined;
-      return { f: look.f, ground: this.ground.active ? this.ground : null, white: this.whiteFrame(), near, voxels: this.voxels, arch: look.f.archDetail ? this.archFrames() : undefined };
+      return { f: look.f, ground: this.ground.active ? this.ground : null, white: this.whiteFrame(), near, voxels: this.voxels, arch: look.f.archDetail ? this.archFrames() : undefined, models: furnitureState.style === 'model' ? this.models : undefined };
     };
     this.sprites.skyVisAt = (x, y, z) => (this.chunks.covered(Math.floor(x), Math.floor(y), Math.round(z)) ? INDOOR_SKY : 1);
     this.decor = new DecorLayer(() => this.source);

@@ -14,6 +14,7 @@ import { frameAverage } from './framePixels';
 import type { VoxelProps } from './voxel';
 import { runSteps } from './steps';
 import { isBareTree, type TreeSpec } from './trees';
+import type { ModelFactory } from './furniture';
 
 // Builds the static geometry of one chunk at one z-level: merged quads grouped by texture
 // page (one draw call per page), plus the billboards the chunk contributes. Light sources
@@ -65,6 +66,8 @@ export interface ChunkMeshData {
   puddles?: GeomBuilder;
   /** look `trees3d`: trees/shrubs to build as trunk + leaf clumps (trees.ts) */
   trees?: TreeSpec[];
+  /** modelled furniture: see-through glass quads (furniture/glass.ts material) */
+  glass?: GeomBuilder;
 }
 
 /** Optional per-look inputs (look.ts); absent = the classic mesh. */
@@ -78,6 +81,8 @@ export interface MeshExtras {
   voxels?: VoxelProps;
   /** Chunk is near the player: expensive volumes (3D trees, voxel props) only here. */
   near: boolean;
+  /** furniture style 'model' (furniture/): modelled pieces replace voxels and billboards */
+  models?: ModelFactory;
 }
 
 const SHAPES: TerrainShape[] = ['none', 'floor', 'liquid', 'wall', 'halfwall', 'window', 'door', 'door_open', 'fence', 'tree', 'shrub', 'stairs_up', 'stairs_down'];
@@ -145,6 +150,9 @@ export function* buildChunkMeshSteps(
   const G = extras?.ground && extras.ground.active ? extras.ground : null;
   const trees: TreeSpec[] = [];
   const pud = { g: undefined as GeomBuilder | undefined };
+  const glassB = { g: undefined as GeomBuilder | undefined };
+  const glassGeo = () => (glassB.g ??= new GeomBuilder());
+  const MD = LF?.voxelProps ? extras?.models : undefined;
   const A = LF?.archDetail ? extras?.arch : undefined;
   // pitched roofs: shingle/thatch/tile roof regions get a hipped roof (arch.ts)
   const pitched = (tx: number, ty: number) => PITCHED.test(terDefs[here.ter(tx, ty)].id);
@@ -417,7 +425,9 @@ export function* buildChunkMeshSteps(
           // sill and lintel as full-depth blocks so the window reads as a hole in a thick wall
           g.box(x, base, y, x + 1, base + SILL_H, y + 1, faces | 4, side, cap, base, 1);
           g.box(x, base + DOOR_H, y, x + 1, base + WALL_TOP, y + 1, faces | 8, side, cap, base, 1);
-          paneQuads(geo(pane), x, y, alongX, base + SILL_H, base + DOOR_H, pane, base + SILL_H);
+          // modelled look: real glass / shards / curtains instead of the textured pane
+          if (!(MD && MD.window(geo, glassGeo, src, def.id, x, y, base + SILL_H, base + DOOR_H, alongX, indoorSide(here, terDefs, x, y, alongX))))
+            paneQuads(geo(pane), x, y, alongX, base + SILL_H, base + DOOR_H, pane, base + SILL_H);
           if (A) {
             windowDetail(geo, A, x, y, alongX, base + SILL_H, base + DOOR_H, /wood|log|board/.test(wallId));
             for (let d = 0; d < 4; d++) if (outdoorFace(d)) wallBand(geo(A.plinth), A.plinth, x, y, d, base, base + 0.32, 0.06, base);
@@ -437,7 +447,9 @@ export function* buildChunkMeshSteps(
           const slab = src.terrain(def.id, 'pane');
           const T = 0.08;
           const g = geo(slab);
-          if (shape === S.door) {
+          if (MD && MD.door(geo, glassGeo, src, def.id, x, y, base, DOOR_H + 0.02, alongX, shape === S.door_open, indoorSide(here, terDefs, x, y, alongX))) {
+            // modelled door leaf (furniture/openings.ts)
+          } else if (shape === S.door) {
             // The leaf reaches a little into the lintel: flush, its top edge sits mid-face on
             // the lintel's underside and GPUs show a 1px line of daylight along it.
             const top = base + DOOR_H + 0.02;
@@ -551,12 +563,19 @@ export function* buildChunkMeshSteps(
         // CDDA CONTAINER furniture (lockers, dressers, fridges) holds its items out of sight
         itemsHidden = hasFlag(fdef, 'CONTAINER') || hasFlag(fdef, 'SEALED');
         itemLift = fs === 'billboard' ? (/bed|couch|sofa|mattress|cot/.test(fdef.id) ? 0.45 : 0) : FURN_TOP[fs];
+        const mt = MD?.topOf(fdef.id);
+        if (mt != null) itemLift = mt;
       }
       if (fi !== 0) {
         const fdef = map.furniture.defs[fi];
         const fs = shapes.furniture(fi);
         const fb = base + raiseOf(x, y);
-        if (fs === 'billboard' && LF?.voxelProps && extras?.near && extras?.voxels && extras.voxels.furniture(geo, extras.white, src, fdef.id, x, y, fb, seed, facingYaw(nShape, isWall))) {
+        if (MD && MD.furniture(geo, glassGeo, src, fdef.id, x, y, fb, seed, {
+          wall: nShape.map(wallLike),
+          furn: (dx, dy) => (dx || dy ? map.furnAt(x + dx, y + dy, z).id : fdef.id),
+        })) {
+          // drawn as a modelled piece (furniture/)
+        } else if (fs === 'billboard' && LF?.voxelProps && extras?.near && extras?.voxels && extras.voxels.furniture(geo, extras.white, src, fdef.id, x, y, fb, seed, facingYaw(nShape, isWall))) {
           // drawn as a voxel volume
         } else if (fs === 'billboard') {
           const f = src.furniture(fdef.id, 'sprite');
@@ -586,6 +605,7 @@ export function* buildChunkMeshSteps(
         for (let k = 0; k < n; k++) {
           const it = list[list.length - 1 - k];
           if (items && !items(it.typeId)) continue;
+          if (MD && MD.item(geo, src, it.typeId, x, y, base + heightLocal(x + 0.5, y + 0.5) + itemLift, seed, k)) continue;
           const f = src.item(it.typeId);
           // only the top of a pile becomes a volume (the rest stay small billboards): piles in
           // stores and warehouses otherwise dominate the chunk's meshing time
@@ -618,7 +638,7 @@ export function* buildChunkMeshSteps(
       }
     }
   }
-  return { pages, sprites, puddles: pud.g, trees: trees.length ? trees : undefined };
+  return { pages, sprites, puddles: pud.g, trees: trees.length ? trees : undefined, glass: glassB.g };
 }
 
 /** Standing props face away from an adjacent wall (the sprite's front is south, +z). */
