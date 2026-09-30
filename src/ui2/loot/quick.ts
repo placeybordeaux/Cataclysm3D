@@ -105,6 +105,8 @@ function render(s: QuickSpec): HTMLElement[] {
       return b;
     };
     const [vu, vm] = s.bars.volume, [wu, wm] = s.bars.weight;
+    // Playtest: under "Cupboard / Empty" these read as the cupboard's own fill. They're yours.
+    out.push(h('div', { class: 'lq-empty', text: 'You carry' }));
     out.push(h('div', { class: 'lq-bars' },
       h('span', { text: `${fmtVolume(vu)} / ${fmtVolume(vm)}` }), bar(vu, vm, s.adds?.volume ?? 0),
       h('span', { text: `${fmtWeight(wu)} / ${fmtWeight(wm)}` }), bar(wu, wm, s.adds?.weight ?? 0)));

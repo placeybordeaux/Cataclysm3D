@@ -17,7 +17,7 @@ import { bash, getMapDamage, smashAbility } from '../src/game/bash';
 import { closeDoor, interactionsAt, openDoor, interactionPrompt } from '../src/game/interact';
 import { fallIfUnsupported, goStairs, stairDestination } from '../src/game/zlevels';
 import { addField, fieldDamageAt, ignite, installFields, processFields } from '../src/game/fields';
-import { evalWeatherCondition, forceWeather, installWeather, weatherConditions, weatherPoint } from '../src/game/weather';
+import { BN_START_CLIMATE_OFFSET_DAYS, climateSeconds, evalWeatherCondition, forceWeather, installWeather, meetsBnRequirements, weatherConditions, weatherPoint } from '../src/game/weather';
 import { comfortAt, goToSleep, installRest, waitFor } from '../src/game/rest';
 import { BODYTEMP } from '../src/game/character';
 import { installTraps, setTrap, triggerTrap } from '../src/game/traps';
@@ -340,19 +340,20 @@ describe('fields', () => {
 });
 
 describe('weather', () => {
-  // TODO(BN): written for DDA data/behaviour; fails on Bright Nights core data (AssertionError: expected 'snowstorm' to be 'rain' // Object.is equality). Port with its system.
-  it.skip('evaluates CDDA weather conditions in priority order', () => {
-    const w = { temperature: 10, humidity: 99, pressure: 1000, windpower: 3, winddirection: 0 };
-    expect(weatherConditions(data, w, true)).toBe('rain');
-    expect(weatherConditions(data, { ...w, pressure: 985 }, true)).toBe('lightning');
-    expect(weatherConditions(data, { ...w, temperature: -5, pressure: 990 }, true)).toBe('snowing');
-    expect(weatherConditions(data, { ...w, humidity: 50, pressure: 1025 }, true)).toBe('sunny');
-    expect(weatherConditions(data, { ...w, humidity: 50, pressure: 1025 }, false)).toBe('clear');
+  it('evaluates BN weather requirements in region-list order', () => {
+    // BN weather_type "requirements": strict thresholds, humidity OR pressure, °F temperatures.
+    const w = { temperature: 10, humidity: 75, pressure: 1008, windpower: 3, winddirection: 0 };
+    expect(weatherConditions(data, w, true)).toBe('cloudy');
+    expect(weatherConditions(data, { ...w, humidity: 91, pressure: 1005 }, true)).toBe('rain');
+    expect(weatherConditions(data, { ...w, temperature: -5, humidity: 91, pressure: 1005 }, true)).toBe('snowing');
+    expect(weatherConditions(data, { ...w, humidity: 100, pressure: 985 }, true)).toBe('lightning');
+    expect(weatherConditions(data, { ...w, humidity: 50, pressure: 1026 }, true)).toBe('sunny');
+    expect(weatherConditions(data, { ...w, humidity: 50, pressure: 1026 }, false)).toBe('clear');
+    expect(meetsBnRequirements({ acidic: true }, w, 'drizzle', true)).toBe(false);
     expect(evalWeatherCondition({ math: ["weather('temperature') < from_fahrenheit( 33 )"] }, { ...w, temperature: 0 }, true)).toBe(true);
   });
 
-  // TODO(BN): written for DDA data/behaviour; fails on Bright Nights core data (AssertionError: expected 364 to be less than 291.2). Port with its system.
-  it.skip('is seasonal: winter colder than summer, and it rains sometimes', () => {
+  it('is seasonal: winter colder than summer, and it rains sometimes', () => {
     let summer = 0, winter = 0, wet = 0, n = 0;
     for (let d = 0; d < 364; d += 1) {
       const p = weatherPoint(42, d * 86400 + 14 * 3600);
@@ -365,6 +366,25 @@ describe('weather', () => {
     expect(summer / 91).toBeGreaterThan(winter / 91 + 12);
     expect(wet).toBeGreaterThan(10);
     expect(wet).toBeLessThan(n * 0.8);
+  });
+
+  it('a new world starts in spring weather (BN mid-spring climate), and winter still snows', () => {
+    // Playtest: "Snowstorm, -7 °C" on a green spring morning. The climate runs BN's INITIAL_DAY
+    // ahead of the clock (see climateSeconds), so the first week has no snow on any seed.
+    let snowFirstWeek = 0, snowWinter = 0;
+    for (let seed = 1; seed <= 60; seed++) {
+      for (let d = 0; d < 7; d++) {
+        const id = weatherConditions(data, weatherPoint(seed, climateSeconds(d * 86400 + 8 * 3600)), true);
+        if (/snow|flurries/.test(id)) snowFirstWeek++;
+      }
+      for (let d = 273; d < 300; d++) {
+        const id = weatherConditions(data, weatherPoint(seed, climateSeconds(d * 86400 + 8 * 3600)), true);
+        if (/snow|flurries/.test(id)) snowWinter++;
+      }
+    }
+    expect(snowFirstWeek).toBe(0);
+    expect(snowWinter).toBeGreaterThan(60);
+    expect(climateSeconds(0)).toBe(BN_START_CLIMATE_OFFSET_DAYS * 86400);
   });
 
   it('rain soaks the player outdoors but not under a roof', () => {

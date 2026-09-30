@@ -29,7 +29,17 @@ export interface NeedSource {
   painDescription(): string;
   morale: { level(): number };
   inv: { weightCarried(): number; weightCapacity(): number };
+  /** Active effects (only `bloated` is read: see the hunger rule). Optional for test stubs. */
+  effects?: { has(id: string): boolean };
 }
+
+/**
+ * Effects whose meaning the need icons already carry, so the HUD shouldn't show them again as a
+ * chip. "Bloated" next to "Famished" read as a contradiction in playtests: in BN the first is
+ * the stomach (you just ate or drank more than it holds at once), the second the body's
+ * reserves (days of eating too little). The hunger icon now says both in one place.
+ */
+export const EFFECTS_SHOWN_AS_NEEDS = new Set(['bloated']);
 
 /** A key label for an action id ("E"); the HUD passes game.keys.label. */
 export type KeyLabel = (actionId: string) => string;
@@ -79,12 +89,22 @@ export function needStates(p: NeedSource, key: KeyLabel): NeedState[] {
 
   const hs = p.hungerState();
   const [hl, htip] = HUNGER[hs] ?? [0, ''];
-  out.push({
-    id: 'hunger', level: hl, label: hl ? hs : '', title: `Hunger: ${hs || 'fine'}`,
-    tip: htip || 'You are well fed.',
-    advice: hs === 'Engorged' ? 'Stop eating for a while.' : hl ? `Eat food with ${eat} (Eat/drink), or from the inventory's right-click menu.` : '',
-    good: hs === 'Sated',
-  });
+  const full = !!p.effects?.has('bloated');
+  if (full && hl >= 2) {
+    // Full stomach, empty reserves: say it once, as one state, and what to do about it.
+    out.push({
+      id: 'hunger', level: 1, label: `Full, still ${hs.toLowerCase()}`, title: `Hunger: ${hs}, but your stomach is full`,
+      tip: `Your stomach is full right now, but your body's reserves are low (${hs.toLowerCase()}). A full stomach doesn't undo days of eating too little.`,
+      advice: `Wait a few minutes for it to settle, then keep eating regular, filling meals (${eat}). Eating more right now may make you throw up.`,
+    });
+  } else {
+    out.push({
+      id: 'hunger', level: hl, label: hl ? hs : full ? 'Full' : '', title: `Hunger: ${hs || 'fine'}${full ? ' (stomach full)' : ''}`,
+      tip: (htip || 'You are well fed.') + (full ? ' Your stomach is full for now: you ate or drank more than it holds at once.' : ''),
+      advice: full ? 'Stop eating or drinking for a few minutes, or you may throw up.' : hs === 'Engorged' ? 'Stop eating for a while.' : hl ? `Eat food with ${eat} (Eat/drink), or from the inventory's right-click menu.` : '',
+      good: hs === 'Sated' && !full,
+    });
+  }
 
   const th = p.thirstDescription();
   const [tl, ttip] = THIRST[th] ?? [0, ''];

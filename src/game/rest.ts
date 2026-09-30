@@ -88,8 +88,9 @@ function untilSun(alt: number, rising: boolean): (game: Game) => number {
 
 /** CDDA wait menu (without the heartbeat-accurate entries that need turn-based play). */
 export const WAIT_OPTIONS: WaitOption[] = [
-  { key: '1', label: 'Wait 20 heartbeats', seconds: () => 20 },
-  { key: '2', label: 'Wait 60 heartbeats', seconds: () => 60 },
+  // CDDA says "heartbeats" for its 1-second turns; there are no turns here (docs/ADAPTATION.md).
+  { key: '1', label: 'Wait 20 seconds', seconds: () => 20 },
+  { key: '2', label: 'Wait 1 minute', seconds: () => 60 },
   { key: '3', label: 'Wait 5 minutes', seconds: () => 300 },
   { key: '4', label: 'Wait 30 minutes', seconds: () => 1800 },
   { key: '5', label: 'Wait 1 hour', seconds: () => 3600 },
