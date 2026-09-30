@@ -2,6 +2,7 @@ import { c, colorize, confirm, getUiRoot, hoverMoved } from './framework';
 import { sfx } from '../audio/sfx';
 import { openOptions } from './options';
 import { openHelp } from './help';
+import { openCredits } from './credits';
 import { applyBuild, openCharGen } from './chargen';
 import type { Hud } from './hud';
 import type { UiContext } from './context';
@@ -134,6 +135,8 @@ export function showMainMenu(ctx: UiContext, hud: Hud): Promise<void> {
       { label: 'Memorial', key: 'm', enabled: () => true, run: () => openMemorialFor(game) },
       { label: 'Options', key: 'o', enabled: () => true, run: () => void openOptions(ctx) },
       { label: 'Help', key: 'h', enabled: () => true, run: () => void openHelp(ctx) },
+      // 'c' is Continue on the button layouts; cRedits.
+      { label: 'Credits', key: 'r', enabled: () => true, run: () => openCredits() },
       {
         label: 'Quit', key: 'q', enabled: () => true,
         run: async () => {
@@ -218,8 +221,10 @@ export function showMainMenu(ctx: UiContext, hud: Hud): Promise<void> {
       if (!busy && lay !== 'classic') return renderButtons(lay);
       el.classList.remove('tt-center', 'tt-side');
       const bar = entries.map((e, i) => {
-        const first = e.label[0], rest = e.label.slice(1);
-        const inner = `${c(e.enabled() ? 'c_light_green' : 'c_dark_gray', first)}${c(e.enabled() ? (i === sel ? 'c_white' : 'c_light_gray') : 'c_dark_gray', rest)}`;
+        // Highlight the entry's shortcut letter where it is ("C[r]edits"), not always the first.
+        const at = Math.max(0, e.label.toLowerCase().indexOf(e.key.toLowerCase()));
+        const plain = e.enabled() ? (i === sel ? 'c_white' : 'c_light_gray') : 'c_dark_gray';
+        const inner = `${c(plain, e.label.slice(0, at))}${c(e.enabled() ? 'c_light_green' : 'c_dark_gray', e.label[at])}${c(plain, e.label.slice(at + 1))}`;
         return `<span class="mm-item" data-i="${i}" style="cursor:pointer;padding:0 .6em;${i === sel ? 'background:var(--c-blue)' : ''}">[${inner}]</span>`;
       }).join('');
       // While a window opened from here is up (Start, New Game), only the logo stays, at the top,
