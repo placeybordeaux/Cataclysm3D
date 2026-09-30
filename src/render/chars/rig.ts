@@ -14,6 +14,7 @@
 // or a flat palette role for thin bits (insect legs, wings).
 
 import type { BodyShape, Weapon } from './archetype';
+import { ridePose, type HumanDims, type RideIn } from './ridePose';
 
 export type Proj = 'front' | 'side';
 /** Painted surface detail for close-up items. */
@@ -89,6 +90,8 @@ export interface PoseIn {
   dead: boolean;
   /** per-creature seed 0..1 (desyncs idles in a horde) */
   seed: number;
+  /** Seated in a vehicle (humanoids): IK targets for hands and feet (ridePose.ts). */
+  ride?: RideIn | null;
 }
 
 export interface PoseOut {
@@ -117,6 +120,8 @@ export interface Rig {
   lie: { angle: number; lift: number; side: boolean };
   /** skin texel density multiplier (1 = 32 texels/m); the first-person rig uses more */
   texels?: number;
+  /** Humanoids: the joint layout the seated / riding pose solves against (ridePose.ts). */
+  dims?: HumanDims;
   pose(p: PoseIn, out: PoseOut): void;
 }
 
@@ -276,10 +281,21 @@ function humanoid(sh: BodyShape): Rig {
   const s = sh.scale;
   const height = (hipY + 0.06 + 0.49 + headH) * s;
   const zombie = sh.zombie;
+  // (hand centre: the fist's box is centred hand/2 - 0.01 past the wrist)
+  const dims: HumanDims = {
+    hipY: hipY * s, hipX: hipX * s, thighDy: -0.06 * s, torsoDy: 0.06 * s, shoulderX: shoulderX * s, shoulderY: 0.42 * s,
+    upperArm: (upperArm - 0.04) * s, foreArm: (foreArm + hand / 2 - 0.01) * s, thigh: thigh * s, shin: shin * s,
+  };
   return {
-    shape: sh, parts: scaleParts(parts, s), height, hover: sh.flies ? 0.6 * s : 0, lie: { angle: Math.PI / 2, lift: torsoD * 0.5 * s, side: false },
+    shape: sh, parts: scaleParts(parts, s), height, hover: sh.flies ? 0.6 * s : 0, lie: { angle: Math.PI / 2, lift: torsoD * 0.5 * s, side: false }, dims,
     pose(p, o) {
       const H = HUM;
+      if (p.ride) {
+        ridePose(p.ride, dims, H, o.rot);
+        // both hands are on the controls: the weapon is stowed (not drawn) while riding
+        if (weaponI >= 0) o.scl.fill(0, weaponI * 3, weaponI * 3 + 3);
+        return;
+      }
       const ph = p.phase * TAU;
       const walk = Math.min(1, p.gait);
       const run = Math.max(0, p.gait - 1);

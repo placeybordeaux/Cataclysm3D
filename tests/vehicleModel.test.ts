@@ -253,3 +253,47 @@ describe('vehicle model: geometry', () => {
     expect(b.skin).toBeNull();
   });
 });
+
+describe('vehicle model: where the rider sits (vehicleRider.ts)', () => {
+  it('bikes: hips over the saddle between the wheels, grips ahead of the hips, feet low', () => {
+    for (const id of ['bicycle', 'motorcycle', 'scooter']) {
+      const v = make(id);
+      const m = buildVehicleModel(v, 0, { separateWheels: true })!;
+      const a = m.ride!;
+      expect(a, id).toBeTruthy();
+      expect(a.kind).toBe(id === 'bicycle' ? 'bicycle' : 'motorcycle');
+      const xs = m.layout.wheels.map((w) => w.x);
+      expect(a.hip[0]).toBeGreaterThan(Math.min(...xs) - 0.6);
+      expect(a.hip[0]).toBeLessThan(Math.max(...xs));
+      expect(a.hip[1]).toBeGreaterThan(0.6);
+      for (const g of a.grips) {
+        expect(g[0]).toBeGreaterThan(a.hip[0]);
+        expect(Math.abs(g[2] - a.hip[2])).toBeGreaterThan(0.15);
+      }
+      // right hand (+z) first
+      expect(a.grips[0][2]).toBeGreaterThan(a.grips[1][2]);
+      for (const f of a.feet) expect(f[1]).toBeLessThan(a.hip[1] - 0.3);
+    }
+  });
+
+  it('a ridden bicycle gets a turning crank; a parked one keeps its pedals in the frame', () => {
+    const v = make('bicycle');
+    expect(buildVehicleModel(v, 0, { separateWheels: true })!.crank).toBeTruthy();
+    expect(buildVehicleModel(v, 0)!.crank).toBeUndefined();
+    expect(buildVehicleModel(v, 0, { separateWheels: true })!.ride!.crank!.r).toBeGreaterThan(0.1);
+  });
+
+  it('cars: the driver sits on the driver seat, under the roof, hands on the rim ahead', () => {
+    for (const id of ['car', 'suv', 'pickup', 'bus']) {
+      const v = make(id);
+      const m = buildVehicleModel(v, 0, { separateWheels: true })!;
+      const a = m.ride!;
+      expect(a, id).toBeTruthy();
+      expect(a.kind).toBe('seat');
+      expect(Math.abs(a.hip[2] - m.driverZ!)).toBeLessThan(1e-6);
+      // head top (~0.8 m over the hips) stays under the roof line
+      expect(a.hip[1] + 0.8).toBeLessThan(m.layout.p.roof + 0.05);
+      for (const g of a.grips) expect(g[0]).toBeGreaterThan(a.hip[0] + 0.3);
+    }
+  });
+});

@@ -342,6 +342,26 @@ export class Cockpit {
     }
   }
 
+  /**
+   * The grips as they are this frame (after update()), in the vehicle's mount space: where
+   * the driver's body puts its hands in the chase / top-down cameras. Right then left.
+   */
+  gripPoints(out: [V3, V3]): [V3, V3] {
+    for (const [o, i] of [[0, 1], [1, 0]] as const) {
+      const e = this.tmpB.set(0, 0, 0).applyMatrix4(this.gripLocal[i]).applyMatrix4(this.wheel.matrix);
+      out[o][0] = e.x;
+      out[o][1] = e.y;
+      out[o][2] = e.z;
+    }
+    return out;
+  }
+
+  /** The first-person fists: hidden while the whole body is drawn at the wheel instead. */
+  set handsVisible(v: boolean) {
+    if (this.hands) this.hands.group.visible = v;
+    for (const m of [...this.fists, ...this.arms]) m.visible = v;
+  }
+
   dispose(): void {
     this.hands?.dispose();
     for (const g of this.geos) g.dispose();
