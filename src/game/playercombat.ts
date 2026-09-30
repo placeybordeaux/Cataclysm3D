@@ -21,7 +21,7 @@ import { FEEL, arcFor, defenseOf, hitStopSeconds, missReason, sweptArcTarget, sw
 import { moveWithCollision } from './physics';
 import { projectileHit } from './projectile';
 import {
-  aimDirection, aimHooks, AimSway, basisDirection, yawPitch, type Vec3, BODY_HEIGHT, Breath, bowPerfect, describeHit, freeAim, hitDamageMul, rhythmWindow, swayAmplitude, timingGames, weakSpotChance,
+  aimDirection, aimHooks, AimSway, basisDirection, basisOf, swingFan, yawPitch, type Vec3, BODY_HEIGHT, Breath, bowPerfect, describeHit, freeAim, hitDamageMul, rhythmWindow, swayAmplitude, timingGames, weakSpotChance,
   type HitZone,
 } from './aimmodel';
 import { raycastTiles } from './raycast';
@@ -682,11 +682,12 @@ export class PlayerCombat implements GameSystem {
     const contact = s.timing.windup + s.timing.strike;
     if (!s.resolved && s.t >= contact) {
       // A monster that visibly dodged this swing isn't in it any more, even if its edge still is.
-      const m = this.meleeTarget(s.reach, s.arc, s.dodged ?? undefined);
+      const pk = this.meleePick(s.reach, s.arc, s.dodged ?? undefined);
+      const m = pk?.m ?? null;
       if (m || s.t >= contact + s.timing.active) {
         s.resolved = true;
         // An NPC under the crosshair may take the blow instead (npcai decides; asks first if friendly).
-        if (!this.npcMelee?.(s.reach, m)) this.melee(m, { phased: s.t });
+        if (!this.npcMelee?.(s.reach, m)) this.melee(m, { phased: s.t, zone: pk?.zone });
       }
     }
     if (s.resolved && s.t >= s.timing.total) this.swing = null;
@@ -712,12 +713,54 @@ export class PlayerCombat implements GameSystem {
    * of the aim, closest to the crosshair first, never through walls.
    */
   meleeTarget(reach = FEEL.reach, arc = FEEL.arcSwing, except?: Monster): Monster | null {
+    return this.meleePick(reach, arc, except)?.m ?? null;
+  }
+
+  /**
+   * What the swing meets, and where. Free aim with drawn 3D models: the swing's fan of rays
+   * (aimmodel.swingFan: the crosshair first, then outward across the arc and a vertical band)
+   * against the models' part boxes; the first ray that meets a body within reach wins, so in a
+   * crowd it's the one under (or nearest) the crosshair, and the part it meets is the zone (a
+   * bat to the head). When no ray meets anything, the swept arc below decides as before (so a
+   * swing still clips what's beside you, or a zombie crawling at your feet) and the zone is torso.
+   */
+  meleePick(reach = FEEL.reach, arc = FEEL.arcSwing, except?: Monster): { m: Monster; zone: HitZone } | null {
     const p = this.game.player;
+    const v = freeAim() ? aimHooks.view?.() ?? null : null;
+    const prep = aimHooks.prepare;
+    if (v && prep) {
+      const origin = v.third ? v.eye : v.o;
+      const basis = v.third ? basisOf(p.yaw, p.pitch) : v;
+      const tests: [Monster, (o: Vec3, d: Vec3) => { t: number; zone: HitZone } | null][] = [];
+      for (const m of this.sys.active) {
+        if (m.dead || m.z !== p.z || m === except) continue;
+        if (Math.hypot(m.x - p.x, m.y - p.y) - m.radius > reach + 1) continue;
+        if (!hasLOS(this.grid, p.tileX, p.tileY, m.tileX, m.tileY, p.z)) continue;
+        const f = prep(m);
+        if (f) tests.push([m, f]);
+      }
+      if (tests.length) {
+        for (const off of swingFan(arc)) {
+          const d = basisDirection(basis, off.x, off.y);
+          let best: { m: Monster; t: number; zone: HitZone } | null = null;
+          for (const [m, f] of tests) {
+            const r = f(origin, d);
+            if (r && (!best || r.t < best.t)) best = { m, t: r.t, zone: r.zone };
+          }
+          if (!best) continue;
+          const hx = origin.x + d.x * best.t, hy = origin.y + d.y * best.t;
+          // Nearest body on this ray is out of reach: nothing nearer along it can be hit either.
+          if (Math.hypot(hx - p.x, hy - p.y) > reach + 0.3) continue;
+          return { m: best.m, zone: best.zone };
+        }
+      }
+    }
     const look = this.game.lookAt?.(reach + 1.5);
     const hit = look?.kind === 'creature' ? (look.creature as { monster?: Monster } | undefined)?.monster : undefined;
-    if (hit && hit !== except && !hit.dead && Math.hypot(hit.x - p.x, hit.y - p.y) - hit.radius <= reach) return hit;
+    if (hit && hit !== except && !hit.dead && Math.hypot(hit.x - p.x, hit.y - p.y) - hit.radius <= reach) return { m: hit, zone: 'torso' };
     const near = this.sys.active.filter((m) => !m.dead && m.z === p.z && m !== except);
-    return sweptArcTarget(p, near, reach, arc, (m) => !hasLOS(this.grid, p.tileX, p.tileY, m.tileX, m.tileY, p.z));
+    const m = sweptArcTarget(p, near, reach, arc, (q) => !hasLOS(this.grid, p.tileX, p.tileY, q.tileX, q.tileY, p.z));
+    return m ? { m, zone: 'torso' } : null;
   }
 
   /**
@@ -725,7 +768,7 @@ export class PlayerCombat implements GameSystem {
    * at once, like before the feel layer. `phased` = seconds since the swing started: the swing
    * clock already runs the animation and cooldown, this only resolves the blow at contact.
    */
-  melee(target: Monster | null = null, o: { phased?: number } = {}): boolean {
+  melee(target: Monster | null = null, o: { phased?: number; zone?: HitZone } = {}): boolean {
     const game = this.game;
     const p = game.player;
     const w = p.inv.wielded;
@@ -756,7 +799,7 @@ export class PlayerCombat implements GameSystem {
       this.feedback('melee', 'whiff', null, p.x + Math.sin(p.yaw) * reach, p.y - Math.cos(p.yaw) * reach, 0, 0, dodged ? `${dodged.theName()} dodged` : short ? 'out of reach' : undefined);
       return false;
     }
-    const hit = this.swingAt(m, { reach, primary: true, elapsed: o.phased });
+    const hit = this.swingAt(m, { reach, primary: true, elapsed: o.phased, zone: o.zone });
     return hit;
   }
 
@@ -765,7 +808,7 @@ export class PlayerCombat implements GameSystem {
    * effects (stun, downed, knockback, AoE follow-ups), prints CDDA's technique message.
    * Follow-up AoE swings (`primary: false`) cost no time or stamina, like CDDA.
    */
-  swingAt(m: Monster, o: { reach?: number; primary: boolean; elapsed?: number }): boolean {
+  swingAt(m: Monster, o: { reach?: number; primary: boolean; elapsed?: number; zone?: HitZone }): boolean {
     const game = this.game;
     const p = game.player;
     const rng = this.sys.rng;
@@ -776,12 +819,16 @@ export class PlayerCombat implements GameSystem {
     // happened on screen at the wind-up (visibleDodge), so none are rolled here.
     const free = freeAim();
     const perfect = !!(o.primary && o.elapsed !== undefined && this.swing?.perfect);
+    // Free aim: where the blow lands (the model part the swing met). BN's melee has no zones;
+    // this layer adds them: the head hurts more and rocks it, the legs less but can drop it.
+    const zone: HitZone = free && o.primary ? o.zone ?? 'torso' : 'torso';
+    const zoneMul = zone === 'head' ? FEEL.aimMeleeHeadMul : zone === 'legs' || zone === 'limb' ? FEEL.aimMeleeLimbMul : 1;
     const res = meleeAttack(p, { dodge: free ? 0 : m.dodge(), armor: m.type.armor, sizeMeleePenalty: m.sizeMeleePenalty(), info: monsterTargetInfo(m) }, rng, m.theName(), {
       allowSpecial: o.primary,
       aoeTargets: (kind) => this.aoeVictims(kind, m, reach).length,
       downable: !m.has('IMMOBILE'),
       autoHit: free ? { glancingMul: FEEL.aimGlancingMul } : undefined,
-      damageMul: perfect ? FEEL.aimPerfectMul : undefined,
+      damageMul: (perfect ? FEEL.aimPerfectMul : 1) * zoneMul,
     });
     if (o.primary) {
       // Phased: the swing clock already spent `elapsed`; CDDA's cost (stumbles, techniques)
@@ -809,7 +856,8 @@ export class PlayerCombat implements GameSystem {
     // Victims of a sweep are chosen before the blow can push the target out of the arc.
     const victims = res.outcome?.aoe ? this.aoeVictims(res.outcome.aoe, m, reach) : [];
     const wskill = p.getSkill(p.inv.wielded ? p.inv.wielded.meleeSkill() : 'unarmed');
-    this.sys.hurt(m, res.total, 'player', { crit: res.crit, stagger: free ? 1 + FEEL.aimStaggerPerSkill * (wskill + p.getSkill('melee')) / 2 + (perfect ? 0.3 : 0) : undefined });
+    this.sys.hurt(m, res.total, 'player', { crit: res.crit || zone === 'head', stagger: free ? 1 + FEEL.aimStaggerPerSkill * (wskill + p.getSkill('melee')) / 2 + (perfect ? 0.3 : 0) + (zone === 'head' ? 0.5 : 0) : undefined });
+    const zoneFx = free && res.total > 0 && !m.dead ? this.meleeZoneEffect(m, zone, wskill) : '';
     // Hit-stop: the hands, the swing clock and the struck monster hold for a few frames.
     let stop = 0;
     if (o.primary && o.elapsed !== undefined) {
@@ -819,8 +867,8 @@ export class PlayerCombat implements GameSystem {
       m.busy = Math.max(m.busy, stop);
     }
     // Before the technique can knock it away: the impact is where it stood when struck.
-    this.feedback('melee', res.crit ? 'crit' : 'hit', m, m.x, m.y, res.total, stop, res.total <= 0 ? 'no damage' : free ? this.meleeQuality(res.glancing, res.crit, perfect, wskill) : undefined,
-      free ? { quality: res.glancing ? FEEL.aimGlancingMul : perfect ? FEEL.aimPerfectMul : res.crit ? 1.5 : 1 } : {});
+    this.feedback('melee', res.crit ? 'crit' : 'hit', m, m.x, m.y, res.total, stop, res.total <= 0 ? 'no damage' : free ? this.meleeQuality(res.glancing, res.crit, perfect, wskill, zone, zoneFx) : undefined,
+      free ? { quality: (res.glancing ? FEEL.aimGlancingMul : perfect ? FEEL.aimPerfectMul : res.crit ? 1.5 : 1) * zoneMul } : {});
     if (m.dead) triggerBuffs(p, 'onkill');
     else if (res.outcome) applyTechniqueToMonster(m, res.outcome, p.x, p.y, rng);
     if (victims.length) {
@@ -831,13 +879,41 @@ export class PlayerCombat implements GameSystem {
   }
 
   /** Free aim: why a connecting blow was weak or strong, for the crosshair. */
-  private meleeQuality(glancing: boolean | undefined, crit: boolean, perfect: boolean, skill: number): string | undefined {
+  private meleeQuality(glancing: boolean | undefined, crit: boolean, perfect: boolean, skill: number, zone: HitZone = 'torso', fx = ''): string | undefined {
     const parts: string[] = [];
     const w = this.game.player.inv.wielded;
+    if (zone === 'head') parts.push(`HEAD ×${FEEL.aimMeleeHeadMul}`);
+    else if (zone === 'legs') parts.push(`legs ×${FEEL.aimMeleeLimbMul}`);
+    else if (zone === 'limb') parts.push(`limb ×${FEEL.aimMeleeLimbMul}`);
+    if (fx) parts.push(fx);
     if (glancing) parts.push(`glancing ×${FEEL.aimGlancingMul} (${w ? w.meleeSkill() : 'unarmed'} ${Math.floor(skill)})`);
     if (crit) parts.push('critical');
     if (perfect) parts.push(`on the beat ×${FEEL.aimPerfectMul}`);
     return parts.length ? parts.join(' · ') : undefined;
+  }
+
+  /**
+   * A blow's zone effect (free aim): a head blow with a blunt or heavy weapon can stun; a leg
+   * blow makes it stumble (a longer flinch) and can knock it down. Chances grow with the weapon
+   * skill; huge monsters and immobile ones don't go down. Returns the crosshair word, if any.
+   */
+  private meleeZoneEffect(m: Monster, zone: HitZone, skill: number): string {
+    const rng = this.sys.rng;
+    const w = this.game.player.inv.wielded;
+    const blunt = !w || w.meleeSkill() === 'bashing' || (w.weight() ?? 0) >= 1500;
+    if (zone === 'head' && blunt && rng.next() < 0.3 + 0.04 * skill) {
+      m.addEffect('stunned', 0.6 + 0.05 * skill);
+      return 'stunned';
+    }
+    if (zone === 'legs') {
+      m.flinch = Math.max(m.flinch, 0.5);
+      if (!m.has('IMMOBILE') && m.size !== 'huge' && rng.next() < 0.2 + 0.04 * skill) {
+        m.addEffect('downed', 1.2);
+        return 'knocked down';
+      }
+      return 'stumbles';
+    }
+    return '';
   }
 
   /**

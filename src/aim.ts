@@ -12,7 +12,7 @@ import { registerOption } from './ui/options';
 import { AimHud, type AimHudFrame } from './ui/aimHud';
 import { sfx } from './audio/sfx';
 import { aimHooks, zoneOfPart, type Vec3 } from './game/aimmodel';
-import { pickModel } from './render/aimPick';
+import { pickModel, prepareModel } from './render/aimPick';
 import { LEVEL_HEIGHT } from './world/coords';
 import type { Monster } from './game/monster';
 
@@ -300,6 +300,17 @@ function installModelHooks(game: Game, renderer: Renderer, monsters: MonstersHan
     const r = pickModel(inst, o, d);
     if (!r) return r;
     return { t: r.t, part: r.part, zone: zoneOfPart(r.part, mon.type.flags.includes('NOHEAD')) };
+  };
+  aimHooks.prepare = (m) => {
+    const mon = m as Monster;
+    const inst = view.modelOf(mon);
+    const f = inst ? prepareModel(inst) : undefined;
+    if (!f) return undefined;
+    const noHead = mon.type.flags.includes('NOHEAD');
+    return (o, d) => {
+      const r = f(o, d);
+      return r ? { t: r.t, part: r.part, zone: zoneOfPart(r.part, noHead) } : null;
+    };
   };
   if (api) {
     /** Debug/setup: the drawn world centre (game coords) of a monster's model part, e.g. to aim at its head. */
