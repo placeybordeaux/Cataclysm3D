@@ -23,6 +23,10 @@ distance; replace hidden to-hit dice with visible skill; fix the boxy cars; adap
 | Adaptation | `docs/ADAPTATION.md` | Principles + 69 playtest findings. Big fixes: BN weather was always a snowstorm; BN item light ignored (flashlights dark); shelter paved over on some seeds; nothing buildable on grass/dirt; fires died unburnt when time sped up. New: big-button title, crosshair activity ring, Rest window, route guide + road atlas, crafting "Almost" tab, credits screen, first beds / boil water / fire safety / freshness. | Several Options rows (listed in the doc) |
 | QA | `docs/QA_WAVE3.md` | Integrated playtest at 3440x1304 in Chromium + Firefox, every Options switch cycled, save/load, per-scenario real-input results. | — |
 
+Health at handoff: `npm run typecheck` clean, `npm test` 1198 passed / 19 skipped, `npm run build` green;
+real-input smoke on the final `bn` (title, move, firstfight, getin, aim, options, quit) 116/116 on the GPU.
+Full-suite and Firefox results: `docs/QA_WAVE3.md`.
+
 Screenshots for every area: `docs/screenshots/wave3/<area>/` (before/after pairs; half-size JPEG).
 
 ### Decisions waiting for you
