@@ -281,7 +281,13 @@ export function installBnInventory(game: Game, ctx: UiContext, api: DebugApi, ca
   reg('apply', 'Activate / apply item', () => {
     openPicker(model, {
       title: 'Use what?', none: "You don't have any items you can use.", onNone: (msg) => game.message(msg, 'c_light_gray'), closeKeys: game.keys.keysFor('apply'),
-      rows: rowsFor((v, loc, it) => (model.onBody(loc) && useActions(it.def).length ? false : null)),
+      // An empty lighter or a flat flashlight is listed greyed with why, below the ones that work
+      // (playtest: "lighter (0/25)" sat next to the full one, looking just as usable).
+      rows: rowsFor((v, loc, it) => {
+        if (!model.onBody(loc) || !useActions(it.def).length) return null;
+        const per = Number(it.def.charges_per_use ?? 0);
+        return per > 0 && it.ammoCapacity() > 0 && it.ammoRemaining() < per ? `Empty (${it.ammoRemaining()}/${it.ammoCapacity()}): it needs charges to use.` : false;
+      }),
       run: (r) => {
         const acts = model.actions(r.view, r.loc);
         const use = acts.find((m) => 'label' in m && ('submenu' in m ? m.label === 'Use' : 'key' in m && m.key === 'A'));

@@ -189,18 +189,22 @@ export function installRouteGuide(game: Game, renderer: Renderer, overmap: () =>
   const v = new THREE.Vector3();
 
   const replan = () => {
-    const mode = routeMode();
+    const driving = !!game.vehicles?.driving;
+    // Driving: ground marks a few metres ahead are useless at 40 mph, so the trail becomes a
+    // beacon further along the route (playtest: nothing showed the way while driving).
+    const mode = driving && routeMode() === 'trail' ? 'beacon' : routeMode();
     const p = game.player;
-    const route = mode === 'off' || p.dead || game.vehicles?.driving ? null : currentRoute(game, overmap());
+    const route = mode === 'off' || p.dead ? null : currentRoute(game, overmap());
     pts = [];
     beaconAt = null;
     root.dataset.metres = route ? String(route.metres) : '';
     if (!route) return;
-    const target = nextTarget(route);
+    const ahead = driving ? 4 : 2;
+    const target = nextTarget(route, ahead);
     if (mode === 'beacon') {
       beaconAt = target;
       // Walking distance: along the route from the next leg, plus the straight bit to it.
-      const rest = Math.max(0, route.omts.length - 1 - 2) * CHUNK;
+      const rest = Math.max(0, route.omts.length - 1 - ahead) * CHUNK;
       const walk = Math.hypot(target.x - p.x, target.y - p.y) + rest;
       (beacon.lastChild as HTMLElement).textContent = `${route.dest.label} · ${Math.round(walk)} m`;
       return;
