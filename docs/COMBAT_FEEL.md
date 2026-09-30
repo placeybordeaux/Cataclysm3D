@@ -154,6 +154,14 @@ Real input (GPU, xdotool, `tsx tools/realinput.ts --only aim,aimtiming --gpu`), 
 | longbow | 0 / 5 | 6/6, 30.3 / 6/6, 38 | 1/6, 37 / 2/6, 19.5 |
 | bat | 0 / 5 | 8/8, 12.6 / 8/8, 22.4 | 7/8, 15.9 / 7/8, 19.3 |
 
+The same run after round 2 (wider skill-0 weave, 3D-model hit zones), free aim, hits / dmg per
+hit / ms spent waiting for the crosshair to cross the chest, skill 0 → 5: pistol 4/6, 20.5, 366 →
+6/6, 28.8, 105; rifle 6/6, 28.3, 268 → 6/6, 41.2, 107; shotgun 4/6, 13, 335 → 5/5, 19.6, 105; longbow
+6/6, 29.2, 448 → 6/6, 37.3, 106; bat 8/8, 12.1 → 8/8, 24.5. Skill 0 now costs aiming time and the
+odd miss (the click's latency carries a fast, wide weave off the body); skill 5 never misses.
+(Damage per hit is a little lower than round 1 because model hits on the arms in front of the
+chest count as limbs.)
+
 Timing (real input): NOW flash → perfect shot, perfect active reload, perfect bow loose and a
 chained swing on the beat all pass. Screenshots: `docs/screenshots/wave3/combat/`
 (`sway_pistol_skill0[_zoom].png` vs `sway_pistol_skill5[_zoom].png` with the aim trail on — the
