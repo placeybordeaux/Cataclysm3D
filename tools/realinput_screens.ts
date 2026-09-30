@@ -318,6 +318,36 @@ export function screenScenarios(c: ScreensCtx): Scenario[] {
       prompt = await js<string>(`document.querySelector('.hud-prompt')?.textContent ?? ''`);
       check('…and it still offers to drive', prompt.includes(`Drive the ${name}`), prompt);
     }],
+    ['refuel', 'gas pump: e on a pump by a parked car fills it up (BN fill rate), the tank gauge rises', async () => {
+      await reset();
+      // Setup only: a car on a road with an empty tank, a gasoline pump beside it (the fuel as
+      // mapgen leaves it: a liquid item on the pump tile), you next to the pump looking at it.
+      const setup = await js<{ name: string; fuel: number } | null>(`(() => {
+        const r = cdda.roadTrip('car'); if (!r) return null;
+        const vs = cdda.vehicleSystem, v = vs.driving; vs.releaseControls(); v.velocity = 0; v.engineOn = false;
+        v.drainFuel('gasoline', 1e9); v.version++;
+        cdda.clearMonsters(); // pumping is an activity: nearby zombies would (rightly) stop it
+        const b = vs.bodyRect(v);
+        const [px, py] = v.mountToWorld(0, b.y0 - 1.1), tx = Math.floor(px), ty = Math.floor(py);
+        const m = cdda.game.map; m.setTer(tx, ty, v.z, 't_gas_pump');
+        window.__pump = [tx, ty, v.z]; window.__fuelcar = v.uid;
+        const [ox, oy] = v.mountToWorld(-1.2, b.y0 - 1.2);
+        const p = cdda.game.player; Object.assign(p, { x: ox, y: oy, z: v.z, yaw: Math.atan2(tx + 0.5 - ox, -(ty + 0.5 - oy)), pitch: -0.25 });
+        cdda.spawnItem('gasoline', tx - p.tileX, ty - p.tileY, { count: 15000 });
+        return { name: v.name, fuel: v.fuelLeft('gasoline') }; })()`);
+      check('setup: an empty car beside a gas pump', !!setup && setup.fuel === 0, setup);
+      const stocked = await js<number>(`(() => { const [x, y, z] = window.__pump; const g = cdda.game; const it = g.map.itemsAt(x, y, z).find((i) => i.typeId === 'gasoline'); return it ? it.charges : 0; })()`);
+      check('setup: the pump holds gasoline', stocked > 0, stocked);
+      await c.toGameplay();
+      await sleep(400);
+      const prompt = await js<string>(`document.querySelector('.hud-prompt')?.textContent ?? ''`);
+      check('the crosshair on the pump offers "Fill up the Car"', /Fill up the Car/.test(prompt), prompt);
+      await shot('refuel_prompt');
+      await c.x().key('e');
+      await sleep(8000);
+      const after = await js<{ fuel: number; busy: boolean; log: string[] }>(`(() => { const v = cdda.vehicleSystem.list.find((q) => q.uid === window.__fuelcar); return { fuel: v.fuelLeft('gasoline'), busy: !!cdda.game.activities.current, log: cdda.ui.log().slice(-2) }; })()`);
+      check('e pumps the pump dry into the tank (15 L)', after.fuel === 15000 && !after.busy, after);
+    }],
     ['body', 'bionics (p), mutations ([), martial arts (_): panels, switches by mouse', async () => {
       await reset();
       await js(`cdda.installBionic('bio_power_storage'); cdda.installBionic('bio_flashlight'); cdda.givePower(100)`);

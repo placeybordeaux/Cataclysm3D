@@ -41,6 +41,9 @@ export function lootTargetAt(game: Game): LootTarget | null {
     if (i >= 0) return { key: `cargo:${i}`, x: t.x, y: t.y, z: t.z, title: cap(cargo[i].label), container: true };
     return null;
   }
+  // A gas pump's fuel is the pump's contents (BN mapgen puts it there as a liquid item): the
+  // pump's own "Fill up" (src/game/refuel.ts) handles it, not quick-loot.
+  if (map.terAt(t.x, t.y, t.z).examine_action === 'gaspump') return null;
   const f = map.furnAt(t.x, t.y, t.z);
   const n = map.itemsAt(t.x, t.y, t.z).length;
   const container = isLootContainer(f);

@@ -22,6 +22,7 @@ uniform float uLen;
 uniform vec2 uWind;
 uniform highp sampler2D tCover;
 uniform vec4 uLmRect;
+uniform float uClear;
 varying float vAlpha;
 void main() {
   vec3 p = position;
@@ -36,6 +37,8 @@ void main() {
   p.xz -= aEnd * uWind * uLen * 0.3;
   vAlpha = 1.0;
   gl_Position = projectionMatrix * viewMatrix * vec4(p, 1.0);
+  // a dry bubble round the camera (inside a car's cabin: the roof and glass keep it out)
+  if (uClear > 0.0 && distance(p, uCam) < uClear) gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
   if (uLmRect.w > 0.5) {
     ivec2 c = ivec2(floor(p.xz - uLmRect.xy));
     int n = int(uLmRect.z);
@@ -83,7 +86,7 @@ export class Weather {
       uniforms: {
         uCam: { value: new THREE.Vector3() }, uTime: { value: 0 }, uSpeed: { value: speed },
         uLen: { value: len }, uWind: { value: new THREE.Vector2(0.6, 0.2) }, uColor: { value: new THREE.Color(color) },
-        tCover: lmUniforms.tCover, uLmRect: lmUniforms.uLmRect,
+        tCover: lmUniforms.tCover, uLmRect: lmUniforms.uLmRect, uClear: { value: 0 },
       },
       transparent: false,
       depthWrite: false,
@@ -119,9 +122,13 @@ export class Weather {
     this.rain.geometry.setDrawRange(0, kind === 'storm' ? Infinity : 1800);
   }
 
+  /** Metres round the camera kept free of particles (0 = none): set while in a car's cockpit. */
+  clearRadius = 0;
+
   update(dt: number, cam: THREE.Vector3): void {
     this.time += dt;
     for (const m of [this.rainMat, this.snowMat]) {
+      m.uniforms.uClear.value = this.clearRadius;
       m.uniforms.uCam.value.copy(cam);
       m.uniforms.uTime.value = this.time;
     }
