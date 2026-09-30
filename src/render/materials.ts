@@ -315,6 +315,31 @@ export function worldMaterials(page: THREE.Texture): { mat: THREE.MeshLambertMat
   return m;
 }
 
+/**
+ * World material for a vehicle body skin (vehicleModel.ts): the chunk look (banded
+ * lighting, light map, outlines) but double-sided, because a body is a thin shell you also
+ * see from inside the cabin. Inner faces are darkened so door cards and the headliner read
+ * as interior, not as a mirrored copy of the paint. Not cached: one per vehicle skin, the
+ * caller disposes it with the texture.
+ */
+export function vehicleBodyMaterials(page: THREE.Texture): { mat: THREE.MeshLambertMaterial; depth: THREE.MeshDepthMaterial } {
+  enableMips(page);
+  const mat = new THREE.MeshLambertMaterial({ map: page, vertexColors: true, side: THREE.DoubleSide });
+  mat.onBeforeCompile = (shader) => {
+    patchWorldVertex(shader, true);
+    patchBandedLambert(shader, 'world');
+    addNormalOutput(shader, true, 1);
+    // Inside faces: a neutral trim grey keeping only a hint of the skin's pattern.
+    shader.fragmentShader = shader.fragmentShader.replace('#include <color_fragment>', '#include <color_fragment>\n  if (!gl_FrontFacing) diffuseColor.rgb = vec3(0.19, 0.19, 0.2) * (0.8 + 0.5 * dot(diffuseColor.rgb, vec3(0.3, 0.59, 0.11)));');
+  };
+  mat.customProgramCacheKey = () => 'cdda-vehicle-body';
+  (mat.userData as any).mrt = true;
+  const depth = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking, side: THREE.DoubleSide });
+  depth.onBeforeCompile = (shader) => patchWorldVertex(shader);
+  depth.customProgramCacheKey = () => 'cdda-vehicle-depth';
+  return { mat, depth };
+}
+
 // --- sprite (billboard) material -----------------------------------------------------
 
 const SPRITE_VERT_PARS = /* glsl */ `
