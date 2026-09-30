@@ -53,7 +53,7 @@ export function normalOutputChunk(hasNormal: boolean, flag: number): string {
 type Shader = THREE.WebGLProgramParametersWithUniforms;
 
 /** Adds the gNormal MRT output to any built-in material's fragment shader. */
-function addNormalOutput(shader: Shader, hasNormal: boolean, flag: number): void {
+export function addNormalOutput(shader: Shader, hasNormal: boolean, flag: number): void {
   shader.fragmentShader = NORMAL_OUT_DECL + shader.fragmentShader.replace(
     /}\s*$/,
     `  ${normalOutputChunk(hasNormal, flag)}\n}`,
@@ -175,7 +175,7 @@ const LIGHTS_BEGIN = patchChunk(
 /** How a banded-Lambert material gets its light-map sample. */
 type LmMode = 'world' | 'sprite' | 'none';
 
-function patchBandedLambert(shader: Shader, lm: LmMode = 'none'): void {
+export function patchBandedLambert(shader: Shader, lm: LmMode = 'none'): void {
   shader.uniforms.uBands = shared.uBands;
   shader.uniforms.uRim = shared.uRim;
   shader.uniforms.uBounce = shared.uBounce;

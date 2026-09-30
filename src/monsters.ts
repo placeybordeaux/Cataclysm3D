@@ -8,6 +8,7 @@ import { Spawner, type OvermapView } from './game/spawner';
 import { PlayerCombat, type ViewModelHook } from './game/playercombat';
 import { MELEE_AIM, MonsterView, NEAR_CLAMP } from './render/monsterView';
 import { HitFx } from './render/hitFx';
+import { charSettings, charsApi, setCharMode } from './render/chars';
 import { ArrowFx } from './render/arrowFx';
 import { butcherPracticeCap, butcherSeconds, butcherToolQuality, butcherYield, type ButcherKind, canDissect, dissectPracticeCap, dissectSeconds, dissectToolMessage, dissectToolQuality, dissectYield, readDissectables } from './game/butchery';
 import { monsterSize, type Monster } from './game/monster';
@@ -74,7 +75,13 @@ export function installMonsters(game: Game, renderer: Renderer | null, worldgen:
     combat.viewmodel = () => (renderer as unknown as { viewmodel?: ViewModelHook }).viewmodel;
     const fx = new HitFx(game, renderer, view);
     const arrows = new ArrowFx(game, renderer, combat, sys, view);
-    if (api) Object.assign(api, { hitFx: fx, arrowFx: arrows, nearClamp: NEAR_CLAMP, meleeAim: MELEE_AIM });
+    if (api) Object.assign(api, { hitFx: fx, arrowFx: arrows, nearClamp: NEAR_CLAMP, meleeAim: MELEE_AIM, chars: charsApi });
+    registerOption({
+      name: 'Creatures',
+      value: () => (charSettings.mode === 'model' ? '3D models' : 'sprites'),
+      change: () => setCharMode(charSettings.mode === 'model' ? 'billboard' : 'model'),
+      desc: 'How monsters, people and bodies are drawn: 3D pixel-textured models that turn and move, or the classic flat tileset sprites that always face you.',
+    });
   }
   (game as unknown as { monsters: MonsterSystem }).monsters = sys;
 
