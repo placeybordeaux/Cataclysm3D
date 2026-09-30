@@ -142,6 +142,13 @@ actually drawn: 600 → 980 draw calls, 1.1 → 1.65 M triangles, Firefox draw 5
 Frame-interval p99 is unchanged (33-50 ms in the city, 17-33 in town) because the city was
 already below 60 Hz in the benchmark.
 
+Driving into the city at 40 mph, 12 s in (3440x1304, half-size): the old order (the far
+street simply isn't there), the old order with stand-ins, and the new order (default).
+
+| old order, no stand-ins | old order + stand-ins | need order (default) |
+| --- | --- | --- |
+| ![](screenshots/wave3/perf/city40_before_holes.jpg) | ![](screenshots/wave3/perf/city40_standins.jpg) | ![](screenshots/wave3/perf/city40_after.jpg) |
+
 ## Benchmarks and budgets
 
 ### `npm run perf` (GPU, pass/fail)
@@ -154,7 +161,17 @@ seed 1 with a fresh profile (so the defaults: voxel look, 168 m, modelled everyt
 (moved at a fixed speed along a straight line without collision) so every run crosses the same
 chunks:
 
-ROUTES
+| route | what | baseline (2026-09-30): longest hole / runway p10 / frame p99 / loop p99 |
+| --- | --- | --- |
+| `town40` | into and through Holden (by the start) at 40 mph, on the straight road with the most buildings, starting 10 OMTs out so the town streams in while you drive | 0 s / 10.3 s / 33.4 / 18.8 ms |
+| `town60` | the same at 60 mph | 0 / 6.8 / 33.4 / 17.4 |
+| `city40` | into and through Columbia Falls (size 18, the biggest town within ~100 OMTs) at 40 mph | 0.65 / 8.9 / 66.6 / 37.4 |
+| `city60` | the same at 60 mph | 0 / 6.4 / 50 / 26.4 |
+| `forest` | straight through thick forest at 40 mph (3D trees, flora LOD rings) | 0 / 10.4 / 33.4 / 15.7 |
+| `rural` | the longest straight road outside towns near the start at 60 mph | 0 / 6.7 / 50 / 23.8 |
+
+The baseline was recorded with the machine at load ~15 (other agents' jobs), so its timing
+metrics are pessimistic; the streaming metrics (holes, runway) barely move with load.
 
 Per route it records the telemetry and checks: **longest continuous unbuilt-in-view stretch**,
 total unbuilt-in-view time, runway p10, frame-interval p99, loop p99, longest single build
@@ -189,8 +206,38 @@ the car and keeps the road clear of parked cars and zombies (a crash would end t
 
 ## Radius 6 vs 8
 
-RADIUS
+Same code (need order + stand-ins), Chromium, the city at 40 and 60 mph, 3440x1304:
+
+| | radius 6 (120 m) 40 mph | radius 8 (168 m) 40 mph | radius 6, 60 mph | radius 8, 60 mph |
+| --- | --- | --- | --- | --- |
+| unbuilt in view (s) | 0 | 0.75 | 0 | 0 |
+| runway p10 (s) | 7.5 | 8.9 | 5.2 | 6.4 |
+| chunk entries | 605 | 1000 | | |
+| draw calls / triangles | 810 / 1.26 M | 1228 / 1.64 M | | |
+| loop p50 / p99 (ms) | 15.4 / 25.3 | 19.8 / 37.4 | 11.6 / 19.1 | 16.1 / 26.4 |
+| frame p50 (ms) | 33.2 | 33.3 | **16.7** | 33.3 |
+| meshing ms/frame | 4.1 | 5.0 | 3.6 | 3.9 |
+
+Radius 8 costs ~4-5 ms of main loop per frame in a city (more to draw: +50 % draw calls,
++30 % triangles; more to mesh), which in the benchmark is the difference between 60 and 30 fps at
+60 mph. Streaming itself keeps up at both radii now: **the holes were never about the radius**
+— the old order at radius 6 left the city road unbuilt for 21 s of 30 as well
+(`?radius=6&stream=distance&placeholders=0`: 21.2 s, runway p10 2.6 s). Radius 6 is the one to
+suggest to someone whose frame rate drops in towns; 8 stays the default the user chose.
 
 ## Not done / next
 
-NEXT
+* **Draw cost in cities** is now the biggest frame item after streaming: ~1000-1200 draw
+  calls, 3-7.6 ms CPU (Firefox the slower). Merging a chunk's per-page meshes and cutting shadow
+  casters at distance would be the next wins (rendering, not streaming).
+* **Far interior LOD**: interiors (painted surfaces, furniture models, dressing, rooms) are ~half
+  of the mesh time (`--detail`) and can't be seen from 100 m. A far version without them,
+  refined when you come within a few chunks, would roughly halve the first-build cost of the
+  outer rings. Not needed for the benchmark routes any more, so not done.
+* **Web Workers**: not needed for mapgen (5-19 ms per second of driving). For meshing they would
+  need the texture/model atlases (mutable, main-thread pages) split from geometry emission first;
+  the telemetry shows the budget is not the limit now.
+* Firefox has single steps of 17-31 ms once or twice a run (a tree, a geometry upload); they
+  look like GC/first-JIT, not a slicing problem, but `maxStepMs` in the benchmark will tell.
+* The prefetcher still generates most chunks inside frames in a city (30 fps leaves no idle
+  time); mapgen is cheap enough that it doesn't matter today.

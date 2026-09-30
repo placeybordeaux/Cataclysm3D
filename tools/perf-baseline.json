@@ -1,0 +1,91 @@
+{
+  "note": "tools/perf-bench.ts budgets: a route fails when a metric is worse than this by more than the tolerance (relative and absolute). Re-record with --write-baseline after an intended change; see docs/PERF.md.",
+  "date": "2026-09-30",
+  "size": "3440x1304",
+  "tolerance": {
+    "maxHoleS": {
+      "rel": 0.5,
+      "abs": 0.3
+    },
+    "holeS": {
+      "rel": 0.5,
+      "abs": 0.5
+    },
+    "runwayP10": {
+      "rel": 0.3,
+      "abs": 0.5
+    },
+    "p99": {
+      "rel": 0.35,
+      "abs": 6
+    },
+    "loopP99": {
+      "rel": 0.35,
+      "abs": 4
+    },
+    "maxStepMs": {
+      "rel": 0.5,
+      "abs": 8
+    },
+    "genSyncMsPerS": {
+      "rel": 0.5,
+      "abs": 20
+    }
+  },
+  "routes": {
+    "town40": {
+      "maxHoleS": 0,
+      "holeS": 0,
+      "runwayP10": 10.3,
+      "p99": 33.4,
+      "loopP99": 18.8,
+      "maxStepMs": 15.7,
+      "genSyncMsPerS": 5.9
+    },
+    "town60": {
+      "maxHoleS": 0,
+      "holeS": 0,
+      "runwayP10": 6.84,
+      "p99": 33.4,
+      "loopP99": 17.4,
+      "maxStepMs": 9.4,
+      "genSyncMsPerS": 4.7
+    },
+    "city40": {
+      "maxHoleS": 0.65,
+      "holeS": 0.75,
+      "runwayP10": 8.86,
+      "p99": 66.6,
+      "loopP99": 37.4,
+      "maxStepMs": 18.6,
+      "genSyncMsPerS": 11.6
+    },
+    "city60": {
+      "maxHoleS": 0,
+      "holeS": 0,
+      "runwayP10": 6.43,
+      "p99": 50,
+      "loopP99": 26.4,
+      "maxStepMs": 16.8,
+      "genSyncMsPerS": 13.6
+    },
+    "forest": {
+      "maxHoleS": 0,
+      "holeS": 0,
+      "runwayP10": 10.36,
+      "p99": 33.4,
+      "loopP99": 15.7,
+      "maxStepMs": 18.7,
+      "genSyncMsPerS": 11.2
+    },
+    "rural": {
+      "maxHoleS": 0,
+      "holeS": 0,
+      "runwayP10": 6.68,
+      "p99": 50,
+      "loopP99": 23.8,
+      "maxStepMs": 15.6,
+      "genSyncMsPerS": 19
+    }
+  }
+}
