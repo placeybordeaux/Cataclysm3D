@@ -161,13 +161,14 @@ def differences_html():
     return total, len(cats), "\n".join(parts)
 
 
-def gallery_html():
-    """captions.md entries: a heading or bold line naming the file, then caption text."""
+def gallery_html(select=lambda f: not f.startswith("rc-"), wide=lambda f: False):
+    """captions.md entries: a heading naming the file, then caption text. `select` picks files,
+    `wide` marks figures that span the whole row (comparison composites)."""
     text = open(need("images/captions.md")).read()
     entries = []
     cur = None
     for line in text.splitlines():
-        m = re.search(r"([0-9][0-9a-z_.-]*\.(?:jpg|png))", line)
+        m = re.search(r"([0-9a-z][0-9a-z_.-]*\.(?:jpg|png))", line)
         if line.startswith("#") and m:
             cur = {"file": m.group(1), "lines": []}
             entries.append(cur)
@@ -180,6 +181,8 @@ def gallery_html():
     out = []
     files = {e["file"] for e in entries}
     for e in entries:
+        if not select(e["file"]):
+            continue
         if "-hero" in e["file"] and e["file"].replace("-hero", "") in files:
             continue  # the half-size twin is shown; the hero is linked from its caption
         path = os.path.join(HERE, "images", e["file"])
@@ -196,7 +199,7 @@ def gallery_html():
                 caption = l2
             else:
                 how.append(l2)
-        hero = False
+        hero = wide(e["file"])
         twin = e["file"].replace(".jpg", "-hero.jpg")
         if twin in files:
             how.insert(0, f"Full-size 1920x1080 version: [{twin}](images/{twin}).")
@@ -274,6 +277,11 @@ def main():
         read_rows.append((short, sum(x["cache_read"] for x in d.values())))
     ndiff, ncat, diffs = differences_html()
     nimg, gallery = gallery_html()
+    # the recreations section: composites full width first, then pairs, then ground views
+    order = lambda f: (0 if "compare" in f else 1 if "strip" in f else 2 if "pair" in f else 3)
+    _, rc_wide = gallery_html(lambda f: f.startswith("rc-") and order(f) < 2, lambda f: True)
+    _, rc_pairs = gallery_html(lambda f: f.startswith("rc-") and order(f) == 2)
+    _, rc_fp = gallery_html(lambda f: f.startswith("rc-") and order(f) == 3)
     commentary = md_to_html(open(need("commentary.md")).read())
     subs = {
         "{{CHART_OUTPUT}}": bar_chart(out_rows, "output", lambda v: f"{v / 1e6:.2f} M", "Output tokens per phase"),
@@ -281,6 +289,7 @@ def main():
         "{{CHART_GROWTH}}": growth_chart(growth),
         "{{DIFFERENCES}}": diffs, "{{NDIFF}}": str(ndiff), "{{NCAT}}": str(ncat),
         "{{GALLERY}}": gallery, "{{NIMG}}": str(nimg),
+        "{{RC_WIDE}}": rc_wide, "{{RC_PAIRS}}": rc_pairs, "{{RC_FP}}": rc_fp,
         "{{COMMENTARY}}": commentary,
     }
     page = tmpl
