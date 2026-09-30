@@ -7,6 +7,7 @@ import { atlasOf, omtLabel, playerOmt, type UiContext } from './context';
 import { openScreen } from './screen2';
 import { mapMarks, noteAt, removeNote, setNote, type MapNote } from './mapmarks';
 import { mapMarkers } from '../game/mapmarkers';
+import { registerOption } from './options';
 import { currentRoute } from './route';
 
 // 'm' map (CDDA overmap_ui.cpp, rebuilt for the mouse): the world at one UltiCa overmap sprite
@@ -36,6 +37,39 @@ export function overmapSeenTracker(): GameSystem {
       revealAround(game);
     },
   };
+}
+
+/**
+ * Road atlas (docs/ADAPTATION.md): a survivor who lived here knows the county's towns and the
+ * roads between them, even without having walked them; CDDA's fog hides everything past 15
+ * OMTs, so a newcomer had no idea another town existed (playtest: "drive to another town").
+ * Options > Map: Road atlas (default) or Explored only (CDDA).
+ */
+export const ATLAS_RADIUS = 60;
+const ATLAS_KEY = 'cdda3d.mapAtlas';
+export function mapAtlasOn(): boolean {
+  try {
+    return localStorage.getItem(ATLAS_KEY) !== 'off';
+  } catch {
+    return true;
+  }
+}
+let atlasOption = false;
+export function registerMapAtlasOption(): void {
+  if (atlasOption) return;
+  atlasOption = true;
+  registerOption({
+    name: 'Map',
+    value: () => (mapAtlasOn() ? 'Road atlas' : 'Explored only (CDDA)'),
+    change: () => {
+      try {
+        localStorage.setItem(ATLAS_KEY, mapAtlasOn() ? 'off' : 'on');
+      } catch {
+        // not persisted
+      }
+    },
+    desc: 'Road atlas: the map shows the names of nearby towns and the roads to them, like a road map you know by heart; buildings stay hidden until you see them. Explored only: only what you have seen, like Cataclysm.',
+  });
 }
 
 /** CDDA scenario distance_initial_visibility (default 15 OMTs): you know your home area. */
@@ -196,6 +230,18 @@ export function openOvermap(ctx: UiContext): Panel | null {
   };
   const refugee = refugeeCenterOmt(wg, start);
   const seen = (x: number, y: number, z: number) => game.overmapSeen.has(seenKey(x, y, z));
+  // Road atlas: town names and roads within ATLAS_RADIUS OMTs of you, fog or not.
+  const atlasOn = mapAtlasOn();
+  /** With the road atlas: the town an unexplored OMT belongs to ("Dana"), else null. */
+  const atlasTown = (x: number, y: number, z: number): string | null => {
+    if (!atlasOn || z !== 0 || !inAtlas(x, y)) return null;
+    const c = wg.overmap.citiesNear(x, y, 1).find((k) => Math.max(Math.abs(k.x - x), Math.abs(k.y - y)) <= k.size + 1);
+    return c?.name ?? null;
+  };
+  const inAtlas = (x: number, y: number) => {
+    const p = game.player;
+    return Math.max(Math.abs(x - Math.floor(p.x / CHUNK)), Math.abs(y - Math.floor(p.y / CHUNK))) <= ATLAS_RADIUS;
+  };
 
   // ---------------------------------------------------------------- drawing
   let W = 0, H = 0, dpr = 1;
@@ -241,6 +287,12 @@ export function openOvermap(ctx: UiContext): Panel | null {
           if (cell >= 6 && ((x + y) & 1) === 0) {
             g.fillStyle = '#0b0c10';
             g.fillRect(px, py, cell, cell);
+          }
+          // Road atlas (docs/ADAPTATION.md): the roads you'd know from a road map, faint.
+          if (atlasOn && cz === 0 && inAtlas(x, y) && /^(road|bridge)/.test(wg.overmap.omtAt(x, y, 0).type)) {
+            g.fillStyle = '#3a3d44';
+            const m = cell < 6 ? 0 : Math.max(1, Math.round(cell * 0.3));
+            g.fillRect(px + m, py + m, cell - 2 * m, cell - 2 * m);
           }
           continue;
         }
@@ -334,8 +386,8 @@ export function openOvermap(ctx: UiContext): Panel | null {
       if (!inView(sx, sy)) return;
       L.push(h('div', { class: `om-label ${cls}`, text, style: { left: `${sx}px`, top: `${sy}px` } }));
     };
-    if (cz === 0 && ZOOMS[zi] >= 6)
-      for (const city of wg.overmap.citiesNear(cx, cy, 1)) if (seen(city.x, city.y, 0)) label(city.x, city.y, city.name, 'city');
+    if (cz === 0 && ZOOMS[zi] >= 3)
+      for (const city of wg.overmap.citiesNear(cx, cy, 1)) if (seen(city.x, city.y, 0) || (atlasOn && inAtlas(city.x, city.y))) label(city.x, city.y, city.name, seen(city.x, city.y, 0) ? 'city' : 'city atlas');
     if (refugee && cz === 0 && seen(refugee.x, refugee.y, 0)) label(refugee.x, refugee.y, 'Refugee Center', 'ref');
     if (ZOOMS[zi] >= 6) {
       // Labs: only ones whose entrance you've actually seen.
@@ -517,7 +569,7 @@ export function openOvermap(ctx: UiContext): Panel | null {
   view.addEventListener('contextmenu', (e) => {
     e.preventDefault();
     const t = omtAtPointer(e);
-    openContextMenu({ x: e.clientX, y: e.clientY }, markMenu(t), { title: seen(t.x, t.y, t.z) ? omtLabel(ctx, t.x, t.y, t.z)?.name ?? 'Here' : 'Unexplored' });
+    openContextMenu({ x: e.clientX, y: e.clientY }, markMenu(t), { title: seen(t.x, t.y, t.z) ? omtLabel(ctx, t.x, t.y, t.z)?.name ?? 'Here' : atlasTown(t.x, t.y, t.z) ? `${atlasTown(t.x, t.y, t.z)} (unexplored)` : 'Unexplored' });
   });
 
   /** Display names for specials whose id reads badly ("evac_center"). */
@@ -526,7 +578,7 @@ export function openOvermap(ctx: UiContext): Panel | null {
     const note = noteAt(game, t.x, t.y, t.z);
     const marks = mapMarks(game);
     const isDest = marks.destination && marks.destination.x === t.x && marks.destination.y === t.y && marks.destination.z === t.z;
-    const lbl = seen(t.x, t.y, t.z) ? omtLabel(ctx, t.x, t.y, t.z)?.name : null;
+    const lbl = seen(t.x, t.y, t.z) ? omtLabel(ctx, t.x, t.y, t.z)?.name : atlasTown(t.x, t.y, t.z);
     const write = async (kind: MapNote['kind']) => {
       const text = await textPrompt({ title: note ? 'Edit note' : `New ${NOTE_KINDS.find((k) => k.kind === kind)!.label.toLowerCase()} note`, initial: note?.text ?? '', placeholder: 'e.g. pharmacy, zombies inside', ok: 'Save' });
       if (text === null) return;

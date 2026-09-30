@@ -7,6 +7,7 @@
 import type { Game } from '../game/game';
 import { BN_START_CLIMATE_OFFSET_DAYS, refreshWeather, setClimateOffsetDays } from '../game/weather';
 import { registerOption } from './options';
+import { registerMapAtlasOption } from './overmap_ui';
 
 type Climate = 'bn' | 'old';
 const KEY = 'cdda3d.climate';
@@ -31,6 +32,7 @@ function apply(game: Game): void {
 
 export function installAdaptation(game: Game): void {
   apply(game);
+  registerMapAtlasOption();
   registerOption({
     name: 'Climate',
     value: () => (climate() === 'bn' ? 'Mid-spring start (BN)' : 'Early spring (old)'),

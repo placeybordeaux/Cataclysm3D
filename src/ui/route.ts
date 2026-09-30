@@ -206,7 +206,9 @@ export function installRouteGuide(game: Game, renderer: Renderer, overmap: () =>
       // Walking distance: along the route from the next leg, plus the straight bit to it.
       const rest = Math.max(0, route.omts.length - 1 - ahead) * CHUNK;
       const walk = Math.hypot(target.x - p.x, target.y - p.y) + rest;
-      (beacon.lastChild as HTMLElement).textContent = `${route.dest.label} · ${Math.round(walk)} m`;
+      // Say it is the route length: the compass above shows the straight-line distance, and
+      // "Dana · 970 m" next to "Dana · 1463 m" read as a contradiction (playtest).
+      (beacon.lastChild as HTMLElement).textContent = `${route.dest.label} · ${Math.round(walk)} m ${driving ? "along the route" : "on foot"}`;
       return;
     }
     // Trail: walkable tiles toward the next leg, the first TRAIL_TILES of them, every other one.
