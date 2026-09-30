@@ -225,6 +225,7 @@ function openPartMenu(game: Game, v: Vehicle, mx: number, my: number): void {
     entries.push({ label: `Take the controls`, hotkey: '^', disabled: !reach, value: () => takeControls(game, v) });
     if (v.locked) entries.push({ label: 'Hotwire', hotkey: 'h', disabled: !reach || !game.player.inv.hasQuality('SCREW', 1), value: () => hotwire(game, v) });
   }
+  for (const extra of vehiclePartMenuExtras) entries.push(...extra(game, v, mx, my));
   entries.push({ label: 'Examine the vehicle', hotkey: 'x', value: () => showVehicleInfo(game, v) });
   const header = `<div>${parts.map(partLine).join('<br>')}</div><div style="margin-top:6px">${fuelSummary(v)}</div>`;
   const m = openMenu<Act>({ title: `${v.name}`, width: 'min(70ch, 92vw)', entries, onSelect: (fn) => void setTimeout(fn, 0) });
@@ -258,6 +259,9 @@ function showVehicleInfo(game: Game, v: Vehicle): void {
 }
 
 /** The ui2 inventory takes over "Get/Put items" when it can (src/ui2/bn/install.ts); false = use the v1 list. */
+/** Extra entries for a vehicle part's `e` menu from other systems (src/grab.ts: grab it). */
+export const vehiclePartMenuExtras: ((game: Game, v: Vehicle, mx: number, my: number) => { label: string; hotkey: string; value: () => void }[])[] = [];
+
 export const cargoUi: { open?: (v: Vehicle, cargo: VehiclePart) => boolean } = {};
 
 function getItemsMenu(game: Game, v: Vehicle, cargo: VehiclePart): void {

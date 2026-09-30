@@ -15,6 +15,7 @@ import { installUi } from './ui/index';
 import { installAudio } from './audio/install';
 import { installCrafting } from './ui/crafting_install';
 import { installVehicles } from './ui/vehicle_ui';
+import { installGrab } from './grab';
 import { installWorldInteraction } from './worldInteraction';
 import { installNature } from './nature';
 import { lightAt } from './game/vision';
@@ -109,6 +110,7 @@ async function main(): Promise<void> {
   // Difficulty presets (src/game/difficulty.ts): spawner knobs, needs, feel, pausing; before progression (its hook).
   installDifficulty(game, { spawner: monsters.spawner, api });
   await installVehicles(game, renderer, api);
+  installGrab(game, renderer, api); // after vehicles: composes with its movementOverride
   const npcs = await installNpcs(game, renderer, worldgen, monsters, api);
   installStairNpcs(game, stairs, npcs.sys);
   const mods = installMutBio(game, renderer, api);
