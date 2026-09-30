@@ -3,7 +3,7 @@ import { has, type Vehicle, type VehiclePart } from '../game/vehicle';
 import { GeomBuilder, type V3 } from './geometry';
 import type { TileFrame } from './textureSource';
 import { analyze, type Layout } from './vehicleLayout';
-import { liveryBody, paintSkin, sheetUv, type SheetName, type Skin, type SkinInput } from './vehicleSkin';
+import { liveryBody, paintSkin, sheetUv, skinLayout, skinLayoutInfo, SKIN_PPM, type SheetName, type Skin, type SkinInput, type SkinLayoutInfo } from './vehicleSkin';
 import { Batches, chamferBox, faceNormal, partFrames, quad4, tube, wheel, type PartSwatch } from './vehicleGeom';
 import { buildBike } from './vehicleBikes';
 
@@ -47,6 +47,8 @@ export interface ModelBuild {
   tails: THREE.BufferGeometry | null;
   beacons: THREE.BufferGeometry | null;
   skin: Skin | null;
+  /** With `deferSkin`: what to paint (in a worker) instead of `skin`. */
+  skinJob: { info: SkinLayoutInfo; inp: SkinInput } | null;
   /** Identifies the skin's content: rebuilds with the same key reuse the texture. */
   skinKey: string;
   layout: Layout;
@@ -258,7 +260,7 @@ function loopNormals(loop: { x: number; y: number }[]): { nx: number; ny: number
 // --- build -----------------------------------------------------------------------------
 
 /** Build the model for a vehicle, or null for grids the model doesn't cover ('frame'). */
-export function buildVehicleModel(v: Vehicle, base: number, opts: { reuseSkinKey?: string } = {}): ModelBuild | null {
+export function buildVehicleModel(v: Vehicle, base: number, opts: { reuseSkinKey?: string; deferSkin?: boolean } = {}): ModelBuild | null {
   const L = analyze(v);
   if (L.style === 'motorcycle' || L.style === 'bicycle') return buildBike(v, L, base);
   if (L.style === 'frame' || !L.sections.length) return null;
@@ -414,12 +416,16 @@ export function buildVehicleModel(v: Vehicle, base: number, opts: { reuseSkinKey
     rowDamage,
     headlamps: lampSpecs.head.map((l) => ({ z: l.z, y: l.y, w: l.w, h: l.h })),
     taillamps: lampSpecs.tail.map((l) => ({ z: l.z, y: l.y, w: l.w, h: l.h })),
-    wallTop: ghTop,
+    wallTop: sampleWallTop(ghTop, L.xTail - 0.3, L.xNose + 0.3),
     yMax,
   };
   const skinKey = [v.protoId, v.paint, v.uid, Math.round(L.wear * 20), [...rowDamage.values()].map((d) => Math.round(d * 4)).join(''), [...rowBlood.values()].map((b) => Math.round(b / 150)).join('')].join('|');
-  const skin = opts.reuseSkinKey === skinKey ? null : paintSkin(L, skinIn);
-  const lay = skin?.layout ?? null;
+  const reuse = opts.reuseSkinKey === skinKey;
+  const info = skinLayoutInfo(L);
+  const skin = reuse || opts.deferSkin ? null : paintSkin(info, skinIn);
+  const skinJob = !reuse && opts.deferSkin ? { info, inp: skinIn } : null;
+  // UVs only need the sheet placement, which doesn't depend on the painting.
+  const lay = skinLayout(info, yMax);
   const uvOf = (sheet: SheetName, a: V3): [number, number] => {
     if (!lay) return [0, 0];
     if (sheet === 'right' || sheet === 'left') return sheetUv(lay, sheet, a[0], a[1] - base);
@@ -568,7 +574,7 @@ export function buildVehicleModel(v: Vehicle, base: number, opts: { reuseSkinKey
 
   // --- parts: wheels, interior, bumpers, mirrors ---
   const parts = new Batches(), wheels = new Batches();
-  const paintC = liveryBody(L, v.paint);
+  const paintC = liveryBody(info, v.paint);
   const floorY = p.sill + 0.1;
   const seatTop = Math.max(floorY + 0.2, p.belt - 0.45);
   const cabX0 = cab ? cab.x0 : L.xNose, cabX1 = L.sections.filter((s) => s.kind !== 'deck' && s.kind !== 'bed' && s.kind !== 'flat' && s.kind !== 'hood').reduce((m, s) => Math.min(m, s.x1), cabX0);
@@ -611,7 +617,8 @@ export function buildVehicleModel(v: Vehicle, base: number, opts: { reuseSkinKey
   const dashFront = p.flatFront || L.xCowl === null ? L.xNose - 0.12 : L.xCowl - 0.02;
   // The cockpit camera sits at `eyeH`: the dash stays under the bonnet line so from the
   // driver's seat the car is a thin band (dash, then a sliver of bonnet) under the road.
-  const dashTop = Math.min(belt - 0.1, p.hood - 0.14);
+  const eyeH = Math.min(p.roof - 0.14, Math.max(seatTop + 0.68, p.hood + 0.3, belt + 0.24));
+  const dashTop = Math.min(belt - 0.1, p.hood - 0.14, eyeH - 0.5);
   if (cab) {
     const dz = hw - 0.08;
     chamferBox(parts.get(darkenC(p.interior, 0.7)), dashFront - 0.34, base + dashTop - 0.28, L.yc - dz, dashFront, base + dashTop, L.yc + dz, 0.05, F.dark, F.dark);
@@ -655,11 +662,18 @@ export function buildVehicleModel(v: Vehicle, base: number, opts: { reuseSkinKey
   const wheelsGeo = out(wheels, false);
   const merged = partsGeo && wheelsGeo ? mergeTwo(partsGeo, wheelsGeo) : partsGeo ?? wheelsGeo;
 
-  const eyeH = Math.min(p.roof - 0.14, Math.max(seatTop + 0.68, p.hood + 0.3, belt + 0.24));
   return {
     body: out(body), roof: out(roof), parts: merged, glass: out(glass), lamps: out(lampsG), tails: out(tailsG), beacons: out(beaconsB),
-    skin, skinKey, layout: L, eyeH, driverZ, parkedLean: 0,
+    skin, skinJob, skinKey, layout: L, eyeH, driverZ, parkedLean: 0,
   };
+}
+
+function sampleWallTop(f: (x: number) => number, x0: number, x1: number): SkinInput['wallTop'] {
+  const step = 1 / SKIN_PPM;
+  const n = Math.ceil((x1 - x0) / step) + 1;
+  const values = new Float32Array(n);
+  for (let i = 0; i < n; i++) values[i] = f(x0 + i * step);
+  return { x0, step, values };
 }
 
 function mergeTwo(a: THREE.BufferGeometry, b: THREE.BufferGeometry): THREE.BufferGeometry {

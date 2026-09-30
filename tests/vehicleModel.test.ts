@@ -8,7 +8,7 @@ import { spawnVehicle, type Vehicle } from '../src/game/vehicle';
 import type { VehicleDataFile } from '../src/game/vehicle_data';
 import { analyze, classify, wheelRadius } from '../src/render/vehicleLayout';
 import { buildOutline, buildVehicleModel } from '../src/render/vehicleModel';
-import { paintSkin, SKIN_PPM, skinLayout } from '../src/render/vehicleSkin';
+import { paintSkin, SKIN_PPM, skinLayout, skinLayoutInfo } from '../src/render/vehicleSkin';
 import { loadNodeData } from '../tools/lib/node_data';
 
 let data: GameData;
@@ -144,13 +144,21 @@ describe('vehicle model: geometry', () => {
   it('paints a skin at 32 texels per metre with every texel set', () => {
     const v = make('policecar');
     const L = analyze(v);
-    const lay = skinLayout(L, 2);
+    const lay = skinLayout(skinLayoutInfo(L), 2);
     expect(lay.sheets.right.w).toBe(Math.ceil((L.xNose - L.xTail + 0.5) * SKIN_PPM));
-    const s = paintSkin(L, { paint: v.paint, seed: 1, panes: { [-1]: [], [1]: [] } as never, arches: [], rowBlood: new Map(), rowDamage: new Map(), headlamps: [], taillamps: [], wallTop: () => 1.4, yMax: 2 });
+    const s = paintSkin(skinLayoutInfo(L), { paint: v.paint, seed: 1, panes: { [-1]: [], [1]: [] } as never, arches: [], rowBlood: new Map(), rowDamage: new Map(), headlamps: [], taillamps: [], wallTop: { x0: -5, step: 1, values: new Float32Array(12).fill(1.4) }, yMax: 2 });
     let unset = 0;
     for (const sh of Object.values(s.layout.sheets))
       for (let v2 = 0; v2 < sh.h; v2++) for (let u = 0; u < sh.w; u++) if (s.data[((sh.v0 + v2) * s.layout.width + sh.u0 + u) * 4 + 3] !== 255) unset++;
     expect(unset).toBe(0);
+  });
+
+  it('can hand the skin to a worker as structured-cloneable data', () => {
+    const m = buildVehicleModel(make('ambulance', 1), 0, { deferSkin: true })!;
+    expect(m.skin).toBeNull();
+    const job = structuredClone(m.skinJob!);
+    const s = paintSkin(job.info, job.inp);
+    expect(s.data.length).toBe(s.layout.width * s.layout.height * 4);
   });
 
   it('reuses the skin when only doors / lights change', () => {

@@ -130,6 +130,6 @@ export function buildBike(v: Vehicle, L: Layout, base: number): ModelBuild {
   const out = (b: Batches | GeomBuilder): THREE.BufferGeometry | null => (b instanceof Batches ? b.build() : b.vertexCount ? b.build() : null);
   return {
     body: null, roof: null, parts: out(parts), glass: null, lamps: out(lamps), tails: out(tails), beacons: null,
-    skin: null, skinKey: '', layout: L, eyeH, driverZ: z, parkedLean: bicycle ? 0.1 : 0.14,
+    skin: null, skinJob: null, skinKey: '', layout: L, eyeH, driverZ: z, parkedLean: bicycle ? 0.1 : 0.14,
   };
 }

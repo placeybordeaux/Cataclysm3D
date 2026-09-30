@@ -4,11 +4,12 @@
 //
 //   street            a town street with the parked / wrecked cars mapgen put there (3/4 view)
 //   lineup:<a,b,..>   the prototypes side by side in a field, seen from the front 3/4
-//   solo:<proto>[:<angle>[:<status>[:<dist>[:<hour>]]]]
+//   solo:<proto>[:<angle>[:<status>[:<dist>[:<hour>]]]]  (status: 0 intact, -1 used, 1 wrecked, smashed)
 //                     one prototype, camera `angle` deg from its nose (90 = right side),
 //                     spawn status (0 intact, -1 light damage, 1 wrecked), dist m off the body
 //   drive / drivechase / driveday / drivedaychase   driving a car (night: headlights on)
 //   nightstreet       the street view at 23:00 with the nearest car's headlights on
+//   top[:<dist>]      top-down camera over a street car (roofs hidden)
 window.vehicleView = async (name) => {
   const c = window.cdda;
   c.godMode(true);
@@ -59,8 +60,21 @@ window.vehicleView = async (name) => {
     const [proto, angle = '40', status = '0', dist = '3', hour = '15.5'] = args;
     c.setHour(Number(hour));
     field();
-    const r = c.spawnVehicle(proto, 6, 0, 0, { fuel: 50, status: Number(status), force: true });
+    // status 'smashed': intact car with every window broken, a flat tyre and a door open
+    const smashed = status === 'smashed';
+    const r = c.spawnVehicle(proto, 6, 0, 0, { fuel: 50, status: smashed ? 0 : Number(status), force: true });
     if (!r) throw new Error(`spawn ${proto} failed`);
+    if (smashed) {
+      const v = c.vehicleSystem.list.find((q) => q.uid === r.uid);
+      for (const q of v.parts) {
+        if (q.def.flags.includes('WINDSHIELD') || q.def.flags.includes('WINDOW')) q.hp = 0;
+        q.open = false;
+      }
+      v.wheels[0].hp = 0;
+      const door = v.parts.find((q) => q.def.flags.includes('OPENABLE') && q.my > 0);
+      if (door) door.open = true;
+      v.version++;
+    }
     c.gotoVehicle(`^${proto}$`, { radius: 2, dist: Number(dist), angle: Number(angle) });
     if (Number(hour) > 20 || Number(hour) < 5) c.vehicleLights(true, r.uid);
   } else if (kind === 'drive' || kind === 'drivechase' || kind === 'driveday' || kind === 'drivedaychase') {
@@ -68,9 +82,19 @@ window.vehicleView = async (name) => {
     c.setHour(night ? 23.2 : 15);
     c.teleportOmt(town.x, town.y);
     c.roadTrip(args[0] ?? 'car', 4, 40);
+    // earlier drive views (and mapgen cars) can sit on the same spot: clear them away
+    const me = c.vehicleSystem.driving;
+    for (const v of [...c.vehicleSystem.list]) if (v !== me && Math.hypot(v.x - me.x, v.y - me.y) < 8) c.vehicleSystem.remove(v);
     if (night) c.vehicleLights(true);
     c.renderer.rig.driveCam = kind.endsWith('chase') ? 'chase' : 'cockpit';
     c.drive(0, 0, 0.2);
+  } else if (kind === 'top') {
+    // top-down over the street: roofs hide so you see into the cabins
+    c.setHour(13);
+    c.teleportOmt(town.x, town.y);
+    c.gotoVehicle('^(car|sedan|suv|pickup|cube_van).*', { radius: 10, dist: 2, angle: 90 });
+    c.setCameraMode('top');
+    c.renderer.rig.topDistance = Number(args[0] ?? 22);
   } else throw new Error(`unknown vehicle view ${name}`);
   c.settle();
   await new Promise((r) => setTimeout(r, 1500));

@@ -1,4 +1,4 @@
-import type { Layout } from './vehicleLayout';
+import type { DoorInfo, Layout } from './vehicleLayout';
 
 // Per-vehicle pixel-art body texture ("skin"), painted procedurally at 32 texels per metre
 // (the project's texel density; UltiCa tiles are 32 px per 1 m tile) and drawn with nearest
@@ -8,8 +8,20 @@ import type { Layout } from './vehicleLayout';
 // rust and grime land where the geometry has them, Shadowglass style: stepped shading,
 // hard-edged detail, a limited palette derived from the body colour.
 //
-// Pure: paints into a Uint8Array (RGBA, row 0 = bottom = v 0), so it runs in node tests;
-// vehicleModel.ts wraps it in a THREE.DataTexture.
+// Pure: paints into a Uint8Array (RGBA, row 0 = bottom = v 0), so it runs in node tests and
+// in a worker (vehicleSkinWorker.ts: the game paints skins off the main thread). Inputs are
+// plain structured-cloneable data (SkinLayoutInfo, SkinInput); VehicleRenderer wraps the
+// result in a THREE.DataTexture.
+
+/** The parts of a Layout the painter reads (no functions, no vehicle parts: clone-safe). */
+export type SkinLayoutInfo = Pick<Layout, 'style' | 'livery' | 'p' | 'xNose' | 'xTail' | 'yc' | 'hw' | 'xCowl' | 'cabin' | 'wear' | 'sections'> & {
+  doors: Omit<DoorInfo, 'part'>[];
+};
+
+export function skinLayoutInfo(L: Layout): SkinLayoutInfo {
+  const { style, livery, p, xNose, xTail, yc, hw, xCowl, cabin, wear, sections } = L;
+  return { style, livery, p, xNose, xTail, yc, hw, xCowl, cabin, wear, sections, doors: L.doors.map(({ side, x0, x1, window }) => ({ side, x0, x1, window })) };
+}
 
 export const SKIN_PPM = 32;
 
@@ -33,7 +45,7 @@ export interface SkinLayout {
 }
 
 /** Sheet placement for a layout: sides (x, y), top (x, z), front/rear (z, y), a grime swatch. */
-export function skinLayout(L: Layout, yMax: number): SkinLayout {
+export function skinLayout(L: SkinLayoutInfo, yMax: number): SkinLayout {
   const ppm = SKIN_PPM;
   const x0 = L.xTail - 0.25, x1 = L.xNose + 0.25;
   const z0 = L.yc - L.hw - 0.3, z1 = L.yc + L.hw + 0.3;
@@ -109,8 +121,9 @@ export interface SkinInput {
   /** Lamps on the front / rear faces: centre z, y, half w, half h. */
   headlamps: { z: number; y: number; w: number; h: number }[];
   taillamps: { z: number; y: number; w: number; h: number }[];
-  /** Top edge of the side walls at x (below it: pillars / window frames, above: roof side). */
-  wallTop: (x: number) => number;
+  /** Top edge of the side walls (below it: pillars / window frames, above: roof side),
+   * sampled every `step` m from x0. */
+  wallTop: { x0: number; step: number; values: Float32Array };
   yMax: number;
 }
 
@@ -120,13 +133,13 @@ export interface Skin {
 }
 
 /** The body colour a livery paints (for parts tinted to match, e.g. mirrors). */
-export function liveryBody(L: Layout, paint: number): number {
+export function liveryBody(L: SkinLayoutInfo, paint: number): number {
   const [r, g, b] = liveryColors(L, paint).body;
   return (Math.round(r) << 16) | (Math.round(g) << 8) | Math.round(b);
 }
 
 /** Livery base: body colour(s) by livery (plain uses the spawn paint). */
-function liveryColors(L: Layout, paint: number): { body: RGB; lower?: RGB; stripe?: RGB; roof?: RGB } {
+function liveryColors(L: SkinLayoutInfo, paint: number): { body: RGB; lower?: RGB; stripe?: RGB; roof?: RGB } {
   switch (L.livery) {
     case 'police': return { body: rgb(0x1c1d22), lower: rgb(0x1c1d22), stripe: rgb(0xe8e8e2), roof: rgb(0xe8e8e2) };
     case 'fbi': return { body: rgb(0x16171b) };
@@ -144,7 +157,13 @@ function liveryColors(L: Layout, paint: number): { body: RGB; lower?: RGB; strip
   }
 }
 
-export function paintSkin(L: Layout, inp: SkinInput): Skin {
+/** Side-wall top at x from the sampled table (nearest sample, clamped). */
+export function wallTopAt(w: SkinInput['wallTop'], x: number): number {
+  const i = Math.round((x - w.x0) / w.step);
+  return w.values[Math.max(0, Math.min(w.values.length - 1, i))];
+}
+
+export function paintSkin(L: SkinLayoutInfo, inp: SkinInput): Skin {
   const lay = skinLayout(L, inp.yMax);
   const W = lay.width, H = lay.height;
   // Clamped: brightening (x1.25 creases) saturates instead of wrapping.
@@ -237,7 +256,7 @@ export function paintSkin(L: Layout, inp: SkinInput): Skin {
     const panes = inp.panes[side];
     for (let tu = 0; tu < sh.w; tu++) {
       const x = sh.a0 + (tu + 0.5) / ppm;
-      const wallTop = inp.wallTop(x);
+      const wallTop = wallTopAt(inp.wallTop, x);
       const policeDoor = L.livery === 'police' && L.doors.some((d) => d.side === side && x <= d.x0 && x >= d.x1);
       column(Math.round(x));
       const tx = x * side * ppm;
@@ -430,7 +449,7 @@ function outlineTexels(pts: [number, number][], ppm: number): [number, number][]
 }
 
 /** Livery marks on the side sheets: crosses, stars, flowers, stencils. */
-function emblem(L: Layout, sh: Sheet, side: -1 | 1, col: { body: RGB; stripe?: RGB }, put: (u: number, v: number, c: RGB) => void, get: (u: number, v: number) => RGB): void {
+function emblem(L: SkinLayoutInfo, sh: Sheet, side: -1 | 1, col: { body: RGB; stripe?: RGB }, put: (u: number, v: number, c: RGB) => void, get: (u: number, v: number) => RGB): void {
   const p = L.p, ppm = SKIN_PPM;
   // centre of the biggest flat panel: the box on vans, else the rear door / quarter
   const box = L.sections.find((s) => s.kind === 'box');

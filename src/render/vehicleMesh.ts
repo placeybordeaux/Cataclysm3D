@@ -15,6 +15,7 @@ import type { Renderer } from './renderer';
 import type { TileFrame } from './textureSource';
 import { Batches, hash, partSwatchPage } from './vehicleGeom';
 import { buildVehicleModel } from './vehicleModel';
+import { liveryBody } from './vehicleSkin';
 
 // 3D meshes for vehicles, built from their parts mount by mount, as low-poly boxes wearing
 // small procedural pixel-art swatches (UltiCa's vp_* sprites are 3/4-view drawings for a
@@ -490,6 +491,10 @@ interface Entry {
   tails: THREE.Mesh | null;
   beacons: THREE.Mesh | null;
   skin: Skin | null;
+  /** Meshes drawn with the skin (body, roof): they swap from the placeholder when it lands. */
+  skinMeshes: THREE.Mesh[];
+  /** Skin being painted by the worker. */
+  pending: { id: number; key: string } | null;
   version: number;
   z: number;
   look: VehicleLook;
@@ -525,8 +530,13 @@ export class VehicleRenderer {
   /** Spot intensity: the road reads ~35 m ahead at night. */
   headlightIntensity = 45;
   private lookMode: VehicleLook = initialVehicleLook();
-  /** Build time of the last model build (ms), for the bench tools. */
-  lastBuildMs = 0;
+  /** Skin painter worker (undefined = not tried yet, null = unavailable: paint inline). */
+  private worker: Worker | null | undefined;
+  private jobId = 0;
+  /** Flat paint-coloured body materials shown until a vehicle's skin arrives. */
+  private placeholders = new Map<number, { tex: THREE.DataTexture; mat: THREE.MeshLambertMaterial; depth: THREE.MeshDepthMaterial }>();
+  /** Mesh build timings (both looks), for the bench tools: `cdda.renderer.vehicleView.buildStats`. */
+  readonly buildStats = { n: 0, totalMs: 0, maxMs: 0 };
 
   constructor(private renderer: Renderer, private game: Game, private system: VehicleSystem) {
     this.group.name = 'vehicles';
@@ -551,6 +561,59 @@ export class VehicleRenderer {
       // not persisted
     }
     for (const v of [...this.entries.keys()]) this.drop(v);
+  }
+
+  private skinWorker(): Worker | null {
+    if (this.worker !== undefined) return this.worker;
+    try {
+      this.worker = new Worker(new URL('./vehicleSkinWorker.ts', import.meta.url), { type: 'module' });
+      this.worker.onmessage = (ev: MessageEvent<{ id: number; width: number; height: number; data: Uint8Array }>) => this.skinArrived(ev.data);
+      this.worker.onerror = (err) => {
+        // Fail loudly, then keep working: skins get painted inline from here on.
+        console.error('[vehicles] skin worker failed; painting on the main thread', err);
+        this.worker?.terminate();
+        this.worker = null;
+        for (const e of this.entries.values()) e.pending = null;
+        for (const v of this.entries.keys()) v.version++;
+      };
+    } catch (err) {
+      console.error('[vehicles] no skin worker; painting on the main thread', err);
+      this.worker = null;
+    }
+    return this.worker;
+  }
+
+  private skinArrived(msg: { id: number; width: number; height: number; data: Uint8Array }): void {
+    for (const e of this.entries.values()) {
+      if (e.pending?.id !== msg.id) continue;
+      const skin = this.makeSkin(e.pending.key, msg.data, msg.width, msg.height);
+      e.pending = null;
+      e.skin = skin;
+      for (const m of e.skinMeshes) {
+        m.material = skin.mat;
+        m.customDepthMaterial = skin.depth;
+      }
+      return;
+    }
+    // the vehicle was rebuilt or left view meanwhile: nothing to do
+  }
+
+  private makeSkin(key: string, data: Uint8Array, w: number, h: number): Skin {
+    const tex = new THREE.DataTexture(data, w, h, THREE.RGBAFormat);
+    setupPixelTexture(tex);
+    const { mat, depth } = vehicleBodyMaterials(tex);
+    return { key, tex, mat, depth };
+  }
+
+  private placeholder(color: number): { mat: THREE.MeshLambertMaterial; depth: THREE.MeshDepthMaterial } {
+    let p = this.placeholders.get(color);
+    if (!p) {
+      const tex = new THREE.DataTexture(new Uint8Array([(color >> 16) & 255, (color >> 8) & 255, color & 255, 255]), 1, 1, THREE.RGBAFormat);
+      setupPixelTexture(tex);
+      p = { tex, ...vehicleBodyMaterials(tex) };
+      this.placeholders.set(color, p);
+    }
+    return p;
   }
 
   private disposeMeshes(e: Entry, keepSkin: Skin | null): void {
@@ -593,27 +656,29 @@ export class VehicleRenderer {
       return mesh;
     };
     const next: Entry = {
-      obj, lean, meshes, roof: null, lamps: null, tails: null, beacons: null, skin: null,
+      obj, lean, meshes, roof: null, lamps: null, tails: null, beacons: null, skin: null, skinMeshes: [], pending: null,
       version: v.version, z: v.z, look: this.lookMode, eyeH: null, driverZ: null, parkedLean: 0, beam: e?.beam ?? [],
     };
     const t0 = performance.now();
-    const model = this.lookMode === 'model' ? buildVehicleModel(v, base, { reuseSkinKey: e?.skin?.key }) : null;
+    const worker = this.lookMode === 'model' ? this.skinWorker() : null;
+    // A skin already painted (or being painted) for the same content is kept.
+    const haveKey = e?.skin?.key ?? e?.pending?.key;
+    const model = this.lookMode === 'model' ? buildVehicleModel(v, base, { reuseSkinKey: haveKey, deferSkin: !!worker }) : null;
     if (model) {
       let skin: Skin | null = e?.skin && e.skin.key === model.skinKey ? e.skin : null;
-      if (!skin && model.skin) {
-        const s = model.skin;
-        const tex = new THREE.DataTexture(s.data, s.layout.width, s.layout.height, THREE.RGBAFormat);
-        setupPixelTexture(tex);
-        const { mat, depth } = vehicleBodyMaterials(tex);
-        skin = { key: model.skinKey, tex, mat, depth };
+      if (!skin && model.skin) skin = this.makeSkin(model.skinKey, model.skin.data, model.skin.layout.width, model.skin.layout.height);
+      if (!skin && e?.pending && e.pending.key === model.skinKey) next.pending = e.pending;
+      if (!skin && model.skinJob && worker) {
+        next.pending = { id: ++this.jobId, key: model.skinKey };
+        worker.postMessage({ id: next.pending.id, ...model.skinJob });
       }
       if (e) this.disposeMeshes(e, skin);
       next.skin = skin;
       const parts = worldMaterials(partSwatchPage().tex);
-      if (skin) {
-        mk(model.body, skin.mat, skin.depth);
-        next.roof = mk(model.roof, skin.mat, skin.depth);
-      }
+      const bodyMat = skin ?? this.placeholder(liveryBody(model.layout, v.paint));
+      const b = mk(model.body, bodyMat.mat, bodyMat.depth);
+      next.roof = mk(model.roof, bodyMat.mat, bodyMat.depth);
+      next.skinMeshes = [b, next.roof].filter((m): m is THREE.Mesh => !!m);
       mk(model.parts, parts.mat, parts.depth);
       if (model.glass) {
         mk(model.glass, this.glassOut, null);
@@ -628,7 +693,6 @@ export class VehicleRenderer {
       // lean about the ground line under the bike
       lean.position.set(0, base, model.driverZ ?? 0);
       pivot.position.set(0, -base, -(model.driverZ ?? 0));
-      this.lastBuildMs = performance.now() - t0;
     } else {
       if (e) this.disposeMeshes(e, null);
       const g = buildVehicleGeometry(v, base);
@@ -641,6 +705,10 @@ export class VehicleRenderer {
       next.look = 'parts';
     }
     this.group.add(obj);
+    const ms = performance.now() - t0;
+    this.buildStats.n++;
+    this.buildStats.totalMs += ms;
+    this.buildStats.maxMs = Math.max(this.buildStats.maxMs, ms);
     return next;
   }
 
