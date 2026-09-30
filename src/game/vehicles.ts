@@ -11,7 +11,9 @@ import { EngineSounds, engineVariant, hornVariant, pickVariant } from '../audio/
 import { MAIN_PARTS, type BodyPartId } from './bodyparts';
 import type { GameData, TerrainDef, FurnitureDef } from '../data/types';
 import type { Chunk, GameMap, MapOverlay, VehicleRequest } from '../world/map';
-import { circleHitsBody, circleTouchesBody, mountSolid, pointInBody, type BodyRect } from './vehicleShape';
+import {
+  circleHitsBody, circleTouchesBody, clampToObb, mountSolid, nearestMount, obbBounds, obbContact, obbHitsObb, obbHitsTile, pointInBody, rectObb, vehicleObbs, type BodyRect, type Obb,
+} from './vehicleShape';
 import { CREATURE_RADIUS } from './physics';
 import { hasFlag } from '../world/registry';
 import { chunkKey, chunkOf } from '../world/coords';
@@ -134,6 +136,18 @@ const tileKey = (x: number, y: number, z: number): number => ((x + 1048576) * 20
 const STOP_EPS = 0.05;
 /** Max front-wheel angle, rad. */
 const MAX_STEER = 0.6;
+/**
+ * Shaped bodies: longest substep (m) and largest turn per substep (deg). The thinnest body a
+ * car can meet is a bicycle's (~0.6 m across), so 0.25 m steps can't skip over one at any
+ * speed; 4 deg swings a 5.6 m car's corner ~0.2 m.
+ */
+const BODY_STEP = 0.25;
+const BODY_TURN_STEP = 4;
+/** A vehicle pushing another aside with its drawn body at the pose it's moving to. */
+interface Pusher {
+  v: Vehicle;
+  obb: Obb;
+}
 /** Brake deceleration, m/s^2 (CDDA brakes shed ~30% of max speed per turn; 30 mph to 0 in ~1.7 s). */
 const BRAKE_DECEL = 8;
 
@@ -151,7 +165,11 @@ export class VehicleSystem implements GameSystem, MapOverlay {
   private shapeCache = new WeakMap<Vehicle, { version: number; epoch: number; rect: BodyRect | null }>();
   readonly name = 'vehicles';
   readonly list: Vehicle[] = [];
-  private index = new Map<number, VehicleOccupant>();
+  /**
+   * Tile -> the vehicles whose grids cover it. Usually one; with drawn bodies (narrower than
+   * their grids) two cars can park or pass with their paint apart but their grids overlapping.
+   */
+  private index = new Map<number, VehicleOccupant[]>();
   private tilesOf = new Map<Vehicle, number[]>();
   private pending: VehicleRequest[] = [];
   /** Vehicle the player is driving (at the controls), if any. */
@@ -227,12 +245,19 @@ export class VehicleSystem implements GameSystem, MapOverlay {
   // --- MapOverlay -----------------------------------------------------------------------
 
   moveCost(x: number, y: number, z: number): number | undefined {
-    const o = this.index.get(tileKey(x, y, z));
-    return o ? o.v.moveCostAt(o.mx, o.my) : undefined;
+    const list = this.index.get(tileKey(x, y, z));
+    if (!list) return undefined;
+    let c = 0;
+    for (const o of list) {
+      const m = o.v.moveCostAt(o.mx, o.my);
+      if (m === 0) return 0;
+      c = Math.max(c, m);
+    }
+    return c;
   }
   opaque(x: number, y: number, z: number): boolean | undefined {
-    const o = this.index.get(tileKey(x, y, z));
-    return o ? o.v.opaqueAt(o.mx, o.my) : undefined;
+    const list = this.index.get(tileKey(x, y, z));
+    return list ? list.some((o) => o.v.opaqueAt(o.mx, o.my)) : undefined;
   }
 
   /** The body outline collision uses for `v`, or null for whole tiles. */
@@ -245,21 +270,21 @@ export class VehicleSystem implements GameSystem, MapOverlay {
     return rect;
   }
   shaped(x: number, y: number, z: number): boolean {
-    const o = this.index.get(tileKey(x, y, z));
-    return !!o && this.bodyRect(o.v) !== null;
+    const list = this.index.get(tileKey(x, y, z));
+    return !!list && list.every((o) => this.bodyRect(o.v) !== null);
   }
   collide(x: number, y: number, z: number, r: number): boolean {
     if (!this.bodyShape || !this.list.length) return false;
     // A rotated body pokes a little past its tiles: look one tile further out.
-    let seen: Vehicle | null = null, seen2: Vehicle | null = null;
+    const seen = new Set<Vehicle>();
     for (let ty = Math.floor(y - r) - 1; ty <= Math.floor(y + r) + 1; ty++)
       for (let tx = Math.floor(x - r) - 1; tx <= Math.floor(x + r) + 1; tx++) {
-        const o = this.index.get(tileKey(tx, ty, z));
-        if (!o || o.v === seen || o.v === seen2) continue;
-        seen2 = seen;
-        seen = o.v;
-        const b = this.bodyRect(o.v);
-        if (b && circleHitsBody(o.v, b, x, y, r)) return true;
+        for (const o of this.index.get(tileKey(tx, ty, z)) ?? []) {
+          if (seen.has(o.v)) continue;
+          seen.add(o.v);
+          const b = this.bodyRect(o.v);
+          if (b && circleHitsBody(o.v, b, x, y, r)) return true;
+        }
       }
     return false;
   }
@@ -269,16 +294,28 @@ export class VehicleSystem implements GameSystem, MapOverlay {
    * of a door's tile, outside the car.
    */
   occupantAt(x: number, y: number, z: number): VehicleOccupant | null {
-    const o = this.index.get(tileKey(Math.floor(x), Math.floor(y), z));
-    if (!o) return null;
-    const b = this.bodyRect(o.v);
-    return !b || pointInBody(o.v, b, x, y) ? o : null;
+    for (const o of this.index.get(tileKey(Math.floor(x), Math.floor(y), z)) ?? []) {
+      const b = this.bodyRect(o.v);
+      if (!b || pointInBody(o.v, b, x, y)) return o;
+    }
+    return null;
   }
 
   // --- registry -----------------------------------------------------------------------
 
+  /**
+   * The vehicle + mount at a tile. Where two grids share the tile (shaped bodies side by
+   * side), the one whose drawn body covers the tile centre.
+   */
   at(x: number, y: number, z: number): VehicleOccupant | null {
-    return this.index.get(tileKey(x, y, z)) ?? null;
+    const list = this.index.get(tileKey(x, y, z));
+    if (!list) return null;
+    if (list.length > 1)
+      for (const o of list) {
+        const b = this.bodyRect(o.v);
+        if (b && pointInBody(o.v, b, x + 0.5, y + 0.5)) return o;
+      }
+    return list[0];
   }
 
   add(v: Vehicle): void {
@@ -297,7 +334,13 @@ export class VehicleSystem implements GameSystem, MapOverlay {
   }
 
   private unindex(v: Vehicle): void {
-    for (const k of this.tilesOf.get(v) ?? []) if (this.index.get(k)?.v === v) this.index.delete(k);
+    for (const k of this.tilesOf.get(v) ?? []) {
+      const list = this.index.get(k);
+      if (!list) continue;
+      const rest = list.filter((o) => o.v !== v);
+      if (rest.length) this.index.set(k, rest);
+      else this.index.delete(k);
+    }
     this.tilesOf.delete(v);
   }
 
@@ -308,7 +351,10 @@ export class VehicleSystem implements GameSystem, MapOverlay {
     for (const t of v.occupiedTiles()) {
       const k = tileKey(t.tx, t.ty, v.z);
       keys.push(k);
-      this.index.set(k, { v, mx: t.mx, my: t.my });
+      const o = { v, mx: t.mx, my: t.my };
+      const list = this.index.get(k);
+      if (list) list.push(o);
+      else this.index.set(k, [o]);
     }
     this.tilesOf.set(v, keys);
   }
@@ -985,11 +1031,16 @@ export class VehicleSystem implements GameSystem, MapOverlay {
 
   /**
    * Move/turn a vehicle by `dist` metres along its facing and `dFacing` degrees, in
-   * substeps, colliding with anything in the tiles it newly enters. The driver (and anyone
-   * standing inside) moves along.
+   * substeps, colliding with anything in the tiles it newly enters (whole tiles) or its drawn
+   * body newly touches (shaped bodies). The driver (and anyone standing inside) moves along.
    */
   move(v: Vehicle, dist: number, dFacing: number): void {
-    const steps = Math.max(1, Math.ceil(Math.max(Math.abs(dist) / 0.3, Math.abs(dFacing) / 8)));
+    const body = this.bodyRect(v);
+    // A drawn body is thinner than a tile row (a bike is ~0.6 m across), so it steps finer to
+    // never skip over one at speed, and turns in smaller steps so a swinging corner is caught
+    // near where it touches. Whole tiles keep CDDA-ish tile stepping.
+    const [stepLen, stepTurn] = body ? [BODY_STEP, BODY_TURN_STEP] : [0.3, 8];
+    const steps = Math.max(1, Math.ceil(Math.max(Math.abs(dist) / stepLen, Math.abs(dFacing) / stepTurn)));
     const p = this.game.player;
     for (let i = 0; i < steps; i++) {
       const rad = (v.facing * Math.PI) / 180;
@@ -1000,40 +1051,115 @@ export class VehicleSystem implements GameSystem, MapOverlay {
       const on = this.playerOn();
       const riding = this.driving === v || (!!on && on.v === v);
       const [plx, ply] = riding ? v.worldToMount(p.x, p.y) : [0, 0];
+      const place = (x: number, y: number, f: number) => {
+        const oldFacing = v.facing;
+        v.x = x;
+        v.y = y;
+        v.facing = ((f % 360) + 360) % 360;
+        this.reindex(v);
+        if (riding) {
+          const [wx, wy] = v.mountToWorld(plx, ply);
+          p.x = wx;
+          p.y = wy;
+          // The view turns with the vehicle (yaw 0 = north; facing 0 = east, both clockwise).
+          p.yaw += ((v.facing - oldFacing + 540) % 360 - 180) * (Math.PI / 180);
+        }
+      };
       const stopped = this.collidePose(v, nx, ny, nf, before, riding);
       if (stopped) {
+        // Shaped bodies: close the last gap so the crash happens where the paint touches, not
+        // up to a substep short of it.
+        if (stopped === 'solid' && body) {
+          const [x0, y0, f0] = [v.x, v.y, v.facing];
+          const f = this.contactFraction(v, body, nx, ny, nf);
+          if (f > 0) place(x0 + (nx - x0) * f, y0 + (ny - y0) * f, f0 + (nf - f0) * f);
+        }
         // Stopped dead against something: drop the cruise target. CDDA keeps it, but there the
         // driver gets a turn to react; in real time the engine would ram the obstacle again
         // every frame.
         if (this.driving === v && Math.abs(v.velocity) < STOP_EPS) v.cruiseVelocity = 0;
         break;
       }
-      const oldFacing = v.facing;
-      v.x = nx;
-      v.y = ny;
-      v.facing = ((nf % 360) + 360) % 360;
-      this.reindex(v);
-      if (riding) {
-        const [wx, wy] = v.mountToWorld(plx, ply);
-        p.x = wx;
-        p.y = wy;
-        // The view turns with the vehicle (yaw 0 = north; facing 0 = east, both clockwise).
-        p.yaw += ((v.facing - oldFacing + 540) % 360 - 180) * (Math.PI / 180);
-      }
+      place(nx, ny, nf);
     }
   }
 
   /**
-   * Check the tiles a pose would newly occupy. Returns true if the vehicle was stopped
-   * (it keeps its old pose); smashed obstacles and knocked-down creatures let it through.
+   * How far (0..1) from its current pose toward (nx, ny, nf) a shaped body gets before it
+   * touches something solid (bisection; the current pose is free by construction).
    */
-  private collidePose(v: Vehicle, nx: number, ny: number, nf: number, before: Set<number>, riding: boolean): boolean {
+  private contactFraction(v: Vehicle, body: BodyRect, nx: number, ny: number, nf: number): number {
+    let lo = 0, hi = 1;
+    for (let i = 0; i < 7; i++) {
+      const m = (lo + hi) / 2;
+      const hit = this.bodyContacts(v, body, v.x + (nx - v.x) * m, v.y + (ny - v.y) * m, v.facing + (nf - v.facing) * m).next();
+      if (hit.done) lo = m;
+      else hi = m;
+    }
+    return lo;
+  }
+
+  /** Vehicles (other than `self`) whose grids reach into world box [x0, y0, x1, y1] (+1 tile). */
+  private vehiclesNear(self: Vehicle | null, z: number, [x0, y0, x1, y1]: [number, number, number, number]): Vehicle[] {
+    const out = new Set<Vehicle>();
+    for (let ty = Math.floor(y0) - 1; ty <= Math.floor(y1) + 1; ty++)
+      for (let tx = Math.floor(x0) - 1; tx <= Math.floor(x1) + 1; tx++)
+        for (const o of this.index.get(tileKey(tx, ty, z)) ?? []) if (o.v !== self) out.add(o.v);
+    return [...out];
+  }
+
+  /**
+   * What a shaped body at pose (nx, ny, nf) newly touches compared with where it is now:
+   * other vehicles' bodies (OBB vs OBB), then blocking tiles (BN's obstacle rules per tile,
+   * obstacleAt). Each contact names the mount of `v` nearest the touch point. Lazy, so a
+   * caller can smash the first tile before the next is judged.
+   */
+  private *bodyContacts(v: Vehicle, body: BodyRect, nx: number, ny: number, nf: number): Generator<
+    | { kind: 'vehicle'; mount: [number, number]; other: VehicleOccupant }
+    | { kind: 'tile'; mount: [number, number]; tx: number; ty: number; ob: Obstacle }
+  > {
+    const map = this.game.map;
+    const z = v.z;
+    const nb = rectObb(v, body, nf, nx, ny), ob = rectObb(v, body);
+    const bounds = obbBounds(nb);
+    const mountOf = (wx: number, wy: number) => {
+      const [lx, ly] = v.worldToMount(wx, wy, nf, nx, ny);
+      return nearestMount(v, lx, ly);
+    };
+    for (const o of this.vehiclesNear(v, z, bounds)) {
+      for (const s of vehicleObbs(o, this.bodyRect(o))) {
+        if (!obbHitsObb(nb, s) || obbHitsObb(ob, s)) continue;
+        const [cx, cy] = obbContact(nb, s);
+        const [olx, oly] = o.worldToMount(cx, cy);
+        const [omx, omy] = nearestMount(o, olx, oly);
+        yield { kind: 'vehicle', mount: mountOf(cx, cy), other: { v: o, mx: omx, my: omy } };
+        break;
+      }
+    }
+    const [x0, y0, x1, y1] = bounds;
+    for (let ty = Math.floor(y0); ty <= Math.floor(y1); ty++)
+      for (let tx = Math.floor(x0); tx <= Math.floor(x1); tx++) {
+        if (!obbHitsTile(nb, tx, ty) || obbHitsTile(ob, tx, ty)) continue;
+        const [cx, cy] = clampToObb(nb, tx + 0.5, ty + 0.5);
+        const mount = mountOf(cx, cy);
+        const obs = obstacleAt(map, tx, ty, z, v.partsAt(mount[0], mount[1]).some((q) => has(q, 'WHEEL')));
+        if (obs) yield { kind: 'tile', mount, tx, ty, ob: obs };
+      }
+  }
+
+  /**
+   * Check the tiles a pose would newly occupy (whole tiles), or what the drawn body newly
+   * touches (shaped). Returns false if the vehicle got through, else why it was stopped (it
+   * keeps its old pose): 'solid' (terrain, another vehicle) or 'creature' (a body it couldn't
+   * fling). Smashed obstacles and knocked-down creatures let it through.
+   */
+  private collidePose(v: Vehicle, nx: number, ny: number, nf: number, before: Set<number>, riding: boolean): false | 'solid' | 'creature' {
     const map = this.game.map;
     const p = this.game.player;
     const z = v.z;
     const mass = v.mass();
     const velBefore = v.velocity;
-    let stopped = false;
+    let stopped: false | 'solid' | 'creature' = false;
     const pose = v.occupiedTiles(nf, nx, ny);
     const poseKeys = new Set(pose.map((t) => tileKey(t.tx, t.ty, z)));
     // Where a knocked-away body can land: off the vehicle's new footprint, walkable, empty.
@@ -1047,10 +1173,28 @@ export class VehicleSystem implements GameSystem, MapOverlay {
       const o = c as { x?: unknown; y?: unknown; radius?: unknown };
       return typeof o.x === 'number' && typeof o.y === 'number' ? [o.x, o.y, typeof o.radius === 'number' ? o.radius : CREATURE_RADIUS] : null;
     };
+    const dir = Math.sign(v.velocity) || 1;
+    const rad = (nf * Math.PI) / 180;
+    const fdx = Math.cos(rad) * dir, fdy = Math.sin(rad) * dir;
+    if (body) {
+      // Solid things first: the body stops at the paint, and a creature beyond a wall it
+      // didn't get through isn't hit.
+      const pusher = { v, obb: rectObb(v, body, nf, nx, ny) };
+      for (const c of this.bodyContacts(v, body, nx, ny, nf)) {
+        const part = collisionPart(v, c.mount[0], c.mount[1]);
+        const hit = c.kind === 'vehicle'
+          ? this.crashVehicle(v, part, c.other, fdx, fdy, new Set(), pusher)
+          : this.crashTerrain(v, part, c.tx, c.ty, c.ob, velBefore);
+        if (hit) {
+          stopped = 'solid';
+          break;
+        }
+      }
+    }
     // A body moving diagonally or turning reaches a creature before the creature's tile joins
     // the footprint: check the ring of tiles around it too (creatures only).
-    const cells: { tx: number; ty: number; mx: number; my: number; ring?: boolean }[] = [...pose];
-    if (body) {
+    const cells: { tx: number; ty: number; mx: number; my: number; ring?: boolean }[] = stopped ? [] : [...pose];
+    if (body && !stopped) {
       const seen = new Set(poseKeys);
       for (const t of pose)
         for (let dy = -1; dy <= 1; dy++)
@@ -1061,40 +1205,28 @@ export class VehicleSystem implements GameSystem, MapOverlay {
             cells.push({ tx: t.tx + dx, ty: t.ty + dy, mx: t.mx, my: t.my, ring: true });
           }
     }
+    // The part that meets a creature at (x, y): with a body, the mount nearest it.
+    const partNear = (t: { mx: number; my: number }, x: number, y: number) => {
+      if (!body) return collisionPart(v, t.mx, t.my);
+      const [lx, ly] = v.worldToMount(x, y, nf, nx, ny);
+      const [mx, my] = nearestMount(v, lx, ly);
+      return collisionPart(v, mx, my);
+    };
     for (const t of cells) {
       const k = tileKey(t.tx, t.ty, z);
       const isNew = !t.ring && !before.has(k);
       if (!isNew && !body) continue;
       const part = collisionPart(v, t.mx, t.my);
-      const dir = Math.sign(v.velocity) || 1;
-      const rad = (nf * Math.PI) / 180;
-      const fdx = Math.cos(rad) * dir, fdy = Math.sin(rad) * dir;
-      // Another vehicle: treat as a heavy obstacle (no momentum transfer yet).
-      const other = isNew ? this.index.get(k) : undefined;
-      // A much lighter one (a bicycle, a shopping cart) is shoved out of the way instead: a car
-      // that stopped dead against a bike lying on the road felt broken in playtesting.
-      if (other && other.v !== v && other.v !== this.driving && other.v.mass() < mass * 0.2 && Math.abs(v.velocity) > 0.5 && this.shove(other.v, fdx, fdy, poseKeys)) {
-        const r = resolveCollision({ mass, velocity: v.velocity, mass2: other.v.mass(), e: 0.3, partDens: 80 });
-        this.damagePart(other.v, collisionPart(other.v, other.mx, other.my), r.objDmg);
-        this.impactMessage(v, part, `the ${other.v.name}`, 'crash!');
-        this.emitSound(v, 50, 'crash!', ['smash_success', 'hit_vehicle'], 'combat');
-        v.velocity *= mass / (mass + other.v.mass());
-        continue;
-      }
-      if (other && other.v !== v) {
-        const r = resolveCollision({ mass, velocity: v.velocity, mass2: other.v.mass(), e: 0.3, partDens: 80 });
-        this.damagePart(v, part, r.partDmg);
-        const op = collisionPart(other.v, other.mx, other.my);
-        this.damagePart(other.v, op, r.objDmg);
-        this.impactMessage(v, part, `the ${other.v.name}`, 'smash!');
-        this.emitSound(v, 50, 'smash!', ['smash_success', 'hit_vehicle'], 'combat');
-        v.velocity = Math.abs(r.velocity) < 0.3 ? 0 : r.velocity;
-        stopped = true;
+      // Another vehicle (whole tiles; shaped bodies did theirs above).
+      const other = isNew && !body ? this.index.get(k)?.find((o) => o.v !== v) : undefined;
+      if (other && this.crashVehicle(v, part, other, fdx, fdy, poseKeys, null)) {
+        stopped = 'solid';
         break;
       }
+      if (other) continue;
       // The player standing in the way (not riding along).
       if (!riding && p.tileX === t.tx && p.tileY === t.ty && p.z === z && !p.dead && (body ? struck(p.x, p.y, CREATURE_RADIUS) : isNew)) {
-        const res = this.hitBody(v, part, {
+        const res = this.hitBody(v, partNear(t, p.x, p.y), {
           name: 'you', mass: 70, damage: (dmg) => {
             for (const bp of MAIN_PARTS) p.takeHit(bp as BodyPartId, [{ type: 'bash', amount: Math.round(dmg * BALANCE.crashDamage * (0.6 + this.rng.next() * 0.8)) }]);
             return p.dead;
@@ -1107,7 +1239,7 @@ export class VehicleSystem implements GameSystem, MapOverlay {
           },
         });
         if (!res) {
-          stopped = true;
+          stopped = 'creature';
           break;
         }
         continue;
@@ -1116,7 +1248,7 @@ export class VehicleSystem implements GameSystem, MapOverlay {
       const cp = c ? creaturePos(c) : null;
       if (c && (body && cp ? struck(cp[0], cp[1], cp[2]) : isNew)) {
         const h = this.creatureHooks;
-        const res = this.hitBody(v, part, {
+        const res = this.hitBody(v, cp ? partNear(t, cp[0], cp[1]) : part, {
           name: h.title ? h.title(c) : `the ${h.name(c)}`, mass: h.mass(c), hpMax: h.hpMax?.(c), damage: (dmg) => h.damage(c, dmg, v),
           fling: (force) => {
             const spot = this.flingSpot(t.tx + 0.5, t.ty + 0.5, fdx, fdy, force, free);
@@ -1126,34 +1258,17 @@ export class VehicleSystem implements GameSystem, MapOverlay {
           },
         });
         if (!res) {
-          stopped = true;
+          stopped = 'creature';
           break;
         }
         continue;
       }
       // Terrain / furniture (CDDA: bashable things that aren't flat floor, then walls).
-      if (!isNew) continue;
+      if (!isNew || body) continue;
       const ob = obstacleAt(map, t.tx, t.ty, z, v.partsAt(t.mx, t.my).some((q) => has(q, 'WHEEL')));
       if (!ob) continue;
-      const name = ob.name;
-      let smashedAny = false;
-      const r = resolveCollision({
-        mass, velocity: v.velocity, mass2: ob.mass2, e: ob.e, partDens: ob.dens,
-        smash: ob.bashable ? (objDmg) => {
-          if (!this.onBash(t.tx, t.ty, z, objDmg)) return false;
-          smashedAny = true;
-          // Whatever the bash left behind may still be in the way (wall -> broken wall).
-          return !obstacleAt(map, t.tx, t.ty, z, false);
-        } : undefined,
-      });
-      this.damagePart(v, part, r.partDmg);
-      this.impactMessage(v, part, name, 'smash!');
-      this.emitSound(v, r.smashed ? 80 : 50, 'smash!', ['smash_success', 'hit_vehicle'], 'combat');
-      v.velocity = r.velocity;
-      if (!r.smashed) {
-        if (Math.abs(v.velocity) < 0.5 || Math.sign(v.velocity) !== Math.sign(velBefore)) v.velocity = 0;
-        stopped = true;
-        if (smashedAny) v.version++;
+      if (this.crashTerrain(v, part, t.tx, t.ty, ob, velBefore)) {
+        stopped = 'solid';
         break;
       }
     }
@@ -1164,23 +1279,95 @@ export class VehicleSystem implements GameSystem, MapOverlay {
   }
 
   /**
-   * Push a light vehicle off to the side of (dx, dy), else 1–3 tiles along it, to the first
-   * spot its whole footprint fits: walkable, clear of other vehicles, creatures, you and
-   * the pushing vehicle's new footprint (`blocked`). False (nothing moved) when pinned.
+   * `v`'s `part` runs into another vehicle at `other`'s mount. A much lighter one is shoved
+   * aside (true = not stopped); otherwise both take BN's collision damage and `v` stops.
+   * `blocked` / `pusher`: where the shoved vehicle can't go (see shove).
    */
-  private shove(o: Vehicle, dx: number, dy: number, blocked: Set<number>): boolean {
+  private crashVehicle(v: Vehicle, part: VehiclePart, other: VehicleOccupant, fdx: number, fdy: number, blocked: Set<number>, pusher: Pusher | null): boolean {
+    const mass = v.mass();
+    // A much lighter one (a bicycle, a shopping cart) is shoved out of the way instead: a car
+    // that stopped dead against a bike lying on the road felt broken in playtesting.
+    if (other.v !== this.driving && other.v.mass() < mass * 0.2 && Math.abs(v.velocity) > 0.5 && this.shove(other.v, fdx, fdy, blocked, pusher)) {
+      const r = resolveCollision({ mass, velocity: v.velocity, mass2: other.v.mass(), e: 0.3, partDens: 80 });
+      this.damagePart(other.v, collisionPart(other.v, other.mx, other.my), r.objDmg);
+      this.impactMessage(v, part, `the ${other.v.name}`, 'crash!');
+      this.emitSound(v, 50, 'crash!', ['smash_success', 'hit_vehicle'], 'combat');
+      v.velocity *= mass / (mass + other.v.mass());
+      return false;
+    }
+    // Another vehicle: treat as a heavy obstacle (no momentum transfer yet).
+    const r = resolveCollision({ mass, velocity: v.velocity, mass2: other.v.mass(), e: 0.3, partDens: 80 });
+    this.damagePart(v, part, r.partDmg);
+    this.damagePart(other.v, collisionPart(other.v, other.mx, other.my), r.objDmg);
+    this.impactMessage(v, part, `the ${other.v.name}`, 'smash!');
+    this.emitSound(v, 50, 'smash!', ['smash_success', 'hit_vehicle'], 'combat');
+    v.velocity = Math.abs(r.velocity) < 0.3 ? 0 : r.velocity;
+    return true;
+  }
+
+  /**
+   * `v`'s `part` runs into terrain/furniture obstacle `ob` at tile (tx, ty): BN part_collision
+   * (bash it with the object's share of the impact). True if it held and stopped the vehicle.
+   */
+  private crashTerrain(v: Vehicle, part: VehiclePart, tx: number, ty: number, ob: Obstacle, velBefore: number): boolean {
+    const map = this.game.map, z = v.z;
+    let smashedAny = false;
+    const r = resolveCollision({
+      mass: v.mass(), velocity: v.velocity, mass2: ob.mass2, e: ob.e, partDens: ob.dens,
+      smash: ob.bashable ? (objDmg) => {
+        if (!this.onBash(tx, ty, z, objDmg)) return false;
+        smashedAny = true;
+        // Whatever the bash left behind may still be in the way (wall -> broken wall).
+        return !obstacleAt(map, tx, ty, z, false);
+      } : undefined,
+    });
+    this.damagePart(v, part, r.partDmg);
+    this.impactMessage(v, part, ob.name, 'smash!');
+    this.emitSound(v, r.smashed ? 80 : 50, 'smash!', ['smash_success', 'hit_vehicle'], 'combat');
+    v.velocity = r.velocity;
+    if (r.smashed) return false;
+    if (Math.abs(v.velocity) < 0.5 || Math.sign(v.velocity) !== Math.sign(velBefore)) v.velocity = 0;
+    if (smashedAny) v.version++;
+    return true;
+  }
+
+  /**
+   * Push a light vehicle off to the side of (dx, dy), else 1–3 tiles along it, to the first
+   * spot it fits: walkable, clear of other vehicles, creatures and you, and of the pushing
+   * vehicle. Whole tiles: its footprint vs the pusher's new footprint (`blocked`); with a
+   * drawn `pusher` body, the boxes (vehicleObbs) vs the pusher's box and other vehicles'.
+   * False (nothing moved) when pinned.
+   */
+  private shove(o: Vehicle, dx: number, dy: number, blocked: Set<number>, pusher: Pusher | null): boolean {
     const map = this.game.map;
     const p = this.game.player;
     const sx = Math.round(dx), sy = Math.round(dy);
+    const clearTile = (tx: number, ty: number) => !this.creatureHooks.at(tx, ty, o.z) && !(p.tileX === tx && p.tileY === ty && p.z === o.z);
     // Aside first (a snowplowed bike just gets hit again), then straight ahead.
     const tries: [number, number][] = [[sx - sy * 2, sy + sx * 2], [sx + sy * 2, sy - sx * 2], [sx * 2 - sy * 2, sy * 2 + sx * 2], [sx * 2 + sy * 2, sy * 2 - sx * 2], [sx, sy], [sx * 2, sy * 2], [sx * 3, sy * 3]];
     for (const [ox, oy] of tries) {
       if (!ox && !oy) continue;
-      const ok = o.occupiedTiles(o.facing, o.x + ox, o.y + oy).every((t) => {
-        const k = tileKey(t.tx, t.ty, o.z);
-        const there = this.index.get(k);
-        return !blocked.has(k) && (!there || there.v === o) && map.passable(t.tx, t.ty, o.z) && !this.creatureHooks.at(t.tx, t.ty, o.z) && !(p.tileX === t.tx && p.tileY === t.ty && p.z === o.z);
-      });
+      let ok: boolean;
+      if (pusher) {
+        const shapes = vehicleObbs(o, this.bodyRect(o), o.facing, o.x + ox, o.y + oy);
+        ok = shapes.every((s) => {
+          if (obbHitsObb(s, pusher.obb)) return false;
+          const [x0, y0, x1, y1] = obbBounds(s);
+          for (let ty = Math.floor(y0); ty <= Math.floor(y1); ty++)
+            for (let tx = Math.floor(x0); tx <= Math.floor(x1); tx++) {
+              if (!obbHitsTile(s, tx, ty)) continue;
+              const ter = map.terAt(tx, ty, o.z), furn = map.furnAt(tx, ty, o.z);
+              if (ter.move_cost <= 0 || furn.move_cost_mod < 0 || !clearTile(tx, ty)) return false;
+            }
+          return this.vehiclesNear(o, o.z, [x0, y0, x1, y1]).every((w) => w === pusher.v || vehicleObbs(w, this.bodyRect(w)).every((t) => !obbHitsObb(s, t)));
+        });
+      } else {
+        ok = o.occupiedTiles(o.facing, o.x + ox, o.y + oy).every((t) => {
+          const k = tileKey(t.tx, t.ty, o.z);
+          const there = this.index.get(k);
+          return !blocked.has(k) && (!there || there.every((q) => q.v === o)) && map.passable(t.tx, t.ty, o.z) && clearTile(t.tx, t.ty);
+        });
+      }
       if (!ok) continue;
       o.x += ox;
       o.y += oy;
