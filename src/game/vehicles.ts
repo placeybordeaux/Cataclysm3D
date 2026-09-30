@@ -11,6 +11,8 @@ import { EngineSounds, engineVariant, hornVariant, pickVariant } from '../audio/
 import { MAIN_PARTS, type BodyPartId } from './bodyparts';
 import type { GameData, TerrainDef, FurnitureDef } from '../data/types';
 import type { Chunk, GameMap, MapOverlay, VehicleRequest } from '../world/map';
+import { circleHitsBody, circleTouchesBody, mountSolid, pointInBody, type BodyRect } from './vehicleShape';
+import { CREATURE_RADIUS } from './physics';
 import { hasFlag } from '../world/registry';
 import { chunkKey, chunkOf } from '../world/coords';
 import { registerSaveable } from '../save/registry';
@@ -121,6 +123,11 @@ export interface VehicleOccupant {
   my: number;
 }
 
+/** The body outline shrunk to one mount's cell (so circleHitsBody tests only that door). */
+function doorOnly(b: BodyRect, mx: number, my: number): BodyRect {
+  return mountSolid(b, mx, my) ?? { x0: mx, x1: mx, y0: my, y1: my };
+}
+
 const tileKey = (x: number, y: number, z: number): number => ((x + 1048576) * 2097152 + (y + 1048576)) * 64 + (z + 32);
 
 /** Speed at which a vehicle is considered stopped, m/s. */
@@ -134,6 +141,14 @@ const BRAKE_DECEL = 8;
 export const GET_IN_RANGE = 3.2;
 
 export class VehicleSystem implements GameSystem, MapOverlay {
+  /**
+   * The drawn body outline of a vehicle in mount space (vehicleShape.ts), supplied by the
+   * renderer (modelled look). null = collide with whole grid tiles (parts look, headless).
+   * Bump `shapeEpoch` when the answer changes for reasons other than vehicle.version.
+   */
+  bodyShape: ((v: Vehicle) => BodyRect | null) | null = null;
+  shapeEpoch = 0;
+  private shapeCache = new WeakMap<Vehicle, { version: number; epoch: number; rect: BodyRect | null }>();
   readonly name = 'vehicles';
   readonly list: Vehicle[] = [];
   private index = new Map<number, VehicleOccupant>();
@@ -218,6 +233,46 @@ export class VehicleSystem implements GameSystem, MapOverlay {
   opaque(x: number, y: number, z: number): boolean | undefined {
     const o = this.index.get(tileKey(x, y, z));
     return o ? o.v.opaqueAt(o.mx, o.my) : undefined;
+  }
+
+  /** The body outline collision uses for `v`, or null for whole tiles. */
+  bodyRect(v: Vehicle): BodyRect | null {
+    if (!this.bodyShape) return null;
+    const c = this.shapeCache.get(v);
+    if (c && c.version === v.version && c.epoch === this.shapeEpoch) return c.rect;
+    const rect = this.bodyShape(v);
+    this.shapeCache.set(v, { version: v.version, epoch: this.shapeEpoch, rect });
+    return rect;
+  }
+  shaped(x: number, y: number, z: number): boolean {
+    const o = this.index.get(tileKey(x, y, z));
+    return !!o && this.bodyRect(o.v) !== null;
+  }
+  collide(x: number, y: number, z: number, r: number): boolean {
+    if (!this.bodyShape || !this.list.length) return false;
+    // A rotated body pokes a little past its tiles: look one tile further out.
+    let seen: Vehicle | null = null, seen2: Vehicle | null = null;
+    for (let ty = Math.floor(y - r) - 1; ty <= Math.floor(y + r) + 1; ty++)
+      for (let tx = Math.floor(x - r) - 1; tx <= Math.floor(x + r) + 1; tx++) {
+        const o = this.index.get(tileKey(tx, ty, z));
+        if (!o || o.v === seen || o.v === seen2) continue;
+        seen2 = seen;
+        seen = o.v;
+        const b = this.bodyRect(o.v);
+        if (b && circleHitsBody(o.v, b, x, y, r)) return true;
+      }
+    return false;
+  }
+  /**
+   * The vehicle a creature at world (x, y) is *in* (standing on a walkable mount, or inside
+   * the drawn body), not merely in a tile of: with shaped bodies you can stand in the edge
+   * of a door's tile, outside the car.
+   */
+  occupantAt(x: number, y: number, z: number): VehicleOccupant | null {
+    const o = this.index.get(tileKey(Math.floor(x), Math.floor(y), z));
+    if (!o) return null;
+    const b = this.bodyRect(o.v);
+    return !b || pointInBody(o.v, b, x, y) ? o : null;
   }
 
   // --- registry -----------------------------------------------------------------------
@@ -333,7 +388,7 @@ export class VehicleSystem implements GameSystem, MapOverlay {
   /** The vehicle + mount the player stands on, if any. */
   playerOn(): VehicleOccupant | null {
     const p = this.game.player;
-    return this.at(p.tileX, p.tileY, p.z);
+    return this.occupantAt(p.x, p.y, p.z);
   }
 
   /** Controls within reach of the player (on the controls tile or next to it, inside the vehicle). */
@@ -347,7 +402,7 @@ export class VehicleSystem implements GameSystem, MapOverlay {
         if (!c || c.mx !== o.mx || c.my !== o.my) continue;
         // From outside you'd have to climb over a closed door/window first.
         if (dx !== 0 || dy !== 0) {
-          const here = this.at(p.tileX, p.tileY, p.z);
+          const here = this.playerOn();
           if (!here || here.v !== o.v) continue;
         }
         return o.v;
@@ -453,7 +508,7 @@ export class VehicleSystem implements GameSystem, MapOverlay {
   climbOut(v: Vehicle): string | null {
     if (Math.abs(v.velocity) > 1) return null;
     const p = this.game.player;
-    const here = this.at(Math.floor(p.x), Math.floor(p.y), p.z);
+    const here = this.playerOn();
     if (!here || here.v !== v) return null;
     const doors = v.parts.filter((q) => has(q, 'OPENABLE') && !has(q, 'MULTISQUARE') && Math.max(Math.abs(q.mx - here.mx), Math.abs(q.my - here.my)) <= 1);
     const dist = (q: { mx: number; my: number }) => Math.hypot(q.mx - here.mx, q.my - here.my);
@@ -587,7 +642,12 @@ export class VehicleSystem implements GameSystem, MapOverlay {
       for (const p of group) {
         const [wx, wy] = v.mountToWorld(p.mx, p.my);
         const pl = this.game.player;
-        if (Math.floor(wx) === pl.tileX && Math.floor(wy) === pl.tileY) return `There's something in the way of the ${door.def.name}.`;
+        const b = this.bodyRect(v);
+        // With a shaped body you may stand in the door's tile but outside the car: only a
+        // player inside the doorway itself blocks it.
+        const inWay = b ? pl.z === v.z && circleTouchesBody(v, doorOnly(b, p.mx, p.my), pl.x, pl.y, CREATURE_RADIUS * 0.8)
+          : Math.floor(wx) === pl.tileX && Math.floor(wy) === pl.tileY;
+        if (inWay) return `There's something in the way of the ${door.def.name}.`;
       }
     }
     for (const p of group) p.open = opening;
@@ -912,9 +972,10 @@ export class VehicleSystem implements GameSystem, MapOverlay {
       const nx = v.x + Math.cos(rad) * d, ny = v.y + Math.sin(rad) * d;
       const nf = v.facing + dFacing / steps;
       const before = new Set(this.tilesOf.get(v) ?? []);
-      const riding = this.driving === v || before.has(tileKey(p.tileX, p.tileY, p.z));
+      const on = this.playerOn();
+      const riding = this.driving === v || (!!on && on.v === v);
       const [plx, ply] = riding ? v.worldToMount(p.x, p.y) : [0, 0];
-      const stopped = this.collide(v, nx, ny, nf, before, riding);
+      const stopped = this.collidePose(v, nx, ny, nf, before, riding);
       if (stopped) {
         // Stopped dead against something: drop the cruise target. CDDA keeps it, but there the
         // driver gets a turn to react; in real time the engine would ram the obstacle again
@@ -941,7 +1002,7 @@ export class VehicleSystem implements GameSystem, MapOverlay {
    * Check the tiles a pose would newly occupy. Returns true if the vehicle was stopped
    * (it keeps its old pose); smashed obstacles and knocked-down creatures let it through.
    */
-  private collide(v: Vehicle, nx: number, ny: number, nf: number, before: Set<number>, riding: boolean): boolean {
+  private collidePose(v: Vehicle, nx: number, ny: number, nf: number, before: Set<number>, riding: boolean): boolean {
     const map = this.game.map;
     const p = this.game.player;
     const z = v.z;
@@ -952,15 +1013,39 @@ export class VehicleSystem implements GameSystem, MapOverlay {
     const poseKeys = new Set(pose.map((t) => tileKey(t.tx, t.ty, z)));
     // Where a knocked-away body can land: off the vehicle's new footprint, walkable, empty.
     const free = (x: number, y: number) => !poseKeys.has(tileKey(x, y, z)) && !before.has(tileKey(x, y, z)) && map.passable(x, y, z) && !this.creatureHooks.at(x, y, z);
-    for (const t of pose) {
+    // With a shaped body (modelled look) creatures can stand in the edge of the vehicle's
+    // tiles, beside the paint: they're hit when the body moves onto them, not when a tile
+    // they stand in becomes the vehicle's. Headless / parts look: the tile rules.
+    const body = this.bodyRect(v);
+    const struck = (x: number, y: number, r: number) => !!body && circleTouchesBody(v, body, x, y, r, nf, nx, ny) && !circleTouchesBody(v, body, x, y, r);
+    const creaturePos = (c: unknown): [number, number, number] | null => {
+      const o = c as { x?: unknown; y?: unknown; radius?: unknown };
+      return typeof o.x === 'number' && typeof o.y === 'number' ? [o.x, o.y, typeof o.radius === 'number' ? o.radius : CREATURE_RADIUS] : null;
+    };
+    // A body moving diagonally or turning reaches a creature before the creature's tile joins
+    // the footprint: check the ring of tiles around it too (creatures only).
+    const cells: { tx: number; ty: number; mx: number; my: number; ring?: boolean }[] = [...pose];
+    if (body) {
+      const seen = new Set(poseKeys);
+      for (const t of pose)
+        for (let dy = -1; dy <= 1; dy++)
+          for (let dx = -1; dx <= 1; dx++) {
+            const rk = tileKey(t.tx + dx, t.ty + dy, z);
+            if (seen.has(rk)) continue;
+            seen.add(rk);
+            cells.push({ tx: t.tx + dx, ty: t.ty + dy, mx: t.mx, my: t.my, ring: true });
+          }
+    }
+    for (const t of cells) {
       const k = tileKey(t.tx, t.ty, z);
-      if (before.has(k)) continue;
+      const isNew = !t.ring && !before.has(k);
+      if (!isNew && !body) continue;
       const part = collisionPart(v, t.mx, t.my);
       const dir = Math.sign(v.velocity) || 1;
       const rad = (nf * Math.PI) / 180;
       const fdx = Math.cos(rad) * dir, fdy = Math.sin(rad) * dir;
       // Another vehicle: treat as a heavy obstacle (no momentum transfer yet).
-      const other = this.index.get(k);
+      const other = isNew ? this.index.get(k) : undefined;
       // A much lighter one (a bicycle, a shopping cart) is shoved out of the way instead: a car
       // that stopped dead against a bike lying on the road felt broken in playtesting.
       if (other && other.v !== v && other.v !== this.driving && other.v.mass() < mass * 0.2 && Math.abs(v.velocity) > 0.5 && this.shove(other.v, fdx, fdy, poseKeys)) {
@@ -983,7 +1068,7 @@ export class VehicleSystem implements GameSystem, MapOverlay {
         break;
       }
       // The player standing in the way (not riding along).
-      if (!riding && p.tileX === t.tx && p.tileY === t.ty && p.z === z && !p.dead) {
+      if (!riding && p.tileX === t.tx && p.tileY === t.ty && p.z === z && !p.dead && (body ? struck(p.x, p.y, CREATURE_RADIUS) : isNew)) {
         const res = this.hitBody(v, part, {
           name: 'you', mass: 70, damage: (dmg) => {
             for (const bp of MAIN_PARTS) p.takeHit(bp as BodyPartId, [{ type: 'bash', amount: Math.round(dmg * BALANCE.crashDamage * (0.6 + this.rng.next() * 0.8)) }]);
@@ -1003,7 +1088,8 @@ export class VehicleSystem implements GameSystem, MapOverlay {
         continue;
       }
       const c = this.creatureHooks.at(t.tx, t.ty, z);
-      if (c) {
+      const cp = c ? creaturePos(c) : null;
+      if (c && (body && cp ? struck(cp[0], cp[1], cp[2]) : isNew)) {
         const h = this.creatureHooks;
         const res = this.hitBody(v, part, {
           name: h.title ? h.title(c) : `the ${h.name(c)}`, mass: h.mass(c), hpMax: h.hpMax?.(c), damage: (dmg) => h.damage(c, dmg, v),
@@ -1021,6 +1107,7 @@ export class VehicleSystem implements GameSystem, MapOverlay {
         continue;
       }
       // Terrain / furniture (CDDA: bashable things that aren't flat floor, then walls).
+      if (!isNew) continue;
       const ob = obstacleAt(map, t.tx, t.ty, z, v.partsAt(t.mx, t.my).some((q) => has(q, 'WHEEL')));
       if (!ob) continue;
       const name = ob.name;

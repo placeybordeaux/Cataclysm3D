@@ -6,11 +6,13 @@ import type { GameMap } from '../world/map';
 export const CREATURE_RADIUS = 0.3;
 
 function blocked(map: GameMap, x: number, y: number, z: number, r: number): boolean {
+  // Overlays with sub-tile shapes (vehicle bodies) first; their tiles skip the AABB test.
+  if (map.collideShapes(x, y, z, r)) return true;
   const x0 = Math.floor(x - r), x1 = Math.floor(x + r);
   const y0 = Math.floor(y - r), y1 = Math.floor(y + r);
   for (let ty = y0; ty <= y1; ty++)
     for (let tx = x0; tx <= x1; tx++) {
-      if (map.passable(tx, ty, z)) continue;
+      if (map.passable(tx, ty, z) || map.shapedTile(tx, ty, z)) continue;
       // circle vs tile AABB
       const cx = Math.max(tx, Math.min(x, tx + 1));
       const cy = Math.max(ty, Math.min(y, ty + 1));
