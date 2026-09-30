@@ -143,7 +143,39 @@ const RULES: [RegExp, Archetype][] = [
   [/^f_(solar_unit|solar_unit_v2|foldable_solar_unit)$/, A('solar', O.solarPanel, 'wall')],
   [/^f_(flagpole_metal|flagpole_wood|us_flag_metal|us_flag_wood|pirate_flag_metal|pirate_flag_wood)$/, A('flag', O.flagpole, 'free')],
   [/^f_dive_block$/, A('pedestal', O.pedestal, 'wall')],
+  [/^f_slab$/, A('slab', O.slab, 'free', { top: 0.5 })],
+  // --- gardens, fitness, games
+  [/^f_planter(_seed)?$/, A('planter', X.planter, 'free', { p: { stage: 0 }, top: 0.32 })],
+  [/^f_planter_seedling$/, A('planter', X.planter, 'free', { p: { stage: 1 }, top: 0.32 })],
+  [/^f_planter_mature$/, A('planter', X.planter, 'free', { p: { stage: 2 }, top: 0.32 })],
+  [/^f_planter_harvest$/, A('planter', X.planter, 'free', { p: { stage: 3 }, top: 0.32 })],
+  [/^f_bigmirror$/, A('mirror', X.mirror)],
+  [/^f_bigmirror_b$/, A('mirror', X.mirror, 'wall', { p: { broken: true } })],
+  [/^f_arcade_machine$/, A('arcade', X.arcade)],
+  [/^f_pinball_machine$/, A('arcade', X.arcade, 'wall', { p: { pinball: true } })],
+  [/^f_treadmill$/, A('fitness', X.fitness, 'wall', { p: { kind: 'treadmill' } })],
+  [/^f_(exercise|ergometer)$/, A('fitness', X.fitness, 'wall')],
 ];
+
+/** Terrain that is really a fixture (consoles, ATMs, gas pumps): drawn as a model too. */
+const TERRAIN_RULES: [RegExp, Archetype][] = [
+  [/^t_console$/, A('console', X.consoleDesk, 'wall')],
+  [/^t_console_broken$/, A('console', X.consoleDesk, 'wall', { p: { broken: true } })],
+  [/^t_atm$/, A('atm', X.atm, 'wall')],
+  [/^t_gas_pump(_smashed)?$/, A('gaspump', X.gasPump, 'free')],
+  [/^t_(gas_tank|diesel_tank)$/, A('gastank', X.gasTank, 'free')],
+  [/^t_generator_broken$/, A('machine', X.machine, 'free', { p: { h: 1.0, w: 0.45, d: 0.4 } })],
+];
+const tcache = new Map<string, Archetype | null>();
+
+/** Archetype for a fixture-like terrain id, or null. */
+export function terrainArchetype(id: string): Archetype | null {
+  let a = tcache.get(id);
+  if (a !== undefined) return a;
+  a = TERRAIN_RULES.find(([re]) => re.test(id))?.[1] ?? null;
+  tcache.set(id, a);
+  return a;
+}
 
 const cache = new Map<string, Archetype | null>();
 

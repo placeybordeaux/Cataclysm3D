@@ -3,7 +3,7 @@ import type { TileFrame, TileTextureSource } from '../textureSource';
 import { framePixels } from '../framePixels';
 import { hashString } from '../../core/rng';
 import { ModelAtlas } from './atlas';
-import { archetypeFor, type Archetype } from './catalog';
+import { archetypeFor, terrainArchetype, type Archetype } from './catalog';
 import { BACK, FRONT, LEFT, RIGHT, type Ctx } from './kit';
 import { ModelBuilder, placeModel, type ModelMesh } from './mesh';
 import { flatPalette, spritePalette, type SpritePalette } from './palette';
@@ -178,7 +178,7 @@ export class ModelFactory {
   private palette(src: TileTextureSource, id: string): SpritePalette {
     let p = this.palettes.get(id);
     if (p) return p;
-    const f = src.furniture(id, 'sprite');
+    const f = id.startsWith('t_') ? src.terrain(id, 'sprite') : src.furniture(id, 'sprite');
     const px = framePixels(f);
     p = (px && spritePalette(px)) ?? flatPalette([140, 120, 100]);
     this.palettes.set(id, p);
@@ -193,6 +193,21 @@ export class ModelFactory {
     x: number, y: number, base: number, seed: number, around: Around): boolean {
     const a = archetypeFor(id);
     if (!a) return false;
+    this.piece(a, geo, glass, src, id, x, y, base, seed, around);
+    return true;
+  }
+
+  /** Fixture-like terrain (consoles, ATMs, gas pumps) as a model; false if not one. */
+  terrainProp(geo: (f: TileFrame) => GeomBuilder, glass: () => GeomBuilder, src: TileTextureSource, id: string,
+    x: number, y: number, base: number, seed: number, around: Around): boolean {
+    const a = terrainArchetype(id);
+    if (!a) return false;
+    this.piece(a, geo, glass, src, id, x, y, base, seed, around);
+    return true;
+  }
+
+  private piece(a: Archetype, geo: (f: TileFrame) => GeomBuilder, glass: () => GeomBuilder, src: TileTextureSource, id: string,
+    x: number, y: number, base: number, seed: number, around: Around): void {
     const t0 = performance.now();
     const same = (d: number) => {
       const n = around.furn(DX[d], DY[d]);
@@ -220,7 +235,6 @@ export class ModelFactory {
     modelStats.placed++;
     modelStats.quads += m.quads;
     modelStats.placeMs += performance.now() - t0;
-    return true;
   }
 }
 

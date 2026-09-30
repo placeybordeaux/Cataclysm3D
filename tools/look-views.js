@@ -139,8 +139,8 @@ window.lookView = async (name) => {
     if (!t) throw new Error(`no ${kind} matching ${re}`);
     const free = (x, y) => { const tt = m.terAt(x, y, 0); return tt.move_cost > 0 && !tt.flags.includes('WINDOW') && m.furnAt(x, y, 0).id === 'f_null'; };
     let best = null, bs = -1;
-    const D = Number(dist);
-    for (let dy = -D; dy <= D; dy++) for (let dx = -D; dx <= D; dx++) {
+    // no good spot at the asked distance (tight rooms): try a little further out
+    for (let D = Number(dist); D <= Number(dist) + 3 && !best; D++) for (let dy = -D; dy <= D; dy++) for (let dx = -D; dx <= D; dx++) {
       if (Math.max(Math.abs(dx), Math.abs(dy)) !== D) continue;
       const x = t[0] + dx, y = t[1] + dy;
       if (!free(x, y)) continue;
@@ -157,7 +157,7 @@ window.lookView = async (name) => {
       n += dx === 0 || dy === 0 ? 3 : 0;
       if (n > bs) { bs = n; best = [x, y]; }
     }
-    if (!best) best = [t[0], t[1] + D];
+    if (!best) throw new Error(`no free spot with a view of ${kind} ${re} at ${t}`);
     if (replace) { if (kind === 'ter') m.setTer(t[0], t[1], 0, replace); else m.setFurn(t[0], t[1], 0, replace); }
     c.teleport(best[0] + 0.5, best[1] + 0.5, 0);
     c.lookAt(t[0] + 0.5, t[1] + 0.5, Number(pitch));

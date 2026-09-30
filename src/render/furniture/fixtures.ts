@@ -425,3 +425,97 @@ export const pottedPlant: Build = (b, c) => {
   b.box(-0.08, 0.55, -0.08, 0.08, 0.85, 0.08, L);
 };
 
+
+// --- machines, consoles, fitness, misc ------------------------------------------------------
+
+/** Computer console / terminal desk: a desk with a monitor and keyboard (terrain t_console). */
+export const consoleDesk: Build = (b, c) => {
+  const body = metalOf(c.pal, [150, 154, 150]);
+  const broken = c.p.broken === true;
+  b.box(-0.45, 0, -0.3, 0.45, 0.72, 0.28, (f) => (f === 'pz' ? F('paint', body, doors(2, [80, 80, 80], true, false)) : F('metal', shade(body, 0.92))), 'ny');
+  b.box(-0.47, 0.72, -0.32, 0.47, 0.76, 0.3, F('plastic', shade(body, 0.8)));
+  b.box(-0.3, 0.76, -0.25, 0.3, 1.18, -0.05, (f) => (f === 'pz' ? F('screen', broken ? [40, 30, 30] : [40, 80, 70], broken ? undefined : inset(0.1, 0.12, 0.9, 0.85, [60, 150, 110], false, true)) : F('plastic', [70, 72, 76])));
+  b.box(-0.25, 0.76, 0.02, 0.25, 0.79, 0.2, (f) => (f === 'py' ? F('plastic', [60, 62, 66], slats(4, 1)) : F('plastic', [60, 62, 66])));
+};
+
+/** ATM: a lit screen and keypad in a steel box. */
+export const atm: Build = (b, c) => {
+  const body = metalOf(c.pal, [120, 126, 132]);
+  b.box(-0.35, 0, -0.35, 0.35, 1.7, 0.3, (f) => (f === 'pz' ? F('metal', body, inset(0.2, 0.18, 0.8, 0.4, [60, 110, 170], true, true)) : F('metal', shade(body, 0.9))), 'ny');
+  b.tiltedBox(-0.28, 0.28, 1.0, 0.3, 0.2, 0.12, -1.1, F('plastic', [50, 52, 56], slats(3, 2)));
+  b.box(-0.35, 1.7, -0.36, 0.35, 1.85, 0.34, F('glow', bodyOf(c.pal)));
+};
+
+/** Gas pump: tall cabinet, price display, nozzle and hose, on a concrete island. */
+export const gasPump: Build = (b, c) => {
+  const col: RGB = c.pal.clusters.find((q) => hsv(q.c)[1] > 0.35 && lumOf(q.c) > 50)?.c ?? [190, 50, 40];
+  b.box(-0.45, 0, -0.45, 0.45, 0.12, 0.45, F('stone', [150, 146, 138]), 'ny');
+  b.box(-0.32, 0.12, -0.22, 0.32, 1.7, 0.22, (f) => (f === 'pz' || f === 'nz' ? F('paint', col, inset(0.15, 0.1, 0.85, 0.32, [30, 34, 30], true, false)) : F('paint', shade(col, 0.85))));
+  b.box(-0.34, 1.7, -0.24, 0.34, 1.85, 0.24, F('glow', [236, 232, 220]));
+  b.box(0.32, 0.9, -0.05, 0.4, 1.1, 0.05, F('dark', [30, 30, 32]));
+  b.box(0.38, 0.4, -0.02, 0.41, 0.95, 0.02, F('rubber', [30, 30, 32]));
+};
+
+/** Metal tank on legs (propane / gas tank). */
+export const gasTank: Build = (b, c) => {
+  const col = whiteOf(c.pal, [210, 210, 206]);
+  legs(b, -0.4, -0.25, 0.4, 0.25, 0.35, 0.05, F('metal', DARK_METAL));
+  b.box(-0.48, 0.35, -0.3, 0.48, 0.95, 0.3, F('enamel', col));
+  b.prism(0, 0, 0.95, 1.05, 0.08, 6, F('chrome', STEEL));
+};
+
+/** Planter: a wooden raised bed with soil and sprouts (grows with the growth stage). */
+export const planter: Build = (b, c) => {
+  const wood = woodOf(c.pal, [120, 84, 52]);
+  b.box(-0.46, 0, -0.46, 0.46, 0.35, 0.46, (f) => (f === 'py' ? null : F('wood', wood, slats(2, 0))), 'ny');
+  b.box(-0.42, 0.3, -0.42, 0.42, 0.32, 0.42, F('soil', [74, 54, 38]), 'ny');
+  const stage = num(c, 'stage', 1);
+  if (stage <= 0) return;
+  const leaf: RGB = [70 + stage * 10, 130, 60];
+  const h = 0.08 + stage * 0.12;
+  for (let i = 0; i < 6; i++) {
+    const x = -0.28 + (i % 3) * 0.28, z = -0.18 + Math.floor(i / 3) * 0.36;
+    const r = 0.07 + stage * 0.02;
+    b.frustum(x - 0.02, z - 0.02, x + 0.02, z + 0.02, 0.32, 0.32 + h, x - r, z - r, x + r, z + r, F('foliage', leaf), 'ny');
+    if (stage >= 3) b.box(x - 0.03, 0.32 + h, z - 0.03, x + 0.03, 0.38 + h, z + 0.03, F('plastic', [200, 60, 50]), 'ny');
+  }
+};
+
+/** Standing mirror in a frame. */
+export const mirror: Build = (b, c) => {
+  const wood = woodOf(c.pal, [110, 76, 44]);
+  b.box(-0.35, 0, -0.2, 0.35, 0.05, 0.2, F('wood', wood));
+  b.box(-0.35, 0.05, -0.04, 0.35, 1.9, 0.04, (f) => (f === 'pz' ? F('wood', wood, inset(0.1, 0.05, 0.9, 0.95, c.p.broken ? [70, 80, 90] : [170, 196, 206], false, true)) : F('wood', shade(wood, 0.9))));
+};
+
+/** Arcade cabinet / pinball: tall cabinet with a screen and control deck. */
+export const arcade: Build = (b, c) => {
+  const col = bodyOf(c.pal);
+  if (c.p.pinball) {
+    legs(b, -0.3, -0.45, 0.3, 0.45, 0.7, 0.05, F('metal', STEEL));
+    b.box(-0.3, 0.7, -0.45, 0.3, 0.85, 0.45, F('paint', col));
+    b.box(-0.3, 0.85, -0.45, 0.3, 1.5, -0.35, (f) => (f === 'pz' ? F('glow', shade(col, 1.2), inset(0.1, 0.1, 0.9, 0.9, [40, 40, 60], false, true)) : F('paint', col)));
+    return;
+  }
+  b.box(-0.32, 0, -0.35, 0.32, 1.8, 0.2, (f) => (f === 'nx' || f === 'px' ? F('paint', col, inset(0.1, 0.2, 0.9, 0.6, shade(col, 1.4), false, false)) : F('paint', shade(col, 0.6))), 'ny');
+  b.box(-0.3, 1.1, 0.2, 0.3, 1.55, 0.21, F('screen', [30, 40, 60], inset(0.1, 0.1, 0.9, 0.9, [60, 120, 160], false, true)));
+  b.tiltedBox(-0.32, 0.32, 0.95, 0.2, 0.05, 0.22, -1.3, F('plastic', [30, 30, 34], knobs(3, [220, 60, 50], 0.5)));
+  b.box(-0.32, 1.6, 0.18, 0.32, 1.8, 0.22, F('glow', [240, 220, 120]));
+};
+
+/** Treadmill / exercise machine / weight bench. */
+export const fitness: Build = (b, c) => {
+  const frame = F('metal', [60, 62, 66]);
+  if (c.p.kind === 'treadmill') {
+    b.box(-0.3, 0, -0.45, 0.3, 0.18, 0.48, (f) => (f === 'py' ? F('rubber', [34, 34, 36]) : frame), 'ny');
+    for (const x of [-0.28, 0.24]) b.tiltedBox(x, x + 0.04, 0.18, -0.4, 1.1, 0.04, 0.12, frame);
+    b.box(-0.3, 1.2, -0.52, 0.3, 1.3, -0.36, F('plastic', [40, 40, 44], inset(0.2, 0.2, 0.8, 0.8, [90, 150, 90], false, false)));
+    return;
+  }
+  // weight bench with a bar on uprights
+  b.box(-0.15, 0.4, -0.45, 0.15, 0.48, 0.3, F('leather', [40, 40, 44]), 'ny');
+  legs(b, -0.15, -0.45, 0.15, 0.3, 0.4, 0.04, frame);
+  for (const x of [-0.3, 0.26]) b.box(x, 0, -0.5, x + 0.04, 1.1, -0.46, frame, 'ny');
+  b.box(-0.55, 1.08, -0.5, 0.55, 1.11, -0.47, F('chrome', STEEL));
+  for (const x of [-0.55, 0.45]) b.prism(x + 0.05, -0.485, 0.95, 1.25, 0.14, 8, F('metal', [30, 30, 32]), null, null, 0.03);
+};

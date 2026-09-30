@@ -489,6 +489,12 @@ export function* buildChunkMeshSteps(
         case S.fence: {
           const floorId = neighborFloor(x, y);
           if (floorId) emitFloor(x, y, floorId, seed);
+          // fixture-like terrain (consoles, ATMs, gas pumps) as a model (furniture/)
+          if (MD && MD.terrainProp(geo, glassGeo, src, def.id, x, y, base + raiseOf(x, y), seed, {
+            wall: nShape.map(wallLike),
+            furn: (dx, dy) => map.furnAt(x + dx, y + dy, z).id,
+            wallAt: (dx, dy) => wallLike(shapeAt(here, x + dx, y + dy)),
+          })) break;
           const pane = src.terrain(def.id, 'pane');
           const h = /chain|wire|bars/.test(def.id) ? 2.0 : 1.1;
           const conn = (s: number) => s === S.fence || wallLike(s);

@@ -187,3 +187,9 @@ export const pedestal: Build = (b, c) => {
   b.box(-0.3, 0, -0.35, 0.3, num(c, 'h', 0.7), 0.35, F('paint', col), 'ny');
   barX(b, -0.3, 0.3, 0.72, -0.35, 0.03, F('chrome', STEEL));
 };
+
+/** Stone slab / plinth block. */
+export const slab: Build = (b, c) => {
+  const stone = metalOf(c.pal, [140, 138, 132]);
+  b.box(-0.45, 0, -0.45, 0.45, num(c, 'h', 0.5), 0.45, F('stone', stone), 'ny');
+};
