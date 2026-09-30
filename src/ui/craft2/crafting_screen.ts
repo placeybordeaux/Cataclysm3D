@@ -214,7 +214,11 @@ export function openCraftingScreen(game: CraftHost): CraftingScreen {
   const renderList = () => {
     const els: HTMLElement[] = [];
     rows.forEach((r, i) => {
-      if (filter === 'craftable' && !r.check.ok && (i === 0 || rows[i - 1].check.ok)) els.push(h('div', { class: 'c2-section ui2-small', text: 'Almost: one thing short' }));
+      if (filter === 'craftable' && !r.check.ok && (i === 0 || rows[i - 1].check.ok)) {
+        const sec = h('div', { class: 'c2-section ui2-small', text: 'Almost: one thing short · see all in "Almost"' });
+        sec.addEventListener('click', () => api.setFilter('almost'));
+        els.push(sec);
+      }
       els.push(rowEl(r));
     });
     list.replaceChildren(...els);
@@ -227,7 +231,7 @@ export function openCraftingScreen(game: CraftHost): CraftingScreen {
       list.append(h('div', { class: 'ui2-empty', text: hint }));
     }
     const ok = rows.filter((r) => r.check.ok).length;
-    count.textContent = filter === 'craftable' ? `${ok} craftable now${rows.length > ok ? ` · ${rows.length - ok} one thing short` : ''}` : `${rows.length} recipe${rows.length === 1 ? '' : 's'}${filter !== 'almost' ? ` · ${ok} craftable now` : ''}`;
+    count.textContent = filter === 'craftable' ? `${ok} craftable now` : `${rows.length} recipe${rows.length === 1 ? '' : 's'}${filter !== 'almost' ? ` · ${ok} craftable now` : ''}`;
   };
   const select = (id: string | null, scroll = true) => {
     selId = id;

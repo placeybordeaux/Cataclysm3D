@@ -61,6 +61,8 @@ export interface Shortfall {
   items: string[];
   /** Too dark to craft here right now. */
   dark: boolean;
+  /** 0..1: how much of the missing groups you already have (2 of 3 rags = 0.67). */
+  progress: number;
 }
 
 const article = (s: string) => (/^[aeiou]/i.test(s) ? `an ${s}` : `a ${s}`);
@@ -88,7 +90,8 @@ export function shortfall(data: GameData, check: CraftCheck): Shortfall {
     items.push({ text, progress: progressOf(best) });
   }
   items.sort((a, b) => b.progress - a.progress);
-  return { count: items.length, items: items.map((i) => i.text), dark: !check.light };
+  const progress = items.length ? items.reduce((a, i) => a + i.progress, 0) / items.length : 1;
+  return { count: items.length, items: items.map((i) => i.text), dark: !check.light, progress };
 }
 
 /** "missing 2 more rags" / "missing 2: a hammer, 3 more nails" / "too dark here". */
@@ -100,6 +103,15 @@ export function shortfallText(s: Shortfall): string {
 
 /** Recipes at most this far off show under "Almost" (Craftable's section shows those 1 off). */
 export const ALMOST_MAX = 2;
+/** Craftable's "almost" section lists this many; the Almost tab has the rest. */
+export const ALMOST_SECTION_MAX = 12;
+
+/**
+ * Categories a newcomer reaches for first, for ordering the "almost" lists: 106 recipes one
+ * thing short opened on "ammonium nitrate pellets" (playtest). Lower = earlier.
+ */
+const CATEGORY_RANK: Record<string, number> = { CC_WEAPON: 0, CC_FOOD: 1, CC_ARMOR: 2, CC_OTHER: 3, CC_ELECTRONIC: 4, CC_AMMO: 5, CC_ANIMALS: 6, CC_CHEM: 7 };
+const catRank = (r: RecipeDef) => CATEGORY_RANK[r.category ?? ''] ?? 8;
 
 export interface RowQuery {
   filter: CraftFilter;
@@ -150,8 +162,14 @@ export class RecipeBook {
     }
     if (q.category === 'RECENT') out.sort((a, b) => recentIdx.get(a.recipe.id)! - recentIdx.get(b.recipe.id)!);
     else if (q.filter === 'craftable' || q.filter === 'almost') {
-      // Craftable first, then the nearest misses; name order within each.
-      out.sort((a, b) => Number(b.check.ok) - Number(a.check.ok) || a.short.count - b.short.count || Number(b.isNew) - Number(a.isNew) || a.name.localeCompare(b.name));
+      // Craftable first, then the nearest misses: fewest things missing, then partly held ("1
+      // more rag" before "a hammer"), then weapons/food/clothes before chemistry.
+      out.sort((a, b) => Number(b.check.ok) - Number(a.check.ok) || a.short.count - b.short.count || Number(b.isNew) - Number(a.isNew)
+        || (a.check.ok ? 0 : Number(b.short.progress > 0) - Number(a.short.progress > 0) || catRank(a.recipe) - catRank(b.recipe)) || a.name.localeCompare(b.name));
+      if (q.filter === 'craftable' && q.almostSection) {
+        const firstShort = out.findIndex((r) => !r.check.ok);
+        if (firstShort >= 0) out.length = Math.min(out.length, firstShort + ALMOST_SECTION_MAX);
+      }
     }
     else {
       const byName = new Map(out.map((o) => [o, nameMatches(data, q.query, o.recipe)]));
