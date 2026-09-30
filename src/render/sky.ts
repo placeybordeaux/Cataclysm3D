@@ -13,6 +13,25 @@ void main() {
   gl_Position = p;
 }`;
 
+/**
+ * The cloudless sky colour along a world direction. Shared with the post pass, whose
+ * distance fade dissolves far geometry into exactly the sky behind it (a grey fog wall in
+ * front of a blue/orange horizon read as a wall, not as distance). Needs uZenith, uHorizon,
+ * uGround, uSunDir, uSunColor, uNight.
+ */
+export const SKY_GRADIENT = /* glsl */ `
+vec3 skyGradient(vec3 d) {
+  float h = d.y;
+  vec3 col = mix(uHorizon, uZenith, pow(clamp(h, 0.0, 1.0), 0.55));
+  // warm glow toward the sun, strong only when it is low (dawn/dusk): at midday the full
+  // glow washed a third of the sky out to white around the sun
+  float sunAmt = max(dot(d, uSunDir), 0.0);
+  float low = 0.3 + 0.7 * (1.0 - smoothstep(0.08, 0.45, uSunDir.y));
+  col += uSunColor * pow(sunAmt, 8.0) * 0.35 * low * (1.0 - uNight);
+  if (h < 0.0) col = mix(col, uGround, clamp(-h * 6.0, 0.0, 1.0));
+  return col;
+}`;
+
 const FRAG = /* glsl */ `
 layout(location = 1) out highp vec4 gNormal;
 uniform vec3 uZenith;
@@ -22,8 +41,11 @@ uniform vec3 uSunDir;
 uniform vec3 uSunColor;
 uniform vec3 uMoonDir;
 uniform float uNight;
+${SKY_GRADIENT}
 uniform float uTime;
 uniform float uCloud;
+uniform float uSunVis;
+uniform float uOvercast;
 varying vec3 vDir;
 
 // Integer hash of a lattice cell. The old fract(sin(dot(p, k)) * 43758.5) hash was the real
@@ -56,11 +78,7 @@ float fbm(vec2 p) {
 void main() {
   vec3 d = normalize(vDir);
   float h = d.y;
-  vec3 col = mix(uHorizon, uZenith, pow(clamp(h, 0.0, 1.0), 0.55));
-  // warm glow toward the sun near the horizon (dawn/dusk)
-  float sunAmt = max(dot(d, uSunDir), 0.0);
-  col += uSunColor * pow(sunAmt, 8.0) * 0.35 * (1.0 - uNight);
-  if (h < 0.0) col = mix(uHorizon, uGround, clamp(-h * 6.0, 0.0, 1.0));
+  vec3 col = skyGradient(d);
 
   // stars: one cell of a lat/long grid lights up; cells are small enough to be ~1 px
   if (uNight > 0.01 && h > 0.0) {
@@ -74,10 +92,12 @@ void main() {
   }
   // sun disc (hard edge = pixel-art disc after quantization)
   float sd = dot(d, uSunDir);
-  if (sd > 0.9985 && uSunDir.y > -0.05) col = mix(col, vec3(1.0, 0.95, 0.8) * 2.0, 1.0 - uNight * 0.8);
+  // (1.6: just over the bloom threshold, so a small halo; at 2.0 the bloom washed a third
+  // of the sky out around the sun)
+  if (sd > 0.9985 && uSunDir.y > -0.05) col = mix(col, vec3(1.0, 0.95, 0.8) * 1.6, (1.0 - uNight * 0.8) * uSunVis);
   // moon disc with a darker mare blotch
   float md = dot(d, uMoonDir);
-  if (md > 0.9992 && uNight > 0.0) {
+  if (md > 0.9992 && uNight > 0.0 && uSunVis > 0.5) {
     vec3 moon = vec3(0.85, 0.88, 0.95);
     vec3 side = normalize(cross(uMoonDir, vec3(0.0, 1.0, 0.0)));
     float off = dot(d - uMoonDir, side) * 800.0;
@@ -98,6 +118,8 @@ void main() {
     float core = smoothstep(lo + 0.08, lo + 0.34, c);
     vec3 lit = mix(mix(uHorizon, vec3(1.0), 0.25) * 1.08 + uSunColor * 0.12, uZenith * 0.7, uNight);
     vec3 cloudCol = mix(lit, lit * vec3(0.8, 0.82, 0.88), core);
+    // rain clouds: darker, heavier undersides (a white sky over a downpour read as fog)
+    cloudCol *= 1.0 - uOvercast * (0.22 + 0.2 * core);
     col = mix(col, cloudCol, cover * 0.8 * smoothstep(0.0, 0.18, h));
   }
   gl_FragColor = vec4(col, 1.0);
@@ -108,6 +130,8 @@ export class Sky {
   readonly mesh: THREE.Mesh;
   readonly material: THREE.ShaderMaterial;
   cloudiness = 0.2;
+  /** 0..1 from the game weather (atmosphere.ts): raises the cloud cover */
+  overcast = 0;
 
   constructor() {
     this.material = new THREE.ShaderMaterial({
@@ -123,6 +147,8 @@ export class Sky {
         uNight: { value: 0 },
         uTime: { value: 0 },
         uCloud: { value: 0.2 },
+        uSunVis: { value: 1 },
+        uOvercast: { value: 0 },
       },
       side: THREE.BackSide,
       depthWrite: false,
@@ -145,7 +171,9 @@ export class Sky {
     u.uMoonDir.value.copy(sky.moonDir);
     u.uNight.value = sky.night;
     u.uTime.value = time;
-    u.uCloud.value = this.cloudiness;
+    u.uCloud.value = Math.max(this.cloudiness, 0.2 + 0.75 * this.overcast);
+    u.uSunVis.value = sky.sunVisible;
+    u.uOvercast.value = this.overcast;
     this.mesh.position.copy(camPos);
   }
 }

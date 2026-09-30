@@ -207,6 +207,8 @@ function clumpMaterials(): { mat: THREE.MeshLambertMaterial; depth: THREE.MeshDe
         // looking through the crown toward the sun: leaves glow (translucency)
         vTrans = pow(max(dot(normalize(ip - cameraPosition), uSunW), 0.0), 3.0);
         vec2 sw = vec2(sin(uTime * 1.3 + ip.x * 0.5 + ip.y * 0.7), cos(uTime * 1.1 + ip.z * 0.6)) * 0.03 * max(ip.y - 1.0, 0.0) / 4.0;
+        // past ~20 m the sway is under a pixel: it only made distant crowns flicker
+        sw *= 1.0 - smoothstep(14.0, 30.0, length(ip - cameraPosition));
         // clumps melt away within a few metres of the eye instead of filling the view
         float near = smoothstep(1.4, 3.6, length(ip - cameraPosition));
         transformed = (cR * position.x + cU * position.y) * instN.w * near + vec3(sw.x, 0.0, sw.y);

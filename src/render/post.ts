@@ -1,5 +1,7 @@
 import * as THREE from 'three';
 import { buildLut, lowResSize } from './grading';
+import { SKY_GRADIENT } from './sky';
+import type { SkyState } from './lights';
 
 // The pixel pipeline:
 //   1. scene -> low-res MRT target (HalfFloat colour + view normal/flag, depth texture)
@@ -42,6 +44,18 @@ export interface PipelineOptions {
   atmosphere: number;
   /** How much the distant skyline fades into the fog colour. */
   skylineFog: number;
+  /** atmosphere.ts: 0 = legacy grey fog, 1 = sky-matched fade (fog* then = fade range). */
+  atmosMode: number;
+  /** Aerial perspective e-folding distance (m), share at infinity, desaturated share. */
+  hazeDist: number;
+  hazeMax: number;
+  hazeDesat: number;
+  /** Outlines/SSAO fade from this fraction of fogFar (distance detail is shimmer). */
+  detailFade: number;
+  /** Sky-matched fade: share reached at fogFar, and where it reaches 1 (m). */
+  edgeLevel: number;
+  farEnd: number;
+  farMax: number;
 }
 
 const FULLSCREEN_VERT = /* glsl */ `
@@ -80,7 +94,23 @@ uniform float uSkylineFog;
 uniform float uBloom;
 uniform sampler2D tBloom;
 uniform int uDebugView;
+uniform int uAtmosMode;
+uniform float uHazeDist;
+uniform float uHazeMax;
+uniform float uHazeDesat;
+uniform float uDetailFade;
+uniform float uEdgeLevel;
+uniform float uFarEnd;
+uniform float uFarMax;
+uniform mat3 uCamRot;
+uniform vec3 uZenith;
+uniform vec3 uHorizon;
+uniform vec3 uGround;
+uniform vec3 uSunDir;
+uniform vec3 uSunColor;
+uniform float uNight;
 varying vec2 vUv;
+${SKY_GRADIENT}
 
 float linDepth(vec2 uv) {
   float d = texture2D(tDepth, uv).r;
@@ -132,6 +162,25 @@ float ssao(vec2 uv, float d, vec3 n) {
   return 1.0 - occ / 8.0;
 }
 
+// Sky-matched distance model (atmosphere.ts). Two parts:
+//  * aerial perspective: a light in-scatter toward the sky colour along this ray (warm
+//    toward a low sun, blue elsewhere), capped at uHazeMax, so silhouettes and dark shapes
+//    (a zombie on the road at 50 m) keep their contrast;
+//  * distance fade: reaches uEdgeLevel over the last stretch of the drawn chunks, then
+//    keeps going over the far ground ring and skyline (skyline.ts, true distance from the
+//    normal target) to fully sky at uFarEnd, so the ground meets the sky at the horizon
+//    instead of stopping at a fog wall.
+vec3 atmosphere(vec3 col, float d, vec3 skyC) {
+  if (uAtmos > 0.0) {
+    float a = uAtmos * uHazeMax * (1.0 - exp(-d / uHazeDist));
+    float l = dot(col, vec3(0.3, 0.59, 0.11));
+    col = mix(col, vec3(l), a * uHazeDesat);
+    col = mix(col, skyC, a);
+  }
+  float e = uEdgeLevel * smoothstep(uFogNear, uFogFar, d) + (max(uFarMax, uEdgeLevel) - uEdgeLevel) * smoothstep(uFogFar, uFarEnd, d);
+  return mix(col, skyC, e * uFogMax);
+}
+
 void main() {
   vec2 px = 1.0 / uRes;
   vec3 col = texture2D(tColor, vUv).rgb * uExposure;
@@ -139,10 +188,14 @@ void main() {
   float dC = linDepth(vUv);
   bool sky = dC > 1e5;
   // alpha 0.5 in the normal target marks the distant skyline: no outlines, its own haze
-  bool skyline = abs(texture2D(tNormal, vUv).a - 0.5) < 0.2;
+  // (r = true distance / 1024: the impostor is pulled in, so its depth isn't its distance)
+  vec4 nS = texture2D(tNormal, vUv);
+  bool skyline = abs(nS.a - 0.5) < 0.2;
 
+  // the sky right behind this pixel (world-space view ray): what distance fades into
+  vec3 skyC = uAtmosMode == 1 ? skyGradient(normalize(uCamRot * vec3((vUv * 2.0 - 1.0) * uTan, -1.0))) : uFogColor;
   if (skyline) {
-    col = mix(col, uFogColor, uSkylineFog);
+    col = uAtmosMode == 1 ? atmosphere(col, nS.r * 1024.0, skyC) : mix(col, skyC, uSkylineFog);
   } else if (!sky) {
     // --- outlines -------------------------------------------------------------------
     // For planar surfaces 1/depth is affine in screen space, so comparing each neighbour
@@ -176,16 +229,17 @@ void main() {
     if (uSsao > 0.0 && nC4.a > 0.75) {
       float ao = ssao(vUv, dC, normalize(nC));
       if (uDebugView == 1) { gl_FragColor = vec4(vec3(ao), 1.0); return; }
-      col *= mix(1.0, ao, uSsao * (1.0 - smoothstep(uFogNear, uFogFar, dC)));
+      col *= mix(1.0, ao, uSsao * (1.0 - smoothstep(uFogFar * uDetailFade, uFogFar, dC)));
     }
     float fog = uFogMax * smoothstep(uFogNear, uFogFar, dC);
-    float near = 1.0 - smoothstep(uFogNear * 0.8, uFogFar, dC);
+    float near = 1.0 - smoothstep(uFogFar * uDetailFade, uFogFar, dC);
     if (sil > 0.5) col *= mix(1.0, 1.0 - uOutline, near);
     else if (convex > 0.5) col = col * (1.0 + uCrease * near) + uCrease * 0.02 * near;
     else if (concave > 0.5) col *= 1.0 - uCrease * 0.5 * near;
 
     // --- aerial perspective + fog -----------------------------------------------------
-    if (uAtmos > 0.0) {
+    if (uAtmosMode == 1) col = atmosphere(col, dC, skyC);
+    else if (uAtmos > 0.0) {
       // distance desaturates and shifts toward the haze colour well before the fog wall,
       // which is what separates planes of depth (full-spectrum, graded afterwards)
       float a = uAtmos * (1.0 - exp(-dC / 60.0));
@@ -193,7 +247,7 @@ void main() {
       col = mix(col, vec3(l), a * 0.4);
       col = mix(col, uHaze, a * 0.45);
     }
-    col = mix(col, uFogColor, fog);
+    if (uAtmosMode != 1) col = mix(col, uFogColor, fog);
   }
 
   // night vision (mutations / bionic NV): amplified, green-tinted luminance
@@ -293,6 +347,8 @@ export class PixelPipeline {
   debugView = 0;
   /** Haze colour for aerial perspective (renderer sets it from the sky each frame). */
   readonly haze = new THREE.Color();
+  /** Sky the sky-matched fade blends into (renderer: setSky each frame). */
+  private skyState: SkyState | null = null;
   private quad: THREE.Mesh;
   private quadScene = new THREE.Scene();
   private quadCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
@@ -314,7 +370,8 @@ export class PixelPipeline {
   constructor(private three: THREE.WebGLRenderer, opts: Partial<PipelineOptions> = {}) {
     this.options = {
       targetHeight: 360, grade: 'palette', dither: 0.035, outline: 0.55, crease: 0.22,
-      fogNear: 28, fogFar: 96, fogMax: 0.92, ditherAnchor: 'view', ssao: 0, bloom: 0, atmosphere: 0, skylineFog: 0.7, ...opts,
+      fogNear: 28, fogFar: 96, fogMax: 0.92, ditherAnchor: 'view', ssao: 0, bloom: 0, atmosphere: 0, skylineFog: 0.7,
+      atmosMode: 0, hazeDist: 60, hazeMax: 1, hazeDesat: 0.4, detailFade: 0.28, edgeLevel: 1, farEnd: 400, farMax: 1, ...opts,
     };
     const LUT = 32;
     const pal = lut3d(buildLut(LUT, 'palette'), LUT, THREE.NearestFilter);
@@ -332,6 +389,9 @@ export class PixelPipeline {
         uDitherOffset: { value: new THREE.Vector2() },
         uTan: { value: new THREE.Vector2(1, 1) }, uSsao: { value: 0 }, uAtmos: { value: 0 },
         uHaze: { value: new THREE.Color() }, uSkylineFog: { value: 0.7 }, uBloom: { value: 0 }, tBloom: { value: null }, uDebugView: { value: 0 },
+        uEdgeLevel: { value: 1 }, uFarEnd: { value: 400 }, uFarMax: { value: 1 }, uAtmosMode: { value: 0 }, uHazeDist: { value: 60 }, uHazeMax: { value: 1 }, uHazeDesat: { value: 0.4 }, uDetailFade: { value: 0.28 },
+        uCamRot: { value: new THREE.Matrix3() }, uZenith: { value: new THREE.Color() }, uHorizon: { value: new THREE.Color() },
+        uGround: { value: new THREE.Color() }, uSunDir: { value: new THREE.Vector3(0, 1, 0) }, uSunColor: { value: new THREE.Color() }, uNight: { value: 0 },
       },
       depthTest: false,
       depthWrite: false,
@@ -390,6 +450,11 @@ export class PixelPipeline {
       magFilter: THREE.NearestFilter,
       depthBuffer: false,
     });
+  }
+
+  /** The sky dome's current colours/sun (the sky-matched distance fade must match it). */
+  setSky(sky: SkyState): void {
+    this.skyState = sky;
   }
 
   /** Low-res aspect ratio (cameras must use this, it includes the margin). */
@@ -473,6 +538,25 @@ export class PixelPipeline {
     u.uAtmos.value = o.atmosphere;
     u.uHaze.value.copy(this.haze);
     u.uSkylineFog.value = o.skylineFog;
+    u.uAtmosMode.value = o.atmosMode;
+    u.uHazeDist.value = o.hazeDist;
+    u.uHazeMax.value = o.hazeMax;
+    u.uHazeDesat.value = o.hazeDesat;
+    u.uDetailFade.value = o.detailFade;
+    u.uEdgeLevel.value = o.edgeLevel;
+    u.uFarEnd.value = o.farEnd;
+    u.uFarMax.value = o.farMax;
+    u.uCamRot.value.setFromMatrix4(camera.matrixWorld);
+    const sk = this.skyState;
+    if (sk) {
+      // same uniforms as sky.ts (Sky.update), so skyGradient gives the dome's colour
+      u.uZenith.value.copy(sk.zenith);
+      u.uHorizon.value.copy(sk.horizon);
+      u.uGround.value.copy(sk.fog).multiplyScalar(0.6);
+      u.uSunDir.value.copy(sk.sunDir);
+      u.uSunColor.value.copy(sk.sunColor);
+      u.uNight.value = sk.night;
+    }
     u.uBloom.value = o.bloom > 0 && this.bloomA ? o.bloom : 0;
     u.tBloom.value = this.bloomA?.texture ?? null;
     if (o.ditherAnchor === 'view') {
