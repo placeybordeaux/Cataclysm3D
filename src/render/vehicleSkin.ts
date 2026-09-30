@@ -238,7 +238,8 @@ export function paintSkin(L: SkinLayoutInfo, inp: SkinInput): Skin {
   const column = (row: number) => {
     colDmg = inp.rowDamage.get(row) ?? 0;
     colBlood = inp.rowBlood.get(row) ?? 0;
-    colRust = Math.max(0, Math.min(1, wear * 1.1 + colDmg * 0.6 - 0.2));
+    // a burnt-out shell is scorched all over rather than patchy with rust
+    colRust = Math.max(0, Math.min(1, wear * 1.1 + colDmg * 0.6 - 0.2)) * (1 - burnt * 0.6);
   };
   /** Weather the scratch colour C (grime, rust, dents, blood), then write it at (u, v).
    * tx / ty: texel coordinates in world space (so both sides / sheets differ). */

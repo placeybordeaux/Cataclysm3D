@@ -196,6 +196,45 @@ describe('vehicle model: geometry', () => {
     expect(tris(far)).toBeLessThan(tris(near) * 0.7);
   });
 
+  it('an open hatch lifts above the roof', () => {
+    const v = make('car_hatch');
+    const top = () => {
+      const m = buildVehicleModel(v, 0)!;
+      return Math.max(bounds(m.body!).max[1], m.glass ? bounds(m.glass).max[1] : 0);
+    };
+    for (const p of v.parts) p.open = false;
+    const closed = top();
+    const lids = v.parts.filter((p) => p.def.flags.includes('MULTISQUARE'));
+    expect(lids.length).toBeGreaterThan(0);
+    for (const p of lids) p.open = true;
+    expect(top()).toBeGreaterThan(closed + 0.2);
+  });
+
+  it('the driven build has a cockpit: wheel, two dials, a windscreen film', () => {
+    const v = make('sedan');
+    expect(buildVehicleModel(v, 0)!.cockpit).toBeUndefined();
+    const m = buildVehicleModel(v, 0, { separateWheels: true })!;
+    const c = m.cockpit!;
+    expect(c.dials.map((d) => d.kind)).toEqual(['speed', 'fuel']);
+    expect(c.film).not.toBeNull();
+    // the wheel is ahead of the driver's seat and below the eye
+    expect(c.wheel.y).toBeLessThan(m.eyeH);
+    expect(c.wheel.x).toBeGreaterThan(m.driverX!);
+  });
+
+  it('smashed glass leaves flecks on the road', () => {
+    const v = make('sedan');
+    const low = (m: ReturnType<typeof buildVehicleModel>) => {
+      const pos = m!.parts!.getAttribute('position');
+      let n = 0;
+      for (let i = 0; i < pos.count; i++) if (pos.getY(i) < 0.03) n++;
+      return n;
+    };
+    const intact = low(buildVehicleModel(v, 0));
+    for (const p of v.parts) if (p.def.flags.includes('WINDSHIELD')) p.hp = 0;
+    expect(low(buildVehicleModel(v, 0))).toBeGreaterThan(intact + 30);
+  });
+
   it('can hand the skin to a worker as structured-cloneable data', () => {
     const m = buildVehicleModel(make('ambulance', 1), 0, { deferSkin: true })!;
     expect(m.skin).toBeNull();

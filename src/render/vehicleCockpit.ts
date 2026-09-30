@@ -124,7 +124,7 @@ export function filmTexture(): THREE.DataTexture {
       if (swept) dust *= 0.3;
       const n = hash(x, y);
       // mostly a faint haze, with the odd single-texel fleck
-      let a = n < 0.015 ? 0.16 * (swept ? 0.4 : 1) : dust * (0.7 + n * 0.3);
+      let a = n < 0.012 ? 0.08 * (swept ? 0.4 : 1) : dust * (0.7 + n * 0.3);
       let c = [120, 110, 92];
       // reflection band: the sky catching the glass, a diagonal stripe
       const band = Math.abs(u * 0.9 - v * 0.6 - 0.18);

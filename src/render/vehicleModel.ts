@@ -664,7 +664,8 @@ export function buildVehicleModel(v: Vehicle, base: number, opts: { reuseSkinKey
   // chassis block between the wheels: grounds the body (you see under a car, not through it)
   {
     const wz = Math.max(0.2, hw - 0.42);
-    parts.get(0x2a2a2c).box(L.xTail + 0.45, base + p.sill * 0.35, L.yc - wz, L.xNose - 0.45, base + p.sill + 0.03, L.yc + wz, 63, F.dark, F.dark, base);
+    // a slab no deeper than ~25 cm: under a high trailer a full-height block read as a wall
+    parts.get(0x2a2a2c).box(L.xTail + 0.45, base + Math.max(p.sill * 0.35, p.sill - 0.25), L.yc - wz, L.xNose - 0.45, base + p.sill + 0.03, L.yc + wz, 63, F.dark, F.dark, base);
   }
   parts.sky = 1;
   // bumpers
@@ -705,14 +706,15 @@ export function buildVehicleModel(v: Vehicle, base: number, opts: { reuseSkinKey
     // the seat): the rim's top third and your hands on it at the bottom of the view, the
     // dials peeking over it, all under the bonnet line so the road stays clear.
     const ex = L.xOf(ctrl.mx) + 0.15, ey = base + eyeH;
-    const wx = Math.min(dashFront - 0.5, ex + 0.45), wy = ey - 0.37;
+    // (72 deg vertical FOV: the bottom edge is 36 deg down; the bonnet line ~14 deg)
+    const wx = Math.min(dashFront - 0.5, ex + 0.42), wy = ey - 0.33;
     const tilt = 0.45, r = 0.18;
     // column into the dash
     tube(parts.get(0x1e1e22), [wx, wy, driverZ], [wx + 0.4, wy - 0.12, driverZ], 0.03, F.dark, 5);
     if (!opts.separateWheels) steeringWheel(parts.get(0x34343a), wx, wy, driverZ, r, F.leather);
     // instrument binnacle: a hooded box behind the wheel, its face tilted toward your eye
-    // the dials sit in the wheel's upper opening, between the rim's top and the hub
-    const cx = Math.min(dashFront - 0.3, ex + 0.68), cy = ey - 0.42;
+    // the dials sit just above the rim's top, ~21 deg down: in view, under the bonnet line
+    const cx = Math.min(dashFront - 0.3, ex + 0.68), cy = ey - 0.26;
     const bz = 0.17;
     chamferBox(parts.get(0x1a1a1c), cx, Math.min(cy - 0.09, base + dashTop - 0.02), driverZ - bz, cx + 0.14, cy + 0.08, driverZ + bz, 0.03, F.dark, F.dark);
     chamferBox(parts.get(0x141416), cx - 0.04, cy + 0.06, driverZ - bz, cx + 0.14, cy + 0.09, driverZ + bz, 0.02, F.dark, F.dark);
