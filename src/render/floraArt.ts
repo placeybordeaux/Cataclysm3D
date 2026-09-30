@@ -23,40 +23,60 @@ export type Ramp4 = [RGB, RGB, RGB, RGB];
 const T = 32;
 const wrap = (v: number) => ((v % T) + T) % T;
 
-export function paintLeaves(r: Ramp4, seed: number, dots?: { cols: RGB[]; n: number; size: 1 | 2 }): Img {
+/** Flower/fruit/berry dots: `size` 1 = single pixels, 2 = 2x2 fruit, 3 = 5-px florets. */
+export interface LeafDots { cols: RGB[]; n: number; size: 1 | 2 | 3 }
+
+/**
+ * Tileable foliage in four clean steps: overlapping scalloped leaf clusters (~7 px, like
+ * scales) painted back to front, each lit on its upper-left edge (r[3]), a light body (r[2]),
+ * a mid inner leaf mark (r[1]) and a dark lower-right rim (r[0]) that also fills the gaps.
+ * Deliberate, readable shapes at 1:1 (v3 was 3-px noise that turned to mush), and a clean
+ * two-tone mottling at distance.
+ */
+export function paintLeaves(r: Ramp4, seed: number, dots?: LeafDots): Img {
   const img = new Img(T, T);
   const rng = new Rng(seed);
   img.fill(r[0]);
   const setW = (x: number, y: number, c: RGB) => img.set(wrap(x), wrap(y), c);
-  // leaf clusters: 3-5 leaves around a centre, each a 3-px blade with a lit tip, so the
-  // pattern reads as leaves at 1:1 and as a mottled mass further out
-  for (let k = 0; k < 64; k++) {
-    const cx = rng.int(0, T - 1), cy = rng.int(0, T - 1);
-    const n = rng.int(3, 5);
-    const light = rng.next() < 0.5;
-    for (let l = 0; l < n; l++) {
-      const a = (l / n) * Math.PI * 2 + rng.next();
-      const dx = Math.round(Math.cos(a) * 1.6), dy = Math.round(Math.sin(a) * 1.6);
-      const x = cx + dx, y = cy + dy;
-      const base = light ? r[2] : r[1];
-      setW(x, y, base);
-      setW(x + Math.sign(dx || 1), y + Math.sign(dy), base);
-      setW(x + 2 * Math.sign(dx || 1), y + 2 * Math.sign(dy), rng.next() < 0.5 ? r[1] : r[0]);
-      // light from above: the upper pixel of a leaf catches it
-      setW(x, y - 1, light && rng.next() < 0.6 ? r[3] : base);
+  const clusters: [number, number, number][] = [];
+  for (let row = 0; row < 5; row++)
+    for (let col = 0; col < 4; col++) {
+      const cx = col * 8 + (row % 2) * 4 + rng.int(-1, 1), cy = row * 6.4 + rng.int(-1, 1);
+      clusters.push([cx, cy, 3.6 + rng.next() * 1.2]);
     }
+  clusters.sort((a, b) => a[1] - b[1]);
+  for (const [cx, cy, rad] of clusters) {
+    // scalloped outline: three overlapping lobes
+    const lobes = [[0, 0, rad], [-rad * 0.5, rad * 0.25, rad * 0.7], [rad * 0.5, rad * 0.25, rad * 0.7]];
+    const inside = (x: number, y: number) => lobes.some(([lx, ly, lr]) => (x - cx - lx) ** 2 + (y - cy - ly) ** 2 <= lr * lr);
+    for (let y = Math.floor(cy - rad - 1); y <= cy + rad + 1; y++)
+      for (let x = Math.floor(cx - rad * 1.3); x <= cx + rad * 1.3; x++) {
+        if (!inside(x, y)) continue;
+        let c = r[2];
+        if (!inside(x + 1, y + 1)) c = r[0];
+        else if (!inside(x - 1, y - 1) || !inside(x, y - 1)) c = r[3];
+        setW(x, y, c);
+      }
+    // one mid-tone leaf mark per cluster (a vein / the next leaf behind)
+    setW(cx, cy + 1, r[1]); setW(cx + 1, cy + 2, r[1]);
   }
   if (dots) {
     for (let k = 0; k < dots.n; k++) {
       const x = rng.int(0, T - 1), y = rng.int(0, T - 1);
       const c = dots.cols[k % dots.cols.length];
       const hi: RGB = [Math.min(255, c[0] + 60), Math.min(255, c[1] + 60), Math.min(255, c[2] + 60)];
-      if (dots.size === 1) {
-        setW(x, y, c);
+      const lo: RGB = [c[0] * 0.6, c[1] * 0.6, c[2] * 0.6];
+      if (dots.size === 1) setW(x, y, c);
+      else if (dots.size === 2) {
+        // a fruit: 2x2 with one highlight pixel and a darker underside
+        setW(x, y, hi); setW(x + 1, y, c); setW(x, y + 1, c); setW(x + 1, y + 1, lo);
       } else {
-        // a flower / fruit: 2x2 with one highlight pixel and a darker underside
-        setW(x, y, hi); setW(x + 1, y, c); setW(x, y + 1, c);
-        setW(x + 1, y + 1, [c[0] * 0.6, c[1] * 0.6, c[2] * 0.6]);
+        // a floret cluster (hydrangea head, rose): a 5-px rounded blob, lit top-left
+        for (let dy = -2; dy <= 2; dy++)
+          for (let dx = -2; dx <= 2; dx++) {
+            if (Math.abs(dx) + Math.abs(dy) > 3) continue;
+            setW(x + dx, y + dy, dx + dy <= -2 ? hi : dx + dy >= 2 ? lo : c);
+          }
       }
     }
   }
@@ -82,7 +102,7 @@ export function paintNeedles(r: Ramp4, seed: number): Img {
 }
 
 /** Ragged leaf-mass cutout (transparent outside); interior uses the leaf pattern. */
-export function paintFringe(r: Ramp4, seed: number, dots?: { cols: RGB[]; n: number; size: 1 | 2 }): Img {
+export function paintFringe(r: Ramp4, seed: number, dots?: LeafDots): Img {
   const leaves = paintLeaves(r, seed, dots);
   const img = new Img(T, T);
   const rng = new Rng(seed ^ 0x51f);
