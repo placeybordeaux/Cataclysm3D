@@ -81,6 +81,15 @@ describe('chunk build schedule', () => {
     expect(res.need.ahead).toBeGreaterThan(res.distance.ahead);
   });
 
+  it("'need' builds the player's own 3x3 first after a teleport, even behind the camera (load curtain)", () => {
+    const { cm, built } = manager('need');
+    cm.forward.x = 1;
+    cm.forward.y = 0;
+    drive(cm, 1000 * 24 + 12, 12, 0, 0, 600);
+    const first9 = built.filter((b) => b.first).slice(0, 9).map((b) => `${b.cx - 1000},${b.cy}`).sort();
+    expect(first9).toEqual(['-1,-1', '-1,0', '-1,1', '0,-1', '0,0', '0,1', '1,-1', '1,0', '1,1']);
+  });
+
   it("'need' never spends a step on a LOD flip while a chunk in view is unbuilt, and never downgrades while moving", () => {
     const { cm, built } = manager('need');
     cm.lodRadius = 1.8;

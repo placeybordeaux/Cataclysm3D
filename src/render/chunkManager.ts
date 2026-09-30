@@ -379,6 +379,9 @@ export class ChunkManager {
     if (e.z < pz) t += 1.5;
     else if (e.z > pz) t += 0.2;
     t += d * 0.002;
+    // the player's own chunk and its 8 neighbours come first whatever the camera does: after
+    // a teleport or a load the view stays curtained until they exist (nearChunks.ts)
+    if (e.z === pz && Math.abs(e.cx - Math.floor(px / CHUNK)) <= 1 && Math.abs(e.cy - Math.floor(py / CHUNK)) <= 1) t = Math.min(t, -1 + d * 0.002);
     const cls: WorkClass = !e.shown ? 'hole' : e.vsig !== e.builtVsig || e.builtSig === -1 ? 'edit' : e.near !== !!e.builtNear ? (e.near ? 'up' : 'down') : 'trees';
     e.cls = cls;
     if (cls === 'hole') {
