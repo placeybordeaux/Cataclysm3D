@@ -57,6 +57,9 @@ export interface Around {
 /** Cost counters (cdda.furnitureStats): models built, placements, quads baked. */
 export const modelStats = { built: 0, buildMs: 0, placed: 0, placeMs: 0, quads: 0 };
 
+/** Curtain fabrics picked per room. */
+const ROOM_CURTAINS: [number, number, number][] = [[150, 64, 60], [70, 90, 130], [190, 170, 120], [90, 120, 80], [130, 90, 120], [200, 196, 184], [160, 110, 70]];
+
 // World direction tables, y south: N, E, S, W.
 const DX = [0, 1, 0, -1];
 const DY = [-1, 0, 1, 0];
@@ -134,14 +137,17 @@ export class ModelFactory {
    * +x, else -1.
    */
   window(geo: (f: TileFrame) => GeomBuilder, glass: () => GeomBuilder, src: TileTextureSource, id: string, x: number, y: number,
-    sill: number, head: number, alongX: boolean, inward: number): boolean {
+    sill: number, head: number, alongX: boolean, inward: number, roomSeed?: number): boolean {
     const H = head - sill;
-    const key = `w|${id}|${H.toFixed(2)}`;
+    const st = windowState(id);
+    // curtains match the room (a room's windows share them); unknown room: the sprite's
+    const curtain = st.curtains !== 'none' && roomSeed !== undefined ? ROOM_CURTAINS[(roomSeed >>> 5) % ROOM_CURTAINS.length] : null;
+    const key = `w|${id}|${H.toFixed(2)}|${curtain?.join(',') ?? ''}`;
     let m = this.meshes.get(key);
     if (!m) {
       const tb = performance.now();
       const b = new ModelBuilder(this.atlas);
-      buildWindow(b, windowState(id), H, curtainColour(this.terrainPalette(src, id)));
+      buildWindow(b, st, H, curtain ?? curtainColour(this.terrainPalette(src, id)));
       m = b.done();
       this.meshes.set(key, m);
       modelStats.built++;
