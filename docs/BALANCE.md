@@ -246,6 +246,26 @@ A human fight runs longer than the bot's: aiming, stepping in and out, guarding.
 check (`tools/realinput.ts --only firstfight`) plays the fight with xdotool and requires it
 to end within 14 s of first contact, with at most 2 grabs.
 
+#### Aim models (wave 3)
+
+Free aim ("Steady hands", the default, docs/COMBAT_FEEL.md "Aim models") replaces BN's to-hit
+dice for the survivor. `--aim sway|timing|dice` runs any scenario under a model; `--scenario
+range` is the ranged table (in COMBAT_FEEL.md). Melee on open ground, 10 seeds, Accessible
+(fight s / HP lost), dice → free aim:
+
+| weapon | 1 zombie | 2 zombies |
+|---|---|---|
+| fists | 10 s, 10.5 → 9 s, 10 | 19 s, 26.5 → 16 s, 29 |
+| chef knife | 4 s, 3 → 4 s, 1 | 8 s, 11.5 → 7 s, 9 |
+| pipe | 5 s, 5.5 → 4 s, 3 | 10 s, 16.5 → 8 s, 10 |
+| crowbar | 5 s, 5 → 4 s, 0 | 10 s, 15 → 7 s, 8 |
+| bat | 3 s, 3 → 3 s, 0 | 7 s, 8 → 7 s, 5 |
+
+First fight (long stick, 30 seeds): Accessible 6.4 → 5.2 s (misses 2 → 0, glancing blows
+instead); Classic 9.8 → 7.8 s. Free aim makes first fights a little shorter; no death-rate change
+in the duels. Classic keeps a larger sway (`aimSwayScale` 1.25) and a lower skill-0 damage
+(×0.65) so its ranged kill times stay close to BN's dice.
+
 #### First night in the shelter
 
 The survivor wears the starting kit, stays inside the shelter and sleeps on the floor at 22:00.

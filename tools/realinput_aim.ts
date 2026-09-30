@@ -58,6 +58,7 @@ const SETUP = (weapon: string, skill: number, d: number, model: string) => `(() 
     cdda.combat.cooldown = 0; cdda.renderer.viewmodel?.freeze(null);
   }
   p.x = window.__aimSpot[0]; p.y = window.__aimSpot[1]; p.stamina = p.staminaMax(); p.recoil = 3000; p.crouching = false;
+  if (cdda.aimHud) cdda.aimHud.trail = 1.5;
   const uid = cdda.spawnMonster('mon_zombie', 0, -${d});
   const m = g.monsters.all.find((z) => z.uid === uid); m.hp = 100000; window.__m = m;
   const mx = m.x, my = m.y; clearInterval(window.__pin); window.__pin = setInterval(() => { if (!m.dead) { m.x = mx; m.y = my; m.attackCooldown = 5; m.windup = null; } }, 16);
@@ -110,6 +111,7 @@ export function aimScenarios(c: AimCtx): Scenario[] {
     await sleep(300);
     await js(AIM);
     await listen();
+    const shots0 = await js<number>('cdda.combat.shots');
     const waits: number[] = [];
     const lines: string[] = [];
     for (let i = 0; i < n; i++) {
@@ -145,10 +147,11 @@ export function aimScenarios(c: AimCtx): Scenario[] {
     const ev = await js<{ k: string; o: string; r: string; d: number; landed: boolean }[]>('window.__ev');
     const mine = ev.filter((e) => (w.melee ? e.k === 'melee' : e.k === 'gun'));
     const hits = mine.filter((e) => e.o === 'hit' || e.o === 'crit' || e.o === 'kill');
-    const misses = mine.filter((e) => e.o === 'miss' || (e.o === 'whiff' && (!e.landed || w.melee)));
-    const shots = w.melee ? n : await js<number>('cdda.combat.shots');
+    const shots = w.melee ? n : (await js<number>('cdda.combat.shots')) - shots0;
+    // Guns: a shot that didn't hit is a miss however it resolved (a hitscan round "lands" in the dirt).
+    const misses = w.melee ? mine.filter((e) => e.o === 'miss' || e.o === 'whiff') : { length: Math.max(0, shots - hits.length) };
     const dmg = hits.reduce((a, e) => a + e.d, 0);
-    const res = { weapon, skill, model, attempts: n, hits: hits.length, misses: misses.length, dmgPerHit: hits.length ? +(dmg / hits.length).toFixed(1) : 0, waitMs: waits.length ? Math.round(waits.reduce((a, b) => a + b, 0) / waits.length) : 0, shots, lines: [...new Set([...lines, ...mine.map((e) => e.r).filter(Boolean)])].slice(0, 4) };
+    const res = { weapon, skill, model, attempts: w.melee ? n : shots, hits: hits.length, misses: misses.length, dmgPerHit: hits.length ? +(dmg / hits.length).toFixed(1) : 0, waitMs: waits.length ? Math.round(waits.reduce((a, b) => a + b, 0) / waits.length) : 0, shots, lines: [...new Set([...lines, ...mine.map((e) => e.r).filter(Boolean)])].slice(0, 4) };
     console.log(`    ${tag}: ${res.hits}/${n} hit, ${res.misses} missed, ${res.dmgPerHit} dmg/hit, ${res.waitMs} ms aiming; lines: ${res.lines.join(' | ')}`);
     return res;
   };
@@ -173,65 +176,122 @@ export function aimScenarios(c: AimCtx): Scenario[] {
       check('free aim: no "miss:" / "wide:" dice reasons on the crosshair', free.every((r) => r.lines.every((l) => !/^(miss|wide):|clumsy|skill too low/.test(l))), free.flatMap((r) => r.lines));
       const dice = rows.filter((r) => r.model === 'dice');
       check('classic dice still misses at skill 0 (the comparison model is intact)', dice.some((r) => r.skill === 0 && r.misses > 0), dice.map((r) => `${r.weapon}${r.skill}:${r.misses}`));
+      // A headshot: the view on the head, a timed click; the crosshair says why it hit hard.
+      await js(SETUP('pistol', 5, 10, 'sway'));
+      await sleep(300);
+      await js(`(() => { const m = window.__m, p = cdda.game.player; const d = Math.hypot(m.x - p.x, m.y - p.y); p.yaw = Math.atan2(m.x - p.x, -(m.y - p.y)); p.pitch = Math.atan2(1.52 - 1.6, d); })()`);
+      await x().buttonDown(3);
+      await sleep(600);
+      await x().clickHere(1);
+      await sleep(120);
+      await shot('aim_headshot');
+      await x().buttonUp(3);
+      const head = await js<{ zone: string; text: string } | null>('cdda.aimState().lastHit');
+      check('a shot with the crosshair on the head is a headshot, and the crosshair says ×2', head?.zone === 'head' && /HEADSHOT ×2/.test(head.text), head);
       console.log('\n    | model | weapon | skill | hit | missed | dmg/hit | aiming ms |');
       for (const r of rows) console.log(`    | ${r.model} | ${r.weapon} | ${r.skill} | ${r.hits}/${r.attempts} | ${r.misses} | ${r.dmgPerHit} | ${r.waitMs} |`);
     }],
-    ['aimtiming', 'timing model by real input: hold breath with Shift while aiming (flash), bow release ring, active reload, melee beat', async () => {
+    ['aimtiming', 'timing model by real input: hold breath with Shift while aiming (flash), active reload, bow release ring, melee beat', async () => {
       await c.toGameplay();
-      // --- breath: RMB, then Shift; the readout says NOW during the perfect window.
+      // Screenshots need ~0.4 s, longer than a timing window: they're taken in a second pass with
+      // the simulation frozen (tactical pause) once the moment is reached, never between a cue and the click.
+      const frozenShot = async (name: string) => {
+        await js('cdda.game.tacticalPause = true');
+        await shot(name);
+        await js('cdda.game.tacticalPause = false');
+      };
+      const readout = () => js<string>(`document.querySelector('.aim-level')?.textContent ?? ''`);
+      // --- breath: RMB, then Shift; the readout says NOW during the perfect window: click.
       await js(SETUP('pistol', 0, 12, 'timing'));
       await sleep(300);
       await js(AIM);
       await x().buttonDown(3);
       await sleep(500);
+      await listen();
       await x().down('Shift_L');
       let saw = '';
-      for (let i = 0; i < 40 && !/NOW/.test(saw); i++) {
-        saw = await js<string>(`document.querySelector('.aim-level')?.textContent ?? ''`);
-        await sleep(15);
+      for (let i = 0; i < 60 && !/NOW/.test(saw); i++) {
+        saw = await readout();
+        if (!/NOW/.test(saw)) await sleep(10);
       }
-      check('Shift while aiming holds the breath and the readout flashes NOW', /NOW/.test(saw), saw);
-      await shot('timing_breath_now');
-      const running = await js<boolean>('cdda.game.player.running');
-      check('holding Shift while aiming does not run', !running);
-      await listen();
       await x().clickHere(1);
+      check('Shift while aiming holds the breath and the readout flashes NOW', /NOW/.test(saw), saw);
+      check('holding Shift while aiming does not run', !(await js<boolean>('cdda.game.player.running')));
       await sleep(300);
       const perfect = await js<{ perfect: boolean; text: string } | null>('cdda.aimState().lastHit');
       check('a shot on the flash is perfect (×1.25)', !!perfect?.perfect && /perfect ×1.25/.test(perfect.text), perfect);
       await x().up('Shift_L');
+      await sleep(1600);
+      // (the screenshot pass: hold the breath again and freeze on NOW)
+      await x().down('Shift_L');
+      for (let i = 0; i < 60 && !/NOW/.test(await readout()); i++) await sleep(10);
+      await frozenShot('timing_breath_now');
+      await x().up('Shift_L');
       await x().buttonUp(3);
-      // --- active reload: R, then R again in the band.
-      await sleep(400);
+      // --- active reload: fire one, R, then R again when the marker is in the bright band.
+      await sleep(1600);
       await x().clickHere(1);
       await sleep(300);
       await x().key('r');
-      let st = await js<{ reload: { t: number; dur: number; band: { start: number; end: number } } | null }>('cdda.aimState()');
+      type R = { reload: { t: number; dur: number; band: { start: number; end: number } } | null; perfectNext: boolean };
+      let st = await js<R>('cdda.aimState()');
       if (st.reload) {
         const target = ((st.reload.band.start + st.reload.band.end) / 2) * st.reload.dur;
-        while ((st = await js('cdda.aimState()')).reload && st.reload!.t < target - 0.02) await sleep(10);
-        await shot('timing_reload_band');
-        await x().key('r');
+        while ((st = await js<R>('cdda.aimState()')).reload && st.reload!.t < target - 0.03) await sleep(8);
+        await x().key('r', 0);
         await sleep(100);
-        const s2 = await js<{ perfectNext: boolean }>('cdda.aimState()');
-        check('reload pressed again in the bright band: a perfect reload', s2.perfectNext, s2);
+        const s2 = await js<R>('cdda.aimState()');
+        check('reload pressed again in the bright band: a perfect reload ("next shot steady")', s2.perfectNext, s2);
+        // screenshot pass
+        await sleep(400);
+        await x().clickHere(1);
+        await sleep(300);
+        await x().key('r');
+        st = await js<R>('cdda.aimState()');
+        if (st.reload) {
+          while ((st = await js<R>('cdda.aimState()')).reload && st.reload!.t < st.reload!.band.start * st.reload!.dur) await sleep(8);
+          await frozenShot('timing_reload_band');
+        }
       } else check('the reload started an active-reload bar', false, st);
-      // --- bow ring
+      // --- bow ring: draw (RMB), loose (LMB) as the closing ring meets the reticle.
       await js(SETUP('bow', 0, 12, 'timing'));
       await sleep(300);
       await js(AIM);
+      await listen();
       await x().buttonDown(3);
       let ring = false;
-      for (let i = 0; i < 120 && !ring; i++) {
-        ring = await js<boolean>(`(() => { const d = cdda.combat.draw; if (!d || d.t < d.full) return false; const w = 0.55; return Math.abs(d.heldFull - w) < 0.05; })()`);
-        if (!ring) await sleep(10);
+      for (let i = 0; i < 300 && !ring; i++) {
+        ring = await js<boolean>(`(() => { const d = cdda.combat.draw; return !!d && d.t >= d.full && d.heldFull >= 0.5; })()`);
+        if (!ring) await sleep(8);
       }
-      await shot('timing_bow_ring');
       await x().clickHere(1);
       await sleep(900);
       const bowHit = await js<{ perfect: boolean; text: string } | null>('cdda.aimState().lastHit');
       check('a bow loosed as the ring meets the reticle is perfect', !!bowHit?.perfect, bowHit);
       await x().buttonUp(3);
+      await sleep(600);
+      await x().buttonDown(3);
+      for (let i = 0; i < 300; i++) {
+        if (await js<boolean>(`(() => { const d = cdda.combat.draw; return !!d && d.t >= d.full && d.heldFull >= 0.3; })()`)) break;
+        await sleep(8);
+      }
+      await frozenShot('timing_bow_ring');
+      await x().buttonUp(3);
+      // --- melee beat: a bat; click again just before the next swing is ready.
+      await js(SETUP('bat', 0, 1.0, 'timing'));
+      await sleep(300);
+      await js(AIM);
+      await x().clickHere(1);
+      await sleep(50);
+      for (let i = 0; i < 200; i++) {
+        if (await js<boolean>('cdda.combat.cooldown > 0 && cdda.combat.cooldown <= 0.07')) break;
+        await sleep(5);
+      }
+      await x().clickHere(1);
+      await sleep(150);
+      check('a click on the beat chains a perfect swing', await js<boolean>('!!cdda.combat.swing?.perfect'));
+      await sleep(600);
+      console.log(`    melee beat line: ${await why()}`);
     }],
   ];
 }

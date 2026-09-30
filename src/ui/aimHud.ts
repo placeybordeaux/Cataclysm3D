@@ -11,6 +11,8 @@ import { cssColor } from './framework';
 //  - a bow at full draw: a ring closing in on the reticle, bright while loosing would be perfect
 //  - melee: a pulse telling you the next swing is ready to be chained on the beat
 //  - active reload: a bar with a bright band; press reload again while the marker is in it
+// Optional (`trail`, Options > Aim trail / cdda.aimHud.trail): a fading trail of where the
+// reticle has been over the last second, which makes the rhythm of the weave easy to read.
 // Everything is pointer-events: none.
 
 const NS = 'http://www.w3.org/2000/svg';
@@ -60,6 +62,10 @@ export class AimHud {
   private bar: HTMLDivElement;
   private band: HTMLDivElement;
   private marker: HTMLDivElement;
+  /** Draw the reticle's recent path (seconds of history; 0 = off). */
+  trail = 0;
+  private trailG: SVGGElement;
+  private trailPts: { x: number; y: number; t: number }[] = [];
 
   constructor(parent: HTMLElement) {
     this.root = document.createElement('div');
@@ -70,6 +76,7 @@ export class AimHud {
     this.root.appendChild(this.svg);
     this.dot = el('circle', { r: 1.5, fill: 'rgba(255,255,255,.45)' }, this.svg);
     this.envelope = el('circle', { r: 20, fill: 'none', 'stroke-width': 1, 'stroke-dasharray': '2 4' }, this.svg);
+    this.trailG = el('g', {}, this.svg);
     this.reticle = el('g', {}, this.svg);
     this.breathArc = el('path', { fill: 'none', 'stroke-width': 2, stroke: 'rgba(160,210,255,.85)' }, this.reticle);
     this.flash = el('circle', { r: 11, fill: 'none', 'stroke-width': 2 }, this.reticle);
@@ -96,6 +103,19 @@ export class AimHud {
     if (!f) return;
     const show = (e: Element, on: boolean) => ((e as HTMLElement | SVGElement).style.display = on ? '' : 'none');
     show(this.dot, f.active);
+    // Trail: dots along the reticle's recent path, fading with age.
+    if (this.trail > 0 && f.active) {
+      this.trailPts.push({ x: f.rx, y: f.ry, t: now });
+      while (this.trailPts.length && now - this.trailPts[0].t > this.trail * 1000) this.trailPts.shift();
+    } else this.trailPts.length = 0;
+    while (this.trailG.childNodes.length > this.trailPts.length) this.trailG.lastChild!.remove();
+    while (this.trailG.childNodes.length < this.trailPts.length) el('circle', { r: 1.2, fill: '#fff' }, this.trailG);
+    this.trailPts.forEach((q, i) => {
+      const c = this.trailG.childNodes[i] as SVGCircleElement;
+      c.setAttribute('cx', q.x.toFixed(1));
+      c.setAttribute('cy', q.y.toFixed(1));
+      c.setAttribute('opacity', (0.6 * (1 - (now - q.t) / (this.trail * 1000))).toFixed(2));
+    });
     this.reticle.setAttribute('transform', `translate(${f.rx.toFixed(1)} ${f.ry.toFixed(1)})`);
     const env = f.active ? f.envelope : null;
     show(this.envelope, !!env);

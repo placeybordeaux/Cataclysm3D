@@ -302,7 +302,7 @@ export function hitDamageMul(q: HitQuality, f: FeelConstants = FEEL): DamagePart
   if (q.weakSpot) parts.push({ label: 'weak spot', mul: f.aimWeakMul });
   if (q.perfect) parts.push({ label: 'perfect', mul: f.aimPerfectMul });
   const sk = skillDamageMul(q.skill, f);
-  parts.push({ label: `${q.skillName ?? 'skill'} ${Math.floor(q.skill)}`, mul: sk });
+  parts.push({ label: `${q.skillName ? `${q.skillName} skill` : 'skill'} ${Math.floor(q.skill)}`, mul: sk });
   // Head + weak spot + perfect would stack to ×4.7: cap it where BN caps a head crit's severity plus a little.
   const mul = Math.min(3, parts.reduce((a, p) => a * p.mul, 1));
   return { mul, parts };
@@ -330,7 +330,7 @@ export class Breath {
 
   /** Perfect window (s after settling) and how long the breath lasts, by skill. */
   static perfectWindow(skill: number): number {
-    return 0.3 + 0.04 * Math.max(0, Math.min(10, skill));
+    return 0.4 + 0.04 * Math.max(0, Math.min(10, skill));
   }
   static holdLimit(skill: number, stamina: number): number {
     return (2.5 + 0.25 * Math.max(0, Math.min(10, skill))) * (0.5 + 0.5 * Math.max(0, Math.min(1, stamina)));

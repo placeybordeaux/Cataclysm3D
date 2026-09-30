@@ -169,7 +169,7 @@ describe('where it hit and what that does', () => {
     expect(describeHit(h)).toBe('HEADSHOT ×2');
     const g = hitDamageMul({ zone: 'legs', graze: true, weakSpot: false, perfect: false, skill: 0, skillName: 'pistol' });
     expect(g.mul).toBeCloseTo(0.75 * 0.5 * 0.75);
-    expect(describeHit(g)).toBe('legs ×0.75 · graze ×0.5 · pistol 0 ×0.75');
+    expect(describeHit(g)).toBe('legs ×0.75 · graze ×0.5 · pistol skill 0 ×0.75');
     expect(hitDamageMul({ zone: 'head', graze: false, weakSpot: true, perfect: true, skill: 10 }).mul).toBe(3);
     expect(weakSpotChance(10, 12, 12)).toBeGreaterThan(weakSpotChance(0, 8, 8) * 3);
   });

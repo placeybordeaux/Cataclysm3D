@@ -513,6 +513,10 @@ tests/               vitest unit tests (pure logic, no DOM/WebGL)
   `sys.struggle()` for grabs (interact key while grabbed).
 - Render hooks: `viewmodel.swing/impact/setGuard/recoil/jolt/reload/ads`, `rig.kick()/rig.ads`,
   `SpriteHandle.setSize`, `hitFx.tracer/watchTracers`, `playerAttack.hitStop`. HUD: `src/ui/combatHud.ts`.
+- Aim models (src/game/aimmodel.ts, wired by src/aim.ts): `aimModel()`/`setAimModel('sway'|'timing'|'dice')`,
+  `freeAim()`. Free aim: `combat.aim` (AimSway: sway + kick; the shot uses `shotOffset`), `castAim`,
+  `freeHit`; hooks for 3D models: `aimHooks.hitZone(m, hFrac)` and `aimHooks.body(m, dist)`; events
+  `monsterDodge`, `playerAttack.quality`; `rig.aimView`, `viewmodel.aimPx`, `game.runVeto`.
 - Debug: `cdda.feel`, `cdda.setFeel(d)`, `cdda.feelState()`, `cdda.recordFrames(n, dt, each)` (frame-exact
   captures for animation timing); `tools/drive.ts seq "…"` (timed real input + screenshot bursts), `xbdown/xbup`.
 - Ranged / archery (`src/game/rangedfeel.ts`, pure): `rangedClass(item)` (firearm/bow/crossbow/sling/thrown/

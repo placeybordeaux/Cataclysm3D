@@ -22,6 +22,7 @@ import { sfx } from './audio/sfx';
 // main.ts calls it once, after installCombatFeel (it wraps the reload key that one wraps).
 
 const STORAGE_KEY = 'cdda3d.aimModel';
+const TRAIL_KEY = 'cdda3d.aimTrail';
 
 function storedModel(): AimModelId | null {
   try {
@@ -155,6 +156,24 @@ function installPresenter(game: Game, renderer: Renderer, monsters: MonstersHand
   const root = getUiRoot();
   const hud = new AimHud(root);
   if (api) api.aimHud = hud;
+  try {
+    hud.trail = Number(localStorage.getItem(TRAIL_KEY) ?? 0) || 0;
+  } catch {
+    // no storage: default off
+  }
+  registerOption({
+    name: 'Aim trail',
+    value: () => (hud.trail > 0 ? 'on' : 'off'),
+    change: () => {
+      hud.trail = hud.trail > 0 ? 0 : 1;
+      try {
+        localStorage.setItem(TRAIL_KEY, String(hud.trail));
+      } catch {
+        // not persisted
+      }
+    },
+    desc: 'Free aim: a faint trail behind the crosshair showing how it has been weaving over the last second (helps you time shots).',
+  });
   let cross: HTMLElement | null = null;
   let linger = 0;
   let last = performance.now();
