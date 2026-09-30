@@ -162,6 +162,15 @@ describe('day counter', () => {
   });
 });
 
+describe('rest window needs warning', () => {
+  it('warns when very hungry or thirsty, not when merely peckish', async () => {
+    const { restNeedsWarning } = await import('../src/ui/rest_ui');
+    expect(restNeedsWarning('Hungry', 'Thirsty')).toBeNull();
+    expect(restNeedsWarning('Very Hungry', 'Very Thirsty')).toMatch(/hungry and thirsty: drink/);
+    expect(restNeedsWarning('Famished', '')).toMatch(/hungry: eat/);
+  });
+});
+
 describe('rest window', () => {
   it('says what tiredness means for sleeping now', () => {
     expect(tirednessText('').tone).toBe('dim');
