@@ -14,6 +14,7 @@ import type { MonsterSystem } from '../game/monai';
 import { interactOverrides } from '../game/interact';
 import type { Renderer } from '../render/renderer';
 import { VEHICLE_LOOKS, VehicleRenderer } from '../render/vehicleMesh';
+import { riderSlot } from '../render/vehicleRider';
 import { VEHICLE_WIDTHS } from '../render/vehicleLayout';
 import { LEVEL_HEIGHT } from '../world/coords';
 import type { UiContext } from './context';
@@ -737,6 +738,17 @@ function installVehicleDebug(api: DebugApi, game: Game, vs: VehicleSystem): void
       overflow += ch.overflow.length;
     }
     return { templates: out, overflow, migrated: vs.migrated };
+  };
+  /**
+   * Your body seated at the wheel in the chase / top-down cameras (3D characters; default on).
+   * Off = the old look: the survivor hidden while driving. No argument = current.
+   */
+  api.vehicleRiders = (on?: boolean) => {
+    if (on !== undefined && typeof on !== 'boolean') throw new Error(`vehicleRiders: true or false, not ${String(on)}`);
+    if (!rendererRef) throw new Error('vehicleRiders: no renderer (installVehicles not run)');
+    const slot = riderSlot(rendererRef);
+    if (on !== undefined) slot.enabled = on;
+    return slot.enabled;
   };
 }
 

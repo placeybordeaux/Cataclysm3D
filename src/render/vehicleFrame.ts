@@ -6,6 +6,7 @@ import { wheelRadius, type Layout } from './vehicleLayout';
 import { seatTopOf } from '../game/chassis';
 import { Batches, chamferBox, partFrames, tube, wheel } from './vehicleGeom';
 import { darkenC, lampBox, seat, steeringWheel, type ModelBuild } from './vehicleModel';
+import { rimGrips, type RideAnchors } from './vehicleRider';
 import { liveryBody, skinLayoutInfo } from './vehicleSkin';
 
 // The "model" look for grids that aren't a car / truck / bus / bike: golf carts, tractors,
@@ -50,6 +51,7 @@ export function buildFrame(v: Vehicle, L0: Layout, base: number): ModelBuild {
   }
 
   const seatTop = seatTopOf(L);
+  let ride: RideAnchors | undefined;
   for (const [mx, my] of mounts) {
     const ps = at(mx, my);
     const outer = DIRS.map(([dx, dy]) => !v.hasMount(mx + dx, my + dy));
@@ -107,7 +109,16 @@ export function buildFrame(v: Vehicle, L0: Layout, base: number): ModelBuild {
     if (s) {
       seat(parts.get(s.hp > 0 ? partTint(s, 0x6a3a30) : 0x3a3a3a), s, L, base, CHASSIS_Y1 - 0.02, seatTop, F, has(s, 'BED'));
     }
-    if (find('CONTROLS')) steeringWheel(parts.get(0x1e1e22), mx + 0.42, Y(0.85), my, 0.17, F.dark);
+    if (find('CONTROLS')) {
+      steeringWheel(parts.get(0x1e1e22), mx + 0.42, Y(0.85), my, 0.17, F.dark);
+      // the driver sits on this tile's seat (open frame: seen from every side)
+      const hipX = mx - 0.1;
+      ride = {
+        kind: 'seat', hip: [hipX, Y(seatTop + 0.07), my], lean: -0.05,
+        grips: rimGrips(mx + 0.42, Y(0.85), my, 0.17, 0.45),
+        feet: [[hipX + 0.6, Y(CHASSIS_Y1 + 0.1), my + 0.11], [hipX + 0.6, Y(CHASSIS_Y1 + 0.1), my - 0.11]],
+      };
+    }
     if (ps.some((p) => has(p, 'ROOF') && p.hp > 0)) chamferBox(roof.get(paint), mx - 0.5, Y(ROOF_Y), my - 0.5, mx + 0.5, Y(ROOF_Y + 0.08), my + 0.5, 0.02, F.metal, F.metal);
     // machinery and cargo that block the tile: rounded blocks in the part's colour
     const machine = ps.find((p) => has(p, 'OBSTACLE') && !has(p, 'WHEEL') && p !== board && p !== half && p !== door && p !== pane && !has(p, 'SEAT'));
@@ -135,6 +146,6 @@ export function buildFrame(v: Vehicle, L0: Layout, base: number): ModelBuild {
   const out = (b: Batches | GeomBuilder): THREE.BufferGeometry | null => (b instanceof Batches ? b.build() : b.vertexCount ? b.build() : null);
   return {
     body: null, roof: out(roof), parts: out(parts), glass: out(glass), lamps: out(lamps), tails: out(tails), beacons: null,
-    skin: null, skinJob: null, skinKey: '', layout: L, eyeH: 1.2, driverZ: null, parkedLean: 0, bodyUsesParts: true,
+    skin: null, skinJob: null, skinKey: '', layout: L, eyeH: 1.2, driverZ: null, parkedLean: 0, bodyUsesParts: true, ride,
   };
 }
