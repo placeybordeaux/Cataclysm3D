@@ -1,7 +1,7 @@
 import { cardSettings, cardsOn, crossCards, flatCard } from './cards';
 import { bakeFigure, isFigure } from './chars/figures';
 import type * as THREE from 'three';
-import { CHUNK, LEVEL_HEIGHT, chunkOf, localOf } from '../world/coords';
+import { CHUNK, LEVEL_HEIGHT, MAX_Z, chunkOf, localOf } from '../world/coords';
 import type { Chunk, GameMap } from '../world/map';
 import { pointSeed } from './atlasIndex';
 import { GeomBuilder } from './geometry';
@@ -218,6 +218,25 @@ export function* buildChunkMeshSteps(
   const here = new LevelSampler(map, z);
   const above = new LevelSampler(map, z + 1);
   const below = new LevelSampler(map, z - 1);
+  // Anything overhead at any height, not only the next level (src/world/levels.ts roofAbove): a
+  // two-storey engine bay is open air at z+1 under a roof at z+3 and read as outdoors (full sky
+  // ambient, no room). Higher levels are read only where generated: the chunk manager generates
+  // every level a column has, so an ungenerated one is open air (fields don't grow five levels).
+  const coverMemo = new Map<number, boolean>();
+  const overhead = (tx: number, ty: number): boolean => {
+    if (shapes.terrain(above.ter(tx, ty)) !== S.none) return true;
+    const k = (tx + 32768) * 65536 + (ty + 32768);
+    let c = coverMemo.get(k);
+    if (c !== undefined) return c;
+    c = false;
+    const cx = chunkOf(tx), cy = chunkOf(ty), li = localOf(ty) * CHUNK + localOf(tx);
+    for (let zz = z + 2; zz <= MAX_Z && !c; zz++) {
+      if (!map.hasChunk(cx, cy, zz)) continue;
+      if (shapes.terrain(map.chunk(cx, cy, zz)!.ter[li]) !== S.none) c = true;
+    }
+    coverMemo.set(k, c);
+    return c;
+  };
   // rooms (rooms.ts): interior finishes, curtains and set dressing are chosen per room; a
   // covered region open to the outside (a porch) is not a room. Scanned with a margin so a
   // room across a chunk border resolves the same way from both chunks.
@@ -227,7 +246,7 @@ export function* buildChunkMeshSteps(
       return sh === S.floor || sh === S.stairs_up || sh === S.stairs_down ? 'floor' : sh === S.wall || sh === S.halfwall ? 'wall'
         : sh === S.window || sh === S.door || sh === S.door_open ? 'opening' : 'other';
     },
-    covered: (tx, ty) => shapeAt(above, tx, ty) !== S.none,
+    covered: overhead,
     furn: (tx, ty) => map.furnAt(tx, ty, z).id,
   }, chunk.cx * CHUNK - 14, chunk.cy * CHUNK - 14, chunk.cx * CHUNK + CHUNK + 14, chunk.cy * CHUNK + CHUNK + 14, z) : null;
   const roomAt = (tx: number, ty: number): Room | null => (RM ? RM.room(tx, ty) : null);
@@ -373,7 +392,7 @@ export function* buildChunkMeshSteps(
       const srole = ST ? ST.role(x, y, z) : 0;
       const seed = pointSeed(x, y) >>> 0;
       const nShape = [0, 1, 2, 3].map((d) => shapeAt(here, x + DX[d], y + DY[d]));
-      const skyOf = (tx: number, ty: number) => (shapeAt(above, tx, ty) !== S.none ? INDOOR_SKY : 1);
+      const skyOf = (tx: number, ty: number) => (overhead(tx, ty) ? INDOOR_SKY : 1);
       /** Face toward d looks at open outdoor ground (plinths/cornices go there). */
       const outdoorFace = (d: number) => z >= 0 && (nShape[d] === S.floor || nShape[d] === S.tree || nShape[d] === S.shrub || nShape[d] === S.fence) &&
         skyOf(x + DX[d], y + DY[d]) >= 1;

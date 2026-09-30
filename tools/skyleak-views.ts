@@ -22,7 +22,7 @@ const DOWN: [number, number][] = [[0, -35], [90, -35], [180, -35], [270, -35]];
 
 export const SKYLEAK_VIEWS: SkyLeakView[] = [
   // The report: inside the fire station's two-storey engine bay, looking up at the roof (z3)
-  { name: 'firestation-bay', seed: 443226190, at: { tile: [942, 1539, 0] }, looks: UP },
+  { name: 'firestation-bay', seed: 443226190, at: { tile: [942, 1539, 0] }, looks: [...UP, [20, 12]] },
   { name: 'firestation-roof', seed: 443226190, at: { omt: 'urban_32_6', where: 'roof' }, looks: DOWN },
   { name: 'cathedral-inside', seed: 1, at: { omt: 'cathedral', where: 'inside' }, looks: UP },
   { name: 'cathedral-roof', seed: 1, at: { omt: 'cathedral', where: 'roof' }, looks: DOWN },
