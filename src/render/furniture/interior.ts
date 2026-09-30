@@ -247,19 +247,23 @@ export const bed: Build = (b, c) => {
   // mattress
   const mx0 = c.conn[LEFT] ? -0.5 : x0 + 0.02, mx1 = c.conn[RIGHT] ? 0.5 : x1 - 0.02;
   const mz0 = head ? z0 + 0.06 : -0.5, mz1 = foot ? z1 - 0.03 : 0.5;
-  b.box(mx0, 0.3, mz0, mx1, 0.46, mz1, F('mattress', sheet), sk + (head ? '' : 'nz') + (foot ? '' : 'pz') + 'ny');
+  const bare = c.p.frameOnly === true;
+  if (bare) {
+    // a bed frame without bedding: slats across the rails
+    for (let z = mz0 + 0.05; z < mz1 - 0.04; z += 0.16) b.box(mx0, 0.27, z, mx1, 0.3, z + 0.08, F('wood', shade(wood, 0.95)), sk + 'ny');
+  } else b.box(mx0, 0.3, mz0, mx1, 0.46, mz1, F('mattress', sheet), sk + (head ? '' : 'nz') + (foot ? '' : 'pz') + 'ny');
   // blanket over the foot 2/3 (on 2-tile beds: all of the foot tile, a bit of the head tile)
   const bz0 = head && foot ? mz0 + 0.32 : head ? mz0 + 0.55 : -0.5;
-  b.box(mx0 - (c.conn[LEFT] ? 0 : 0.015), 0.35, bz0, mx1 + (c.conn[RIGHT] ? 0 : 0.015), 0.475, mz1 + (foot ? 0.015 : 0), F('fabric', blanket), sk + (foot ? '' : 'pz') + 'ny');
+  if (!bare) b.box(mx0 - (c.conn[LEFT] ? 0 : 0.015), 0.35, bz0, mx1 + (c.conn[RIGHT] ? 0 : 0.015), 0.475, mz1 + (foot ? 0.015 : 0), F('fabric', blanket), sk + (foot ? '' : 'pz') + 'ny');
   // turned-down sheet edge (on the head tile: on the foot tile of a 2-tile bed it would
   // cross the blanket at the tile seam)
-  if (head) b.box(mx0 - (c.conn[LEFT] ? 0 : 0.016), 0.44, bz0 - 0.001, mx1 + (c.conn[RIGHT] ? 0 : 0.016), 0.478, bz0 + 0.07, F('sheet', sheet), sk + 'ny');
+  if (head && !bare) b.box(mx0 - (c.conn[LEFT] ? 0 : 0.016), 0.44, bz0 - 0.001, mx1 + (c.conn[RIGHT] ? 0 : 0.016), 0.478, bz0 + 0.07, F('sheet', sheet), sk + 'ny');
   if (head) {
     // headboard + pillow(s)
     b.box(x0, 0.12, z0, x1, 0.95, z0 + 0.06, (f) => (f === 'pz' ? F('wood', wood, slats(3, 4)) : F('wood', shade(wood, 0.9))), sk);
     const pw = c.conn[LEFT] || c.conn[RIGHT] ? 0.36 : 0.5;
     const pcx = c.conn[RIGHT] && !c.conn[LEFT] ? mx0 + 0.25 : c.conn[LEFT] && !c.conn[RIGHT] ? mx1 - 0.25 : (mx0 + mx1) / 2;
-    b.box(pcx - pw / 2, 0.46, mz0 + 0.04, pcx + pw / 2, 0.56, mz0 + 0.3, F('sheet', shade(sheet, 1.05)), 'ny');
+    if (!bare) b.box(pcx - pw / 2, 0.46, mz0 + 0.04, pcx + pw / 2, 0.56, mz0 + 0.3, F('sheet', shade(sheet, 1.05)), 'ny');
   }
   if (foot && c.p.footboard !== false) b.box(x0, 0.12, z1 - 0.05, x1, 0.62, z1, F('wood', wood), sk);
 };
