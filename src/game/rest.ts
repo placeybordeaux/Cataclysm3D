@@ -187,6 +187,16 @@ function sleepHints(game: Game, ci: ComfortInfo): void {
   if (feelsCold(game)) survivalHint(game, 'cold');
 }
 
+/**
+ * BN's "You try to sleep, but you just can't." plus the reason when it's simply that you aren't
+ * tired: after a long sleep a newcomer lay down at 23:00 twice and got only this line (playtest,
+ * round 6). Sleepiness builds while awake; waiting it out is the fix.
+ */
+function cantSleep(game: Game): void {
+  const notTired = game.player.sleepinessDescription() === '';
+  game.message(notTired ? "You try to sleep, but you just can't: you aren't tired yet. Stay up a few more hours, then try again." : "You try to sleep, but you just can't.", 'c_yellow');
+}
+
 function startSleepActivity(game: Game): boolean {
   const p = game.player;
   let awakeFor = 0;
@@ -210,7 +220,7 @@ function startSleepActivity(game: Game): boolean {
       if (!p.hasEffect('lying_down') && awakeFor > 0) {
         // Woke up (rested, noise, attack: those say so themselves) or lying_down ran out
         // without ever dropping off, which would otherwise end the activity in silence.
-        if (!slept) game.message("You try to sleep, but you just can't.", 'c_yellow');
+        if (!slept) cantSleep(game);
         if (a) a.elapsed = a.spec.duration;
         return;
       }
@@ -219,7 +229,7 @@ function startSleepActivity(game: Game): boolean {
       // keep the comfort of the spot it rates current.
       p.sleepComfort = comfortAt(game, p.tileX, p.tileY, p.z).comfort;
       if (awakeFor > 2 * SECONDS_PER_HOUR && !p.isAsleep()) {
-        game.message("You try to sleep, but you just can't.", 'c_yellow');
+        cantSleep(game);
         p.removeEffect('lying_down');
         if (a) a.elapsed = a.spec.duration;
       }
