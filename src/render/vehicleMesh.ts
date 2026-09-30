@@ -513,6 +513,10 @@ interface Entry {
   skinMeshes: THREE.Mesh[];
   /** Skin being painted by the worker. */
   pending: { id: number; key: string } | null;
+  /** Built for the driven vehicle: separate wheel meshes that steer and spin. */
+  driven: boolean;
+  wheels: { mesh: THREE.Mesh; r: number; steer: boolean; spin: number }[];
+  bike: boolean;
   version: number;
   z: number;
   look: VehicleLook;
@@ -564,7 +568,7 @@ export class VehicleRenderer {
     renderer.scene.add(this.group, this.headlight, this.headlight.target);
     renderer.vehicleView = this;
     system.onRemoved.push((v) => this.drop(v));
-    renderer.beforeRender.push(() => this.update());
+    renderer.beforeRender.push((dt) => this.update(dt));
   }
 
   get look(): VehicleLook {
@@ -689,13 +693,14 @@ export class VehicleRenderer {
     };
     const next: Entry = {
       obj, lean, meshes, roof: null, lamps: null, tails: null, beacons: null, skin: null, skinMeshes: [], pending: null,
+      driven: v === this.system.driving, wheels: [], bike: false,
       version: v.version, z: v.z, look: this.lookMode, eyeH: null, driverZ: null, parkedLean: 0, beam: e?.beam ?? [],
     };
     const t0 = performance.now();
     const worker = this.lookMode === 'model' ? this.skinWorker() : null;
     // A skin already painted (or being painted) for the same content is kept.
     const haveKey = e?.skin?.key ?? e?.pending?.key;
-    const model = this.lookMode === 'model' ? buildVehicleModel(v, base, { reuseSkinKey: haveKey, deferSkin: !!worker }) : null;
+    const model = this.lookMode === 'model' ? buildVehicleModel(v, base, { reuseSkinKey: haveKey, deferSkin: !!worker, separateWheels: next.driven }) : null;
     if (model) {
       let skin: Skin | null = e?.skin && e.skin.key === model.skinKey ? e.skin : null;
       if (!skin && model.skin) skin = this.makeSkin(model.skinKey, model.skin.data, model.skin.layout.width, model.skin.layout.height);
@@ -719,6 +724,12 @@ export class VehicleRenderer {
       next.lamps = mk(model.lamps, v.lightsOn ? this.lampOn : this.lampOff, null);
       next.tails = mk(model.tails, v.lightsOn ? this.tailOn : this.tailOff, null);
       next.beacons = mk(model.beacons, this.beaconMat, null);
+      for (const w of model.wheels ?? []) {
+        const mesh = mk(w.geo, parts.mat, parts.depth)!;
+        mesh.position.set(w.x, w.y, w.z);
+        next.wheels.push({ mesh, r: w.r, steer: w.steer, spin: 0 });
+      }
+      next.bike = model.layout.style === 'motorcycle' || model.layout.style === 'bicycle';
       next.eyeH = model.eyeH;
       next.driverZ = model.driverZ;
       next.parkedLean = model.parkedLean;
@@ -744,7 +755,7 @@ export class VehicleRenderer {
     return next;
   }
 
-  update(): void {
+  update(dt = 0): void {
     const p = this.game.player;
     const rig = this.renderer.rig;
     const driving = this.system.driving;
@@ -770,7 +781,9 @@ export class VehicleRenderer {
       }
       seen.add(v);
       let e = this.entries.get(v);
-      if (!e || e.version !== v.version || e.z !== v.z || (e.look !== this.lookMode && this.lookMode === 'parts')) {
+      // Taking or leaving the wheel rebuilds too: the driven vehicle's wheels are separate meshes.
+      const drivenChanged = !!e && e.look === 'model' && e.driven !== (v === driving);
+      if (!e || drivenChanged || e.version !== v.version || e.z !== v.z || (e.look !== this.lookMode && this.lookMode === 'parts')) {
         // Spread first builds over frames (a town street streams in dozens at once), but
         // never delay the vehicle being driven or a visible change to an existing one nearby.
         const urgent = v === driving || (e && d < 20);
@@ -783,8 +796,14 @@ export class VehicleRenderer {
       if (!e) continue;
       e.obj.position.set(v.x, 0, v.y);
       e.obj.rotation.y = (-v.facing * Math.PI) / 180;
-      // A parked bike leans left on its stand; ridden (or moving) it stands up.
-      e.lean.rotation.x = e.parkedLean && v !== driving && Math.abs(v.velocity) < 0.3 ? -e.parkedLean : 0;
+      // A parked bike leans left on its stand; ridden it stands up and leans into turns.
+      if (e.parkedLean && v !== driving && Math.abs(v.velocity) < 0.3) e.lean.rotation.x = -e.parkedLean;
+      else e.lean.rotation.x = e.bike ? Math.max(-0.45, Math.min(0.45, v.steer * Math.abs(v.velocity) * 0.12)) : 0;
+      // Front wheels follow the steering; all of them roll with the speed.
+      for (const w of e.wheels) {
+        w.spin -= (v.velocity * dt) / w.r;
+        w.mesh.rotation.set(0, w.steer ? -v.steer : 0, w.spin);
+      }
       // Top-down hides roofs (and anything above your level) so you can see inside.
       if (e.roof) e.roof.visible = !top || v.z < p.z;
       if (e.lamps) e.lamps.material = v.lightsOn ? this.lampOn : this.lampOff;

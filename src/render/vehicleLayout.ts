@@ -348,7 +348,9 @@ export function analyze(v: Vehicle, forceStyle?: BodyStyle): Layout {
       const rank = same.indexOf(w.my);
       z = yc + side * (hw - width / 2 + 0.03 - rank * (width + 0.03));
     }
-    wheels.push({ part: w, x, z, r, width, side, steer: has(w, 'STEERABLE') || /steerable/.test(w.def.id) });
+    // steering comes from the wheel's mount (wheel_mount_*_steerable) or a steerable wheel part
+    const steer = v.partsAt(w.mx, w.my).some((q) => has(q, 'STEERABLE') || /steerable/.test(q.def.id));
+    wheels.push({ part: w, x, z, r, width, side, steer });
   }
 
   const doors = findDoors(rows, sections, xCowl);

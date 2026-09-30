@@ -144,7 +144,8 @@ skin reuse on door / light changes, frame fallback.
 
 ## Known gaps / ideas
 
-- Wheels don't turn with steering or spin (they're merged into one mesh per vehicle).
+- Only the driven vehicle's wheels steer and roll (its wheels are separate meshes; parked
+  ones are merged into one mesh per vehicle). Ridden bikes lean into turns.
 - No distance LOD: a far car gets the same skin as a near one (cheap enough so far).
 - With `real` width the collision footprint is still the grid, so you bump into air ~0.7 m
   beside a car (`fill` trades proportions for that). A true fix needs a finer collision

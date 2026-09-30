@@ -60,6 +60,8 @@ export interface ModelBuild {
   parkedLean: number;
   /** Frame-style builds: the roof is drawn with the parts swatches, there is no skin. */
   bodyUsesParts?: boolean;
+  /** With `separateWheels`: each wheel built around its own centre, to steer and spin. */
+  wheels?: { geo: THREE.BufferGeometry; x: number; y: number; z: number; r: number; steer: boolean }[];
 }
 
 const FULL: TileFrame = { texture: null as unknown as THREE.Texture, uv: [0, 0, 1, 1], w: 1, h: 1, ppm: 32 };
@@ -263,7 +265,7 @@ function loopNormals(loop: { x: number; y: number }[]): { nx: number; ny: number
 // --- build -----------------------------------------------------------------------------
 
 /** Build the model for a vehicle (odd grids get the tidy frame build, vehicleFrame.ts). */
-export function buildVehicleModel(v: Vehicle, base: number, opts: { reuseSkinKey?: string; deferSkin?: boolean } = {}): ModelBuild | null {
+export function buildVehicleModel(v: Vehicle, base: number, opts: { reuseSkinKey?: string; deferSkin?: boolean; separateWheels?: boolean } = {}): ModelBuild | null {
   const L = analyze(v);
   if (L.style === 'motorcycle' || L.style === 'bicycle') return buildBike(v, L, base);
   if (L.style === 'frame' || !L.sections.length) return buildFrame(v, L, base);
@@ -640,11 +642,19 @@ export function buildVehicleModel(v: Vehicle, base: number, opts: { reuseSkinKey
     const tint = s.hp > 0 ? p.interior : darkenC(p.interior, 0.6);
     seat(parts.get(tint), s, L, base, floorY, seatTop, F, has(s, 'BED'));
   }
-  // wheels
+  // wheels (the driven vehicle gets one mesh per wheel so the renderer can steer and spin them)
+  const loose: NonNullable<ModelBuild['wheels']> = [];
   for (const w of L.wheels) {
     const flat = w.part.hp <= 0;
     const r = w.r;
-    wheel(wheels.get(flat ? 0x5a5656 : 0x9a9a9a), w.x, base + (flat ? r * 0.8 : r), w.z, r, w.width, F, { flat, sides: r > 0.4 ? 16 : 14, rimFrac: L.style === 'truck' || L.style === 'bus' ? 0.55 : 0.64 });
+    const cy = base + (flat ? r * 0.8 : r);
+    const wopts = { flat, sides: r > 0.4 ? 16 : 14, rimFrac: L.style === 'truck' || L.style === 'bus' ? 0.55 : 0.64 };
+    if (opts.separateWheels && !flat) {
+      const one = new Batches();
+      wheel(one.get(0x9a9a9a), 0, 0, 0, r, w.width, F, wopts);
+      const geo = one.build();
+      if (geo) loose.push({ geo, x: w.x, y: cy, z: w.z, r, steer: w.steer });
+    } else wheel(wheels.get(flat ? 0x5a5656 : 0x9a9a9a), w.x, cy, w.z, r, w.width, F, wopts);
   }
   // exhaust
   tube(parts.get(0x8a8a8e), [L.xTail + 0.5, base + p.sill * 0.6, L.yc - hw * 0.45], [L.xTail - 0.04, base + p.sill * 0.6, L.yc - hw * 0.45], 0.035, F.chrome, 6);
@@ -668,7 +678,7 @@ export function buildVehicleModel(v: Vehicle, base: number, opts: { reuseSkinKey
 
   return {
     body: out(body), roof: out(roof), parts: merged, glass: out(glass), lamps: out(lampsG), tails: out(tailsG), beacons: out(beaconsB),
-    skin, skinJob, skinKey, layout: L, eyeH, driverZ, parkedLean: 0,
+    skin, skinJob, skinKey, layout: L, eyeH, driverZ, parkedLean: 0, wheels: loose.length ? loose : undefined,
   };
 }
 
