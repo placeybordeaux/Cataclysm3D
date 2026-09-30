@@ -471,4 +471,29 @@ describe('monsters on the stairs', () => {
     expect(n.z).toBe(1);
     expect(climbOf(n)).toBeUndefined();
   });
+
+  it('being moved off a flight by something else (teleport, a vehicle, a load) ends the climb', () => {
+    const { game, walker } = world(HALL, 'flight');
+    standAt(game, walker, 4, 2);
+    const p = game.player;
+    game.input.held.add('KeyW');
+    step(game, 0.9);
+    expect(climbOf(p)).toBeTruthy();
+    expect(p.z).toBe(1);
+    // a script / vehicle puts you somewhere else on the ground floor
+    p.x = 1.5;
+    p.y = 1.5;
+    p.z = 0;
+    expect(liftOf(p)).toBe(0);
+    game.input.held.delete('KeyW');
+    step(game, 0.5);
+    // not dragged back onto the stairs, not lifted, and walking works normally again
+    expect([p.x, p.y, p.z]).toEqual([1.5, 1.5, 0]);
+    expect(climbOf(p)).toBeUndefined();
+    p.yaw = Math.PI / 2;
+    game.input.held.add('KeyW');
+    step(game, 0.3);
+    expect(p.x).toBeGreaterThan(1.8);
+    expect(p.z).toBe(0);
+  });
 });
