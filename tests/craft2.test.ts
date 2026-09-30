@@ -103,6 +103,17 @@ describe('what is missing (adaptation)', () => {
     expect(book.rows(q({ filter: 'craftable' })).every((r) => r.check.ok)).toBe(true);
   });
 
+  it('a search in Craftable still puts name matches first (spear before long pointy stick)', () => {
+    const h = host();
+    for (const id of ['knife_folding', 'stick_long', 'rag', 'sandpaper']) h.player.inv.giveNew(createItem(data, id));
+    h.player.setSkill('fabrication', 3);
+    h.player.setSkill('survival', 1);
+    const rows = new RecipeBook(h, craftingInventory(h)).rows(q({ filter: 'craftable', query: 'spear', almostSection: true }));
+    const ok = rows.filter((r) => r.check.ok);
+    const named = ok.map((r) => nameMatches(data, 'spear', r.recipe));
+    expect(named.indexOf(false) === -1 || named.slice(named.indexOf(false)).every((n) => !n)).toBe(true);
+  });
+
   it('partial components say how many more', () => {
     const s = shortfall(data, {
       ok: false, missing: ['x'], light: true, speed: 1,

@@ -164,7 +164,10 @@ export class RecipeBook {
     else if (q.filter === 'craftable' || q.filter === 'almost') {
       // Craftable first, then the nearest misses: fewest things missing, then partly held ("1
       // more rag" before "a hammer"), then weapons/food/clothes before chemistry.
-      out.sort((a, b) => Number(b.check.ok) - Number(a.check.ok) || a.short.count - b.short.count || Number(b.isNew) - Number(a.isNew)
+      // A search still ranks name matches first within each (realinput: "spear" + Enter made
+      // the long pointy stick, whose description mentions spears, instead of the wooden spear).
+      const byName = new Map(out.map((o) => [o, nameMatches(data, q.query, o.recipe)]));
+      out.sort((a, b) => Number(b.check.ok) - Number(a.check.ok) || Number(byName.get(b)) - Number(byName.get(a)) || a.short.count - b.short.count || Number(b.isNew) - Number(a.isNew)
         || (a.check.ok ? 0 : Number(b.short.progress > 0) - Number(a.short.progress > 0) || catRank(a.recipe) - catRank(b.recipe)) || a.name.localeCompare(b.name));
       if (q.filter === 'craftable' && q.almostSection) {
         const firstShort = out.findIndex((r) => !r.check.ok);
