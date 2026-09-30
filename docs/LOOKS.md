@@ -105,6 +105,9 @@ normal/height page for atlas sprites instead of luminance bump.
 - Image: `post.ts` (SSAO, bloom, aerial perspective, skyline haze, debug views),
   `grading.ts lowResSize` (targetHeight 0 = auto), `materials.ts` (rim, bounce, bump,
   sprite rounding), `lights.ts` (fill light, `setShadow`).
+- Furniture, fixtures, doors, windows and ground items are modelled (low-poly, 32 texels/m
+  pixel textures from the sprite palette) by default in the volume looks; the voxel versions
+  stay one switch away (Options > Furniture, `?furniture=voxel`): see `docs/FURNITURE.md`.
 - Volumes: `voxel.ts` (sprite inflation/extrusion), `trees.ts` (3D trees), `arch.ts`
   (frames, casings, bands, fences, hipped roofs), wired in `chunkMesh.ts`.
 - Ground: `ground.ts` (relief + curbs, `renderer.groundAt` for sprites and the eye),
