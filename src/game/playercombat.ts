@@ -1140,7 +1140,7 @@ export class PlayerCombat implements GameSystem {
     if (fliesVisibly(cls)) {
       const meant = this.rangedTarget(range * 1.6);
       const along = this.castAim(dir.yaw, dir.pitch, range * 1.6, undefined, ray.o);
-      this.launch(gun, cls, shot, ammo, dir.yaw, range, meant, spread, { pitch: dir.pitch, aimDist: along.hit ? Math.hypot(along.hit.x - p.x, along.hit.y - p.y) : along.dist, perfect });
+      this.launch(gun, cls, shot, ammo, dir.yaw, range, meant, spread, { pitch: dir.pitch, eye: ray.o.h - p.z * LEVEL_HEIGHT, aimDist: along.hit ? Math.hypot(along.hit.x - p.x, along.hit.y - p.y) : along.dist, perfect });
       return shot;
     }
     const pellets = shot.pellets ?? 1;
@@ -1424,11 +1424,13 @@ export class PlayerCombat implements GameSystem {
   /** Release a visible projectile (see Flight). */
   private launch(
     gun: Item, cls: RangedClass, shot: ShotResult, ammo: ItemDef | undefined, yaw: number, range: number, meant: { m: Monster; dist: number } | null, spread: DispersionBreakdown,
-    free?: { pitch: number; aimDist: number; perfect: boolean },
+    free?: { pitch: number; aimDist: number; perfect: boolean; eye?: number },
   ): void {
     const p = this.game.player;
     const speed = flightSpeed(cls, Number(ammo?.speed) || 100);
-    const eye = p.crouching ? 1.0 : 1.6;
+    // Free aim: from where the shot ray starts (the drawn eye, which rides the ground relief the
+    // drawn bodies stand on), so the arc and the models share one space.
+    const eye = free?.eye ?? (p.crouching ? 1.0 : 1.6);
     // The arc meets the crosshair where the survivor aimed: the target, else where the view ray
     // reaches the ground or a wall, never past the range. Free aim: where the reticle's ray ends.
     let aimDist = range;

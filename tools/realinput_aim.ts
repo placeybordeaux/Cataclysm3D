@@ -76,7 +76,9 @@ const LOOK = `(() => {
   const cross = document.querySelector('.hud-cross'); const r = cross.getBoundingClientRect();
   const m = window.__m, cam = cdda.renderer.rig.camera, V = cam.position.constructor;
   const LH = 2.6, z = m.z * LH;
-  const c = new V(m.x, z + 1.1, m.y).project(cam), e = new V(m.x, z + 1.1, m.y);
+  // The chest as drawn: the model's torso box when there is one (it rides the ground relief), else 1.1 m.
+  const t = cdda.modelPart?.(m.uid, 'torso'); const cx = t ? t.x : m.x, cy = t ? t.y : m.y, ch = t ? t.h : z + 1.1;
+  const c = new V(cx, ch, cy).project(cam), e = new V(cx, ch, cy);
   const p = cdda.game.player; const d = Math.hypot(m.x - p.x, m.y - p.y);
   // a point one body-radius to the side, perpendicular to the view
   const sx = -(m.y - p.y) / d, sy = (m.x - p.x) / d; e.x += sx * m.radius; e.z += sy * m.radius; const ep = e.project(cam);
