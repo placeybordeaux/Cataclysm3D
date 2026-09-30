@@ -235,6 +235,19 @@ with 3 aimed shots, a runner in 3.7 s — the 2–3 aimed shots are there; two z
 *Grabbed prompt overlap*: while grabbed only the GRABBED banner shows the key; the crosshair
 prompt is empty.
 
+**The `aim`/`aimzones` failures on `bn` after characters rounds 3–4** were not the models' part
+boxes (they pick correctly: `cdda.aimDebug(uid)` and the `aimdebug` scenario print the drawn
+camera ray, what it meets and a direct model pick). Three causes: (1) the suites reused a
+wielded rifle a previous scenario had nearly emptied, so later shots didn't fire and read as
+"none" (each setup now wields a fresh, full weapon); (2) the drawn eye rides the ground relief
+(1.41 m on a road the renderer draws 0.19 m low) while free-aim **arrows** were launched from the
+simulation's flat 1.6 m, so they flew ~0.2 m high of the drawn bodies — they now leave from the
+shot ray's origin like hitscan rounds (`launch(..., { eye })`); (3) the suite's "player" watched
+a fixed 1.1 m chest instead of the drawn torso. With those, `aim` 26/26 and `aimzones` 9/9 in
+sequence. The shamble and the tapered parts are honest geometry: a shin is a hand's width, so the
+shin check allows a clean miss (never another zone), and a bow at skill 5 may lose one arrow of
+six to a body that shambled during the flight.
+
 Screenshots (JPEG): `r3_melee_crowd_head.jpg` (the middle of three: "HEAD ×1.5 · stunned"),
 `r3_enemy_rounds.jpg`, `r3_hint_sway.jpg`, `r3_hint_headshot.jpg`, `r3_hint_guard.jpg`.
 
