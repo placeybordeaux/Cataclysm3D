@@ -49,7 +49,8 @@ RMB guard / aim / draw a bow, `e` interact (get in and drive a car, open doors),
 `o` world action menu, `Tab`/`i` inventory, quick-loot at the crosshair (wheel, `e` take,
 `r` take all), `1`–`0` hotbar, `` ` `` tactical pause, `&` craft, `*` construct,
 `@` character, `m` map, `J` journal, `F` flashlight, `F5` save, `F11` fullscreen,
-`?` help, Esc menu, `v` camera (first person / shoulder / top-down).
+`?` help, Esc pause menu, `v` camera (first person / shoulder / top-down). Space (or the key
+that opened it) closes any menu and keeps the mouse in the game.
 Everything is rebindable in Options → Key bindings; the full list is in `docs/STATUS.md`.
 
 ## What's in it

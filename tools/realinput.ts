@@ -488,13 +488,19 @@ const scenarios: Scenario[] = [
         check(`${what}: the footer advertises Space, never Esc`, /Space/.test(f) && !/\bEsc\b/.test(f), f);
       }
       await shot(`space_${what}`);
-      const at = [s.x, s.y];
+      // A free cursor parked in a corner: re-capturing must not report its trip to the centre
+      // as mouse-look (the view snapped ~49° before bn 7da0d71).
+      if (!s.lock) await x.moveTo(40, 40, 4);
+      await sleep(100);
+      s = await state();
+      const at = [s.x, s.y], yaw0 = s.yaw;
       await x.key('space');
       s = await until((t) => !opened(t) && t.lock && !t.hint, 2500);
       check(`Space closes the ${what}: back in play, mouse captured, no resume hint`, !opened(s) && s.lock && !s.hint, { s, refusals: await js('cdda.game.input.lockRefusals') });
       await sleep(350);
       s = await state();
       check(`…and that Space didn't also side-step`, Math.hypot(s.x - at[0], s.y - at[1]) < 0.05, { from: at, to: [s.x, s.y] });
+      check(`…and the view didn't jump as the mouse was re-captured`, Math.abs(s.yaw - yaw0) < 0.02, { yaw0, yaw: s.yaw });
     }
     // The pause menu: Esc opens it (the browser frees the mouse); Space resumes and re-captures,
     // even pressed inside Chrome's ~1.25 s re-lock cooldown (Input retries a non-Esc key).
@@ -516,16 +522,6 @@ const scenarios: Scenario[] = [
     s = await until((t) => !opened(t));
     check('Esc still closes a menu', !opened(s), s);
     await toGameplay();
-  }],
-  ['dbgesc', 'debug', async () => {
-    await toGameplay();
-    await js(`(() => { window.__kl = []; const t0 = performance.now(); for (const ty of ['keydown','keyup']) window.addEventListener(ty, (e) => window.__kl.push([ty, e.key, e.code, Math.round(performance.now()-t0), !!document.pointerLockElement, e.defaultPrevented]), true); document.addEventListener('pointerlockchange', () => window.__kl.push(['plc', !!document.pointerLockElement, Math.round(performance.now()-t0)])); })()`);
-    await x.key('i');
-    await until((t) => t.panels.length > 0);
-    await sleep(300);
-    await x.key('Escape');
-    await sleep(800);
-    console.log(JSON.stringify(await js('window.__kl')), JSON.stringify(await state()));
   }],
   ['keys', 'held keys, repeats, stuck keys, CapsLock', async () => {
     await toGameplay();

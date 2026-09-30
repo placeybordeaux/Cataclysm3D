@@ -28,7 +28,7 @@ function fakeDom() {
   vi.stubGlobal('document', { ...doc, pointerLockElement: null, hasFocus: () => true, hidden: false });
   vi.stubGlobal('HTMLInputElement', class {});
   vi.stubGlobal('HTMLTextAreaElement', class {});
-  const key = (k: string, code = k) => win.fire('keydown', { key: k, code, target: null, repeat: false, shiftKey: false, getModifierState: () => false, preventDefault: () => {} });
+  const key = (k: string, code = k, repeat = false) => win.fire('keydown', { key: k, code, target: null, repeat, shiftKey: false, getModifierState: () => false, preventDefault: () => {} });
   const keyup = (code: string) => win.fire('keyup', { code });
   return { canvas: canvas as unknown as HTMLCanvasElement, requests, key, keyup };
 }
@@ -80,9 +80,20 @@ describe('Input: the key that closes the last menu', () => {
     expect(input.captured).toBe(false);
     expect(input.held.has('Space')).toBe(false);
     // Auto-repeat while still held: still not gameplay input.
-    dom.key(' ', 'Space');
+    dom.key(' ', 'Space', true);
     expect(input.held.has('Space')).toBe(false);
     dom.keyup('Space');
+    dom.key(' ', 'Space');
+    expect(input.held.has('Space')).toBe(true);
+  });
+  it('a lost keyup never leaves a key swallowed: the next fresh press counts', () => {
+    const dom = fakeDom();
+    const input = new Input(dom.canvas);
+    const release = input.capture((e) => {
+      if (e.key === ' ') release();
+      return true;
+    });
+    dom.key(' ', 'Space');
     dom.key(' ', 'Space');
     expect(input.held.has('Space')).toBe(true);
   });

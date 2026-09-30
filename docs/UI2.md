@@ -29,8 +29,9 @@ Screenshots: `docs/screenshots/ui2/`.
 | Ctrl-click | Split the stack (amount prompt); the BN inventory moves that many to the quick-move target (BN stacks re-merge where they land, so an in-place split means nothing) |
 | Right-click | Context menu: every action with its time cost; impossible ones stay visible, greyed, with the reason ("Need: a screwdriver") |
 | Hover | Tooltip after 350 ms; neighbours show instantly while scanning |
-| Esc | Closes the topmost thing: menu → dialog → drag → window group |
-| Right-click while dragging / Esc | Cancel the drag |
+| Space (game action `close_menu`) | Closes the topmost thing: menu → dialog (as "no"/cancel, never "yes") → drag → window group. Advertised in every footer/hint instead of Esc |
+| Esc | Same as Space, but **never advertised**: outside fullscreen the browser also takes Esc to release the mouse |
+| Right-click while dragging / Space / Esc | Cancel the drag |
 | Menu key / Shift+F10 | Context menu for the keyboard-selected item |
 | Tab | Toggle the inventory (game action `inventory2`) |
 | 1…0 | Hotbar slots, in gameplay and in the inventory (actions `hotbar_1`…`hotbar_0`) |
@@ -46,8 +47,17 @@ arrows / Enter / → ← / letters; grids and lists take arrows / Home / End / E
   neither pauses nor shows "click to resume". ui2 owns the keyboard (`input.capture(..., {
   timeFlows: true })`). **Closing the last surface re-captures the mouse** inside the closing
   click/key. Exception, by browser rule: Esc is not a "user activation" key, so closing the last
-  window *with Esc* (outside F11 fullscreen) leaves the usual resume hint; Tab, a click on ×, or
-  Enter re-capture directly.
+  window *with Esc* (outside F11 fullscreen) leaves the usual resume hint; Space, Tab, a click on
+  ×, or Enter re-capture directly. That's why hints say Space.
+- **The close-key rule** (for anyone adding a screen): footers, buttons (`{key: …}`), tooltips and
+  tips name `closeKeyLabel()` (Space, from the player's `close_menu` binding) and/or the opening
+  key — never "Esc". `openPanel` closes on it after the window's `onKey`, so a screen gets it for
+  free; a screen where Space means something (marking rows, skipping dialogue text, typing in a
+  search) either handles `' '` itself in `onKey` or passes `closeKey: false`, and then advertises
+  Bksp instead. Search screens (crafting, construction) take Space as close only while the search
+  is empty. Text/number prompts: Space types; a fresh Bksp in the empty field cancels (count
+  prompts: Space cancels, a count has no spaces). The key that closed the last surface is ignored
+  by gameplay until released (`Input`), so Space-to-close never also side-steps or brakes.
 - **Time**: ui2 captures don't pause the game by themselves. Inventory-type windows open with
   `pauses: true` and add the `'menus'` tactical-pause hold (src/game/pause.ts) while
   `settings.pauseInInventory` is on. The difficulty preset sets it (Options > Difficulty > Pause in
@@ -111,7 +121,7 @@ worldContextProviders.push((t) => t.furniture === 'f_locker'
 2. **Compose**: `containerPanel(model, loc, {id, group, pauses})` for a container window,
    `containerView` + `capacityBars` + `sectionLabel` for several containers in one window,
    `paperDollView(model, slots)` for equipment, a `Hotbar`. Give every window of the screen the
-   same `group` so Esc closes the screen; give inventory-type windows `pauses: true`.
+   same `group` so Space (or Esc) closes the screen; give inventory-type windows `pauses: true`.
 3. **Actions**: `model.actions(item, loc)` returns `MenuItem[]`: `{label, time?, key?, primary?,
    disabled?: reason, danger?, submenu?, action}`. Keep impossible actions in the list with the
    reason. Mark the double-click action `primary`. Destructive ones: `danger` + `confirmModal`.
@@ -217,7 +227,7 @@ The real inventory on the BN item model (docs/INVENTORY_MODEL.md), replacing the
 | `popups.ts` | quick pickers for the action keys, the liquid menu (on src/game/liquid.ts), the examine card |
 | `install.ts` | keys, `e`/vehicle-cargo/world-menu loot hooks, the gameplay hotbar, timed actions, `cdda.inv2` |
 
-- **Opening**: i / Tab toggle (opening key, Esc or Backspace close). `g` picks up a lone item or opens
+- **Opening**: i / Tab toggle (the opening key, Space or Backspace close; Esc too, unadvertised). `g` picks up a lone item or opens
   Nearby; `e` on a pile / locker / corpse / open trunk (vehicle "Get items") opens with that place in
   front — in the "Inventory tabs" looting style; Quick and Area loot take over `e` / `g` ("Looting" below). The Nearby tab defaults to what's under you, else where you looted last.
 - **Action keys** z O T E u q U open a picker (a focused list with times, greyed rows say why);

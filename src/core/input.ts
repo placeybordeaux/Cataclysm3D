@@ -72,7 +72,12 @@ export class Input {
       this.keySeq++;
       if (e.key === 'Escape') this.lastEscape = performance.now();
       // The key that closed the last menu, still held (auto-repeat): not gameplay input yet.
-      if (this.swallowed.has(e.code)) return void e.preventDefault();
+      // A fresh press means it was released even if its keyup never arrived (the browser eats
+      // keys around pointer-lock changes), so it never stays swallowed.
+      if (this.swallowed.has(e.code)) {
+        if (e.repeat) return void e.preventDefault();
+        this.swallowed.delete(e.code);
+      }
       this.held.add(e.code);
       if (MOVEMENT_CODES.has(e.code) && !e.repeat) this.onMovementKey?.(e.code, e.key);
       // Keys that work in every state, menus included (the tactical pause).
@@ -82,7 +87,7 @@ export class Input {
         if (top(e) !== false) e.preventDefault();
         // This key closed the last menu (Space, i, Enter on a picker…): gameplay must not also
         // see it as newly held — Space would side-step, or brake at the wheel — until released.
-        if (!this.captured) {
+        if (!this.captured && e.key !== 'Escape') {
           this.held.delete(e.code);
           this.swallowed.add(e.code);
         }
