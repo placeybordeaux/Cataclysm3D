@@ -389,7 +389,9 @@ export function* buildChunkMeshSteps(
       // Floor slab underside + exposed slab edges: anything with a floor at this level
       // that has air (or a non-solid tile) under it.
       // painted look: roof gutters are a trough under the eave, not a floor slab ledge
-      const gutter = !!SP && A !== undefined && /^t_gutter/.test(def.id);
+      // (a gutter tile in an inner corner, over a recessed door or porch, keeps its slab: it is
+      // the soffit there, and without it you looked up into the dark under the roof)
+      const gutter = !!SP && A !== undefined && /^t_gutter/.test(def.id) && [0, 1, 2, 3].filter((d) => pitched(x + DX[d], y + DY[d])).length < 2;
       const hasSlab = shape !== S.none && shape !== S.liquid && shape !== S.stairs_down && !gutter;
       if (hasSlab && z > -10) {
         const belowShape = shapeAt(below, x, y);
