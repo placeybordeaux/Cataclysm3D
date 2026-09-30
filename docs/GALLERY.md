@@ -87,15 +87,15 @@ All are live (no reload needed). "Proof" is the scene the automated pixel-diff c
 | Trees | models · clumps | Options > Trees | `?flora=` | lineup | 12 % |
 | Vehicle look | modelled bodies · part blocks | Options > Vehicle look | `?vehicles=` | cars | 7.5 % |
 | Vehicle width | true to life · fill the tiles | Options > Vehicle width | `?vehiclewidth=` | cars | 3.9 % |
-| Aim model | sway · sway + timing · dice (BN) | Options > Aim model | `?aim=` | fp_pistol | see below |
+| Aim model | sway · sway + timing · dice (BN) | Options > Aim model | `?aim=` | fp_pistol | timing 0.4 %, dice 4.9 % (see below) |
 
 \* Share of pixels that change from the default to each other value in the proof scene
 (`cdda.gallery.proof()`, 640 px captures, summed RGB difference > 24). Every switch changes the
 picture. Two caveats:
 
-- **Aim model**: `sway` and `sway + timing` have the same weave, so their pictures are the same
-  apart from nothing; the timing model's differences (breath, bow ring, active reload, melee
-  beat) only exist while you play. `dice` has no weave: the path collapses to a dot.
+- **Aim model**: `sway` and `sway + timing` share the weave, so their stills barely differ
+  (0.4 %); the timing model's extras (breath, bow ring, active reload, melee beat) only exist
+  while you play. `dice` has no weave: the crosshair path collapses to a dot.
 - **Props**: projectile effects (arrow meshes vs dots, monster globs) keep the mode they were
   created with until a reload; fires, far furniture, loot and figures switch live.
 
@@ -114,7 +114,8 @@ entries).
 (PNG data URL of the stage), `idle()`.
 
 Real input: `tools/realinput.ts --only gallery,galleryproof --gpu` (Chromium) and
-`--browser firefox`. `gallery` opens the Esc-menu entry, then clicks every scene and every value
+`--browser firefox` (both pass: Chromium GPU 1720x652, Firefox llvmpipe 960x540 + HMR, 44/44;
+the smoke set title/move/esc/firstfight/options/quit stays 97/97). `gallery` opens the Esc-menu entry, then clicks every scene and every value
 of every switch, drags to look, walks with W, resets with R, runs A/B on five switches (Enter,
 Space flip, the three views), one Matrix (chips, Generate, enlarge, arrows, Esc), copies
 defaults and checks the stored value, then factory defaults. `galleryproof` runs the pixel diff
