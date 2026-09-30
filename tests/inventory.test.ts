@@ -267,7 +267,8 @@ describe('tools and qualities', () => {
     const { c, log } = survivor();
     c.inv.wear(createItem(data, 'backpack'), null);
     const fl = give(c, 'flashlight');
-    expect(c.inv.use(fl).msg).toBe("The flashlight's batteries are dead.");
+    // src/game/reloadhelp.ts: what it takes, not just "dead" (no item groups in the fixture: no "most common")
+    expect(c.inv.use(fl).msg).toBe("The flashlight's batteries are dead. Your flashlight takes a light disposable battery or a light battery. You have none.");
     const cell = createItem(data, 'light_battery_cell', { ammo: 'battery', ammoCount: 2 });
     expect(spawnItem(cell, L.mag(fl)).ok).toBe(true);
     const r = c.inv.use(fl);
@@ -293,7 +294,7 @@ describe('reloading and unloading', () => {
     c.inv.wear(createItem(data, 'backpack'), null);
     const gun = createItem(data, 'glock_19');
     c.inv.wield(gun, null);
-    expect(c.inv.reload().msg).toBe("You don't have a magazine to reload your Glock 19!");
+    expect(c.inv.reload().msg).toMatch(/^Your Glock 19 takes a Glock magazine or a Glock extended magazine \(9x19mm\)\. You have none\./);
     const mag = give(c, 'glockmag', { ammo: '9mm' });
     const r = c.inv.reload();
     expect(r.ok).toBe(true);
