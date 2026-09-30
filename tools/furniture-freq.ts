@@ -7,7 +7,7 @@
 //                                        [--unmapped]
 //   --radius R   OMTs around each start (default 5 = 11x11 OMTs, z 0 and buildings' 1/-1)
 //   --kind       what to rank (default furn); ter = only shaped terrain (doors, windows,
-//                fences, shrubs), item = item categories + ids
+//                fences, shrubs), surf = walls and floors, item = item categories + ids
 //   --unmapped   furniture only: also report which archetype each id maps to and flag the
 //                ones that would fall back to the voxel path
 //   --json       write the full counts
@@ -30,7 +30,7 @@ const seeds = (get('--seeds') ?? '1,2,3').split(',').map(Number);
 const R = Number(get('--radius') ?? 5);
 const top = Number(get('--top') ?? 80);
 const kind = get('--kind') ?? 'furn';
-if (!['furn', 'ter', 'item'].includes(kind)) throw new Error(`--kind must be furn|ter|item, got ${kind}`);
+if (!['furn', 'ter', 'item', 'surf'].includes(kind)) throw new Error(`--kind must be furn|ter|item, got ${kind}`);
 
 const { game, wg } = loadNodeData();
 const counts = new Map<string, number>();
@@ -52,6 +52,11 @@ for (const seed of seeds) {
         chunks++;
         for (let i = 0; i < c.ter.length; i++) {
           if (kind === 'furn' && c.furn[i]) bump(map.furniture.get(c.furn[i]).id);
+          if (kind === 'surf') {
+            const t = map.terrain.get(c.ter[i]);
+            const s = terrainShape(t);
+            if (s === 'floor' || s === 'wall' || s === 'halfwall') bump(`${s}\t${t.id}`);
+          }
           if (kind === 'ter') {
             const t = map.terrain.get(c.ter[i]);
             const s = terrainShape(t);

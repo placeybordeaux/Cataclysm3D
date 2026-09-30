@@ -55,6 +55,17 @@ export function monsterRadius(def: MonsterDef): number {
 /** Integer size for data conditions like "u_val('size') > n_val('size')" (CDDA creature_size). */
 export const SIZE_RANK: Record<CreatureSize, number> = { tiny: 1, small: 2, medium: 3, large: 4, huge: 5 };
 
+/**
+ * BN names some zombies by the job they had ("nurse", "surgeon"). In a first-person game
+ * "You spot a nurse to the west!" reads as a survivor to rescue (wave-3 playtest), so the
+ * name says what it is now. Only zombies (species ZOMBIE) whose name is a bare job word.
+ */
+const JOB_NAMED_ZOMBIES = new Set(['nurse', 'surgeon']);
+export function zombieAwareName(def: Pick<MonsterDef, 'name' | 'name_plural'> & { species?: string[] }): string {
+  const n = monsterName(def);
+  return def.species?.includes('ZOMBIE') && JOB_NAMED_ZOMBIES.has(n) ? `zombie ${n}` : n;
+}
+
 /** BN world options (options.cpp defaults): MONSTER_UPGRADE_FACTOR, EVOLVE_MAX_ITERS. */
 export const MONSTER_UPGRADE_FACTOR = 2;
 export const EVOLVE_MAX_ITERS = 5;
@@ -255,11 +266,11 @@ export class Monster {
 
   /** "zombie" (or the mapgen-given name). */
   displayName(): string {
-    return this.name ?? monsterName(this.type);
+    return this.name ?? zombieAwareName(this.type);
   }
   /** "the zombie" for messages. */
   theName(): string {
-    return this.name ?? `the ${monsterName(this.type)}`;
+    return this.name ?? `the ${zombieAwareName(this.type)}`;
   }
   /** "The zombie" at sentence start. */
   TheName(): string {

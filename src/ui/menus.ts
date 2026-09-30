@@ -2,6 +2,7 @@ import { c, colorize, confirm, getUiRoot, hoverMoved } from './framework';
 import { sfx } from '../audio/sfx';
 import { openOptions } from './options';
 import { openHelp } from './help';
+import { openCredits } from './credits';
 import { applyBuild, openCharGen } from './chargen';
 import type { Hud } from './hud';
 import type { UiContext } from './context';
@@ -82,14 +83,18 @@ export function showMainMenu(ctx: UiContext, hud: Hud): Promise<void> {
     };
     raf = requestAnimationFrame(spin);
 
-    const close = () => {
+    // `restoreView`: undo the title's slow pan. Not after a load: the save has its own view
+    // (loading a game then facing north every time was a wave-3 playtest find).
+    const close = (restoreView = true) => {
       cancelAnimationFrame(raf);
       window.removeEventListener('resize', onResize);
       release();
       el.remove();
       document.body.classList.remove('title-open');
-      p.yaw = saved.yaw;
-      p.pitch = saved.pitch;
+      if (restoreView) {
+        p.yaw = saved.yaw;
+        p.pitch = saved.pitch;
+      }
       game.paused = false;
       ctx.renderer.hideViewmodel = false;
       hud.setVisible(true);
@@ -127,13 +132,15 @@ export function showMainMenu(ctx: UiContext, hud: Hud): Promise<void> {
         label: 'Load', key: 'l', enabled: () => !!game.load && (game.hasSave?.() ?? true),
         desc: 'Pick up where you left off.',
         run: async () => {
-          if (await game.load!()) close();
+          if (await game.load!()) close(false);
         },
       },
       ...(prog ? [{ label: 'Journal', key: 'j', enabled: () => true, run: () => void openJournal(game, prog, false) }] : []),
       { label: 'Memorial', key: 'm', enabled: () => true, run: () => openMemorialFor(game) },
       { label: 'Options', key: 'o', enabled: () => true, run: () => void openOptions(ctx) },
       { label: 'Help', key: 'h', enabled: () => true, run: () => void openHelp(ctx) },
+      // 'c' is Continue on the button layouts; cRedits.
+      { label: 'Credits', key: 'r', enabled: () => true, run: () => openCredits() },
       {
         label: 'Quit', key: 'q', enabled: () => true,
         run: async () => {
@@ -155,7 +162,7 @@ export function showMainMenu(ctx: UiContext, hud: Hud): Promise<void> {
         // surprise); the full list stays under the small "Load" button.
         const cont: MainEntry = { label: 'Continue', key: 'c', enabled: () => true, weight: 'primary', desc: 'Pick up where you left off.',
           run: async () => {
-            if (await (game.continueLatest ?? game.load)!()) close();
+            if (await (game.continueLatest ?? game.load)!()) close(false);
           } };
         for (const e of entries) if (e.weight === 'primary') e.weight = 'major';
         entries.unshift(cont);
@@ -218,8 +225,10 @@ export function showMainMenu(ctx: UiContext, hud: Hud): Promise<void> {
       if (!busy && lay !== 'classic') return renderButtons(lay);
       el.classList.remove('tt-center', 'tt-side');
       const bar = entries.map((e, i) => {
-        const first = e.label[0], rest = e.label.slice(1);
-        const inner = `${c(e.enabled() ? 'c_light_green' : 'c_dark_gray', first)}${c(e.enabled() ? (i === sel ? 'c_white' : 'c_light_gray') : 'c_dark_gray', rest)}`;
+        // Highlight the entry's shortcut letter where it is ("C[r]edits"), not always the first.
+        const at = Math.max(0, e.label.toLowerCase().indexOf(e.key.toLowerCase()));
+        const plain = e.enabled() ? (i === sel ? 'c_white' : 'c_light_gray') : 'c_dark_gray';
+        const inner = `${c(plain, e.label.slice(0, at))}${c(e.enabled() ? 'c_light_green' : 'c_dark_gray', e.label[at])}${c(plain, e.label.slice(at + 1))}`;
         return `<span class="mm-item" data-i="${i}" style="cursor:pointer;padding:0 .6em;${i === sel ? 'background:var(--c-blue)' : ''}">[${inner}]</span>`;
       }).join('');
       // While a window opened from here is up (Start, New Game), only the logo stays, at the top,

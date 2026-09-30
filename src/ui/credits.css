@@ -1,0 +1,7 @@
+/* Credits window (src/ui/credits.ts). */
+#ui2 .cr-body { gap: calc(var(--u) * 4); line-height: 1.35; user-select: text; -webkit-user-select: text; }
+#ui2 .cr-sec p { margin: var(--u) 0; white-space: normal; }
+#ui2 .cr-title { color: var(--p-accent); font-size: var(--fs-l); }
+#ui2 .cr-links { display: flex; flex-wrap: wrap; gap: calc(var(--u) * 2) calc(var(--u) * 6); font-size: var(--fs-s); }
+#ui2 .cr-links a { color: var(--p-info); }
+#ui2 .cr-links a:hover { color: var(--p-text-bright); }
