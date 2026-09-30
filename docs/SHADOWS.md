@@ -97,19 +97,35 @@ sun step for the two-map modes (the far map covers ~28× the area).
 
 ## Captures (`docs/screenshots/wave3/shadows/`)
 
-Each is the four modes, 2×2 (legacy, stable / cascades, smooth), at the game's own 2× nearest
-upscale of the low-res image:
+Legacy on the left, smooth on the right, at the game's own 2x nearest upscale of the low-res
+image. Real time, 1 s, looping:
 
-- `street-time.gif`: 1 s standing on the street, time at normal speed. Legacy's sidewalk
-  shadows boil; the others are still.
-- `street-walk.gif`: walking along the sidewalk.
-- `forest-time.gif`, `forest-pan.gif`: in the woods, waiting / turning.
-- `street-sweep.gif`: the clock ×20 for 2.5 s, to show the sun steps dissolving.
-- `heat-<view>-<scenario>.png`: red where shadows changed without the camera moving.
-- `still-street.png`, `still-forest.png`: the modes side by side. Smooth's sidewalk edges are
-  clean; cascades/smooth show shadows under the trees down the street.
-- `mask-street.png`, `mask-forest.png`: the sun-shadow factor only (black shadow, white lit, grey
-  = not a lit surface). The staircase-versus-contour difference is easiest to see here.
+- [`legacy-vs-smooth-time.gif`](screenshots/wave3/shadows/legacy-vs-smooth-time.gif): standing
+  on the street with time at normal speed. Legacy's sidewalk and lawn shadows boil; smooth is
+  still.
+
+  ![time passing](screenshots/wave3/shadows/legacy-vs-smooth-time.gif)
+- [`legacy-vs-smooth-walk.gif`](screenshots/wave3/shadows/legacy-vs-smooth-walk.gif): walking
+  along the sidewalk at 3 m/s.
+
+  ![walking](screenshots/wave3/shadows/legacy-vs-smooth-walk.gif)
+- [`street-sweep.webm`](screenshots/wave3/shadows/street-sweep.webm) (still:
+  [`street-sweep.png`](screenshots/wave3/shadows/street-sweep.png)): all four modes (legacy,
+  stable / cascades, smooth), the clock at 20x for 2.5 s, to show the sun steps dissolving.
+- [`heat-street-time.png`](screenshots/wave3/shadows/heat-street-time.png),
+  [`heat-forest-walk.png`](screenshots/wave3/shadows/heat-forest-walk.png): all four modes, red
+  where shadows changed without the camera moving.
+- [`still-street.png`](screenshots/wave3/shadows/still-street.png),
+  [`still-forest.png`](screenshots/wave3/shadows/still-forest.png): the four modes side by side.
+  Smooth's sidewalk edges are clean; cascades/smooth show shadows under the trees down the street.
+- [`mask-street.png`](screenshots/wave3/shadows/mask-street.png),
+  [`mask-forest.png`](screenshots/wave3/shadows/mask-forest.png): the sun-shadow factor only (black
+  shadow, white lit, grey = not a lit surface). The staircase-versus-contour difference is easiest
+  to see here.
+
+The tool writes more than is committed: 2x2 GIFs of every clip and every heat map. The committed
+set was trimmed to keep the folder small (the pairs were cut out of the 2x2 GIFs; the sweep was
+re-encoded as VP9).
 
 Re-run: `~/claude-stuff/bin/heavy --kind gpu --mem 2 -- npx tsx tools/shadow-motion.ts`
 (`--help`; `--only-stills`, `--no-gifs`, `--look full`, `--modes`, `--scenarios still,time,walk,pan,sweep`).
