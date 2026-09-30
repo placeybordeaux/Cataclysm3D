@@ -125,11 +125,16 @@ export class Renderer {
   private trauma = 0;
   private playerLook = '';
   private snapExposure = true;
-  private shadowT = 1;
-  /** Max sun shadow-map re-renders per second (the shadow pass is the priciest part of a
-   *  frame in software GL; sun shadows are world-anchored, so a stale map stays correct
-   *  except for moving casters, which then update at this rate). */
-  shadowHz = 20;
+  /** Max sun shadow-map re-renders per second in the legacy shadow mode (the shadow pass is
+   *  the priciest part of a frame in software GL; sun shadows are world-anchored, so a stale
+   *  map stays correct except for moving casters, which then update at this rate). The other
+   *  modes (shadows.ts) have a rate per cascade. */
+  get shadowHz(): number {
+    return this.lights.shadows.legacyHz;
+  }
+  set shadowHz(v: number) {
+    this.lights.shadows.legacyHz = v;
+  }
   private playerLookT = 0;
   private sunDay = NaN;
   private sunT: SunTimes = sunTimes(0);
@@ -303,8 +308,9 @@ export class Renderer {
     shared.uSpriteRound.value = f.spriteRound;
     this.lights.fillK = f.fill;
     this.lights.setShadow(f.shadowSize, f.shadowExtent);
-    this.three.shadowMap.type = f.softShadows ? THREE.PCFShadowMap : THREE.BasicShadowMap;
-    if (!first && prevSoft !== f.softShadows) {
+    const prevType = this.three.shadowMap.type;
+    this.three.shadowMap.type = this.lights.shadows.pcf(f.softShadows) ? THREE.PCFShadowMap : THREE.BasicShadowMap;
+    if (!first && (prevSoft !== f.softShadows || prevType !== this.three.shadowMap.type)) {
       // the shadow sampling code is baked into programs: recompile everything once
       this.scene.traverse((o) => {
         const m = (o as THREE.Mesh).material as THREE.Material | THREE.Material[] | undefined;
@@ -332,7 +338,7 @@ export class Renderer {
     this.chunks.invalidateAll();
     this.decor.invalidate();
     this.snapExposure = true;
-    this.shadowT = 1;
+    this.lights.shadows.invalidate();
     if (!first) this.resize();
   }
 
@@ -437,7 +443,7 @@ export class Renderer {
     this.chunks.update(p.x, p.y, p.z, (z) => this.zVisible(z), true);
     this.lightmap.invalidate();
     this.snapExposure = true;
-    this.shadowT = 1;
+    this.lights.shadows.invalidate();
   }
 
   private zVisible(z: number): boolean {
@@ -543,12 +549,9 @@ export class Renderer {
     su.uSunDir.value.copy(this.skyState.moonLit ? this.skyState.moonDir : this.skyState.sunDir);
     su.uDay.value = 1 - this.skyState.night;
     su.uSkyTint.value.copy(this.skyState.hemiSky).multiplyScalar(this.skyState.hemiIntensity * 0.6);
-    // the flashlight's shadow moves with the camera, so it can't be rate limited
-    this.shadowT += dt;
-    if (this.shadowT >= 1 / this.shadowHz || this.lights.flashlightOn) {
-      this.three.shadowMap.needsUpdate = true;
-      this.shadowT = 0;
-    }
+    // the flashlight's shadow moves with the camera, so it can't be rate limited; the sun
+    // maps say themselves when they're due (shadows.ts)
+    if (this.lights.shadowDue || this.lights.flashlightOn) this.three.shadowMap.needsUpdate = true;
     this.sky.update(this.skyState, cam.position, this.time);
     this.weather.update(dt, cam.position);
     this.autoPatch();

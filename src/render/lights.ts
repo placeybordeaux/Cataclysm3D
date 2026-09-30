@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { LEVEL_HEIGHT } from '../world/coords';
 import { form } from './formLight';
+import { ShadowRig, initialShadowMode } from './shadows';
 
 // All scene lights. The *number* of each light type is fixed at construction so shader
 // programs never recompile at runtime.
@@ -212,7 +213,14 @@ const SEASON_TINT: Record<'spring' | 'summer' | 'autumn' | 'winter', { ground: T
 
 export class LightManager {
   readonly group = new THREE.Group();
-  readonly sun = new THREE.DirectionalLight(0xffffff, 1);
+  /** The sun/moon and its shadow maps (shadows.ts: one to four directional lights by mode). */
+  readonly shadows: ShadowRig;
+  /** The first sun light (legacy: the only one). */
+  get sun(): THREE.DirectionalLight {
+    return this.shadows.lights[0];
+  }
+  /** set by lights.update: a sun-shadow map must be redrawn this frame */
+  shadowDue = false;
   readonly hemi = new THREE.HemisphereLight(0xffffff, 0x444444, 1);
   /** Shadowless fill from the side opposite the sun (look.ts `fill`): a light pointing at
    *  the camera flattens forms unless a second light keeps their shape. Always present
@@ -231,21 +239,20 @@ export class LightManager {
   /** A handle changed since the light map last read them (renderer forces a rebuild). */
   handlesDirty = false;
   private time = 0;
-  /** Shadow frustum half-size in metres around the camera focus. */
+  /** Shadow frustum half-size in metres around the camera focus (legacy mode; look.ts). */
   shadowExtent = 30;
+  private shadowSize: number;
 
   // 768: ~8 cm texels over the 60 m frustum, still finer than a low-res pixel at a few
   // metres, at ~half the shadow-pass fill cost of 1024 (see renderer shadowHz too).
   constructor(shadowMapSize = 768) {
     this.group.name = 'lights';
-    this.sun.castShadow = true;
-    this.sun.shadow.mapSize.set(shadowMapSize, shadowMapSize);
-    const c = this.sun.shadow.camera;
-    c.left = -this.shadowExtent; c.right = this.shadowExtent; c.top = this.shadowExtent; c.bottom = -this.shadowExtent;
-    c.near = 1; c.far = 160;
-    this.sun.shadow.bias = -0.0008;
-    this.sun.shadow.normalBias = 0.03;
-    this.group.add(this.sun, this.sun.target, this.hemi, this.fill, this.fill.target);
+    this.shadowSize = shadowMapSize;
+    // the sun-shadow lights go into the group first: three orders shadow-casting directional
+    // lights by scene order, and the shader picks them by index (shadows.ts)
+    this.shadows = new ShadowRig(this.group, () => ({ size: this.shadowSize, extent: this.shadowExtent }));
+    this.shadows.setMode(initialShadowMode());
+    this.group.add(this.hemi, this.fill, this.fill.target);
     for (let i = 0; i < POOL_SIZE; i++) {
       const p = new THREE.PointLight(0xffffff, 0, 8, 1.6);
       this.pool.push(p);
@@ -287,16 +294,9 @@ export class LightManager {
 
   /** Resize the sun shadow map / frustum (look.ts); the map reallocates on the next frame. */
   setShadow(size: number, extent: number): void {
-    const sh = this.sun.shadow;
-    if (sh.mapSize.x !== size) {
-      sh.mapSize.set(size, size);
-      sh.map?.dispose();
-      (sh as { map: THREE.WebGLRenderTarget | null }).map = null;
-    }
+    this.shadowSize = size;
     this.shadowExtent = extent;
-    const c = sh.camera;
-    c.left = -extent; c.right = extent; c.top = extent; c.bottom = -extent;
-    c.updateProjectionMatrix();
+    this.shadows.applyLookSize();
   }
 
   /** Handles for the light map (lightmap.ts reads x/y/z/lum/color/flicker/phase). */
@@ -318,24 +318,15 @@ export class LightManager {
   update(dt: number, sky: SkyState, focus: THREE.Vector3, cam: THREE.Camera): void {
     this.time += dt;
     // Directional: sun by day, moon by night (one light so the shader never changes).
-    const dir = sky.moonLit ? sky.moonDir : sky.sunDir;
+    let dir = sky.moonLit ? sky.moonDir : sky.sunDir;
     const fs = form.s;
-    this.sun.color.copy(sky.sunColor);
-    this.sun.intensity = sky.sunIntensity * fs.key;
-    // Shadow camera follows the focus, snapped to whole shadow texels along the light's
-    // axes so shadow edges don't crawl as the player moves (pixel stabilization).
-    const ext = this.shadowExtent;
-    const texel = (2 * ext) / this.sun.shadow.mapSize.x;
-    const fwd = tmpV.copy(dir).negate();
-    const right = tmpR.set(0, 1, 0).cross(fwd).normalize();
-    const up = tmpU.copy(fwd).cross(right).normalize();
-    const rx = Math.round(focus.dot(right) / texel) * texel;
-    const uy = Math.round(focus.dot(up) / texel) * texel;
-    const fz = focus.dot(fwd);
-    const snapped = tmpS.set(0, 0, 0).addScaledVector(right, rx).addScaledVector(up, uy).addScaledVector(fwd, fz);
-    this.sun.target.position.copy(snapped);
-    this.sun.position.copy(snapped).addScaledVector(dir, 80);
-    this.sun.target.updateMatrixWorld();
+    // Shadow cameras follow the focus, snapped to whole shadow texels (shadows.ts: legacy
+    // snaps along axes that turn with the sun every frame; the other modes hold the sun still
+    // between steps so the snap actually holds).
+    this.shadowDue = this.shadows.update(dt, dir, focus, sky.sunColor, sky.sunIntensity * fs.key, this.flashlightOn);
+    const snapped = tmpS.copy(this.sun.target.position);
+    // the fill turns with the held sun step too, or its bands would still crawl every frame
+    dir = this.shadows.heldDir(dir);
     this.hemi.color.copy(sky.hemiSky);
     this.hemi.groundColor.copy(sky.hemiGround);
     this.hemi.intensity = sky.hemiIntensity * fs.ambient;
@@ -386,4 +377,4 @@ export class LightManager {
   }
 }
 
-const tmpV = new THREE.Vector3(), tmpR = new THREE.Vector3(), tmpU = new THREE.Vector3(), tmpS = new THREE.Vector3();
+const tmpS = new THREE.Vector3();
