@@ -267,7 +267,10 @@ body.ui2-dragging, body.ui2-dragging * { cursor: grabbing !important; }
 #ui2 .ui2-toast-kind:empty { display: none; }
 #ui2 .ui2-toast-title { color: var(--p-text-bright); }
 #ui2 .ui2-toast-body { font-size: var(--fs-s); color: var(--p-text-dim); }
-@keyframes ui2-toast-in { from { translate: -110% 0; } to { translate: 0 0; } }
+/* A short slide + fade, not -110% of the card: with the HUD in a centred 16:9 column on
+   ultrawide, the first stepped frame of a full-width slide sat at the screen's far left edge and
+   then jumped into the column (QA wave 3, #8). */
+@keyframes ui2-toast-in { from { translate: calc(var(--u) * -10) 0; opacity: 0; } to { translate: 0 0; opacity: 1; } }
 
 /* ---- modal ---- */
 #ui2 .ui2-scrim { position: absolute; inset: 0; background: rgba(4, 5, 8, .55); display: flex; align-items: center; justify-content: center; }

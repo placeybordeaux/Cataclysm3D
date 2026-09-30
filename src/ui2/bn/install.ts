@@ -173,7 +173,11 @@ export function installBnInventory(game: Game, ctx: UiContext, api: DebugApi, ca
     const inv = game.player.inv;
     const picks: Item[] = [];
     if (inv.wielded) picks.push(inv.wielded);
-    for (const it of inv.allItems()) if (picks.length < 4 && !picks.includes(it) && (inv.comestibleIn(it) || useActions(it.def).length) && !inv.worn.includes(it)) picks.push(it);
+    // Not the water inside a bottle already picked: slot 2 "clean water (plastic bottle)" and
+    // slot 3 "water" were the same drink, and the second counted every clean water carried, so it
+    // read "water ×3" with no such item in sight (playtest, round 6).
+    const inPicked = (it: Item) => picks.some((q) => q.contents.includes(it));
+    for (const it of inv.allItems()) if (picks.length < 4 && !picks.includes(it) && !inPicked(it) && (inv.comestibleIn(it) || useActions(it.def).length) && !inv.worn.includes(it)) picks.push(it);
     picks.forEach((it, i) => {
       const v = model.viewOfItem(it);
       if (v) hotbar.bind(i, v.view);

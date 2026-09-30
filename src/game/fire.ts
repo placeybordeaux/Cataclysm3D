@@ -87,7 +87,9 @@ export function useFirestarter(host: CraftHost, tool: Item, ua: { moves?: number
     const now = Date.now() / 1000;
     if (!(lastWarning && lastWarning.key === key && now - lastWarning.at < 30)) {
       lastWarning = { key, at: now };
-      return say(false, `${risk}  Fires spread.  A fire ring (10 rocks), a brazier or a fireplace keeps it in.  Use the lighter again to light it anyway.`, 'c_yellow');
+      // Where rocks come from, since they're scarce lying around: BN's small boulder bashes into
+      // 16-32 rocks (str_min 16: bare hands at Str 8 can't, a hammer can; playtest: 35 hits, 27 rocks).
+      return say(false, `${risk}  Fires spread.  A fire ring (10 rocks: smash a boulder with a hammer), a brazier or a fireplace keeps it in.  Use the lighter again to light it anyway.`, 'c_yellow');
     }
   }
   // BN firestarter_actor::load: moves_slow defaults to 10 × the fast cost.
