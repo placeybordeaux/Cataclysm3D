@@ -352,8 +352,12 @@ export function* buildChunkMeshSteps(
     !G ? 0 : isRel(tx, ty) ? cornerH(X, Y) : raiseOf(tx, ty);
   const groundBearing = (sh: number) => sh === S.floor || sh === S.tree || sh === S.shrub || sh === S.door || sh === S.door_open || sh === S.fence;
 
+  // Steps are rows, but also cut on time: a row of never-seen furniture, dressing and room
+  // fills could run 10+ ms in one go (the chunk manager can only slice at yields).
+  let stepT = performance.now();
+  const due = () => performance.now() - stepT > 2.5;
   for (let ly = 0; ly < CHUNK; ly++) {
-    if (ly > 0) yield;
+    if (ly > 0) { yield; stepT = performance.now(); }
     for (let lx = 0; lx < CHUNK; lx++) {
       const x = x0c + lx, y = y0c + ly;
       const ti = chunk.ter[ly * CHUNK + lx];
@@ -788,14 +792,18 @@ export function* buildChunkMeshSteps(
       }
       // first sight of many new furniture/item models (painting their faces) can make a
       // row expensive: yield mid-row then (furniture/index.ts yieldHint)
-      if (MD?.yieldHint()) yield;
+      if (MD?.yieldHint() || due()) { yield; stepT = performance.now(); }
     }
   }
   if (RM && DR) {
     // resolve every room touching this chunk, then dress the ones anchored here (so each
     // room's lamp and rugs are emitted once)
-    for (let ly = 0; ly < CHUNK; ly++) for (let lx = 0; lx < CHUNK; lx++) roomAt(x0c + lx, y0c + ly);
-    for (const r of RM.rooms) {
+    for (let ly = 0; ly < CHUNK; ly++) {
+      for (let lx = 0; lx < CHUNK; lx++) roomAt(x0c + lx, y0c + ly);
+      if (due()) { yield; stepT = performance.now(); }
+    }
+    for (const r of [...RM.rooms]) {
+      if (due()) { yield; stepT = performance.now(); }
       if (r.ax < x0c || r.ay < y0c || r.ax >= x0c + CHUNK || r.ay >= y0c + CHUNK) continue;
       const cx = Math.round((r.x0 + r.x1) / 2), cy = Math.round((r.y0 + r.y1) / 2);
       if (RM.has(r, cx, cy) && r.tiles >= 4) DR.ceilingLamp(geo, cx + 0.5, cy + 0.5, base + WALL_TOP);
