@@ -191,6 +191,27 @@ wooden stock, bolt handle, scope); crowbar (claw, chisel) vs pipe; kitchen knife
 handle, wide thin blade) vs combat knife; sledgehammer vs hammer; hatchet vs red fire axe vs
 axe.
 
+## Round 6: fire, body plans, NPC variety
+
+- **Fire** (`chars/fireView.ts`): each `fd_fire` field is three crossed world-fixed cards
+  playing UltiCa's own flame animation (`fd_fire_int1..3`, 4–8 frames at 8/60 s ≈ 7.5 fps,
+  stepped), sized by intensity, desynchronised per tile, with rising, drifting, cooling ember
+  meshes. The light map's fire source already flickers; the cards are unlit. The chunk
+  mesher's static fire cards are skipped while it runs (`cardSettings.fireLive`).
+- **Body plans** (`BodyShape.variant`): ants (pinched waist, round gaster, big head,
+  mandibles, elbowed antennae), roaches/beetles (wing cases, shield), spiders (unchanged
+  8-leg plan); wasps and bees (striped abdomen tapering to a sting, second wing pair, dangling
+  legs), mosquitoes (long legs, proboscis, thin abdomen), flies (red compound eyes, stubby),
+  dragonflies (long abdomen, four long wings), birds (beak, fanned tail, feet, eyes), bats
+  (tall ears, wide membrane wings with finger struts). Zombie features: boomer/gasbag
+  (distended belly, jowls), hulk (hump, log forearms, huge fists), skeleton (pared limbs,
+  bone ribs), acid (glowing pustules), shocker (blue spines), scorched (crusted flakes). New
+  part names follow the hit-zone prefixes (`head*`, `wing*`, `leg*`) so aimPick zones stay right.
+- **NPC variety** (`npcLook` in npcView.ts, stable per uid; neighbouring uids differ): six
+  builds (height/girth), seven skin tones, eight hair colours, hair styles (short, long,
+  ponytail, bald; women and men draw from different lists), or the worn headgear instead (cap,
+  hat, helmet from worn item ids). Palette overrides go through `PaintOpts.person`.
+
 ## Performance
 
 `tools/char-shots.ts --gpu --bench --views bench` (60 hostile zombies and dogs 8–45 m down
@@ -204,6 +225,10 @@ the street, `full` look, RTX 5080, 1920×1080, `cdda.benchView(6)`). Round 1 (ma
 Round 2 (after merging `bn`'s atmosphere; the machine was shared with other GPU jobs, so
 compare within the run): billboards p50 13.8 ms / p99 34.6, work 19.6 ms; models p50 13.8 ms /
 p99 39.6, work 18.5 ms — the same. Humanoids are now 16 parts (18 with wings, +1 weapon).
+
+Round 6 (fires, body plans, NPC variety, props as cards; same bench scene): 3D models + cards
+p50 5.3 ms / p99 8.3 ms, work p50 7.8 ms; `?chars=billboard&props=billboard` p50 5.6 ms /
+p99 49.9 ms (spikes from other GPU jobs during that run) — no cost from the round.
 
 No measurable cost: ~800 part instances are one or two instanced draws (plus shadow), 12
 triangles each. Matrices are rebuilt at the simulation rate (30 Hz) only for creatures that

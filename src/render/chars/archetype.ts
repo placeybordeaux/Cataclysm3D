@@ -31,6 +31,14 @@ export interface BodyShape {
   wings: 'none' | 'feather' | 'membrane' | 'insect';
   /** Held weapon mesh (humanoids: NPCs and the survivor). */
   weapon?: Weapon;
+  /**
+   * A distinct plan within the archetype (docs/CHARACTERS.md round 6): insects 'ant' |
+   * 'spider' | 'roach'; flyers 'wasp' | 'bee' | 'mosquito' | 'fly' | 'dragonfly' | 'bird' |
+   * 'bat'; humanoids a feature: 'bloated' | 'hulk' | 'skeletal' | 'acid' | 'shocker' | 'charred'.
+   */
+  variant?: string;
+  /** humanoids: hair style / headgear piece (NPC variety) */
+  hair?: 'none' | 'short' | 'long' | 'ponytail' | 'cap' | 'hat' | 'helmet';
 }
 
 export type Weapon = 'none' | 'pistol' | 'rifle' | 'long' | 'short';
@@ -123,7 +131,17 @@ export function bodyShapeOf(m: MonsterLike): BodyShape {
   let wings: BodyShape['wings'] = 'none';
   if (arch === 'flyer') wings = species.includes('INSECT') || m.bodytype === 'flying insect' ? 'insect' : /bat/.test(id) ? 'membrane' : species.includes('ROBOT_FLYING') ? 'none' : 'feather';
   else if (fliesFlag && arch === 'humanoid') wings = 'membrane';
-  return { arch, scale, girth, legs, head, zombie, legCount, flies: fliesFlag, wings };
+  let variant = '';
+  if (arch === 'insect') variant = /(^|_)ant(_|$)/.test(id) ? 'ant' : legCount === 8 ? 'spider' : 'roach';
+  else if (arch === 'flyer') {
+    variant = /wasp|hornet|yellowjacket/.test(id) ? 'wasp' : /(^|_)bee(_|$)|bumble/.test(id) ? 'bee' : /mosquito/.test(id) ? 'mosquito'
+      : /dragonfly/.test(id) ? 'dragonfly' : /(^|_)fly(_|$)/.test(id) ? 'fly' : /(^|_)bat(_|$)|vampire/.test(id) ? 'bat' : wings === 'feather' ? 'bird' : '';
+  } else if (arch === 'humanoid') {
+    variant = /boomer|bloat|gasbag|gas_zombie|swollen/.test(id) ? 'bloated' : /hulk|colossus/.test(id) ? 'hulk'
+      : /skeleton|skeletal|withered|shriveled/.test(id) ? 'skeletal' : /acid|spitter|corrosive/.test(id) ? 'acid'
+      : /shock|electric|static/.test(id) ? 'shocker' : /scorched|charred|burnt/.test(id) ? 'charred' : '';
+  }
+  return { arch, scale, girth, legs, head, zombie, legCount, flies: fliesFlag, wings, variant };
 }
 
 /**

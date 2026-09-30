@@ -10,6 +10,7 @@ import { MELEE_AIM, MonsterView, NEAR_CLAMP } from './render/monsterView';
 import { HitFx } from './render/hitFx';
 import { charSettings, charsApi, setCharMode, setViewmodelMode } from './render/chars';
 import { FpView } from './render/chars/fpView';
+import { FireView } from './render/chars/fireView';
 import { PlayerModel } from './render/chars/playerModel';
 import { ArrowFx } from './render/arrowFx';
 import { butcherPracticeCap, butcherSeconds, butcherToolQuality, butcherYield, type ButcherKind, canDissect, dissectPracticeCap, dissectSeconds, dissectToolMessage, dissectToolQuality, dissectYield, readDissectables } from './game/butchery';
@@ -80,6 +81,7 @@ export function installMonsters(game: Game, renderer: Renderer | null, worldgen:
     const arrows = new ArrowFx(game, renderer, combat, sys, view);
     if (api) Object.assign(api, { hitFx: fx, arrowFx: arrows, nearClamp: NEAR_CLAMP, meleeAim: MELEE_AIM, chars: charsApi });
     if (renderer.viewmodel) new FpView(game, renderer, renderer.viewmodel);
+    new FireView(game, renderer);
     registerOption({
       name: 'First-person hands',
       value: () => (charSettings.viewmodel === 'model' ? '3D' : 'sprites'),

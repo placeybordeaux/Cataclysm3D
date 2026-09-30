@@ -23,7 +23,8 @@ function initialMode(): 'cards' | 'billboard' {
   return 'cards';
 }
 
-export const cardSettings = { mode: initialMode() };
+/** fireLive: chars/fireView.ts draws animated fires, so the mesher leaves them out */
+export const cardSettings = { mode: initialMode(), fireLive: false };
 
 export function cardsOn(): boolean {
   return cardSettings.mode === 'cards';

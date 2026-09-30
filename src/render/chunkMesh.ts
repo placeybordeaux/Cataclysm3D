@@ -1,4 +1,4 @@
-import { cardsOn, crossCards, flatCard } from './cards';
+import { cardSettings, cardsOn, crossCards, flatCard } from './cards';
 import { bakeFigure, isFigure } from './chars/figures';
 import type * as THREE from 'three';
 import { CHUNK, LEVEL_HEIGHT, chunkOf, localOf } from '../world/coords';
@@ -702,7 +702,7 @@ export function* buildChunkMeshSteps(
         const st = fieldStyle(fd.type);
         const lvl = Math.max(1, Math.min(3, fd.intensity));
         if (st.kind === 'fire') {
-          if (cardsOn()) crossCards(geo, src.sprite(`${fd.type}_int${lvl}`), x + 0.5, y + 0.5, base + heightLocal(x + 0.5, y + 0.5), 0.5 + lvl * 0.25, seed, 3);
+          if (cardsOn() && cardSettings.fireLive) { /* animated by chars/fireView.ts */ } else if (cardsOn()) crossCards(geo, src.sprite(`${fd.type}_int${lvl}`), x + 0.5, y + 0.5, base + heightLocal(x + 0.5, y + 0.5), 0.5 + lvl * 0.25, seed, 3);
           else sprites.push({ x: x + 0.5, y: y + 0.5, z, frame: src.sprite(`${fd.type}_int${lvl}`), height: 0.5 + lvl * 0.25, kind: 'fire' });
         } else if (st.kind === 'decal') {
           const f = src.sprite(`${fd.type}_int${lvl}`);

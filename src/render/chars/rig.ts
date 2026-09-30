@@ -17,10 +17,10 @@ import type { BodyShape, Weapon } from './archetype';
 
 export type Proj = 'front' | 'side';
 /** Painted surface detail for close-up items. */
-export type Detail = 'grain' | 'serration' | 'knurl' | 'tape' | 'port' | 'vent' | 'bevel' | 'metal';
+export type Detail = 'grain' | 'serration' | 'knurl' | 'tape' | 'port' | 'vent' | 'bevel' | 'metal' | 'stripes';
 export type Role = 'dark' | 'main' | 'light' | 'accent' | 'skin' | 'wing';
 export type Region = 'head' | 'neck' | 'torso' | 'hips' | 'upperArm' | 'foreArm' | 'hand' | 'thigh' | 'shin' | 'foot'
-  | 'fpSleeveLower' | 'fpSleeveUpper' | 'fpBack' | 'fpPalm' | 'fpFinger' | 'fpThumb';
+  | 'fpSleeveLower' | 'fpSleeveUpper' | 'fpBack' | 'fpPalm' | 'fpFinger' | 'fpThumb' | 'hair' | 'hat';
 
 export interface PartSrc {
   rect?: [number, number, number, number];
@@ -217,6 +217,61 @@ function humanoid(sh: BodyShape): Rig {
     weaponI = parts.length;
     // along the fist's -y (the forearm's line): a gun held out points forward, a bat hangs
     parts.push({ name: 'weapon', parent: HUM.handR, joint: [0, -hand * 0.6, 0], size: [wd.w, wd.len, wd.d], center: [0, -wd.len / 2 + (weapon === 'long' ? 0.15 : 0.04), 0], src: { color: wd.color }, kind: 'thin' });
+  }
+  // Zombie variants that should read at a glance (docs/CHARACTERS.md round 6)
+  const feat = sh.variant ?? '';
+  if (feat === 'bloated') {
+    // a boomer: a huge distended belly and a bloated neck
+    parts.push({ name: 'belly', parent: HUM.torso, joint: [0, 0.12, -torsoD * 0.3], size: [torsoW * 1.25, 0.42, torsoD * 1.4], center: [0, 0, -torsoD * 0.25], taper: [0.8, 0.85, 1, 1], src: { region: 'torso' }, kind: 'core' });
+    parts.push({ name: 'jowls', parent: HUM.neck, joint: [0, 0.03, -0.02], size: [0.2, 0.08, 0.17], center: [0, 0, 0], src: { region: 'neck' }, kind: 'core' });
+  } else if (feat === 'hulk') {
+    // hunched mass of muscle: a hump behind the head, forearms like logs, huge fists
+    parts.push({ name: 'hump', parent: HUM.torso, joint: [0, 0.42, torsoD * 0.35], size: [torsoW * 0.85, 0.22, torsoD * 0.7], center: [0, 0, 0], src: { region: 'torso' }, kind: 'core' });
+    for (const [fa, hand] of [[HUM.fArmR, HUM.handR], [HUM.fArmL, HUM.handL]] as const) {
+      parts[fa] = { ...parts[fa], size: [parts[fa].size[0] * 1.6, parts[fa].size[1] * 1.15, parts[fa].size[2] * 1.6], center: [0, -parts[fa].size[1] * 0.575, 0], taper: [1.2, 1.2, 0.9, 0.9] };
+      parts[hand] = { ...parts[hand], joint: [0, -foreArm * 1.15, 0], size: [parts[hand].size[0] * 1.8, parts[hand].size[1] * 1.6, parts[hand].size[2] * 1.8] };
+    }
+  } else if (feat === 'skeletal') {
+    // thin as bone: limbs pared down, a narrow torso with the ribs showing (bone-coloured bars)
+    for (const i of [HUM.uArmR, HUM.fArmR, HUM.uArmL, HUM.fArmL, HUM.thighR, HUM.shinR, HUM.thighL, HUM.shinL]) parts[i] = { ...parts[i], size: [parts[i].size[0] * 0.6, parts[i].size[1], parts[i].size[2] * 0.6] };
+    parts[HUM.torso] = { ...parts[HUM.torso], size: [torsoW * 0.8, 0.46, torsoD * 0.75] };
+    for (let r = 0; r < 4; r++) parts.push({ name: `rib${r}`, parent: HUM.torso, joint: [0, 0.18 + r * 0.065, -torsoD * 0.39], size: [torsoW * 0.78, 0.022, 0.02], center: [0, 0, 0], src: { color: [206, 196, 170] }, kind: 'thin' });
+  } else if (feat === 'acid') {
+    // glowing green pustules on the shoulders and back
+    const pus: [number, number, number, number][] = [[0.14, 0.44, 0.05, 0.08], [-0.12, 0.4, 0.08, 0.07], [0.02, 0.3, 0.12, 0.09], [-0.1, 0.18, 0.11, 0.06], [0.12, 0.2, 0.1, 0.05]];
+    for (const [i, [x, y, z, r]] of pus.entries()) parts.push({ name: `pustule${i}`, parent: HUM.torso, joint: [x * g, y, z], size: [r, r, r], center: [0, 0, 0], rest: [0.5, 0.7, 0], src: { color: [150, 230, 60] }, kind: 'thin' });
+  } else if (feat === 'shocker') {
+    // crackling blue spines along the head and spine
+    for (let i = 0; i < 4; i++) parts.push({ name: `spine${i}`, parent: i === 0 ? HUM.head : HUM.torso, joint: i === 0 ? [0, headH * 0.95, 0] : [0, 0.46 - i * 0.12, torsoD * 0.5], size: [0.02, 0.1, 0.02], center: [0, 0.05, 0], rest: [i === 0 ? -0.2 : 0.7, 0, 0], taper: [1, 1, 0.2, 0.2], src: { color: [120, 200, 255] }, kind: 'thin' });
+  } else if (feat === 'charred') {
+    // burnt: black crusted flakes stand off the body
+    for (let i = 0; i < 5; i++) parts.push({ name: `char${i}`, parent: i < 3 ? HUM.torso : HUM.head, joint: [((i * 37) % 7 - 3) * 0.04, 0.1 + ((i * 13) % 5) * 0.08, -torsoD * 0.5], size: [0.07, 0.05, 0.02], center: [0, 0, 0], rest: [0, 0, i * 0.7], src: { color: [26, 22, 20] }, kind: 'thin' });
+  }
+  // hair and headgear (NPC variety): pieces on the head, painted in the person's hair/hat colour
+  const hw = headW, hh = headH, hd2 = headW * 1.12;
+  switch (sh.hair) {
+    case 'long':
+      parts.push({ name: 'headHairBack', parent: HUM.head, joint: [0, hh * 0.85, hd2 * 0.45], size: [hw * 1.08, hh * 1.25, 0.05], center: [0, -hh * 0.55, 0], rest: [0.12, 0, 0], src: { region: 'hair' }, kind: 'thin' });
+      parts.push({ name: 'headHairTop', parent: HUM.head, joint: [0, hh, 0.01], size: [hw * 1.08, 0.04, hd2 * 1.04], center: [0, 0, 0], src: { region: 'hair' }, kind: 'thin' });
+      break;
+    case 'ponytail':
+      parts.push({ name: 'headHairTop', parent: HUM.head, joint: [0, hh, 0.01], size: [hw * 1.06, 0.035, hd2 * 1.02], center: [0, 0, 0], src: { region: 'hair' }, kind: 'thin' });
+      parts.push({ name: 'headTail', parent: HUM.head, joint: [0, hh * 0.75, hd2 * 0.5], size: [0.05, 0.2, 0.05], center: [0, -0.09, 0.02], rest: [0.3, 0, 0], taper: [0.6, 0.6, 1, 1], src: { region: 'hair' }, kind: 'thin' });
+      break;
+    case 'short':
+      parts.push({ name: 'headHairTop', parent: HUM.head, joint: [0, hh, 0.012], size: [hw * 1.06, 0.04, hd2 * 1.02], center: [0, 0, 0], src: { region: 'hair' }, kind: 'thin' });
+      break;
+    case 'cap':
+      parts.push({ name: 'headCap', parent: HUM.head, joint: [0, hh * 0.92, 0], size: [hw * 1.08, hh * 0.3, hd2 * 1.06], center: [0, 0.02, 0], taper: [1, 1, 0.9, 0.9], src: { region: 'hat' }, kind: 'thin' });
+      parts.push({ name: 'headBrim', parent: HUM.head, joint: [0, hh * 0.86, -hd2 * 0.5], size: [hw * 0.95, 0.015, 0.08], center: [0, 0, -0.035], rest: [-0.1, 0, 0], src: { region: 'hat' }, kind: 'thin' });
+      break;
+    case 'hat':
+      parts.push({ name: 'headCrown', parent: HUM.head, joint: [0, hh * 0.9, 0], size: [hw * 1.02, hh * 0.45, hd2 * 1.0], center: [0, 0.05, 0], taper: [1, 1, 0.85, 0.85], src: { region: 'hat' }, kind: 'thin' });
+      parts.push({ name: 'headBrim', parent: HUM.head, joint: [0, hh * 0.9, 0], size: [hw * 1.9, 0.015, hd2 * 1.8], center: [0, 0, 0], src: { region: 'hat' }, kind: 'thin' });
+      break;
+    case 'helmet':
+      parts.push({ name: 'headHelmet', parent: HUM.head, joint: [0, hh * 0.55, 0], size: [hw * 1.18, hh * 0.62, hd2 * 1.16], center: [0, hh * 0.25, 0], taper: [1, 1, 0.8, 0.8], src: { region: 'hat' }, kind: 'thin' });
+      break;
   }
   const s = sh.scale;
   const height = (hipY + 0.06 + 0.49 + headH) * s;
@@ -470,11 +525,24 @@ function insect(sh: BodyShape): Rig {
       parts.push({ name: `leg${i}${side > 0 ? 'R' : 'L'}l`, parent: up, joint: [side * upper, 0, 0], size: [0.045, lower, 0.045], center: [0, -lower / 2, 0], rest: [0, 0, side * (0.25 - 0.55)], src: { role: 'dark' }, kind: 'thin' });
     }
   }
+  const antR = parts.length, antL = parts.length + 1;
   if (!spider) {
     parts.push(
       { name: 'antR', parent: 2, joint: [0.04, 0.03, -0.14], size: [0.015, 0.015, 0.3], center: [0, 0, -0.15], rest: [0.5, -0.3, 0], src: { role: 'dark' }, kind: 'thin' },
       { name: 'antL', parent: 2, joint: [-0.04, 0.03, -0.14], size: [0.015, 0.015, 0.3], center: [0, 0, -0.15], rest: [0.5, 0.3, 0], src: { role: 'dark' }, kind: 'thin' },
     );
+    if (sh.variant === 'ant') {
+      // ants: a pinched waist and round gaster, big head with mandibles, elbowed antennae
+      parts[1] = { ...parts[1], joint: [0, 0.03, tl / 2 + 0.07], size: [aw * 1.05, ah * 1.9, al * 0.8], center: [0, ah * 0.5, al * 0.4], rest: [-0.25, 0, 0], taper: [0.6, 0.6, 0.7, 0.7], taperAxis: 'z' };
+      parts[2] = { ...parts[2], size: [tw * 1.0, th * 1.4, 0.18] };
+      parts.push({ name: 'waist', parent: 0, joint: [0, 0.02, tl / 2 + 0.03], size: [0.05, 0.06, 0.06], center: [0, 0, 0], src: { role: 'dark' }, kind: 'thin' });
+      for (const sd of [1, -1]) parts.push({ name: `headMand${sd}`, parent: 2, joint: [sd * 0.05, -0.03, -0.17], size: [0.08, 0.025, 0.03], center: [-sd * 0.03, 0, -0.01], rest: [0, sd * 0.5, 0], taper: [1, 1, 1, 1], src: { role: 'dark' }, kind: 'thin' });
+      for (const [i, sd] of [[antR, 1], [antL, -1]] as const) parts.push({ name: `antTip${sd}`, parent: i, joint: [0, 0, -0.3], size: [0.013, 0.013, 0.22], center: [0, 0, -0.11], rest: [-1.1, sd * -0.3, 0], src: { role: 'dark' }, kind: 'thin' });
+    } else {
+      // roaches and beetles: wing cases over a flat back, a pronotum shield over the head
+      for (const sd of [1, -1]) parts.push({ name: `elytron${sd}`, parent: 1, joint: [sd * aw * 0.25, ah * 0.55, 0], size: [aw * 0.52, 0.02, al * 0.95], center: [0, 0, al / 2], rest: [0, 0, sd * -0.12], src: { role: 'accent' }, kind: 'thin' });
+      parts.push({ name: 'shield', parent: 0, joint: [0, th * 0.55, -tl * 0.2], size: [tw * 1.1, 0.02, tl * 0.8], center: [0, 0, 0], src: { role: 'main' }, kind: 'thin' });
+    }
   } else {
     parts.push(
       { name: 'fangR', parent: 2, joint: [0.04, -0.03, -0.14], size: [0.04, 0.08, 0.04], center: [0, -0.04, 0], rest: [-0.3, 0, 0], src: { role: 'accent' }, kind: 'thin' },
@@ -501,9 +569,8 @@ function insect(sh: BodyShape): Rig {
       const idle = sin(p.t * 3 + p.seed * TAU);
       setRot(o, 1, 0.04 * idle);
       if (!spider) {
-        const n2 = parts.length;
-        setRot(o, n2 - 2, 0.15 * sin(p.t * 5 + p.seed * 4), 0.2 * sin(p.t * 3.1));
-        setRot(o, n2 - 1, 0.15 * sin(p.t * 5.3 + 1), 0.2 * sin(p.t * 2.7 + 2));
+        setRot(o, antR, 0.15 * sin(p.t * 5 + p.seed * 4), 0.2 * sin(p.t * 3.1));
+        setRot(o, antL, 0.15 * sin(p.t * 5.3 + 1), 0.2 * sin(p.t * 2.7 + 2));
       }
       if (p.windup !== null) {
         const u = ease(p.windup);
@@ -543,14 +610,47 @@ function flyer(sh: BodyShape): Rig {
     { name: 'head', parent: 0, joint: [0, bh * 0.3, -bl / 2], size: [hs, hs, hs], center: [0, hs * 0.2, -hs * 0.4], src: { rect: [0.6, 0, 1, 0.45], proj: 'side', core: true, face: true }, kind: 'core' },
   ];
   if (sh.wings !== 'none') {
-    const ww = insectW ? 0.22 : 0.32, wd = insectW ? 0.08 : 0.16;
+    const ww = insectW ? 0.22 : sh.variant === 'bat' ? 0.42 : 0.32, wd = insectW ? 0.08 : 0.16;
     parts.push(
       { name: 'wingR', parent: 0, joint: [bw / 2, bh * 0.3, -bl * 0.1], size: [ww, 0.015, wd], center: [ww / 2, 0, wd * 0.3], src: insectW ? { role: 'wing' } : { rect: [0.25, 0.1, 0.75, 0.5], proj: 'side' }, kind: 'thin' },
       { name: 'wingL', parent: 0, joint: [-bw / 2, bh * 0.3, -bl * 0.1], size: [ww, 0.015, wd], center: [-ww / 2, 0, wd * 0.3], src: insectW ? { role: 'wing' } : { rect: [0.25, 0.1, 0.75, 0.5], proj: 'side' }, kind: 'thin' },
     );
   }
-  if (insectW) parts.push({ name: 'abdomen', parent: 0, joint: [0, 0, bl / 2], size: [bw * 1.3, bh * 1.2, bl * 1.3], center: [0, -bh * 0.2, bl * 0.6], rest: [0.3, 0, 0], src: { rect: [0, 0.3, 0.55, 1], proj: 'side', core: true }, kind: 'core' });
-  else if (sh.wings !== 'none') parts.push({ name: 'tail', parent: 0, joint: [0, 0, bl / 2], size: [bw * 0.9, 0.02, bl * 0.6], center: [0, 0, bl * 0.3], rest: [-0.2, 0, 0], src: { role: 'dark' }, kind: 'thin' });
+  const v = sh.variant ?? '';
+  if (insectW) {
+    // abdomen: striped and tapering to a sting (wasps, bees), long and thin (dragonflies,
+    // mosquitoes), stubby (flies)
+    const long = v === 'dragonfly' ? 3.2 : v === 'mosquito' ? 1.7 : v === 'fly' ? 0.9 : 1.3;
+    const fat = v === 'bee' ? 1.6 : v === 'dragonfly' || v === 'mosquito' ? 0.7 : v === 'fly' ? 1.3 : 1.2;
+    const striped = v === 'wasp' || v === 'bee';
+    const ab = parts.length;
+    parts.push({ name: 'abdomen', parent: 0, joint: [0, 0, bl / 2 + (v === 'wasp' ? 0.02 : 0)], size: [bw * fat, bh * fat, bl * long], center: [0, -bh * 0.2, bl * long * 0.5], rest: [v === 'dragonfly' ? 0.05 : 0.3, 0, 0], taper: striped ? [0.85, 0.85, 0.4, 0.4] : [1, 1, 0.7, 0.7], taperAxis: 'z', src: striped ? { color: v === 'bee' ? [200, 150, 40] : [214, 180, 40], detail: 'stripes' } : { rect: [0, 0.3, 0.55, 1], proj: 'side', core: true }, kind: 'core' });
+    if (striped) parts.push({ name: 'sting', parent: ab, joint: [0, -bh * 0.2, bl * long], size: [0.012, 0.012, 0.05], center: [0, 0, 0.025], taper: [1, 1, 0.2, 0.2], taperAxis: 'z', src: { color: [30, 26, 22] }, kind: 'thin' });
+    // a second, smaller pair of wings; dragonflies: two long equal pairs
+    const ww2 = v === 'dragonfly' ? 0.32 : 0.14;
+    for (const sd of [1, -1]) parts.push({ name: `wingHind${sd}`, parent: 0, joint: [sd * bw / 2, bh * 0.3, bl * 0.25], size: [ww2, 0.012, 0.06], center: [sd * ww2 / 2, 0, 0.02], rest: [0, sd * -0.25, 0], src: { role: 'wing' }, kind: 'thin' });
+    if (v === 'dragonfly') { parts[2] = { ...parts[2], size: [0.32, 0.012, 0.06] }; parts[3] = { ...parts[3], size: [0.32, 0.012, 0.06] }; }
+    // dangling legs: long for mosquitoes
+    const leg = v === 'mosquito' ? 0.2 : 0.09;
+    for (let i = 0; i < 3; i++) for (const sd of [1, -1]) parts.push({ name: `leg${i}${sd}`, parent: 0, joint: [sd * bw * 0.4, -bh * 0.4, -bl * 0.3 + i * bl * 0.3], size: [0.008, leg, 0.008], center: [0, -leg / 2, 0], rest: [0.3 - i * 0.3, 0, sd * 0.4], src: { role: 'dark' }, kind: 'thin' });
+    // heads: compound eyes on flies, a proboscis on mosquitoes
+    if (v === 'fly' || v === 'dragonfly') for (const sd of [1, -1]) parts.push({ name: `headEye${sd}`, parent: 1, joint: [sd * hs * 0.45, hs * 0.2, -hs * 0.3], size: [hs * 0.5, hs * 0.6, hs * 0.6], center: [0, 0, 0], src: { color: v === 'fly' ? [170, 30, 26] : [60, 110, 150] }, kind: 'thin' });
+    if (v === 'mosquito') parts.push({ name: 'headProboscis', parent: 1, joint: [0, 0, -hs * 0.8], size: [0.008, 0.008, 0.16], center: [0, 0, -0.08], rest: [0.5, 0, 0], src: { color: [40, 34, 30] }, kind: 'thin' });
+  } else if (sh.wings !== 'none') {
+    parts.push({ name: 'tail', parent: 0, joint: [0, 0, bl / 2], size: [bw * (v === 'bird' ? 1.5 : 0.9), 0.02, bl * 0.6], center: [0, 0, bl * 0.3], rest: [-0.2, 0, 0], taper: v === 'bird' ? [0.7, 1, 1.4, 1] : undefined, taperAxis: 'z', src: { role: 'dark' }, kind: 'thin' });
+    if (v === 'bird') {
+      parts.push({ name: 'headBeak', parent: 1, joint: [0, hs * 0.1, -hs * 0.9], size: [hs * 0.35, hs * 0.3, hs * 0.55], center: [0, 0, -hs * 0.27], taper: [1, 1, 0.1, 0.2], taperAxis: 'z', src: { color: [40, 36, 30] }, kind: 'thin' });
+      for (const sd of [1, -1]) parts.push({ name: `foot${sd}`, parent: 0, joint: [sd * bw * 0.25, -bh / 2, 0], size: [0.01, 0.06, 0.01], center: [0, -0.03, 0], src: { color: [60, 50, 40] }, kind: 'thin' });
+      for (const sd of [1, -1]) parts.push({ name: `headEye${sd}`, parent: 1, joint: [sd * hs * 0.5, hs * 0.25, -hs * 0.45], size: [0.004, 0.02, 0.02], center: [0, 0, 0], src: { color: [240, 230, 180] }, kind: 'thin' });
+    }
+    if (v === 'bat') {
+      // tall ears, a snub face, wide membrane wings with finger struts
+      for (const sd of [1, -1]) parts.push({ name: `ear${sd}`, parent: 1, joint: [sd * hs * 0.3, hs * 0.6, 0], size: [hs * 0.3, hs * 0.8, hs * 0.1], center: [0, hs * 0.4, 0], rest: [0, 0, sd * -0.25], taper: [1, 1, 0.3, 1], src: { role: 'dark' }, kind: 'thin' });
+      parts[2] = { ...parts[2], size: [0.42, 0.012, 0.2] };
+      parts[3] = { ...parts[3], size: [0.42, 0.012, 0.2] };
+      for (const [w, sd] of [[2, 1], [3, -1]] as const) for (let f = 0; f < 3; f++) parts.push({ name: `wingStrut${w}${f}`, parent: w, joint: [sd * 0.05, 0.008, 0.02], size: [0.3 - f * 0.05, 0.008, 0.008], center: [sd * (0.15 - f * 0.025), 0, 0], rest: [0, sd * (0.15 + f * 0.35), 0], src: { color: [40, 30, 34] }, kind: 'thin' });
+    }
+  }
   const s = sh.scale;
   const hasWings = sh.wings !== 'none';
   return {
