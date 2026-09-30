@@ -54,3 +54,26 @@ describe('painted surfaces', () => {
     expect(p.active()).toBe(false);
   });
 });
+
+describe('fences', () => {
+  it('kinds and every kind/connection builds', async () => {
+    const { buildFence, buildGateLeaf, fenceKind } = await import('../../src/render/furniture/fences');
+    const { ModelBuilder } = await import('../../src/render/furniture/mesh');
+    const { ModelAtlas } = await import('../../src/render/furniture/atlas');
+    expect(fenceKind('t_chainfence')).toBe('chain');
+    expect(fenceKind('t_fence')).toBe('picket');
+    expect(fenceKind('t_privacy_fence')).toBe('privacy');
+    expect(fenceKind('t_metal_railing')).toBe('metal');
+    expect(fenceKind('t_glass_railing')).toBe('glass');
+    const atlas = new ModelAtlas();
+    for (const k of ['picket', 'privacy', 'splitrail', 'chain', 'chicken', 'wire', 'metal', 'glass', 'concrete'] as const)
+      for (const conn of [[false, false, false, false], [true, false, true, false], [true, true, true, true]]) {
+        const b = new ModelBuilder(atlas);
+        buildFence(b, k, conn, null);
+        expect(b.done().quads, k).toBeGreaterThan(0);
+        const g = new ModelBuilder(atlas);
+        buildGateLeaf(g, k, null, 0.94);
+        expect(g.done().quads).toBeGreaterThan(0);
+      }
+  });
+});
