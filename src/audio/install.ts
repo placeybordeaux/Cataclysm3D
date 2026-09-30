@@ -10,7 +10,11 @@ import { rangeForLoudness } from './spatial';
 // Wires the audio engine into the game: listener = player camera, footsteps, ambient beds,
 // world `sound` events, and window.cdda helpers. Call once after the Game exists.
 
-const PRELOAD = ['plmove', 'melee_swing', 'melee_hit_flesh', 'mon_bite', 'melee_attack', 'speech', 'mon_death', 'menu_move', 'menu_error', 'deal_damage'];
+// Smashes and doors too: a one-shot whose sample isn't decoded within STALE_MS is dropped, so a
+// cold first blow on a door during a busy frame (chunk streaming) could go silent.
+// They're small (~0.5 MB for every smash_*, open_door and close_door file).
+const PRELOAD = ['plmove', 'melee_swing', 'melee_hit_flesh', 'mon_bite', 'melee_attack', 'speech', 'mon_death', 'menu_move', 'menu_error', 'deal_damage',
+  'smash', 'smash_fail', 'smash_success', 'open_door', 'close_door'];
 
 export interface AudioHandle {
   engine: AudioEngine;
