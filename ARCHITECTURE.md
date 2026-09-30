@@ -515,6 +515,15 @@ tests/               vitest unit tests (pure logic, no DOM/WebGL)
   `SpriteHandle.setSize`, `hitFx.tracer/watchTracers`, `playerAttack.hitStop`. HUD: `src/ui/combatHud.ts`.
 - Debug: `cdda.feel`, `cdda.setFeel(d)`, `cdda.feelState()`, `cdda.recordFrames(n, dt, each)` (frame-exact
   captures for animation timing); `tools/drive.ts seq "…"` (timed real input + screenshot bursts), `xbdown/xbup`.
+- Ranged / archery (`src/game/rangedfeel.ts`, pure): `rangedClass(item)` (firearm/bow/crossbow/sling/thrown/
+  launcher/energy/air from BN data), `hasMuzzleFlash`, `drawStyle`, BN STR_DRAW rules, `drawSeconds`,
+  `rollRecovery`/`embedsIn` (drop_or_embed_projectile), `arcHeight`, `rangedMissReason`. In PlayerCombat:
+  `draw` (RMB draws/whirls, LMB looses), `flights` (visible arrows resolved where they arrive), `landed`,
+  `rangedTarget()`, `bowPose()`, `settleFlights()` (a save lands arrows). A surviving round leaves the gun as
+  an object (`moves.takeRound`) and ends on the ground or in `Monster.stuck` (a cargo-like Loc, saved in
+  MonsterJSON, dropped on death). Render: `render/bowArt.ts` (drawn bow viewmodel), `render/arrowFx.ts`.
+  Events: `playerAttack.reason/ranged/landed`, `attackRefused`. Tests: tests/rangedfeel.test.ts; real input:
+  `tools/realinput_archery.ts` (`--only archery`).
 
 ### Difficulty & tactical pause (src/game/{difficulty,balance,pause}.ts, src/difficulty.ts, src/pause.ts; see docs/BALANCE.md)
 - `DifficultySettings` holds every balance knob (spawn/horde scale, safe radius, monster speed & resilience, item

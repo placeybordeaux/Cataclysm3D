@@ -12,6 +12,7 @@ import { BODY_PARTS, type BodyPartId } from './bodyparts';
 import { GUN_PROJECTILE_SPEED, projectileHit } from './projectile';
 import { CREATURE_RADIUS } from './physics';
 import { sfx } from '../audio/sfx';
+import { flightSpeed, fliesVisibly, rangedClass } from './rangedfeel';
 
 // Monster guns (mattack_actors.cpp gun_actor): turrets, secubots, armed zombies/humans and
 // throwers. CDDA's rules: the attack needs its dialogue condition, a seen target in one of the
@@ -183,14 +184,26 @@ function shootAt(sys: MonsterSystem, m: Monster, gun: ItemDef, ammo: ItemDef | n
   const moa = rollDispersionMoa(dispersionOf(c, gun, ammo), rng);
   c.recoil = Math.min(MAX_RECOIL, c.recoil + 5 * recoilOf(c, gun, ammo) * (1 - Math.min(c.getSkill(gun.skill ?? 'gun'), 10) / 20));
   const noise = Math.max(0, (gun.loudness ?? 0) + (ammo ? ammoLoudness(ammo) : 0));
-  sfx.gunshot(gun.id, m, { ammoType: typeof ammo?.ammo_type === 'string' ? ammo.ammo_type : undefined, loudness: noise });
-  sys.emitSound(m.x, m.y, m.z, noise, noise >= 150 ? (burst ? 'Brrrap!' : 'kerblam!') : burst ? 'Brrrap!' : 'bang!', m, '', 'combat', sys.playerSees(m));
+  // A monster's crossbow or bow twangs and its bolt flies visibly (rangedfeel.ts), like the survivor's.
+  const cls = rangedClass({ def: gun, isGun: () => true, hasFlag: (f) => asArray(gun.flags).includes(f), ammoTypes: () => asArray(gun.ammo as string[] | undefined), ammoData: () => ammo ?? undefined });
+  sfx.rangedShot(cls, gun.id, m, { ammoType: typeof ammo?.ammo_type === 'string' ? ammo.ammo_type : undefined, loudness: noise });
+  sys.emitSound(m.x, m.y, m.z, noise, fliesVisibly(cls) ? (cls === 'crossbow' ? 'thonk!' : 'whizz!') : noise >= 150 ? (burst ? 'Brrrap!' : 'kerblam!') : burst ? 'Brrrap!' : 'bang!', m, '', 'combat', sys.playerSees(m));
   const range = Math.max(1, (ammo?.range ?? 0) + (gun.range ?? 0)) || 30;
   const aim = Math.atan2(p.x - m.x, -(p.y - m.y));
   const off = moaToRadians(moa) * Math.cos(rng.next() * Math.PI * 2);
   const yaw = aim + off;
   const d = Math.hypot(p.x - m.x, p.y - m.y);
   const dx = Math.sin(yaw), dy = -Math.cos(yaw);
+  if (fliesVisibly(cls)) {
+    // Resolved where it arrives: step aside while it's in the air and it misses.
+    const tx = m.x + dx * Math.min(d, range), ty = m.y + dy * Math.min(d, range);
+    sys.launchProjectile(m, tx, ty, m.z, { symbol: ammo?.symbol ?? '=', color: ammo?.color ?? 'brown' }, flightSpeed(cls, Number(ammo?.speed) || 100), () => {
+      const miss = Math.hypot(p.x - tx, p.y - ty);
+      if (p.dead || d > range || miss > CREATURE_RADIUS + 0.05) return;
+      hitSurvivor(sys, m, damageOf(gun, ammo), miss / (CREATURE_RADIUS + 0.05), noCrit, Number(ammo?.speed) || 100);
+    });
+    return;
+  }
   // Perpendicular miss at the survivor's distance.
   const along = (p.x - m.x) * dx + (p.y - m.y) * dy;
   const perp = Math.abs((p.x - m.x) * dy - (p.y - m.y) * dx);

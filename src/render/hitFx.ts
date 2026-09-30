@@ -195,8 +195,12 @@ export class HitFx {
       // Bullets that hit nothing kick up dust where they stopped (and mark the wall); swings
       // through air make none.
       if (e.kind === 'gun') {
-        this.burst(e.x, e.y, e.z, this.impactHeight(e.x, e.y, 1.6), DUST, 5, 1.2, false);
-        this.mark(e.x, e.y, e.z);
+        // Arrows, bolts and stones: a small puff where they come to rest and no bullet hole
+        // (the arrow itself stays there, render/arrowFx.ts); nothing for a miss called mid-flight.
+        const soft = e.ranged === 'bow' || e.ranged === 'crossbow' || e.ranged === 'sling';
+        if (soft && !e.landed) return;
+        this.burst(e.x, e.y, e.z, soft ? 0.15 : this.impactHeight(e.x, e.y, 1.6), DUST, soft ? 3 : 5, soft ? 0.8 : 1.2, false);
+        if (!soft) this.mark(e.x, e.y, e.z);
       }
       return;
     }

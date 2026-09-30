@@ -127,6 +127,44 @@ export const sfx = {
     for (const [id, v] of tries) if (has(id, v)) return play(id, v, po);
     return play('fire_gun', 'default', po);
   },
+  /**
+   * A shot, by launcher kind (rangedfeel.ts rangedClass): firearms, launchers, energy and air
+   * guns go through gunshot(); a bow twangs (the pack's fire_gun/<bow> recording, softer, over a
+   * synthesized bowstring), a crossbow clicks and thonks, a sling or slingshot swishes.
+   */
+  rangedShot(cls: string, gunId: string, pos?: Vec3, opts: { ammoType?: string; loudness?: number; listenerDist?: number } = {}): Voice | null {
+    const po: PlayOptions = { pos, pitchJitter: 0.06, range: rangeForLoudness(Math.max(20, opts.loudness ?? 30)), minGain: pos ? 0.3 : 0 };
+    if (cls === 'bow') {
+      if (has('fire_gun', gunId)) play('fire_gun', gunId, { ...po, volume: 0.5 });
+      return play('synth_bow_twang', 'default', po);
+    }
+    if (cls === 'crossbow') {
+      if (has('fire_gun', gunId)) play('fire_gun', gunId, { ...po, volume: 0.45 });
+      return play('synth_xbow_release', 'default', po);
+    }
+    if (cls === 'sling') return slowed(play('synth_whoosh', 'default', { ...po, volume: 0.9 }), 1.25);
+    return sfx.gunshot(gunId, pos, opts);
+  },
+  /** Nocking and drawing a bow (heavier bows creak lower). */
+  bowDraw(heavy = false): Voice | null {
+    return slowed(play('synth_bow_draw', 'default', { pitchJitter: 0.1, volume: 0.8 }), heavy ? 0.85 : 1);
+  },
+  /** Cranking a crossbow (a looping-length ratchet; stop() it if the reload is cut short). */
+  crossbowCrank(): Voice | null {
+    return play('synth_xbow_crank', 'default', { pitchJitter: 0.05 });
+  },
+  /** A sling whirling overhead: loops until the caller stops it. */
+  slingWhirl(): Voice | null {
+    return play('synth_sling_whirl', 'default', { loop: true, volume: 0.7, fadeIn: 0.1 });
+  },
+  /** An arrow, bolt or stone landing: in flesh, a wall/wood, or the ground. */
+  arrowHit(what: 'flesh' | 'wall' | 'ground', pos: Vec3): Voice | null {
+    return play('synth_arrow_hit', what, { pos, pitchJitter: 0.12 });
+  },
+  /** An arrow passing close by (quiet, quick). */
+  arrowFly(pos: Vec3): Voice | null {
+    return slowed(play('synth_whoosh', 'default', { pos, pitchJitter: 0.15, volume: 0.35, range: 12 }), 1.6);
+  },
   gunEmpty(pos?: Vec3): Voice | null {
     return play('fire_gun', 'empty', { pos });
   },

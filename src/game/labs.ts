@@ -40,7 +40,7 @@ export const autoUi = (game: Game, picks?: number[]): LabUi => {
   };
 };
 
-const monstersOf = (game: Game) => (game as unknown as { monsters?: { all: Monster[]; remove(m: Monster): void; spawnById(id: string, x: number, y: number, z: number): Monster | null; monsterAt(x: number, y: number, z: number): Monster | null } }).monsters;
+const monstersOf = (game: Game) => (game as unknown as { monsters?: { all: Monster[]; remove(m: Monster): void; dropStuck(m: Monster): void; spawnById(id: string, x: number, y: number, z: number): Monster | null; monsterAt(x: number, y: number, z: number): Monster | null } }).monsters;
 
 const sameOmt = (ax: number, ay: number, bx: number, by: number) => chunkOf(ax) === chunkOf(bx) && chunkOf(ay) === chunkOf(by);
 
@@ -52,6 +52,7 @@ export function despawnInOmt(game: Game, x: number, y: number, z: number, flag: 
   for (const m of [...sys.all]) {
     if (m.dead || m.z !== z || !sameOmt(Math.floor(m.x), Math.floor(m.y), x, y)) continue;
     if (!m.type.flags.includes(flag) || m.friendly) continue;
+    sys.dropStuck(m); // arrows stuck in it stay behind
     sys.remove(m);
     n++;
   }

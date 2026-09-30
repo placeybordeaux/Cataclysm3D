@@ -24,6 +24,7 @@ import { resolve } from 'node:path';
 import { fitWindow, launchBrowser, startXvfb, XInput, type BrowserKind } from './lib/realinput';
 import { screenScenarios } from './realinput_screens';
 import { lootScenarios } from './realinput_loot';
+import { archeryScenarios } from './realinput_archery';
 
 const argv = process.argv.slice(2);
 const opt = (n: string, d: string) => (argv.includes(n) ? argv[argv.indexOf(n) + 1] : d);
@@ -1403,6 +1404,10 @@ scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...lootScenario
 
 // Interaction screens (dialogue, trade, missions, vehicles, body, Autodoc, scores): before 'death'.
 scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...screenScenarios({ page: () => page, x: () => x, js, check, shot, toGameplay, sleep }));
+
+// Archery (draw, loose, why-missed, arrow recovery): last before 'death' — it leaves a bow, arrows and
+// a backpack in the inventory, which shifts the item lists the screen scenarios drag from.
+scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...archeryScenarios({ x: () => x, js, check, shot, toGameplay, sleep }));
 
 if (argv.includes('--list') || argv.includes('--dry-run')) {
   for (const [n, what] of scenarios) console.log(`${only && !only.has(n) ? '  (skip)' : '  run   '} ${n.padEnd(11)} ${what}`);

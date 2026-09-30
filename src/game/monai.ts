@@ -16,7 +16,7 @@ import { monsterMeleeAttack, type MonsterAttackResult } from './combat';
 import type { Character } from './character';
 import { BODY_PARTS } from './bodyparts';
 import { createItem, fromSpawned, type Item } from './item';
-import { consumeItem, L, spawnOnGround } from './moves';
+import { consumeItem, L, moveItem, spawnOnGround } from './moves';
 import type { BodyPartId } from './bodyparts';
 import { sfx } from '../audio/sfx';
 import { overflowDamage, runDeathFunctions } from './mondeath';
@@ -195,6 +195,13 @@ export class MonsterSystem implements GameSystem {
   remove(m: Monster): void {
     m.dead = true;
     this.dirty = true;
+  }
+
+  /** Put whatever is stuck in `m` (arrows, bolts) on the ground where it stands. */
+  dropStuck(m: Monster): void {
+    const from = L.cargo(m.stuck);
+    for (const it of [...m.stuck.items]) moveItem(it, from, L.ground(this.game.map, m.tileX, m.tileY, m.z), { force: true, quiet: true });
+    m.stuck.hits.clear();
   }
 
   private inBubble(m: Monster): boolean {
@@ -596,6 +603,8 @@ export class MonsterSystem implements GameSystem {
       const rng = new Rng(hashSeed(this.game.seed, m.uid, 0xd40b));
       for (const s of expandItemGroup(this.game.data, def.death_drops, rng)) for (const it of fromSpawned(this.game.data, s)) spawnOnGround(this.game.map, tx, ty, m.z, it);
     }
+    // Arrows and bolts stuck in it fall with the body (BN: a dead monster's items drop).
+    this.dropStuck(m);
     // mdeath::normal bleeds once more on the spot.
     const blood = this.bloodType(def);
     if (blood && corpse) this.addField(tx, ty, m.z, blood, 2);

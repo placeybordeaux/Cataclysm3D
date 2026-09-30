@@ -5,6 +5,7 @@ import { Rng } from '../core/rng';
 import { ACTION_SCALE, clockScale, SECONDS_PER_DAY } from '../core/time';
 import { BALANCE } from './balance';
 import { sizeFromVolume, sizeMeleePenalty, type CreatureSize } from './combat';
+import type { Item } from './item';
 
 // A live creature instance of a CDDA MonsterDef (monster.cpp). Positions are float tiles like
 // the player's. All timers here are REAL seconds of action time: CDDA "moves"/"turns" are
@@ -174,6 +175,15 @@ export class Monster {
   raising = 0;
   /** Speech/sound bookkeeping. */
   name?: string;
+  /**
+   * Arrows and bolts stuck in it (BN monster::add_item from drop_or_embed_projectile). A cargo-like
+   * place so moves.ts moves them (L.cargo(m.stuck)); they fall where it dies (monai.die).
+   * `hits` says where each arrow of a stack struck, for the renderer: sideways share of the
+   * radius, height share of the body, and the flight's yaw relative to the monster's facing.
+   */
+  readonly stuck: { items: Item[]; def: { name: string; size: number }; hits: Map<Item, { side: number; hgt: number; yaw: number }[]> } = {
+    items: [], def: { name: 'creature', size: 1e9 }, hits: new Map(), // no volume limit: BN monsters carry whatever sticks
+  };
   readonly rng: Rng;
 
   constructor(readonly data: GameData, type: MonsterDef, x: number, y: number, z: number, rng: Rng) {

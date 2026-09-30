@@ -921,6 +921,40 @@ export function unloadItem(host: Item, to: Loc | Loc[], opts: MoveOpts & { pourL
   return done(fail('not_allowed', `You can't unload a ${host.baseName()}!`));
 }
 
+/**
+ * Fire one round out of `host` (a bow's nocked arrow, a crossbow's bolt, a magazine's round)
+ * and keep it as an object: the projectile in flight. BN's recoverable ammo (arrows, bolts,
+ * stones) lands somewhere after the shot, so it must not be destroyed like ammoConsume does.
+ * Returns the round, now *unplaced*: the caller must spawnItem it where it lands (ground, stuck
+ * in a monster) or it is gone. Null when there's nothing to take.
+ */
+export function takeRound(host: Item): Item | null {
+  const log: Undo[] = [];
+  let piece: Item | null = null;
+  const mag = host._magazine;
+  if (mag) return takeRound(mag);
+  if (host.isMagazine() || host.isBandolier()) {
+    const first = host._contents[0];
+    if (!first || first.charges <= 0) return null;
+    piece = takeFrom(L.in(host), first, 1, log);
+  } else if (host.hasIntegralMagazine() && host.charges > 0 && host.ammoId && host.data.items[host.ammoId]) {
+    // Integral magazine: the rounds are the host's charges (see putAt), so one of them becomes an item again.
+    piece = new Item(host.data, host.data.items[host.ammoId]);
+    piece.charges = 1;
+    const [c0, a0] = [host.charges, host.ammoId];
+    host.charges -= 1;
+    if (host.charges === 0) host.ammoId = null;
+    record(log, () => {
+      host.charges = c0;
+      host.ammoId = a0;
+    });
+  }
+  if (!piece) return null;
+  const tx = txStack[txStack.length - 1];
+  if (tx) tx.push(...log);
+  return piece;
+}
+
 /** Test/debug helper: every item reachable from `locs`, depth-first, with where it sits. */
 export function* walkLocs(locs: Loc[]): Generator<{ item: Item; loc: Loc }> {
   const visit = function* (loc: Loc): Generator<{ item: Item; loc: Loc }> {

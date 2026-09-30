@@ -4,6 +4,9 @@ import type { MonsterSystem } from '../game/monai';
 import { arcFor, defenseOf, FEEL } from '../game/combatfeel';
 import { swingStyleOf, type PlayerCombat } from '../game/playercombat';
 import { cssColor } from './framework';
+import { dispersionBreakdown, moaToRadians } from '../game/combat';
+import { maxOf, meanLateral } from '../game/rangedfeel';
+import type { Item } from '../game/item';
 
 // The combat feel HUD around the crosshair (src/game/combatfeel.ts), drawn as one small SVG
 // overlay so it never touches the main HUD's layout:
@@ -63,7 +66,13 @@ export class CombatHud {
   private last = performance.now();
   private raf = 0;
 
-  constructor(private game: Game, private combat: PlayerCombat, private sys: MonsterSystem, parent: HTMLElement, private visible: () => boolean) {
+  /** Ranged: the spread circle (typical error of the next shot) and its fit on the target. */
+  private spread: SVGCircleElement;
+  private spreadR = 0;
+  private spreadFit: 'good' | 'fair' | 'poor' | 'none' = 'none';
+  private spreadT = 0;
+
+  constructor(private game: Game, private combat: PlayerCombat, private sys: MonsterSystem, parent: HTMLElement, private visible: () => boolean, private fovDeg: () => number = () => 70) {
     this.root = document.createElement('div');
     this.root.className = 'combat-hud';
     Object.assign(this.root.style, { position: 'absolute', left: '50%', top: '50%', width: '0', height: '0', pointerEvents: 'none', zIndex: '4' });
@@ -79,6 +88,8 @@ export class CombatHud {
     const b = (sx: number, sy: number) => `M ${sx * 13} ${sy * 9} L ${sx * 13} ${sy * 13} L ${sx * 9} ${sy * 13}`;
     this.brackets = el('path', { d: [b(-1, -1), b(1, -1), b(-1, 1), b(1, 1)].join(' '), fill: 'none', stroke: cssColor('c_light_red'), 'stroke-width': 1.5 }, this.svg);
     this.guard = el('path', { d: arcPath(RING_R + 5, Math.PI - 0.9, Math.PI + 0.9), fill: 'none', 'stroke-width': 3, 'stroke-linecap': 'square' }, this.svg);
+    this.spread = el('circle', { r: 20, fill: 'none', 'stroke-width': 1.5, 'stroke-dasharray': '3 3' }, this.svg);
+    this.spread.style.display = 'none';
     this.grabEl = document.createElement('div');
     Object.assign(this.grabEl.style, {
       position: 'absolute', left: '0', top: '-64px', transform: 'translateX(-50%)', whiteSpace: 'nowrap', textAlign: 'center',
@@ -95,11 +106,15 @@ export class CombatHud {
     parent.appendChild(this.root);
 
     game.events.on('playerAttack', (e) => {
-      if (e.kind !== 'melee' || !e.reason) return;
-      this.whyEl.textContent = e.outcome === 'miss' ? `miss: ${e.reason}` : e.reason;
-      this.whyEl.style.color = cssColor(e.reason === 'dodged' || e.reason === 'no damage' ? 'c_yellow' : 'c_light_gray');
-      this.whyT = 1.0;
+      if (!e.reason) return;
+      // Ranged reasons already lead with what happened ("wide: …", "blocked by cover").
+      const ranged = e.kind !== 'melee';
+      const lead = /^(wide|high|low|fell short):/.test(e.reason) || !ranged ? '' : 'miss: ';
+      this.why(e.outcome === 'miss' || (ranged && e.outcome === 'whiff') ? (ranged ? `${lead}${e.reason}` : `miss: ${e.reason}`) : e.reason,
+        e.reason === 'dodged' || e.reason === 'no damage' || e.reason === 'grazed' ? 'c_yellow' : ranged && e.outcome !== 'hit' && e.outcome !== 'crit' ? 'c_light_red' : 'c_light_gray',
+        ranged ? 1.8 : 1.0);
     });
+    game.events.on('attackRefused', (e) => this.why(e.reason, 'c_light_red', 1.8));
 
     game.events.on('playerHurt', (e) => {
       const m = e.source as { x?: number; y?: number } | undefined;
@@ -117,6 +132,33 @@ export class CombatHud {
       this.frame();
     };
     this.raf = requestAnimationFrame(loop);
+  }
+
+  /**
+   * The spread circle: the typical error of the next shot (half the BN dispersion max, the mean
+   * of its sum of uniform draws) projected to screen pixels, and how it compares with the angular
+   * size of the creature under the crosshair.
+   */
+  private updateSpread(gun: Item): void {
+    const p = this.game.player;
+    const b = dispersionBreakdown(p, gun);
+    const ang = moaToRadians(maxOf(b) / 2);
+    const fov = (this.fovDeg() * Math.PI) / 180;
+    const h = this.root.parentElement?.clientHeight || window.innerHeight;
+    this.spreadR = Math.max(RING_R + 4, Math.min(h * 0.45, (Math.tan(Math.min(ang, 1.4)) / Math.tan(fov / 2)) * (h / 2)));
+    const t = this.combat.rangedTarget(60);
+    if (!t) this.spreadFit = 'none';
+    else {
+      const lateral = Math.tan(meanLateral(b)) * t.dist;
+      this.spreadFit = lateral <= t.m.radius * 0.7 ? 'good' : lateral <= t.m.radius * 1.4 ? 'fair' : 'poor';
+    }
+  }
+
+  /** Show a line above the crosshair for `seconds` (fading over the last 0.3 s). */
+  private why(text: string, color: string, seconds: number): void {
+    this.whyEl.textContent = text;
+    this.whyEl.style.color = cssColor(color);
+    this.whyT = seconds;
   }
 
   destroy(): void {
@@ -145,24 +187,45 @@ export class CombatHud {
     }
     this.brackets.style.display = this.inReach ? '' : 'none';
 
-    // --- swing ring: fills over the recovery; a blink when ready again
+    // --- ranged: the spread circle shrinks as you aim; its colour says whether it fits on the
+    // body under the crosshair (green), about does (yellow) or is wider than it (red).
+    const gun = w?.isGun() ? w : null;
+    if (gun) {
+      if ((this.spreadT -= dt) <= 0) {
+        this.spreadT = 0.06;
+        this.updateSpread(gun);
+      }
+      const r = this.spreadR;
+      this.spread.setAttribute('r', r.toFixed(1));
+      const col = { good: 'rgba(120,230,120,.8)', fair: 'rgba(255,220,90,.8)', poor: 'rgba(255,90,70,.85)', none: 'rgba(255,255,255,.45)' }[this.spreadFit];
+      this.spread.setAttribute('stroke', col);
+      this.spread.style.display = '';
+    } else this.spread.style.display = 'none';
+
+    // --- swing ring: fills over the recovery; a blink when ready again. With a bow or sling it
+    // fills with the draw (warm) and turns white at full draw.
+    const dr = c.draw;
     const s = c.swing;
     const total = s?.timing.total ?? 0;
-    const cooling = melee && c.cooldown > 0.02 && total > 0;
-    if (cooling) {
+    const cooling = !dr && melee && c.cooldown > 0.02 && total > 0;
+    if (dr) {
+      const f = Math.min(1, dr.t / dr.full);
+      this.ring.setAttribute('d', arcPath(RING_R, 0, Math.max(0.01, f * Math.PI * 2 - 0.001)));
+      this.ring.setAttribute('stroke', f < 1 ? 'rgba(255,200,120,.85)' : 'rgba(255,255,255,.9)');
+    } else if (cooling) {
       const f = Math.max(0, Math.min(1, 1 - c.cooldown / total));
       this.ring.setAttribute('d', arcPath(RING_R, 0, Math.max(0.01, f * Math.PI * 2 - 0.001)));
       this.ring.setAttribute('stroke', s && !s.resolved ? 'rgba(255,220,150,.8)' : 'rgba(255,255,255,.55)');
     } else if (this.wasCooling) this.readyBlink = 0.12;
     this.wasCooling = cooling;
     this.readyBlink = Math.max(0, this.readyBlink - dt);
-    if (!cooling && this.readyBlink > 0) {
+    if (!cooling && !dr && this.readyBlink > 0) {
       this.ring.setAttribute('d', arcPath(RING_R, 0, Math.PI * 2 - 0.001));
       this.ring.setAttribute('stroke', 'rgba(255,255,255,.9)');
     }
-    const ringOn = cooling || this.readyBlink > 0;
+    const ringOn = cooling || this.readyBlink > 0 || !!dr;
     this.ring.style.display = ringOn ? '' : 'none';
-    this.ringBg.style.display = cooling ? '' : 'none';
+    this.ringBg.style.display = cooling || dr ? '' : 'none';
 
     // --- guard / parry window
     const def = defenseOf(p);

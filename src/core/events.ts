@@ -36,7 +36,16 @@ export interface GameEvents {
     hitStop?: number;
     /** Why it didn't connect, for the crosshair: "dodged", "out of reach", "clumsy swing", "no damage". */
     reason?: string;
+    /** Ranged: the launcher kind (rangedfeel.ts RangedClass); arrows/bolts/stones leave no bullet marks. */
+    ranged?: string;
+    /** Ranged: the round came to rest here (a wall or the ground), not just passed its target. */
+    landed?: boolean;
   };
+  /**
+   * The survivor tried to attack and couldn't (too weak to draw the bow, no arrows): the
+   * crosshair says why (src/ui/combatHud.ts).
+   */
+  attackRefused: { reason: string };
   /** BN character_gets_headshot: the survivor's projectile landed with missed_by ≤ 0.1. */
   playerHeadshot: { target: unknown };
   /**
