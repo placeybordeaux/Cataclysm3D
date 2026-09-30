@@ -230,7 +230,7 @@ export function interactionsAt(game: Game, x: number, y: number, z: number): Int
     if (!canPick && !canPry)
       add('locked', `Examine ${t.name} (locked)`, () => {
         sfx.doorLocked({ x: x + 0.5, y: y + 0.5, z });
-        say(game, `The ${t.name} is locked.  If only you had something to pry it with…`);
+        say(game, `The ${t.name} is locked.  Hit it to smash it (or [${game.keys.keyFor('smash')}]), or pry it open with a crowbar.`);
       });
   }
 
@@ -252,7 +252,7 @@ export function interactionsAt(game: Game, x: number, y: number, z: number): Int
     const isDoorish = hasFlag(t, 'DOOR') || hasFlag(t, 'WINDOW') || !!t.open || !!t.close;
     const tBlocked = openCloseFlags(t) && !inside;
     if (tBlocked) {
-      if (t.open || t.close) add('examine', `Examine ${t.name}`, () => say(game, `You can't reach the ${t.name}'s latch from outside.`));
+      if (t.open || t.close) add('examine', `Examine ${t.name}`, () => say(game, `You can't reach the ${t.name}'s latch from outside.  Hit it to smash it (or [${game.keys.keyFor('smash')}]).`));
     } else if (t.open && !(locked && !inside)) add('open', `${locked ? 'Unlock and open' : 'Open'} ${t.name}`, () => say(game, openDoor(game, x, y, z)));
     else if (t.close && isDoorish && !onTile) add('close', `Close ${t.name}`, () => say(game, closeDoor(game, x, y, z)));
     if (f.open) add('open', `Open ${f.name}`, () => say(game, openDoor(game, x, y, z)));

@@ -363,6 +363,12 @@ export class PlayerCombat implements GameSystem {
     sfx.meleeSwing(undefined, ws);
     if (!m) {
       if (!phased) this.viewmodel()?.attack('melee');
+      // First-person players smash windows and doors by hitting them (CDDA's separate smash
+      // key X still works). The bash applies its own recovery and messages.
+      if (this.smashWorld?.()) {
+        this.cooldown = phased ? Math.max(this.cooldown, attackCooldownSeconds(p, w) - o.phased!) : attackCooldownSeconds(p, w);
+        return true;
+      }
       // Swinging at nothing still costs the swing (and a little stamina).
       const cd = attackCooldownSeconds(p, w);
       this.cooldown = phased ? Math.max(this.cooldown, cd - o.phased!) : cd;
@@ -691,6 +697,12 @@ export class PlayerCombat implements GameSystem {
   }
 
   /** World hooks for ammo effects (set by the combat-depth installer; no-ops in tests). */
+  /**
+   * A swing that finds no creature may hit the world instead: breaks the window/door/furniture
+   * under the crosshair (set by main.ts from bash.ts). Returns true if the blow landed on something.
+   */
+  smashWorld?: () => boolean;
+
   hooks: {
     ignite?: (x: number, y: number, z: number) => void;
     addField?: (x: number, y: number, z: number, type: string, intensity: number) => void;

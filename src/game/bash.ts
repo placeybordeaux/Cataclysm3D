@@ -288,3 +288,17 @@ export function smashUntilBroken(game: Game, target: TargetTile): void {
     onComplete: () => {},
   });
 }
+
+/**
+ * A melee swing at the world: smash what's under the crosshair if it's breakable (a window,
+ * door, fence, furniture) — never the floor or open air. Used when a swing finds no creature.
+ */
+export function smashAimed(game: Game): boolean {
+  const t = targetTile(game);
+  if (!t) return false;
+  const map = game.map;
+  const ter = map.terAt(t.x, t.y, t.z), furn = map.furnAt(t.x, t.y, t.z);
+  const breakable = (furn.id !== 'f_null' && !!furn.bash) || (!!ter.bash && !ter.bash.bash_below && !map.passable(t.x, t.y, t.z)) || (!!ter.bash && (ter.open !== undefined || ter.close !== undefined));
+  if (!breakable) return false;
+  return playerSmash(game, t) !== null;
+}

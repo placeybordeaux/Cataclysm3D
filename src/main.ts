@@ -19,6 +19,7 @@ import { installWorldInteraction } from './worldInteraction';
 import { installNature } from './nature';
 import { lightAt } from './game/vision';
 import { installMonsters } from './monsters';
+import { smashAimed } from './game/bash';
 import { installNpcs } from './npcs';
 import { installMutBio } from './mutbio';
 import { installCombatDepth } from './combatdepth';
@@ -92,6 +93,8 @@ async function main(): Promise<void> {
   // Crafting/reading probe `game.lightAt` for "too dark" checks; back it with real vision light.
   (game as unknown as { lightAt: (x: number, y: number, z: number) => number }).lightAt = (x, y, z) => lightAt(game, x, y, z);
   const monsters = installMonsters(game, renderer, worldgen, api);
+  // Swinging at a window/door/furniture with nothing alive in the arc smashes it.
+  monsters.combat.smashWorld = () => smashAimed(game);
   // Difficulty presets (src/game/difficulty.ts): spawner knobs, needs, feel, pausing; before progression (its hook).
   installDifficulty(game, { spawner: monsters.spawner, api });
   await installVehicles(game, renderer, api);
