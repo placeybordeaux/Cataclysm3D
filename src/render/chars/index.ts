@@ -30,6 +30,8 @@ export const charSettings = {
   mode: initialMode(),
   /** pose updates per second (Shadowglass-style stepped animation); 0 = every frame */
   fps: 10,
+  /** people's skins: styled.ts (default) or the projected sprite (?charpaint=sprite) */
+  paint: (typeof location !== 'undefined' && new URLSearchParams(location.search).get('charpaint') === 'sprite' ? 'sprite' : 'styled') as 'styled' | 'sprite',
   listeners: [] as ((m: CharMode) => void)[],
 };
 
@@ -46,16 +48,23 @@ export function setCharMode(m: CharMode): void {
 }
 
 /** Debug entry (cdda.chars): mode string, or a tweak object; returns the current settings. */
-export function charsApi(arg?: CharMode | { fps?: number; far?: [number, number]; emph?: number }): Record<string, unknown> {
+export function charsApi(arg?: CharMode | { fps?: number; far?: [number, number]; emph?: number; paint?: 'styled' | 'sprite' }): Record<string, unknown> {
   if (typeof arg === 'string') setCharMode(arg);
   else if (arg) {
+    if (arg.paint) {
+      if (arg.paint !== 'styled' && arg.paint !== 'sprite') throw new Error(`chars paint: ${arg.paint}`);
+      charSettings.paint = arg.paint;
+      if (layersIfAny) layersIfAny.store.style = arg.paint;
+      // repaint: every view rebuilds its visuals (skins are keyed by style)
+      for (const f of charSettings.listeners) f(charSettings.mode);
+    }
     if (arg.fps !== undefined) charSettings.fps = arg.fps;
     if (arg.far) (charUniforms.uFarNear.value = arg.far[0], charUniforms.uFarFar.value = arg.far[1]);
     if (arg.emph !== undefined) charUniforms.uEmphK.value = arg.emph;
   }
   const L = layersIfAny;
   return {
-    mode: charSettings.mode, fps: charSettings.fps, far: [charUniforms.uFarNear.value, charUniforms.uFarFar.value], emph: charUniforms.uEmphK.value,
+    mode: charSettings.mode, paint: charSettings.paint, fps: charSettings.fps, far: [charUniforms.uFarNear.value, charUniforms.uFarFar.value], emph: charUniforms.uEmphK.value,
     live: L?.live.count ?? 0, bodies: L?.dead.count ?? 0, skins: L?.store.skinCount ?? 0, pages: L?.store.pageCount ?? 0,
   };
 }
@@ -76,6 +85,7 @@ export function charLayers(renderer: Renderer): CharLayers {
   let L = perRenderer.get(renderer);
   if (L) return L;
   const store = new SkinStore();
+  store.style = charSettings.paint;
   const live = new CharLayer(true, 'chars-live');
   const dead = new CharLayer(true, 'chars-dead');
   for (const l of [live, dead]) {

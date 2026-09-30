@@ -166,8 +166,13 @@ export class FallingBody {
     const push = Math.hypot(dx, dy);
     let ang: number;
     if (rig.lie.side) ang = facing + (seed < 0.5 ? 1 : -1) * Math.PI / 2;
-    else if (push > 0.01) ang = Math.atan2(dx, -dy);
-    else ang = facing + Math.PI;
+    else if (push > 0.01) {
+      // People fall flat on their back or front, whichever is nearer the blow: toppling
+      // sideways left the spread arms sticking up out of the pile.
+      const blow = Math.atan2(dx, -dy);
+      const diff = Math.atan2(Math.sin(blow - facing), Math.cos(blow - facing));
+      ang = Math.abs(diff) < Math.PI / 2 ? facing : facing + Math.PI;
+    } else ang = facing + Math.PI;
     this.fallDir = { x: Math.sin(ang), y: -Math.cos(ang) };
     this.inst.yaw = facing;
     this.inst.z = z;

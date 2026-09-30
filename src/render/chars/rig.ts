@@ -13,20 +13,31 @@
 // sprites are drawn facing us) or right side (animals: drawn in profile, head to the right),
 // or a flat palette role for thin bits (insect legs, wings).
 
-import type { BodyShape } from './archetype';
+import type { BodyShape, Weapon } from './archetype';
 
 export type Proj = 'front' | 'side';
 export type Role = 'dark' | 'main' | 'light' | 'accent' | 'skin' | 'wing';
+export type Region = 'head' | 'neck' | 'torso' | 'hips' | 'upperArm' | 'foreArm' | 'hand' | 'thigh' | 'shin' | 'foot';
 
 export interface PartSrc {
   rect?: [number, number, number, number];
   proj?: Proj;
   /** flat palette colour instead of a sprite crop */
   role?: Role;
+  /** a fixed colour (weapons) */
+  color?: [number, number, number];
+  /**
+   * What this part is on a person (styled painting, paint.ts paintStyled): the sprite gives
+   * a semantic palette (skin, hair, shirt, pants, shoes, blood) and each region is painted
+   * deliberately from it.
+   */
+  region?: Region;
   /** trim the crop to the columns that are mostly opaque (drop outstretched arms etc.) */
   core?: boolean;
   /** paint eyes on the front face (heads) */
   face?: boolean;
+  /** paint a dark nose on the front face (muzzles) */
+  nose?: boolean;
   /**
    * Arms: take the outer quarter of the mostly-opaque core of these rows, on this side of
    * the image (the model's right arm is the sprite's left). Outstretched sprite arms and
@@ -43,6 +54,12 @@ export interface PartDef {
   center: [number, number, number];
   rest?: [number, number, number];
   src: PartSrc;
+  /**
+   * Taper: cross-section scale at the box's -axis end (x, z for the y axis; x, y for z) and
+   * its +axis end. [0.7, 0.7, 1, 1] on a hanging limb = narrower at the wrist/ankle.
+   */
+  taper?: [number, number, number, number];
+  taperAxis?: 'y' | 'z';
   /** 'limb' parts get fattened for far readability; 'core' parts less */
   kind?: 'core' | 'limb' | 'thin';
 }
@@ -126,47 +143,75 @@ function scaleParts(parts: PartDef[], s: number): PartDef[] {
 
 // ------------------------------------------------------------------ humanoid
 
-/** Humanoid part indices (order of the parts list in humanoid()). */
+/** Humanoid part indices (order of the parts list in humanoid()). Wings and a weapon follow. */
 export const HUM = {
   hips: 0, torso: 1, head: 2, uArmR: 3, fArmR: 4, uArmL: 5, fArmL: 6,
-  thighR: 7, shinR: 8, thighL: 9, shinL: 10, footR: 11, footL: 12, wingR: 13, wingL: 14,
+  thighR: 7, shinR: 8, thighL: 9, shinL: 10, footR: 11, footL: 12, neck: 13, handR: 14, handL: 15,
 } as const;
+
+/** Per-individual 0..1 values from one seed (posture quirks in a horde). */
+function quirk(seed: number, k: number): number {
+  const x = Math.sin(seed * 91.7 + k * 17.3) * 43758.5453;
+  return x - Math.floor(x);
+}
+
+/** Weapon mesh lengths (m) by kind; held in the right fist, along the forearm's axis. */
+const WEAPON: Record<Exclude<Weapon, 'none'>, { len: number; w: number; d: number; color: [number, number, number] }> = {
+  pistol: { len: 0.2, w: 0.04, d: 0.12, color: [44, 46, 50] },
+  rifle: { len: 0.85, w: 0.05, d: 0.1, color: [52, 50, 46] },
+  long: { len: 0.8, w: 0.05, d: 0.05, color: [120, 88, 56] },
+  short: { len: 0.3, w: 0.03, d: 0.05, color: [150, 152, 158] },
+};
 
 function humanoid(sh: BodyShape): Rig {
   const g = sh.girth, hd = sh.head;
-  const legLen = 0.87, hipY = 0.92;
+  const hipY = 0.92;
   const torsoW = 0.38 * g, torsoD = 0.22 * Math.sqrt(g) * (g > 1.3 ? 1.25 : 1);
   const armW = 0.11 * Math.sqrt(g);
   const legW = 0.15 * Math.sqrt(g), legD = 0.16 * Math.sqrt(g);
   // hip joint at hipY - 0.06: thigh + shin + foot reach the floor
-  const upperArm = 0.32, foreArm = 0.33, thigh = 0.41, shin = 0.38, footH = 0.07;
+  const upperArm = 0.3, foreArm = 0.25, hand = 0.09, thigh = 0.41, shin = 0.38, footH = 0.07;
   const hipX = 0.095 * Math.min(g, 1.3);
-  const shoulderX = torsoW / 2 + armW / 2;
-  // Two-segment limbs (shoulder/elbow, hip/knee) plus feet: bent elbows and knees and a foot
-  // pointing where the body faces read far better than Minecraft planks. Indices are H.* below.
+  const shoulderX = torsoW / 2 + armW / 2 - 0.01;
+  const headH = 0.25 * hd, headW = 0.24 * hd;
+  // Two-segment limbs, fists and feet, a neck, tapered segments (wrists and ankles narrower,
+  // shoulders wider than the waist): reads as a person, not a stack of planks. Indices: HUM.
   const parts: PartDef[] = [
-    { name: 'hips', parent: -1, joint: [0, hipY, 0], size: [torsoW * 0.92, 0.16, torsoD * 0.95], center: [0, -0.02, 0], src: { rect: [0.2, 0.5, 0.8, 0.6], proj: 'front', core: true }, kind: 'core' },
-    { name: 'torso', parent: 0, joint: [0, 0.06, 0], size: [torsoW, 0.46, torsoD], center: [0, 0.23, 0], src: { rect: [0.15, 0.22, 0.85, 0.52], proj: 'front', core: true }, kind: 'core' },
-    { name: 'head', parent: 1, joint: [0, 0.47, 0], size: [0.25 * hd, 0.27 * hd, 0.25 * hd], center: [0, 0.135 * hd, 0], src: { rect: [0.2, 0, 0.8, 0.22], proj: 'front', core: true, face: true }, kind: 'core' },
-    { name: 'uArmR', parent: 1, joint: [shoulderX, 0.42, 0], size: [armW, upperArm, armW], center: [0, -upperArm / 2 + 0.03, 0], src: { rect: [0, 0.22, 1, 0.4], proj: 'front', edge: 'left' }, kind: 'limb' },
-    { name: 'fArmR', parent: 3, joint: [0, -upperArm + 0.04, 0], size: [armW * 0.92, foreArm, armW * 0.92], center: [0, -foreArm / 2, 0], src: { rect: [0, 0.38, 1, 0.56], proj: 'front', edge: 'left' }, kind: 'limb' },
-    { name: 'uArmL', parent: 1, joint: [-shoulderX, 0.42, 0], size: [armW, upperArm, armW], center: [0, -upperArm / 2 + 0.03, 0], src: { rect: [0, 0.22, 1, 0.4], proj: 'front', edge: 'right' }, kind: 'limb' },
-    { name: 'fArmL', parent: 5, joint: [0, -upperArm + 0.04, 0], size: [armW * 0.92, foreArm, armW * 0.92], center: [0, -foreArm / 2, 0], src: { rect: [0, 0.38, 1, 0.56], proj: 'front', edge: 'right' }, kind: 'limb' },
-    { name: 'thighR', parent: 0, joint: [hipX, -0.06, 0], size: [legW, thigh, legD], center: [0, -thigh / 2, 0], src: { rect: [0.1, 0.56, 0.5, 0.76], proj: 'front', core: true }, kind: 'limb' },
-    { name: 'shinR', parent: 7, joint: [0, -thigh, 0], size: [legW * 0.9, shin, legD * 0.9], center: [0, -shin / 2, 0], src: { rect: [0.1, 0.74, 0.5, 0.94], proj: 'front', core: true }, kind: 'limb' },
-    { name: 'thighL', parent: 0, joint: [-hipX, -0.06, 0], size: [legW, thigh, legD], center: [0, -thigh / 2, 0], src: { rect: [0.5, 0.56, 0.9, 0.76], proj: 'front', core: true }, kind: 'limb' },
-    { name: 'shinL', parent: 9, joint: [0, -thigh, 0], size: [legW * 0.9, shin, legD * 0.9], center: [0, -shin / 2, 0], src: { rect: [0.5, 0.74, 0.9, 0.94], proj: 'front', core: true }, kind: 'limb' },
-    { name: 'footR', parent: 8, joint: [0, -shin, 0], size: [legW * 0.95, footH, 0.26], center: [0, -footH / 2 + 0.005, -0.05], src: { rect: [0.1, 0.9, 0.5, 1], proj: 'front', core: true }, kind: 'limb' },
-    { name: 'footL', parent: 10, joint: [0, -shin, 0], size: [legW * 0.95, footH, 0.26], center: [0, -footH / 2 + 0.005, -0.05], src: { rect: [0.5, 0.9, 0.9, 1], proj: 'front', core: true }, kind: 'limb' },
+    { name: 'hips', parent: -1, joint: [0, hipY, 0], size: [torsoW * 0.9, 0.16, torsoD * 0.95], center: [0, -0.02, 0], src: { rect: [0.2, 0.5, 0.8, 0.6], proj: 'front', core: true, region: 'hips' }, kind: 'core' },
+    { name: 'torso', parent: 0, joint: [0, 0.06, 0], size: [torsoW, 0.46, torsoD], center: [0, 0.23, 0], taper: [0.8, 0.92, 1, 1], src: { rect: [0.15, 0.22, 0.85, 0.52], proj: 'front', core: true, region: 'torso' }, kind: 'core' },
+    { name: 'head', parent: 1, joint: [0, 0.49, 0], size: [headW, headH, headW * 1.05], center: [0, headH / 2, 0], taper: [0.82, 0.88, 1, 1], src: { rect: [0.2, 0, 0.8, 0.22], proj: 'front', core: true, face: true, region: 'head' }, kind: 'core' },
+    { name: 'uArmR', parent: 1, joint: [shoulderX, 0.42, 0], size: [armW, upperArm, armW], center: [0, -upperArm / 2 + 0.03, 0], taper: [0.85, 0.85, 1, 1], src: { rect: [0, 0.22, 1, 0.4], proj: 'front', edge: 'left', region: 'upperArm' }, kind: 'limb' },
+    { name: 'fArmR', parent: 3, joint: [0, -upperArm + 0.04, 0], size: [armW * 0.88, foreArm, armW * 0.88], center: [0, -foreArm / 2, 0], taper: [0.78, 0.78, 1, 1], src: { rect: [0, 0.38, 1, 0.56], proj: 'front', edge: 'left', region: 'foreArm' }, kind: 'limb' },
+    { name: 'uArmL', parent: 1, joint: [-shoulderX, 0.42, 0], size: [armW, upperArm, armW], center: [0, -upperArm / 2 + 0.03, 0], taper: [0.85, 0.85, 1, 1], src: { rect: [0, 0.22, 1, 0.4], proj: 'front', edge: 'right', region: 'upperArm' }, kind: 'limb' },
+    { name: 'fArmL', parent: 5, joint: [0, -upperArm + 0.04, 0], size: [armW * 0.88, foreArm, armW * 0.88], center: [0, -foreArm / 2, 0], taper: [0.78, 0.78, 1, 1], src: { rect: [0, 0.38, 1, 0.56], proj: 'front', edge: 'right', region: 'foreArm' }, kind: 'limb' },
+    { name: 'thighR', parent: 0, joint: [hipX, -0.06, 0], size: [legW, thigh, legD], center: [0, -thigh / 2, 0], taper: [0.82, 0.85, 1, 1], src: { rect: [0.1, 0.56, 0.5, 0.76], proj: 'front', core: true, region: 'thigh' }, kind: 'limb' },
+    { name: 'shinR', parent: 7, joint: [0, -thigh, 0], size: [legW * 0.86, shin, legD * 0.86], center: [0, -shin / 2, 0], taper: [0.75, 0.8, 1, 1], src: { rect: [0.1, 0.74, 0.5, 0.94], proj: 'front', core: true, region: 'shin' }, kind: 'limb' },
+    { name: 'thighL', parent: 0, joint: [-hipX, -0.06, 0], size: [legW, thigh, legD], center: [0, -thigh / 2, 0], taper: [0.82, 0.85, 1, 1], src: { rect: [0.5, 0.56, 0.9, 0.76], proj: 'front', core: true, region: 'thigh' }, kind: 'limb' },
+    { name: 'shinL', parent: 9, joint: [0, -thigh, 0], size: [legW * 0.86, shin, legD * 0.86], center: [0, -shin / 2, 0], taper: [0.75, 0.8, 1, 1], src: { rect: [0.5, 0.74, 0.9, 0.94], proj: 'front', core: true, region: 'shin' }, kind: 'limb' },
+    { name: 'footR', parent: 8, joint: [0, -shin, 0], size: [legW * 0.92, footH, 0.25], center: [0, -footH / 2 + 0.005, -0.05], taper: [1, 0.75, 1, 1.1], taperAxis: 'z', src: { rect: [0.1, 0.9, 0.5, 1], proj: 'front', core: true, region: 'foot' }, kind: 'limb' },
+    { name: 'footL', parent: 10, joint: [0, -shin, 0], size: [legW * 0.92, footH, 0.25], center: [0, -footH / 2 + 0.005, -0.05], taper: [1, 0.75, 1, 1.1], taperAxis: 'z', src: { rect: [0.5, 0.9, 0.9, 1], proj: 'front', core: true, region: 'foot' }, kind: 'limb' },
+    { name: 'neck', parent: 1, joint: [0, 0.45, 0], size: [0.1 * Math.sqrt(g), 0.07, 0.1 * Math.sqrt(g)], center: [0, 0.03, 0], src: { rect: [0.4, 0.18, 0.6, 0.24], proj: 'front', region: 'neck' }, kind: 'core' },
+    { name: 'handR', parent: 4, joint: [0, -foreArm, 0], size: [armW * 0.95, hand, armW * 1.05], center: [0, -hand / 2 + 0.01, 0], taper: [0.85, 0.85, 1, 1], src: { rect: [0, 0.5, 0.2, 0.58], proj: 'front', region: 'hand' }, kind: 'limb' },
+    { name: 'handL', parent: 6, joint: [0, -foreArm, 0], size: [armW * 0.95, hand, armW * 1.05], center: [0, -hand / 2 + 0.01, 0], taper: [0.85, 0.85, 1, 1], src: { rect: [0.8, 0.5, 1, 0.58], proj: 'front', region: 'hand' }, kind: 'limb' },
   ];
+  let wingR = -1, wingL = -1, weaponI = -1;
   if (sh.wings !== 'none') {
+    wingR = parts.length;
+    wingL = parts.length + 1;
     parts.push(
       { name: 'wingR', parent: 1, joint: [0.08, 0.38, 0.12], size: [0.7, 0.5, 0.03], center: [0.35, 0.05, 0], rest: [0, -0.4, 0.3], src: { role: 'wing' }, kind: 'thin' },
       { name: 'wingL', parent: 1, joint: [-0.08, 0.38, 0.12], size: [0.7, 0.5, 0.03], center: [-0.35, 0.05, 0], rest: [0, 0.4, -0.3], src: { role: 'wing' }, kind: 'thin' },
     );
   }
+  const weapon = sh.weapon ?? 'none';
+  if (weapon !== 'none') {
+    const wd = WEAPON[weapon];
+    weaponI = parts.length;
+    // along the fist's -y (the forearm's line): a gun held out points forward, a bat hangs
+    parts.push({ name: 'weapon', parent: HUM.handR, joint: [0, -hand * 0.6, 0], size: [wd.w, wd.len, wd.d], center: [0, -wd.len / 2 + (weapon === 'long' ? 0.15 : 0.04), 0], src: { color: wd.color }, kind: 'thin' });
+  }
   const s = sh.scale;
-  const height = (hipY + 0.06 + 0.47 + 0.27 * hd) * s;
+  const height = (hipY + 0.06 + 0.49 + headH) * s;
   const zombie = sh.zombie;
   return {
     shape: sh, parts: scaleParts(parts, s), height, hover: sh.flies ? 0.6 * s : 0, lie: { angle: Math.PI / 2, lift: torsoD * 0.5 * s, side: false },
@@ -176,12 +221,32 @@ function humanoid(sh: BodyShape): Rig {
       const walk = Math.min(1, p.gait);
       const run = Math.max(0, p.gait - 1);
       const amp = walk * 0.45 + run * 0.35;
-      const lean = zombie ? 0.1 : 0.0;
+      if (p.dead) {
+        // a corpse: limp, arms flung out sideways, legs a little apart, head lolled. Nothing
+        // points at the sky (a lying body's "forward" is up).
+        setRot(o, H.head, 0.1, 0.6 * (p.seed - 0.5), 0.5 * (p.seed - 0.5));
+        setRot(o, H.uArmR, 0.1, 0, 0.9 + 0.5 * p.seed);
+        setRot(o, H.fArmR, 0.2 * p.seed);
+        setRot(o, H.uArmL, 0.15 * (1 - p.seed), 0, -(0.7 + 0.6 * (1 - p.seed)));
+        setRot(o, H.fArmL, 0.25);
+        setRot(o, H.thighR, -0.05, 0, 0.14);
+        setRot(o, H.thighL, 0.05, 0, -0.1);
+        setRot(o, H.shinR, -0.1);
+        // feet pointed along the legs (a lying body's toes would otherwise stand up 25 cm)
+        setRot(o, H.footR, 1.1, 0, 0.2);
+        setRot(o, H.footL, 1.1, 0, -0.2);
+        return;
+      }
+      // zombie quirks, fixed per individual: a hunch, a head tilt, a dragging arm
+      const hunch = zombie ? 0.1 + 0.2 * quirk(p.seed, 1) : 0;
+      const tilt = zombie ? (quirk(p.seed, 2) - 0.5) * 0.6 : 0;
+      const drag = zombie && quirk(p.seed, 3) < 0.35;
+      const limp = zombie ? 0.15 * quirk(p.seed, 4) : 0;
       // legs: opposite swing, the knee folds while the leg swings through, the foot stays
       // roughly flat; the body dips at each foot fall
-      for (const [thighI, shinI, footI, off] of [[H.thighR, H.shinR, H.footR, 0], [H.thighL, H.shinL, H.footL, Math.PI]] as const) {
-        const a = sin(ph + off) * amp;
-        const knee = -Math.max(0, cos(ph + off)) * (amp * 1.3 + run * 0.4);
+      for (const [thighI, shinI, footI, off, k] of [[H.thighR, H.shinR, H.footR, 0, 1], [H.thighL, H.shinL, H.footL, Math.PI, 1 - limp * 2]] as const) {
+        const a = sin(ph + off) * amp * k;
+        const knee = -Math.max(0, cos(ph + off)) * (amp * 1.3 + run * 0.4) * k;
         setRot(o, thighI, a);
         setRot(o, shinI, knee);
         setRot(o, footI, -(a + knee) * 0.7);
@@ -189,26 +254,36 @@ function humanoid(sh: BodyShape): Rig {
       o.pos[1] -= Math.abs(sin(ph)) * 0.04 * walk * s;
       // idle: slow breathing sway (zombies loll their heads)
       const idle = sin(p.t * 1.7 + p.seed * TAU);
-      setRot(o, H.torso, -lean - 0.03 * idle * (zombie ? 1 : 0.4) - run * 0.25, 0, zombie ? 0.05 * sin(ph * 0.5 + p.seed * 6) : 0);
-      setRot(o, H.head, zombie ? 0.18 + 0.08 * idle : 0.02 * idle, zombie ? 0.1 * sin(p.t * 0.9 + p.seed * 9) : 0, zombie ? 0.2 * sin(p.seed * 20) : 0);
-      // arms: zombies reach out, uneven, hands drooping; people swing them against the legs
-      const reachR = zombie ? 1.3 + 0.12 * sin(ph + 1) + 0.06 * idle : 0;
-      const reachL = zombie ? 1.15 + 0.12 * sin(ph + 2.2) - 0.05 * idle : 0;
+      setRot(o, H.torso, -hunch - 0.03 * idle * (zombie ? 1 : 0.4) - run * 0.25, 0, zombie ? 0.05 * sin(ph * 0.5 + p.seed * 6) + (quirk(p.seed, 5) - 0.5) * 0.12 : 0);
+      setRot(o, H.head, zombie ? 0.12 + 0.08 * idle : 0.02 * idle, zombie ? 0.1 * sin(p.t * 0.9 + p.seed * 9) : 0, tilt);
+      // arms: zombies reach out, uneven, hands drooping (one may hang and drag); people swing
+      // them against the legs; armed people hold their weapon
+      let reachR = zombie ? 1.3 + 0.12 * sin(ph + 1) + 0.06 * idle : 0;
+      let reachL = zombie ? (drag ? 0.15 + 0.1 * sin(ph + 2.2) : 1.15 + 0.12 * sin(ph + 2.2) - 0.05 * idle) : 0;
       if (zombie) {
         setRot(o, H.uArmR, reachR, 0, -0.08);
-        setRot(o, H.uArmL, reachL, 0, 0.1);
+        setRot(o, H.uArmL, reachL, 0, drag ? -0.08 : 0.1);
         setRot(o, H.fArmR, -0.25 + 0.1 * sin(p.t * 1.3 + p.seed * 4));
-        setRot(o, H.fArmL, -0.35 + 0.1 * sin(p.t * 1.1 + p.seed * 7));
+        setRot(o, H.fArmL, drag ? 0.1 : -0.35 + 0.1 * sin(p.t * 1.1 + p.seed * 7));
+      } else if (weapon === 'rifle' || weapon === 'pistol') {
+        // weapon at the ready: right forearm level, left hand supporting
+        reachR = 1.0;
+        setRot(o, H.uArmR, 0.35, 0, 0.1);
+        setRot(o, H.fArmR, 1.1);
+        setRot(o, H.uArmL, weapon === 'rifle' ? 0.6 : 0.4, 0, -0.35);
+        setRot(o, H.fArmL, 0.9);
+        setRot(o, weaponI, -0.1);
       } else {
         setRot(o, H.uArmR, -sin(ph) * amp * 0.9 + run * 0.2, 0, 0.06);
         setRot(o, H.uArmL, sin(ph) * amp * 0.9 + run * 0.2, 0, -0.06);
         setRot(o, H.fArmR, 0.15 + walk * 0.25 + run * 0.9);
         setRot(o, H.fArmL, 0.15 + walk * 0.25 + run * 0.9);
+        if (weaponI >= 0) setRot(o, weaponI, weapon === 'long' ? 1.2 : 1.4);
       }
-      if (sh.wings !== 'none') {
+      if (wingR >= 0) {
         const f = sin(p.t * 9 + p.seed * 5) * 0.6;
-        setRot(o, H.wingR, 0, 0, f);
-        setRot(o, H.wingL, 0, 0, -f);
+        setRot(o, wingR, 0, 0, f);
+        setRot(o, wingL, 0, 0, -f);
         o.pos[1] += (0.08 * sin(p.t * 4.5)) * s;
       }
       if (p.windup !== null) {
@@ -234,7 +309,7 @@ function humanoid(sh: BodyShape): Rig {
           // (+x continues the arm's swing: past straight up the hands go behind the head)
           setRot(o, H.fArmR, 0.8 * u);
           setRot(o, H.fArmL, 0.8 * u);
-          setRot(o, H.torso, (0.28 + 0.12 * heavy) * u);
+          setRot(o, H.torso, (0.28 + 0.12 * heavy + hunch) * u);
           setRot(o, H.head, -0.2 * u);
           o.pos[2] += 0.1 * u * s;
         }
@@ -256,31 +331,15 @@ function humanoid(sh: BodyShape): Rig {
         setRot(o, H.fArmR, 0.3 * p.flinch);
         setRot(o, H.fArmL, 0.3 * p.flinch);
       }
-      if (p.dead) {
-        // a corpse forgets the reach/walk pose (zombie arms would point at the sky): limp,
-        // arms flung out, one knee up
-        o.rot.fill(0);
-        setRot(o, H.head, 0, 0.5 * (p.seed - 0.5), 0.4 * (p.seed - 0.5));
-        // (+z swings the right arm out to the side, -z the left)
-        setRot(o, H.uArmR, 0.15, 0, 0.9 + 0.5 * p.seed);
-        setRot(o, H.fArmR, 0.3 * p.seed);
-        setRot(o, H.uArmL, 0.25 - 0.3 * p.seed, 0, -(0.7 + 0.6 * (1 - p.seed)));
-        setRot(o, H.fArmL, 0.4);
-        setRot(o, p.seed > 0.5 ? H.thighR : H.thighL, 0.3);
-        setRot(o, p.seed > 0.5 ? H.shinR : H.shinL, -0.5);
-        setRot(o, H.thighR, 0, 0, 0.12);
-        setRot(o, H.thighL, 0, 0, -0.12);
-        setRot(o, H.footR, 0.4, 0, 0.3);
-        setRot(o, H.footL, 0.4, 0, -0.3);
-      } else if (p.down > 0) {
-        // lying on the back: limbs relax outward
+      if (p.down > 0) {
+        // lying on the back: arms fall to the sides
         const d = p.down;
         setRot(o, H.uArmR, -reachR * d, 0, 0.5 * d);
         setRot(o, H.uArmL, -reachL * d, 0, -0.5 * d);
         setRot(o, H.thighR, 0, 0, 0.15 * d);
         setRot(o, H.thighL, 0, 0, -0.15 * d);
-        setRot(o, H.footR, 0.8 * d);
-        setRot(o, H.footL, 0.8 * d);
+        setRot(o, H.footR, 1.1 * d);
+        setRot(o, H.footL, 1.1 * d);
       }
     },
   };
@@ -297,15 +356,18 @@ function quadruped(sh: BodyShape, critter: boolean): Rig {
   const hs = (critter ? 0.11 : 0.2) * hd;
   const bodyY = leg + bh / 2 - 0.02;
   const parts: PartDef[] = [
-    { name: 'body', parent: -1, joint: [0, bodyY, 0], size: [bw, bh, bl], center: [0, 0, 0], src: { rect: [0.15, 0.2, 0.8, 0.65], proj: 'side', core: true }, kind: 'core' },
-    { name: 'head', parent: 0, joint: [0, bh * 0.35, -bl / 2], size: [hs * 0.9, hs, hs * 1.25], center: [0, hs * 0.35, -hs * 0.45], src: { rect: [0.68, 0, 1, 0.45], proj: 'side', core: true, face: true }, kind: 'core' },
-    { name: 'legFR', parent: 0, joint: [bw / 2 - legW / 2, -bh / 2 + 0.02, -bl / 2 + legW], size: [legW, leg, legW], center: [0, -leg / 2, 0], src: { rect: [0.6, 0.55, 0.85, 1], proj: 'side', core: true }, kind: 'limb' },
-    { name: 'legFL', parent: 0, joint: [-bw / 2 + legW / 2, -bh / 2 + 0.02, -bl / 2 + legW], size: [legW, leg, legW], center: [0, -leg / 2, 0], src: { rect: [0.6, 0.55, 0.85, 1], proj: 'side', core: true }, kind: 'limb' },
-    { name: 'legBR', parent: 0, joint: [bw / 2 - legW / 2, -bh / 2 + 0.02, bl / 2 - legW], size: [legW, leg, legW], center: [0, -leg / 2, 0], src: { rect: [0.1, 0.55, 0.4, 1], proj: 'side', core: true }, kind: 'limb' },
-    { name: 'legBL', parent: 0, joint: [-bw / 2 + legW / 2, -bh / 2 + 0.02, bl / 2 - legW], size: [legW, leg, legW], center: [0, -leg / 2, 0], src: { rect: [0.1, 0.55, 0.4, 1], proj: 'side', core: true }, kind: 'limb' },
-    { name: 'tail', parent: 0, joint: [0, bh * 0.3, bl / 2], size: [legW * 0.7, legW * 0.7, bl * 0.4], center: [0, 0, bl * 0.2], rest: [0.6, 0, 0], src: { rect: [0, 0.15, 0.2, 0.45], proj: 'side' }, kind: 'thin' },
+    // deep chest, narrow loins (taper along the body)
+    { name: 'body', parent: -1, joint: [0, bodyY, 0], size: [bw, bh, bl], center: [0, 0, 0], taper: [1.05, 1.08, 0.82, 0.84], taperAxis: 'z', src: { rect: [0.15, 0.2, 0.8, 0.65], proj: 'side', core: true }, kind: 'core' },
+    { name: 'head', parent: 0, joint: [0, bh * 0.35, -bl / 2], size: [hs * 0.9, hs, hs * 0.95], center: [0, hs * 0.35, -hs * 0.35], taper: [0.85, 0.85, 1, 1], taperAxis: 'z', src: { rect: [0.68, 0, 1, 0.45], proj: 'side', core: true, face: true }, kind: 'core' },
+    { name: 'legFR', parent: 0, taper: [0.75, 0.75, 1, 1], joint: [bw / 2 - legW / 2, -bh / 2 + 0.02, -bl / 2 + legW], size: [legW, leg, legW], center: [0, -leg / 2, 0], src: { rect: [0.6, 0.55, 0.85, 1], proj: 'side', core: true }, kind: 'limb' },
+    { name: 'legFL', parent: 0, taper: [0.75, 0.75, 1, 1], joint: [-bw / 2 + legW / 2, -bh / 2 + 0.02, -bl / 2 + legW], size: [legW, leg, legW], center: [0, -leg / 2, 0], src: { rect: [0.6, 0.55, 0.85, 1], proj: 'side', core: true }, kind: 'limb' },
+    { name: 'legBR', parent: 0, taper: [0.75, 0.75, 1, 1], joint: [bw / 2 - legW / 2, -bh / 2 + 0.02, bl / 2 - legW], size: [legW, leg, legW], center: [0, -leg / 2, 0], src: { rect: [0.1, 0.55, 0.4, 1], proj: 'side', core: true }, kind: 'limb' },
+    { name: 'legBL', parent: 0, taper: [0.75, 0.75, 1, 1], joint: [-bw / 2 + legW / 2, -bh / 2 + 0.02, bl / 2 - legW], size: [legW, leg, legW], center: [0, -leg / 2, 0], src: { rect: [0.1, 0.55, 0.4, 1], proj: 'side', core: true }, kind: 'limb' },
+    { name: 'tail', parent: 0, joint: [0, bh * 0.3, bl / 2], size: [legW * 0.8, legW * 0.8, bl * 0.42], center: [0, 0, bl * 0.2], rest: [0.6, 0, 0], taper: [1, 1, 0.45, 0.45], taperAxis: 'z', src: { rect: [0, 0.15, 0.2, 0.45], proj: 'side' }, kind: 'thin' },
     { name: 'earR', parent: 1, joint: [hs * 0.3, hs * 0.8, -hs * 0.1], size: [hs * 0.22, hs * (critter && L > 1.1 ? 1.2 : 0.4), hs * 0.12], center: [0, hs * 0.2, 0], rest: [-0.2, 0, -0.2], src: { rect: [0.7, 0, 0.95, 0.2], proj: 'side' }, kind: 'thin' },
     { name: 'earL', parent: 1, joint: [-hs * 0.3, hs * 0.8, -hs * 0.1], size: [hs * 0.22, hs * (critter && L > 1.1 ? 1.2 : 0.4), hs * 0.12], center: [0, hs * 0.2, 0], rest: [-0.2, 0, 0.2], src: { rect: [0.7, 0, 0.95, 0.2], proj: 'side' }, kind: 'thin' },
+    // a tapered muzzle with a dark nose (dogs, deer, bears; short on critters)
+    { name: 'snout', parent: 1, joint: [0, hs * 0.18, -hs * 0.8], size: [hs * 0.55, hs * 0.5, hs * (critter ? 0.35 : 0.6)], center: [0, 0, -hs * (critter ? 0.17 : 0.3)], taper: [0.7, 0.75, 1, 1], taperAxis: 'z', src: { rect: [0.85, 0.12, 1, 0.45], proj: 'side', core: true, nose: true }, kind: 'core' },
   ];
   const s = sh.scale;
   return {
@@ -578,33 +640,56 @@ function serpent(sh: BodyShape): Rig {
 // ------------------------------------------------------------------ triffids, fungaloids
 
 function plant(sh: BodyShape): Rig {
+  // A triffid-like stalker: root tendrils, a bending two-part stalk, a bulb head that opens in
+  // four petals around a dark maw, a whip, drooping leaves. Fungaloids get the same body in
+  // their own colours.
   const parts: PartDef[] = [
-    { name: 'base', parent: -1, joint: [0, 0, 0], size: [0.42, 0.12, 0.42], center: [0, 0.06, 0], src: { rect: [0.1, 0.85, 0.9, 1], proj: 'front', core: true }, kind: 'core' },
-    { name: 'stalk', parent: 0, joint: [0, 0.1, 0], size: [0.18, 0.95, 0.18], center: [0, 0.47, 0], src: { rect: [0.3, 0.4, 0.7, 0.9], proj: 'front', core: true }, kind: 'core' },
-    { name: 'bulb', parent: 1, joint: [0, 0.92, 0], size: [0.42, 0.38, 0.42], center: [0, 0.18, 0], src: { rect: [0.15, 0, 0.85, 0.4], proj: 'front', core: true, face: true }, kind: 'core' },
-    { name: 'leafR', parent: 1, joint: [0.08, 0.45, 0], size: [0.4, 0.03, 0.14], center: [0.2, 0, 0], rest: [0, 0.3, 0.4], src: { role: 'accent' }, kind: 'thin' },
-    { name: 'leafL', parent: 1, joint: [-0.08, 0.6, 0.02], size: [0.4, 0.03, 0.14], center: [-0.2, 0, 0], rest: [0, -0.5, -0.4], src: { role: 'accent' }, kind: 'thin' },
-    { name: 'leafB', parent: 1, joint: [0, 0.3, 0.08], size: [0.14, 0.03, 0.38], center: [0, 0, 0.19], rest: [-0.4, 0, 0], src: { role: 'accent' }, kind: 'thin' },
+    { name: 'base', parent: -1, joint: [0, 0, 0], size: [0.4, 0.14, 0.4], center: [0, 0.07, 0], taper: [1.25, 1.25, 0.7, 0.7], src: { rect: [0.1, 0.85, 0.9, 1], proj: 'front', core: true }, kind: 'core' },
+    { name: 'stalk1', parent: 0, joint: [0, 0.12, 0], size: [0.2, 0.5, 0.2], center: [0, 0.25, 0], taper: [1, 1, 0.8, 0.8], src: { rect: [0.3, 0.55, 0.7, 0.9], proj: 'front', core: true }, kind: 'core' },
+    { name: 'stalk2', parent: 1, joint: [0, 0.48, 0], size: [0.16, 0.46, 0.16], center: [0, 0.23, 0], rest: [0.12, 0, 0], taper: [1, 1, 0.7, 0.7], src: { rect: [0.3, 0.4, 0.7, 0.6], proj: 'front', core: true }, kind: 'core' },
+    { name: 'bulb', parent: 2, joint: [0, 0.44, 0], size: [0.36, 0.32, 0.36], center: [0, 0.16, 0], taper: [0.55, 0.55, 1, 1], src: { rect: [0.15, 0, 0.85, 0.4], proj: 'front', core: true }, kind: 'core' },
+    { name: 'maw', parent: 3, joint: [0, 0.31, 0], size: [0.2, 0.04, 0.2], center: [0, 0, 0], src: { color: [48, 16, 20] }, kind: 'thin' },
   ];
+  // petals around the maw, opening outward
+  for (let i = 0; i < 4; i++) {
+    const a = (i * Math.PI) / 2;
+    parts.push({ name: `petal${i}`, parent: 3, joint: [Math.sin(a) * 0.14, 0.3, Math.cos(a) * 0.14], size: [0.16, 0.2, 0.03], center: [0, 0.09, 0], rest: [Math.cos(a) * 0.5, a, 0], taper: [1, 1, 0.4, 0.4], src: { role: 'accent' }, kind: 'thin' });
+  }
+  const leaf = (name: string, y: number, yaw: number): PartDef => ({ name, parent: 1, joint: [Math.sin(yaw) * 0.08, y, Math.cos(yaw) * 0.08], size: [0.05, 0.03, 0.42], center: [0, 0, 0.2], rest: [-0.35, yaw, 0], taper: [1.4, 1, 0.5, 1], taperAxis: 'z', src: { role: 'main' }, kind: 'thin' });
+  parts.push(leaf('leaf0', 0.3, 0.6), leaf('leaf1', 0.42, 2.7), leaf('leaf2', 0.2, 4.4));
+  const whip = parts.length;
+  parts.push({ name: 'whip', parent: 3, joint: [0, 0.12, -0.16], size: [0.03, 0.03, 0.55], center: [0, 0, -0.27], rest: [0.7, 0, 0], taper: [0.5, 0.5, 1, 1], taperAxis: 'z', src: { role: 'accent' }, kind: 'thin' });
+  for (let i = 0; i < 3; i++) {
+    const a = (i * TAU) / 3 + 0.4;
+    parts.push({ name: `root${i}`, parent: 0, joint: [Math.sin(a) * 0.18, 0.03, Math.cos(a) * 0.18], size: [0.05, 0.04, 0.24], center: [0, 0, 0.1], rest: [0, a, 0], taper: [1, 1, 0.4, 0.4], taperAxis: 'z', src: { role: 'dark' }, kind: 'thin' });
+  }
   const s = sh.scale;
   return {
-    shape: sh, parts: scaleParts(parts, s), height: 1.4 * s, hover: 0, lie: { angle: Math.PI / 2, lift: 0.09 * s, side: false },
+    shape: sh, parts: scaleParts(parts, s), height: 1.68 * s, hover: 0, lie: { angle: Math.PI / 2, lift: 0.1 * s, side: false },
     pose(p, o) {
       const sw = sin(p.t * 1.4 + p.seed * TAU);
       setRot(o, 1, 0.05 * sw, 0, 0.05 * sin(p.t * 1.1 + p.seed * 3) + 0.1 * Math.min(1, p.gait) * sin(p.phase * TAU));
-      setRot(o, 2, 0.1 * sw);
-      setRot(o, 3, 0, 0, 0.2 * sin(p.t * 2 + 1));
-      setRot(o, 4, 0, 0, -0.2 * sin(p.t * 2.2 + 2));
+      setRot(o, 2, 0.08 * sw);
+      setRot(o, 3, 0.06 * sw);
+      for (let i = 0; i < 4; i++) setRot(o, 5 + i, 0.1 * sin(p.t * 2 + i));
+      setRot(o, whip, 0.2 * sin(p.t * 3 + p.seed * 4), 0.3 * sin(p.t * 2.1));
       if (p.windup !== null) {
         const u = ease(p.windup);
-        setRot(o, 1, 0.5 * u);
+        // rear back, petals flare open, the whip coils up
+        setRot(o, 1, 0.3 * u);
         setRot(o, 2, 0.4 * u);
+        for (let i = 0; i < 4; i++) {
+          const a = (i * Math.PI) / 2;
+          setRot(o, 5 + i, Math.cos(a) * 0.5 * u, 0, -Math.sin(a) * 0.5 * u);
+        }
+        setRot(o, whip, -1.0 * u);
       }
       if (p.strike > 0) {
-        setRot(o, 1, -0.7 * p.strike);
-        setRot(o, 2, -0.3 * p.strike);
+        setRot(o, 1, -0.4 * p.strike);
+        setRot(o, 2, -0.5 * p.strike);
+        setRot(o, whip, 0.8 * p.strike);
       }
-      if (p.dead) setRot(o, 1, 1.4, 0, 0.3);
+      if (p.dead) { setRot(o, 1, 1.2, 0, 0.3); setRot(o, 2, 0.3); }
     },
   };
 }
@@ -614,19 +699,28 @@ function plant(sh: BodyShape): Rig {
 function machine(sh: BodyShape, turret: boolean): Rig {
   const parts: PartDef[] = turret
     ? [
-      { name: 'base', parent: -1, joint: [0, 0, 0], size: [0.5, 0.35, 0.5], center: [0, 0.175, 0], src: { rect: [0.1, 0.55, 0.9, 1], proj: 'front', core: true }, kind: 'core' },
-      { name: 'head', parent: 0, joint: [0, 0.35, 0], size: [0.4, 0.3, 0.45], center: [0, 0.15, 0], src: { rect: [0.1, 0, 0.9, 0.55], proj: 'front', core: true, face: true }, kind: 'core' },
-      { name: 'barrel', parent: 1, joint: [0, 0.15, -0.2], size: [0.07, 0.07, 0.45], center: [0, 0, -0.22], src: { role: 'dark' }, kind: 'thin' },
+      // tripod, a slim post, a slewing head with a sensor eye and twin barrels
+      { name: 'post', parent: -1, joint: [0, 0, 0], size: [0.12, 0.5, 0.12], center: [0, 0.25, 0], src: { role: 'dark' }, kind: 'core' },
+      { name: 'head', parent: 0, joint: [0, 0.5, 0], size: [0.34, 0.26, 0.46], center: [0, 0.12, 0.02], taper: [0.7, 0.8, 1, 1], taperAxis: 'z', src: { rect: [0.1, 0, 0.9, 0.55], proj: 'front', core: true }, kind: 'core' },
+      { name: 'barrelR', parent: 1, joint: [0.06, 0.1, -0.2], size: [0.05, 0.05, 0.42], center: [0, 0, -0.2], src: { color: [40, 42, 46] }, kind: 'thin' },
+      { name: 'barrelL', parent: 1, joint: [-0.06, 0.1, -0.2], size: [0.05, 0.05, 0.42], center: [0, 0, -0.2], src: { color: [40, 42, 46] }, kind: 'thin' },
+      { name: 'eye', parent: 1, joint: [0, 0.2, -0.2], size: [0.1, 0.06, 0.04], center: [0, 0, 0], src: { color: [235, 60, 40] }, kind: 'thin' },
+      { name: 'legA', parent: 0, joint: [0, 0.2, 0], size: [0.05, 0.3, 0.05], center: [0, -0.13, 0], rest: [0.6, 0, 0], src: { role: 'dark' }, kind: 'thin' },
+      { name: 'legB', parent: 0, joint: [0, 0.2, 0], size: [0.05, 0.3, 0.05], center: [0, -0.13, 0], rest: [0.6, 2.1, 0], src: { role: 'dark' }, kind: 'thin' },
+      { name: 'legC', parent: 0, joint: [0, 0.2, 0], size: [0.05, 0.3, 0.05], center: [0, -0.13, 0], rest: [0.6, 4.2, 0], src: { role: 'dark' }, kind: 'thin' },
     ]
     : [
-      { name: 'body', parent: -1, joint: [0, 0.35, 0], size: [0.55, 0.45, 0.7], center: [0, 0.1, 0], src: { rect: [0.1, 0.3, 0.9, 0.8], proj: 'front', core: true }, kind: 'core' },
-      { name: 'head', parent: 0, joint: [0, 0.33, -0.05], size: [0.32, 0.24, 0.36], center: [0, 0.12, 0], src: { rect: [0.2, 0, 0.8, 0.35], proj: 'front', core: true, face: true }, kind: 'core' },
+      // a sloped hull on tracks, a domed sensor head with a red eye and an antenna
+      { name: 'body', parent: -1, joint: [0, 0.35, 0], size: [0.55, 0.45, 0.7], center: [0, 0.1, 0], taper: [0.8, 0.7, 1, 1], taperAxis: 'z', src: { rect: [0.1, 0.3, 0.9, 0.8], proj: 'front', core: true }, kind: 'core' },
+      { name: 'head', parent: 0, joint: [0, 0.33, -0.05], size: [0.32, 0.22, 0.36], center: [0, 0.11, 0], taper: [1, 1, 0.7, 0.7], src: { rect: [0.2, 0, 0.8, 0.35], proj: 'front', core: true }, kind: 'core' },
       { name: 'trackR', parent: 0, joint: [0.33, -0.2, 0], size: [0.14, 0.3, 0.8], center: [0, 0, 0], src: { role: 'dark' }, kind: 'limb' },
       { name: 'trackL', parent: 0, joint: [-0.33, -0.2, 0], size: [0.14, 0.3, 0.8], center: [0, 0, 0], src: { role: 'dark' }, kind: 'limb' },
+      { name: 'eye', parent: 1, joint: [0, 0.1, -0.18], size: [0.2, 0.05, 0.03], center: [0, 0, 0], src: { color: [235, 60, 40] }, kind: 'thin' },
+      { name: 'antenna', parent: 1, joint: [0.1, 0.2, 0.08], size: [0.02, 0.35, 0.02], center: [0, 0.17, 0], rest: [0.2, 0, -0.15], src: { role: 'dark' }, kind: 'thin' },
     ];
   const s = sh.scale;
   return {
-    shape: sh, parts: scaleParts(parts, s), height: (turret ? 0.65 : 0.92) * s, hover: 0, lie: { angle: 0.25, lift: 0, side: true },
+    shape: sh, parts: scaleParts(parts, s), height: (turret ? 0.76 : 0.92) * s, hover: 0, lie: { angle: 0.25, lift: 0, side: true },
     pose(p, o) {
       setRot(o, 1, 0, 0.25 * sin(p.t * 0.7 + p.seed * TAU));
       if (!turret) o.pos[1] += (p.gait > 0.1 ? 0.012 * sin(p.t * 30) : 0) * s;

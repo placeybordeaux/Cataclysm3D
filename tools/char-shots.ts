@@ -9,7 +9,7 @@
 // Options: --out <dir>, --views a,b (default all), --size WxH (default 1920x1080), --gpu,
 // --prefix <name> (file prefix, default "shot"), --params '<query>' (extra URL params),
 // --look <look> (default full), --js '<expr>' (after each view is set up), --bench
-// (cdda.benchView per view), --dry-run, --help.
+// (cdda.benchView per view), --png (lossless instead of JPEG q85), --dry-run, --help.
 import { createServer } from 'vite';
 import puppeteer from 'puppeteer-core';
 import { mkdirSync, readFileSync } from 'node:fs';
@@ -37,6 +37,7 @@ const extraJs = opt('--js', '');
 const gpu = argv.includes('--gpu');
 const bench = argv.includes('--bench');
 const dry = argv.includes('--dry-run');
+const png = argv.includes('--png');
 const allViews = ['horde_near', 'horde_mid', 'horde_far', 'horde_road', 'horde_dusk', 'dog', 'npc', 'windup', 'critters', 'zoo', 'night', 'third', 'corpse', 'bench'];
 const defaultViews = allViews.filter((v) => v !== 'bench');
 const views = viewsArg ? viewsArg.split(',') : defaultViews;
@@ -79,8 +80,9 @@ try {
     const info = await page.evaluate(`charView(${JSON.stringify(v)})`);
     if (info && info !== v) console.log(`  ${v}: ${info}`);
     if (extraJs) await page.evaluate(`(async () => { const cdda = window.cdda; ${extraJs}; })()`);
-    const file = resolve(`${out}/${prefix}_${v}.png`);
-    await page.screenshot({ path: file as `${string}.png` });
+    // JPEG keeps the committed comparison shots light (--png for lossless)
+    const file = resolve(`${out}/${prefix}_${v}.${png ? 'png' : 'jpg'}`);
+    await page.screenshot(png ? { path: file as `${string}.png` } : { path: file as `${string}.jpeg`, type: 'jpeg', quality: 85 });
     let b = '';
     if (bench) {
       // let skins, chunk builds and grass settle before timing
