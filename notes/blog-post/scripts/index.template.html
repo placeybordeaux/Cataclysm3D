@@ -1,0 +1,248 @@
+<title>Building CDDA-3D</title>
+<meta name="description" content="Briefing for a blog post on how a lead Claude Code session and ~70 subagents rebuilt Cataclysm as a real-time 3D game.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&family=Pixelify+Sans:wght@500;700&display=swap">
+<style>
+:root{
+  --ground:#EDEFEA; --surface:#F8F9F6; --ink:#1B211E; --muted:#56615A; --rule:#D0D6CE;
+  --accent:#9A5A0B; --bar:#B87318; --barsoft:#E6CFA6; --quote:#E4E8E1; --focus:#2F6F6A;
+  --t-adapt:#2F6F6A; --t-new:#7A4FA0; --t-simp:#56615A; --t-fix:#A3421F; --t-nyi:#8A6D12; --t-eng:#3B5B8C;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --ground:#111513; --surface:#191F1B; --ink:#E2E7E1; --muted:#9AA59D; --rule:#2E3732;
+    --accent:#E7A650; --bar:#D08A2E; --barsoft:#4A3A22; --quote:#1F2622; --focus:#6FC0B8;
+    --t-adapt:#6FC0B8; --t-new:#C2A1E6; --t-simp:#A9B3AC; --t-fix:#F08C66; --t-nyi:#E0C35C; --t-eng:#8EB0E6;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#111513; --surface:#191F1B; --ink:#E2E7E1; --muted:#9AA59D; --rule:#2E3732;
+  --accent:#E7A650; --bar:#D08A2E; --barsoft:#4A3A22; --quote:#1F2622; --focus:#6FC0B8;
+  --t-adapt:#6FC0B8; --t-new:#C2A1E6; --t-simp:#A9B3AC; --t-fix:#F08C66; --t-nyi:#E0C35C; --t-eng:#8EB0E6;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{background:var(--ground);color:var(--ink);font:16px/1.6 "IBM Plex Sans",system-ui,sans-serif;margin:0;padding-inline:16px;padding-block:0 64px}
+.wrap{max-width:1040px;margin:0 auto}
+.read{max-width:70ch}
+h1,h2,h3,h4{text-wrap:balance;line-height:1.2}
+h1{font-family:"Pixelify Sans","IBM Plex Mono",monospace;font-weight:700;font-size:clamp(2.2rem,6vw,3.6rem);margin:0 0 .3em;letter-spacing:.01em}
+h2{font-size:1.6rem;margin:2.4em 0 .6em;padding-top:.6em;border-top:1px solid var(--rule)}
+h3{font-size:1.15rem;margin:1.6em 0 .4em}
+h4{font-size:1rem;margin:1.2em 0 .3em}
+a{color:var(--accent)}
+a:focus-visible,button:focus-visible,summary:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+code{font:.88em "IBM Plex Mono",monospace;background:var(--quote);padding:.05em .3em;border-radius:3px;overflow-wrap:anywhere}
+.eyebrow{font:500 .78rem "IBM Plex Mono",monospace;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+header.top{padding-top:40px}
+.dek{font-size:1.15rem;color:var(--muted);max-width:62ch;margin:0}
+.herofig{margin:28px 0 0}
+.herofig img{display:block;width:100%;border-radius:6px;image-rendering:pixelated}
+.herofig figcaption{font-size:.85rem;color:var(--muted);margin-top:6px}
+nav.toc{display:flex;flex-wrap:wrap;gap:6px 14px;margin:20px 0 0;font:.85rem "IBM Plex Mono",monospace}
+nav.toc a{color:var(--ink);text-decoration:none;border-bottom:1px solid var(--rule)}
+nav.toc a:hover{border-color:var(--accent)}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin:24px 0 0}
+.stat{background:var(--surface);border:1px solid var(--rule);border-radius:6px;padding:14px 16px}
+.stat .n{font-family:"Pixelify Sans","IBM Plex Mono",monospace;font-weight:500;font-size:2rem;line-height:1.1;color:var(--accent);font-variant-numeric:tabular-nums}
+.stat .l{font-size:.88rem;color:var(--muted);margin-top:4px}
+.prompt{background:var(--surface);border:1px solid var(--rule);border-radius:6px;padding:18px 20px;font:15px/1.65 "IBM Plex Mono",monospace;white-space:pre-wrap}
+.prompt .who{display:block;font-size:.78rem;color:var(--muted);margin-bottom:8px}
+.tablewrap{overflow-x:auto;margin:12px 0}
+table{border-collapse:collapse;width:100%;font-size:.9rem;font-variant-numeric:tabular-nums}
+th,td{text-align:left;padding:7px 10px;border-bottom:1px solid var(--rule);vertical-align:top}
+th{font-weight:600;color:var(--muted);font-size:.8rem;text-transform:uppercase;letter-spacing:.04em}
+td.num,th.num{text-align:right}
+.charts{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,420px),1fr));gap:24px}
+.chartbox{background:var(--surface);border:1px solid var(--rule);border-radius:6px;padding:14px 16px}
+.chartbox h3{margin:0 0 2px;font-size:1rem}
+.chartbox p{margin:0 0 8px;font-size:.85rem;color:var(--muted)}
+svg.chart{width:100%;height:auto;display:block}
+svg.chart .bar{fill:var(--bar)}
+svg.chart g:hover .bar{fill:var(--accent)}
+svg.chart .lbl{fill:var(--ink);font:12px "IBM Plex Sans",sans-serif}
+svg.chart .val{fill:var(--ink);font:500 12px "IBM Plex Mono",monospace}
+svg.chart .tick{fill:var(--muted);font:11px "IBM Plex Mono",monospace}
+svg.chart .grid{stroke:var(--rule);stroke-width:1}
+svg.chart .axis{stroke:var(--muted);stroke-width:1}
+.gallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,300px),1fr));gap:18px}
+.shot{margin:0;background:var(--surface);border:1px solid var(--rule);border-radius:6px;overflow:hidden;display:flex;flex-direction:column}
+.shot.hero{grid-column:1/-1}
+.shot img{display:block;width:100%;aspect-ratio:16/9;object-fit:cover;image-rendering:pixelated;background:var(--quote)}
+.shot figcaption{padding:10px 12px 12px;font-size:.88rem}
+.shot .fn{display:block;font:.72rem "IBM Plex Mono",monospace;color:var(--muted);margin-bottom:2px}
+.shot details{margin-top:6px;color:var(--muted);font-size:.82rem}
+.shot summary{cursor:pointer}
+.filters{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0 18px;position:sticky;top:env(safe-area-inset-top,0px);background:var(--ground);padding:8px 0;z-index:2}
+.chip{font:.8rem "IBM Plex Mono",monospace;border:1px solid var(--rule);background:var(--surface);color:var(--ink);border-radius:999px;padding:4px 12px;cursor:pointer}
+.chip.on{background:var(--ink);color:var(--ground);border-color:var(--ink)}
+details.cat{border-top:1px solid var(--rule);padding:6px 0}
+details.cat>summary{cursor:pointer;font-weight:600;font-size:1.05rem;display:flex;justify-content:space-between;gap:12px;padding:6px 0}
+details.cat .count{font:500 .85rem "IBM Plex Mono",monospace;color:var(--muted)}
+.catlead{color:var(--muted);font-size:.92rem;margin:4px 0 8px;max-width:75ch}
+ol.diffs{margin:0;padding-left:1.6em;display:grid;gap:10px}
+ol.diffs li{max-width:80ch;font-size:.95rem}
+ol.diffs li[hidden]{display:none}
+.meta{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:baseline;margin-top:3px}
+.tag{font:500 .72rem "IBM Plex Mono",monospace;border:1px solid currentColor;border-radius:3px;padding:0 5px}
+.t-medium-adaptation{color:var(--t-adapt)} .t-new-player-design{color:var(--t-new)} .t-simplification{color:var(--t-simp)}
+.t-fidelity-fix{color:var(--t-fix)} .t-not-yet-implemented{color:var(--t-nyi)} .t-engine-limitation{color:var(--t-eng)}
+.src{font:.75rem "IBM Plex Mono",monospace;color:var(--muted);overflow-wrap:anywhere}
+.commentary blockquote{margin:12px 0;padding:10px 16px;background:var(--quote);border-radius:6px}
+.commentary blockquote p{margin:.3em 0}
+.commentary h3{color:var(--accent)}
+.commentary{max-width:75ch}
+.outline ol>li{margin-bottom:.6em}
+.note{font-size:.9rem;color:var(--muted)}
+footer{margin-top:48px;font-size:.85rem;color:var(--muted)}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+
+<div class="wrap">
+<header class="top">
+  <div class="eyebrow">Blog-post briefing · snapshot 2026-09-30 11:26 PDT</div>
+  <h1>Building CDDA-3D</h1>
+  <p class="dek">One prompt, four multiple-choice answers and 5 h 26 min later, a lead Claude Code session and 24 subagents had a playable real-time, first-person Cataclysm in the browser. This page collects the numbers, the story, the pictures and the quotes for a long-form post.</p>
+  <nav class="toc" aria-label="Sections">
+    <a href="#numbers">Numbers</a><a href="#prompt">The prompt</a><a href="#timeline">Timeline</a><a href="#charts">Tokens &amp; code</a><a href="#gallery">Images</a><a href="#differences">Differences</a><a href="#commentary">Commentary</a><a href="#outline">Post outline</a><a href="#method">Method</a>
+  </nav>
+  <figure class="herofig"><img src="images/03-town-street-hero.jpg" alt="A Bright Nights town street rendered in CDDA-3D"><figcaption>A small-town street from Cataclysm: Bright Nights map data, rendered in the engine at 1920×1080.</figcaption></figure>
+</header>
+
+<section id="numbers">
+<h2>Headline numbers</h2>
+<div class="stats">
+  <div class="stat"><div class="n">5h26m</div><div class="l">first prompt → “CDDA-3D is finished” (v1, DDA data)</div></div>
+  <div class="stat"><div class="n">1 + 4</div><div class="l">human inputs before v1: the prompt and one round of 4 multiple-choice questions</div></div>
+  <div class="stat"><div class="n">0</div><div class="l">manual tool approvals (auto permission mode throughout)</div></div>
+  <div class="stat"><div class="n">72</div><div class="l">subagent transcripts (61 spawned by the lead, 11 nested), 76 agent-hours</div></div>
+  <div class="stat"><div class="n">111k</div><div class="l">lines of TypeScript today; 53k at the first working copy</div></div>
+  <div class="stat"><div class="n">1,238</div><div class="l">tests passing on the latest merge (565 at v1)</div></div>
+  <div class="stat"><div class="n">16,354</div><div class="l">model responses; 18,587 tool calls (14,224 of them shell)</div></div>
+  <div class="stat"><div class="n">5.46B</div><div class="l">cache-read tokens; 4.3M output tokens visible in transcripts (a lower bound)</div></div>
+  <div class="stat"><div class="n">495</div><div class="l">commits on <code>bn</code>, 108 of them the lead merging agent branches</div></div>
+  <div class="stat"><div class="n">6,061</div><div class="l">Bright Nights item types loaded (plus 615 monsters, 3,187 recipes, 257 vehicles)</div></div>
+</div>
+<p class="note">Every figure is derived in <code>facts.md</code>, with its method and caveats.</p>
+</section>
+
+<section id="prompt" class="read">
+<h2>The original prompt</h2>
+<div class="prompt"><span class="who">the user · Sep 28, 22:25 PDT · verbatim</span>You have a large task ahead of you. You're going to be making a real time 3d version of Cataclysm Dark Days Ahead. You'll be aiming to keep as much of the style, content &amp; approaches to game design as possible while converting this to a fully real time 3d game. This is an excersize in determining how much you can do *automomously* there will be a brief period at the start to ask the user questions. After that you are expected to lead a team of subagents to deliver a fully working game. You'll be judged on completeness, how much you were able to retain and enjoyment. Bonus points for closely using similar graphical style by immitating the graphic appraoch used by project shadowglass. Now is your opportunity for asking questions go!</div>
+<h3>The only questions before v1</h3>
+<p>56 seconds later the lead asked four multiple-choice questions. Nothing else was typed until the user came back the next morning to ask “what's the status are you done?”</p>
+<div class="tablewrap"><table>
+<thead><tr><th>Question</th><th>Options offered</th><th>Answer</th></tr></thead>
+<tbody>
+<tr><td>Which engine/platform should the 3D game target?</td><td>Three.js + TS (recommended) · Godot 4 · Rust + Bevy · You pick</td><td>“You pick, note this is NixOS so you can use anything that can be accessed via nixpkgs”</td></tr>
+<tr><td>What is ‘project shadowglass’?</td><td>I'll paste a link · Research it yourself</td><td>Research it yourself</td></tr>
+<tr><td>How should the game use CDDA's content?</td><td>Import CDDA JSON directly (recommended) · Hand-curated subset</td><td>Import CDDA JSON directly</td></tr>
+<tr><td>How much autonomy and scale?</td><td>Go big, many hours · Moderate</td><td>Go big, many hours</td></tr>
+</tbody></table></div>
+<p><strong>First working copy</strong> = commit <code>0251064</code> (03:48 PDT), announced at 03:51 as “a complete, playable real-time first-person Cataclysm: DDA that runs in the browser”, after a final QA agent played the whole loop on the production build. The game first booted into a real evac shelter 45 minutes after the prompt.</p>
+</section>
+
+<section id="timeline">
+<h2>Timeline</h2>
+<div class="tablewrap"><table>
+<thead><tr><th>Phase</th><th>When (PDT)</th><th class="num">Wall clock</th><th>What happened</th><th>User input</th></tr></thead>
+<tbody>
+<tr><td><strong>v1 autonomous build</strong></td><td>Sep 28 22:25 → Sep 29 03:51</td><td class="num">5h 26m</td><td>DDA data. 24 agents in waves: data, atlas, render, worldgen, core → UI, interaction, monsters, crafting → vehicles, save, NPCs, QA → mutations, seasons, polish, combat depth → final QA. 123 commits.</td><td>1 prompt, 4 answers</td></tr>
+<tr><td>asleep</td><td>03:51 → 07:09</td><td class="num">3h 18m</td><td>Nothing running.</td><td>—</td></tr>
+<tr><td><strong>v1 review + UX</strong></td><td>07:09 → 08:37</td><td class="num">1h 28m</td><td>First human play finds Shift+W opening the wear menu and Esc losing the mouse. UX review with real keyboard and mouse. Tagged <code>v1-dda</code>.</td><td>5 messages</td></tr>
+<tr><td><strong>v2 Bright Nights</strong></td><td>Sep 29 08:37 → 22:43</td><td class="num">~14h</td><td>Switch to Bright Nights, modern drag-and-drop UI, item-conservation inventory, unlocks, difficulty presets, combat feel, looting, archery, driving camera. The user plays live via hot reload.</td><td>18 messages, 9 answers</td></tr>
+<tr><td><strong>wave 3 overnight</strong></td><td>Sep 29 22:49 → Sep 30 07:14</td><td class="num">~8.5h</td><td>“TV adaptation” wave: Shadowglass-style 3D characters, furniture, cars and trees; readability at distance; aim-based combat; new-player pass. Paused 02:18–03:40 on the session usage limit.</td><td>1 message</td></tr>
+<tr><td><strong>wave 4 (ongoing)</strong></td><td>Sep 30 07:14 →</td><td class="num">4h+</td><td>Style gallery, collision on the drawn car body, deathmobile research and vehicles v3, walkable stairs, bike riders, VR branch, streaming telemetry, this brief.</td><td>12 messages</td></tr>
+</tbody></table></div>
+</section>
+
+<section id="charts">
+<h2>Tokens and code</h2>
+<div class="charts">
+  <div class="chartbox"><h3>Output tokens per phase</h3><p>Includes thinking. From transcript messages; Claude Code's own meter counts more.</p>{{CHART_OUTPUT}}</div>
+  <div class="chartbox"><h3>Cache-read tokens per phase</h3><p>Context re-read on every call. Uncached input was only 33k in total.</p>{{CHART_CACHE}}</div>
+  <div class="chartbox" style="grid-column:1/-1"><h3>Lines of TypeScript/JavaScript at each milestone</h3><p>Code lines only (no comments or blanks), excluding extracted data. Hover a bar for the exact figure.</p>{{CHART_GROWTH}}</div>
+</div>
+<div class="tablewrap"><table>
+<thead><tr><th>Where the code lives</th><th class="num">Files</th><th class="num">Code lines</th></tr></thead>
+<tbody>
+<tr><td><code>src/game</code>: rules, items, combat, vehicles, NPCs</td><td class="num">92</td><td class="num">27,982</td></tr>
+<tr><td><code>src/render</code>: 3D pipeline, models, lighting</td><td class="num">98</td><td class="num">22,311</td></tr>
+<tr><td><code>tests</code></td><td class="num">89</td><td class="num">16,274</td></tr>
+<tr><td><code>src/ui</code> + <code>src/ui2</code> + <code>src/screens</code></td><td class="num">129</td><td class="num">21,110</td></tr>
+<tr><td><code>tools</code>: extractors, screenshot, real-input and bench tools</td><td class="num">58</td><td class="num">10,597</td></tr>
+<tr><td>everything else in <code>src</code> (world, audio, save, progression, gallery…)</td><td class="num">87</td><td class="num">14,637</td></tr>
+</tbody></table></div>
+</section>
+
+<section id="gallery">
+<h2>Images ({{NIMG}})</h2>
+<p class="read">Recognisable Cataclysm places and creatures, generated from Bright Nights data and the UltiCa tileset and rendered in the engine. Captions say how each was made; full details are in <code>images/captions.md</code>.</p>
+<div class="gallery">
+{{GALLERY}}
+</div>
+</section>
+
+<section id="differences">
+<h2>What differs from Cataclysm ({{NDIFF}} entries)</h2>
+<p class="read">Every material difference we could document, in {{NCAT}} groups. Each entry says what Cataclysm does, what CDDA-3D does, why, and where it's recorded. Filter by reason:</p>
+{{DIFFERENCES}}
+</section>
+
+<section id="commentary">
+<h2>Commentary from the build</h2>
+<div class="commentary">
+{{COMMENTARY}}
+</div>
+</section>
+
+<section id="outline" class="read outline">
+<h2>Suggested post outline</h2>
+<ol>
+<li><strong>The bet.</strong> One paragraph prompt, “how much can you do autonomously”. Show the prompt and the four questions.</li>
+<li><strong>The first night (5h 26m).</strong> Lead writes a scaffold and shared architecture doc, then fans out waves of 5–6 agents in git worktrees and merges them. Evac shelter boots at 45 min. Commits-per-hour and LOC growth chart.</li>
+<li><strong>The morning after.</strong> The user finds two bugs in minutes that three QA agents missed, because QA drove the game through debug APIs. Birth of the “real input only” rule.</li>
+<li><strong>Changing the brief.</strong> From faithful DDA port to Bright Nights for a new audience; modern UI; the tutorial question the user answered with “achievements and dynamic unlocks”.</li>
+<li><strong>When the data lies.</strong> Snowstorm weather, milliwatts, centimetre wheels, the DIGGABLE flag, broken windows as floor decals, fires that fast-forward badly. The “units from source” rule.</li>
+<li><strong>A TV adaptation of a book.</strong> Wave 3: what Shadowglass actually does, sprites as inspiration for 3D models, aim instead of dice, cars that aren't boxes. Before/after images and the style gallery.</li>
+<li><strong>What it cost.</strong> Tokens by phase, cache reads vs output, lead vs subagents, the usage-limit pause, and what the numbers don't include.</li>
+<li><strong>What's different, and what's missing.</strong> Pick 10 from the differences list; link the full list.</li>
+<li><strong>Working this way.</strong> Parallel worktrees with a merging lead, variants behind switches instead of guessing, a live bridge into the player's tab, honest “best guess” fixes.</li>
+<li><strong>What's next.</strong> Vehicles v3 (a ladder of chassis sizes toward a deathmobile), walkable stairs, VR.</li>
+</ol>
+</section>
+
+<section id="method" class="read">
+<h2>Method and caveats</h2>
+<ul>
+<li>Transcripts: 2 lead sessions and 72 subagent JSONL files, streamed into SQLite (<code>scripts/load_transcripts.py</code>) and analysed separately (<code>scripts/analyse.py</code>). Usage is de-duplicated per message id, taking the maximum of each field.</li>
+<li>Claude Code's own meter for session 1 shows more than the transcripts (8.88M output vs 3.18M; 4.66B vs 3.73B cache reads), most likely calls that never appear as messages, such as the auto-mode classifier. Treat transcript totals as a lower bound. Session 2 is still running.</li>
+<li>Code: counted from git objects at <code>bn</code> <code>e7e9bf1</code> by <code>scripts/code_stats.py</code>, excluding <code>public/</code> data, <code>vendor/</code> and these notes.</li>
+<li>Quotes are verbatim; <code>…</code> marks cuts. Attributed to the user, the lead, or a subagent by task.</li>
+<li>Snapshot 2026-09-30 11:26 PDT. VR, vehicles v3 and telemetry work were still in flight.</li>
+</ul>
+</section>
+
+<footer>Generated by <code>notes/blog-post/scripts/build_index.py</code> from the notes in the same folder.</footer>
+</div>
+
+<script>
+(function(){
+  var chips=document.querySelectorAll('.filters .chip');
+  function apply(tag){
+    chips.forEach(function(c){c.classList.toggle('on',c.dataset.tag===tag)});
+    document.querySelectorAll('ol.diffs li').forEach(function(li){
+      li.hidden = tag!=='all' && (' '+li.dataset.tags+' ').indexOf(' '+tag+' ')<0;
+    });
+    document.querySelectorAll('details.cat').forEach(function(d){
+      var vis=d.querySelectorAll('ol.diffs li:not([hidden])').length;
+      d.hidden = vis===0;
+      var n=d.querySelector('.count'); if(n) n.textContent=vis;
+    });
+  }
+  chips.forEach(function(c){c.addEventListener('click',function(){apply(c.dataset.tag)})});
+})();
+</script>
