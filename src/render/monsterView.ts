@@ -434,6 +434,9 @@ export class MonsterView implements GameSystem {
     const f = v ? { frame: v.frame, height: v.height } : this.frameFor(m);
     this.drop(m);
     if (!c) return;
+    // placeCorpse's onCorpse already made a lying body for this record (it runs before onDied);
+    // replace it, or it stays behind as a second, orphaned body under the falling one.
+    this.dropCorpse(c);
     // Keep the body as a sprite that staggers along the killing blow, topples and bounces; it
     // lives as long as the corpse item. Killed up close by the survivor: slide away from them.
     const p = this.game.player;

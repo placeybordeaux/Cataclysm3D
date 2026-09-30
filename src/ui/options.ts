@@ -34,6 +34,10 @@ function loadStored(): Partial<GameOptions> {
     return {};
   }
 }
+/** Persist game options (merged into what's stored); the style gallery's "copy as my defaults" uses it for Colour grading. */
+export function storeGameOptions(o: Partial<GameOptions>): void {
+  store(o);
+}
 function store(o: Partial<GameOptions>): void {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...loadStored(), ...o }));
@@ -68,6 +72,10 @@ export interface Opt {
 const extraOptions: Opt[] = [];
 export function registerOption(o: Opt): void {
   extraOptions.push(o);
+}
+/** The registered entries (the style gallery persists "my defaults" through them, exactly as Options would). */
+export function registeredOptions(): readonly Opt[] {
+  return extraOptions;
 }
 
 export function openOptions(ctx: UiContext): Panel {

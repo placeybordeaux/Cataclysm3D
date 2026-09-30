@@ -90,6 +90,7 @@ Screenshots for every area: `docs/screenshots/wave3/<area>/` (before/after pairs
 | `docs/READABILITY.md` | Wave 3: haze, far ground, form lighting, shimmer |
 | `docs/FLORA.md` | Wave 3: 3D trees and bushes |
 | `docs/ADAPTATION.md` | Wave 3: adaptation principles, playtest findings, switches |
+| `docs/GALLERY.md` | Style gallery (`/?gallery`): every wave-3 switch on fixed scenes, live / A/B / Matrix compare, copy as defaults |
 | `docs/QA_WAVE3.md` | Wave-3 integration QA at 3440x1304 (Chromium + Firefox): issues, realinput per scenario, perf |
 
 ## Controls (current defaults; all rebindable in Options → Key bindings)
