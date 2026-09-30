@@ -141,6 +141,18 @@ describe('credits', () => {
   });
 });
 
+describe('weather messages', () => {
+  it('only changes you would notice, none while time is sped up; all of them on request', async () => {
+    const { weatherMessageFilter, weatherMessages } = await import('../src/game/weather');
+    expect(weatherMessageFilter('drizzle', 'light_drizzle', false)).toBe(false);
+    expect(weatherMessageFilter('cloudy', 'rain', false)).toBe(true);
+    expect(weatherMessageFilter('cloudy', 'rain', true)).toBe(false);
+    weatherMessages.all = true;
+    expect(weatherMessageFilter('drizzle', 'light_drizzle', true)).toBe(true);
+    weatherMessages.all = false;
+  });
+});
+
 describe('day counter', () => {
   it('turns over at midnight, like the clock', () => {
     const start = 8 * 3600;
