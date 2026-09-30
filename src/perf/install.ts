@@ -1,4 +1,5 @@
 import type { DebugApi } from '../debug';
+import { installSkyLeak } from '../render/skyLeak';
 import type { Game } from '../game/game';
 import type { Renderer } from '../render/renderer';
 import type { ChunkPrefetcher } from '../world/prefetch';
@@ -288,6 +289,9 @@ export function installPerf(game: Game, renderer: Renderer, api: DebugApi, prefe
     if (mode) chunks.schedule = mode;
     return chunks.schedule;
   };
+
+  // ---- sky-leak probe (render/skyLeak.ts): tools/skyleak.ts asserts nothing the map has is missing
+  installSkyLeak(game, renderer, api as unknown as Record<string, unknown>);
 
   // ---- which levels exist (src/world/levels.ts): 'world' (default, per-column extent) or 'window'
   const lvq = params.get('levels');
