@@ -5,3 +5,6 @@ shots/
 node_modules
 .claude/
 .scratch/
+
+# blog-post transcript database (regenerate with notes/blog-post/scripts/load_transcripts.py)
+notes/blog-post/transcripts.sqlite

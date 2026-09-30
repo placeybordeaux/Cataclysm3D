@@ -1,0 +1,233 @@
+{
+ "snapshot_last_api_call_utc": "2026-09-30T18:26:22.214Z",
+ "tokens_by_phase": {
+  "v1 autonomous build (DDA)": {
+   "lead": {
+    "api_calls": 184,
+    "input": 418,
+    "output": 161886,
+    "cache_read": 40398613,
+    "cache_creation": 708477,
+    "thinking": 27126
+   },
+   "subagent": {
+    "api_calls": 5139,
+    "input": 10280,
+    "output": 1211811,
+    "cache_read": 1461669260,
+    "cache_creation": 10815340,
+    "thinking": 126702
+   }
+  },
+  "v1 review + UX pass": {
+   "lead": {
+    "api_calls": 74,
+    "input": 148,
+    "output": 58691,
+    "cache_read": 32128494,
+    "cache_creation": 465980,
+    "thinking": 21734
+   },
+   "subagent": {
+    "api_calls": 236,
+    "input": 472,
+    "output": 52325,
+    "cache_read": 63266197,
+    "cache_creation": 422630,
+    "thinking": 6830
+   }
+  },
+  "v2 Bright Nights push": {
+   "lead": {
+    "api_calls": 235,
+    "input": 514,
+    "output": 149133,
+    "cache_read": 156863063,
+    "cache_creation": 1827881,
+    "thinking": 31453
+   },
+   "subagent": {
+    "api_calls": 5822,
+    "input": 11654,
+    "output": 1543729,
+    "cache_read": 1979714012,
+    "cache_creation": 15509741,
+    "thinking": 198330
+   }
+  },
+  "wave 3 overnight": {
+   "lead": {
+    "api_calls": 161,
+    "input": 382,
+    "output": 74657,
+    "cache_read": 29957846,
+    "cache_creation": 513362,
+    "thinking": 9721
+   },
+   "subagent": {
+    "api_calls": 3357,
+    "input": 6790,
+    "output": 693081,
+    "cache_read": 1467096713,
+    "cache_creation": 59750984,
+    "thinking": 95351
+   }
+  },
+  "wave 4 interactive (gallery, vehicles, stairs, VR, perf, blog)": {
+   "lead": {
+    "api_calls": 55,
+    "input": 122,
+    "output": 49308,
+    "cache_read": 20064578,
+    "cache_creation": 701290,
+    "thinking": 9302
+   },
+   "subagent": {
+    "api_calls": 1091,
+    "input": 2198,
+    "output": 305122,
+    "cache_read": 213079967,
+    "cache_creation": 4672701,
+    "thinking": 25780
+   }
+  }
+ },
+ "tokens_total": {
+  "api_calls": 16354,
+  "input": 32978,
+  "output": 4299743,
+  "cache_read": 5464238743,
+  "cache_creation": 95388386,
+  "thinking": 552329
+ },
+ "tokens_lead": [
+  709,
+  1584,
+  4216990,
+  279412594,
+  493675
+ ],
+ "tokens_subagent": [
+  15645,
+  31394,
+  91171396,
+  5184826149,
+  3806068
+ ],
+ "models": {
+  "<synthetic>": 15,
+  "claude-opus-5-5": 16339
+ },
+ "agents_by_phase": {
+  "v1 autonomous build (DDA)": {
+   "1": 24,
+   "2": 1
+  },
+  "v1 review + UX pass": {
+   "1": 1
+  },
+  "v2 Bright Nights push": {
+   "1": 20,
+   "2": 5
+  },
+  "wave 3 overnight": {
+   "1": 7
+  },
+  "wave 4 interactive (gallery, vehicles, stairs, VR, perf, blog)": {
+   "1": 9,
+   "2": 5
+  }
+ },
+ "subagent_hours": 76.1325,
+ "peak_concurrent_subagents": [
+  7,
+  "2026-09-29T16:23:58.241Z"
+ ],
+ "rate_limit_messages": [
+  15,
+  "2026-09-30T09:18:13.910Z",
+  "2026-09-30T09:40:30.379Z"
+ ],
+ "tool_calls_total": 18738,
+ "tool_calls": {
+  "Bash": 14341,
+  "Read": 1984,
+  "Write": 1312,
+  "Edit": 691,
+  "SubagentHandback": 93,
+  "Agent": 82,
+  "SendMessage": 68,
+  "WebSearch": 49,
+  "ToolSearch": 38,
+  "WebFetch": 34,
+  "Monitor": 25,
+  "TaskStop": 17,
+  "AskUserQuestion": 4
+ },
+ "tool_calls_by_phase": {
+  "v1 autonomous build (DDA)": 5962,
+  "v1 review + UX pass": 363,
+  "v2 Bright Nights push": 6692,
+  "wave 3 overnight": 4416,
+  "wave 4 interactive (gallery, vehicles, stairs, VR, perf, blog)": 1305
+ },
+ "user_msgs_by_phase": {
+  "v1 autonomous build (DDA)": {
+   "human": 1,
+   "ask_rounds": 1,
+   "ask_questions": 4
+  },
+  "v1 review + UX pass": {
+   "human": 4,
+   "queued_human": 1
+  },
+  "v2 Bright Nights push": {
+   "human": 16,
+   "queued_human": 2,
+   "ask_rounds": 3,
+   "ask_questions": 9
+  },
+  "wave 3 overnight": {
+   "human": 1
+  },
+  "wave 4 interactive (gallery, vehicles, stairs, VR, perf, blog)": {
+   "human": 11,
+   "queued_human": 1
+  }
+ },
+ "assistant_text_blocks": {
+  "lead": 246,
+  "subagent": 935
+ },
+ "first_ts": "2026-09-29T05:25:00.536Z",
+ "cost_state": [
+  {
+   "sessionId": "84829a4a-c886-4a5c-9f0a-30dc488da29b",
+   "totalCostUSD": 1279.7163978000005,
+   "totalAPIDuration": 103671185,
+   "totalDuration": 87868507,
+   "totalLinesAdded": 121559,
+   "totalLinesRemoved": 6400,
+   "modelUsage": {
+    "claude-haiku-4-5-20251001": {
+     "inputTokens": 52680,
+     "outputTokens": 2850,
+     "thinkingTokens": 0,
+     "cacheReadInputTokens": 0,
+     "cacheCreationInputTokens": 0,
+     "webSearchRequests": 3,
+     "costUSD": 0.09693
+    },
+    "claude-opus-5-5": {
+     "inputTokens": 3892585,
+     "outputTokens": 8881287,
+     "thinkingTokens": 2528522,
+     "cacheReadInputTokens": 4663636389,
+     "cacheCreationInputTokens": 28934566,
+     "webSearchRequests": 0,
+     "costUSD": 1279.6194678000006
+    }
+   }
+  }
+ ]
+}

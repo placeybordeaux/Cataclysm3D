@@ -272,5 +272,90 @@ export function driveScenarios(c: DriveCtx): Scenario[] {
         await js(`(() => { const vs = cdda.vehicleSystem; if (vs.driving) { vs.driving.velocity = 0; vs.releaseControls(); } })()`);
       }
     }],
+    ['riders', 'your body rides in the seat outside first person: hands on the bars / wheel, feet on pedals / pegs / floor, pedalling with speed, leaning with the bike; none in the cockpit view or the billboard mode', async () => {
+      await js(HELPERS);
+      await js(`cdda.chars('model')`);
+      interface RC { kind: string | null; visible: boolean; alive: boolean; handErr: number; footErr: number; hip: [number, number, number]; ageMs: number }
+      const rider = () => js<RC | null>(`cdda.renderer.vehicleView.riderCheck()`);
+      const seated = (r: RC | null) => !!r && r.alive && r.visible && r.ageMs < 500 && r.handErr < 0.03 && r.footErr < 0.03;
+      const entry = () => js<{ pedal: number; lean: number; v: number; steer: number }>(`(() => { const vv = cdda.renderer.vehicleView, v = cdda.vehicleSystem.driving, e = v && vv.entries.get(v);
+        return e ? { pedal: e.pedalShown, lean: e.lean.rotation.x, v: v.velocity, steer: v.steer } : null; })()`);
+      for (const proto of ['bicycle', 'motorcycle', 'car']) {
+        // a fresh one on a clear road, you on it (setup only; everything after is real keys)
+        const ok = await js<boolean>(`(() => { const vs = cdda.vehicleSystem; if (vs.driving) { vs.driving.velocity = 0; vs.releaseControls(); }
+          if (!cdda.roadTrip('${proto}')) return false; const v = vs.driving;
+          for (const o of [...vs.list]) if (o !== v && Math.hypot(o.x - v.x, o.y - v.y) < 40) vs.remove(o);
+          cdda.clearMonsters(); return !!v; })()`);
+        check(`setup: on a ${proto} on a road`, ok);
+        if (!ok) continue;
+        await c.toGameplay();
+        check(`${proto}: chase camera (V)`, await camera('third'));
+        // the world streams in around the new spot before the first shot
+        await sleep(proto === 'bicycle' ? 4000 : 1500);
+        let r = await rider();
+        const want = proto === 'car' ? 'seat' : proto;
+        check(`${proto}, stopped: the body is in the seat (${want}), hands and feet on the controls`, seated(r) && r!.kind === want, r);
+        await shot(`riders_${proto}_stopped`);
+        // Mouse-look orbits the chase camera: swing round to a three-quarter view from the right
+        // front to see the pose (the view keeps that offset while riding).
+        const look = () => js<number>(`(() => { const d = cdda.game.player.yaw - (cdda.vehicleSystem.driving.facing + 90) * Math.PI / 180; return Math.atan2(Math.sin(d), Math.cos(d)); })()`);
+        for (let i = 0; i < 30 && Math.abs(await look()) < 1.95; i++) await c.x().move(60, 0, 4);
+        await sleep(300);
+        await shot(`riders_${proto}_stopped_side`);
+        if (proto === 'bicycle') {
+          // the old look for comparison (cdda.vehicleRiders(false)): a riderless "ghost" bike
+          await js(`cdda.vehicleRiders(false)`);
+          await sleep(300);
+          check('vehicleRiders(false): no body at the wheel (the old behaviour)', (await rider()) === null);
+          await shot('riders_bicycle_before_ghost');
+          await js(`cdda.vehicleRiders(true)`);
+          await sleep(300);
+        }
+        await c.x().down('w');
+        await sleep(proto === 'bicycle' ? 3500 : 2000);
+        const e0 = await entry();
+        await sleep(150);
+        const e1 = await entry();
+        r = await rider();
+        check(`${proto}, riding straight: still seated`, seated(r), { r, e1 });
+        if (proto === 'bicycle') check('bicycle: the pedals turn with the speed (stepped)', !!e0 && !!e1 && e1.v > 1 && e0.pedal !== e1.pedal, { e0, e1 });
+        await shot(`riders_${proto}_straight`);
+        await c.x().down('a');
+        await sleep(proto === 'car' ? 450 : 900);
+        const et = await entry();
+        r = await rider();
+        check(`${proto}, turning: still seated${proto === 'car' ? ' (hands follow the wheel)' : ', the bike leans into the turn'}`, seated(r) && (proto === 'car' || Math.abs(et?.lean ?? 0) > 0.03), { r, et });
+        await shot(`riders_${proto}_turning`);
+        await c.x().up('a');
+        if (proto === 'car') {
+          // straighten up and stop on the road for the top-down view
+          await c.x().hold('d', 400);
+          await c.x().up('w');
+          await c.x().hold('s', 1800);
+        }
+        await c.x().up('w');
+        // back behind it for the next one
+        for (let i = 0; i < 30 && Math.abs(await look()) > 0.3; i++) await c.x().move(-60, 0, 4);
+        if (proto === 'car') {
+          check('car: top-down camera (V)', await camera('top'));
+          await sleep(400);
+          r = await rider();
+          check('car, top-down: seated, seen through the missing roof', seated(r), r);
+          await shot('riders_car_top');
+          check('car: cockpit camera (V)', await camera('first'));
+          await sleep(300);
+          const fp = await js<{ rider: unknown; hands: boolean | null }>(`(() => { const vv = cdda.renderer.vehicleView, e = vv.entries.get(cdda.vehicleSystem.driving); return { rider: vv.riderCheck(), hands: e.cockpit ? e.cockpit.hands?.group.visible ?? null : null }; })()`);
+          check('car, cockpit view: no body, the first-person fists are back on the wheel', fp.rider === null && fp.hands !== false, fp);
+          await camera('third');
+          await js(`cdda.chars('billboard')`);
+          await sleep(300);
+          check('billboard mode: no 3D rider (the old behaviour)', (await rider()) === null);
+          await js(`cdda.chars('model')`);
+        }
+        await c.x().hold('s', 1500);
+      }
+      await js(`(() => { const vs = cdda.vehicleSystem; if (vs.driving) { vs.driving.velocity = 0; vs.releaseControls(); } })()`);
+      await camera('first');
+    }],
   ];
 }

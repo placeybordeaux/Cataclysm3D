@@ -198,7 +198,7 @@ window.lookView = async (name) => {
       m.setTer(x, y, p.z, id);
     });
     c.look(0, far ? -1 : 3);
-  } else if (name === 'dusk') {  } else if (name === 'dusk') {
+  } else if (name === 'dusk') {
     await window.lookView('street');
     c.setHour(window.duskHour());
   } else if (name === 'rain') {

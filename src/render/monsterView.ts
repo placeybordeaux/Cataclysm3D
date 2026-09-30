@@ -17,6 +17,7 @@ import { FxMeshes } from './chars/fxMeshes';
 import { cardsOn } from './cards';
 import { cddaColor } from './atlasIndex';
 import type { MonsterDef } from '../data/types';
+import { liftOf } from '../game/stairwalk';
 
 // Billboards for monsters, their corpses and projectiles (blood/bile/acid decals are drawn by
 // render/worldFx.ts from the map fields the monster system adds). Runs as a
@@ -538,7 +539,7 @@ export class MonsterView implements GameSystem {
           moving: m.moving, walkPhase: m.walkPhase,
           windup: w ? { elapsed: w.total - w.t, total: w.total, kind: w.kind } : null,
           flinch: Math.min(1, Math.max(m.flinch * 4, kickK)), down: v.down, visible,
-          emph: m.attitude() === 'attack' ? 1 : 0, camDist: Math.hypot(x - cam.x, y - cam.z),
+          emph: m.attitude() === 'attack' ? 1 : 0, camDist: Math.hypot(x - cam.x, y - cam.z), lift: liftOf(m),
           // far figures dissolve over the last 12 m before the draw distance instead of popping
           fade: m.dormant ? Math.min(1, Math.max(0, (Math.hypot(m.x - p.x, m.y - p.y) - (this.farRange - 12)) / 12)) : 0,
           sy: 1 + (stretch - 1) * 0.5 - (1 - squash) * 0.5, sxz: 1 - (1 - narrow) * 0.5,
@@ -548,10 +549,11 @@ export class MonsterView implements GameSystem {
       const h = v.h!;
       const x = m.x + sway * Math.cos(p.yaw) + kx, y = m.y + sway * Math.sin(p.yaw) + ky;
       // foot height as drawn (the sprite layer adds the look's ground relief itself)
-      const foot = m.z * LEVEL_HEIGHT + (this.renderer.groundAt?.(x, y, m.z) ?? 0);
+      const climb = liftOf(m);
+      const foot = m.z * LEVEL_HEIGHT + (this.renderer.groundAt?.(x, y, m.z) ?? 0) + climb;
       const aim = v.down > 0 || this.renderer.cameraMode !== 'first' ? 0 : meleeAimLift(Math.hypot(x - cam.x, y - cam.z), cam.y - foot, v.height);
       const near = nearClamp(cam, x, y, foot + aim);
-      h.set(x, y, m.z + (bob * near.scale + aim + near.lift) / LEVEL_HEIGHT);
+      h.set(x, y, m.z + (bob * near.scale + aim + near.lift + climb) / LEVEL_HEIGHT);
       // Lying down: short and wide instead of the old half-height stand.
       const lie = v.down;
       const hgt = v.height * (1 - (1 - FALLEN) * lie) * squash * stretch * near.scale;

@@ -92,6 +92,12 @@ export class NpcSystem implements GameSystem, TalkWorld, MissionHost {
 
   // Renderer / UI listeners
   readonly onSpawned: ((n: Npc) => void)[] = [];
+  /**
+   * Walkable stairs (src/stairs.ts): followers take the survivor's flight instead of appearing
+   * upstairs. `follow` = start following over the flight (true = handled); `drive` = carry an
+   * NPC that is on (or walking to) a flight this tick (true = its movement is done).
+   */
+  stairs: { follow(n: Npc): boolean; drive(n: Npc, dt: number): boolean } | null = null;
   readonly onRemoved: ((n: Npc) => void)[] = [];
   readonly onDied: ((n: Npc) => void)[] = [];
   readonly onHurt: ((n: Npc, amount: number) => void)[] = [];
@@ -347,6 +353,7 @@ export class NpcSystem implements GameSystem, TalkWorld, MissionHost {
         n.thinkTimer += THINK + this.rng.next() * 0.05;
         this.think(n);
       }
+      if (this.stairs?.drive(n, dt)) continue;
       this.act(n, dt);
     }
     this.separate();
@@ -360,6 +367,7 @@ export class NpcSystem implements GameSystem, TalkWorld, MissionHost {
     for (const n of this.npcs) {
       if (n.dead || !n.isFollower() || !n.following || n.z !== fromZ) continue;
       if (Math.hypot(n.x - this.lastPX, n.y - this.lastPY) > 6) continue;
+      if (this.stairs?.follow(n)) continue;
       const spot = this.freeTileNear(p.tileX, p.tileY, p.z);
       if (!spot) continue;
       n.x = spot[0] + 0.5;

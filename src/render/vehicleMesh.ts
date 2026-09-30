@@ -19,8 +19,11 @@ import { pointInBody } from '../game/vehicleShape';
 import { Cockpit, type HandColors } from './vehicleCockpit';
 import { makeWheelHands } from './vehicleHands';
 import { AtlasTextureSource } from './atlasSource';
-import { spriteInfo } from './chars/index';
+import { charLayers, charSettings, spriteInfo } from './chars/index';
+import { CRANK_M_PER_TURN, genericAnchors, riderSlot, type RideAnchors } from './vehicleRider';
+import type { V3 } from './geometry';
 import { bodyRectFor, setVehicleWidth, vehicleWidth, type VehicleWidth } from './vehicleLayout';
+import { noseX } from '../game/chassis';
 import { liveryBody } from './vehicleSkin';
 
 // 3D meshes for vehicles, built from their parts mount by mount, as low-poly boxes wearing
@@ -539,6 +542,17 @@ interface Entry {
   parkedLean: number;
   /** Headlight beam: a few dynamic lights along the cone (they feed the tile light map). */
   beam: LightHandle[];
+  /** Where the driver's body sits (model look; vehicleRider.ts), null = generic seat. */
+  ride: RideAnchors | null;
+  /** Ridden bicycle: the crank mesh, the crank angle ridden and the angle shown (stepped). */
+  crank: THREE.Mesh | null;
+  pedal: number;
+  pedalShown: number;
+  pedalTick: number;
+  /** Mount space of the meshes (child of the lean pivot): the rider's frame. */
+  pivot: THREE.Group;
+  /** Model look: the glass seen from outside (lighter while your body sits behind it). */
+  glassOut: THREE.Mesh | null;
 }
 
 /** Distance LOD thresholds (m): simplified beyond LOD_FAR, detailed again inside LOD_NEAR. */
@@ -556,6 +570,9 @@ export class VehicleRenderer {
   // inside so the cockpit view isn't hazed.
   private glassOut = new THREE.MeshLambertMaterial({ color: 0x34424e, transparent: true, opacity: 0.72, depthWrite: false, side: THREE.FrontSide });
   private glassIn = new THREE.MeshLambertMaterial({ color: 0x9ab4c4, transparent: true, opacity: 0.1, depthWrite: false, side: THREE.BackSide });
+  // With your body at the wheel (chase / top-down cameras) the driven car's glass is tinted
+  // less, so you can see yourself driving through it.
+  private glassOutRider = new THREE.MeshLambertMaterial({ color: 0x3a4a56, transparent: true, opacity: 0.4, depthWrite: false, side: THREE.FrontSide });
   private lampOn = new THREE.MeshBasicMaterial({ color: 0xfff2c8 });
   private lampOff = new THREE.MeshBasicMaterial({ color: 0x8a8a80 });
   private tailOn = new THREE.MeshBasicMaterial({ color: 0xff3020 });
@@ -581,12 +598,15 @@ export class VehicleRenderer {
     setVehicleWidth(initialVehicleWidth());
     // Creatures collide with the drawn body, not the whole grid tiles (vehicleShape.ts).
     system.bodyShape = (v) => (this.lookMode === 'model' ? bodyRectFor(v) : null);
-    for (const m of [this.glassMat, this.glassOut, this.glassIn, this.lampOn, this.lampOff, this.tailOn, this.tailOff, this.beaconMat]) patchNormalOutput(m, false);
+    for (const m of [this.glassMat, this.glassOut, this.glassOutRider, this.glassIn, this.lampOn, this.lampOff, this.tailOn, this.tailOff, this.beaconMat]) patchNormalOutput(m, false);
     this.headlight.castShadow = false;
     renderer.scene.add(this.group, this.headlight, this.headlight.target);
     renderer.vehicleView = this;
     system.onRemoved.push((v) => this.drop(v));
     renderer.beforeRender.push((dt) => this.update(dt));
+    // The character layers flush in their own beforeRender step: make sure it comes after
+    // ours, so the rider placed at the end of update() is drawn in this frame's seat.
+    charLayers(renderer);
   }
 
   get look(): VehicleLook {
@@ -716,6 +736,7 @@ export class VehicleRenderer {
       obj, lean, meshes, roof: null, lamps: null, tails: null, beacons: null, skin: null, skinMeshes: [], pending: null,
       driven: v === this.system.driving, wheels: [], bike: false, far, roofY: null, cockpit: null,
       version: v.version, z: v.z, look: this.lookMode, eyeH: null, driverZ: null, driverX: null, eyeX: null, parkedLean: 0, beam: e?.beam ?? [],
+      ride: null, crank: null, pedal: e?.pedal ?? 0, pedalShown: e?.pedalShown ?? 0, pedalTick: 0, pivot, glassOut: null,
     };
     const t0 = performance.now();
     const worker = this.lookMode === 'model' ? this.skinWorker() : null;
@@ -739,7 +760,7 @@ export class VehicleRenderer {
       next.skinMeshes = model.bodyUsesParts ? [] : [b, next.roof].filter((m): m is THREE.Mesh => !!m);
       mk(model.parts, parts.mat, parts.depth);
       if (model.glass) {
-        mk(model.glass, this.glassOut, null);
+        next.glassOut = mk(model.glass, this.glassOut, null);
         mk(model.glass, this.glassIn, null);
       }
       next.lamps = mk(model.lamps, v.lightsOn ? this.lampOn : this.lampOff, null);
@@ -750,6 +771,12 @@ export class VehicleRenderer {
         mesh.position.set(w.x, w.y, w.z);
         next.wheels.push({ mesh, r: w.r, steer: w.steer, spin: 0 });
       }
+      if (model.crank) {
+        next.crank = mk(model.crank.geo, parts.mat, parts.depth)!;
+        next.crank.position.set(model.crank.x, model.crank.y, model.crank.z);
+        next.crank.rotation.z = next.pedalShown;
+      }
+      next.ride = model.ride ?? null;
       next.bike = model.layout.style === 'motorcycle' || model.layout.style === 'bicycle';
       if (model.cockpit) {
         next.cockpit = new Cockpit(model.cockpit, parts.mat, this.handColors(), makeWheelHands(this.game, this.renderer));
@@ -836,6 +863,7 @@ export class VehicleRenderer {
         w.spin -= (v.velocity * dt) / w.r;
         w.mesh.rotation.set(0, w.steer ? -v.steer : 0, w.spin);
       }
+      if (e.crank) this.pedal(e, v, dt);
       // Top-down hides roofs (and anything above your level) so you can see inside.
       if (e.roof) e.roof.visible = !top || v.z < p.z;
       if (e.lamps) e.lamps.material = v.lightsOn ? this.lampOn : this.lampOff;
@@ -864,6 +892,7 @@ export class VehicleRenderer {
       });
     }
     for (const v of [...this.entries.keys()]) if (!seen.has(v)) this.drop(v);
+    this.placeRider(driving, now);
     rig.drive = driving ? this.driveView(driving) : null;
     rig.eyeCap = driving ? null : this.doorwayEyeCap();
     // no rain inside the cabin in the cockpit view (the glass is ~1 m ahead)
@@ -897,6 +926,62 @@ export class VehicleRenderer {
       return v.z * LEVEL_HEIGHT + e.roofY - 0.2;
     }
     return null;
+  }
+
+  /**
+   * Pedalling: the crank turns with the distance ridden (forward = the front pedal goes down,
+   * the same sense as the wheels' spin), but the crank and the feet on it show it stepped at
+   * the characters' animation rate (charSettings.fps), like every other body animation.
+   */
+  private pedal(e: Entry, v: Vehicle, dt: number): void {
+    e.pedal -= (v.velocity * dt * Math.PI * 2) / CRANK_M_PER_TURN;
+    e.pedal %= Math.PI * 2;
+    const f = charSettings.fps;
+    e.pedalTick += dt;
+    if (f <= 0 || e.pedalTick >= 1 / f) {
+      e.pedalTick = f > 0 ? e.pedalTick % (1 / f) : 0;
+      e.pedalShown = e.pedal;
+    }
+    e.crank!.rotation.z = e.pedalShown;
+  }
+
+  /** Tools: the seated rider's state (null = no body in the seat), `cdda.renderer.vehicleView.riderCheck()`. */
+  riderCheck(): ReturnType<NonNullable<ReturnType<typeof riderSlot>['rider']>['check']> & { ageMs: number } | null {
+    const r = riderSlot(this.renderer).rider;
+    return r ? { ...r.check(), ageMs: performance.now() - r.placedAt } : null;
+  }
+
+  private riderGrips: [V3, V3] = [[0, 0, 0], [0, 0, 0]];
+  private riderWorld = { x: 0, y: 0, z: 0 };
+  private riderClock = 0;
+  /**
+   * The survivor's body in the seat of the vehicle being driven (chase / top-down cameras,
+   * 3D characters: the player model puts itself in riderSlot). Runs after the vehicle's own
+   * placement this frame, so the body never trails the vehicle.
+   */
+  private placeRider(driving: Vehicle | null, now: number): void {
+    const rider = riderSlot(this.renderer).rider;
+    const e = driving ? this.entries.get(driving) : undefined;
+    for (const [v, en] of this.entries) {
+      const seated = !!rider && v === driving;
+      if (en.cockpit) en.cockpit.handsVisible = !seated;
+      if (en.glassOut) en.glassOut.material = seated ? this.glassOutRider : this.glassOut;
+    }
+    if (!rider || !driving || !e) return;
+    let a = e.ride;
+    if (!a) {
+      const s = driving.driverSeat();
+      if (!s) return;
+      a = genericAnchors(s.mx, s.my, driving.z * LEVEL_HEIGHT);
+    }
+    e.pivot.updateWorldMatrix(true, false);
+    const grips = e.cockpit ? e.cockpit.gripPoints(this.riderGrips) : null;
+    const [wx, wy] = driving.mountToWorld(a.hip[0], a.hip[2]);
+    Object.assign(this.riderWorld, { x: wx, y: wy, z: driving.z });
+    // (idle breathing and the like run off the stepped clock, like other bodies)
+    const f = charSettings.fps;
+    this.riderClock = f > 0 ? Math.floor(now * f) / f : now;
+    rider.place(a, e.pivot.matrixWorld, grips, e.pedalShown, this.riderClock, this.riderWorld);
   }
 
   /** Wipers: 0 off, 1 rain / drizzle, 2 storm (the weather you see falling). */
@@ -963,10 +1048,11 @@ export class VehicleRenderer {
     return out;
   }
 
-  /** World point `ahead` metres in front of the vehicle's front row. */
+  /** World point `ahead` metres in front of the vehicle's nose (its template's, in the model look). */
   private front(v: Vehicle, ahead: number): [number, number] {
-    const [, , x1] = v.bounds();
-    return v.mountToWorld(x1 + 0.5 + ahead, (v.bounds()[1] + v.bounds()[3]) / 2);
+    const [, y0, x1, y1] = v.bounds();
+    const nose = this.lookMode === 'model' ? noseX(v) : x1 + 0.5;
+    return v.mountToWorld(nose + ahead, (y0 + y1) / 2);
   }
 }
 

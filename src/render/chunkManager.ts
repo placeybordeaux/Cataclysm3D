@@ -197,6 +197,14 @@ export class ChunkManager {
     }
   }
 
+  /** Rebuild one chunk's mesh (keeps the old one up meanwhile): a stair flight solved next door. */
+  invalidateChunk(cx: number, cy: number, z: number): void {
+    const e = this.entries.get(key(cx, cy, z));
+    if (!e) return;
+    e.builtSig = -1;
+    e.job = null;
+  }
+
   /** Is tile (x,y,z) under a roof/floor (anything on the level above)? Used for ambient. */
   covered(x: number, y: number, z: number): boolean {
     return terrainShape(this.map.terAt(x, y, z + 1)) !== 'none';

@@ -1,6 +1,7 @@
 # Vehicles v3: chassis templates, sockets, and a planned build queue
 
-Status: **design agreed 2026-09-30, not built.** Background and sources:
+Status: **design agreed 2026-09-30; phase 1 (templates + mapping) built**, see
+`docs/VEHICLES.md` "v3 phase 1". Background and sources:
 `docs/research/VEHICLE_BUILDING.md`. Current renderer/collision: `docs/VEHICLES.md`.
 
 ## Why
@@ -93,9 +94,19 @@ Walking around inside a *moving* vehicle (moving reference frame) is out of scop
 
 ## Phases (proposed)
 
-1. **Templates + mapping** (no building yet): socket data model; map every BN vehicle and
+1. [x] **Templates + mapping** (no building yet): socket data model; map every BN vehicle and
    mapgen spawn onto a template (frame fallback); drawn body = collision body; save
    migration; tests over all 257 BN vehicles. Removes the collision mismatch for good.
+   *Done 2026-09-30* (`src/game/chassis/`, `docs/VEHICLES.md` "v3 phase 1"): 21 templates
+   (15 bike / car / utility / heavy, the rig, 5 frame), 7 socket kinds, all 257 BN vehicles mapped with
+   0 of 26,885 parts in overflow; the template is saved per vehicle (pre-v3 saves migrate on
+   load). Decisions made on the way: the template is authoritative once chosen (a stripped
+   vehicle keeps its body; only choosing checks the grid envelope); parts BN force-stacked on
+   one tile share the socket (can_mount is for installs, phase 3); side protrusions (wing
+   mirrors) hang on that side's panel; anything with wings / rotors / balloons is an
+   airframe whatever its id (BN's flying motorcycle); the renderer keeps drawing bodies at
+   the wave-3 proportions (templates promise length / width ranges rather than one fixed
+   size, since BN grids of one kind vary in length).
 2. **Adopt, strip, salvage**: claim a vehicle, remove parts into items, strip to chassis.
 3. **Plan-and-queue building**: the 3D planner, requirements (per Q5), queued timed job,
    installing parts into sockets, build a chassis at a garage; the top-rung rig chassis.

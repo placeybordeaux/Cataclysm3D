@@ -1,0 +1,407 @@
+{
+ "ref": "bn",
+ "sha": "e7e9bf1579",
+ "by_lang": {
+  "Markdown": [
+   24,
+   5313,
+   0,
+   840
+  ],
+  "HTML": [
+   1,
+   15,
+   0,
+   0
+  ],
+  "JSON": [
+   2,
+   54,
+   0,
+   0
+  ],
+  "Nix": [
+   1,
+   8,
+   4,
+   0
+  ],
+  "TypeScript": [
+   531,
+   110900,
+   16644,
+   8748
+  ],
+  "CSS": [
+   16,
+   1417,
+   121,
+   88
+  ],
+  "Shell": [
+   2,
+   33,
+   13,
+   0
+  ],
+  "JavaScript": [
+   4,
+   554,
+   84,
+   1
+  ],
+  "Python": [
+   1,
+   16,
+   1,
+   1
+  ]
+ },
+ "by_area": {
+  "(root)": [
+   2,
+   24
+  ],
+  "src": [
+   16,
+   3573
+  ],
+  "src/audio": [
+   11,
+   1524
+  ],
+  "src/core": [
+   6,
+   295
+  ],
+  "src/data": [
+   5,
+   850
+  ],
+  "src/dev": [
+   1,
+   87
+  ],
+  "src/gallery": [
+   5,
+   1168
+  ],
+  "src/game": [
+   92,
+   27982
+  ],
+  "src/progression": [
+   13,
+   1881
+  ],
+  "src/render": [
+   98,
+   22311
+  ],
+  "src/save": [
+   11,
+   1455
+  ],
+  "src/screens": [
+   16,
+   2601
+  ],
+  "src/ui": [
+   65,
+   11593
+  ],
+  "src/ui2": [
+   48,
+   6916
+  ],
+  "src/world": [
+   19,
+   3804
+  ],
+  "tests": [
+   89,
+   16274
+  ],
+  "tools": [
+   58,
+   10597
+  ]
+ },
+ "test_files": 87,
+ "tracked_files": 1022,
+ "test_cases_static": 1059,
+ "data": {
+  "achievements": {
+   "bytes": 58404,
+   "counts": {
+    "achievements": 95,
+    "statistics": 70,
+    "transformations": 68,
+    "scores": 14
+   }
+  },
+  "furniture": {
+   "bytes": 414188,
+   "counts": {
+    "entries": 490
+   }
+  },
+  "item_groups": {
+   "bytes": 1238460,
+   "counts": {
+    "entries": 2688
+   }
+  },
+  "items": {
+   "bytes": 5796022,
+   "counts": {
+    "entries": 6061
+   }
+  },
+  "mapgen": {
+   "bytes": 3467812,
+   "counts": {
+    "omt": 2247,
+    "nested": 785,
+    "objects": 3016,
+    "update": 3,
+    "builtin": 30
+   }
+  },
+  "misc": {
+   "bytes": 2545343,
+   "counts": {
+    "monster_blacklist": 1,
+    "nested_category": 21,
+    "uncraft": 1093,
+    "requirement": 216,
+    "construction": 632,
+    "profession": 266,
+    "material": 79,
+    "tool_quality": 65,
+    "ammunition_type": 116,
+    "scenario": 40,
+    "start_location": 89,
+    "mutation": 760,
+    "mutation_category": 25,
+    "mutation_type": 23,
+    "mutation_flag": 26,
+    "trait_group": 142,
+    "effect_type": 287,
+    "martial_art": 37,
+    "technique": 181,
+    "harvest": 115,
+    "field_type": 62,
+    "trap": 67,
+    "construction_group": 390,
+    "construction_category": 14,
+    "body_part": 13,
+    "anatomy": 2,
+    "skill": 28,
+    "item_category": 44,
+    "monster_faction": 53,
+    "species": 29,
+    "bionic": 144,
+    "fault": 16,
+    "morale_type": 88,
+    "recipe_category": 10,
+    "item_action": 218,
+    "emit": 57,
+    "vitamin": 17,
+    "weather_type": 16,
+    "ammo_effect": 89,
+    "json_flag": 531,
+    "monster_attack": 6,
+    "spell": 99,
+    "enchantment": 23,
+    "enchantment_value": 96,
+    "enchantment_flag": 27,
+    "enchantment_condition": 15,
+    "enchantment_vision": 5,
+    "gate": 9,
+    "ter_furn_transform": 1,
+    "rotatable_symbol": 24,
+    "weapon_category": 54,
+    "clothing_mod": 14,
+    "scent_type": 3,
+    "activity_type": 110,
+    "hit_range": 1,
+    "disease_type": 1,
+    "item_migration": 189,
+    "external_option": 49,
+    "snippet": 226,
+    "speech": 65,
+    "profession_item_substitutions": 32,
+    "dream": 25
+   }
+  },
+  "monster_groups": {
+   "bytes": 253883,
+   "counts": {
+    "entries": 232
+   }
+  },
+  "monsters": {
+   "bytes": 758155,
+   "counts": {
+    "entries": 615
+   }
+  },
+  "npcs": {
+   "bytes": 1150705,
+   "counts": {
+    "templates": 105,
+    "classes": 89,
+    "topics": 979,
+    "missions": 177,
+    "factions": 17,
+    "eocs": 0,
+    "names": 3
+   }
+  },
+  "overmap": {
+   "bytes": 673790,
+   "counts": {
+    "terrains": 2261,
+    "specials": 437,
+    "locations": 49,
+    "region": 8,
+    "wildSpecials": 35,
+    "names": 3
+   }
+  },
+  "palettes": {
+   "bytes": 152525,
+   "counts": {
+    "entries": 110
+   }
+  },
+  "recipes": {
+   "bytes": 2535988,
+   "counts": {
+    "entries": 3187
+   }
+  },
+  "terrain": {
+   "bytes": 627160,
+   "counts": {
+    "entries": 869
+   }
+  },
+  "ui": {
+   "bytes": 167657,
+   "counts": {
+    "title": 18,
+    "tombstone": 3,
+    "names": 5,
+    "help": 24,
+    "moodFaces": 7,
+    "tips": 86
+   }
+  },
+  "unlocks": {
+   "bytes": 8772,
+   "counts": {
+    "unlocks": 21
+   }
+  },
+  "vehicles": {
+   "bytes": 1182610,
+   "counts": {
+    "parts": 813,
+    "vehicles": 257,
+    "groups": 76,
+    "fuels": 9
+   }
+  }
+ },
+ "public_bytes": {
+  "atlas": 14833722,
+  "audio": 16877269,
+  "data": 21031474,
+  "favicon.ico": 198,
+  "favicon.png": 176,
+  "fonts": 12765387
+ },
+ "git": {
+  "commits_all_refs": 500,
+  "commits_bn": 495,
+  "merges_bn": 108,
+  "branches": 67,
+  "agent_branches": 63
+ },
+ "growth": [
+  {
+   "phase": "scaffold (first commit)",
+   "commit": "ce7b579",
+   "date_pdt": "2026-09-28 22:33",
+   "commits": 1,
+   "ts_js_code": 1014,
+   "src_code": 933,
+   "tests_code": 0,
+   "tools_code": 80,
+   "test_files": 0,
+   "markdown_lines": 133
+  },
+  {
+   "phase": "v1 first working copy (0251064)",
+   "commit": "0251064",
+   "date_pdt": "2026-09-29 03:48",
+   "commits": 123,
+   "ts_js_code": 52760,
+   "src_code": 41297,
+   "tests_code": 7890,
+   "tools_code": 3684,
+   "test_files": 36,
+   "markdown_lines": 681
+  },
+  {
+   "phase": "v1-dda tag",
+   "commit": "aff1709",
+   "date_pdt": "2026-09-29 08:21",
+   "commits": 134,
+   "ts_js_code": 54546,
+   "src_code": 42160,
+   "tests_code": 8096,
+   "tools_code": 4405,
+   "test_files": 38,
+   "markdown_lines": 816
+  },
+  {
+   "phase": "end of v2 (BN) push",
+   "commit": "941157a",
+   "date_pdt": "2026-09-29 22:41",
+   "commits": 301,
+   "ts_js_code": 87138,
+   "src_code": 67435,
+   "tests_code": 12930,
+   "tools_code": 8013,
+   "test_files": 62,
+   "markdown_lines": 2854
+  },
+  {
+   "phase": "end of wave 3 overnight",
+   "commit": "3e89023",
+   "date_pdt": "2026-09-30 05:11",
+   "commits": 479,
+   "ts_js_code": 107083,
+   "src_code": 82968,
+   "tests_code": 15493,
+   "tools_code": 9985,
+   "test_files": 84,
+   "markdown_lines": 4983
+  },
+  {
+   "phase": "now (bn head)",
+   "commit": "e7e9bf1",
+   "date_pdt": "2026-09-30 11:13",
+   "commits": 495,
+   "ts_js_code": 111454,
+   "src_code": 86040,
+   "tests_code": 16274,
+   "tools_code": 10597,
+   "test_files": 87,
+   "markdown_lines": 6153
+  }
+ ]
+}

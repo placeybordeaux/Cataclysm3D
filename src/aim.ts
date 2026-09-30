@@ -304,7 +304,7 @@ function installModelHooks(game: Game, renderer: Renderer, monsters: MonstersHan
   aimHooks.view = () => {
     const mode = renderer.cameraMode;
     if (mode === 'top') return null;
-    const eyeH = (p.crouching ? 1.0 : 1.6) + renderer.rig.eyeOffset + (renderer.groundAt?.(p.x, p.y, p.z) ?? 0);
+    const eyeH = (p.crouching ? 1.0 : 1.6) + renderer.rig.eyeOffset + (renderer.groundAt?.(p.x, p.y, p.z) ?? 0) + renderer.rig.lift;
     return {
       o: v3(e[12], e[13], e[14]), r: v3(e[0], e[1], e[2]), u: v3(e[4], e[5], e[6]), f: v3(-e[8], -e[9], -e[10]),
       third: mode === 'third', eye: { x: p.x, y: p.y, h: p.z * LEVEL_HEIGHT + eyeH },
