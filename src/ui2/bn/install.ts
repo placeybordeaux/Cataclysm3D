@@ -108,7 +108,18 @@ export function installBnInventory(game: Game, ctx: UiContext, api: DebugApi, ca
     let total = 0;
     let exact: { view: ItemView; loc: string } | null = null;
     for (const a of model.all()) {
-      if (!model.onBody(a.loc) || a.view.typeId !== typeId) continue;
+      if (!model.onBody(a.loc)) continue;
+      // The exact item even when a use_action transformed it (smartphone → "smartphone -
+      // Flashlight"): the slot read "0 left" in red while the phone lit the room.
+      // (or, after a reload when refs are new, the "on" type whose revert_to is the bound one).
+      const turnedOn = (a.item.def as { revert_to?: string }).revert_to === typeId;
+      if ((ref && a.view.id === ref && a.view.typeId !== typeId) || (turnedOn && a.view.typeId !== typeId)) {
+        if (ref && a.view.id === ref) exact = { view: a.view, loc: a.loc };
+        else byType ??= { view: a.view, loc: a.loc };
+        total += a.view.count;
+        continue;
+      }
+      if (a.view.typeId !== typeId) continue;
       total += a.view.count;
       if (ref && a.view.id === ref) exact = { view: a.view, loc: a.loc };
       byType ??= { view: a.view, loc: a.loc };

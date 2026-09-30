@@ -10,6 +10,7 @@
 import type { Game } from '../game/game';
 import { comfortAt, goToSleep, waitFor, WAIT_OPTIONS } from '../game/rest';
 import { isOutside } from '../game/vision';
+import { playerLightState, toggleLight } from '../game/lightitems';
 import { h } from '../ui2/dom';
 import { fmtDuration } from '../ui2/logic/items';
 import { closeGroup, openPanel } from '../ui2/window';
@@ -57,6 +58,17 @@ export function waitChoices(game: Game): { key: string; label: string; seconds: 
 
 const GROUP = 'rest';
 
+/**
+ * Lie down, switching your flashlight off first. Playtest: the phone's flashlight app, left on
+ * from walking around in the dark, ran the battery flat overnight and the survivor woke up in
+ * the dark with a dead phone. CDDA leaves it to you; this says what it did so it isn't magic.
+ */
+function sleepHere(game: Game): void {
+  const light = playerLightState(game);
+  if (light.on && light.item && toggleLight(game)) game.message('You switch off your light to save the battery.', 'c_light_gray');
+  goToSleep(game);
+}
+
 export function openRest(game: Game, focus: 'sleep' | 'wait'): void {
   closeGroup(GROUP);
   const p = game.player;
@@ -71,7 +83,7 @@ export function openRest(game: Game, focus: 'sleep' | 'wait'): void {
     panel.close();
     fn();
   };
-  const sleepBtn = button('Sleep here', () => run(() => void goToSleep(game)), {
+  const sleepBtn = button('Sleep here', () => run(() => sleepHere(game)), {
     key: 'Y', tone: 'accent', disabled: blocked ?? (ci.comfort <= -999 ? "You can't sleep here." : undefined),
   });
   const sleepCard = h('div', { class: 'rest-card' },
@@ -100,7 +112,7 @@ export function openRest(game: Game, focus: 'sleep' | 'wait'): void {
       }
       if (blocked) return false;
       if (k === 'y' && ci.comfort > -999) {
-        run(() => void goToSleep(game));
+        run(() => sleepHere(game));
         return true;
       }
       const c = choices.find((x) => x.key === k);
