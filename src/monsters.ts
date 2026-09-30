@@ -8,7 +8,8 @@ import { Spawner, type OvermapView } from './game/spawner';
 import { PlayerCombat, type ViewModelHook } from './game/playercombat';
 import { MELEE_AIM, MonsterView, NEAR_CLAMP } from './render/monsterView';
 import { HitFx } from './render/hitFx';
-import { charSettings, charsApi, setCharMode } from './render/chars';
+import { charSettings, charsApi, setCharMode, setViewmodelMode } from './render/chars';
+import { FpView } from './render/chars/fpView';
 import { PlayerModel } from './render/chars/playerModel';
 import { ArrowFx } from './render/arrowFx';
 import { butcherPracticeCap, butcherSeconds, butcherToolQuality, butcherYield, type ButcherKind, canDissect, dissectPracticeCap, dissectSeconds, dissectToolMessage, dissectToolQuality, dissectYield, readDissectables } from './game/butchery';
@@ -78,6 +79,13 @@ export function installMonsters(game: Game, renderer: Renderer | null, worldgen:
     const fx = new HitFx(game, renderer, view);
     const arrows = new ArrowFx(game, renderer, combat, sys, view);
     if (api) Object.assign(api, { hitFx: fx, arrowFx: arrows, nearClamp: NEAR_CLAMP, meleeAim: MELEE_AIM, chars: charsApi });
+    if (renderer.viewmodel) new FpView(game, renderer, renderer.viewmodel);
+    registerOption({
+      name: 'First-person hands',
+      value: () => (charSettings.viewmodel === 'model' ? '3D' : 'sprites'),
+      change: () => setViewmodelMode(charSettings.viewmodel === 'model' ? 'sprite' : 'model'),
+      desc: 'Your hands and what you hold, in first person: 3D arms and weapons, or the classic flat pixel sprites.',
+    });
     registerOption({
       name: 'Creatures',
       value: () => (charSettings.mode === 'model' ? '3D models' : 'sprites'),

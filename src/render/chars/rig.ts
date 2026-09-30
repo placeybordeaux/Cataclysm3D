@@ -110,6 +110,8 @@ export interface Rig {
    * its side (animals, bugs) rather than forward/back along the killing blow (people).
    */
   lie: { angle: number; lift: number; side: boolean };
+  /** skin texel density multiplier (1 = 32 texels/m); the first-person rig uses more */
+  texels?: number;
   pose(p: PoseIn, out: PoseOut): void;
 }
 
@@ -252,6 +254,14 @@ function humanoid(sh: BodyShape): Rig {
         setRot(o, footI, -(a + knee) * 0.7);
       }
       o.pos[1] -= Math.abs(sin(ph)) * 0.04 * walk * s;
+      if (zombie && walk > 0) {
+        // a shamble, not a walk: the body lurches onto the good leg and sways side to side,
+        // by an amount that differs per zombie
+        const lurch = 0.06 + 0.1 * quirk(p.seed, 6);
+        o.lean[2] += sin(ph) * lurch * walk;
+        o.pos[0] += sin(ph) * 0.03 * walk * s;
+        setRot(o, H.head, 0, 0, -sin(ph) * lurch * 0.8 * walk);
+      }
       // idle: slow breathing sway (zombies loll their heads)
       const idle = sin(p.t * 1.7 + p.seed * TAU);
       setRot(o, H.torso, -hunch - 0.03 * idle * (zombie ? 1 : 0.4) - run * 0.25, 0, zombie ? 0.05 * sin(ph * 0.5 + p.seed * 6) + (quirk(p.seed, 5) - 0.5) * 0.12 : 0);

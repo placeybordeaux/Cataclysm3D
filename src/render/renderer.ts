@@ -342,6 +342,8 @@ export class Renderer {
   /** The player billboard shows outside first person, except at the wheel (you're inside the
    *  car). Checked every frame: taking/leaving the controls switches the camera mode too. */
   private spriteShown: boolean | null = null;
+  /** A 3D first-person view (render/chars/fpView.ts) drawn instead of the sprite viewmodel; null = sprites. */
+  viewmodelOverlay: ((dt: number) => { scene: THREE.Scene; camera: THREE.Camera } | null) | null = null;
   /** Another system draws the player's body (render/chars 3D model): keep the billboard hidden. */
   playerBodyOverride = false;
   private syncPlayerSprite(): void {
@@ -541,7 +543,7 @@ export class Renderer {
     if (vm.enabled) {
       this.viewmodelTint(vm.tint);
       vm.update(dt, p.inv.wielded, p.x, p.y, p.yaw, this.pipeline.lowW, this.pipeline.lowH, (id) => this.source.item(id));
-      overlay = vm;
+      overlay = this.viewmodelOverlay?.(dt) ?? vm;
     }
     // Fog of war tied to the draw distance: fully opaque before the nearest not-yet-loaded
     // chunk can be (the load circle is (radius + 0.5) chunks around the player's chunk, and

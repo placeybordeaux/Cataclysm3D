@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
 import { archetypeOf, bodyShapeOf, weaponOf, ARCHETYPES, type Archetype } from '../../src/render/chars/archetype';
 import { paintStyled, personPalette } from '../../src/render/chars/styled';
+import { buildHeld, heldClass } from '../../src/render/chars/held';
 import { makeRig, type PoseIn } from '../../src/render/chars/rig';
 import { analyseSprite, netSize, paintPart, texelDims, type Img } from '../../src/render/chars/paint';
 import { CharLayer, type Skin } from '../../src/render/chars/charLayer';
@@ -187,5 +188,33 @@ describe('weapons', () => {
     expect(weaponOf({ isGun: () => false, def: { volume: 250 } })).toBe('short');
     const rig = makeRig({ ...bodyShapeOf({ id: 'npc', bodytype: 'human', species: ['HUMAN'] }), weapon: 'rifle' });
     expect(rig.parts[rig.parts.length - 1].name).toBe('weapon');
+  });
+});
+
+describe('first-person held items', () => {
+  const pal = analyseSprite({ w: 1, h: 1, data: new Uint8Array([120, 80, 50, 255]) }).pal;
+  it('classifies wielded items', () => {
+    const gun = (skill: string) => ({ typeId: 'x', isGun: () => true, def: { skill } });
+    expect(heldClass(gun('pistol'))).toBe('pistol');
+    expect(heldClass(gun('shotgun'))).toBe('shotgun');
+    expect(heldClass(gun('smg'))).toBe('smg');
+    expect(heldClass({ typeId: 'crossbow', isGun: () => true, def: { skill: 'rifle' } })).toBe('crossbow');
+    expect(heldClass({ typeId: 'bat' })).toBe('bat');
+    expect(heldClass({ typeId: 'knife_combat' })).toBe('knife');
+    expect(heldClass({ typeId: 'fire_ax' })).toBe('axe');
+    expect(heldClass({ typeId: 'spear_wood' })).toBe('spear');
+    expect(heldClass({ typeId: 'katana' })).toBe('sword');
+    expect(heldClass({ typeId: 'machete' })).toBe('machete');
+    expect(heldClass({ typeId: 'pipe' })).toBe('pipe');
+    expect(heldClass({ typeId: 'flashlight' })).toBe('flashlight');
+    expect(heldClass({ typeId: 'can_beans' })).toBe('generic');
+  });
+  it('builds every class with valid parents, guns with a muzzle', () => {
+    for (const c of ['pistol', 'rifle', 'shotgun', 'smg', 'launcher', 'crossbow', 'knife', 'machete', 'sword', 'axe', 'bat', 'pipe', 'spear', 'hammer', 'flashlight', 'generic'] as const) {
+      const h = buildHeld(c, pal, 1000);
+      expect(h.parts.length, c).toBeGreaterThan(0);
+      h.parts.forEach((p, i) => expect(p.parent < i, `${c}:${p.name}`).toBe(true));
+      if (h.gun) expect(h.muzzle, c).not.toBeNull();
+    }
   });
 });
