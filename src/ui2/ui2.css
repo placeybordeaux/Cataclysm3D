@@ -217,6 +217,7 @@ body.ui2-dragging, body.ui2-dragging * { cursor: grabbing !important; }
 }
 #ui2 .ui2-delta { text-align: right; }
 #ui2 .ui2-itemtip-desc { font-size: var(--fs-s); color: var(--p-text-dim); white-space: normal; }
+#ui2 .ui2-itemtip-note { font-size: var(--fs-s); white-space: normal; }
 #ui2 .ui2-itemtip-hints { font-size: var(--fs-s); color: var(--p-text-dim); border-top: var(--u) solid var(--p-bg-raised); padding-top: var(--u); }
 
 /* ---- context menu ---- */

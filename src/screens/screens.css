@@ -40,6 +40,7 @@
 #ui2 .ix-dlg-name { color: var(--p-accent); font-size: var(--fs-l); line-height: 1.1; }
 #ui2 .ix-dlg-job { color: var(--p-text); font-size: var(--fs-s); }
 #ui2 .ix-dlg-tags { display: flex; flex-wrap: wrap; gap: calc(var(--u) * 2); }
+#ui2 .ix-dlg-howto { white-space: normal; max-width: calc(var(--fs) * 14); line-height: 1.25; }
 #ui2 .ix-dlg-wield { font-size: var(--fs-s); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #ui2 .ix-dlg-main { display: flex; flex-direction: column; gap: calc(var(--u) * 3); min-width: 0; min-height: 0; flex: 1; }
 #ui2 .ix-dlg-history {

@@ -284,6 +284,8 @@ export class Character {
   env: CharacterEnvironment = { temperature: 20, wind: 0, precipitation: false };
   /** Absolute game second counter used for BN "once_every"/tick alignment. */
   turn = 0;
+  /** Game second of the last "learning slowly: low morale" note (practice). */
+  lastSlowLearningNote = -Infinity;
   /** Character::last_sleep_check: roll_can_sleep rolls at most every 30 minutes. */
   lastSleepCheck = -Infinity;
   /**
@@ -524,6 +526,13 @@ export class Character {
     if (this.hasTrait('FASTLEARNER')) focus += 15;
     if (this.hasTrait('SLOWLEARNER')) focus -= 15;
     focus += (this.int - INT_LEARNING_BASE) * INT_LEARNING_FOCUS;
+    // Low morale pulls focus (and so learning) down, invisibly in BN. Say so, at most once an
+    // hour of game time (docs/ADAPTATION.md: "why is my skill not going up?").
+    const mood = this.morale.level();
+    if (mood <= -10 && focus < 90 && this.turn - this.lastSlowLearningNote >= 3600) {
+      this.lastSlowLearningNote = this.turn;
+      this.msg(`You're learning slowly: your low morale (${mood}) makes it hard to focus.  Something tasty, warmth, rest or a good book helps.`, 'c_yellow');
+    }
     amount = this.rollRemainder((amount * focus) / 100);
     if (amount <= 0 || sk.level > cap) return false;
     sk.exercise += amount * 100;
