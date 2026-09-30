@@ -28,6 +28,7 @@ import { archeryScenarios } from './realinput_archery';
 import { aimScenarios } from './realinput_aim';
 import { qaScenarios } from './realinput_qa';
 import { galleryScenarios } from './realinput_gallery';
+import { driveScenarios } from './realinput_drive';
 
 const argv = process.argv.slice(2);
 const opt = (n: string, d: string) => (argv.includes(n) ? argv[argv.indexOf(n) + 1] : d);
@@ -1428,6 +1429,8 @@ scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...lootScenario
 
 // Interaction screens (dialogue, trade, missions, vehicles, body, Autodoc, scores): before 'death'.
 scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...screenScenarios({ page: () => page, x: () => x, js, check, shot, toGameplay, sleep }));
+// Driving collision against the drawn body (roads, then the refugee center's lot): right after the vehicle screens.
+scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...driveScenarios({ x: () => x, js, check, shot, toGameplay, sleep }));
 
 // Archery (draw, loose, why-missed, arrow recovery): last before 'death' — it leaves a bow, arrows and
 // a backpack in the inventory, which shifts the item lists the screen scenarios drag from.

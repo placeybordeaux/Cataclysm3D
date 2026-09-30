@@ -260,6 +260,17 @@ export class VehicleSystem implements GameSystem, MapOverlay {
     return list ? list.some((o) => o.v.opaqueAt(o.mx, o.my)) : undefined;
   }
 
+  /**
+   * What driving crashes (vehicle vs terrain / vehicle) test: 'body' = the drawn body where
+   * there is one (default), 'tiles' = CDDA's whole tiles even in the modelled look (the
+   * pre-wave-3 behaviour, kept for comparison: cdda.vehicleCrashes('tiles')). Creatures,
+   * run-overs and `playerOn` follow the body either way.
+   */
+  crashGeometry: 'body' | 'tiles' = 'body';
+  private crashBody(v: Vehicle): BodyRect | null {
+    return this.crashGeometry === 'body' ? this.bodyRect(v) : null;
+  }
+
   /** The body outline collision uses for `v`, or null for whole tiles. */
   bodyRect(v: Vehicle): BodyRect | null {
     if (!this.bodyShape) return null;
@@ -294,9 +305,10 @@ export class VehicleSystem implements GameSystem, MapOverlay {
    * of a door's tile, outside the car.
    */
   occupantAt(x: number, y: number, z: number): VehicleOccupant | null {
-    for (const o of this.index.get(tileKey(Math.floor(x), Math.floor(y), z)) ?? []) {
-      const b = this.bodyRect(o.v);
-      if (!b || pointInBody(o.v, b, x, y)) return o;
+    const list = this.index.get(tileKey(Math.floor(x), Math.floor(y), z)) ?? [];
+    for (let i = list.length - 1; i >= 0; i--) {
+      const b = this.bodyRect(list[i].v);
+      if (!b || pointInBody(list[i].v, b, x, y)) return list[i];
     }
     return null;
   }
@@ -310,12 +322,14 @@ export class VehicleSystem implements GameSystem, MapOverlay {
   at(x: number, y: number, z: number): VehicleOccupant | null {
     const list = this.index.get(tileKey(x, y, z));
     if (!list) return null;
+    // Latest indexed first (the vehicle that moved or spawned there last), as when one entry
+    // per tile was simply overwritten.
     if (list.length > 1)
-      for (const o of list) {
-        const b = this.bodyRect(o.v);
-        if (b && pointInBody(o.v, b, x + 0.5, y + 0.5)) return o;
+      for (let i = list.length - 1; i >= 0; i--) {
+        const b = this.bodyRect(list[i].v);
+        if (b && pointInBody(list[i].v, b, x + 0.5, y + 0.5)) return list[i];
       }
-    return list[0];
+    return list[list.length - 1];
   }
 
   add(v: Vehicle): void {
@@ -1035,7 +1049,7 @@ export class VehicleSystem implements GameSystem, MapOverlay {
    * body newly touches (shaped bodies). The driver (and anyone standing inside) moves along.
    */
   move(v: Vehicle, dist: number, dFacing: number): void {
-    const body = this.bodyRect(v);
+    const body = this.crashBody(v);
     // A drawn body is thinner than a tile row (a bike is ~0.6 m across), so it steps finer to
     // never skip over one at speed, and turns in smaller steps so a swinging corner is caught
     // near where it touches. Whole tiles keep CDDA-ish tile stepping.
@@ -1137,14 +1151,21 @@ export class VehicleSystem implements GameSystem, MapOverlay {
       }
     }
     const [x0, y0, x1, y1] = bounds;
+    const touched: { tx: number; ty: number; cx: number; cy: number; d: number }[] = [];
     for (let ty = Math.floor(y0); ty <= Math.floor(y1); ty++)
       for (let tx = Math.floor(x0); tx <= Math.floor(x1); tx++) {
         if (!obbHitsTile(nb, tx, ty) || obbHitsTile(ob, tx, ty)) continue;
         const [cx, cy] = clampToObb(nb, tx + 0.5, ty + 0.5);
-        const mount = mountOf(cx, cy);
-        const obs = obstacleAt(map, tx, ty, z, v.partsAt(mount[0], mount[1]).some((q) => has(q, 'WHEEL')));
-        if (obs) yield { kind: 'tile', mount, tx, ty, ob: obs };
+        touched.push({ tx, ty, cx, cy, d: Math.hypot(cx - nb.cx, cy - nb.cy) });
       }
+    // Nearest the body's centre first: a car meeting a wall square-on takes it on the bonnet /
+    // bumper in the middle of the nose, not on whichever corner tile the scan found first.
+    touched.sort((a, b) => a.d - b.d);
+    for (const t of touched) {
+      const mount = mountOf(t.cx, t.cy);
+      const obs = obstacleAt(map, t.tx, t.ty, z, v.partsAt(mount[0], mount[1]).some((q) => has(q, 'WHEEL')));
+      if (obs) yield { kind: 'tile', mount, tx: t.tx, ty: t.ty, ob: obs };
+    }
   }
 
   /**
@@ -1176,11 +1197,13 @@ export class VehicleSystem implements GameSystem, MapOverlay {
     const dir = Math.sign(v.velocity) || 1;
     const rad = (nf * Math.PI) / 180;
     const fdx = Math.cos(rad) * dir, fdy = Math.sin(rad) * dir;
-    if (body) {
+    // Crashes may stay on whole tiles (crashGeometry 'tiles') while creatures use the body.
+    const solidBody = this.crashBody(v);
+    if (solidBody) {
       // Solid things first: the body stops at the paint, and a creature beyond a wall it
       // didn't get through isn't hit.
-      const pusher = { v, obb: rectObb(v, body, nf, nx, ny) };
-      for (const c of this.bodyContacts(v, body, nx, ny, nf)) {
+      const pusher = { v, obb: rectObb(v, solidBody, nf, nx, ny) };
+      for (const c of this.bodyContacts(v, solidBody, nx, ny, nf)) {
         const part = collisionPart(v, c.mount[0], c.mount[1]);
         const hit = c.kind === 'vehicle'
           ? this.crashVehicle(v, part, c.other, fdx, fdy, new Set(), pusher)
@@ -1218,7 +1241,7 @@ export class VehicleSystem implements GameSystem, MapOverlay {
       if (!isNew && !body) continue;
       const part = collisionPart(v, t.mx, t.my);
       // Another vehicle (whole tiles; shaped bodies did theirs above).
-      const other = isNew && !body ? this.index.get(k)?.find((o) => o.v !== v) : undefined;
+      const other = isNew && !solidBody ? [...(this.index.get(k) ?? [])].reverse().find((o) => o.v !== v) : undefined;
       if (other && this.crashVehicle(v, part, other, fdx, fdy, poseKeys, null)) {
         stopped = 'solid';
         break;
@@ -1264,7 +1287,7 @@ export class VehicleSystem implements GameSystem, MapOverlay {
         continue;
       }
       // Terrain / furniture (CDDA: bashable things that aren't flat floor, then walls).
-      if (!isNew || body) continue;
+      if (!isNew || solidBody) continue;
       const ob = obstacleAt(map, t.tx, t.ty, z, v.partsAt(t.mx, t.my).some((q) => has(q, 'WHEEL')));
       if (!ob) continue;
       if (this.crashTerrain(v, part, t.tx, t.ty, ob, velBefore)) {

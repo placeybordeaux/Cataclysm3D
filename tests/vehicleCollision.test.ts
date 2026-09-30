@@ -163,8 +163,9 @@ describe('driving collision follows the drawn body', () => {
     expect(car.parts.filter((p) => p.mx < 0).reduce((a, p) => a + p.hp, 0)).toBe(rear);
   });
 
-  it("whole tiles (headless, parts look) keep BN's tile rule: stopped when the front mount would take the wall tile", () => {
-    const { game, vs } = world(false);
+  it.each([['headless / parts look', false], ["crashGeometry 'tiles' in the modelled look", true]])("whole tiles (%s) keep BN's tile rule: stopped when the front mount would take the wall tile", (_, shaped) => {
+    const { game, vs } = world(shaped as boolean);
+    vs.crashGeometry = 'tiles';
     for (let y = 0; y < 40; y++) wall(game.map, 30, y);
     const car = put(vs, 'car', 15.5, 15.5, 0);
     const b = bodyRectFor(car)!;
