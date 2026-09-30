@@ -95,9 +95,18 @@ function dice(game: Game, n: number, sides: number): number {
   return sides < 1 ? 0 : game.player.rng.dice(n, sides);
 }
 
+/**
+ * BN's pry_items / break_items are an inline entry list read as a collection
+ * (map/mapdata.cpp: item_group::load_item_group(..., "collection")). The expander takes a group,
+ * not a bare array: passing the array threw "entries is not iterable" on a manhole cover.
+ */
+export function pryDrops(data: Game['data'], list: unknown, rng: Game['player']['rng']): ReturnType<typeof expandItemGroup> {
+  if (!Array.isArray(list)) return [];
+  return expandItemGroup(data, { subtype: 'collection', entries: list } as never, rng);
+}
+
 function dropItems(game: Game, x: number, y: number, z: number, list: unknown): void {
-  if (!Array.isArray(list)) return;
-  for (const sp of expandItemGroup(game.data, list as never, game.player.rng))
+  for (const sp of pryDrops(game.data, list, game.player.rng))
     for (const it of fromSpawned(game.data, sp)) spawnOnGround(game.map, x, y, z, it);
 }
 
