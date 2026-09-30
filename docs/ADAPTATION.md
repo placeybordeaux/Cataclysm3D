@@ -99,8 +99,47 @@ dusk → the first night (light, trying to sleep) → waiting until dawn → Con
 | 27 | **The loot card covered the crafting bar** when crafting next to the locker you took the parts from. | quick-loot card | **Fixed**: the card is hidden while a timed job runs. |
 | 28 | **An item card from the crafting window stayed on screen for the whole craft.** Enter closed the window and the mouse was captured, so no pointer move ever hid it. | tooltips | **Fixed**: tooltips hide on pointer-lock changes and on Enter, Esc and Backspace. |
 | 29 | **The activity ring sat on top of "[e] Go down the stairs".** | crosshair | **Fixed**: the interaction prompt hides while the ring shows. |
-| 30 | **Crafting opens on "All known": 305 recipes** (acid bomb, atomic coffee…) with 1 craftable. The discovery toast had already named the one you can make. | crafting | Open (crafting UI area): default to "Craftable" when anything is. |
+| 30 | **Crafting opens on "All known": 305 recipes** (acid bomb, atomic coffee…) with 1 craftable. The discovery toast had already named the one you can make. | crafting | **Fixed (round 3)**, see below. |
 | 31 | **Waiting 21 hours straight** (until dawn, from the morning) never stops for hunger, thirst or tiredness. BN only interrupts for dangerous levels. | wait | Kept (BN). The Rest window shows your tiredness. |
+
+### Round 3: day 2, food, a house, a car, a gun fight
+
+This was played the same way on seed 743667900, from the second morning. Setup used debug
+calls only to skip walking, to clear monsters, and to hand over a loaded pistol; everything
+else was real keyboard and mouse. Aim and vehicle findings went to the lead rather than being
+fixed here, because other agents own those areas.
+
+| # | Friction | Where | Status |
+|---|---|---|---|
+| 32 | **Crafting shows the recipes you can't make, not the ones you nearly can.** | crafting | **Fixed**: it opens on **Craftable**. Below that list is an **"Almost: one thing short"** section, and a new **Almost** tab shows recipes up to two things short. Each row says what's missing in words ("missing 2 more rags", "missing a cutting tool"). Recipes where you already hold part of what's missing come first, and weapons, food and clothes come before chemistry (106 recipes were one short, and the list used to start with "ammonium nitrate pellets"). The section shows at most 12, with a link to the tab. With nothing craftable, the screen opens on Almost. Options → Crafting list → Craftable only turns the section off. |
+| 33 | **Stuck walking past a tree.** In a forest the survivor stopped dead against the corner of a lone tree tile: axis-by-axis sliding has nothing to slide along when you walk straight at a corner. | `physics.ts` | **Fixed**: movement steps around a lone blocked corner (at most the step length per frame, toward whichever side is free). Walls still stop you. `tests/physics_corner.test.ts`. |
+| 34 | **"Night falls" at 05:26.** A tip queued during "Wait until dawn" showed at sunrise. | discovery tips | **Fixed**: `first_night` only fires in the evening. Tips about passing states (night, rain, cold) are checked again at the moment they would show, and dropped if the state has passed. |
+| 35 | **"You spot a nurse to the west!"** BN names some zombies by their old job, which reads like a survivor to rescue. | monster names | **Fixed**: the nurse and surgeon zombies are called "zombie nurse" and "zombie surgeon" in messages and labels. |
+| 36 | **Loading a save faced you north.** The title screen's slow pan put back the view it started with, over the one the save restored. | title screen | **Fixed**: Continue and Load keep the saved view. |
+| 37 | **Hungry, in front of a cupboard full of food, with no obvious way to eat.** | loot card | **Fixed**: the card offers **[E] Eat** or **[E] Drink** (your eat key) next to Take, just like Wear. When hungry or thirsty it says "You're hungry: [E] eats it here". |
+| 38 | **The loot card covered the second zombie.** Killing the first one opened a 13-row card for its corpse while the next one closed in. | loot card | **Fixed**: the card hides while a hostile is within 6 m or you were hit or attacked in the last 3 s. |
+| 39 | **The death screen opened scrolled to the bottom**: focusing the "Last words" field scrolled "You died" and the summary out of view at 720p. | death screen | **Fixed** (the field is focused without scrolling). |
+| 40 | **The house marked on the map was an empty building site**, and the walk to it went through slow forest with no path. | map | Kept (that's Cataclysm). A route line to the destination would help. |
+| 41 | **"You could craft jam sandwich" while `g` said "There is nothing to pick up nearby"**: crafting reaches further than picking up. | crafting / pickup | Kept (BN ranges). Worth wording: "nothing within arm's reach". |
+| 42 | **No credits and no attribution in the game.** | title screen, Esc menu | **Fixed**, see Credits below. |
+
+Reported to the lead (not fixed here):
+- **Vehicles.** At an open car door, `e` closes the door. There's no "Get in" or "Drive" prompt, and `^` says "No vehicle controls in reach" until you've walked into the car. In the doorway the camera clips through the roof. The front doors stay open while you drive.
+- **Combat pacing.** Two zombies spawned 14 m and 18 m away were on the survivor within about 4 s of real time. The new 3D zombie heads are very large close up. "GRABBED … mash [e] to break free" overlaps the "[e] Break free" prompt under the crosshair. The pistol at the hip is barely visible (a fist at the bottom right).
+
+### Credits (round 3)
+
+Credits is on the title screen (`R`) and in the Esc menu (`c`). It says clearly that this is
+an unofficial fan adaptation, and gives the attributions the licences require. Every fact
+comes from a licence file:
+- Cataclysm: Bright Nights (and before it DDA and Cataclysm): CC BY-SA 3.0 Unported (`Cataclysm-BN/LICENSE.txt`).
+- UltimateCataclysm tileset by I-am-Erk and the CDDA-Tilesets contributors: CC BY-SA 3.0 (`vendor/tilesets/readme.md`). Filler trees by Yar (`tileset.txt`).
+- CC-Sounds soundpack (pack CC BY-SA 4.0, per-file CC0/CC BY): the screen links `audio/CREDITS.md`.
+- CO.AG music (CC BY-SA 4.0, used with the composer's permission).
+- Terminus (SIL OFL 1.1, copyright lines from `public/fonts/LICENSE-OFL-Terminus-Font.txt`) and GNU Unifont (GPLv2+ with the font embedding exception, from BN's `LICENSE.txt`).
+
+A test checks the credits still match the shipped licence files. No licence file in the repo
+covers this project's own code: the credits only claim CC BY-SA for the derived content.
 
 ## What changed (wave 3, "adaptation")
 
@@ -135,6 +174,17 @@ Round 2:
 - `src/game/game.ts` (hot file, one additive optional field `continueLatest`),
   `src/save/install.ts`, `src/ui/menus.ts`: Continue.
 
+Round 3:
+- `src/ui/craft2/craft_model.ts`: `shortfall`/`shortfallText`, the `almost` filter, and the
+  ordering. `crafting_screen.ts`: `openingFilter`, the section and Options → Crafting list.
+- `src/game/physics.ts`: corner rounding in `moveWithCollision`, which monsters and NPCs use too.
+- `src/progression/install.ts`: `STILL_TRUE` re-check, and `first_night` in the evening only.
+- `src/game/monster.ts`: `zombieAwareName`.
+- `src/ui2/loot/install.ts`: `verbFor` (Wear / Eat / Drink), and the card hides in a fight.
+- `src/ui/death_screen.ts`: focus without scrolling.
+- `src/ui/credits.ts`, `.css`: Credits. `menus.ts` and `escmenu.ts` add the entry, and the
+  classic title row highlights each entry's own shortcut letter.
+
 ### Switches
 
 | What | Option | URL |
@@ -144,6 +194,7 @@ Round 2:
 | Tips | Options → Tips: Adapted / Cataclysm originals | — |
 | Climate | Options → Climate: Mid-spring start (BN) / Early spring (old) | `?climate=bn\|old` |
 | Rest menus | Options → Rest menus: Modern (Rest window) / Classic (CDDA sleep y/n + wait list) | — |
+| Crafting list | Options → Crafting list: Craftable + one short (default) / Craftable only | — |
 
 Screenshots: `docs/screenshots/wave3/adaptation/`.
 
@@ -159,3 +210,8 @@ Screenshots: `docs/screenshots/wave3/adaptation/`.
 | `loot_wear_when_cold.png`, `loot_wear_cold_hint_classic.png` | Round 2: "[O] Wear" on the loot card, and the "You're cold" hint (classic look, 1280×720) |
 | `first_night_phone_light.png` | Round 2: 18:40, moon icon, the phone's flashlight app lighting the room |
 | `title_continue_classic.png` | Round 2: with a save, Continue on top (classic look) |
+| `credits.jpg` | Round 3: the Credits window (classic look, 1280×720, JPEG) |
+| `crafting_almost.jpg` | Round 3: crafting opens on Craftable with "Almost: one thing short" |
+| `loot_eat_when_hungry.jpg` | Round 3: "[E] Eat" and "You're hungry" on a kitchen cupboard |
+| `drive_hatchback.jpg` | Round 3: driving the modelled hatchback, 25 mph |
+| `map_day2.jpg` | Round 3: the map on day 2 with a destination set |

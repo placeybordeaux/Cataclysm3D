@@ -66,7 +66,9 @@ export function showDeathScreen(ctx: UiContext, hud: Hud, cause: string, diedAt 
   requestAnimationFrame(() => (el.style.opacity = '1'));
   hud.setVisible(false);
   // Typing goes straight into the last words.
-  setTimeout(() => words.focus(), 1600);
+  // preventScroll: the panel scrolls, and focusing the field at its bottom scrolled "You died" and the
+  // summary out of view on a 720p screen (wave-3 playtest).
+  setTimeout(() => words.focus({ preventScroll: true }), 1600);
   let left = false;
   const leave = () => {
     if (left) return;

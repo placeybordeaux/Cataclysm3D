@@ -3,6 +3,7 @@ import { button, confirmModal, h, type Panel } from '../ui2';
 import { colorize } from './framework';
 import { openOptions } from './options';
 import { openHelp } from './help';
+import { openCredits } from './credits';
 import type { Hud } from './hud';
 import type { UiContext } from './context';
 import { logLine } from './format';
@@ -21,6 +22,7 @@ export function openEscMenu(ctx: UiContext, onQuit: () => void): Panel {
     { label: 'Resume', key: 'r', tone: 'accent', run: () => panel.close() },
     { label: 'Options', key: 'o', run: () => void openOptions(ctx) },
     { label: 'Help', key: '?', run: () => void openHelp(ctx) },
+    { label: 'Credits', key: 'c', run: () => openCredits() },
     {
       label: 'Save game', key: 's', disabled: canSave ? undefined : 'Saving is not available yet',
       run: async () => {
