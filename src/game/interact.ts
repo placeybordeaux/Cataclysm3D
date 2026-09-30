@@ -277,7 +277,10 @@ export function interactionsAt(game: Game, x: number, y: number, z: number): Int
     }
     case 'water_source':
     case 'finite_water_source':
-      add('drink', `Drink from the ${def.name}`, () => drinkFrom(game, x, y, z, def.name, false));
+      // BN's iuse::blech_because_unclean asks "This looks unclean, sure you want to drink it?"
+      // before a sip of this water; the label carries that warning instead of a y/n popup, up front
+      // because the HUD prompt truncates long labels.
+      add('drink', `Drink the unclean ${def.name}`, () => drinkFrom(game, x, y, z, def.name, false));
       break;
     case 'gaspump':
     case 'pay_gas':
@@ -434,12 +437,15 @@ export function interact(game: Game, target: TargetTile | null = targetTile(game
   }
   // Open/close/stairs are unambiguous actions; others with alternatives get a menu.
   const primary = list[0];
-  if (list.length === 1 || ['open', 'close', 'stairs_up', 'stairs_down'].includes(primary.id) || !ui.menu) {
+  // (filling up the car at a pump is what `e` on a pump means: refuel.ts)
+  if (list.length === 1 || ['open', 'close', 'stairs_up', 'stairs_down'].includes(primary.id) || primary.id.startsWith('fill_') || !ui.menu) {
     primary.run();
     return true;
   }
   const t = game.map.terAt(tt.x, tt.y, tt.z), f = game.map.furnAt(tt.x, tt.y, tt.z);
-  ui.menu((f.id !== 'f_null' ? f.name : t.name).replace(/^./, (c) => c.toUpperCase()), list);
+  // A burning tile is "Fire", not "Grass" (its boil-water menu read oddly).
+  const title = fieldsFire(game, tt.x, tt.y, tt.z) ? 'fire' : f.id !== 'f_null' ? f.name : t.name;
+  ui.menu(title.replace(/^./, (c) => c.toUpperCase()), list);
   return true;
 }
 

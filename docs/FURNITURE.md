@@ -256,18 +256,48 @@ More: ![](screenshots/wave3/furniture/dressing_kitchen.jpg) ![](screenshots/wave
 ![](screenshots/wave3/furniture/dressing_front_door.jpg) ![](screenshots/wave3/furniture/dressing_street_30m.jpg)
 ![](screenshots/wave3/furniture/dressing_street_far.jpg)
 
-**The house-view p99 spike** (`look-shots --bench`, 1080p): it is not first-sight painting.
-The same view without painted surfaces shows it too (work p99: tileset 24.8 ms, painted
-without dressing 24.6 ms, painted + dressing 25.9 ms; street 16.0 / 15.5 / 15.9 ms; render
-2.5 / 2.5 / 2.3 ms house, 1.9 / 1.9 / 2.1 ms street). Painting is still made cheaper to
-schedule: frame painting time now counts toward the mesher's mid-row yield
-(`paintClock`), so a row that paints many new faces yields early.
+**The house-view p99 spike** (round 4, traced): it is not ours. `look-shots --bench` runs
+Chromium uncapped (no vsync, no frame limit), and its "work" includes `wait` — the time
+between the frame's rAF timestamp and our callback, i.e. the browser/GPU queue under
+back-to-back rendering and other processes on the shared machine. The slowest house frames
+split as e.g. 20.4 ms = wait 11.0 + game 3.9 + draw 3.8 + beforeRender 1.0; 16.6 ms = wait
+14.4 + draw 1.7 (look-shots `--bench` now prints these splits). With vsync (a normal
+browser, `tools/drive.ts --gpu`), standing in the same house view for 8 s: work p50 3.6 ms,
+p99 7.1 ms, max 12.5 ms, no frame over 14 ms; per frame draw 1.9, game 0.4, beforeRender
+0.4, lightmap 0.07, chunks.sig 0.06 ms. Across runs the uncapped p99 moved between 15 and
+26 ms with the same build and any surface style, which is contention, not a system. Painting
+new faces also counts toward the mesher's mid-row yield (`paintClock`).
+
+## Wrecked houses (round 4): clutter and broken things
+
+Render-only and deterministic from the building seed (the house state kept / dirty /
+wrecked from round 3):
+
+- **Toppled furniture** in wrecked houses: some chairs lie on their backs, some bookcases
+  lie on their faces (only where the floor in front is free). Modelled pieces take a rigid
+  transform (`ModelBuilder.xform`), cached as their own variant.
+- **Floor clutter** in dirty and wrecked rooms: plaster crumbs and splinters, scattered
+  papers, more of it the worse the house; a junk heap (boxes, a plank, a bag) in a free
+  corner of some wrecked rooms.
+- **Broken glass** on the floor inside and outside every smashed window.
+- **Gutters, revised**: the flat roof-edge ring stays (it is the eave soffit — removing it
+  opened a view into the dark underside of the roof: the "dark wedge" over the recessed
+  doors); the trough hangs on its outer edge and downspouts run from there.
+
+| | |
+| --- | --- |
+| ![](screenshots/wave3/furniture/wrecked_living.jpg) | ![](screenshots/wave3/furniture/wrecked_toppled_chair.jpg) |
+| ![](screenshots/wave3/furniture/wrecked_kitchen.jpg) | ![](screenshots/wave3/furniture/wrecked_hall.jpg) |
+| ![](screenshots/wave3/furniture/broken_window_glass_on_ground.jpg) | ![](screenshots/wave3/furniture/front_door_gutters.jpg) |
+
+Views: `house:<level>[:<n>]` (0 kept, 1 dirty, 2 wrecked) and `wfurn:<id regex>[:<n>...]`
+(close-ups in wrecked houses) in `tools/look-views.js`; `cdda.buildingLevel(omtX, omtY)`.
 
 ## Known gaps / next
 
 - Rooms are scanned 14 tiles around a chunk; a room bigger than that (warehouses) can pick
   different finishes in two chunks.
-- Dressing is decals and a few small models: no clutter piles, no broken furniture yet.
+- Clutter is decals and a few small models; toppled pieces are chairs and bookcases only.
 - Ceiling lamps are unlit (no power); porch lamps are render-only.
 
 - Wild flowers and a few rare pieces (statues, mannequins) still use the voxel path.

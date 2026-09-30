@@ -155,6 +155,37 @@ it all sits between the bonnet line, ~14 deg down, and the view's bottom edge, 3
   partition glass no longer cuts the cabin in two). Carts, forklifts, quad bikes and golf
   carts stay on the tidy frame look.
 
+### Cockpit polish (round 4)
+
+- **A-pillars**: the eye now sits over the seat's back half (`MODEL_EYE_FORWARD`) and saloons
+  have a shorter windscreen run, so the pillar top is ~0.6 m ahead instead of at your cheek;
+  the pillar is one narrow shoulder strip at the windscreen corner, and interior faces are a
+  lighter trim grey. The road on the left reads past it.
+- **Steering wheel**: a round rim (16 segments of an 8-sided tube), a lighter upper arc,
+  three spokes and a hub with a horn pad.
+- **Hands**: the characters agent's modelled first-person fists (`fistRig` / `FIST_GRIP`
+  exported from `src/render/chars/fpView.ts`, curled fingers, thumb, sleeve cuffs, painted
+  from your outfit by the shared skin store), placed on the rim at ten-to-two in their own
+  small `CharLayer` under the cockpit (`src/render/vehicleHands.ts`), so they turn with the
+  wheel. Falls back to simple fists without the character renderer.
+- **Dashboard**: grained (leather swatch, a little more sky light) with a lighter lip along
+  its top edge.
+- **Wipers** sweep while it rains (render weather rain / storm, or the game weather's
+  `rains`), faster in storms, and park when it stops. Rain streaks no longer fall inside the
+  cabin in the cockpit view (`Weather.clearRadius`).
+- Smaller interior mirror, tucked up against the glass.
+
+### Filling up (round 4, `src/game/refuel.ts`)
+
+Look at a gas / diesel pump with a vehicle parked within ~2.5 tiles and `e` offers **Fill up the
+Car with gasoline (N L)**. BN keeps a pump's fuel as a liquid item on the pump tile (mapgen
+`place_gaspumps`) and `iexamine::gaspump` hands it to the liquid handler, whose
+`ACT_FILL_LIQUID` moves 2/3 L per game second: filling is a timed activity at that rate
+(interruptible, partial fills kept), charges in ml (`fuels.<id>.chargesPerL` = 1000). Empty
+tanks take the fuel the engine burns; a vehicle that doesn't burn it says so. BN's dexterity
+spill roll is left out. The pump tile isn't a quick-loot target any more (its fuel is the
+pump's). Real input: `tools/realinput.ts --only refuel`. Siphoning isn't done.
+
 ### Playtest fixes (round 3)
 
 - `e` at an open door (any side) offers **Drive / Get in**; closing is under More...
@@ -188,6 +219,13 @@ modelled bodies (`model`).
 | driving, cockpit | ![](screenshots/wave3/vehicles/parts_driveday.jpg) | ![](screenshots/wave3/vehicles/model_driveday.jpg) |
 | driving, chase cam | ![](screenshots/wave3/vehicles/parts_drivedaychase.jpg) | ![](screenshots/wave3/vehicles/model_drivedaychase.jpg) |
 | night driving, chase cam | ![](screenshots/wave3/vehicles/parts_drivechase.jpg) | ![](screenshots/wave3/vehicles/model_drivechase.jpg) |
+
+Round 4 (half size): cockpit by day, in the rain (wipers), at night, and the chase cam.
+
+| | |
+| --- | --- |
+| ![](screenshots/wave3/vehicles/r4/model_driveday.jpg) | ![](screenshots/wave3/vehicles/r4/model_driverain.jpg) |
+| ![](screenshots/wave3/vehicles/r4/model_drive.jpg) | ![](screenshots/wave3/vehicles/r4/model_drivedaychase.jpg) |
 
 Round 3 (model look only):
 
@@ -248,7 +286,7 @@ it, driving past someone on the verge, running over what's in the lane only.
 - Semi tractors and trailers are separate BN vehicles and aren't coupled.
 - Boats, aircraft and tanks use the frame fallback (tracks are drawn as big wheels).
 - Bonnets never open (BN has no bonnet part); tailgates and shutters open as a hole.
-- Wipers don't sweep (rain doesn't reach inside the car yet); the mirror shows a flat tint,
+- The mirror shows a flat tint,
   not a reflection.
 - Only the driven vehicle gets the cockpit rig; a passenger seat has no view extras.
 - The part-block look (`parts`) is kept as it was in v2, including its door bug.

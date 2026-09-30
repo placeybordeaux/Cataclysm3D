@@ -63,15 +63,15 @@ export interface StyleParams {
 }
 
 const BASE: StyleParams = {
-  sill: 0.3, belt: 0.98, hood: 0.98, nose: 0.78, roof: 1.62, deck: 1.02, box: 0, rake: 0.95, rearRake: 0.8,
+  sill: 0.3, belt: 0.98, hood: 0.98, nose: 0.78, roof: 1.62, deck: 1.02, box: 0, rake: 0.8, rearRake: 0.8,
   crown: 0.06, shoulder: 0.12, tumble: 0.14, widthPerCol: 0.53, lengthScale: 0.93, flatFront: false, wheelScale: 1, bumper: 'black',
   blackPillars: true, lampY: 0.7, lampW: 0.2, lampH: 0.06, interior: 0x2e2e32,
 };
 
 export const STYLE_PARAMS: Record<BodyStyle, StyleParams> = {
   sedan: { ...BASE },
-  hatch: { ...BASE, roof: 1.64, rake: 0.9 },
-  sports: { ...BASE, sill: 0.22, belt: 0.82, hood: 0.8, nose: 0.6, roof: 1.3, widthPerCol: 0.54, lengthScale: 0.94, deck: 0.84, rake: 1.25, rearRake: 1.3, crown: 0.07, shoulder: 0.14, tumble: 0.2, lampY: 0.55, lampW: 0.22, lampH: 0.05 },
+  hatch: { ...BASE, roof: 1.64, rake: 0.78 },
+  sports: { ...BASE, sill: 0.22, belt: 0.82, hood: 0.8, nose: 0.6, roof: 1.3, widthPerCol: 0.54, lengthScale: 0.94, deck: 0.84, rake: 1.05, rearRake: 1.3, crown: 0.07, shoulder: 0.14, tumble: 0.2, lampY: 0.55, lampW: 0.22, lampH: 0.05 },
   suv: { ...BASE, sill: 0.42, belt: 1.16, hood: 1.14, nose: 1.0, roof: 1.95, widthPerCol: 0.54, lengthScale: 0.88, deck: 1.16, rake: 0.8, crown: 0.05, shoulder: 0.1, tumble: 0.1, wheelScale: 1.15, lampY: 0.9, lampW: 0.22, lampH: 0.08 },
   pickup: { ...BASE, sill: 0.44, belt: 1.18, hood: 1.2, nose: 1.08, roof: 1.95, widthPerCol: 0.55, lengthScale: 0.92, deck: 1.18, rake: 0.75, crown: 0.04, shoulder: 0.08, tumble: 0.08, wheelScale: 1.15, bumper: 'chrome', lampY: 0.95, lampW: 0.2, lampH: 0.09 },
   van: { ...BASE, sill: 0.4, belt: 1.25, hood: 1.28, nose: 1.1, roof: 2.2, deck: 1.25, box: 2.6, rake: 0.55, crown: 0.03, shoulder: 0.08, tumble: 0.06, widthPerCol: 0.54, lengthScale: 0.95, wheelScale: 1.05, lampY: 0.95, lampW: 0.18, lampH: 0.1, blackPillars: false },

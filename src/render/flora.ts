@@ -2,11 +2,12 @@ import * as THREE from 'three';
 import { Rng, hashString } from '../core/rng';
 import { LEVEL_HEIGHT } from '../world/coords';
 import type { RGB } from './colors';
-import { FloraAtlas, paintBark, paintFringe, paintLeaves, paintNeedles, paintSnow, paintTwigs, type BarkKind, type Ramp4 } from './floraArt';
+import { FloraAtlas, type LeafDots, paintBark, paintFringe, paintLeaves, paintNeedles, paintSnow, paintTwigs, type BarkKind, type Ramp4 } from './floraArt';
 import { framePixels, frameKey } from './framePixels';
 import { GeomBuilder, type V3 } from './geometry';
 import type { GroundField } from './ground';
-import { worldMaterials } from './materials';
+import { shared, worldMaterials } from './materials';
+import { leafGlow, leafSun } from './trees';
 import { Img } from './pixelArt';
 import type { TileFrame } from './textureSource';
 import type { TreeSpec } from './trees';
@@ -98,7 +99,7 @@ export interface Species {
   /** height multiplier on the mesher's tree height */
   scale: number;
   /** pixel dots in the leaf texture by season (flowers, blossom, fruit, berries) */
-  dots?: (season: string) => { cols: RGB[]; n: number; size: 1 | 2 } | undefined;
+  dots?: (season: string) => LeafDots | undefined;
 }
 
 const FRUIT: Record<string, RGB> = {
@@ -131,7 +132,9 @@ export function speciesOf(id: string | undefined, shrub: boolean): Species {
         if (season === 'winter') return undefined;
         if (kind === 'flower' && season === 'autumn') return undefined;
         if (kind === 'berry' && season === 'spring') return { cols: [[240, 240, 232]], n: 10, size: 1 };
-        return { cols, n: kind === 'flower' ? 22 : 16, size: 2 };
+        // a few big floret clusters / berry pairs on a clean green base (dozens of 2-px dots
+        // read as confetti)
+        return kind === 'flower' ? { cols, n: 5, size: 3 } : { cols, n: 9, size: 2 };
       } : undefined,
     };
   }
@@ -144,9 +147,9 @@ export function speciesOf(id: string | undefined, shrub: boolean): Species {
     return {
       family: 'fruit', bark: 'smooth', scale: 0.8,
       dots: (season) => {
-        if (season === 'spring') return { cols: BLOSSOM_PINK.test(s) ? [[240, 178, 200], [250, 214, 226]] : [[246, 242, 236], [230, 226, 222]], n: 30, size: 2 };
+        if (season === 'spring') return { cols: BLOSSOM_PINK.test(s) ? [[240, 178, 200], [250, 214, 226]] : [[246, 242, 236], [230, 226, 222]], n: 9, size: 3 };
         if (harvested || !fruitKey || season === 'winter') return undefined;
-        return { cols: [FRUIT[fruitKey]], n: season === 'summer' ? 12 : 18, size: 2 };
+        return { cols: [FRUIT[fruitKey]], n: season === 'summer' ? 6 : 9, size: 2 };
       },
     };
   }
@@ -237,8 +240,9 @@ function makeLayout(family: Family, variant: number, bare: boolean): Layout {
       const top = trunk(0.42, 0.05, 0.05);
       crownOf([0, 0.66, 0], [0.4, 0.24, 0.4], 9, [0.34, 0.44], 0.8);
       for (const l of L.lumps.slice(1)) if (l.c[1] < 0.7) {
-        l.c = [l.c[0] * 1.12, l.c[1] - 0.1, l.c[2] * 1.12];
-        l.r = [l.r[0] * 0.8, l.r[1] * 2.1, l.r[2] * 0.8];
+        // (tongues hanging below ~2.5 m put the walker's head inside the crown)
+        l.c = [l.c[0] * 1.12, l.c[1] - 0.05, l.c[2] * 1.12];
+        l.r = [l.r[0] * 0.8, l.r[1] * 1.6, l.r[2] * 0.8];
       }
       if (bare) bareCrown(top, 0.05, 0.1);
       else for (let i = 1; i < L.lumps.length; i += 2) limb(top, L.lumps[i].c, 0.022);
@@ -362,7 +366,10 @@ export function paletteOf(f: TileFrame): Palette | null {
     const ramp: Ramp4 = leaf.length > 8
       // brightened: the sprite's colours are drawn with its own shading baked in, while the
       // model gets real (toon) shading on top; unbrightened, crowns read dark olive
-      ? [darken(at(leaf, 0.15), 0.85), brighten(at(leaf, 0.42), 1.15), brighten(at(leaf, 0.74), 1.22), brighten(at(leaf, 0.96), 1.3)]
+      // Lifted in value, not in hue: multiplying sRGB channels pushes a green with some red
+      // toward yellow (round 4's sun side read as yellow), so the top steps lift luminance and
+      // pull red back toward the mid tone's red/green ratio.
+      ? [darken(at(leaf, 0.2), 0.85), brighten(at(leaf, 0.45), 1.08), cool(brighten(at(leaf, 0.75), 1.12), at(leaf, 0.45)), cool(brighten(at(leaf, 0.96), 1.18), at(leaf, 0.45))]
       : [[26, 40, 20], [52, 78, 34], [78, 108, 46], [118, 146, 64]];
     const barkC: RGB = bark.length ? at(bark, 0.5) : [70, 52, 38];
     const q = (c: RGB) => c.map((v) => Math.round(v / 20)).join('.');
@@ -372,6 +379,14 @@ export function paletteOf(f: TileFrame): Palette | null {
   return out;
 }
 const darken = (c: RGB, k: number): RGB => [c[0] * k, c[1] * k, c[2] * k];
+/** Keep c's value but give it `ref`'s red/green balance where c is redder (less yellow). */
+const cool = (c: RGB, ref: RGB): RGB => {
+  const rg = ref[0] / Math.max(1, ref[1]);
+  const d: RGB = c[0] / Math.max(1, c[1]) > rg ? [c[1] * rg * 1.04, c[1], c[2]] : c;
+  // and a little less chroma: toon light (warm sun) plus leaf glow saturate it again
+  const l = 0.3 * d[0] + 0.59 * d[1] + 0.11 * d[2];
+  return [l + (d[0] - l) * 0.8, l + (d[1] - l) * 0.8, l + (d[2] - l) * 0.8];
+};
 const brighten = (c: RGB, k: number): RGB => [Math.min(255, c[0] * k), Math.min(255, c[1] * k), Math.min(255, c[2] * k)];
 
 // --- geometry ----------------------------------------------------------------------------
@@ -395,7 +410,8 @@ function quadOut(g: GeomBuilder, a: V3, b: V3, c: V3, d: V3, ns: V3[], uv: numbe
   const fn: V3 = [f1[1] * f2[2] - f1[2] * f2[1], f1[2] * f2[0] - f1[0] * f2[2], f1[0] * f2[1] - f1[1] * f2[0]];
   const avg = [ns[0][0] + ns[1][0] + ns[2][0] + ns[3][0], ns[0][1] + ns[1][1] + ns[2][1] + ns[3][1], ns[0][2] + ns[1][2] + ns[2][2] + ns[3][2]];
   if (fn[0] * avg[0] + fn[1] * avg[1] + fn[2] * avg[2] >= 0) g.quadEx(a, b, c, d, ns, uv, f, col);
-  else g.quadEx(b, a, d, c, [ns[1], ns[0], ns[3], ns[2]], [uv[2], uv[1], uv[0], uv[3]], f, col);
+  else g.quadEx(b, a, d, c, [ns[1], ns[0], ns[3], ns[2]], [uv[2], uv[1], uv[0], uv[3]], f,
+    col.length === 12 ? [...col.slice(3, 6), ...col.slice(0, 3), ...col.slice(9, 12), ...col.slice(6, 9)] : col);
 }
 
 /** A tapered tube through `pts` (world metres) with radial normals; bark tiles at 1 m. */
@@ -428,23 +444,38 @@ function tube(g: GeomBuilder, f: TileFrame, pts: V3[], radii: number[], sides: n
  *  normal, so the crown shades as one mass (lit top, dark underside) with lumps in it. */
 function lump(g: GeomBuilder, f: TileFrame, c: V3, r: V3, crown: V3, seg: number, rings: number, seed: number): void {
   const rng = new Rng(seed);
+  // each lump a slightly different value and hue (a younger/older leaf mass), like the v2
+  // clumps coloured from different sprite pixels: one flat tint read as a plastic ball
+  const tv = 0.86 + rng.next() * 0.24, th = (rng.next() - 0.5) * 0.12;
+  const tint: V3 = [tv * (1 + th), tv, tv * (1 - th)];
   const wob: number[] = [];
-  for (let i = 0; i < seg * (rings + 1); i++) wob.push(1 + (rng.next() - 0.5) * 0.34);
+  for (let i = 0; i < seg * (rings + 1); i++) wob.push(1 + (rng.next() - 0.5) * 0.26);
   const circ = Math.max(1, Math.round(2 * Math.PI * r[0]));
-  const P = (i: number, k: number): [V3, V3, number, number] => {
+  // which way this lump faces out of the crown: its inner and lower sides are occluded
+  const out = norm([c[0] - crown[0] + 1e-4, (c[1] - crown[1]) * 0.6, c[2] - crown[2]]);
+  const P = (i: number, k: number): [V3, V3, number, number, number] => {
     const th = (i / seg) * Math.PI * 2, ph = -Math.PI / 2 + (k / rings) * Math.PI;
     const w = k === 0 || k === rings ? 1 : wob[(i % seg) * (rings + 1) + k];
     const d: V3 = [Math.cos(th) * Math.cos(ph), Math.sin(ph), Math.sin(th) * Math.cos(ph)];
     const p: V3 = [c[0] + d[0] * r[0] * w, c[1] + d[1] * r[1] * w, c[2] + d[2] * r[2] * w];
     const vn = norm([p[0] - crown[0], (p[1] - crown[1]) * 1.2, p[2] - crown[2]]);
-    const n = norm([d[0] * 0.6 + vn[0] * 0.4, d[1] * 0.6 + vn[1] * 0.4, d[2] * 0.6 + vn[2] * 0.4]);
-    return [p, n, (i / seg) * circ, p[1]];
+    // mostly the crown's sphere normal (smooth, one mass, no facets), a little of the lump's
+    // own so lumps still read
+    const n = norm([d[0] * 0.28 + vn[0] * 0.72, d[1] * 0.28 + vn[1] * 0.72, d[2] * 0.28 + vn[2] * 0.72]);
+    // baked occlusion as vertex colour: faces toward the crown's inside and underneath are
+    // darker, so neighbouring lumps separate by value (the v2 clumps' dark gaps) while the
+    // lighting stays smooth
+    const facing = 0.5 + 0.5 * (d[0] * out[0] + d[1] * out[1] + d[2] * out[2]);
+    const up = 0.5 + 0.5 * d[1];
+    const occ = 0.5 + 0.5 * Math.min(1, facing * 0.65 + up * 0.55);
+    return [p, n, (i / seg) * circ, p[1], occ];
   };
   for (let k = 0; k < rings; k++)
     for (let i = 0; i < seg; i++) {
       const a = P(i, k), b = P(i + 1, k), cc = P(i + 1, k + 1), d = P(i, k + 1);
       // winding: outward-facing (i grows counter-clockwise seen from above)
-      quadOut(g, a[0], b[0], cc[0], d[0], [a[1], b[1], cc[1], d[1]], [a[2], a[3], b[2], d[3]], f, WHITE);
+      quadOut(g, a[0], b[0], cc[0], d[0], [a[1], b[1], cc[1], d[1]], [a[2], a[3], b[2], d[3]], f,
+        [a, b, cc, d].flatMap((q) => [q[4] * tint[0], q[4] * tint[1], q[4] * tint[2]]));
     }
 }
 
@@ -568,7 +599,8 @@ function paintImpostor(L: Layout, axis: 0 | 1, pal: Palette, leafTex: Img, barkT
 /** Build one chunk's modelled trees/bushes (one mesh on the flora page), a tree per step. */
 export function* buildFloraSteps(specs: TreeSpec[], ground: GroundField | null): Generator<void, THREE.Object3D[]> {
   const A = floraAtlas();
-  const g = new GeomBuilder();
+  const g = new GeomBuilder(); // trunks, limbs, impostors: plain world material
+  const fg = new GeomBuilder(); // leaves, needles, cards, snow: foliage material (sway, near fade)
   let first = true;
   for (const s of specs) {
     if (!first) yield;
@@ -622,34 +654,100 @@ export function* buildFloraSteps(specs: TreeSpec[], ground: GroundField | null):
     const snow = season === 'winter' && conifer ? A.frame('snow', true, () => paintSnow(5)) : undefined;
     for (let i = 0; i < L.cones.length; i++) {
       const c = L.cones[i];
-      cone(g, leafF, X([0, 0, 0]), gy + c.y0 * H, gy + c.y1 * H, c.r * H, near ? 12 : 8, s.seed + i, snow);
+      cone(fg, leafF, X([0, 0, 0]), gy + c.y0 * H, gy + c.y1 * H, c.r * H, near ? 12 : 8, s.seed + i, snow);
     }
     const fringeF = near && L.lumps.length ? A.frame(`fringe|${pal.key}|${dk}`, false, () => paintFringe(pal.leaf, 7, dots)) : null;
     for (let i = 0; i < L.lumps.length; i++) {
       const l = L.lumps[i];
       const c = X(l.c);
       const r: V3 = [l.r[0] * H, l.r[1] * H, l.r[2] * H];
-      lump(g, leafF, c, r, crownW, near ? 9 : 6, near ? 5 : 3, s.seed + i * 17);
-      // ragged leaf-mass cards through the lump: only their rim shows outside it
-      if (fringeF) cards(g, fringeF, c, r[0] * 1.32, r[1] * 1.32, crownW, yaw + i, 3);
+      lump(fg, leafF, c, r, crownW, near ? 9 : 6, near ? 5 : 3, s.seed + i * 17);
+      if (fringeF) {
+        // ragged leaf-mass cards through the lump: only their rim shows outside it, and it
+        // hides the lump's polygon outline; lumps on the crown's lower half also get a flat
+        // card under them, where the underside silhouette is seen from below
+        // pushed a little outward from the crown centre so the ragged rim covers the outline
+        const o = norm([c[0] - crownW[0], (c[1] - crownW[1]) * 0.5, c[2] - crownW[2]]);
+        cards(fg, fringeF, [c[0] + o[0] * r[0] * 0.3, c[1] + o[1] * r[1] * 0.3, c[2] + o[2] * r[2] * 0.3], r[0] * 1.6, r[1] * 1.6, crownW, yaw + i, 3);
+        if (l.c[1] <= L.crown[1] + 0.02) hcard(fg, fringeF, [c[0], c[1] - r[1] * 0.45, c[2]], r[0] * 1.35, crownW, yaw + i);
+      }
     }
     if (L.twigs.length) {
       const twigF = A.frame(`twig|${barkBase.map((v) => Math.round(v / 10)).join('.')}`, false, () => paintTwigs(barkBase, 9));
       for (const t of L.twigs) {
         const c = X(t.c);
-        if (near || lod === 1) cards(g, twigF, [c[0], c[1] + t.r[1] * H * 0.3, c[2]], t.r[0] * H, t.r[1] * H, crownW, yaw, near ? 3 : 2);
+        if (near || lod === 1) cards(fg, twigF, [c[0], c[1] + t.r[1] * H * 0.3, c[2]], t.r[0] * H, t.r[1] * H, crownW, yaw, near ? 3 : 2);
       }
     }
   }
-  if (!g.vertexCount) return [];
+  const out: THREE.Object3D[] = [];
   const { mat, depth } = worldMaterials(A.texture);
-  const m = new THREE.Mesh(g.build(), mat);
-  m.customDepthMaterial = depth;
-  m.castShadow = true;
-  m.receiveShadow = true;
-  m.matrixAutoUpdate = false;
-  m.userData.flora = true;
-  return [m];
+  for (const [b, material] of [[g, mat], [fg, foliageMaterial(A.texture)]] as const) {
+    if (!b.vertexCount) continue;
+    const m = new THREE.Mesh(b.build(), material);
+    m.customDepthMaterial = depth;
+    m.castShadow = true;
+    m.receiveShadow = true;
+    m.matrixAutoUpdate = false;
+    m.userData.flora = true;
+    out.push(m);
+  }
+  return out;
+}
+
+// --- foliage material --------------------------------------------------------------------
+// The world material plus three things only leaves want:
+//  * near fade: within ~2 m of the eye leaves dissolve (screen-door on the pixel grid),
+//    so walking into a crown or bush doesn't fill the screen with giant texels
+//  * stepped wind: a small sway advanced in 4 keyframes per second (pixel-art animation
+//    timing, and a still frame between steps doesn't shimmer), gone past ~25 m
+//  * light through leaves: the v2 clumps' glow (undersides never go muddy) and backlit
+//    translucency when looking toward the sun
+let foliageMat: THREE.MeshLambertMaterial | null = null;
+/** Sway amplitude in metres (0 = off); cdda.floraTweak can change it. */
+export const floraWind = { value: 0.05 };
+
+function foliageMaterial(tex: THREE.Texture): THREE.MeshLambertMaterial {
+  if (foliageMat) return foliageMat;
+  const base = worldMaterials(tex).mat;
+  const m = new THREE.MeshLambertMaterial({ map: tex, vertexColors: true, alphaTest: 0.5, side: THREE.FrontSide });
+  m.onBeforeCompile = (sh, r) => {
+    base.onBeforeCompile(sh, r);
+    Object.assign(sh.uniforms, { uTime: shared.uTime, uSway: floraWind, uLeafGlow: leafGlow, uSunW: leafSun.dir, uSunC: leafSun.color });
+    const anchor = 'vSkyVis = skyVis;';
+    if (!sh.vertexShader.includes(anchor)) throw new Error('flora: world vertex anchor missing');
+    sh.vertexShader = 'uniform float uTime;\nuniform float uSway;\nuniform vec3 uSunW;\nvarying float vFolDist;\nvarying float vFolTrans;\n' + sh.vertexShader.replace(anchor, `${anchor}
+{
+  vec3 fw = (modelMatrix * vec4(transformed, 1.0)).xyz;
+  vFolDist = length(fw - cameraPosition);
+  vFolTrans = pow(max(dot(normalize(fw - cameraPosition), uSunW), 0.0), 3.0);
+  float st = floor(uTime * 4.0) * 0.25;
+  float ph = fw.x * 0.31 + fw.z * 0.23 + fw.y * 0.4;
+  vec2 sw = vec2(sin(st * 1.7 + ph), cos(st * 1.3 + ph * 1.3)) * uSway * (1.0 - smoothstep(12.0, 25.0, vFolDist));
+  transformed.xz += sw;
+}`);
+    sh.fragmentShader = 'uniform float uLeafGlow;\nuniform vec3 uSunC;\nvarying float vFolDist;\nvarying float vFolTrans;\n' + sh.fragmentShader
+      .replace('#include <alphatest_fragment>', `#include <alphatest_fragment>
+if (vFolDist < 2.0) {
+  ivec2 bi = ivec2(mod(gl_FragCoord.xy, 4.0));
+  int bm[16] = int[16](0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5);
+  if ((float(bm[bi.x + bi.y * 4]) + 0.5) / 16.0 >= smoothstep(0.9, 2.0, vFolDist)) discard;
+}`)
+      .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance += diffuseColor.rgb * (uLeafGlow * 0.45 + uSunC * vFolTrans * 0.25);');
+  };
+  m.customProgramCacheKey = () => 'cdda-foliage';
+  (m.userData as { mrt?: boolean }).mrt = true;
+  foliageMat = m;
+  return m;
+}
+
+/** A horizontal cutout card (both faces) under a lump: the crown's underside edge. */
+function hcard(g: GeomBuilder, f: TileFrame, c: V3, half: number, crown: V3, yaw: number): void {
+  const ca = Math.cos(yaw) * half, sa = Math.sin(yaw) * half;
+  const corners: V3[] = [[c[0] - ca + sa, c[1], c[2] - sa - ca], [c[0] + ca + sa, c[1], c[2] + sa - ca], [c[0] + ca - sa, c[1], c[2] + sa + ca], [c[0] - ca - sa, c[1], c[2] - sa + ca]];
+  const ns = corners.map((p) => norm([p[0] - crown[0], p[1] - crown[1], p[2] - crown[2]]));
+  g.quadEx(corners[0], corners[1], corners[2], corners[3], ns, [0.001, 0.001, 0.999, 0.999], f, WHITE);
+  g.quadEx(corners[1], corners[0], corners[3], corners[2], [ns[1], ns[0], ns[3], ns[2]], [0.999, 0.001, 0.001, 0.999], f, WHITE);
 }
 
 /** For tests/debug: painted leaf texture of a palette-less default. */

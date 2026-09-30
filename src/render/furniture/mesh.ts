@@ -47,6 +47,9 @@ export class ModelBuilder {
   private nq = 0;
   /** faces lower than this (m) are darkened toward the floor (contact AO) */
   aoHeight = 0.25;
+  /** Optional rigid transform applied to every point (toppled furniture). Sizes of face
+   *  frames are measured after it, so it must not scale. */
+  xform: ((p: V3) => V3) | null = null;
 
   constructor(private atlas: ModelAtlas) {}
 
@@ -59,6 +62,7 @@ export class ModelBuilder {
    * The frame is painted at |ab| x |ad| metres unless `size` overrides it (in texels).
    */
   quad(a: V3, b: V3, c: V3, d: V3, spec: FaceSpec, size?: [number, number], shade?: [number, number, number, number]): void {
+    if (this.xform) { a = this.xform(a); b = this.xform(b); c = this.xform(c); d = this.xform(d); }
     const ab = Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]);
     const ad = Math.hypot(d[0] - a[0], d[1] - a[1], d[2] - a[2]);
     const w = size?.[0] ?? texels(ab), h = size?.[1] ?? texels(ad);
@@ -157,6 +161,7 @@ export class ModelBuilder {
 
   /** A see-through glass quad (both sides are drawn by the glass material). */
   glass(a: V3, b: V3, c: V3, d: V3): void {
+    if (this.xform) { a = this.xform(a); b = this.xform(b); c = this.xform(c); d = this.xform(d); }
     const n = normal(a, b, d);
     for (const p of [a, b, c, d]) {
       this.glassPos.push(p[0], p[1], p[2]);

@@ -4,6 +4,7 @@ import type { Game } from '../game/game';
 import type { Item } from '../game/item';
 import { has, MPH_PER_MS, type Vehicle, type VehiclePart } from '../game/vehicle';
 import { loadVehicleData } from '../game/vehicle_data';
+import { installRefuel } from '../game/refuel';
 import { pointInBody } from '../game/vehicleShape';
 import { composeCreatureHooks, monsterCreatureHooks, npcCreatureHooks, registerVehicleSave, VehicleSystem, type DriveMode } from '../game/vehicles';
 import { registerOption } from './options';
@@ -429,6 +430,7 @@ export async function installVehicles(game: Game, renderer: Renderer, api?: Debu
   game.vehicles = vs;
   game.systems.push(vs);
   registerVehicleSave(game, vs);
+  installRefuel(game, vs);
   // Run-overs hit real monsters (the monster system is installed before us in main.ts) and
   // NPCs (installed after us: the NPC hooks look game.npcs up on each call).
   const ms = (game as unknown as { monsters?: MonsterSystem }).monsters;

@@ -19,6 +19,11 @@ import { chip, markup, plain, portrait } from './common';
 import { keyToResponse, opinionWord, responseRow, trialOutcome, type ResponseRow } from './logic/dialogue';
 import { revealSchedule, TEXT_SPEED_CPS, visibleCount, type TextSpeed } from './logic/typewriter';
 import { factionName } from '../ui/npc_ui';
+
+/** What raises and lowers an NPC's opinion of you (BN talk effects and npc_opinion changes). */
+export const STANDING_SHORT = 'Finished jobs and kind answers earn their trust; threats and violence make them afraid or angry.';
+export const STANDING_HOWTO = 'It changes with what you do: finishing a job they gave you and some answers in conversation raise trust and value; threats raise fear; hurting them raises anger, and an angry survivor may turn on you.  Trusted survivors share more and may agree to join you.';
+export const FACTION_HOWTO = 'Its members give out jobs; ask them what they need.';
 import { valueText } from './logic/missions';
 
 export interface TalkCtx {
@@ -142,7 +147,9 @@ export function openDialoguePanel(ctx: TalkCtx, d: Dialogue, onClose?: () => voi
     const job = sys.nd.classes[n.classId]?.name;
     const op = opinionWord(n.op, n.isEnemy(), n.isAlly());
     const opChip = chip(op.word, op.tone);
-    attachTooltip(opChip, () => `How ${n.name} feels about you.  Trust ${n.op.trust} · Fear ${n.op.fear} · Value ${n.op.value} · Anger ${n.op.anger}${n.op.owed ? ` · Owes you $${(n.op.owed / 100).toFixed(2)}` : ''}`);
+    attachTooltip(opChip, () => `How ${n.name} feels about you.  Trust ${n.op.trust} · Fear ${n.op.fear} · Value ${n.op.value} · Anger ${n.op.anger}${n.op.owed ? ` · Owes you $${(n.op.owed / 100).toFixed(2)}` : ''}.  ${STANDING_HOWTO}`);
+    const facChip = chip(factionName(sys, n), 'info');
+    attachTooltip(facChip, () => `${factionName(sys, n)}: the group ${n.name} belongs to.  ${FACTION_HOWTO}`);
     const w = n.inv.wielded;
     who.replaceChildren(
       portrait(game, ctx.renderer, n),
@@ -151,7 +158,10 @@ export function openDialoguePanel(ctx: TalkCtx, d: Dialogue, onClose?: () => voi
         { class: 'ix-dlg-id' },
         h('div', { class: 'ix-dlg-name', text: n.name }),
         job ? h('div', { class: 'ix-dlg-job', text: job }) : null,
-        h('div', { class: 'ix-dlg-tags' }, chip(factionName(sys, n), 'info'), opChip),
+        h('div', { class: 'ix-dlg-tags' }, facChip, opChip),
+        // Standing, explained where it's shown (docs/ADAPTATION.md): BN tracks trust, fear,
+        // value and anger per NPC with no word on what moves them.
+        h('div', { class: 'ix-dlg-howto ui2-small ui2-dim', text: STANDING_SHORT }),
         h('div', { class: 'ix-dlg-wield' }, h('span', { class: 'ui2-dim', text: 'Holding ' }), h('span', { text: w ? plain(w.name()) : 'nothing' })),
       ),
     );

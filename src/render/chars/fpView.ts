@@ -388,3 +388,14 @@ export class FpView {
 
 /** Default pose buffer size check (tests). */
 export const _fpInternals = { armParts, heldRig, bowRig, newPoseOut };
+
+/**
+ * A first-person arm + modelled fist rig (the same parts and painter as the on-foot view),
+ * rooted at the wrist, for other renderers to place: the hands on a steering wheel
+ * (render/vehicleHands.ts). `side` 1 = right, -1 = left.
+ */
+export function fistRig(side: 1 | -1): Rig {
+  return rigOf(armParts(side));
+}
+/** Where the curled fingers close round a grip, in the fist rig's wrist frame (heldRig's pivot). */
+export const FIST_GRIP: [number, number, number] = [0, -0.014, -0.095];

@@ -198,13 +198,64 @@ Rough cost and value, cheapest first. The ones marked **built** are done; the re
 | Map fog past 15 OMTs | You can't plan a trip to a town you don't know exists | **Built**: road atlas | small |
 | Mission distances in OMT | A unit only veterans know | **Built**: metres | tiny |
 | Diggable ground | "Too hard to dig" everywhere (a bug that looked like obscurity) | **Built**: BN rule | tiny |
-| Construction skill gates (bed = Fabrication 2–4) | The first thing you'd build is locked behind a skill you can't see how to train | **Proposal**: "Practice" stages (a crude bed at skill 0 with lower comfort), or show "Craft X or build Y to learn Fabrication" next to the gate | medium |
-| Water safety (boil river and toilet water) | Needs a pot, a fire and a recipe; the tip says "boil it" but not how | **Proposal**: an "Boil water" action on a lit fire when you carry a pot and dirty water (BN recipe under the hood), plus a Rest-window hint when thirsty | small–medium |
-| Fire spreading | Lighting sticks in a grass field works, and can burn the field | **Proposal**: when lighting a fire outside a fire container, a one-time prompt: "Fires spread. Build a fire ring (10 rocks) or use a fireplace?" | small |
-| Faction standing (Old Guard, Free Merchants) | The card says "Neutral"; how to change it is hidden | **Proposal**: show on the NPC card what raises and lowers standing (jobs, trading, stealing) | small |
+| Construction skill gates (bed = Fabrication 2–4) | The first thing you'd build is locked behind a skill you can't see how to train | **Built** (round 6, switch "First beds"): straw and makeshift beds at Fabrication 0, 1.5× slower | small |
+| Water safety (boil river and toilet water) | Needs a pot, a fire and a recipe; the tip says "boil it" but not how | **Built** (round 6): "Boil water" on a lit fire (BN recipe `water_clean` under the hood) | small |
+| Fire spreading | Lighting sticks in a grass field works, and can burn the field | **Built** (round 6, switch "Fire safety"): a warning, and a second try to light it anyway | small |
+| Faction standing (Old Guard, Free Merchants) | The card says "Neutral"; how to change it is hidden | **Built** (round 6): a line on the NPC card and tooltips on the faction and opinion chips | small |
 | Vehicle refuelling | Not implemented; in BN, siphoning and pumps need menu actions | **Proposal** (vehicle area): "[e] Fill up" at a gas pump with a car next to it; "Siphon fuel" on a parked car when you carry a hose and a container | medium |
-| Morale and focus | Numbers that change learning speed invisibly | **Proposal**: a "learning slowly: low morale" note on the skill-gain toast | small |
-| Food spoilage | "(old)" and "(rotten)" appear with no timeline | **Proposal**: "fresh for ~2 days" on the item card from BN rot data | small |
+| Morale and focus | Numbers that change learning speed invisibly | **Built** (round 6): a "learning slowly: low morale" message, at most once an hour | small |
+| Food spoilage | "(old)" and "(rotten)" appear with no timeline | **Built** (round 6): "Fresh: about 9 days at room temperature, about 4 weeks in a fridge" on the item card | small |
+
+### Round 6: the proposals built, and days 2–5
+
+#### Built (the ones that change rules have a switch; off = BN exactly)
+- **First beds** (Options → First beds: No skill needed (slower) / Fabrication 1–2 (BN)).
+  `constr_straw_bed` and `constr_makeshift_bed` need no Fabrication and take 1.5× as long; the
+  construction screen says "(slow without the skill)". Proper beds keep their gate, and the XP
+  you earn is BN's. `src/game/adaptation_rules.ts`.
+- **Fire safety** (Options → Fire safety: Warn outside a fire ring / No warning (BN)). Lighting a
+  fire off a fire container, next to something that burns or under a roof, says why, "Fires
+  spread. A fire ring (10 rocks), a brazier or a fireplace keeps it in. Use the lighter again to
+  light it anyway." A second try within 30 s lights it.
+- **Boil water** on a lit fire (`e` on it). With unclean water and a pot: "Boil water (2 servings
+  of clean water)", which runs BN's `water_clean` recipe (same time, tools and practice). No
+  pot: it says what's missing. The fire's menu is titled "Fire", and the loot card no longer
+  sits on a burning pile (it used to take the firewood out).
+- **Freshness** on food cards: "Fresh: about 9 days at room temperature, about 4 weeks in a
+  fridge. Frozen, it keeps.", "Going off soon", "Rotten: eating it will make you sick.", and for
+  a sealed can "Keeps while sealed. Once opened: …". From BN's rot model (3600 points an hour at
+  65 °F, doubling every 16 °F).
+- **Faction standing**: the NPC card says "Finished jobs and kind answers earn their trust;
+  threats and violence make them afraid or angry." The faction chip's tooltip names the group
+  and says its members give out jobs.
+- **Low morale slows learning**: "You're learning slowly: your low morale (-25) makes it hard to
+  focus. Something tasty, warmth, rest or a good book helps." At most once an hour of game time.
+- **Fire goes out** note: "the rain put it out", "it has burned through its fuel", or, when wood
+  is left, "The fire goes out before the wood on it burned up. Light it again; a fire ring burns
+  hotter and keeps going."
+- Long flash notes wrap and stay up longer (by length) instead of running off the screen.
+
+Skipped as asked: refuelling (vehicle area).
+
+#### Playing days 2–5 (real input, seed 743667900)
+Built a straw bed at Fabrication 0 and slept in it; walked to a pond past a chain-link fence
+(climbed it with `e`), filled a bottle, lit sticks by the bed (warning, then lit), boiled the
+water at the fire, ate the last food, and lived on pond water to the morning of day 5 (Very
+Hungry, Very Thirsty, unhurt).
+
+| # | Friction | Where | What happened |
+|---|---|---|---|
+| 59 | **A campfire on a woodpile went out in ~20 min with every stick unburnt**, whenever time was sped up (waiting, crafting, eating). | fields | **Fixed** (BN fidelity): the fields system simulated 8 turns a frame and decayed the rest in bulk, which ignores fuel; fires now get their turns one by one (budgeted). Fuel uses `roll_remainder` as BN does, and a fire in a fire ring or brazier burns at BN's contained rates (intensity 3, volume-independent), so a ring fire really lasts. On open ground a small fire still dies fast: that's BN. |
+| 60 | **"The fire goes out: it has burned through its fuel"** with the wood still there. | fire-out note | **Fixed**: says the wood didn't burn up and points at a fire ring. |
+| 61 | **"Drink from the shallow water"** gave no hint that it's unclean. | water menu | **Fixed**: "Drink the unclean shallow water" (BN asks "This looks unclean, sure you want to drink it?"; the label carries that instead of a y/n popup). Note: in BN unclean water carries **no disease**; the journal's "can make you sick" was wrong and now says it's unclean and how to boil it. The boil label says "clean water", not "safe". |
+| 62 | **On a straw bed the Rest window said "a bed or sleeping bag would help"**, and the log followed "This is a comfortable place to sleep" with "You'd sleep better in a bed". | Rest window, sleep hints | **Fixed**: "straw bed, a little hard: a mattress, a proper bed or a sleeping bag would be better"; the bed hint only on bare ground. |
+| 63 | **"You try to sleep, but you just can't."** twice at 23:00 after a long sleep, with no reason. | sleep | **Fixed**: "…: you aren't tired yet. Stay up a few more hours, then try again." when that's why. |
+| 64 | **Two bottles of water were listed as two different things** in the eat picker ("clean water (plastic bottle)" and "clean water · In your plastic bottle"). | eat picker | **Fixed**: one row, "clean water (plastic bottles) · 4 servings". |
+| 65 | **A loot card next to "[e] Talk to …"** when an NPC stood in front of a pile; `e` talks. | loot card | **Fixed**: no card while a creature is under the crosshair. |
+| 66 | **Days of "Very Hungry" with no idea where food is.** | tips | **Fixed**: a "Nothing to eat" tip (very hungry, no food on you): kitchens, stores, crates; thirst first. Also: the hunger tip's list spelled "Very hungry"/"Starving!", which the game never reports. |
+| 67 | **The fire warning says "a fire ring (10 rocks)"**, but outside the walled compound there was one rock in 40 tiles. | fire safety | Kept; reported. A "where to find rocks" line should be checked against BN sources before it goes in. |
+| 68 | **The hotbar showed "water ×3"** in a slot with no such item on me. | hotbar | Reported (hotbar area). |
+| 69 | **The warehouse compound north of the shelter has no way in on its south side** (a long concrete wall); the fruit crates inside were out of reach on foot. | mapgen | Reported; not investigated. |
 
 ### Credits (round 3)
 
@@ -276,6 +327,28 @@ Round 5:
 - `src/ui/rest_ui.ts` `restNeedsWarning`.
 - Tests: `tests/diggable.test.ts`, plus cases in `tests/adaptation.test.ts` and `tests/screens.test.ts`.
 
+Round 6:
+- `src/game/adaptation_rules.ts` (switches, `effectiveSkills`/`effectiveTime`), used by
+  `construction.ts` and `ui/craft2/construction_screen.ts`; `src/ui/adaptation.ts` registers the
+  Options.
+- `src/game/fire.ts` `fireSpreadRisk` and the warning in `useFirestarter`; `src/game/boil.ts`
+  (Boil water provider); `src/game/interact.ts` ("Fire" title, "Drink the unclean …").
+- `src/game/fields.ts`: fires simulated per turn in bulk, `roll_remainder` fuel, contained burn
+  rates, `fireOutNote`.
+- `src/game/freshness.ts`, shown through `ItemView.note` (`ui2/logic/items.ts`, `ui2/tooltip.ts`,
+  `ui2/bn/model.ts`).
+- `src/screens/dialogue.ts` (`STANDING_SHORT`, `STANDING_HOWTO`, `FACTION_HOWTO`),
+  `screens.css`.
+- `src/game/character.ts` (`lastSlowLearningNote`, the note in `practice`).
+- `src/game/rest.ts` (`cantSleep`, the bed hint), `src/ui/tips_adapted.ts` (straw bed wording),
+  `src/ui2/bn/eat_rows.ts` (stacked bottles), `src/ui2/loot/install.ts` (no card on a fire or
+  under an NPC), `src/ui2/dragdrop.ts` and `ui2.css` (flash notes wrap).
+- `src/progression/discovery.ts`, `install.ts`: "Nothing to eat", the thirst text, the hunger
+  state spellings.
+- Tests: `tests/adaptation_rules.test.ts`, `tests/fire_fuel.test.ts`, cases in
+  `tests/adaptation.test.ts`; `tests/crafting.test.ts` turns the fire warning off for its
+  lighter test (its test map counts as indoors).
+
 Round 4:
 - `src/ui/route.ts`, `.css`: `omtCost`, `planOmtRoute` (A* over overmap tiles), `currentRoute`,
   and the Trail and Beacon displays (DOM marks on the ui2 world layer; nothing in the renderer).
@@ -298,6 +371,8 @@ Round 4:
 | Route guide | Options → Route guide: Trail on the ground (default) / Beacon ahead / Off | `?route=trail\|beacon\|off` |
 | Map | Options → Map: Road atlas (default) / Explored only (CDDA) | — |
 | Weather messages | Options → Weather messages: Changes you notice (default) / Every change (CDDA) | — |
+| First beds | Options → First beds: No skill needed (slower) (default) / Fabrication 1–2 (BN) | — |
+| Fire safety | Options → Fire safety: Warn outside a fire ring (default) / No warning (BN) | — |
 
 Screenshots: `docs/screenshots/wave3/adaptation/`.
 
@@ -328,3 +403,12 @@ Screenshots: `docs/screenshots/wave3/adaptation/`.
 | `r5_road_atlas.jpg` | Round 5: the road atlas, with Dana set as the destination |
 | `r5_beacon_driving.jpg` | Round 5: the beacon while driving |
 | `r5_rest_dead_tired.jpg` | Round 5: the Rest window at dusk, dead tired (shot before the hunger/thirst warning) |
+| `r6_fire_warning.jpg` | Round 6 (960×540 JPEG): the fire-spread warning, wrapped |
+| `r6_boil_prompt.jpg`, `r6_boiling.jpg` | Round 6: "[e] Boil water" on a lit fire, and boiling (shot with the first label wording) |
+| `r6_straw_bed_ready.jpg` | Round 6: the straw bed buildable at Fabrication 0, "(slow without the skill)" |
+| `r6_straw_bed_rest.jpg` | Round 6: the Rest window on the straw bed |
+| `r6_freshness.jpg` | Round 6: "Fresh: about 9 days at room temperature, about 4 weeks in a fridge" on bread |
+| `r6_faction_howto.jpg` | Round 6: the NPC card's standing line under "The Free Merchants" and "Neutral" |
+| `r6_eat_two_bottles.jpg` | Round 6: the eat picker (shot with one bottle left) |
+| `r6_fire_out_note.jpg` | Round 6: "The fire goes out before the wood on it burned up" |
+| `r6_day5_no_food.jpg` | Round 6: day 5, the journal's "Nothing to eat" entry |

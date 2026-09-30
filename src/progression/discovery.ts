@@ -44,9 +44,14 @@ export const NUDGES: Record<string, NudgeDef> = Object.fromEntries([
   N('first_hunger', 'Needs', 6, 'You are getting hungry',
     'Eat with <keybind:eat>. Fresh food spoils; canned and dried food keeps.',
     'Hunger builds slowly. <keybind:eat> eats or drinks something you carry or stand next to. Fresh food rots in a few days; canned, dried and junk food keeps. Cooking needs a fire and a pot.'),
+  N('no_food', 'Needs', 7, 'Nothing to eat',
+    'Kitchens (cupboards, fridges), stores and crates hold food. Canned food keeps for years.',
+    'Food is where people kept it: kitchen cupboards and fridges in houses, grocery and convenience stores, crates and boxes in warehouses. Canned, dried and junk food keeps; fresh food spoils in days. Hunger works slowly (you weaken over days), thirst much faster: find water first.'),
   N('first_thirst', 'Needs', 7, 'You are thirsty',
     'Drink with <keybind:eat>. Water from rivers and toilets should be boiled first.',
-    'Thirst is faster than hunger. Bottled water and soda are safe; water from rivers, lakes and toilets can make you sick unless boiled or purified. Keep a container of clean water.'),
+    // Not "can make you sick": in BN unclean water has no disease (no contamination in its
+    // JSON; iuse::blech_because_unclean only asks for confirmation). Say what's true.
+    'Thirst is faster than hunger. Bottled water and soda are clean; water from rivers, lakes and toilets is unclean ("safer to drink once purified"). Boil it at a fire with a pot (the fire offers Boil water) and keep a container of clean water.'),
   N('first_fatigue', 'Needs', 6, 'You are getting tired',
     'Sleep with <keybind:sleep>, ideally in a bed behind a closed door.',
     'Sleep restores you. <keybind:sleep> lies down; a bed or a sleeping bag helps you fall asleep, and a closed room keeps wanderers from finding you. <keybind:wait> waits without sleeping.'),
