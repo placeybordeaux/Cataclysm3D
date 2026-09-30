@@ -441,3 +441,15 @@ function findDoors(rows: RowInfo[], sections: Section[], xCowl: number | null): 
   }
   return out;
 }
+
+/**
+ * The body outline collision should use (vehicleShape.ts BodyRect, mount space), or null
+ * when the drawing fills the grid (frame-style builds). Wheels sit a few cm proud of the
+ * sides, so they count.
+ */
+export function bodyRectFor(v: Vehicle): { x0: number; x1: number; y0: number; y1: number } | null {
+  const L = analyze(v);
+  if (L.style === 'frame' || (!L.sections.length && L.style !== 'motorcycle' && L.style !== 'bicycle')) return null;
+  const w = L.hw + 0.04;
+  return { x0: L.xTail, x1: L.xNose, y0: L.yc - w, y1: L.yc + w };
+}

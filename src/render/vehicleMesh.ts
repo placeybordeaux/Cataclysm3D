@@ -15,7 +15,7 @@ import type { Renderer } from './renderer';
 import type { TileFrame } from './textureSource';
 import { Batches, hash, partSwatchPage } from './vehicleGeom';
 import { buildVehicleModel } from './vehicleModel';
-import { setVehicleWidth, vehicleWidth, type VehicleWidth } from './vehicleLayout';
+import { bodyRectFor, setVehicleWidth, vehicleWidth, type VehicleWidth } from './vehicleLayout';
 import { liveryBody } from './vehicleSkin';
 
 // 3D meshes for vehicles, built from their parts mount by mount, as low-poly boxes wearing
@@ -563,6 +563,8 @@ export class VehicleRenderer {
   constructor(private renderer: Renderer, private game: Game, private system: VehicleSystem) {
     this.group.name = 'vehicles';
     setVehicleWidth(initialVehicleWidth());
+    // Creatures collide with the drawn body, not the whole grid tiles (vehicleShape.ts).
+    system.bodyShape = (v) => (this.lookMode === 'model' ? bodyRectFor(v) : null);
     for (const m of [this.glassMat, this.glassOut, this.glassIn, this.lampOn, this.lampOff, this.tailOn, this.tailOff, this.beaconMat]) patchNormalOutput(m, false);
     this.headlight.castShadow = false;
     renderer.scene.add(this.group, this.headlight, this.headlight.target);
@@ -586,6 +588,7 @@ export class VehicleRenderer {
       // not persisted
     }
     for (const v of [...this.entries.keys()]) this.drop(v);
+    this.system.shapeEpoch++;
   }
   /** Switch renderer; every vehicle rebuilds on the next frame. */
   set look(l: VehicleLook) {
@@ -597,6 +600,7 @@ export class VehicleRenderer {
       // not persisted
     }
     for (const v of [...this.entries.keys()]) this.drop(v);
+    this.system.shapeEpoch++;
   }
 
   private skinWorker(): Worker | null {
