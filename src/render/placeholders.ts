@@ -14,7 +14,7 @@ import type { TileFrame } from './textureSource';
 // the real mesh replaces it. Only at ground level (z 0) and outdoors, where the far view is.
 
 /** Linear albedo for the stand-ins: the skyline's colours are tuned for its own dim shader. */
-const BRIGHTEN = 3.2;
+const BRIGHTEN = 2.6;
 
 const colKey = (cx: number, cy: number) => (cx + 32768) * 65536 + (cy + 32768);
 
