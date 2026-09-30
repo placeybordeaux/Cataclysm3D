@@ -184,6 +184,20 @@ export class Overmap {
     return undefined;
   }
 
+  /**
+   * Where you walk into a placed special: the OMT its road connection leaves from (BN
+   * overmap_special connections[].from), rotated like the special. null for specials without
+   * one. A destination on "the refugee center" means its gate, not whichever fence tile the
+   * player clicked (wave-3 playtest: the route ended at a locked back door).
+   */
+  specialEntrance(inst: SpecialInstance): { x: number; y: number } | null {
+    const def = this.data.specials[inst.def];
+    const c = def?.connections?.find((k) => k.from) ?? null;
+    if (!c || !c.from) return null;
+    const [dx, dy] = rotateOffset(c.from[0], c.from[1], inst.rot);
+    return { x: inst.x + dx, y: inst.y + dy };
+  }
+
   /** Nearest placed instance of an overmap special id. Generates regions outward as needed. */
   findSpecial(defId: string, from: { x: number; y: number }, maxRegions = 3): SpecialInstance | undefined {
     const rx = Math.floor(from.x / REGION), ry = Math.floor(from.y / REGION);

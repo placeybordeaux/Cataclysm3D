@@ -9,7 +9,8 @@ import type { Renderer } from '../render/renderer';
 import type { MissionInstance } from '../game/missions';
 import { button, h, openPanel, tabs, type Panel } from '../ui2';
 import { centreFirstTime, chip, hours, markup, portrait, section } from './common';
-import { missionEntry, valueText, type MissionEntry } from './logic/missions';
+import { distanceText, missionEntry, missionTarget, valueText, type MissionEntry } from './logic/missions';
+import { mapMarks } from '../ui/mapmarks';
 
 export interface MissionsCtx {
   game: Game;
@@ -84,6 +85,14 @@ export function openMissionsPanel(ctx: MissionsCtx, focusUid?: number): Panel {
 
   function toggleTrack(uid: number): void {
     missionTracking.uid = missionTracking.uid === uid ? null : uid;
+    // Tracking also makes it the map destination, so the compass, the map line and the route
+    // guide lead there (playtest: "Track" only drew a ring on the map). Untracking clears it
+    // only if it's still this mission's.
+    const marks = mapMarks(game);
+    const m = ms.get(uid);
+    const tgt = m ? missionTarget(m) : null;
+    if (missionTracking.uid === uid && tgt && m) marks.destination = { x: tgt.omx, y: tgt.omy, z: tgt.z, label: entryOf(m).name };
+    else if (tgt && marks.destination && marks.destination.x === tgt.omx && marks.destination.y === tgt.omy) marks.destination = null;
     draw();
   }
 
@@ -100,7 +109,7 @@ export function openMissionsPanel(ctx: MissionsCtx, focusUid?: number): Panel {
               { class: `ix-mrow${m.uid === selUid ? ' selected' : ''}`, data: { uid: String(m.uid) } },
               h('div', { class: 'ix-mrow-top' }, h('span', { class: 'ix-mrow-name', text: e.name }), missionTracking.uid === m.uid ? chip('Tracked', 'accent') : null),
               h('div', { class: 'ix-mrow-sub' },
-                e.target && tab === 'active' ? h('span', { class: 'ix-arrow', text: `${e.target.arrow} ${e.target.omts ? `${e.target.omts} OMT` : 'here'}` }) : null,
+                e.target && tab === 'active' ? h('span', { class: 'ix-arrow', text: `${e.target.arrow} ${e.target.omts ? distanceText(e.target.metres).replace('about ', '') : 'here'}` }) : null,
                 e.hoursLeft !== null && tab === 'active' ? h('span', { class: `tone-${e.deadlineTone}`, text: `${hours(e.hoursLeft)} left` }) : null,
                 e.giver ? h('span', { class: 'ui2-dim', text: e.giver }) : null),
             );

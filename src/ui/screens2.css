@@ -153,3 +153,5 @@
 #ui2 .dt-words input { font: inherit; flex: 1; color: var(--p-text-bright); background: var(--p-bg-deep); border: var(--u) solid var(--p-bevel-hi); padding: var(--u) calc(var(--u) * 3); outline: none; user-select: text; }
 #ui2 .dt-words input:focus { border-color: var(--p-accent); }
 body.lk-hovering #ui2 .ui2-hover-label { display: none !important; }
+/* Road atlas: towns you know of but haven't seen (src/ui/overmap_ui.ts). */
+#ui2 .om-label.city.atlas { color: var(--p-text-dim); font-style: italic; }

@@ -48,6 +48,17 @@ export const NULL_FURN: FurnitureDef = {
 
 /** Per-def cached flag lookups; flags arrays are small but queried every frame. */
 const flagCache = new WeakMap<object, Set<string>>();
+/**
+ * ter_t::is_diggable (BN map/mapdata.cpp): the terrain has digging_results with a result.
+ * BN dropped DDA's DIGGABLE flag (2 terrains still carry it, 50 have digging_results), so
+ * testing the flag made grass and dirt "too hard to dig": no barricade, pit or grave anywhere
+ * (wave-3 playtest). The flag still counts for old data.
+ */
+export function isDiggable(def: { flags: string[]; digging_results?: { result_ter?: string } }): boolean {
+  const r = def.digging_results?.result_ter;
+  return (!!r && r !== 't_null') || hasFlag(def, 'DIGGABLE');
+}
+
 export function hasFlag(def: { flags: string[] }, flag: string): boolean {
   let s = flagCache.get(def);
   if (!s) flagCache.set(def, (s = new Set(def.flags)));

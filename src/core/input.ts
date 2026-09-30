@@ -51,6 +51,12 @@ export class Input {
   private dispatching: string | null = null;
 
   constructor(private canvas: HTMLCanvasElement) {
+    // Every Esc, in the capture phase: Esc in a screen's search field closes the screen (the
+    // field's own handler stops the event, so the listener below never sees it), the game
+    // re-grabs the mouse, and the same Esc drops the lock again. Without the timestamp the
+    // pointer policy took that for "the player left the game" and opened the pause menu
+    // (wave-3 playtest: Esc out of crafting or construction landed on "Paused").
+    window.addEventListener('keydown', (e) => void (e.key === 'Escape' && (this.lastEscape = performance.now())), true);
     window.addEventListener('keydown', (e) => {
       this.dispatching = e.key;
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;

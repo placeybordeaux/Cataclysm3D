@@ -358,8 +358,21 @@ function onWeatherChanged(game: Game, prev: string | undefined): void {
   // CDDA announces the change ("The weather changed to Rain!") when you're outside.
   if (prev !== undefined) {
     const p = game.player;
-    if (isOutside(game.map, p.tileX, p.tileY, p.z)) game.message(`The weather changed to ${w.name}!`, 'c_light_cyan');
+    if (isOutside(game.map, p.tileX, p.tileY, p.z) && weatherMessageFilter(prev, w.id, game.clock.warp > 1)) game.message(`The weather changed to ${w.name}!`, 'c_light_cyan');
   }
+}
+
+/**
+ * Which weather changes get a message (docs/ADAPTATION.md): by default only ones you'd notice
+ * (dry → rain → storm → snow, not drizzle → light drizzle), and none while time is sped up
+ * (a wait until dawn logged "changed to Rain / Drizzle / Light Drizzle / Cloudy" in a row).
+ * Set `weatherMessages.all` for CDDA's every-change messages (Options > Weather messages).
+ */
+export const weatherMessages = { all: false };
+export function weatherMessageFilter(prev: string, next: string, warped: boolean): boolean {
+  if (weatherMessages.all) return true;
+  if (warped) return false;
+  return renderWeatherKind(prev) !== renderWeatherKind(next);
 }
 
 /** Force a weather id (CDDA weather_type or clear/rain/storm/snow); null returns to generated. */

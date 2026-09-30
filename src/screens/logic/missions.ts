@@ -15,17 +15,26 @@ export interface Bearing {
   omts: number;
   dir: string;
   arrow: string;
-  /** "12 OMT north-east" / "here". */
+  /** "about 290 m north-east" / "You are there". */
   text: string;
+  /** Straight-line metres to the target OMT's centre (for "290 m"). */
+  metres: number;
+}
+
+/** "about 290 m" / "about 1.4 km": BN says "12 OMT", which only a veteran can read. */
+export function distanceText(m: number): string {
+  if (m >= 1000) return `about ${(m / 1000).toFixed(1)} km`;
+  return `about ${Math.max(10, Math.round(m / 10) * 10)} m`;
 }
 
 /** From the survivor's tile to an OMT (y grows south). */
 export function bearing(px: number, py: number, omx: number, omy: number): Bearing {
   const dx = omx - Math.floor(px / OMT), dy = omy - Math.floor(py / OMT);
   const d = Math.max(Math.abs(dx), Math.abs(dy));
-  if (d === 0) return { omts: 0, dir: 'here', arrow: '•', text: 'You are there' };
+  if (d === 0) return { omts: 0, dir: 'here', arrow: '•', text: 'You are there', metres: 0 };
   const i = Math.round((((Math.atan2(dx, -dy) * 180) / Math.PI + 360) % 360) / 45) % 8;
-  return { omts: d, dir: DIRS[i], arrow: ARROWS[i], text: `${d} OMT ${DIRS[i]}` };
+  const metres = Math.hypot(omx * OMT + OMT / 2 - px, omy * OMT + OMT / 2 - py);
+  return { omts: d, dir: DIRS[i], arrow: ARROWS[i], text: `${distanceText(metres)} ${DIRS[i]}`, metres };
 }
 
 /** Where a mission points now: its target OMT, else its target monster, else nothing. */
