@@ -8,7 +8,7 @@
 // Releasing over nothing calls the source's onDropNowhere (hotbar: unbind) or snaps back.
 
 import { h, ui2Layers } from './dom';
-import { pushKeys } from './host';
+import { isCloseKey, pushKeys } from './host';
 import { iconEl } from './icons';
 import { isAccepted, wheelCount, type DropVerdict } from './logic/dnd';
 import type { ItemView } from './logic/items';
@@ -149,7 +149,8 @@ function beginDrag(payload: DragPayload, source: HTMLElement, opts: DraggableOpt
     refresh();
   };
   const removeKeys = pushKeys((e) => {
-    if (e.key === 'Escape') cancel();
+    // The close key cancels too: it would otherwise close the window under the drag.
+    if (e.key === 'Escape' || isCloseKey(e)) cancel();
     // Everything else is swallowed: no window shortcuts mid-drag.
     return true;
   }, { overlay: true });

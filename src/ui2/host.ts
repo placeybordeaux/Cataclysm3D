@@ -103,6 +103,25 @@ function updatePause(): void {
 let overlays = 0;
 
 /**
+ * The keys that close the topmost thing besides Esc (the player's `close_menu` binding, Space by
+ * default; the game sets this from src/ui/keys.ts). Esc keeps working everywhere, but it's never
+ * the key we advertise: outside fullscreen the browser also takes it to release the mouse.
+ */
+let closeKeysFn: () => readonly string[] = () => [' '];
+export function setCloseKeys(fn: () => readonly string[]): void {
+  closeKeysFn = fn;
+}
+/** A fresh (non-repeat) press of a close key. */
+export function isCloseKey(e: KeyboardEvent): boolean {
+  return !e.repeat && closeKeysFn().includes(e.key);
+}
+/** How to show the close key in hints ("Space"); '' when unbound. */
+export function closeKeyLabel(): string {
+  const k = closeKeysFn()[0];
+  return k === undefined ? '' : k === ' ' ? 'Space' : k;
+}
+
+/**
  * Push a key handler on top; returns a remover. `overlay` marks keyboard-modal things (menus,
  * dialogs, drags): while one is up, widgets with their own element-level key handling (lists,
  * grids, tabs) must leave keys alone — check overlayOpen() — or a focused list would eat the

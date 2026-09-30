@@ -205,3 +205,40 @@ describe('pointer lock policy', () => {
     expect(lockPaused({ ...s, wantLock: false })).toBe(false);
   });
 });
+
+describe('close_menu (menu-only action, default Space)', () => {
+  const ev = (key: string, code: string, mods: Record<string, boolean> = {}) => ({ key, code, ...mods });
+  it('defaults to Space and is reachable although Space is a movement key', () => {
+    const { keys } = fakeKeys();
+    expect(keys.keyFor('close_menu')).toBe(' ');
+    expect(keys.label('close_menu')).toBe('Space');
+    expect(keys.unreachable()).not.toContain('close_menu');
+    expect(Keys.closeKeys()).toEqual([' ']);
+  });
+  it('never fires in gameplay, and shares keys with gameplay actions without a conflict', () => {
+    const { keys, fired, send } = fakeKeys();
+    send(' ', 'Space');
+    keys.setBindings(applyBinding(keys.bindings(), 'close_menu', ';'));
+    expect(() => keyIndex(keys.bindings())).not.toThrow();
+    send(';', 'Semicolon');
+    expect(fired).toEqual([]);
+    expect(Keys.closeKeys()).toEqual([';']);
+  });
+  it('takes Space and symbols, refuses letters, digits, menu keys and the tactical pause', () => {
+    expect(checkBinding(DEFAULT_BINDINGS, 'close_menu', ev(' ', 'Space'))).toEqual({ ok: true });
+    expect(checkBinding(DEFAULT_BINDINGS, 'close_menu', ev('/', 'Slash'))).toEqual({ ok: true });
+    // & is crafting in play, but menus never see gameplay bindings: no "replaces".
+    expect(checkBinding(DEFAULT_BINDINGS, 'close_menu', ev('&', 'Digit7'))).toEqual({ ok: true });
+    for (const [k, c] of [['q', 'KeyQ'], ['7', 'Digit7'], ['Enter', 'Enter'], ['Escape', 'Escape'], ['`', 'Backquote']])
+      expect(checkBinding(DEFAULT_BINDINGS, 'close_menu', ev(k, c))).toMatchObject({ ok: false, reason: 'reserved' });
+    expect(checkBinding(DEFAULT_BINDINGS, 'close_menu', ev(' ', 'Space', { ctrlKey: true }))).toMatchObject({ ok: false, reason: 'modifier' });
+    // A gameplay action still can't take Space (movement).
+    expect(checkBinding(DEFAULT_BINDINGS, 'wear', ev(' ', 'Space'))).toMatchObject({ ok: false, reason: 'movement' });
+  });
+  it('binding it to a gameplay key leaves the gameplay action alone', () => {
+    const b = applyBinding(DEFAULT_BINDINGS, 'close_menu', '&');
+    expect(b.close_menu).toEqual(['&']);
+    expect(b.craft).toEqual(['&']);
+    expect(findConflicts(b)).toEqual([]);
+  });
+});

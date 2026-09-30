@@ -8,6 +8,7 @@
 
 import { h, ui2Layers, viewport } from './dom';
 import { iconEl } from './icons';
+import { isCloseKey } from './host';
 import { placePopup } from './logic/layout';
 import { fmtVolume, fmtWeight, totalVolume, totalWeight, type ItemStat, type ItemView } from './logic/items';
 
@@ -96,7 +97,7 @@ if (typeof document !== 'undefined') {
   // key that closes or confirms, and grabbing the mouse for play, take the tooltip with them.
   document.addEventListener('pointerlockchange', () => hideTooltip());
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' || e.key === 'Escape' || e.key === 'Backspace') hideTooltip();
+    if (e.key === 'Enter' || e.key === 'Escape' || e.key === 'Backspace' || isCloseKey(e)) hideTooltip();
   }, true);
 }
 

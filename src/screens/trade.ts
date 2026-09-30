@@ -7,7 +7,8 @@
 //
 // Mouse: drag between a list and the table (wheel while dragging changes the amount, Shift
 // asks for it), click moves the whole row, Ctrl-click asks how many, right-click for a menu.
-// Keys: ←/→ column, ↑/↓ row, Enter/Space move it, +/- one unit, D make the deal, Esc cancel.
+// Keys: ←/→ column, ↑/↓ row, Enter/Space move it, +/- one unit, D make the deal, Bksp (or Esc)
+// cancel. Space keeps its CDDA "mark" meaning here, so it isn't the close key.
 
 import type { Game } from '../game/game';
 import type { Npc } from '../game/npc';
@@ -53,7 +54,7 @@ export function openTradePanel(ctx: TradeCtx, n: Npc, cost = 0, onDone?: (traded
     pauses: true,
     width: 'min(calc(var(--fs) * 74), 97vw)',
     height: 'min(90vh, calc(var(--fs) * 40))',
-    footer: 'Drag or click goods onto the table · wheel while dragging: amount · Ctrl-click: how many · D make the deal · Esc cancel',
+    footer: 'Drag or click goods onto the table · wheel while dragging: amount · Ctrl-click: how many · D make the deal · Bksp cancel',
     onKey,
     onClose: () => {
       for (const u of unregs) u();
@@ -72,7 +73,7 @@ export function openTradePanel(ctx: TradeCtx, n: Npc, cost = 0, onDone?: (traded
   const reactEl = h('div', { class: 'ix-react' });
   const dealBtn = button('Make the deal', () => void deal(), { tone: 'accent', key: 'D' });
   dealBtn.dataset.testid = 'trade-deal';
-  const cancelBtn = button('Cancel', () => panel.close(), { key: 'Esc' });
+  const cancelBtn = button('Cancel', () => panel.close(), { key: 'Bksp' });
   const table = h(
     'div',
     { class: 'ix-table' },
@@ -282,7 +283,7 @@ export function openTradePanel(ctx: TradeCtx, n: Npc, cost = 0, onDone?: (traded
   // ---------------------------------------------------------------- keys
   const SIDES: Side[] = ['yours', 'give', 'get', 'theirs'];
   function onKey(e: KeyboardEvent): boolean {
-    if (e.key === 'Escape') return panel.close(), true;
+    if (e.key === 'Escape' || (e.key === 'Backspace' && !e.repeat)) return panel.close(), true;
     if (e.key === 'd' || e.key === 'D') return deal(), true;
     const list = listOf(cursor.side);
     if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {

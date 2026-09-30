@@ -92,7 +92,7 @@ export function openOptions(ctx: UiContext): Panel {
     name: 'Fullscreen',
     value: () => (isFullscreen() ? 'on' : 'off'),
     change: () => void toggleFullscreen(game).then(() => list.setItems(opts)),
-    desc: `Also ${game.keys.label('fullscreen')} in game. In fullscreen Esc opens and closes menus without freeing the mouse (hold Esc to leave fullscreen).`,
+    desc: `Also ${game.keys.label('fullscreen')} in game. In fullscreen Esc no longer frees the mouse (hold Esc to leave fullscreen). Either way, ${game.keys.label('close_menu')} closes menus and keeps it.`,
   });
   opts.push({
     name: 'Menu cursor',

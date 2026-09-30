@@ -4,7 +4,7 @@
 // with the reason ("Need: a cutting tool") — the player learns what's possible.
 
 import { h, ui2Layers, viewport } from './dom';
-import { acquireSurface, pushKeys } from './host';
+import { acquireSurface, isCloseKey, pushKeys } from './host';
 import { iconEl } from './icons';
 import { fmtDuration, type IconRef } from './logic/items';
 import { placePopup, type Rect } from './logic/layout';
@@ -113,7 +113,11 @@ function menuKey(e: KeyboardEvent, close: () => void): boolean {
     if (e.repeat) return true;
     if (l.parent) closeSub(l.parent);
     else close();
-  } else if (e.key === 'Enter' || e.key === ' ') {
+  } else if (isCloseKey(e)) {
+    // Space closes the whole menu like every other menu (it used to activate, which Enter does):
+    // a player closing things with Space must never trigger an action by accident.
+    close();
+  } else if (e.key === 'Enter') {
     if (!e.repeat) activate(l, l.sel, close);
   } else if (e.key.length === 1 && !e.repeat) {
     const i = l.items.findIndex((m) => isEntry(m) && m.key?.toLowerCase() === e.key.toLowerCase());

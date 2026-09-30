@@ -9,7 +9,7 @@ export type Bindings = Record<string, string[]>;
 export const MOVEMENT_CODES = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'Space', 'ShiftLeft', 'ShiftRight']);
 
 /**
- * Keys the UI itself owns: every window closes on Esc/Backspace, lists move with the arrows,
+ * Keys the UI itself owns: every window closes on Esc/Backspace (and `close_menu`, Space), lists move with the arrows,
  * Enter confirms, Tab switches tabs. Binding an action to one of them would make it fire only
  * in gameplay and do something else in every menu, so the editor refuses them.
  */
@@ -18,6 +18,15 @@ export const RESERVED_KEYS = new Set([
   'PageUp', 'PageDown', 'Home', 'End', 'Shift', 'Control', 'Alt', 'Meta', 'AltGraph', 'CapsLock',
   'Dead', 'Unidentified', 'Process', 'F12',
 ]);
+
+/**
+ * Actions that only mean something inside menus (`close_menu`, default Space). They live in the
+ * same bindings table so Options > Key bindings can rebind them, but they never dispatch in
+ * gameplay and don't conflict with gameplay keys: Space is the side-step on foot *and* closes
+ * every menu, the same way Backspace already did. Closing with Esc is what we avoid advertising:
+ * outside fullscreen the browser takes Esc to release the captured mouse.
+ */
+export const MENU_ACTIONS = new Set(['close_menu']);
 
 /** Actions whose key can't be changed (the pause menu must stay on Esc so nobody gets locked in). */
 export const FIXED_ACTIONS = new Set(['menu']);
@@ -118,6 +127,7 @@ export function diffBindings(defaults: Bindings, current: Bindings): Bindings {
 export function keyIndex(b: Bindings): Map<string, string> {
   const m = new Map<string, string>();
   for (const [id, keys] of Object.entries(b)) {
+    if (MENU_ACTIONS.has(id)) continue; // their own scope: see menuKeyCheck
     for (const k of keys) {
       const prev = m.get(k);
       if (prev && prev !== id) throw new Error(`key ${JSON.stringify(k)} is bound to both ${prev} and ${id}`);
@@ -130,7 +140,7 @@ export function keyIndex(b: Bindings): Map<string, string> {
 /** Every key bound to more than one action. */
 export function findConflicts(b: Bindings): { key: string; actions: string[] }[] {
   const by = new Map<string, string[]>();
-  for (const [id, keys] of Object.entries(b)) for (const k of new Set(keys)) by.set(k, [...(by.get(k) ?? []), id]);
+  for (const [id, keys] of Object.entries(b)) if (!MENU_ACTIONS.has(id)) for (const k of new Set(keys)) by.set(k, [...(by.get(k) ?? []), id]);
   return [...by].filter(([, ids]) => ids.length > 1).map(([key, actions]) => ({ key, actions }));
 }
 
@@ -150,26 +160,45 @@ export function checkBinding(
   blockedChars: ReadonlySet<string> = QWERTY_MOVEMENT_CHARS,
 ): BindCheck {
   if (FIXED_ACTIONS.has(id)) return { ok: false, reason: 'fixed', message: 'This action always uses Esc.' };
+  if (MENU_ACTIONS.has(id)) return menuKeyCheck(b, id, ev);
   if (MOVEMENT_CODES.has(ev.code) || blockedChars.has(ev.key))
     return { ok: false, reason: 'movement', message: 'That key moves you (movement keys, Space and Shift never trigger actions).' };
   if ((ev.ctrlKey || ev.altKey || ev.metaKey) && !ev.altGraph)
     return { ok: false, reason: 'modifier', message: 'Ctrl/Alt/Meta combinations belong to the browser.' };
   if (RESERVED_KEYS.has(ev.key)) return { ok: false, reason: 'reserved', message: `${keyLabel(ev.key)} is used by every menu.` };
-  for (const [other, keys] of Object.entries(b)) if (other !== id && keys.includes(ev.key)) return { ok: true, replaces: other };
+  for (const [other, keys] of Object.entries(b)) if (other !== id && !MENU_ACTIONS.has(other) && keys.includes(ev.key)) return { ok: true, replaces: other };
   return { ok: true };
 }
+
+/**
+ * A menu-only action's key: Space (a movement key in play) is fine, but not a letter or digit
+ * (every menu's hotkeys: the close key would pick an entry instead) nor a key menus already use
+ * (Esc/Bksp close anyway, arrows move, Enter picks) nor the tactical pause, which runs first.
+ */
+function menuKeyCheck(b: Bindings, id: string, ev: { key: string; ctrlKey?: boolean; altKey?: boolean; metaKey?: boolean; altGraph?: boolean }): BindCheck {
+  if ((ev.ctrlKey || ev.altKey || ev.metaKey) && !ev.altGraph)
+    return { ok: false, reason: 'modifier', message: 'Ctrl/Alt/Meta combinations belong to the browser.' };
+  if (/^[\p{L}\p{N}]$/u.test(ev.key)) return { ok: false, reason: 'reserved', message: 'Menus use letters and digits as hotkeys; pick Space or a symbol key.' };
+  if (RESERVED_KEYS.has(ev.key)) return { ok: false, reason: 'reserved', message: `${keyLabel(ev.key)} is used by every menu.` };
+  if ((b.tactical_pause ?? []).includes(ev.key)) return { ok: false, reason: 'reserved', message: `${keyLabel(ev.key)} is the tactical pause, which works inside menus.` };
+  for (const [other, keys] of Object.entries(b)) if (other !== id && MENU_ACTIONS.has(other) && keys.includes(ev.key)) return { ok: true, replaces: other };
+  return { ok: true };
+}
+
+/** Whether two actions compete for keys (gameplay actions with each other, menu actions with each other). */
+const sameScope = (a: string, b: string) => MENU_ACTIONS.has(a) === MENU_ACTIONS.has(b);
 
 /** Bind `key` as the only key of `id`, taking it away from any other action. Returns a new map. */
 export function applyBinding(b: Bindings, id: string, key: string): Bindings {
   const out: Bindings = {};
-  for (const [other, keys] of Object.entries(b)) out[other] = other === id ? [key] : keys.filter((k) => k !== key);
+  for (const [other, keys] of Object.entries(b)) out[other] = other === id ? [key] : sameScope(id, other) ? keys.filter((k) => k !== key) : [...keys];
   return out;
 }
 
 /** Add `key` as an extra key for `id` (taken away from any other action). Returns a new map. */
 export function addBinding(b: Bindings, id: string, key: string): Bindings {
   const out: Bindings = {};
-  for (const [other, keys] of Object.entries(b)) out[other] = other === id ? [...keys.filter((k) => k !== key), key] : keys.filter((k) => k !== key);
+  for (const [other, keys] of Object.entries(b)) out[other] = other === id ? [...keys.filter((k) => k !== key), key] : sameScope(id, other) ? keys.filter((k) => k !== key) : [...keys];
   return out;
 }
 
@@ -199,5 +228,6 @@ export function withLayoutFallbacks(b: Bindings, blocked: ReadonlySet<string>): 
 
 /** Actions none of whose keys can be pressed on this layout (shown as a warning / in red). */
 export function unreachableActions(b: Bindings, blocked: ReadonlySet<string>): string[] {
-  return Object.entries(b).filter(([, keys]) => !keys.some((k) => !blocked.has(k))).map(([id]) => id);
+  // Menu actions are pressed inside menus, where movement keys (Space) are free.
+  return Object.entries(b).filter(([id, keys]) => !MENU_ACTIONS.has(id) && !keys.some((k) => !blocked.has(k))).map(([id]) => id);
 }

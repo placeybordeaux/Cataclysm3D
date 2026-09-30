@@ -1,6 +1,7 @@
 import type { Input } from '../core/input';
+import { setCloseKeys } from '../ui2/host';
 import {
-  diffBindings, keyIndex, keyLabel, mergeBindings, movementChars, movementLabel, MOVEMENT_CODES, QWERTY_MOVEMENT_CHARS,
+  MENU_ACTIONS, diffBindings, keyIndex, keyLabel, mergeBindings, movementChars, movementLabel, MOVEMENT_CODES, QWERTY_MOVEMENT_CHARS,
   unreachableActions, withLayoutFallbacks, type Bindings,
 } from './keymap';
 
@@ -91,6 +92,8 @@ export const DEFAULT_BINDINGS: Record<string, string[]> = {
   journal: ['J'],
   // --- performance overlay (src/perf/install.ts): Shift+F3 saves the last 60 s ---
   perf_overlay: ['F3'],
+  // --- inside menus only (keymap.ts MENU_ACTIONS): never fires in gameplay, where Space side-steps ---
+  close_menu: [' '], // closes the top window/menu; advertised instead of Esc, which frees the mouse
 };
 
 /** localStorage key for the player's rebinds (a diff over DEFAULT_BINDINGS). */
@@ -127,6 +130,12 @@ export class Keys {
   /** Open key-binding screens: while > 0, keys that work inside menus (tactical pause) don't. */
   static rebinding = 0;
   private static input: Input | null = null;
+  /** The game's bindings (legacy windows read the close key from here). */
+  static current: Keys | null = null;
+  /** Keys that close menus besides Esc/Bksp/the opening key (`close_menu`, Space by default). */
+  static closeKeys(): string[] {
+    return Keys.current ? Keys.current.keysFor('close_menu') : [' '];
+  }
   /** The opening key for a window being created now, or null. */
   static openingKey(): string | null {
     const o = Keys.opening;
@@ -147,6 +156,9 @@ export class Keys {
       this.user = mergeBindings(DEFAULT_BINDINGS, {});
     }
     this.rebuild();
+    this.register('close_menu', 'Close the menu or window (as do the key that opened it and Bksp)', () => {});
+    Keys.current = this;
+    setCloseKeys(() => this.keysFor('close_menu'));
     input.onPress((e) => {
       // AltGr (Ctrl+Alt on Windows) types @ [ | on many layouts: that's a character, not a shortcut.
       if ((e.ctrlKey || e.metaKey || e.altKey) && !e.getModifierState?.('AltGraph')) return false;
@@ -228,7 +240,8 @@ export class Keys {
 
   /** Keys that trigger the action on this keyboard (unreachable ones left out). */
   keysFor(id: string): string[] {
-    return (this.effective[id] ?? []).filter((k) => !this.blocked.has(k));
+    // Menu actions are pressed inside menus, where the movement keys (Space) are free.
+    return (this.effective[id] ?? []).filter((k) => MENU_ACTIONS.has(id) || !this.blocked.has(k));
   }
 
   /** The key to show for an action, e.g. in "[e] Open door"; '?' when it has none. */

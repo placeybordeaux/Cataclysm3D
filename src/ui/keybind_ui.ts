@@ -1,14 +1,15 @@
 import type { Game } from '../game/game';
 import { h, confirmModal, type Panel } from '../ui2';
 import { openScreen } from './screen2';
-import { addBinding, applyBinding, checkBinding, keyLabel } from './keymap';
+import { MENU_ACTIONS, addBinding, applyBinding, checkBinding, keyLabel } from './keymap';
 import { Keys } from './keys';
 
 // Options > Key bindings (CDDA's keybinding screen, reduced; a ui2 window): every action with
 // its keys. Enter (or a click on the selected row) waits for a new key and replaces the action's
 // keys with it, + adds an extra key, - unbinds, R resets everything. Movement keys, Space/Shift
 // and the keys every menu uses are refused with the reason; a key another action has is moved
-// after a yes/no. Changes apply at once and persist (src/ui/keys.ts setBindings → localStorage).
+// after a yes/no. `close_menu` (Space) only works inside menus, so it may share a key with
+// gameplay (keymap.ts MENU_ACTIONS). Changes apply at once and persist (src/ui/keys.ts setBindings → localStorage).
 
 export function openKeybindings(game: Game): Panel {
   const keys = game.keys;
@@ -35,7 +36,8 @@ export function openKeybindings(game: Game): Panel {
       if (busy) return true;
       if (capturing) {
         if (e.repeat) return true;
-        if (e.key === 'Escape') {
+        // Bksp can't be bound (every menu uses it), so it cancels; Esc too, unadvertised.
+        if (e.key === 'Escape' || e.key === 'Backspace') {
           capturing = null;
           flash = null;
           render();
@@ -139,12 +141,13 @@ export function openKeybindings(game: Game): Panel {
       flash
         ? h('span', { class: `tone-${flash.tone}`, text: flash.text })
         : capturing
-          ? h('span', { class: 'tone-warn', text: `Press the new key for "${actions[sel].name}" (Esc cancels)` })
-          : h('span', { class: 'ui2-dim', text: `Movement: ${keys.movementKeys()} + Shift (run) + Space; those keys never trigger actions.` }),
+          ? h('span', { class: 'tone-warn', text: `Press the new key for "${actions[sel].name}" (Bksp cancels)` })
+          : h('span', { class: 'ui2-dim', text: `Movement: ${keys.movementKeys()} + Shift (run) + Space; those keys never trigger actions (in menus, Space closes).` }),
     );
     list.replaceChildren(
       ...actions.map((a, i) => {
         const ks = b[a.id] ?? [];
+        const isBlocked = (k: string) => blocked.has(k) && !MENU_ACTIONS.has(a.id);
         // Layout stand-ins (AZERTY's w for wield) aren't the player's binding but do work: show them.
         const standIns = keys.keysFor(a.id).filter((k) => !ks.includes(k));
         const on = i === sel;
@@ -152,7 +155,7 @@ export function openKeybindings(game: Game): Panel {
           ? [h('span', { class: 'kb-key wait', text: 'press a key' })]
           : ks.length
             ? [
-                ...ks.map((k) => h('span', { class: `kb-key${blocked.has(k) ? ' blocked' : ''}`, text: blocked.has(k) ? `${keyLabel(k)} (movement)` : keyLabel(k) })),
+                ...ks.map((k) => h('span', { class: `kb-key${isBlocked(k) ? ' blocked' : ''}`, text: isBlocked(k) ? `${keyLabel(k)} (movement)` : keyLabel(k) })),
                 ...standIns.map((k) => h('span', { class: 'kb-key layout', text: `${keyLabel(k)} (layout)` })),
               ]
             : [h('span', { class: 'kb-key none', text: 'unbound' })];

@@ -4,6 +4,7 @@
 // examine card.
 
 import { h } from '../dom';
+import { closeKeyLabel } from '../host';
 import { iconEl } from '../icons';
 import { openContextMenu, type MenuItem } from '../menu';
 import { confirmModal } from '../modal';
@@ -67,7 +68,7 @@ export function openPicker(model: BnInventoryModel, o: { title: string; none: st
   const p = openPanel({
     id: 'inv.picker', title: o.title, group: PICKER_GROUP, pauses: true,
     width: 'calc(var(--fs) * 30 + var(--row-icon) * 2)',
-    footer: o.note ?? '↑↓ Enter: choose · Esc: cancel · Tab: full inventory',
+    footer: o.note ?? `↑↓ Enter: choose · ${closeKeyLabel() || 'Bksp'}: cancel · Tab: full inventory`,
     // Like every menu: the key that opened it closes it, and so does Backspace.
     onKey: (e) => {
       if (e.repeat || !(e.key === 'Backspace' || o.closeKeys?.includes(e.key))) return false;

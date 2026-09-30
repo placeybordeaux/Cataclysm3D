@@ -44,13 +44,35 @@ export interface Climb {
   tread: number;
   /** blocked at an end this tick (closed door on the landing, someone standing there) */
   held: boolean;
+  /** where the flight last put the walker (see `live`) */
+  px: number;
+  py: number;
+  pz: number;
 }
 
 const climbs = new WeakMap<object, Climb>();
-export const climbOf = (w: object): Climb | undefined => climbs.get(w);
+/** Further than this from where the flight put it, a walker was moved by something else. */
+const MOVED_OFF = 0.75;
+/**
+ * A walker's climb, if it is still on the flight. Something else moving it far or to another
+ * level (a teleport, a save loaded over it, getting into a vehicle, a script) ends the climb
+ * right there: otherwise the next tick would drag it back onto the stairs and every renderer
+ * would keep lifting it. Small shoves (crowding on the flight) don't.
+ */
+function live(w: object): Climb | undefined {
+  const c = climbs.get(w);
+  if (!c) return undefined;
+  const p = w as Walker;
+  if (p.z !== c.pz || Math.hypot(p.x - c.px, p.y - c.py) > MOVED_OFF) {
+    climbs.delete(w);
+    return undefined;
+  }
+  return c;
+}
+export const climbOf = (w: object): Climb | undefined => live(w);
 /** Metres a walker is lifted above its level's floor (0 off the stairs). */
-export const liftOf = (w: object): number => climbs.get(w)?.lift ?? 0;
-export const isClimbing = (w: object): boolean => climbs.has(w);
+export const liftOf = (w: object): number => live(w)?.lift ?? 0;
+export const isClimbing = (w: object): boolean => !!live(w);
 
 /** Speed on a flight relative to walking on flat ground, per kind (along the 3D path). */
 const SPEED = { stairs: 0.72, slope: 0.85, ladder: 0.38 };
@@ -116,7 +138,11 @@ export class StairWalker {
     if (!STAIR_VARIANTS.includes(v)) throw new Error(`unknown stairs variant ${v}: ${STAIR_VARIANTS.join('|')}`);
     // everyone mid-flight lands on the nearer end first: the flights are about to change shape
     for (const w of [...this.riding]) {
-      const c = climbs.get(w)!;
+      const c = live(w);
+      if (!c) {
+        this.riding.delete(w);
+        continue;
+      }
       this.detach(w, c.s > c.link.path.len / 2);
     }
     this.index.reset(v);
@@ -178,7 +204,7 @@ export class StairWalker {
     const off = Math.hypot(w.x - px, w.y - py);
     const c: Climb = {
       link: l, s, lat, bx: w.x - px, by: w.y - py, blendLen: Math.max(0.4, off * 1.5), blendFrom: s,
-      auto: opts.auto ?? 0, head: p.head, h: p.h, lift: 0, tread: Math.floor(p.h / treadRise(l)), held: false,
+      auto: opts.auto ?? 0, head: p.head, h: p.h, lift: 0, tread: Math.floor(p.h / treadRise(l)), held: false, px: w.x, py: w.y, pz: w.z,
     };
     climbs.set(w, c);
     this.riding.add(w);
@@ -216,6 +242,9 @@ export class StairWalker {
     w.z = lv.z;
     c.h = p.h;
     c.lift = lv.lift;
+    c.px = w.x;
+    c.py = w.y;
+    c.pz = w.z;
   }
 
   /**
@@ -224,7 +253,7 @@ export class StairWalker {
    * someone standing there) and behind other climbers.
    */
   advance(w: Walker, ds: number, running = false): 'top' | 'bottom' | null {
-    const c = climbs.get(w);
+    const c = live(w);
     if (!c) return null;
     const l = c.link, len = l.path.len;
     c.held = false;
@@ -232,7 +261,11 @@ export class StairWalker {
     // queue behind whoever is ahead on the same flight
     for (const o of this.riding) {
       if (o === w) continue;
-      const oc = climbs.get(o)!;
+      const oc = live(o);
+      if (!oc) {
+        this.riding.delete(o);
+        continue;
+      }
       if (oc.link !== l) continue;
       const gap = 0.62;
       if (ds > 0 && oc.s > c.s && s > oc.s - gap) s = Math.max(c.s, oc.s - gap);
@@ -307,7 +340,7 @@ export class StairWalker {
     const sin = Math.sin(p.yaw), cos = Math.cos(p.yaw);
     const wx = len ? (fy * sin + fx * cos) / len : 0;
     const wy = len ? (-fy * cos + fx * sin) / len : 0;
-    let c = climbs.get(p);
+    let c = live(p);
     if (!c) {
       if (!len) return false;
       if (this.unstick(p)) return false;
@@ -349,7 +382,7 @@ export class StairWalker {
   /** `<` / `>`: climb the nearest flight in that direction by itself. False if none is near. */
   autoClimb(w: Walker, up: boolean): boolean {
     if (!this.index.enabled) return false;
-    const c = climbs.get(w);
+    const c = live(w);
     if (c) {
       c.auto = up ? 1 : -1;
       return true;
@@ -376,7 +409,7 @@ export class StairWalker {
 
   /** The player's climb as JSON (null when not on a flight). */
   saveState(): { key: number; z: number; s: number; lat: number; auto: number } | null {
-    const c = climbs.get(this.game.player);
+    const c = live(this.game.player);
     return c ? { key: c.link.key, z: c.link.z, s: c.s, lat: c.lat, auto: c.auto } : null;
   }
 

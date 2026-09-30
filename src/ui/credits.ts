@@ -9,6 +9,7 @@
 // The per-file sound credits aren't repeated in-game (400 rows); the screen points to the file.
 
 import { h } from '../ui2/dom';
+import { closeKeyLabel } from '../ui2/host';
 import { openPanel, closeGroup } from '../ui2/window';
 import './credits.css';
 
@@ -93,7 +94,7 @@ export function openCredits(): void {
   const panel = openPanel({
     id: 'credits', title: 'Credits', group: 'credits', pauses: true,
     width: 'min(calc(var(--fs) * 46), 94vw)', height: 'min(calc(var(--fs) * 34), 90vh)',
-    footer: 'Esc close · links open in a new tab',
+    footer: `${closeKeyLabel() || 'Bksp'} close · links open in a new tab`,
   });
   panel.body.classList.add('cr-body');
   for (const c of CREDITS) {

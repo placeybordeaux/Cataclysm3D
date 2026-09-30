@@ -9,6 +9,9 @@ export type KeyHandler = (e: KeyboardEvent) => boolean | void;
 /** How menus treat the mouse: keep it captured (keyboard menus) or free the cursor to point and click. */
 export type MenuCursor = 'captured' | 'free';
 
+/** Mouse movement ignored right after the pointer lock engages (see the mousemove listener). */
+export const LOCK_SETTLE_MS = 80;
+
 export class Input {
   /**
    * Physical codes currently held. Tracked while menus are open too (keyups always arrive), so
@@ -47,6 +50,9 @@ export class Input {
   /** Movement key pressed with the character it typed (lets Keys learn the keyboard layout). */
   onMovementKey: ((code: string, key: string) => void) | null = null;
 
+  /** Codes whose keydown closed the last menu; ignored until their keyup. */
+  private readonly swallowed = new Set<string>();
+
   /** The key whose keydown handlers are running right now (see tryLock), else null. */
   private dispatching: string | null = null;
 
@@ -65,6 +71,13 @@ export class Input {
       if (key !== e.key) Object.defineProperty(e, 'key', { value: key });
       this.keySeq++;
       if (e.key === 'Escape') this.lastEscape = performance.now();
+      // The key that closed the last menu, still held (auto-repeat): not gameplay input yet.
+      // A fresh press means it was released even if its keyup never arrived (the browser eats
+      // keys around pointer-lock changes), so it never stays swallowed.
+      if (this.swallowed.has(e.code)) {
+        if (e.repeat) return void e.preventDefault();
+        this.swallowed.delete(e.code);
+      }
       this.held.add(e.code);
       if (MOVEMENT_CODES.has(e.code) && !e.repeat) this.onMovementKey?.(e.code, e.key);
       // Keys that work in every state, menus included (the tactical pause).
@@ -72,6 +85,12 @@ export class Input {
       const top = this.captureStack[this.captureStack.length - 1];
       if (top) {
         if (top(e) !== false) e.preventDefault();
+        // This key closed the last menu (Space, i, Enter on a picker…): gameplay must not also
+        // see it as newly held — Space would side-step, or brake at the wheel — until released.
+        if (!this.captured && e.key !== 'Escape') {
+          this.held.delete(e.code);
+          this.swallowed.add(e.code);
+        }
         return;
       }
       // Back in gameplay after losing the lock (Esc closed a menu, alt-tab): any key is a user
@@ -82,22 +101,39 @@ export class Input {
     });
     // Runs right after the listener above for the same event (whatever it returned early from).
     window.addEventListener('keydown', () => (this.dispatching = null));
-    window.addEventListener('keyup', (e) => this.held.delete(e.code));
+    window.addEventListener('keyup', (e) => {
+      this.held.delete(e.code);
+      this.swallowed.delete(e.code);
+    });
     // Focus loss eats the keyups and mouseups of whatever was held: forget it all.
     const release = () => {
       this.held.clear();
+      this.swallowed.clear();
       this.mouseButtons = 0;
     };
     window.addEventListener('blur', release);
     document.addEventListener('visibilitychange', () => document.hidden && release());
+    // Taking the pointer (back): Chromium reports the jump of the OS cursor to where it is
+    // locked as the first movement, e.g. the click that resumes play after a menu that freed
+    // the cursor, landing far from where the cursor was. As mouse look that swung the view by
+    // up to a screen (real-input QA: 342 px = 49° of pitch, then `e` examined the pavement
+    // instead of getting into the car). Movement right after the lock engages is dropped.
+    let lockedAt = -Infinity, wasLocked = false;
+    const lockNow = () => {
+      const on = document.pointerLockElement === this.canvas;
+      if (on && !wasLocked) lockedAt = performance.now();
+      wasLocked = on;
+      return on;
+    };
     document.addEventListener('pointerlockchange', () => {
+      lockNow();
       if (!this.locked) this.mouseButtons = 0;
     });
     window.addEventListener('mousemove', (e) => {
-      if (document.pointerLockElement === this.canvas) {
-        this.mouseDX += e.movementX;
-        this.mouseDY += e.movementY;
-      }
+      // (the move can arrive before pointerlockchange: lockNow notices the new lock either way)
+      if (!lockNow() || performance.now() - lockedAt < LOCK_SETTLE_MS) return;
+      this.mouseDX += e.movementX;
+      this.mouseDY += e.movementY;
     });
     canvas.addEventListener('mousedown', (e) => {
       if (this.captureStack.length) return;

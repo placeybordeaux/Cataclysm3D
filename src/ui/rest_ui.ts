@@ -12,6 +12,7 @@ import { comfortAt, goToSleep, waitFor, WAIT_OPTIONS } from '../game/rest';
 import { isOutside } from '../game/vision';
 import { playerLightState, toggleLight } from '../game/lightitems';
 import { h } from '../ui2/dom';
+import { closeKeyLabel } from '../ui2/host';
 import { fmtDuration } from '../ui2/logic/items';
 import { closeGroup, openPanel } from '../ui2/window';
 import { button } from '../ui2/widgets';
@@ -111,7 +112,7 @@ export function openRest(game: Game, focus: 'sleep' | 'wait'): void {
   const panel = openPanel({
     id: 'rest', title: 'Rest', group: GROUP, pauses: true,
     width: 'min(calc(var(--fs) * 40), 94vw)',
-    footer: 'Y sleep · the key on a button waits · Esc close',
+    footer: `Y sleep · the key on a button waits · ${closeKeyLabel() || 'Bksp'} close`,
     onKey: (e) => {
       if (e.repeat) return false;
       const k = e.key.toLowerCase();

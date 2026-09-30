@@ -94,9 +94,14 @@ export function screenScenarios(c: ScreensCtx): Scenario[] {
         check('the title-bar button switches the layout', await js<boolean>(`!!document.querySelector('#ui2 .ix-dlg.layout-book')`));
         await shot('talk_book');
         await clickSel('#ui2 .ix-layout-btn');
-        await c.x().key('Escape');
+        // Space skips the typing here (it isn't the close key in a conversation); Bksp leaves.
+        await c.x().key('space');
+        await sleep(300);
+        v = await u();
+        check('Space skips, it does not leave the conversation', v.panels.includes('talk'), v.panels);
+        await c.x().key('BackSpace');
         v = await waitPanel('talk', false);
-        check('Esc leaves the conversation', !v.panels.includes('talk') && !v.tacticalPause, v);
+        check('Bksp leaves the conversation', !v.panels.includes('talk') && !v.tacticalPause, v);
       }
       await js(`cdda.screens.prefs.speed = 'normal'`);
     }],
@@ -180,9 +185,9 @@ export function screenScenarios(c: ScreensCtx): Scenario[] {
       if (btn) await c.x().click(btn[0], btn[1]);
       await sleep(300);
       check('the engine button starts/stops the engine', (await js<boolean>(`cdda.vehicleSystem.driving.engineOn`)) !== was);
-      await c.x().key('Escape');
+      await c.x().key('space');
       v = await waitPanel('vehicle', false);
-      check('Esc closes it', !v.panels.includes('vehicle'), v.panels);
+      check('Space closes it', !v.panels.includes('vehicle'), v.panels);
       await js(`cdda.exitVehicle()`);
     }],
     ['getin', "vehicle: walking up to the driver's door says '[e] Drive the Car'; e gets in, e gets out; o lists the rest", async () => {

@@ -445,6 +445,8 @@ export function openMultiSelect(ctx: UiContext, title: string, rows: MultiRow[],
     width: 'min(124ch, 96vw)',
     height: '86vh',
     detailPane: true,
+    // Space toggles the highlighted row here (CDDA multi-select): Bksp / the opening key close.
+    closeKey: false,
     footer: footer(),
     entries: build(),
     onKey: (e, cur) => {

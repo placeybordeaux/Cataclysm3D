@@ -3,7 +3,7 @@
 
 export { h, ui2Layers, viewport } from './dom';
 export { installTheme, palette, currentMetrics, setScalePref, scalePref, onScaleChange } from './theme';
-export { setHost, standaloneHost, acquireSurface, pushKeys, shortcut, routeKey, settings, saveSettings, surfacesOpen, type Ui2Host } from './host';
+export { setHost, standaloneHost, acquireSurface, pushKeys, shortcut, routeKey, settings, saveSettings, surfacesOpen, setCloseKeys, isCloseKey, closeKeyLabel, type Ui2Host } from './host';
 export { iconEl, setLooksLike, iconsReady } from './icons';
 export { openPanel, findPanel, topPanel, openPanels, closeGroup, resetWindowPositions, type Panel, type PanelOpts } from './window';
 export { rememberedPosition } from './window';

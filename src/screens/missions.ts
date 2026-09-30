@@ -7,7 +7,7 @@ import type { Game } from '../game/game';
 import type { NpcSystem } from '../game/npcai';
 import type { Renderer } from '../render/renderer';
 import type { MissionInstance } from '../game/missions';
-import { button, h, openPanel, tabs, type Panel } from '../ui2';
+import { button, closeKeyLabel, h, openPanel, tabs, type Panel } from '../ui2';
 import { centreFirstTime, chip, hours, markup, portrait, section } from './common';
 import { distanceText, missionEntry, missionTarget, valueText, type MissionEntry } from './logic/missions';
 import { mapMarks } from '../ui/mapmarks';
@@ -38,7 +38,7 @@ export function openMissionsPanel(ctx: MissionsCtx, focusUid?: number): Panel {
     pauses: true,
     width: 'min(calc(var(--fs) * 56), 95vw)',
     height: 'min(82vh, calc(var(--fs) * 32))',
-    footer: `←→ tabs · ↑↓ choose · T track on the map · ${game.keys.keyFor('missions')} / Esc close`,
+    footer: `←→ tabs · ↑↓ choose · T track on the map · ${closeKeyLabel()} / ${game.keys.keyFor('missions')} close`,
     onKey: (e) => {
       if (e.key === game.keys.keyFor('missions') && !e.repeat) return panel.close(), true;
       const order: Tab[] = ['active', 'succeeded', 'failed'];
