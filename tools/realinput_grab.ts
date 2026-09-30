@@ -99,7 +99,8 @@ export function grabScenarios(c: GrabCtx): Scenario[] {
       check('test room built (setup)', !!o, o);
       // --- push a dresser east
       await js(put(1, 0, 'f_dresser'));
-      await sleep(300);
+      // the room may be a walk from where you woke: let its chunks mesh before looking
+      await sleep(2500);
       await c.x().key('G');
       await sleep(250);
       let r = await read();
@@ -159,6 +160,7 @@ export function grabScenarios(c: GrabCtx): Scenario[] {
       check('G grabs the shopping cart', r.grab?.kind === 'vehicle' && /Shopping Cart/.test(r.name ?? ''), r);
       await hold(['w'], 1400);
       r = await read();
+      await js('(() => { cdda.game.player.pitch = -0.6; })()');
       check('walking pushes the cart ahead of you', (r.cart ?? 0) >= 3 && r.px === (r.cart ?? 0) - 1, { cart: r.cart, px: r.px });
       await shot('grab_cart');
       await c.x().key('G');

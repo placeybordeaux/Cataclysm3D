@@ -361,11 +361,17 @@ export function interactionsAt(game: Game, x: number, y: number, z: number): Int
 
   out.push(...later);
 
+  // "Grab" (src/grab.ts, via interactionProviders) is an extra: it goes last and never stands
+  // in for what `e` did before (look in the dresser, examine the chair).
+  const grabs = out.filter((i) => i.id === 'grab');
+  if (grabs.length) out.splice(0, out.length, ...out.filter((i) => i.id !== 'grab'));
+
   // --- fallback: describe it
   if (!out.length && (f.id !== 'f_null' || !map.passable(x, y, z) || tAct)) {
     const main = f.id !== 'f_null' ? f : t;
     add('describe', `Examine ${main.name}`, () => describe(game, x, y, z));
   }
+  out.push(...grabs);
   return out;
 }
 

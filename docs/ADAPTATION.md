@@ -485,4 +485,8 @@ Refrigerators can't be grabbed — BN data gives `f_fridge` `required_str: -1`.
 Tests: `tests/grab.test.ts` (push, pull, nudge, wall, too heavy, strain, contents conserved,
 stuff in the way, barricade pathing, shopping cart push/pull/wall). Real input: `tools/realinput.ts
 --only grab` (push a dresser into a wall, o-menu grab + pull a chair, push a cart, a safe too
-heavy, save/load while holding). Screenshots: `docs/screenshots/wave3/hotbar-grab/`.
+heavy, save/load while holding). Screenshots (`docs/screenshots/wave3/hotbar-grab/`, GPU, full
+look): `grab_push_shoulder.jpg` (mid-push, shoulder camera, the banner), `grab_nudged_out_of_reach.jpg`
+(a diagonal nudge pushed it out of reach: "You let go of the dresser."), `grab_cart.jpg` (pushing a
+shopping cart). `e` on furniture keeps doing what it did (look in the dresser, examine the chair):
+Grab only joins `e` menus that already had a choice.

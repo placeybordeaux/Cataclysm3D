@@ -12,6 +12,7 @@ import { createItem } from '../src/game/item';
 import { Grid } from '../src/game/los';
 import { census, L, spawnOnGround } from '../src/game/moves';
 import { findPath, tileCost } from '../src/game/pathfind';
+import { interactionProviders, interactionsAt } from '../src/game/interact';
 import type { VehicleDataFile } from '../src/game/vehicle_data';
 import { VehicleSystem } from '../src/game/vehicles';
 import { recentSounds } from '../src/game/sound';
@@ -285,5 +286,23 @@ describe('grab: vehicles pushed by hand', () => {
     expect(w.log.at(-1)).toMatch(/^The Shopping Cart collides with the /);
     expect(w.vs.at(13, 10, 0)?.v).toBe(cart);
     expect(cart.parts.map((p) => p.hp)).toEqual(hp);
+  });
+});
+
+describe('grab in the e menu', () => {
+  it("rides along last: e on a dresser still looks inside, e on a chair still examines it", () => {
+    const w = world();
+    w.at(5, 5);
+    w.game.map.setFurn(6, 5, 0, 'f_dresser');
+    w.game.map.setFurn(5, 6, 0, 'f_chair');
+    // what src/grab.ts registers
+    const prov = () => [{ id: 'grab', label: 'Grab it', run: () => {} }];
+    interactionProviders.push(prov);
+    try {
+      expect(interactionsAt(w.game, 6, 5, 0).map((i) => i.id)).toEqual(['pickup', 'grab']);
+      expect(interactionsAt(w.game, 5, 6, 0).map((i) => i.id)).toEqual(['describe', 'grab']);
+    } finally {
+      interactionProviders.splice(interactionProviders.indexOf(prov), 1);
+    }
   });
 });
