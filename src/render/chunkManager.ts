@@ -305,11 +305,11 @@ export class ChunkManager {
     lv.eye.y = py;
     lv.eye.z = pz;
     lv.beginFrame();
-    const [zLo, zHi] = lv.span(pz);
-    outer: for (const [dx, dy] of this.offsets)
-      for (let z = zLo; z <= zHi; z++) {
-        if (curtain && (Math.abs(dx) > 1 || Math.abs(dy) > 1)) break outer; // offsets are nearest first
-        const cx = pcx + dx, cy = pcy + dy;
+    outer: for (const [dx, dy] of this.offsets) {
+      if (curtain && (Math.abs(dx) > 1 || Math.abs(dy) > 1)) break; // offsets are nearest first
+      const cx = pcx + dx, cy = pcy + dy;
+      const [clo, chi] = lv.columnSpan(cx, cy, pz);
+      for (let z = clo; z <= chi; z++) {
         const rz = lv.radiusAt(cx, cy, z, pz);
         // offsets are circular around the player's chunk, like computeOffsets
         if (rz < 0 || (rz < R && dx * dx + dy * dy > (rz + 0.5) * (rz + 0.5))) continue;
@@ -325,6 +325,7 @@ export class ChunkManager {
         });
         this.probe?.want(cx, cy, z);
       }
+    }
     const creationDone = !curtain && (!created || unlimited || performance.now() - t0 <= createBudget);
     this.stats.frameCreateMs = performance.now() - t0;
     frameStats.lap('chunks.create');

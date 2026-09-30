@@ -54,9 +54,31 @@ export class VisibleLevels {
    */
   constructor(private om: OmtLookup | null = null, public map: LiveMap | null = null) {}
 
-  /** Start of a frame: generated content may have changed (the chunk manager calls this). */
+  private frames = 0;
+  /**
+   * Start of a frame (the chunk manager calls this). Content above a column's overmap top only
+   * appears through play (building on a roof), so the live tops are re-read every 30 frames:
+   * a full re-scan every frame cost ~0.4 ms in a city.
+   */
   beginFrame(): void {
+    if (++this.frames % 30 === 0) this.live.clear();
+  }
+
+  /** Forget cached live tops now (a test or a debug edit placing terrain above a column's top). */
+  refresh(): void {
     this.live.clear();
+  }
+
+  /**
+   * Levels [lo, hi] column (cx, cy) can want with the eye on pz (radiusAt >= 0 inside, -1
+   * outside). The chunk manager's per-frame loops iterate this instead of every level.
+   */
+  columnSpan(cx: number, cy: number, pz: number, p: LevelPolicy = this.policy): [number, number] {
+    const wlo = Math.max(MIN_Z, pz - p.below), whi = Math.min(MAX_Z, pz + p.above);
+    if (p.mode === 'window' || pz < 0) return [wlo, whi];
+    const top = this.columnTop(cx, cy);
+    const t = Number.isNaN(top) ? whi : Math.min(MAX_Z, top);
+    return [Math.min(wlo, 0), Math.max(whi, t)];
   }
 
   get overmap(): OmtLookup | null {
