@@ -358,7 +358,10 @@ export async function installProgression(
     if (key === lastOmt || !worldgen) return;
     lastOmt = key;
     const ov = worldgen.overmap;
-    const city = ov.closestCity(omx, omy, 1);
+    // regions that exist only: generating the 8 around here was the first frame after a load
+    // spending 160 ms (Chromium) to 490 ms (Firefox) in this stats check (docs/PERF.md). A
+    // town you're standing in is in a generated region: its chunks were made from it.
+    const city = ov.closestCity(omx, omy, 1, false);
     if (city && Math.hypot(city.x - omx, city.y - omy) <= city.size) {
       prof.note('towns', `${game.seed}:${city.name}`);
       addPlace(city.name);

@@ -76,10 +76,12 @@ async function main(): Promise<void> {
     worldgen = new WorldGenerator(seed, worldgenData, data);
     game.map.generator = worldgen;
     // CDDA's default scenario: wake up inside an evacuation shelter near a town.
-    // (A loaded save puts the player back where they were instead.)
-    const start = worldgen.findStartLocation('shelter', game.map);
-    game.player.x = start.x + 0.5;
-    game.player.y = start.y + 0.5;
+    // (A loaded save puts the player back where they were instead: stand there from the
+    // start, so nothing generates or streams around the shelter first — docs/PERF.md.)
+    const saved = savedPosition(pending?.file?.sections);
+    const start = saved ?? worldgen.findStartLocation('shelter', game.map);
+    game.player.x = saved ? saved.x : start.x + 0.5;
+    game.player.y = saved ? saved.y : start.y + 0.5;
     game.player.z = start.z;
   } else {
     game.map.generator = new TestGenerator();
@@ -141,7 +143,9 @@ async function main(): Promise<void> {
   api.prefetch = prefetch;
   // Generate one ring beyond what's drawn so chunks entering the draw circle are ready to mesh.
   prefetch.opts.radius = renderer.chunks.radius + 1;
-  if (params.get('prefetch') !== '0') prefetch.start();
+  // (after a pending load is applied, below: it would prefetch around the wrong spot)
+  const startPrefetch = () => void (params.get('prefetch') !== '0' && prefetch.start());
+  if (!pending) startPrefetch();
   // Performance telemetry: F3 overlay, Shift+F3 dump, cdda.perf (src/perf, docs/PERF.md).
   installPerf(game, renderer, api, prefetch);
 
@@ -159,10 +163,16 @@ async function main(): Promise<void> {
     frameStats.frame(performance.now() - now, now);
     requestAnimationFrame(loop);
   };
-  requestAnimationFrame(loop);
+  // Loading a save: no frames until it is applied (they would stream the shelter the new
+  // game starts in, then throw it away).
+  if (!pending) requestAnimationFrame(loop);
   // Title screen / character creation (skipped with ?skipmenu=1 and under automation),
   // unless the previous page asked to load a save.
   const loaded = pending ? await save.applyPending(pending) : false;
+  if (pending) {
+    requestAnimationFrame(loop);
+    startPrefetch();
+  }
   if (gallery) {
     // No title, no mouse capture, no save session, no live bridge (tools/live.ts must keep
     // talking to the player's own tab): the gallery owns the page from here.
@@ -184,6 +194,13 @@ async function main(): Promise<void> {
   save.startSession();
   achievements.begin(loaded);
   progression.begin(loaded);
+}
+
+/** Where a save file's player stands (its 'player' section), or null if it can't tell. */
+function savedPosition(sections: Record<string, unknown> | undefined): { x: number; y: number; z: number } | null {
+  const p = sections?.player as { x?: unknown; y?: unknown; z?: unknown } | undefined;
+  if (!p || typeof p.x !== 'number' || typeof p.y !== 'number' || typeof p.z !== 'number') return null;
+  return { x: p.x, y: p.y, z: p.z };
 }
 
 main().catch((e) => {

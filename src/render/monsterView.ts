@@ -196,6 +196,9 @@ function seedOf(uid: number): number {
   return x - Math.floor(x);
 }
 
+/** Per-frame time for creating monster visuals beyond 20 m (see update). */
+const CREATE_MS = 4;
+
 export class MonsterView implements GameSystem {
   readonly name = 'monster-view';
   private atlas: Atlas | null = null;
@@ -473,10 +476,19 @@ export class MonsterView implements GameSystem {
       this.farScan = 0.5;
       this.farFigures(p);
     }
+    // Building a monster's body (rig, painted skin) is 1-5 ms; a load or a drive into a horde
+    // asked for dozens in one frame (40-80 ms, docs/PERF.md). Beyond 20 m they appear over a
+    // few frames instead: at most CREATE_MS of creation per frame, the first one always.
+    let createMs = 0;
     for (const m of this.sys.active.length ? [...this.sys.active, ...this.far] : this.far) {
       if (m.dead) continue;
       let v = this.views.get(m);
-      if (!v) v = this.create(m);
+      if (!v) {
+        if (createMs > CREATE_MS && Math.hypot(m.x - p.x, m.y - p.y) > 20) continue;
+        const c0 = performance.now();
+        v = this.create(m);
+        createMs += performance.now() - c0 + 0.01;
+      }
       const visible = Math.abs(m.z - p.z) <= 1;
       v.h?.setVisible(visible);
       // Hit-stop: the struck sprite holds exactly where the blow found it.
