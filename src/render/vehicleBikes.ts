@@ -4,6 +4,7 @@ import { GeomBuilder, type V3 } from './geometry';
 import type { Layout } from './vehicleLayout';
 import { Batches, chamferBox, partFrames, tube, wheel } from './vehicleGeom';
 import type { ModelBuild } from './vehicleModel';
+import type { RideAnchors } from './vehicleRider';
 
 // Motorcycles and bicycles for the "model" renderer: tubes, a tank, a saddle, forks and
 // spoked wheels instead of a body shell. A bike's grid is 3-4 tiles long (one per part row),
@@ -15,7 +16,11 @@ function darkenTint(c: number): number {
   return (Math.round(((c >> 16) & 255) * 0.6) << 16) | (Math.round(((c >> 8) & 255) * 0.6) << 8) | Math.round((c & 255) * 0.6);
 }
 
-export function buildBike(v: Vehicle, L: Layout, base: number): ModelBuild {
+/**
+ * `driven`: the bike being ridden gets its crank (arms + pedals) as a separate mesh the
+ * renderer turns with the rider's feet (vehicleRider.ts); parked bikes keep them in `parts`.
+ */
+export function buildBike(v: Vehicle, L: Layout, base: number, driven = false): ModelBuild {
   const F = partFrames();
   const parts = new Batches(), lamps = new GeomBuilder(), tails = new GeomBuilder();
   const ctrl = v.parts.find((q) => has(q, 'CONTROLS')) ?? v.parts.find((q) => has(q, 'SEAT'));
@@ -41,6 +46,8 @@ export function buildBike(v: Vehicle, L: Layout, base: number): ModelBuild {
   if (rear) wheel(g(rear.part.hp > 0 ? 0x9a9a9a : 0x5a5656), xR, base + rR, z, rR, Math.max(0.05, rear.width * (bicycle ? 1 : 1.3)), F, { sides: 16, rim: bicycle ? 'spokes' : 'rim', rimFrac: bicycle ? 0.9 : 0.66, flat: rear.part.hp <= 0 });
 
   let eyeH: number;
+  let ride: RideAnchors;
+  let crank: ModelBuild['crank'];
   if (bicycle) {
     const r = rR;
     const R = P(xR, r), B = P(xR + 0.42, r - 0.04), S = P(xR + 0.3, r + 0.5), H = P(xF - 0.3, r + 0.46), Hb = P(xF - 0.27, r + 0.3);
@@ -62,9 +69,33 @@ export function buildBike(v: Vehicle, L: Layout, base: number): ModelBuild {
     tube(g(chrome), S, seatP, t * 0.8, F.chrome);
     chamferBox(g(black), seatP[0] - 0.14, seatP[1] - 0.01, z - 0.07, seatP[0] + 0.1, seatP[1] + 0.05, z + 0.07, 0.04, F.leather, F.leather);
     tube(g(0x555558), P(xR + 0.42, r - 0.04, -0.1), P(xR + 0.42, r - 0.04, 0.1), 0.03, F.metal);
-    for (const s of [-1, 1]) chamferBox(g(black), xR + 0.36 + s * 0.12, base + r - 0.08 - s * 0.1, z + s * 0.12 - 0.05, xR + 0.48 + s * 0.12, base + r - 0.06 - s * 0.1, z + s * 0.12 + 0.05, 0.02, F.dark, F.dark);
+    const crankR = 0.17, pedalHalf = 0.12;
+    if (!driven) {
+      // parked: cranks fixed at 3 and 9 o'clock-ish
+      for (const s of [-1, 1]) chamferBox(g(black), xR + 0.36 + s * 0.12, base + r - 0.08 - s * 0.1, z + s * 0.12 - 0.05, xR + 0.48 + s * 0.12, base + r - 0.06 - s * 0.1, z + s * 0.12 + 0.05, 0.02, F.dark, F.dark);
+    } else {
+      // ridden: arms + pedals around their own centre (the renderer turns them about +z; the
+      // right arm points along +x at angle 0, the left one opposite)
+      const cb = new Batches();
+      for (const s of [-1, 1]) {
+        const ex = s * crankR;
+        tube(cb.get(0x555558), [0, 0, s * 0.07], [ex, 0, s * 0.07], 0.014, F.metal, 5);
+        tube(cb.get(0x555558), [ex, 0, s * 0.07], [ex, 0, s * pedalHalf], 0.008, F.metal, 4);
+        chamferBox(cb.get(black), ex - 0.05, -0.012, s * pedalHalf - 0.045, ex + 0.05, 0.012, s * pedalHalf + 0.045, 0.01, F.dark, F.dark);
+      }
+      const geo = cb.build();
+      if (geo) crank = { geo, x: xR + 0.42, y: base + r - 0.04, z };
+    }
     if (v.parts.some((q) => has(q, 'CONE_LIGHT'))) chamferBox(lamps, bar[0] + 0.02, bar[1] - 0.12, z - 0.04, bar[0] + 0.08, bar[1] - 0.06, z + 0.04, 0.02, F.light, F.light);
     eyeH = r + 1.2;
+    // on the saddle, reaching well forward to the flat bars; pedalling round the crank
+    const gz = 0.22;
+    ride = {
+      kind: 'bicycle', hip: P(seatP[0] - 0.06, seatP[1] - base + 0.13), lean: 0.62,
+      grips: [P(bar[0] - 0.02, bar[1] - base + 0.02, gz), P(bar[0] - 0.02, bar[1] - base + 0.02, -gz)],
+      feet: [P(xR + 0.42, r - 0.1, pedalHalf), P(xR + 0.42, r - 0.1, -pedalHalf)],
+      crank: { c: P(xR + 0.42, r - 0.04), r: crankR, half: pedalHalf },
+    };
   } else {
     // A standard / cruiser: steering head up front, teardrop tank, flat saddle, engine hung
     // under the tank, swingarm to the rear axle, exhaust down the right side.
@@ -119,6 +150,14 @@ export function buildBike(v: Vehicle, L: Layout, base: number): ModelBuild {
     tube(g(chrome), P(em + 0.1, 0.24, 0.17), P(ex0 - 0.1, 0.25, 0.19), 0.03, F.chrome, 6);
     tube(g(chrome), P(ex0 - 0.1, 0.25, 0.19), P(xR - 0.1, rR + 0.02, 0.19), 0.05, F.chrome, 7);
     eyeH = hy + 0.8;
+    // astride the saddle just behind the tank, a slight crouch to the wide bars, feet on pegs
+    // under the knees
+    const hipX = sx1 - 0.12;
+    ride = {
+      kind: 'motorcycle', hip: P(hipX, hy + 0.04), lean: 0.4,
+      grips: [P(bx - 0.03, by, 0.31), P(bx - 0.03, by, -0.31)],
+      feet: [P(hipX + 0.22, 0.34, 0.2), P(hipX + 0.22, 0.34, -0.2)],
+    };
   }
   // sidecar tub on its own column
   for (const w of side) {
@@ -130,6 +169,6 @@ export function buildBike(v: Vehicle, L: Layout, base: number): ModelBuild {
   const out = (b: Batches | GeomBuilder): THREE.BufferGeometry | null => (b instanceof Batches ? b.build() : b.vertexCount ? b.build() : null);
   return {
     body: null, roof: null, parts: out(parts), glass: null, lamps: out(lamps), tails: out(tails), beacons: null,
-    skin: null, skinJob: null, skinKey: '', layout: L, eyeH, driverZ: z, parkedLean: bicycle ? 0.1 : 0.14,
+    skin: null, skinJob: null, skinKey: '', layout: L, eyeH, driverZ: z, parkedLean: bicycle ? 0.1 : 0.14, ride, crank,
   };
 }

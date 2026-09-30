@@ -151,6 +151,8 @@ export function filmTexture(): THREE.DataTexture {
 /** Wheel turns this many times the front-wheel angle (a car's steering ratio, shortened). */
 const WHEEL_RATIO = 2.6;
 const NEEDLE_RATE = 6;
+/** How far (rad) the driver's body's hands turn with the wheel before sliding round the rim. */
+export const GRIP_TURN_MAX = 1.0;
 
 export interface HandColors {
   sleeve: number;
@@ -296,6 +298,7 @@ export class Cockpit {
 
   private tmpA = new THREE.Vector3();
   private tmpB = new THREE.Vector3();
+  private tmpQ = new THREE.Quaternion();
   private up = new THREE.Vector3(0, 1, 0);
   private rot = new THREE.Matrix4();
   private scl = new THREE.Matrix4();
@@ -340,6 +343,31 @@ export class Cockpit {
       nd.value += (target - nd.value) * Math.min(1, dt * NEEDLE_RATE);
       nd.mesh.rotation.z = -(-DIAL_SWEEP / 2 + nd.value * DIAL_SWEEP);
     }
+  }
+
+  /**
+   * The grips as they are this frame (after update()), in the vehicle's mount space: where
+   * the driver's body puts its hands in the chase / top-down cameras. Right then left.
+   */
+  gripPoints(out: [V3, V3]): [V3, V3] {
+    // Past ~57 deg a driver's hands slide round the rim (or go hand over hand) instead of
+    // twisting with it: the body's reach from the seat can't follow full lock (x2.6 = 90 deg).
+    const turn = Math.max(-GRIP_TURN_MAX, Math.min(GRIP_TURN_MAX, this.steerShown));
+    const t = this.a.wheel.tilt;
+    const q = this.tmpQ.setFromAxisAngle(this.tmpA.set(Math.cos(t), Math.sin(t), 0), -turn);
+    for (const [o, i] of [[0, 1], [1, 0]] as const) {
+      const e = this.tmpB.setFromMatrixPosition(this.gripLocal[i]).applyQuaternion(q).add(this.wheel.position);
+      out[o][0] = e.x;
+      out[o][1] = e.y;
+      out[o][2] = e.z;
+    }
+    return out;
+  }
+
+  /** The first-person fists: hidden while the whole body is drawn at the wheel instead. */
+  set handsVisible(v: boolean) {
+    if (this.hands) this.hands.group.visible = v;
+    for (const m of [...this.fists, ...this.arms]) m.visible = v;
   }
 
   dispose(): void {

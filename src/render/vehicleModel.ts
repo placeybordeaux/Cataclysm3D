@@ -8,6 +8,7 @@ import { Batches, chamferBox, faceNormal, hash, mergeGeometries, partFrames, qua
 import { buildBike } from './vehicleBikes';
 import { buildFrame } from './vehicleFrame';
 import type { CockpitAnchors } from './vehicleCockpit';
+import { rimGrips, type RideAnchors } from './vehicleRider';
 
 // The "model" vehicle renderer: a cohesive low-poly body generated from the part grid
 // (vehicleLayout.ts decides the style and where things are), instead of one box per part.
@@ -68,6 +69,10 @@ export interface ModelBuild {
   cockpit?: CockpitAnchors;
   /** With `separateWheels`: each wheel built around its own centre, to steer and spin. */
   wheels?: { geo: THREE.BufferGeometry; x: number; y: number; z: number; r: number; steer: boolean }[];
+  /** Where the driver's body sits, reaches and rests its feet (vehicleRider.ts). */
+  ride?: RideAnchors;
+  /** Ridden bicycles: the pedal crank built around its own centre, turned about +z. */
+  crank?: { geo: THREE.BufferGeometry; x: number; y: number; z: number };
 }
 
 const FULL: TileFrame = { texture: null as unknown as THREE.Texture, uv: [0, 0, 1, 1], w: 1, h: 1, ppm: 32 };
@@ -293,7 +298,7 @@ function loopNormals(loop: { x: number; y: number }[]): { nx: number; ny: number
  */
 export function buildVehicleModel(v: Vehicle, base: number, opts: { reuseSkinKey?: string; deferSkin?: boolean; separateWheels?: boolean; far?: boolean } = {}): ModelBuild | null {
   const L = analyze(v);
-  if (L.style === 'motorcycle' || L.style === 'bicycle') return buildBike(v, L, base);
+  if (L.style === 'motorcycle' || L.style === 'bicycle') return buildBike(v, L, base, !!opts.separateWheels);
   if (L.style === 'frame' || !L.sections.length) return buildFrame(v, L, base);
   const p = L.p;
   const F = partFrames();
@@ -727,6 +732,7 @@ export function buildVehicleModel(v: Vehicle, base: number, opts: { reuseSkinKey
   const ctrl = v.parts.find((q) => has(q, 'CONTROLS'));
   if (ctrl && cab) driverZ = L.zOf(ctrl.my);
   let cockpit: CockpitAnchors | undefined;
+  let ride: RideAnchors | undefined;
   if (ctrl && cab && driverZ !== null && !far) {
     // Placed from the driver's eye (the cockpit camera, vehicleMesh.ts EYE_FORWARD ahead of
     // the seat): the rim's top third and your hands on it at the bottom of the view, the
@@ -735,6 +741,15 @@ export function buildVehicleModel(v: Vehicle, base: number, opts: { reuseSkinKey
     // (72 deg vertical FOV: the bottom edge is 36 deg down; the bonnet line ~14 deg)
     const wx = Math.min(dashFront - 0.5, ex + 0.42), wy = ey - 0.33;
     const tilt = 0.45, r = 0.18;
+    // the driver's body (chase / top-down cameras): back in the seat, a slight recline, hands
+    // at ten-to-two (the cockpit's turning grips replace these on the driven car), feet on the
+    // floor under the pedals
+    const hipX = L.xOf(ctrl.mx) - 0.02;
+    ride = {
+      kind: 'seat', hip: [hipX, base + seatTop + 0.07, driverZ], lean: -0.04,
+      grips: rimGrips(wx, wy, driverZ, r, tilt),
+      feet: [[hipX + 0.62, base + floorY + 0.1, driverZ + 0.11], [hipX + 0.62, base + floorY + 0.1, driverZ - 0.11]],
+    };
     // column into the dash
     tube(parts.get(0x1e1e22), [wx, wy, driverZ], [wx + 0.4, wy - 0.12, driverZ], 0.03, F.dark, 5);
     if (!opts.separateWheels) steeringWheel(parts.get(0x34343a), wx, wy, driverZ, r, F.leather);
@@ -868,7 +883,7 @@ export function buildVehicleModel(v: Vehicle, base: number, opts: { reuseSkinKey
 
   return {
     body: out(body), roof: out(roof), parts: merged, glass: out(glass), lamps: out(lampsG), tails: out(tailsG), beacons: out(beaconsB),
-    skin, skinJob, skinKey, layout: L, eyeH, driverZ, driverX: ctrl ? L.xOf(ctrl.mx) : undefined, eyeX: ctrl ? L.xOf(ctrl.mx) + MODEL_EYE_FORWARD : undefined, parkedLean: 0, cockpit, wheels: loose.length ? loose : undefined,
+    skin, skinJob, skinKey, layout: L, eyeH, driverZ, driverX: ctrl ? L.xOf(ctrl.mx) : undefined, eyeX: ctrl ? L.xOf(ctrl.mx) + MODEL_EYE_FORWARD : undefined, parkedLean: 0, cockpit, wheels: loose.length ? loose : undefined, ride,
   };
 }
 
