@@ -21,11 +21,13 @@ beforeAll(() => {
 
 const make = (id: string, status = 0, seed = 1): Vehicle => spawnVehicle(vdata, data, id, { x: 0.5, y: 0.5, z: 0, facing: 0, fuel: 50, status, rng: new Rng(seed) });
 
-function bounds(g: THREE.BufferGeometry): { min: number[]; max: number[] } {
+/** Bounds of a geometry; `aboveY` skips vertices lower than it (debris lying on the road). */
+function bounds(g: THREE.BufferGeometry, aboveY = -Infinity): { min: number[]; max: number[] } {
   const pos = g.getAttribute('position');
   const min = [Infinity, Infinity, Infinity], max = [-Infinity, -Infinity, -Infinity];
   for (let i = 0; i < pos.count; i++)
     for (let k = 0; k < 3; k++) {
+      if (pos.getY(i) < aboveY) continue;
       const v = pos.getComponent(i, k);
       expect(Number.isFinite(v)).toBe(true);
       min[k] = Math.min(min[k], v);
@@ -106,7 +108,8 @@ describe('vehicle model: geometry', () => {
         // out a little past the side columns and nothing leaves the grid
         const doorSlack = v.parts.some((p) => p.open && p.my !== Math.round((y0 + y1) / 2)) ? 1.3 : 0;
         for (const g of bodyish) {
-          const b = bounds(g);
+          // glass on the road and a burnt wreck's scorch lie beyond the body
+          const b = bounds(g, 0.03);
           expect(b.min[0]).toBeGreaterThan(x0 - 0.5 - 0.1);
           expect(b.max[0]).toBeLessThan(x1 + 0.5 + 0.1 + doorSlack * 0.3);
           expect(b.min[2]).toBeGreaterThan(y0 - 0.5 - 0.3 - doorSlack);
