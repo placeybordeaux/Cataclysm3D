@@ -656,6 +656,9 @@ export class MonsterView implements GameSystem {
     this.farRange = range;
     for (const m of this.sys.all) {
       if (m.dead || !m.dormant || !this.renderer.chunks.levels.drawn(m.x, m.y, m.z)) continue;
+      // a dormant figure indoors on another level is behind walls and floors (at most a glimpse
+      // through a window): skipping them saved ~0.4 ms/frame in a city (docs/PERF.md)
+      if (m.z !== p.z && this.renderer.chunks.covered(Math.floor(m.x), Math.floor(m.y), m.z)) continue;
       if (Math.hypot(m.x - p.x, m.y - p.y) > range) continue;
       this.far.push(m);
       this.farSet.add(m);
