@@ -71,6 +71,8 @@ export class CombatHud {
   private spreadR = 0;
   private spreadFit: 'good' | 'fair' | 'poor' | 'none' = 'none';
   private spreadT = 0;
+  /** Seconds the spread circle stays up after RMB is released. */
+  private spreadLinger = 0;
 
   constructor(private game: Game, private combat: PlayerCombat, private sys: MonsterSystem, parent: HTMLElement, private visible: () => boolean, private fovDeg: () => number = () => 70) {
     this.root = document.createElement('div');
@@ -190,7 +192,11 @@ export class CombatHud {
     // --- ranged: the spread circle shrinks as you aim; its colour says whether it fits on the
     // body under the crosshair (green), about does (yellow) or is wider than it (red).
     const gun = w?.isGun() ? w : null;
-    if (gun) {
+    // Only while aiming/drawing (RMB held), lingering briefly after release: a permanent circle
+    // on a wielded bow or gun was distracting during normal play (playtest).
+    if ((this.game.input.mouseButtons & 4) !== 0) this.spreadLinger = 0.5;
+    else this.spreadLinger = Math.max(0, this.spreadLinger - dt);
+    if (gun && this.spreadLinger > 0) {
       if ((this.spreadT -= dt) <= 0) {
         this.spreadT = 0.06;
         this.updateSpread(gun);
