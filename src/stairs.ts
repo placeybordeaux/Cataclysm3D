@@ -8,6 +8,9 @@ import { stairHooks } from './game/zlevels';
 import { registerSaveable } from './save/registry';
 import { openDoor } from './game/interact';
 import { L } from './game/moves';
+import type { NpcSystem } from './game/npcai';
+import type { Npc } from './game/npc';
+import { moveWithCollision } from './game/physics';
 
 // Wires walkable stairs (docs/STAIRS.md) into the game: the variant switch (`?stairs=`,
 // Options > Stairs, cdda.stairs.setVariant), the player's movement hook, the `<` / `>`
@@ -214,6 +217,55 @@ export function installStairs(game: Game, opts: { monsters?: MonsterSystem; api?
     };
   }
   return handle;
+}
+
+/**
+ * Followers take the flight too: when the survivor changes level over a flight, a following
+ * NPC walks to its foot (or top) and climbs it instead of appearing next to them.
+ */
+export function installStairNpcs(game: Game, stairs: StairsHandle, npcs: NpcSystem): void {
+  const walker = stairs.walker;
+  const wants = new WeakMap<Npc, { link: StairLink; up: boolean; t: number }>();
+  npcs.stairs = {
+    follow(n) {
+      const trip = walker.lastTrip;
+      if (!trip || walker.time - trip.time > 30) return false;
+      if (n.z !== (trip.up ? trip.link.z : trip.link.z + 1)) return false;
+      wants.set(n, { link: trip.link, up: trip.up, t: 0 });
+      return true;
+    },
+    drive(n, dt) {
+      const c = climbOf(n);
+      const v = 3 * 0.72;
+      if (c) {
+        const dir = c.auto || 1;
+        walker.advance(n, dir * v * dt);
+        n.facing = c.link.path.at(c.s).head + (dir < 0 ? Math.PI : 0);
+        n.moving = true;
+        n.walkPhase += v * dt * 1.5;
+        return true;
+      }
+      const w = wants.get(n);
+      if (!w) return false;
+      const l = w.link;
+      const e = l.path.at(w.up ? 0 : l.path.len);
+      const d = Math.hypot(e.x - n.x, e.y - n.y);
+      w.t += dt;
+      if (d < 0.45 || w.t > 6) {
+        // (stuck behind something for 6 s: step onto the flight anyway)
+        wants.delete(n);
+        walker.attach(n, l, !w.up, { auto: w.up ? 1 : -1 });
+        return true;
+      }
+      const ox = n.x, oy = n.y;
+      const step = Math.min(d, 3 * dt);
+      [n.x, n.y] = moveWithCollision(game.map, n.x, n.y, n.z, ((e.x - n.x) / d) * step, ((e.y - n.y) / d) * step);
+      n.facing = Math.atan2(n.x - ox, -(n.y - oy));
+      n.moving = true;
+      n.walkPhase += step * 1.5;
+      return true;
+    },
+  };
 }
 
 function describe(l: StairLink) {

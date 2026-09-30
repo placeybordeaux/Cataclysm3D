@@ -14,6 +14,9 @@ import { climbOf, liftOf } from '../src/game/stairwalk';
 import { installStairs } from '../src/stairs';
 import { fallIfUnsupported, goStairs, installZLevels } from '../src/game/zlevels';
 import { MonsterSystem } from '../src/game/monai';
+import { NpcSystem } from '../src/game/npcai';
+import { Dialogue } from '../src/game/talk';
+import { installStairNpcs } from '../src/stairs';
 
 const dir = path.join(__dirname, '../public/data');
 const load = (f: string) => JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8'));
@@ -445,5 +448,27 @@ describe('monsters on the stairs', () => {
     expect(p.z).toBe(1);
     const loc = p.groundLoc!() as unknown as { x: number; y: number; z: number };
     expect([loc.x, loc.y, loc.z]).toEqual([...l.bottom[0], 0]);
+  });
+
+  it('a follower takes the flight after you instead of appearing upstairs', () => {
+    const { game, sys, walker, stairs } = world(HALL, 'flight');
+    const nd = load('npcs.json');
+    const npcs = new NpcSystem(game, nd, sys);
+    game.systems.push(npcs);
+    installStairNpcs(game, stairs, npcs);
+    const l = standAt(game, walker, 4, 2);
+    const b = l.path.at(0);
+    const hx = Math.sin(b.head), hy = -Math.cos(b.head);
+    const n = npcs.spawn({ cls: 'NC_SCAVENGER' }, Math.floor(b.x - hx * 1.5), Math.floor(b.y - hy * 1.5), 0)!;
+    new Dialogue(npcs, n).effect('follow');
+    game.input.held.add('KeyW');
+    let rode = false;
+    step(game, 3, () => (rode ||= !!climbOf(n)));
+    game.input.held.delete('KeyW');
+    step(game, 8, () => (rode ||= !!climbOf(n)));
+    expect(game.player.z).toBe(1);
+    expect(rode).toBe(true);
+    expect(n.z).toBe(1);
+    expect(climbOf(n)).toBeUndefined();
   });
 });
