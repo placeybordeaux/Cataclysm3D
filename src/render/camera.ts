@@ -67,6 +67,11 @@ export class CameraRig {
   ads = 0;
   adsFov = 50;
   private adsBlend = 0;
+  /**
+   * Free aim (src/game/aimmodel.ts): the share of the weapon's recoil kick the view shows, in
+   * screen angles (x right, y up; radians). Set every frame by src/aim.ts; the reticle shows the rest.
+   */
+  readonly aimView = { x: 0, y: 0 };
   /** Gun kick (radians): added to the view, springs back over ~0.15 s. `kick()` adds to it. */
   private kickPitch = 0;
   private kickYaw = 0;
@@ -145,8 +150,8 @@ export class CameraRig {
       cam.position.set(p.x - fwdZ * bobX, base + eyeH + bobY, p.y + fwdX * bobX);
       if (this.snapRotation) {
         const q = (2 * Math.tan((cam.fov * Math.PI) / 360)) / lowResHeight;
-        cam.rotation.set(Math.round(p.pitch / q) * q + this.kickPitch, -Math.round(p.yaw / q) * q - this.kickYaw, 0, 'YXZ');
-      } else cam.rotation.set(p.pitch + this.kickPitch, -p.yaw - this.kickYaw, 0, 'YXZ');
+        cam.rotation.set(Math.round(p.pitch / q) * q + this.kickPitch + this.aimView.y, -Math.round(p.yaw / q) * q - this.kickYaw - this.aimView.x, 0, 'YXZ');
+      } else cam.rotation.set(p.pitch + this.kickPitch + this.aimView.y, -p.yaw - this.kickYaw - this.aimView.x, 0, 'YXZ');
       this.focus.copy(cam.position);
     } else if (this.mode === 'third') {
       cam.fov = fovFirst;

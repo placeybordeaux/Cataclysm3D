@@ -1,12 +1,13 @@
 import type { Game } from '../game/game';
 import type { Monster } from '../game/monster';
 import type { MonsterSystem } from '../game/monai';
-import { arcFor, defenseOf, FEEL } from '../game/combatfeel';
+import { arcFor, defenseOf, FEEL, parryWindowOf } from '../game/combatfeel';
 import { swingStyleOf, type PlayerCombat } from '../game/playercombat';
 import { cssColor } from './framework';
 import { dispersionBreakdown, moaToRadians } from '../game/combat';
 import { maxOf, meanLateral } from '../game/rangedfeel';
 import type { Item } from '../game/item';
+import { freeAim } from '../game/aimmodel';
 
 // The combat feel HUD around the crosshair (src/game/combatfeel.ts), drawn as one small SVG
 // overlay so it never touches the main HUD's layout:
@@ -55,6 +56,8 @@ export class CombatHud {
   private ringBg: SVGCircleElement;
   private guard: SVGPathElement;
   private threatG: SVGGElement;
+  /** The crosshair-bound marks (ring, brackets, guard, spread): moved with the free-aim reticle. */
+  private reticle: SVGGElement;
   private grabEl: HTMLDivElement;
   private whyEl: HTMLDivElement;
   private whyT = 0;
@@ -84,13 +87,14 @@ export class CombatHud {
     const shadow = 'drop-shadow(0 0 1px rgba(0,0,0,.9))';
     this.svg.style.filter = shadow;
     this.threatG = el('g', {}, this.svg);
-    this.ringBg = el('circle', { r: RING_R, fill: 'none', stroke: 'rgba(255,255,255,.12)', 'stroke-width': 1.5 }, this.svg);
-    this.ring = el('path', { fill: 'none', stroke: 'rgba(255,255,255,.7)', 'stroke-width': 1.5 }, this.svg);
+    this.reticle = el('g', {}, this.svg);
+    this.ringBg = el('circle', { r: RING_R, fill: 'none', stroke: 'rgba(255,255,255,.12)', 'stroke-width': 1.5 }, this.reticle);
+    this.ring = el('path', { fill: 'none', stroke: 'rgba(255,255,255,.7)', 'stroke-width': 1.5 }, this.reticle);
     // Corner brackets 9..13 px out from the centre.
     const b = (sx: number, sy: number) => `M ${sx * 13} ${sy * 9} L ${sx * 13} ${sy * 13} L ${sx * 9} ${sy * 13}`;
-    this.brackets = el('path', { d: [b(-1, -1), b(1, -1), b(-1, 1), b(1, 1)].join(' '), fill: 'none', stroke: cssColor('c_light_red'), 'stroke-width': 1.5 }, this.svg);
-    this.guard = el('path', { d: arcPath(RING_R + 5, Math.PI - 0.9, Math.PI + 0.9), fill: 'none', 'stroke-width': 3, 'stroke-linecap': 'square' }, this.svg);
-    this.spread = el('circle', { r: 20, fill: 'none', 'stroke-width': 1.5, 'stroke-dasharray': '3 3' }, this.svg);
+    this.brackets = el('path', { d: [b(-1, -1), b(1, -1), b(-1, 1), b(1, 1)].join(' '), fill: 'none', stroke: cssColor('c_light_red'), 'stroke-width': 1.5 }, this.reticle);
+    this.guard = el('path', { d: arcPath(RING_R + 5, Math.PI - 0.9, Math.PI + 0.9), fill: 'none', 'stroke-width': 3, 'stroke-linecap': 'square' }, this.reticle);
+    this.spread = el('circle', { r: 20, fill: 'none', 'stroke-width': 1.5, 'stroke-dasharray': '3 3' }, this.reticle);
     this.spread.style.display = 'none';
     this.grabEl = document.createElement('div');
     Object.assign(this.grabEl.style, {
@@ -112,9 +116,13 @@ export class CombatHud {
       // Ranged reasons already lead with what happened ("wide: …", "blocked by cover").
       const ranged = e.kind !== 'melee';
       const lead = /^(wide|high|low|fell short):/.test(e.reason) || !ranged ? '' : 'miss: ';
+      // Free aim: a hit's line says why it was strong or weak ("HEADSHOT ×2", "glancing ×0.5").
+      const hitLine = e.outcome === 'hit' || e.outcome === 'crit' || e.outcome === 'kill';
+      const q = e.quality;
+      const qColor = q === undefined ? null : q >= 1.2 ? 'c_light_green' : q < 0.9 ? 'c_yellow' : 'c_light_gray';
       this.why(e.outcome === 'miss' || (ranged && e.outcome === 'whiff') ? (ranged ? `${lead}${e.reason}` : `miss: ${e.reason}`) : e.reason,
-        e.reason === 'dodged' || e.reason === 'no damage' || e.reason === 'grazed' ? 'c_yellow' : ranged && e.outcome !== 'hit' && e.outcome !== 'crit' ? 'c_light_red' : 'c_light_gray',
-        ranged ? 1.8 : 1.0);
+        hitLine && qColor ? qColor : e.reason === 'dodged' || e.reason === 'no damage' || e.reason === 'grazed' || /dodged$/.test(e.reason) ? 'c_yellow' : ranged && !hitLine ? 'c_light_red' : 'c_light_gray',
+        ranged || hitLine ? 1.8 : 1.0);
     });
     game.events.on('attackRefused', (e) => this.why(e.reason, 'c_light_red', 1.8));
 
@@ -154,6 +162,11 @@ export class CombatHud {
       const lateral = Math.tan(meanLateral(b)) * t.dist;
       this.spreadFit = lateral <= t.m.radius * 0.7 ? 'good' : lateral <= t.m.radius * 1.4 ? 'fair' : 'poor';
     }
+  }
+
+  /** Free aim: move the crosshair-bound marks to where the weapon points (CSS px from the centre). */
+  setReticle(x: number, y: number): void {
+    this.reticle.setAttribute('transform', x || y ? `translate(${x.toFixed(1)} ${y.toFixed(1)})` : '');
   }
 
   /** Show a line above the crosshair for `seconds` (fading over the last 0.3 s). */
@@ -196,7 +209,8 @@ export class CombatHud {
     // on a wielded bow or gun was distracting during normal play (playtest).
     if ((this.game.input.mouseButtons & 4) !== 0) this.spreadLinger = 0.5;
     else this.spreadLinger = Math.max(0, this.spreadLinger - dt);
-    if (gun && this.spreadLinger > 0) {
+    // Free aim has no dispersion roll to show: the reticle's own weave is the spread (src/ui/aimHud.ts).
+    if (gun && this.spreadLinger > 0 && !freeAim()) {
       if ((this.spreadT -= dt) <= 0) {
         this.spreadT = 0.06;
         this.updateSpread(gun);
@@ -237,7 +251,7 @@ export class CombatHud {
     const def = defenseOf(p);
     this.guard.style.display = def.guarding ? '' : 'none';
     if (def.guarding) {
-      const parry = def.guardAge <= FEEL.parryWindow;
+      const parry = def.guardAge <= parryWindowOf(def);
       this.guard.setAttribute('stroke', parry ? cssColor('c_yellow') : 'rgba(200,200,200,.7)');
     }
 

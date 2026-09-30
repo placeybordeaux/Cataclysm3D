@@ -78,6 +78,8 @@ export class Game {
   vehicles: VehicleSystem | null = null;
   /** When it returns true, WASD doesn't walk the player (e.g. driving: src/game/vehicles.ts). */
   movementOverride: (() => boolean) | null = null;
+  /** Shift doesn't run while this says so (src/aim.ts: it holds your breath while aiming). */
+  runVeto: (() => boolean) | null = null;
   /**
    * Exact world light at a tile in CDDA units (natural + placed sources, shadowcast), or
    * null where the provider has no exact value. main.ts backs it with the renderer's light
@@ -150,7 +152,7 @@ export class Game {
     if (down('KeyS')) fy -= 1;
     if (down('KeyD')) fx += 1;
     if (down('KeyA')) fx -= 1;
-    p.running = k.has('ShiftLeft') || k.has('ShiftRight');
+    p.running = (k.has('ShiftLeft') || k.has('ShiftRight')) && !this.runVeto?.();
     if (fx === 0 && fy === 0) return;
     const len = Math.hypot(fx, fy);
     fx /= len; fy /= len;

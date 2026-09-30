@@ -118,6 +118,33 @@ export interface FeelConstants {
   drawShake: number;
   /** Whirling a sling before the release (s, added to BN's reload cost). */
   slingWhirl: number;
+
+  // --- free aim (src/game/aimmodel.ts; the "sway" and "timing" aim models, not "dice")
+  /** Reticle sway amplitude as a share of BN's mean lateral shot error (the dispersion it replaces). */
+  aimSwayScale: number;
+  /** Unaimed-ness (recoil MOA above the sight floor, BN's aim state) adds this share as extra sway. */
+  aimUnsteady: number;
+  /** Shot recoil (BN MOA added by the round) -> reticle kick, and the share of it the camera shows. */
+  aimKickScale: number;
+  aimKickView: number;
+  /** Kick recovery rate (1/s) at skill 0, and how much each skill level adds. */
+  aimKickRecover: number;
+  aimKickRecoverPerSkill: number;
+  /** Damage multiplier at weapon skill 0 and at 10 (linear between): skill makes hits count, not land. */
+  aimSkillDmg0: number;
+  aimSkillDmg10: number;
+  /** Where it hit: head, legs; a graze on the edge of the body; a weak spot (skill/dex/per chance); a perfectly timed shot. */
+  aimHeadMul: number;
+  aimLegMul: number;
+  aimGrazeMul: number;
+  aimWeakMul: number;
+  aimPerfectMul: number;
+  /** Melee in free aim: a blow that visibly connects but whose BN hit roll failed lands glancing. */
+  aimGlancingMul: number;
+  /** Each melee skill level widens the parry window by this share (free aim models). */
+  aimParryPerSkill: number;
+  /** Each weapon skill level adds this to a hit's stagger (share of HP counted for flinch/stagger). */
+  aimStaggerPerSkill: number;
 }
 
 const ACCESSIBLE: FeelConstants = {
@@ -134,6 +161,9 @@ const ACCESSIBLE: FeelConstants = {
   holdInside: 0.2, surroundRange: 3.5,
   adsFov: 50,
   drawMin: 0.45, drawStaminaPerSec: 50, drawHoldSteady: 4, drawShake: 220, slingWhirl: 0.35,
+  aimSwayScale: 1, aimUnsteady: 0.06, aimKickScale: 0.15, aimKickView: 0.5, aimKickRecover: 5, aimKickRecoverPerSkill: 0.9,
+  aimSkillDmg0: 0.75, aimSkillDmg10: 1.3, aimHeadMul: 2, aimLegMul: 0.75, aimGrazeMul: 0.5, aimWeakMul: 1.5, aimPerfectMul: 1.25,
+  aimGlancingMul: 0.5, aimParryPerSkill: 0.05, aimStaggerPerSkill: 0.04,
 };
 
 /** Classic: BN's own pacing where real time allows — shorter tells, tighter parries. */
@@ -145,6 +175,7 @@ const CLASSIC: FeelConstants = {
   struggleBonus: 1, grabCooldownMul: 1, staggerBreaksGrab: false,
   staggerShare: 0.3,
   drawStaminaPerSec: 90, drawHoldSteady: 2.5, drawShake: 400,
+  aimSwayScale: 1.25, aimUnsteady: 0.08, aimKickRecover: 4, aimSkillDmg0: 0.65, aimGlancingMul: 0.4, aimParryPerSkill: 0.03,
 };
 
 export const FEEL_PRESETS: Record<FeelDifficulty, FeelConstants> = { accessible: ACCESSIBLE, classic: CLASSIC };
@@ -295,6 +326,8 @@ export interface DefenseState {
   dodgeWindow: number;
   /** Cumulative struggle bonus while grabbed. */
   struggle: number;
+  /** Parry window multiplier (free aim: melee skill widens it; PlayerCombat sets it each tick). */
+  parryMul?: number;
 }
 
 const defenses = new WeakMap<Character, DefenseState>();
@@ -318,10 +351,15 @@ export function blockAttemptChance(meleeSkill: number, guarding: boolean): numbe
 }
 
 /** Block-score bonus from the guard (0 when not guarding); a fresh guard is a parry. */
-export function guardScoreBonus(s: Pick<DefenseState, 'guarding' | 'guardAge'> | null, f: FeelConstants = FEEL): { bonus: number; parry: boolean } {
+export function guardScoreBonus(s: Pick<DefenseState, 'guarding' | 'guardAge' | 'parryMul'> | null, f: FeelConstants = FEEL): { bonus: number; parry: boolean } {
   if (!s?.guarding) return { bonus: 0, parry: false };
-  const parry = s.guardAge <= f.parryWindow;
+  const parry = s.guardAge <= parryWindowOf(s, f);
   return { bonus: f.guardBlockBonus + (parry ? f.parryBonus : 0), parry };
+}
+
+/** The parry window (s) for this defender: FEEL's, widened by skill in the free-aim models. */
+export function parryWindowOf(s: Pick<DefenseState, 'parryMul'> | null, f: FeelConstants = FEEL): number {
+  return f.parryWindow * (s?.parryMul ?? 1);
 }
 
 /** Side-step -> CDDA dodge_roll: inside the window the roll gets the bonus and needs no dodge left. */
