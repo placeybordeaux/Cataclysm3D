@@ -56,6 +56,11 @@ Where Space already meant something it keeps that meaning, and the footer says *
 Space's old duplicate-of-Enter meanings were dropped so closing can never act: context menu
 (activated the entry) and bionics/mutations (toggled the power).
 
+Tested with real input (`tools/realinput.ts --only spaceclose`, Chromium GPU and `--browser firefox`):
+i / & / m / z / E / R / @ / * / ? / P / ) / x each close on Space, back in play with the lock re-acquired,
+no side-step, no view jump; the pause menu resumes on Space; Esc still closes. Footers:
+`docs/screenshots/wave3/menu-close/`.
+
 ## Input model
 
 | # | Issue | Sev | Status | Fix |
