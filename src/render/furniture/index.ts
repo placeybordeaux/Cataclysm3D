@@ -49,6 +49,8 @@ export interface Around {
   wall: boolean[];
   /** furniture id at an offset from the tile (f_null for none) */
   furn(dx: number, dy: number): string;
+  /** wall-like terrain at an offset (for pieces spanning tiles: a bed's head wall) */
+  wallAt(dx: number, dy: number): boolean;
 }
 
 /** Cost counters (cdda.furnitureStats): models built, placements, quads baked. */
@@ -229,6 +231,16 @@ function facingDir(a: Archetype, around: Around, conn: boolean[], seed: number):
     for (let d = 0; d < 4; d++) if (isTableLike(around.furn(DX[d], DY[d]))) return d;
   }
   if (a.facing !== 'free') {
+    // (counter runs turn corners: a run's tiles keep their own wall when they have one)
+    const ownWall = around.wall.some((w) => w);
+    if (a.group && conn.some((c) => c) && !(a.axis === 'side' && ownWall)) {
+      // multi-tile pieces (2x2 beds, counter runs, sofas) share one facing: the wall most of
+      // the group's tiles back onto, found by walking the connected tiles
+      const d = groupWall(a, around);
+      if (d >= 0) return (d + 2) & 3;
+    }
+    // in a corner, back onto the wall the run continues along
+    if (a.axis === 'side') for (let d = 0; d < 4; d++) if (around.wall[d] && (conn[(d + 1) & 3] || conn[(d + 3) & 3])) return (d + 2) & 3;
     for (let d = 0; d < 4; d++) if (around.wall[d]) return (d + 2) & 3;
     // connected along x (east-west run): face north or south; along y: east or west
     if (conn[1] || conn[3]) return seed & 1 ? 2 : 0;
@@ -237,6 +249,28 @@ function facingDir(a: Archetype, around: Around, conn: boolean[], seed: number):
     if (a.facing === 'wall') return 2;
   }
   return (seed >>> 3) & 3;
+}
+
+/** Direction (0 N .. 3 W) of the wall most tiles of this piece's group touch, or -1. */
+function groupWall(a: Archetype, around: Around): number {
+  const seen = new Set<string>(['0,0']);
+  const todo: [number, number][] = [[0, 0]];
+  const count = [0, 0, 0, 0];
+  while (todo.length && seen.size < 12) {
+    const [x, y] = todo.pop()!;
+    for (let d = 0; d < 4; d++) {
+      if (around.wallAt(x + DX[d], y + DY[d])) count[d]++;
+      const nx = x + DX[d], ny = y + DY[d], k = `${nx},${ny}`;
+      if (seen.has(k) || Math.abs(nx) > 3 || Math.abs(ny) > 3) continue;
+      const n = around.furn(nx, ny);
+      if (n === 'f_null' || archetypeFor(n)?.group !== a.group) continue;
+      seen.add(k);
+      todo.push([nx, ny]);
+    }
+  }
+  let best = -1;
+  for (let d = 0; d < 4; d++) if (count[d] > 0 && (best < 0 || count[d] > count[best])) best = d;
+  return best;
 }
 
 const isTableLike = (id: string) => {

@@ -251,8 +251,9 @@ export const bed: Build = (b, c) => {
   // blanket over the foot 2/3 (on 2-tile beds: all of the foot tile, a bit of the head tile)
   const bz0 = head && foot ? mz0 + 0.32 : head ? mz0 + 0.55 : -0.5;
   b.box(mx0 - (c.conn[LEFT] ? 0 : 0.015), 0.35, bz0, mx1 + (c.conn[RIGHT] ? 0 : 0.015), 0.475, mz1 + (foot ? 0.015 : 0), F('fabric', blanket), sk + (foot ? '' : 'pz') + 'ny');
-  // turned-down sheet edge
-  b.box(mx0 - (c.conn[LEFT] ? 0 : 0.016), 0.44, bz0 - 0.001, mx1 + (c.conn[RIGHT] ? 0 : 0.016), 0.478, bz0 + 0.07, F('sheet', sheet), sk + 'ny');
+  // turned-down sheet edge (on the head tile: on the foot tile of a 2-tile bed it would
+  // cross the blanket at the tile seam)
+  if (head) b.box(mx0 - (c.conn[LEFT] ? 0 : 0.016), 0.44, bz0 - 0.001, mx1 + (c.conn[RIGHT] ? 0 : 0.016), 0.478, bz0 + 0.07, F('sheet', sheet), sk + 'ny');
   if (head) {
     // headboard + pillow(s)
     b.box(x0, 0.12, z0, x1, 0.95, z0 + 0.06, (f) => (f === 'pz' ? F('wood', wood, slats(3, 4)) : F('wood', shade(wood, 0.9))), sk);

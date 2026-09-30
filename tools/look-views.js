@@ -153,7 +153,8 @@ window.lookView = async (name) => {
       if (!ok) continue;
       let n = 0;
       for (let ey = -1; ey <= 1; ey++) for (let ex = -1; ex <= 1; ex++) if (free(x + ex, y + ey)) n++;
-      n += Math.abs(dx) === Math.abs(dy) ? 0.5 : 0;
+      // straight-on views (dx or dy = 0) show fronts, not corners
+      n += dx === 0 || dy === 0 ? 3 : 0;
       if (n > bs) { bs = n; best = [x, y]; }
     }
     if (!best) best = [t[0], t[1] + D];

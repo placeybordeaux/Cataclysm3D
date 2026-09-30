@@ -573,6 +573,7 @@ export function* buildChunkMeshSteps(
         if (MD && MD.furniture(geo, glassGeo, src, fdef.id, x, y, fb, seed, {
           wall: nShape.map(wallLike),
           furn: (dx, dy) => (dx || dy ? map.furnAt(x + dx, y + dy, z).id : fdef.id),
+          wallAt: (dx, dy) => wallLike(shapeAt(here, x + dx, y + dy)),
         })) {
           // drawn as a modelled piece (furniture/)
         } else if (fs === 'billboard' && LF?.voxelProps && extras?.near && extras?.voxels && extras.voxels.furniture(geo, extras.white, src, fdef.id, x, y, fb, seed, facingYaw(nShape, isWall))) {
