@@ -14,6 +14,7 @@ import { CreatureModel, FallingBody } from './chars/creature';
 import { makeRig, type Rig } from './chars/rig';
 import { FxMeshes } from './chars/fxMeshes';
 import { cardsOn } from './cards';
+import { liftOf } from '../game/stairwalk';
 
 // NPCs: CDDA's npc_male / npc_female body with the worn clothing and wielded item overlays
 // stacked on top (like the tileset draws characters), composited once per outfit. In 'model'
@@ -281,7 +282,7 @@ export class NpcView implements GameSystem {
           target: n.goal.kind === 'fight' ? { x: n.goal.x, y: n.goal.y } : null,
           moving: n.moving, walkPhase: n.walkPhase, windup: null, flinch: 0,
           down: downed ? 1 : 0, visible, emph: n.isEnemy() ? 1 : 0,
-          camDist: Math.hypot(n.x - cam.x, n.y - cam.z), sy: 1, sxz: 1,
+          camDist: Math.hypot(n.x - cam.x, n.y - cam.z), sy: 1, sxz: 1, lift: liftOf(n),
         });
         continue;
       }
@@ -289,10 +290,11 @@ export class NpcView implements GameSystem {
       const bob = n.moving ? Math.abs(Math.sin(n.walkPhase * Math.PI)) * 0.06 : 0;
       // Point-blank: draw as if at NEAR_CLAMP (see monsterView.ts nearClamp).
       // ...and raised to meet the crosshair at arm's length (monsterView.ts meleeAimLift)
-      const foot = n.z * LEVEL_HEIGHT + (this.renderer.groundAt?.(n.x, n.y, n.z) ?? 0);
+      const climb = liftOf(n);
+      const foot = n.z * LEVEL_HEIGHT + (this.renderer.groundAt?.(n.x, n.y, n.z) ?? 0) + climb;
       const aim = downed || this.renderer.cameraMode !== 'first' ? 0 : meleeAimLift(Math.hypot(n.x - cam.x, n.y - cam.z), cam.y - foot, HEIGHT);
       const near = nearClamp(cam, n.x, n.y, foot + aim);
-      h.set(n.x, n.y, n.z + (bob * near.scale + aim + near.lift) / LEVEL_HEIGHT);
+      h.set(n.x, n.y, n.z + (bob * near.scale + aim + near.lift + climb) / LEVEL_HEIGHT);
       h.setVisible(visible);
       h.setFrame(v.frame, HEIGHT * (downed ? 0.5 : 1) * near.scale);
     }

@@ -29,6 +29,7 @@ import { aimScenarios } from './realinput_aim';
 import { qaScenarios } from './realinput_qa';
 import { galleryScenarios } from './realinput_gallery';
 import { driveScenarios } from './realinput_drive';
+import { stairsScenarios } from './realinput_stairs';
 
 const argv = process.argv.slice(2);
 const opt = (n: string, d: string) => (argv.includes(n) ? argv[argv.indexOf(n) + 1] : d);
@@ -1441,6 +1442,8 @@ scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...aimScenarios
 scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...qaScenarios({ x: () => x, js, check, shot, toGameplay, sleep, errors: () => errors }));
 // The style gallery (docs/GALLERY.md): its own page; restores localStorage and comes back to a quick-started game.
 scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...galleryScenarios({ page: () => page, x: () => x, js, check, shot, toGameplay, sleep, errors: () => errors, gameUrl: () => gameUrl, quickStart }));
+// Walkable stairs (docs/STAIRS.md): the shelter flight, a zombie following, a spiral, the roof ladder.
+scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...stairsScenarios({ x: () => x, js, check, shot, toGameplay, sleep }));
 
 if (argv.includes('--list') || argv.includes('--dry-run')) {
   for (const [n, what] of scenarios) console.log(`${only && !only.has(n) ? '  (skip)' : '  run   '} ${n.padEnd(11)} ${what}`);

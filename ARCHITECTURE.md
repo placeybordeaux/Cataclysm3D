@@ -237,6 +237,11 @@ tests/               vitest unit tests (pure logic, no DOM/WebGL)
 - `targeting.ts` `targetTile(game)` = tile under the crosshair within reach; `interact.ts`
   (`e`), `zlevels.ts` (`<`/`>`, falling), `rest.ts` (`|` wait, `$` sleep), `weather.ts`
   (`game.weather`), `traps.ts`, `lightitems.ts` (`F`: flashlight transform).
+- Walkable stairs (docs/STAIRS.md): `stairs.ts` solves each BN stair pair into a link (straight
+  flight / spiral / ladder, footprint, landings, path), `stairwalk.ts` carries walkers along it
+  (`liftOf(creature)` = metres above its level; renderers add it), `src/stairs.ts` wires the
+  player (`game.stairStep`), `<`/`>`, monsters (`MonsterSystem.stairs`), followers, saving;
+  `render/stairs/` models flights and stairwells (`MeshExtras.stairs`). `?stairs=flight|compact|classic`.
 
 ### Vehicles (src/game/vehicle*.ts, src/render/vehicleMesh.ts, src/ui/vehicle_ui.ts)
 

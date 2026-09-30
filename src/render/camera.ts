@@ -63,6 +63,8 @@ export class CameraRig {
   suppressBob = false;
   /** Added to the eye height (metres): swimming puts the head at the water line (src/nature.ts). */
   eyeOffset = 0;
+  /** Metres the player stands above their level's floor: walking a flight (render/stairs, set per frame). */
+  lift = 0;
   /**
    * Highest the first-person eye may be (absolute, metres), or null: standing in a car's
    * doorway ducks you under its roof instead of putting the camera through it
@@ -137,7 +139,7 @@ export class CameraRig {
     this.kickYaw *= back;
     const fovFirst = this.fovFirst + (this.adsFov - this.fovFirst) * this.adsBlend;
     const eyeH = (p.crouching ? EYE_CROUCH : EYE) + this.eyeOffset;
-    const base = p.z * LEVEL_HEIGHT;
+    const base = p.z * LEVEL_HEIGHT + this.lift;
 
     // head-bob amplitude follows actual ground speed (so bumping a wall doesn't bob)
     const moved = Number.isNaN(this.lastX) ? 0 : Math.hypot(p.x - this.lastX, p.y - this.lastY);

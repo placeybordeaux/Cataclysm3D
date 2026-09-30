@@ -36,6 +36,8 @@ import { installDifficulty } from './difficulty';
 import { installTacticalPause } from './pause';
 import { installScreens } from './screens/install';
 import { installChunkEviction } from './save/eviction';
+import { installStairs, installStairNpcs } from './stairs';
+import { installStairsView } from './render/stairs/install';
 
 // URL params (all optional): seed=<int>, gen=world|test (default world), debug=1 (render stats overlay),
 // renderer params px/grade/tex/cam/walls (see src/render/renderer.ts), debug=atlas (sprite sheet view
@@ -98,12 +100,16 @@ async function main(): Promise<void> {
   // Crafting/reading probe `game.lightAt` for "too dark" checks; back it with real vision light.
   (game as unknown as { lightAt: (x: number, y: number, z: number) => number }).lightAt = (x, y, z) => lightAt(game, x, y, z);
   const monsters = installMonsters(game, renderer, worldgen, api);
+  // Walkable stairs (docs/STAIRS.md): flights you walk up and down, monsters follow; models + stairwells.
+  const stairs = installStairs(game, { monsters: monsters.sys, api });
+  installStairsView(game, renderer, stairs);
   // Swinging at a window/door/furniture with nothing alive in the arc smashes it.
   monsters.combat.smashWorld = () => smashAimed(game);
   // Difficulty presets (src/game/difficulty.ts): spawner knobs, needs, feel, pausing; before progression (its hook).
   installDifficulty(game, { spawner: monsters.spawner, api });
   await installVehicles(game, renderer, api);
   const npcs = await installNpcs(game, renderer, worldgen, monsters, api);
+  installStairNpcs(game, stairs, npcs.sys);
   const mods = installMutBio(game, renderer, api);
   installLabs(game, worldgen, api);
   // Before installUi: the UI registers the save key only when game.save exists.

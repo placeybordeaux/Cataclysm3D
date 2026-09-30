@@ -80,6 +80,11 @@ export class Game {
   vehicles: VehicleSystem | null = null;
   /** When it returns true, WASD doesn't walk the player (e.g. driving: src/game/vehicles.ts). */
   movementOverride: (() => boolean) | null = null;
+  /**
+   * Stair walking (src/game/stairwalk.ts): gets the WASD axes (right, forward) every tick and
+   * carries the player along a flight; true = it moved the player (normal walking skipped).
+   */
+  stairStep: ((fx: number, fy: number, dt: number) => boolean) | null = null;
   /** Shift doesn't run while this says so (src/aim.ts: it holds your breath while aiming). */
   runVeto: (() => boolean) | null = null;
   /**
@@ -155,6 +160,7 @@ export class Game {
     if (down('KeyD')) fx += 1;
     if (down('KeyA')) fx -= 1;
     p.running = (k.has('ShiftLeft') || k.has('ShiftRight')) && !this.runVeto?.();
+    if (this.stairStep?.(fx, fy, dt)) return;
     if (fx === 0 && fy === 0) return;
     const len = Math.hypot(fx, fy);
     fx /= len; fy /= len;

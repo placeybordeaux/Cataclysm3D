@@ -32,6 +32,8 @@ export interface CreatureState {
   /** telegraph stretch / knock-back squash */
   sy: number;
   sxz: number;
+  /** metres above the level floor (walking a flight: render/stairs) */
+  lift?: number;
 }
 
 const TURN_RATE = 9; // rad/s
@@ -130,7 +132,7 @@ export class CreatureModel {
     const back = this.yawR + (lie.side ? Math.PI / 2 : Math.PI);
     c.fallDx = Math.sin(back);
     c.fallDy = -Math.cos(back);
-    c.lift = liftFor(this.rig, fall) + this.rig.hover * (1 - s.down);
+    c.lift = liftFor(this.rig, fall) + this.rig.hover * (1 - s.down) + (s.lift ?? 0);
   }
 
   flash(color: number, seconds: number): void {
