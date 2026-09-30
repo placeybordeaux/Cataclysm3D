@@ -341,6 +341,21 @@ function installModelHooks(game: Game, renderer: Renderer, monsters: MonstersHan
       const e = inst.mats.subarray(i * 16, i * 16 + 16);
       return { x: e[12], y: e[14], h: e[13], parts: inst.rig.parts.map((q) => q.name) };
     };
+    /** Diagnosis: the drawn camera, the ray a shot would take now, what it meets, and a direct model pick of `uid`. */
+    api.aimDebug = (uid?: number) => {
+      const v = aimHooks.view?.() ?? null;
+      const off = monsters.combat.aim.shotOffset(performance.now());
+      const ray = monsters.combat.aimRay(off, 60);
+      const hit = monsters.combat.castAim(ray.yaw, ray.pitch, 60, undefined, ray.o);
+      const m = uid === undefined ? null : monsters.sys.active.find((q) => q.uid === uid) ?? null;
+      const inst = m ? view.modelOf(m) : null;
+      const r3 = (o: Vec3 | undefined) => o && { x: +o.x.toFixed(3), y: +o.y.toFixed(3), h: +o.h.toFixed(3) };
+      return {
+        mode: renderer.cameraMode, view: v && { o: r3(v.o), f: r3(v.f), eye: r3(v.eye) }, off, ray: { o: r3(ray.o), yaw: ray.yaw, pitch: ray.pitch },
+        hit: { uid: (hit.hit as Monster | null)?.uid ?? null, zone: hit.zone, stop: hit.stop, dist: hit.dist },
+        model: inst ? { visible: inst.visible, dirty: inst.dirty, fade: (inst as unknown as { fade?: number }).fade, override: !!(inst as unknown as { rootOverride?: unknown }).rootOverride, pickCentre: v ? aimHooks.pick?.(m, v.o, v.f) : null } : null,
+      };
+    };
     /** The enemy-fire system (rounds in flight), for setup and checks. */
     api.enemyFire = () => enemyFireOf(game);
     api.modelLift = (uid: number) => {
