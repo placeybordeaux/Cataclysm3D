@@ -7,7 +7,7 @@
 // where the flash appears.
 
 import type { Palette, RGB } from './paint';
-import type { PartDef } from './rig';
+import type { Detail, PartDef } from './rig';
 
 export type HeldClass =
   | 'pistol' | 'rifle' | 'shotgun' | 'smg' | 'launcher' | 'crossbow'
@@ -57,34 +57,52 @@ export interface HeldBuild {
 
 const STEEL: RGB = [168, 174, 182];
 const EDGE: RGB = [214, 220, 226];
-const GUNMETAL: RGB = [46, 48, 54];
-const WOOD: RGB = [118, 80, 48];
-const GRIP: RGB = [40, 36, 34];
+const GUNMETAL: RGB = [58, 61, 68];
+const WOOD: RGB = [124, 84, 50];
+const GRIP: RGB = [44, 40, 38];
 
 /**
- * Parts for a held item, parents relative to this list (-1 = the fist). Colours come from the
- * sprite palette where the item has its own look (a red bat, a wooden stock), fixed materials
- * for steel. `volume` (ml) sizes generic objects.
+ * Parts for a held item, parents relative to this list (-1 = the grip in the fist). Colours
+ * come from the sprite palette where the item has its own look (a red bat, a wooden stock),
+ * fixed materials for steel; surface detail (grain, serrations, ports, tape, bevels) is painted
+ * by paint.ts at the first-person texel density. `volume` (ml) sizes generic objects.
  */
 export function buildHeld(cls: HeldClass, pal: Palette, volume = 500): HeldBuild {
   const P: PartDef[] = [];
-  const add = (name: string, parent: number, joint: [number, number, number], size: [number, number, number], center: [number, number, number], color: RGB, o: Partial<PartDef> = {}): number => {
-    P.push({ name, parent, joint, size, center, src: { color: color.map((v) => Math.round(v)) as RGB }, kind: 'thin', ...o });
+  const add = (name: string, parent: number, joint: [number, number, number], size: [number, number, number], center: [number, number, number], color: RGB, o: Partial<PartDef> & { detail?: Detail } = {}): number => {
+    const { detail, ...rest } = o;
+    P.push({ name, parent, joint, size, center, src: { color: color.map((v) => Math.round(v)) as RGB, detail }, kind: 'thin', ...rest });
     return P.length - 1;
   };
+  /**
+   * A round bar (bat, barrel, shaft, flashlight): a square prism plus a twin turned 45° about
+   * its long axis — an 8-sided silhouette from any angle, still two boxes. The centre must lie
+   * on the long axis.
+   */
+  const round = (name: string, parent: number, joint: [number, number, number], size: [number, number, number], center: [number, number, number], color: RGB, o: Partial<PartDef> & { detail?: Detail } = {}): number => {
+    const i = add(name, parent, joint, size, center, color, o);
+    const long = size[1] >= size[2] ? 'y' : 'z';
+    add(`${name}~`, i, center, size, [0, 0, 0], color, { taper: o.taper, taperAxis: o.taperAxis, detail: o.detail, rest: long === 'y' ? [0, Math.PI / 4, 0] : [0, 0, Math.PI / 4] });
+    return i;
+  };
   const main = pal.main, dark = pal.dark, light = pal.light;
-  // a stock / furniture colour: the sprite's main colour when it looks like wood, else polymer
+  // furniture: the sprite's main colour when it looks like wood, else black polymer
   const brownish = main[0] > main[2] * 1.25 && main[0] > 70;
   const furniture = brownish ? main : GRIP;
+  const bright = (c: RGB) => c[0] + c[1] + c[2];
   switch (cls) {
     case 'pistol': {
-      add('grip', -1, [0, 0, 0], [0.032, 0.11, 0.05], [0, -0.025, 0.01], GRIP, { rest: [-0.25, 0, 0] });
-      const slide = add('slide', -1, [0, 0.068, -0.05], [0.034, 0.04, 0.2], [0, 0, 0], main[0] + main[1] + main[2] > 360 ? main : GUNMETAL, { taper: [0.9, 0.9, 1, 1], taperAxis: 'z' });
-      add('frame', -1, [0, 0.042, -0.07], [0.03, 0.022, 0.16], [0, 0, 0], GRIP);
-      add('guard', -1, [0, -0.005, -0.045], [0.012, 0.025, 0.045], [0, 0, 0], GRIP);
-      add('front', slide, [0, 0.024, -0.09], [0.007, 0.01, 0.012], [0, 0, 0], [20, 20, 20]);
-      add('rear', slide, [0, 0.024, 0.085], [0.024, 0.01, 0.01], [0, 0, 0], [20, 20, 20]);
-      return { parts: P, hold: [0, 0, 0], support: [-0.035, -0.045, 0.02], muzzle: [0, 0.068, -0.16], gun: true };
+      // grip raked back under the fist, slide with serrations, frame, trigger guard, sights
+      add('grip', -1, [0, 0, 0], [0.032, 0.105, 0.052], [0, -0.02, 0.008], GRIP, { rest: [-0.28, 0, 0], detail: 'knurl' });
+      const slide = add('slide', -1, [0, 0.07, -0.055], [0.032, 0.036, 0.19], [0, 0, 0], bright(main) > 360 ? main : GUNMETAL, { detail: 'serration' });
+      add('frame', -1, [0, 0.043, -0.068], [0.029, 0.022, 0.155], [0, 0, 0], GRIP, { detail: 'metal' });
+      add('guard', -1, [0, 0.016, -0.05], [0.01, 0.026, 0.048], [0, 0, 0], GRIP);
+      add('trigger', -1, [0, 0.02, -0.035], [0.006, 0.02, 0.008], [0, 0, 0], [30, 30, 32]);
+      round('muzzle', slide, [0, -0.004, -0.096], [0.012, 0.012, 0.006], [0, 0, 0], [16, 16, 18]);
+      add('front', slide, [0, 0.022, -0.086], [0.006, 0.009, 0.01], [0, 0, 0], [20, 20, 20]);
+      add('rear', slide, [0, 0.022, 0.085], [0.026, 0.009, 0.01], [0, 0, 0], [20, 20, 20]);
+      // one-handed at the hip: a cupping off hand read as a second fist glued underneath
+      return { parts: P, hold: [0, 0, 0], support: null, muzzle: [0, 0.066, -0.16], gun: true };
     }
     case 'rifle':
     case 'smg':
@@ -92,35 +110,50 @@ export function buildHeld(cls: HeldClass, pal: Palette, volume = 500): HeldBuild
     case 'launcher':
     case 'crossbow': {
       if (cls === 'launcher') {
-        add('tube', -1, [0, 0.07, -0.1], [0.1, 0.1, 0.85], [0, 0, 0], main, { kind: 'core' });
-        add('grip', -1, [0, 0, 0], [0.03, 0.1, 0.045], [0, -0.02, 0], GRIP);
+        round('tube', -1, [0, 0.07, -0.1], [0.1, 0.1, 0.85], [0, 0, 0], main, { kind: 'core', detail: 'metal' });
+        add('grip', -1, [0, 0, 0], [0.03, 0.1, 0.045], [0, -0.02, 0], GRIP, { detail: 'knurl' });
         add('sight', -1, [-0.06, 0.1, -0.05], [0.03, 0.05, 0.06], [0, 0, 0], GUNMETAL);
         return { parts: P, hold: [0, 0, 0], support: [0, -0.01, -0.28], muzzle: [0, 0.07, -0.55], gun: true };
       }
       const long = cls !== 'smg';
       const shotgun = cls === 'shotgun';
-      const recv = add('receiver', -1, [0, 0.035, -0.06], [0.046, 0.075, long ? 0.26 : 0.24], [0, 0, 0], shotgun ? GUNMETAL : main[0] + main[1] + main[2] > 300 ? main : GUNMETAL, { kind: 'core' });
-      add('grip', -1, [0, 0, 0.02], [0.032, 0.09, 0.045], [0, -0.03, 0], GRIP, { rest: [-0.3, 0, 0] });
-      if (long) add('stock', recv, [0, -0.015, 0.13], [0.04, 0.085, 0.3], [0, -0.01, 0.15], shotgun || brownish ? WOOD : furniture, { taper: [1, 0.8, 1, 1.2], taperAxis: 'z' });
-      const bl = cls === 'smg' ? 0.14 : shotgun ? 0.5 : 0.46;
-      add('barrel', recv, [0, 0.012, -0.13], [shotgun ? 0.03 : 0.02, shotgun ? 0.03 : 0.02, bl], [0, 0, -bl / 2], GUNMETAL);
-      if (shotgun) add('pump', recv, [0, -0.02, -0.3], [0.05, 0.045, 0.15], [0, 0, 0], WOOD);
-      else if (cls !== 'crossbow') add('handguard', recv, [0, 0.0, -0.22], [0.05, 0.055, long ? 0.22 : 0.1], [0, 0, 0], furniture);
-      if (cls === 'rifle' || cls === 'smg') add('mag', recv, [0, -0.05, cls === 'smg' ? -0.02 : -0.06], [0.03, 0.12, 0.06], [0, -0.04, 0], GUNMETAL, { rest: [0.2, 0, 0] });
-      add('sight', recv, [0, 0.05, 0.02], [0.02, 0.025, 0.05], [0, 0, 0], [24, 24, 26]);
-      add('post', recv, [0, 0.03, long ? -0.5 : -0.2], [0.008, 0.03, 0.01], [0, 0, 0], [24, 24, 26]);
+      const woodStock = shotgun || brownish;
+      const recvCol = bright(main) > 300 && !brownish ? main : GUNMETAL;
+      const recv = add('receiver', -1, [0, 0.038, -0.06], [0.046, 0.07, long ? 0.26 : 0.22], [0, 0, 0], recvCol, { kind: 'core', detail: 'port' });
+      add('grip', -1, [0, 0, 0.02], [0.032, 0.095, 0.048], [0, -0.03, 0], GRIP, { rest: [-0.3, 0, 0], detail: 'knurl' });
+      add('guard', recv, [0, -0.045, 0.06], [0.01, 0.022, 0.06], [0, 0, 0], GRIP);
+      if (long) {
+        // stock: comb, then wrist down to a butt pad
+        add('stock', recv, [0, -0.012, 0.13], [0.042, 0.075, 0.28], [0, -0.012, 0.14], woodStock ? WOOD : furniture, { taper: [1, 0.85, 1.05, 1.35], taperAxis: 'z', detail: woodStock ? 'grain' : 'metal' });
+        add('butt', recv, [0, -0.02, 0.41], [0.044, 0.115, 0.02], [0, 0, 0], [30, 28, 26]);
+      }
+      const bl = cls === 'smg' ? 0.14 : shotgun ? 0.5 : 0.44;
+      const bw = shotgun ? 0.028 : 0.018;
+      round('barrel', recv, [0, 0.014, -0.13], [bw, bw, bl], [0, 0, -bl / 2], GUNMETAL, { detail: 'metal' });
+      if (shotgun) {
+        round('tube', recv, [0, -0.012, -0.13], [0.024, 0.024, bl * 0.8], [0, 0, -bl * 0.4], GUNMETAL);
+        add('pump', recv, [0, -0.016, -0.27], [0.052, 0.046, 0.15], [0, 0, 0], WOOD, { detail: 'grain' });
+      } else if (cls !== 'crossbow') {
+        add('handguard', recv, [0, 0.004, -0.21], [0.052, 0.058, long ? 0.2 : 0.1], [0, 0, 0], furniture, { detail: woodStock ? 'grain' : 'vent' });
+      }
+      if (cls === 'rifle' || cls === 'smg') add('mag', recv, [0, -0.05, cls === 'smg' ? -0.02 : -0.05], [0.028, 0.13, 0.06], [0, -0.05, 0], GUNMETAL, { rest: [0.22, 0, 0], detail: 'metal' });
+      // sights: a rear aperture on the receiver, a front post on a block near the muzzle
+      add('rear', recv, [0, 0.045, 0.07], [0.028, 0.02, 0.02], [0, 0, 0], [26, 26, 28]);
+      const fz = -0.13 - bl + 0.04;
+      add('fblock', recv, [0, 0.022, fz], [0.024, 0.016, 0.03], [0, 0, 0], [26, 26, 28]);
+      add('post', recv, [0, 0.036, fz], [0.006, 0.02, 0.008], [0, 0, 0], [20, 20, 22]);
       if (cls === 'crossbow') {
-        add('prod', recv, [0, 0.02, -0.34], [0.55, 0.025, 0.035], [0, 0, 0], dark, { taper: [1, 1, 1, 1] });
+        add('prod', recv, [0, 0.02, -0.34], [0.55, 0.025, 0.035], [0, 0, 0], dark, { detail: 'metal' });
         add('string', recv, [0, 0.02, -0.26], [0.5, 0.006, 0.006], [0, 0, 0], [220, 214, 196]);
       }
       const muzzleZ = -0.19 - bl;
-      return { parts: P, hold: [0, 0, 0], support: [0, -0.035, shotgun ? -0.36 : long ? -0.3 : -0.1], muzzle: [0, 0.047, muzzleZ], gun: cls !== 'crossbow' };
+      return { parts: P, hold: [0, 0, 0], support: [0, -0.035, shotgun ? -0.34 : long ? -0.28 : -0.1], muzzle: [0, 0.052, muzzleZ], gun: cls !== 'crossbow' };
     }
     case 'knife': {
-      add('handle', -1, [0, -0.02, 0], [0.03, 0.11, 0.032], [0, 0, 0], dark);
-      add('guard', -1, [0, 0.04, 0], [0.012, 0.012, 0.05], [0, 0, 0], STEEL);
-      add('blade', -1, [0, 0.045, 0], [0.01, 0.17, 0.034], [0, 0.085, -0.004], STEEL, { taper: [1, 1, 0.3, 0.2] });
-      add('edge', -1, [0, 0.045, -0.02], [0.006, 0.15, 0.006], [0, 0.07, 0], EDGE, { taper: [1, 1, 0.5, 0.5] });
+      add('handle', -1, [0, -0.02, 0], [0.028, 0.11, 0.034], [0, 0, 0], dark, { taper: [0.9, 0.9, 1, 1], detail: 'knurl' });
+      add('guard', -1, [0, 0.038, 0], [0.014, 0.012, 0.056], [0, 0, 0], STEEL, { detail: 'metal' });
+      add('blade', -1, [0, 0.044, 0], [0.008, 0.17, 0.036], [0, 0.085, -0.004], STEEL, { taper: [1, 1, 0.35, 0.25], detail: 'bevel' });
+      add('pommel', -1, [0, -0.08, 0], [0.03, 0.014, 0.036], [0, 0, 0], STEEL, { detail: 'metal' });
       // broad side of the blade toward the eye, not its edge
       return { parts: P, hold: [-0.5, 1.1, 0.35], support: null, muzzle: null, gun: false };
     }
@@ -128,44 +161,47 @@ export function buildHeld(cls: HeldClass, pal: Palette, volume = 500): HeldBuild
     case 'sword': {
       const len = cls === 'sword' ? 0.75 : 0.45;
       const w = cls === 'sword' ? 0.04 : 0.055;
-      add('handle', -1, [0, -0.03, 0], [0.032, cls === 'sword' ? 0.18 : 0.13, 0.034], [0, 0, 0], dark);
-      add('guard', -1, [0, 0.045, 0], [0.018, 0.016, cls === 'sword' ? 0.16 : 0.07], [0, 0, 0], cls === 'sword' ? [160, 130, 70] : GRIP);
-      add('blade', -1, [0, 0.05, 0], [0.01, len, w], [0, len / 2, -0.004], STEEL, { taper: [1, 1, 0.5, cls === 'sword' ? 0.35 : 1.2] });
-      add('edge', -1, [0, 0.05, -w / 2], [0.006, len * 0.95, 0.006], [0, len / 2, 0], EDGE);
+      add('handle', -1, [0, -0.03, 0], [0.03, cls === 'sword' ? 0.18 : 0.13, 0.034], [0, 0, 0], dark, { detail: cls === 'sword' ? 'tape' : 'knurl' });
+      add('guard', -1, [0, 0.045, 0], [0.018, 0.016, cls === 'sword' ? 0.16 : 0.07], [0, 0, 0], cls === 'sword' ? [170, 138, 74] : GRIP, { detail: 'metal' });
+      add('blade', -1, [0, 0.05, 0], [0.008, len, w], [0, len / 2, -0.004], STEEL, { taper: [1, 1, 0.5, cls === 'sword' ? 0.35 : 1.2], detail: 'bevel' });
       return { parts: P, hold: [-0.45, 1.1, 0.4], support: null, muzzle: null, gun: false };
     }
     case 'axe': {
-      add('haft', -1, [0, -0.08, 0], [0.034, 0.62, 0.034], [0, 0.26, 0], brownish ? main : WOOD, { taper: [0.9, 0.9, 1.1, 1.1] });
-      const head = add('head', -1, [0, 0.48, 0], [0.03, 0.08, 0.13], [0, 0, -0.03], GUNMETAL, { taper: [1, 0.7, 1, 1.3], taperAxis: 'z' });
-      add('bit', head, [0, 0, -0.1], [0.012, 0.15, 0.03], [0, 0, 0], EDGE);
-      return { parts: P, hold: [-0.4, 0, 0.45], support: [0, -0.2, 0], muzzle: null, gun: false };
+      round('haft', -1, [0, -0.08, 0], [0.034, 0.62, 0.034], [0, 0.26, 0], brownish ? main : WOOD, { taper: [0.9, 0.9, 1.1, 1.1], detail: 'grain' });
+      const head = add('head', -1, [0, 0.48, 0], [0.03, 0.08, 0.13], [0, 0, -0.03], GUNMETAL, { taper: [1, 0.7, 1, 1.3], taperAxis: 'z', detail: 'metal' });
+      add('bit', head, [0, 0, -0.095], [0.014, 0.16, 0.034], [0, 0, 0], STEEL, { detail: 'bevel' });
+      add('poll', head, [0, 0, 0.045], [0.034, 0.06, 0.03], [0, 0, 0], GUNMETAL);
+      return { parts: P, hold: [-0.4, 1.1, 0.45], support: null, muzzle: null, gun: false };
     }
     case 'hammer': {
-      add('haft', -1, [0, -0.06, 0], [0.032, 0.5, 0.032], [0, 0.2, 0], brownish ? main : WOOD);
-      add('head', -1, [0, 0.42, 0], [0.05, 0.06, 0.14], [0, 0, 0], GUNMETAL);
+      round('haft', -1, [0, -0.06, 0], [0.032, 0.5, 0.032], [0, 0.2, 0], brownish ? main : WOOD, { detail: 'grain' });
+      add('head', -1, [0, 0.42, 0], [0.05, 0.06, 0.14], [0, 0, 0], GUNMETAL, { detail: 'metal' });
       return { parts: P, hold: [-0.4, 0, 0.45], support: volume > 2500 ? [0, -0.2, 0] : null, muzzle: null, gun: false };
     }
     case 'bat': {
-      // knob, handle, fat barrel: tapered so it reads as a bat, not a plank
-      add('knob', -1, [0, -0.09, 0], [0.045, 0.02, 0.045], [0, 0, 0], main);
-      add('bat', -1, [0, -0.08, 0], [0.05, 0.78, 0.05], [0, 0.39, 0], main, { taper: [0.55, 0.55, 1.25, 1.25] });
-      add('tape', -1, [0, -0.02, 0], [0.034, 0.12, 0.034], [0, 0, 0], dark);
+      // knob, taped handle, a round barrel swelling toward the end
+      const col = brownish || bright(main) < 90 ? (brownish ? main : WOOD) : main;
+      round('knob', -1, [0, -0.1, 0], [0.05, 0.022, 0.05], [0, 0, 0], col);
+      round('bat', -1, [0, -0.09, 0], [0.066, 0.8, 0.066], [0, 0.4, 0], col, { taper: [0.5, 0.5, 1.05, 1.05], detail: 'grain' });
+      round('tape', -1, [0, -0.02, 0], [0.038, 0.14, 0.038], [0, 0, 0], [34, 34, 38], { detail: 'tape' });
+      round('end', -1, [0, 0.71, 0], [0.07, 0.012, 0.07], [0, 0, 0], col.map((v) => v * 0.8) as RGB);
       return { parts: P, hold: [-0.4, 0, 0.45], support: volume > 1500 ? [0, -0.17, 0] : null, muzzle: null, gun: false };
     }
     case 'pipe': {
-      add('bar', -1, [0, -0.1, 0], [0.032, 0.7, 0.032], [0, 0.33, 0], main[0] + main[1] + main[2] > 200 ? main : STEEL);
+      round('bar', -1, [0, -0.1, 0], [0.032, 0.7, 0.032], [0, 0.33, 0], bright(main) > 200 ? main : STEEL, { detail: 'metal' });
       add('end', -1, [0, 0.58, 0], [0.04, 0.04, 0.06], [0, 0, -0.02], dark, { rest: [0.5, 0, 0] });
       return { parts: P, hold: [-0.4, 0, 0.45], support: null, muzzle: null, gun: false };
     }
     case 'spear': {
-      add('shaft', -1, [0, -0.5, 0], [0.03, 1.5, 0.03], [0, 0.6, 0], brownish ? main : WOOD);
-      add('tip', -1, [0, 1.1, 0], [0.012, 0.2, 0.04], [0, 0.1, 0], STEEL, { taper: [1, 1, 0.2, 0.1] });
+      round('shaft', -1, [0, -0.5, 0], [0.03, 1.5, 0.03], [0, 0.6, 0], brownish ? main : WOOD, { detail: 'grain' });
+      add('tip', -1, [0, 1.1, 0], [0.01, 0.2, 0.042], [0, 0.1, 0], STEEL, { taper: [1, 1, 0.2, 0.1], detail: 'bevel' });
+      round('wrap', -1, [0, 1.07, 0], [0.036, 0.06, 0.036], [0, 0, 0], [70, 56, 40], { detail: 'tape' });
       // held low and pointing ahead, both hands on the shaft
       return { parts: P, hold: [-1.5, 0, 0.1], support: [0, -0.35, 0], muzzle: null, gun: false };
     }
     case 'flashlight': {
-      add('body', -1, [0, 0, -0.04], [0.036, 0.036, 0.18], [0, 0, 0], main[0] + main[1] + main[2] > 150 ? main : GUNMETAL);
-      add('head', -1, [0, 0, -0.15], [0.052, 0.052, 0.05], [0, 0, 0], dark, { taper: [1.1, 1.1, 0.8, 0.8], taperAxis: 'z' });
+      round('body', -1, [0, 0, -0.04], [0.036, 0.036, 0.18], [0, 0, 0], bright(main) > 150 ? main : GUNMETAL, { detail: 'knurl' });
+      round('head', -1, [0, 0, -0.15], [0.052, 0.052, 0.05], [0, 0, 0], dark, { taper: [1.1, 1.1, 0.8, 0.8], taperAxis: 'z', detail: 'metal' });
       add('lens', -1, [0, 0, -0.178], [0.044, 0.044, 0.006], [0, 0, 0], [250, 244, 200]);
       // turned a little across the body so you see its length, not just the tail cap
       return { parts: P, hold: [0.15, 0.45, 0], support: null, muzzle: null, gun: false };
@@ -173,8 +209,8 @@ export function buildHeld(cls: HeldClass, pal: Palette, volume = 500): HeldBuild
     default: {
       // a lump the size of the thing, in its colours, sitting in the palm
       const side = Math.max(0.05, Math.min(0.28, Math.cbrt(volume) / 100));
-      const b = add('object', -1, [0, 0.02, -0.03], [side * 0.8, side, side * 0.6], [0, side * 0.3, 0], main, { kind: 'core' });
-      add('band', b, [0, side * 0.15, 0], [side * 0.82, side * 0.2, side * 0.62], [0, 0, 0], light);
+      const b = add('object', -1, [0, 0.02, -0.03], [side * 0.8, side, side * 0.6], [0, side * 0.3, 0], main, { kind: 'core', detail: 'metal' });
+      add('band', b, [0, side * 0.3, 0], [side * 0.82, side * 0.2, side * 0.62], [0, 0, 0], light);
       return { parts: P, hold: [-0.2, 0, 0.2], support: null, muzzle: null, gun: false };
     }
   }

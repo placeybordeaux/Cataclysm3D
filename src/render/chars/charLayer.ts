@@ -192,9 +192,17 @@ export function fpMaterial(page: THREE.Texture, tint: THREE.Color): THREE.MeshLa
       .replace('#include <map_fragment>', FRAG_MAP)
       .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
 {
-  float l = dot(normalize(normal), normalize(vec3(-0.35, 0.85, 0.4)));
-  float band = l > 0.45 ? 1.0 : l > -0.1 ? 0.8 : 0.6;
-  totalEmissiveRadiance = diffuseColor.rgb * uTint * band;
+  // Camera-relative key (up-left, toward the eye) + a cooler fill from the lower right, both
+  // stepped (Shadowglass's secondary light keeps form where the key falls off), scaled by the
+  // light at the player so the hands still go dark at night.
+  vec3 n = normalize(normal);
+  float kl = dot(n, normalize(vec3(-0.45, 0.75, 0.55)));
+  float fl = dot(n, normalize(vec3(0.7, -0.15, 0.55)));
+  float key = kl > 0.55 ? 1.0 : kl > 0.15 ? 0.72 : 0.42;
+  float fill = fl > 0.3 ? 0.24 : 0.1;
+  float lvl = max(max(uTint.r, uTint.g), uTint.b);
+  vec3 light = uTint * key + vec3(0.85, 0.9, 1.0) * fill * lvl;
+  totalEmissiveRadiance = diffuseColor.rgb * light * 1.1;
   if (vFlash.a > 0.99) totalEmissiveRadiance = vFlash.rgb * 1.3;
   diffuseColor.rgb = vec3(0.0);
 }`);
