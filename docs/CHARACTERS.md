@@ -17,6 +17,7 @@ The billboards are still there as a variant.
 | `cdda.chars({ fps: 12 })` | pose rate (0 = every frame, smooth) |
 | `cdda.chars({ far: [16, 45], emph: 0.35 })` | hostile readability ramp (m) and strength |
 | `cdda.chars({ paint: 'sprite' })` / `?charpaint=sprite` | people painted by projecting the sprite (round 1) instead of the styled skins |
+| `?viewmodel=model` / `?viewmodel=sprite`, Options → **First-person hands**, `cdda.chars({ viewmodel: 'sprite' })` | 3D first-person arms/items (default) or the classic 2D viewmodel sprites |
 | `cdda.chars()` | current settings + live/body/skin/page counts |
 
 ## How it works (src/render/chars/)
@@ -100,6 +101,66 @@ billboard path still uses the sprite's art span). The point-blank sprite hacks (
   the far-LOD thickening and hostile emphasis — a horde down a long road is visible
   (`after_horde_road`: 66–110 m).
 
+## Round 3: the first-person view in 3D
+
+`src/render/chars/fpView.ts` + `held.ts`. The flat pixel viewmodel was the most-seen 2D element
+left; the hands and what they hold are now 3D in the same kit, drawn as the overlay scene
+(after the world, same outline/dither/grade pass).
+
+- **Not a second animation system.** `render/viewmodel.ts` still runs every pose — phased
+  swings (anticipation/strike/follow-through/recovery), hit-stop, guard, block, thrust,
+  recoil, reload dip / crossbow crank, ADS, bow/slingshot draw & loose, sling whirl, jolts,
+  walk bob, look sway and the free-aim offset (`aimPx`). It now also publishes what it
+  computed (`Viewmodel.state`, additive) and hides its sprites when `hide2d` is set; fpView
+  maps those screen-space poses into a small perspective scene (grip point → a point in front
+  of the eye, 2D rotation → roll/chop, `dy` → forward reach). Upcoming changes to the 2D
+  animation (the combat agent's aim work) flow into the 3D view for free.
+- **Arms**: forearm + upper arm + fist (knuckle ridge, folded thumb), painted by the styled
+  person painter from the survivor's own outfit composite at 80 texels/m — sleeves and skin
+  follow what you wear. Lit by the renderer's light-map sample at the player (`vm.tint`) with
+  a fixed 3-band key light; muzzle flashes are unlit.
+- **Held items** (`heldClass`: guns by BN skill, the rest by id/name keywords): pistol,
+  rifle, SMG, shotgun (pump + wooden stock), launcher, crossbow (prod + string), knife,
+  machete, sword, axe, hammer, bat (tapered barrel, taped grip), pipe/crowbar, spear (held
+  low, two hands), flashlight (lens, head), and a generic object sized by volume in its sprite
+  colours. Guns have sights and a muzzle point for the flash; two-handed items put the off
+  hand on the support point. Down the sights the gun comes onto the eye axis following the
+  free-aim offset.
+- **Bow / slingshot**: riser and two limbs that bend with the draw, string halves that follow
+  the nock, an arrow with head and fletching that appears when nocked; the right fist pinches
+  the nock.
+- Also this round: far figures **dither-fade** over the last 12 m before the draw distance
+  instead of popping; zombies **shamble** — a per-individual lurch and sway onto the good leg.
+
+## Round 4: first-person art pass
+
+- **Fists** are modelled, rooted at a narrower wrist: domed back of the hand, a palm, four
+  fingers in two curled segments (a knuckle row on top, separation shading between them, the
+  little finger shorter) and a thumb wrapping across the front. Holding something, the hand
+  rolls so the grip runs *through* the curled fingers (`heldRig`: hand = hold · Rz 90°).
+- **Sleeves** are painted for 30 cm: readable cloth (dark UltiCa cloth lifted to a legible
+  level keeping its hue — the default flannel reads red, not a black slab), a woven grid,
+  drifting fold creases, an underside seam, a darker cuff and bare skin at the wrist.
+- **Lighting**: the first-person layer has its own camera-relative key (upper left) and a cool
+  fill (lower right), both stepped, scaled by the light-map sample at the player so night
+  still darkens the hands.
+- **Items** are painted at 256 texels/m with surface detail (`Detail` in rig.ts, painted in
+  paint.ts): wood grain, slide serrations, knurled grips, grip tape, a receiver ejection port
+  and rail, handguard vents, blade bevels with a bright edge, metal highlights. Round things
+  (bat, barrels, shafts, flashlight, knob) are 8-sided (a box plus a twin turned 45°). The
+  rifle has a front sight block and post and a rear aperture; the stock is hidden in first
+  person (under the arm at the hip, at the shoulder down the sights).
+- **Pistol at the hip** is held higher, nearer and turned in so the gun itself reads (the
+  playtest saw only a fist); one-handed at the hip.
+- **Bows and slingshots stay 2D** while drawn: in side-by-side shots `bowArt`'s hand-drawn
+  bend and string read better than the 3D bow. `cdda.chars({ fpBow: true })` shows the 3D bow.
+- **Honest verdict** (see `uw_before_fp_*` / `uw_after_fp_*` at 3440×1304): held weapons are
+  clearly better in 3D (the sprite pistol is a fist with a stub, the sprite rifle a curved
+  blob); bare fists are a draw — the sprite fists are cleaner icons, the 3D ones add sleeves and
+  depth. Default stays **model**; the Options switch is there to compare.
+- **Zombie heads** are now ~1/7.5 of body height (0.23 × 0.20 m, was 0.25 × 0.24 × 0.25): the
+  combat hit zones read the model boxes (aimPick.ts), so the headshot zone shrank with them.
+
 ## Performance
 
 `tools/char-shots.ts --gpu --bench --views bench` (60 hostile zombies and dogs 8–45 m down
@@ -121,10 +182,14 @@ moved; bodies are static once they land. Skins: a zombie is ~4 k texels; one 102
 
 ## Screenshots
 
-`docs/screenshots/wave3/characters/` (JPEG q85) — `before_*` are the billboards, `after_*`
+`docs/screenshots/wave3/characters/` (JPEG q85, half size; `--full` for full size) — `before_*` are the billboards, `after_*`
 the models: zombie horde near / mid / far / down a long road (66–110 m) and at dusk, a dog,
 NPCs (with weapons), corpses, a melee wind-up, critters, plus `after_zoo` (one of each body
-plan), `after_night` (flashlight) and `after_third` (the survivor's own body).
+plan), `after_night` (flashlight) and `after_third` (the survivor's own body), and the
+first-person set `after_fp_*` (fists, punch, pistol firing, rifle hip/ADS/reload, shotgun,
+bat idle/swing/guard, knife, axe, spear, katana, flashlight, bow at draw) with
+`before_fp_*` for the sprite viewmodel, and `uw_before_fp_*` / `uw_after_fp_*` pairs at the
+user's 3440×1304. `tools/char-shots.ts --views fp_...` regenerates them.
 Regenerate with
 
     ~/claude-stuff/bin/heavy --kind gpu --mem 2 -- nix-shell --run 'npx tsx tools/char-shots.ts --gpu --prefix after'
@@ -134,7 +199,10 @@ Regenerate with
 
 - One body plan per archetype: a moose and a dog differ in proportions, not anatomy; spiders
   and ants share the insect plan; robots are a generic tracked machine.
-- Weapons are simple boxes by kind (pistol, rifle, long, short), not per-item models.
+- NPC weapons (third person) are simple boxes by kind; the first-person items are per class,
+  not per item model.
+- The first-person view has no separate eat/use pose: those use the 2D viewmodel's generic
+  poses, mapped the same way.
 - At 90–110 m a zombie is a few pixels tall; far figures are idle (dormant monsters only
   drift), and they appear/disappear at the draw distance.
 - Hordes of hundreds: every live part is re-uploaded each frame (fine for dozens; see perf).

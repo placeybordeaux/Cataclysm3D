@@ -9,6 +9,7 @@ import { ModelBuilder, placeModel, type ModelMesh } from './mesh';
 import { flatPalette, spritePalette, type SpritePalette } from './palette';
 import { buildItem, itemHeight, itemShape, itemSize } from './items';
 import { buildDoorLeaf, buildWindow, curtainColour, doorKind, windowState } from './openings';
+import { buildFence, buildGateLeaf, fenceKind } from './fences';
 import type { ItemDef } from '../../data/types';
 
 // Modelled furniture (docs/FURNITURE.md): low-poly pieces with per-face pixel textures in
@@ -157,7 +158,9 @@ export class ModelFactory {
    */
   door(geo: (f: TileFrame) => GeomBuilder, glass: () => GeomBuilder, src: TileTextureSource, id: string, x: number, y: number,
     base: number, height: number, alongX: boolean, open: boolean, inward: number): boolean {
-    if (!/door/.test(id) || /fence|gate|chain/.test(id)) return false;
+    const gate = /gate/.test(id) && !/gates_/.test(id);
+    if (gate) return this.gate(geo, src, id, x, y, base, alongX, open, inward);
+    if (!/door/.test(id) || /fence|chain/.test(id)) return false;
     const kind = doorKind(id);
     const key = `d|${id}|${height.toFixed(2)}`;
     let m = this.meshes.get(key);
@@ -177,6 +180,46 @@ export class ModelFactory {
     const hx = -0.48, hz = open ? 0.03 : 0;
     const theta = open ? -Math.PI / 2 : 0;
     placeModel(geo, m, { x: x + 0.5 + hx * c + hz * s, y: base, z: y + 0.5 - hx * s + hz * c, yaw: Y + theta }, glass);
+    return true;
+  }
+
+  /** Fence gate leaf: like a door, the leaf a fence-panel of the gate's fence kind. */
+  private gate(geo: (f: TileFrame) => GeomBuilder, src: TileTextureSource, id: string, x: number, y: number,
+    base: number, alongX: boolean, open: boolean, inward: number): boolean {
+    const kind = fenceKind(id.replace(/gate/, 'fence'));
+    const key = `g|${id}`;
+    let m = this.meshes.get(key);
+    if (!m) {
+      const b = new ModelBuilder(this.atlas);
+      buildGateLeaf(b, kind, this.terrainPalette(src, id), 0.94);
+      m = b.done();
+      this.meshes.set(key, m);
+      modelStats.built++;
+    }
+    const Y = alongX ? (inward > 0 ? 0 : Math.PI) : inward > 0 ? Math.PI / 2 : -Math.PI / 2;
+    const c = Math.cos(Y), s = Math.sin(Y);
+    const hx = -0.47, hz = 0;
+    placeModel(geo, m, { x: x + 0.5 + hx * c + hz * s, y: base, z: y + 0.5 - hx * s + hz * c, yaw: Y + (open ? -Math.PI / 2 : 0) });
+    return true;
+  }
+
+  /** A fence / railing tile (world-aligned); `conn` = connects N, E, S, W. */
+  fence(geo: (f: TileFrame) => GeomBuilder, glass: () => GeomBuilder, src: TileTextureSource, id: string, x: number, y: number, base: number, conn: boolean[]): boolean {
+    if (!/fence|railing|_bars$|^t_bars$/.test(id) || /gate|window/.test(id)) return false;
+    const kind = fenceKind(id);
+    const key = `fc|${id}|${conn.map(Number).join('')}`;
+    let m = this.meshes.get(key);
+    if (!m) {
+      const tb = performance.now();
+      const b = new ModelBuilder(this.atlas);
+      b.aoHeight = 0.1;
+      buildFence(b, kind, conn, this.terrainPalette(src, id));
+      m = b.done();
+      this.meshes.set(key, m);
+      modelStats.built++;
+      { const dt = performance.now() - tb; modelStats.buildMs += dt; this.sinceYield += dt; }
+    }
+    placeModel(geo, m, { x: x + 0.5, y: base, z: y + 0.5, yaw: 0 }, glass);
     return true;
   }
 
@@ -234,14 +277,15 @@ export class ModelFactory {
     // local direction k (BACK, RIGHT, FRONT, LEFT) -> world direction
     const toWorld = (k: number) => (face + 2 + k) & 3;
     const conn = [0, 1, 2, 3].map((k) => worldConn[toWorld(k)]) as Ctx['conn'];
+    const connAll = [...conn] as Ctx['conn'];
     if (a.axis === 'side') conn[BACK] = conn[FRONT] = false;
     const wall = [0, 1, 2, 3].map((k) => around.wall[toWorld(k)]) as Ctx['wall'];
-    const variant = `${id}|${conn.map(Number).join('')}|${a.kind === 'shower' || a.kind === 'cupboard' ? wall.map(Number).join('') : ''}`;
+    const variant = `${id}|${conn.map(Number).join('')}|${connAll[FRONT] ? 'F' : ''}|${a.kind === 'shower' || a.kind === 'cupboard' ? wall.map(Number).join('') : ''}`;
     let m = this.meshes.get(variant);
     if (!m) {
       const tb = performance.now();
       const b = new ModelBuilder(this.atlas);
-      a.build(b, { id, pal: this.palette(src, id), conn, wall, seed: hashString(id), p: a.p ?? {} });
+      a.build(b, { id, pal: this.palette(src, id), conn, connAll, wall, seed: hashString(id), p: a.p ?? {} });
       m = b.done();
       this.meshes.set(variant, m);
       modelStats.built++;

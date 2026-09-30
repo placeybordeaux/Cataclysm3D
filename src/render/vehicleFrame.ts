@@ -28,7 +28,7 @@ function partTint(p: VehiclePart, fallback: number): number {
 
 export function buildFrame(v: Vehicle, L0: Layout, base: number): ModelBuild {
   const F = partFrames();
-  const L: Layout = { ...L0, zOf: (my: number) => my };
+  const L: Layout = { ...L0, zOf: (my: number) => my, xOf: (mx: number) => mx };
   const parts = new Batches(), roof = new Batches(), glass = new GeomBuilder(), lamps = new GeomBuilder(), tails = new GeomBuilder();
   const paint = liveryBody(skinLayoutInfo(L), v.paint);
   const chassis = 0x3e3e42;

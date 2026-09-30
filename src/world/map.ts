@@ -129,6 +129,14 @@ export interface MapOverlay {
   moveCost?(x: number, y: number, z: number): number | undefined;
   /** true = blocks sight (overlays can only add opacity). */
   opaque?(x: number, y: number, z: number): boolean | undefined;
+  /**
+   * Sub-tile collision (vehicles in the modelled look): true when this overlay blocks tile
+   * (x, y, z) with a shape smaller than the tile, which `collide` resolves. Physics then
+   * skips the whole-tile test for it.
+   */
+  shaped?(x: number, y: number, z: number): boolean;
+  /** Does a circle at (x, y) with radius r hit any of this overlay's shapes? */
+  collide?(x: number, y: number, z: number, r: number): boolean;
 }
 
 export interface ChunkGenerator {
@@ -311,6 +319,18 @@ export class GameMap {
   }
   passable(x: number, y: number, z: number): boolean {
     return this.moveCost(x, y, z) > 0;
+  }
+  /** Tile (x, y, z) is blocked only by an overlay with its own sub-tile shape (see MapOverlay.shaped). */
+  shapedTile(x: number, y: number, z: number): boolean {
+    const t = this.terAt(x, y, z);
+    if (t.move_cost <= 0 || this.furnAt(x, y, z).move_cost_mod < 0) return false;
+    for (const o of this.overlays) if (o.shaped?.(x, y, z)) return true;
+    return false;
+  }
+  /** A circle hits some overlay's sub-tile shape. */
+  collideShapes(x: number, y: number, z: number, r: number): boolean {
+    for (const o of this.overlays) if (o.collide?.(x, y, z, r)) return true;
+    return false;
   }
   /** Blocks sight: opaque terrain/furniture lacking TRANSPARENT, as in CDDA. */
   opaque(x: number, y: number, z: number): boolean {

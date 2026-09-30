@@ -26,10 +26,38 @@ function initialMode(): CharMode {
   return 'model';
 }
 
+const VM_KEY = 'cdda3d.viewmodel';
+function initialViewmodel(): 'model' | 'sprite' {
+  const p = typeof location !== 'undefined' ? new URLSearchParams(location.search).get('viewmodel') : null;
+  if (p === 'model' || p === 'sprite') return p;
+  if (p) throw new Error(`?viewmodel=${p}: expected model or sprite`);
+  try {
+    const s = typeof localStorage !== 'undefined' ? localStorage.getItem(VM_KEY) : null;
+    if (s === 'model' || s === 'sprite') return s;
+  } catch {
+    // storage blocked: default
+  }
+  return 'model';
+}
+
+export function setViewmodelMode(m: 'model' | 'sprite'): void {
+  if (m !== 'model' && m !== 'sprite') throw new Error(`viewmodel mode: ${m}`);
+  charSettings.viewmodel = m;
+  try {
+    localStorage.setItem(VM_KEY, m);
+  } catch {
+    // not persisted
+  }
+}
+
 export const charSettings = {
   mode: initialMode(),
   /** pose updates per second (Shadowglass-style stepped animation); 0 = every frame */
   fps: 10,
+  /** draw bows/slingshots in 3D too (off: the 2D bowArt sprite reads better) */
+  fpBow: false,
+  /** first-person hands: 3D (fpView.ts) or the sprite viewmodel (?viewmodel=sprite) */
+  viewmodel: initialViewmodel(),
   /** people's skins: styled.ts (default) or the projected sprite (?charpaint=sprite) */
   paint: (typeof location !== 'undefined' && new URLSearchParams(location.search).get('charpaint') === 'sprite' ? 'sprite' : 'styled') as 'styled' | 'sprite',
   listeners: [] as ((m: CharMode) => void)[],
@@ -48,9 +76,11 @@ export function setCharMode(m: CharMode): void {
 }
 
 /** Debug entry (cdda.chars): mode string, or a tweak object; returns the current settings. */
-export function charsApi(arg?: CharMode | { fps?: number; far?: [number, number]; emph?: number; paint?: 'styled' | 'sprite' }): Record<string, unknown> {
+export function charsApi(arg?: CharMode | { fps?: number; far?: [number, number]; emph?: number; paint?: 'styled' | 'sprite'; viewmodel?: 'model' | 'sprite'; fpBow?: boolean }): Record<string, unknown> {
   if (typeof arg === 'string') setCharMode(arg);
   else if (arg) {
+    if (arg.viewmodel) setViewmodelMode(arg.viewmodel);
+    if (arg.fpBow !== undefined) charSettings.fpBow = arg.fpBow;
     if (arg.paint) {
       if (arg.paint !== 'styled' && arg.paint !== 'sprite') throw new Error(`chars paint: ${arg.paint}`);
       charSettings.paint = arg.paint;
@@ -64,7 +94,7 @@ export function charsApi(arg?: CharMode | { fps?: number; far?: [number, number]
   }
   const L = layersIfAny;
   return {
-    mode: charSettings.mode, paint: charSettings.paint, fps: charSettings.fps, far: [charUniforms.uFarNear.value, charUniforms.uFarFar.value], emph: charUniforms.uEmphK.value,
+    mode: charSettings.mode, paint: charSettings.paint, viewmodel: charSettings.viewmodel, fps: charSettings.fps, far: [charUniforms.uFarNear.value, charUniforms.uFarFar.value], emph: charUniforms.uEmphK.value,
     live: L?.live.count ?? 0, bodies: L?.dead.count ?? 0, skins: L?.store.skinCount ?? 0, pages: L?.store.pageCount ?? 0,
   };
 }

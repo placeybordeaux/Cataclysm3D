@@ -7,7 +7,7 @@
 // Views are names understood by vehicleView() (see tools/vehicle-views.js), e.g.
 //   --views street,lineup:car,sedan,suv  (commas inside a view: separate views with ';')
 // Options: --out <dir> (default docs/screenshots/wave3/vehicles), --views 'a;b' ,
-// --size WxH (default 1600x900), --gpu, --look <look> (default full), --params '<query>',
+// --size WxH (default 1600x900), --png (default: JPEG q75: at q85 these low-res upscaled frames come out larger than PNG), --gpu, --look <look> (default full), --params '<query>',
 // --bench (cdda.benchView per view), --js '<expr>' after each view, --print '<expr>',
 // --dry-run, --help.
 import { createServer } from 'vite';
@@ -37,10 +37,11 @@ const params = opt('--params', '');
 const bench = argv.includes('--bench');
 const dry = argv.includes('--dry-run');
 const gpu = argv.includes('--gpu');
+const png = argv.includes('--png');
 const renderers = argv.filter((a) => !a.startsWith('--'));
 if (!renderers.length) throw new Error('name at least one renderer (model parts)');
 const views = viewsArg.split(';').filter(Boolean);
-const fileName = (r: string, v: string) => `${r}_${v.replace(/[^a-zA-Z0-9_.-]+/g, '-')}.png`;
+const fileName = (r: string, v: string) => `${r}_${v.replace(/[^a-zA-Z0-9_.-]+/g, '-')}.${png ? 'png' : 'jpg'}`;
 if (dry) {
   for (const r of renderers) for (const v of views) console.log(`would capture ${out}/${fileName(r, v)} at ${size.join('x')}${gpu ? ' (gpu)' : ''}`);
   process.exit(0);
@@ -92,7 +93,7 @@ try {
       if (extraJs) await page.evaluate(`(async () => { const cdda = window.cdda; ${extraJs}; })()`);
       await new Promise((res) => setTimeout(res, 400));
       const file = resolve(`${out}/${fileName(r, v)}`);
-      await page.screenshot({ path: file as `${string}.png` });
+      await page.screenshot(png ? { path: file as `${string}.png` } : { path: file as `${string}.jpeg`, type: 'jpeg', quality: 75 });
       if (printJs) console.log(`  ${r}/${v}: ${JSON.stringify(await page.evaluate(`(async () => { const cdda = window.cdda; return (${printJs}); })()`))}`);
       if (bench) {
         await new Promise((res) => setTimeout(res, 2500));

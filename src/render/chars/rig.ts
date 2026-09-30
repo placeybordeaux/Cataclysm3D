@@ -16,8 +16,11 @@
 import type { BodyShape, Weapon } from './archetype';
 
 export type Proj = 'front' | 'side';
+/** Painted surface detail for close-up items. */
+export type Detail = 'grain' | 'serration' | 'knurl' | 'tape' | 'port' | 'vent' | 'bevel' | 'metal';
 export type Role = 'dark' | 'main' | 'light' | 'accent' | 'skin' | 'wing';
-export type Region = 'head' | 'neck' | 'torso' | 'hips' | 'upperArm' | 'foreArm' | 'hand' | 'thigh' | 'shin' | 'foot';
+export type Region = 'head' | 'neck' | 'torso' | 'hips' | 'upperArm' | 'foreArm' | 'hand' | 'thigh' | 'shin' | 'foot'
+  | 'fpSleeveLower' | 'fpSleeveUpper' | 'fpBack' | 'fpPalm' | 'fpFinger' | 'fpThumb';
 
 export interface PartSrc {
   rect?: [number, number, number, number];
@@ -26,6 +29,8 @@ export interface PartSrc {
   role?: Role;
   /** a fixed colour (weapons) */
   color?: [number, number, number];
+  /** surface detail painted over a flat colour (held items seen up close, paint.ts) */
+  detail?: Detail;
   /**
    * What this part is on a person (styled painting, paint.ts paintStyled): the sprite gives
    * a semantic palette (skin, hair, shirt, pants, shoes, blood) and each region is painted
@@ -110,6 +115,8 @@ export interface Rig {
    * its side (animals, bugs) rather than forward/back along the killing blow (people).
    */
   lie: { angle: number; lift: number; side: boolean };
+  /** skin texel density multiplier (1 = 32 texels/m); the first-person rig uses more */
+  texels?: number;
   pose(p: PoseIn, out: PoseOut): void;
 }
 
@@ -173,13 +180,14 @@ function humanoid(sh: BodyShape): Rig {
   const upperArm = 0.3, foreArm = 0.25, hand = 0.09, thigh = 0.41, shin = 0.38, footH = 0.07;
   const hipX = 0.095 * Math.min(g, 1.3);
   const shoulderX = torsoW / 2 + armW / 2 - 0.01;
-  const headH = 0.25 * hd, headW = 0.24 * hd;
+  // a head is ~1/7.5 of a person's height (0.23 m of 1.75): bigger read as bobbleheads up close
+  const headH = 0.23 * hd, headW = 0.2 * hd;
   // Two-segment limbs, fists and feet, a neck, tapered segments (wrists and ankles narrower,
   // shoulders wider than the waist): reads as a person, not a stack of planks. Indices: HUM.
   const parts: PartDef[] = [
     { name: 'hips', parent: -1, joint: [0, hipY, 0], size: [torsoW * 0.9, 0.16, torsoD * 0.95], center: [0, -0.02, 0], src: { rect: [0.2, 0.5, 0.8, 0.6], proj: 'front', core: true, region: 'hips' }, kind: 'core' },
     { name: 'torso', parent: 0, joint: [0, 0.06, 0], size: [torsoW, 0.46, torsoD], center: [0, 0.23, 0], taper: [0.8, 0.92, 1, 1], src: { rect: [0.15, 0.22, 0.85, 0.52], proj: 'front', core: true, region: 'torso' }, kind: 'core' },
-    { name: 'head', parent: 1, joint: [0, 0.49, 0], size: [headW, headH, headW * 1.05], center: [0, headH / 2, 0], taper: [0.82, 0.88, 1, 1], src: { rect: [0.2, 0, 0.8, 0.22], proj: 'front', core: true, face: true, region: 'head' }, kind: 'core' },
+    { name: 'head', parent: 1, joint: [0, 0.49, 0], size: [headW, headH, headW * 1.12], center: [0, headH / 2, 0], taper: [0.82, 0.88, 1, 1], src: { rect: [0.2, 0, 0.8, 0.22], proj: 'front', core: true, face: true, region: 'head' }, kind: 'core' },
     { name: 'uArmR', parent: 1, joint: [shoulderX, 0.42, 0], size: [armW, upperArm, armW], center: [0, -upperArm / 2 + 0.03, 0], taper: [0.85, 0.85, 1, 1], src: { rect: [0, 0.22, 1, 0.4], proj: 'front', edge: 'left', region: 'upperArm' }, kind: 'limb' },
     { name: 'fArmR', parent: 3, joint: [0, -upperArm + 0.04, 0], size: [armW * 0.88, foreArm, armW * 0.88], center: [0, -foreArm / 2, 0], taper: [0.78, 0.78, 1, 1], src: { rect: [0, 0.38, 1, 0.56], proj: 'front', edge: 'left', region: 'foreArm' }, kind: 'limb' },
     { name: 'uArmL', parent: 1, joint: [-shoulderX, 0.42, 0], size: [armW, upperArm, armW], center: [0, -upperArm / 2 + 0.03, 0], taper: [0.85, 0.85, 1, 1], src: { rect: [0, 0.22, 1, 0.4], proj: 'front', edge: 'right', region: 'upperArm' }, kind: 'limb' },
@@ -252,6 +260,14 @@ function humanoid(sh: BodyShape): Rig {
         setRot(o, footI, -(a + knee) * 0.7);
       }
       o.pos[1] -= Math.abs(sin(ph)) * 0.04 * walk * s;
+      if (zombie && walk > 0) {
+        // a shamble, not a walk: the body lurches onto the good leg and sways side to side,
+        // by an amount that differs per zombie
+        const lurch = 0.06 + 0.1 * quirk(p.seed, 6);
+        o.lean[2] += sin(ph) * lurch * walk;
+        o.pos[0] += sin(ph) * 0.03 * walk * s;
+        setRot(o, H.head, 0, 0, -sin(ph) * lurch * 0.8 * walk);
+      }
       // idle: slow breathing sway (zombies loll their heads)
       const idle = sin(p.t * 1.7 + p.seed * TAU);
       setRot(o, H.torso, -hunch - 0.03 * idle * (zombie ? 1 : 0.4) - run * 0.25, 0, zombie ? 0.05 * sin(ph * 0.5 + p.seed * 6) + (quirk(p.seed, 5) - 0.5) * 0.12 : 0);
