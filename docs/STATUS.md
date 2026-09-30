@@ -54,6 +54,7 @@ Real-input suite (`tools/realinput.ts`, 33+ scenarios) last passed fully on the 
 | `docs/LOOKS.md` | Visual styles (classic/crisp/voxel/terrain/full), perf, screenshots |
 | `docs/UX_REVIEW.md` | Input/pointer-lock model, key rules |
 | `docs/QA_V2.md` | Latest full playtest: issues and statuses |
+| `docs/QA_WAVE3.md` | Wave-3 integration QA at 3440x1304 (Chromium + Firefox): issues, realinput per scenario, perf |
 
 ## Controls (current defaults; all rebindable in Options → Key bindings)
 

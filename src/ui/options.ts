@@ -21,7 +21,8 @@ export interface GameOptions {
   px: number;
   grade: GradeMode;
   camera: (typeof CAMERA_MODES)[number];
-  /** Chunks drawn around the player (fog of war sits just inside this). */
+  /** Legacy (pre-wave-3) draw radius; Options > Draw distance now lives in render/lookInstall.ts,
+   *  which migrates this value once. */
   radius: number;
   menuCursor: MenuCursor;
 }
@@ -53,15 +54,7 @@ export function applyStoredOptions(ctx: UiContext): void {
     ctx.renderer.resize();
   }
   if (o.grade && !params.get('grade')) pipe.options.grade = o.grade;
-  if (o.radius && !params.get('radius')) setDrawDistance(ctx, o.radius);
   if (o.camera && CAMERA_MODES.includes(o.camera) && !params.get('cam')) ctx.renderer.setCameraMode(o.camera);
-}
-
-/** Draw radius in chunks; the fog follows it and world prefetch stays one ring ahead. */
-function setDrawDistance(ctx: UiContext, radius: number): void {
-  ctx.renderer.chunks.radius = radius;
-  const prefetch = (window as unknown as { cdda?: { prefetch?: { opts: { radius: number } } } }).cdda?.prefetch;
-  if (prefetch) prefetch.opts.radius = radius + 1;
 }
 
 export interface Opt {
@@ -126,17 +119,8 @@ export function openOptions(ctx: UiContext): Panel {
     },
     desc: 'Height of the low-resolution pixel-art image. Lower is chunkier (and faster).',
   });
-  const RADII = [4, 5, 6, 7, 8, 10];
-  opts.push({
-    name: 'Draw distance',
-    value: () => `${renderer.chunks.radius * 24} m`,
-    change: (d) => {
-      const i = RADII.indexOf(renderer.chunks.radius);
-      setDrawDistance(ctx, RADII[Math.max(0, Math.min(RADII.length - 1, (i < 0 ? 2 : i) + d))]);
-      store({ radius: renderer.chunks.radius });
-    },
-    desc: 'How far the world is drawn before it fades into fog. Farther costs more GPU and generation time.',
-  });
+  // Draw distance is registered by render/lookInstall.ts (one entry; this screen used to have a
+  // second, older one with different steps, labels and storage that overrode it at boot).
   const GRADES: GradeMode[] = ['palette', 'smooth', 'off'];
   opts.push({
     name: 'Colour grading',

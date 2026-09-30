@@ -720,10 +720,11 @@ export function* buildChunkMeshSteps(
           wreck: roomAt(x, y) ? wreck : undefined,
         })) {
           // drawn as a modelled piece (furniture/)
-        } else if (fs === 'billboard' && LF?.voxelProps && extras?.near && extras?.voxels && extras.voxels.furniture(geo, extras.white, src, fdef.id, x, y, fb, seed, facingYaw(nShape, isWall))) {
+        } else if (fs === 'billboard' && LF?.voxelProps && extras?.near && extras?.voxels && extras.voxels.furniture(geo, extras.white, src, fdef.id, x, y, fb, seed, facingYaw(nShape, isWall), season)) {
           // drawn as a voxel volume
         } else if (fs === 'billboard') {
-          const f = src.furniture(fdef.id, 'sprite');
+          // season: some flowers only have per-season tiles (voxel.ts VoxelProps.furniture)
+          const f = src.furniture(fdef.id, 'sprite', { season });
           // world-fixed crossed cards instead of a camera-facing billboard (render/cards.ts)
           if (cardsOn()) crossCards(geo, f, x + 0.5, y + 0.5, fb, f.h / (f.ppm ?? 16), seed, 2);
           else sprites.push({ x: x + 0.5, y: y + 0.5, z, frame: f, height: f.h / (f.ppm ?? 16), kind: 'furniture' });
