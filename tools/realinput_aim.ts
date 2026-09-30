@@ -246,9 +246,10 @@ export function aimScenarios(c: AimCtx): Scenario[] {
       const zHead = await shootAtPart('head', 4);
       check('zombie: shots at the drawn head are headshots', zHead.every((z) => z === 'head'), zHead);
       await shot('zones_zombie_head');
-      const zLeg = await shootAtPart('shinL', 3);
-      // A shin is a hand's width and the zombie shambles: most shots land on it, none elsewhere.
-      check('zombie: shots at a drawn shin hit the legs (or just miss it, never another zone)', zLeg.filter((z) => z === 'legs').length >= 2 && zLeg.every((z) => z === 'legs' || z === 'none'), zLeg);
+      const zLeg = await shootAtPart('thighL', 3);
+      // The pinned zombie keeps trying to walk, so its legs swing: aim at the thigh (it swings least):
+      // most shots land on the legs, a clean miss is allowed, another zone never.
+      check('zombie: shots at a drawn thigh hit the legs (or just miss, never another zone)', zLeg.filter((z) => z === 'legs').length >= 2 && zLeg.every((z) => z === 'legs' || z === 'none'), zLeg);
       // A dog side-on at 7 m: its head is out in front, low.
       await js(SETUP('rifle', 10, 7, 'sway', 'mon_dog', Math.PI / 2));
       await sleep(800);
