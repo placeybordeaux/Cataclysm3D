@@ -406,8 +406,8 @@ export class SurfacePainter {
     const coloured = /_(r|y|b|g|p|w|red|yellow|blue|green|purple|white)$/.test(id) && pal;
     const h = hash2(seed, 0, 51);
     let kind: InteriorMat = m === 'block' || m === 'concrete' ? 'blockpaint' : (['paint', 'paint', 'stripes', 'damask', 'paint'] as InteriorMat[])[h % 5];
-    let c = coloured ? q8(mix(pal!.main, [220, 216, 206], 0.35)) : PAINTS[(h >> 4) % PAINTS.length];
-    if (kind === 'stripes' || kind === 'damask') c = PAPERS[(h >> 8) % PAPERS.length];
+    let c = coloured ? q8(mix(pal!.main, [220, 216, 206], 0.35)) : PAINTS[(h >>> 4) % PAINTS.length];
+    if (kind === 'stripes' || kind === 'damask') c = PAPERS[(h >>> 8) % PAPERS.length];
     if (coloured) kind = kind === 'blockpaint' ? kind : 'paint';
     const accent = sh(c, 0.78);
     return this.frame(`int:${kind}:${c.join(',')}`, () => paintInterior(kind, c, accent, 3));
