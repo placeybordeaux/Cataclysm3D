@@ -74,7 +74,7 @@ pixel-art textures at a fixed texel density**. That is what this pass builds.
 Default is **model**. Models need a look with volumes (`full` or `voxel`); `classic`,
 `crisp` and `terrain` are unchanged apart from the broken-window/door fix.
 
-## Screenshots (1600x900 JPEG, RTX 5080, seed 1)
+## Screenshots (half-size JPEG, RTX 5080, seed 1)
 
 | view | voxel (before) | model (after) |
 | --- | --- | --- |
@@ -212,11 +212,63 @@ Perf (1080p, RTX 5080, tileset -> painted): render 1.8 -> 2.0 ms (street), 2.3 -
 (house); triangles +6-8 % (baseboards, crown, fence parts); streaming sprint meshing
 924 -> 991 ms total, loop p99 12.4 -> 12.4 ms, longest step 2.7 -> 2.9 ms.
 
-Known gaps (surfaces): window reveals (the neighbouring wall's face into the opening) still
-show the outside material; porches count as indoors for interior finishes; wallpaper choice
-is per chunk, not per room.
+
+
+## Rooms and set dressing (round 3): lived-in, then abandoned
+
+The painted interiors read too clean and empty for a post-apocalypse. Round 3 adds rooms and
+deterministic, render-only set dressing (`?dressing=off` / `cdda.setDressing(false)` for the
+bare rooms; it rides on painted surfaces).
+
+- **Rooms** (`src/render/rooms.ts`): covered floor tiles flood-filled up to walls, doors and
+  windows. A region that reaches uncovered ground is a porch/carport, not a room (so porches
+  keep the outside material). Each room has a seed from its first tile (so both chunks of a
+  room across a chunk border agree) and a kind from its furniture (bathroom, kitchen,
+  bedroom, living, shop). Paint / wallpaper, curtains and dressing are chosen **per room**.
+- **Window and door reveals**: the wall face into an opening is split in half; each half
+  takes the finish of the room (or the outside) on its side. Sills, lintels and door heads
+  take the finish of the room each face looks into.
+- **Walls** (`src/render/dressing.ts`, alpha-cut decals a few mm off the wall): framed
+  pictures, posters, calendars (kitchens), clocks, light switches beside doors, outlets,
+  tiled splashbacks (1.2 m) in bathrooms and some kitchens; in run-down houses (a building
+  seed picks kept / dirty / wrecked) grime at the foot and along the ceiling, water stains
+  running down from the ceiling, peeling paint, pictures hanging crooked; in some houses
+  ("something happened here") bloody handprints and smears by the doors. Nothing is hung
+  behind wardrobes, bookcases, fridges and shelves. The base paint stays flat.
+- **Floors and ceilings**: rugs under beds, dining tables and coffee tables (most rooms);
+  a flush ceiling lamp in the middle of every room (unlit: the power is out).
+- **Curtains** match per room (a room's windows share one fabric).
+- **Exteriors**: house numbers over outside doors (per door), a porch lamp beside them,
+  occasional graffiti tags on outside walls, rain gutter troughs under the eaves with
+  downspouts to the ground (the `t_gutter` roof-edge tiles used to be flat floor ledges).
+  Brick and siding at 10-40 m: no moiré in the half-res image (mips + the far-texture
+  averaging from the readability pass); asphalt cracks now in one variant in five and
+  softer (a crack in every third tile read as a repeating scribble from the street).
+
+| | bare (dressing off) | dressed |
+| --- | --- | --- |
+| dining room | ![](screenshots/wave3/furniture/dressing_house_bare.jpg) | ![](screenshots/wave3/furniture/dressing_house.jpg) |
+| bedroom | ![](screenshots/wave3/furniture/dressing_bedroom_bare.jpg) | ![](screenshots/wave3/furniture/dressing_bedroom.jpg) |
+| living room | ![](screenshots/wave3/furniture/dressing_living_bare.jpg) | ![](screenshots/wave3/furniture/dressing_living.jpg) |
+| front of a duplex | ![](screenshots/wave3/furniture/dressing_front_bare.jpg) | ![](screenshots/wave3/furniture/dressing_front.jpg) |
+
+More: ![](screenshots/wave3/furniture/dressing_kitchen.jpg) ![](screenshots/wave3/furniture/dressing_bathroom.jpg)
+![](screenshots/wave3/furniture/dressing_front_door.jpg) ![](screenshots/wave3/furniture/dressing_street_30m.jpg)
+![](screenshots/wave3/furniture/dressing_street_far.jpg)
+
+**The house-view p99 spike** (`look-shots --bench`, 1080p): it is not first-sight painting.
+The same view without painted surfaces shows it too (work p99: tileset 24.8 ms, painted
+without dressing 24.6 ms, painted + dressing 25.9 ms; street 16.0 / 15.5 / 15.9 ms; render
+2.5 / 2.5 / 2.3 ms house, 1.9 / 1.9 / 2.1 ms street). Painting is still made cheaper to
+schedule: frame painting time now counts toward the mesher's mid-row yield
+(`paintClock`), so a row that paints many new faces yields early.
 
 ## Known gaps / next
+
+- Rooms are scanned 14 tiles around a chunk; a room bigger than that (warehouses) can pick
+  different finishes in two chunks.
+- Dressing is decals and a few small models: no clutter piles, no broken furniture yet.
+- Ceiling lamps are unlit (no power); porch lamps are render-only.
 
 - Wild flowers and a few rare pieces (statues, mannequins) still use the voxel path.
 - Glass dither reads as glass but is a fixed 4x4 pattern; a softer look (blue-noise or a
