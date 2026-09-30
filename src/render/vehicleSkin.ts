@@ -71,13 +71,28 @@ export function hash2(x: number, y: number, s: number): number {
   h = Math.imul(h ^ (h >>> 13), 1274126177);
   return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
 }
-/** Blocky value noise (cells of `cell` texels) for rust / grime patches. */
-function vnoise(x: number, y: number, cell: number, seed: number): number {
-  const cx = Math.floor(x / cell), cy = Math.floor(y / cell);
-  const fx = x / cell - cx, fy = y / cell - cy;
-  const a = hash2(cx, cy, seed), b = hash2(cx + 1, cy, seed), c = hash2(cx, cy + 1, seed), d = hash2(cx + 1, cy + 1, seed);
-  const sx = fx * fx * (3 - 2 * fx), sy = fy * fy * (3 - 2 * fy);
-  return a + (b - a) * sx + (c - a) * sy + (a - b - c + d) * sx * sy;
+// Noise comes from small tiling tables built once: painting a skin samples noise for every
+// texel (~100k), and hashing per sample made a car's skin cost ~15 ms.
+const NT = 128; // table size in texels: 32 cells of 4, a power of two so `& NM` wraps
+const NM = NT - 1;
+let valueTable: Float32Array | null = null, whiteTable: Float32Array | null = null;
+function tables(): [Float32Array, Float32Array] {
+  if (valueTable && whiteTable) return [valueTable, whiteTable];
+  const vt = new Float32Array(NT * NT), wt = new Float32Array(NT * NT);
+  const cells = NT / 4;
+  const h = (i: number, j: number) => hash2(i % cells, j % cells, 11);
+  for (let y = 0; y < NT; y++)
+    for (let x = 0; x < NT; x++) {
+      const cx = x >> 2, cy = y >> 2;
+      const fx = (x & 3) / 4, fy = (y & 3) / 4;
+      const a = h(cx, cy), b = h(cx + 1, cy), c = h(cx, cy + 1), d = h(cx + 1, cy + 1);
+      const sx = fx * fx * (3 - 2 * fx), sy = fy * fy * (3 - 2 * fy);
+      vt[y * NT + x] = a + (b - a) * sx + (c - a) * sy + (a - b - c + d) * sx * sy;
+      wt[y * NT + x] = hash2(x, y, 7);
+    }
+  valueTable = vt;
+  whiteTable = wt;
+  return [vt, wt];
 }
 
 /** Everything the painter needs to know beyond the layout. */
@@ -132,7 +147,9 @@ function liveryColors(L: Layout, paint: number): { body: RGB; lower?: RGB; strip
 export function paintSkin(L: Layout, inp: SkinInput): Skin {
   const lay = skinLayout(L, inp.yMax);
   const W = lay.width, H = lay.height;
-  const data = new Uint8Array(W * H * 4);
+  // Clamped: brightening (x1.25 creases) saturates instead of wrapping.
+  const data = new Uint8ClampedArray(W * H * 4);
+  const [VT, WT] = tables();
   const p = L.p;
   const ppm = SKIN_PPM;
   const col = liveryColors(L, inp.paint);
@@ -147,9 +164,9 @@ export function paintSkin(L: Layout, inp: SkinInput): Skin {
   const put = (u: number, v: number, c: RGB) => {
     if (u < 0 || v < 0 || u >= W || v >= H) return;
     const o = (v * W + u) * 4;
-    data[o] = Math.max(0, Math.min(255, c[0]));
-    data[o + 1] = Math.max(0, Math.min(255, c[1]));
-    data[o + 2] = Math.max(0, Math.min(255, c[2]));
+    data[o] = c[0];
+    data[o + 1] = c[1];
+    data[o + 2] = c[2];
     data[o + 3] = 255;
   };
   const get = (u: number, v: number): RGB => {
@@ -161,25 +178,56 @@ export function paintSkin(L: Layout, inp: SkinInput): Skin {
   // Weathering is driven by `wear` (share of broken / damaged parts) and per-row damage: an
   // intact car gets a faint band of road grime, an abandoned one rust along the sills and
   // arches, a wreck blotches everywhere. vnoise is 0..1, so thresholds near 1 are rare spots.
-  const weather = (c: RGB, wx: number, wy: number, low: number, row: number): RGB => {
-    const n2 = hash2(Math.floor(wx * ppm), Math.floor(wy * ppm), seed + 7);
-    const dmg = inp.rowDamage.get(row) ?? 0;
-    const band = 0.12 + wear * 0.3;
-    const g = Math.max(0, band - low) / band;
-    if (g > 0 && n2 < g * 0.7) c = lerpC(c, dirt, 0.18 + 0.2 * g);
-    const rustAmt = Math.max(0, Math.min(1, wear * 1.1 + dmg * 0.6 - 0.2));
-    if (rustAmt > 0) {
-      const n = vnoise(wx * ppm, wy * ppm, 3, seed);
+  // Hot loops paint into this scratch colour (no per-texel arrays: allocation dominated).
+  const C: RGB = [0, 0, 0];
+  const setC = (c: RGB) => {
+    C[0] = c[0];
+    C[1] = c[1];
+    C[2] = c[2];
+  };
+  const mulC = (k: number) => {
+    C[0] *= k;
+    C[1] *= k;
+    C[2] *= k;
+  };
+  const mixC = (c: RGB, t: number) => {
+    C[0] += (c[0] - C[0]) * t;
+    C[1] += (c[1] - C[1]) * t;
+    C[2] += (c[2] - C[2]) * t;
+  };
+  const blood: RGB = [96, 12, 10];
+  const band = 0.12 + wear * 0.3;
+  // Per-paint noise offsets (the tables tile; the seed shifts where each vehicle samples).
+  const oV = (seed * 29) & NM, oVy = (seed * 13) & NM, oW = (seed * 17 + 7) & NM, oWy = (seed * 7 + 3) & NM;
+  let colDmg = 0, colBlood = 0, colRust = 0;
+  /** Set the per-column damage / blood (mount row) before emitting a column. */
+  const column = (row: number) => {
+    colDmg = inp.rowDamage.get(row) ?? 0;
+    colBlood = inp.rowBlood.get(row) ?? 0;
+    colRust = Math.max(0, Math.min(1, wear * 1.1 + colDmg * 0.6 - 0.2));
+  };
+  /** Weather the scratch colour C (grime, rust, dents, blood), then write it at (u, v).
+   * tx / ty: texel coordinates in world space (so both sides / sheets differ). */
+  const emit = (u: number, v: number, tx: number, ty: number, low: number) => {
+    const ix = Math.floor(tx), iy = Math.floor(ty);
+    const n2 = WT[((iy + oWy) & NM) * NT + ((ix + oW) & NM)];
+    const g = (band - low) / band;
+    if (g > 0 && n2 < g * 0.7) mixC(dirt, 0.18 + 0.2 * g);
+    if (colRust > 0) {
+      const n = VT[((iy + oVy) & NM) * NT + ((ix + oV) & NM)];
       const bias = low < 0.25 ? 1.4 : low < 0.6 ? 0.8 : 0.5;
-      const t = 1 - 0.42 * rustAmt * bias;
-      if (n > t + 0.06) c = lerpC(c, n2 < 0.5 ? rust : rustDark, 0.7);
-      else if (n > t && n2 < 0.55) c = lerpC(c, rust, 0.4);
+      const t = 1 - 0.42 * colRust * bias;
+      if (n > t + 0.06) mixC(n2 < 0.5 ? rust : rustDark, 0.7);
+      else if (n > t && n2 < 0.55) mixC(rust, 0.4);
     }
     // Dents: darker blotches on hard-hit rows.
-    if (dmg > 0.5 && vnoise(wx * ppm + 50, wy * ppm, 3, seed + 3) > 1.15 - dmg * 0.4) c = scale(c, 0.75);
-    const blood = inp.rowBlood.get(row) ?? 0;
-    if (blood > 0 && vnoise(wx * ppm, wy * ppm + 99, 2, seed + 5) > 1 - Math.min(0.55, blood / 900)) c = lerpC(c, [96, 12, 10], 0.8);
-    return c;
+    if (colDmg > 0.5 && VT[((iy + 37) & NM) * NT + ((ix + oV + 50) & NM)] > 1.15 - colDmg * 0.4) mulC(0.75);
+    if (colBlood > 0 && VT[((iy * 2 + 99) & NM) * NT + ((ix * 2 + oW) & NM)] > 1 - Math.min(0.55, colBlood / 900)) mixC(blood, 0.8);
+    const o = (v * W + u) * 4;
+    data[o] = C[0];
+    data[o + 1] = C[1];
+    data[o + 2] = C[2];
+    data[o + 3] = 255;
   };
 
   const shoulder = p.belt - 0.12;
@@ -187,25 +235,36 @@ export function paintSkin(L: Layout, inp: SkinInput): Skin {
   for (const side of [1, -1] as const) {
     const sh = lay.sheets[side > 0 ? 'right' : 'left'];
     const panes = inp.panes[side];
-    for (let tv = 0; tv < sh.h; tv++)
-      for (let tu = 0; tu < sh.w; tu++) {
-        const x = sh.a0 + (tu + 0.5) / ppm, y = sh.b0 + (tv + 0.5) / ppm;
-        let c: RGB = col.body;
-        if (col.lower && y < p.belt - 0.28) c = col.lower;
+    for (let tu = 0; tu < sh.w; tu++) {
+      const x = sh.a0 + (tu + 0.5) / ppm;
+      const wallTop = inp.wallTop(x);
+      const policeDoor = L.livery === 'police' && L.doors.some((d) => d.side === side && x <= d.x0 && x >= d.x1);
+      column(Math.round(x));
+      const tx = x * side * ppm;
+      for (let tv = 0; tv < sh.h; tv++) {
+        const y = sh.b0 + (tv + 0.5) / ppm;
+        setC(col.lower && y < p.belt - 0.28 ? col.lower : col.body);
         // stepped shading: highlight band under the shoulder, darker rocker
-        if (y > shoulder - 0.1 && y < shoulder) c = scale(c, 1.1);
-        else if (y < p.sill + 0.16) c = scale(c, 0.78);
-        else if (y < p.sill + 0.3) c = scale(c, 0.9);
-        if (y > p.belt + 0.02 && y < inp.wallTop(x) - 0.01) c = p.blackPillars ? trim : scale(c, 0.95);
+        if (y > shoulder - 0.1 && y < shoulder) mulC(1.1);
+        else if (y < p.sill + 0.16) mulC(0.78);
+        else if (y < p.sill + 0.3) mulC(0.9);
+        if (y > p.belt + 0.02 && y < wallTop - 0.01) {
+          if (p.blackPillars) setC(trim);
+          else mulC(0.95);
+        }
         // crease lines
-        if (Math.abs(y - shoulder) < 0.5 / ppm) c = scale(col.body, 1.25);
-        if (Math.abs(y - (p.sill + 0.3)) < 0.5 / ppm) c = scale(c, 0.7);
+        if (Math.abs(y - shoulder) < 0.5 / ppm) {
+          setC(col.body);
+          mulC(1.25);
+        }
+        if (Math.abs(y - (p.sill + 0.3)) < 0.5 / ppm) mulC(0.7);
         // livery stripes
-        if (col.stripe && L.livery !== 'police' && Math.abs(y - (p.belt - 0.3)) < 0.06) c = col.stripe;
-        if (L.livery === 'school' && (Math.abs(y - (p.belt - 0.08)) < 0.03 || Math.abs(y - (p.sill + 0.45)) < 0.03)) c = col.stripe!;
-        if (L.livery === 'police' && y > p.sill + 0.25 && y < p.belt && L.doors.some((d) => d.side === side && x <= d.x0 && x >= d.x1)) c = col.stripe!;
-        put(sh.u0 + tu, sh.v0 + tv, c);
+        if (col.stripe && L.livery !== 'police' && Math.abs(y - (p.belt - 0.3)) < 0.06) setC(col.stripe);
+        if (L.livery === 'school' && (Math.abs(y - (p.belt - 0.08)) < 0.03 || Math.abs(y - (p.sill + 0.45)) < 0.03)) setC(col.stripe!);
+        if (policeDoor && y > p.sill + 0.25 && y < p.belt) setC(col.stripe!);
+        emit(sh.u0 + tu, sh.v0 + tv, tx, tv, y - p.sill);
       }
+    }
     // window trims: a dark frame 2 texels around each pane (the pane itself is a hole)
     for (const pane of panes) {
       for (const [px, py] of outlineTexels(pane.pts, ppm)) {
@@ -254,81 +313,101 @@ export function paintSkin(L: Layout, inp: SkinInput): Skin {
     }
     // livery emblems
     if (L.livery === 'ambulance' || L.livery === 'police' || L.livery === 'fire' || L.livery === 'security' || L.livery === 'hippie' || L.livery === 'military') emblem(L, sh, side, col, put, get);
-    // weathering pass
-    for (let tv = 0; tv < sh.h; tv++)
-      for (let tu = 0; tu < sh.w; tu++) {
-        const x = sh.a0 + (tu + 0.5) / ppm, y = (tv + 0.5) / ppm;
-        put(sh.u0 + tu, sh.v0 + tv, weather(get(sh.u0 + tu, sh.v0 + tv), x * side, y, y - p.sill, Math.round(x)));
-      }
   }
 
   // --- top: hood / roof / trunk lid panel lines ---
   {
     const sh = lay.sheets.top;
     const cab = L.cabin;
-    for (let tv = 0; tv < sh.h; tv++)
-      for (let tu = 0; tu < sh.w; tu++) {
-        const x = sh.a0 + (tu + 0.5) / ppm, z = sh.b0 + (tv + 0.5) / ppm;
+    const rg = L.sections.find((q) => q.kind === 'rearglass');
+    const bed = L.sections.find((q) => q.kind === 'bed');
+    const boxes = L.sections.filter((q) => q.kind === 'box');
+    const bedFloor: RGB = [60, 60, 62];
+    for (let tu = 0; tu < sh.w; tu++) {
+      const x = sh.a0 + (tu + 0.5) / ppm;
+      const onRoof = !!cab && x < cab.x0 - p.rake + 0.05 && x > cab.x1 - 0.1;
+      const roofPaint = !!col.roof && (onRoof || boxes.some((q) => x <= q.x0 && x >= q.x1));
+      const cowlSeam = L.xCowl !== null && Math.abs(x - (L.xCowl + 0.08)) < 0.5 / ppm;
+      const onHood = L.xCowl !== null && x > L.xCowl + 0.1;
+      const rib = (L.style === 'bus' || L.style === 'van' || L.style === 'truck') && onRoof && Math.floor(x * ppm) % 24 === 0;
+      const trunkSeam = !!rg && Math.abs(x - (rg.x0 - p.rearRake - 0.04)) < 0.5 / ppm;
+      const inBed = !!bed && x < bed.x0 && x > bed.x1 + 0.02;
+      column(Math.round(x));
+      for (let tv = 0; tv < sh.h; tv++) {
+        const z = sh.b0 + (tv + 0.5) / ppm;
         const zl = Math.abs(z - L.yc) / L.hw;
-        let c: RGB = scale(col.body, 0.88);
-        const onRoof = cab && x < cab.x0 - p.rake + 0.05 && x > cab.x1 - 0.1;
-        if (col.roof && (onRoof || L.sections.some((s) => s.kind === 'box' && x <= s.x0 && x >= s.x1))) c = scale(col.roof, 0.9);
+        setC(roofPaint ? col.roof! : col.body);
+        mulC(roofPaint ? 0.9 : 0.88);
         // a sheen band along the centre line and darker edges (stepped, no gradients)
-        if (zl < 0.18) c = scale(c, 1.06);
-        else if (zl > 0.82) c = scale(c, 0.86);
+        if (zl < 0.18) mulC(1.06);
+        else if (zl > 0.82) mulC(0.86);
         // hood seam at the cowl and hood centre crease
-        if (L.xCowl !== null && Math.abs(x - (L.xCowl + 0.08)) < 0.5 / ppm) c = scale(c, 0.5);
-        if (L.xCowl !== null && x > L.xCowl + 0.1 && Math.abs(z - L.yc) < 0.5 / ppm) c = scale(c, 0.85);
-        // roof rack / rails on SUVs and vans
-        if (onRoof && (L.style === 'suv' || L.style === 'minivan') && Math.abs(zl - 0.72) < 0.03) c = trim;
-        // bus / van roof ribs
-        if ((L.style === 'bus' || L.style === 'van' || L.style === 'truck') && onRoof && Math.floor(x * ppm) % 24 === 0) c = scale(c, 0.8);
-        // trunk lid seam
-        const rg = L.sections.find((s) => s.kind === 'rearglass');
-        if (rg && Math.abs(x - (rg.x0 - p.rearRake - 0.04)) < 0.5 / ppm) c = scale(c, 0.5);
-        const bed = L.sections.find((s) => s.kind === 'bed');
-        if (bed && x < bed.x0 && x > bed.x1 + 0.02) c = zl > 0.86 ? scale(col.body, 0.8) : [60, 60, 62];
-        put(sh.u0 + tu, sh.v0 + tv, weather(c, x, z, 0.5, Math.round(x)));
+        if (cowlSeam) mulC(0.5);
+        if (onHood && Math.abs(z - L.yc) < 0.5 / ppm) mulC(0.85);
+        // roof rails on SUVs and minivans, ribs on bus / van / truck roofs
+        if (onRoof && (L.style === 'suv' || L.style === 'minivan') && Math.abs(zl - 0.72) < 0.03) setC(trim);
+        if (rib) mulC(0.8);
+        if (trunkSeam) mulC(0.5);
+        if (inBed) {
+          if (zl > 0.86) {
+            setC(col.body);
+            mulC(0.8);
+          } else setC(bedFloor);
+        }
+        emit(sh.u0 + tu, sh.v0 + tv, tu + 300, tv, 0.5);
       }
+    }
   }
 
   // --- front and rear faces ---
+  const bumperBlack: RGB = [40, 41, 44], seamDark: RGB = [20, 20, 22], slatGrey: RGB = [70, 72, 76], gap: RGB = [18, 18, 20], busVent: RGB = [30, 30, 32];
+  const plateRim: RGB = [30, 30, 34], plateInk: RGB = [40, 50, 90], plate: RGB = [214, 212, 200], bezel: RGB = [24, 24, 26];
+  const headCore: RGB = [236, 234, 220], headLens: RGB = [176, 178, 172], tailCore: RGB = [210, 60, 44], tailLens: RGB = [140, 24, 20];
   for (const end of ['front', 'rear'] as const) {
     const sh = lay.sheets[end];
     const lamps = end === 'front' ? inp.headlamps : inp.taillamps;
-    for (let tv = 0; tv < sh.h; tv++)
-      for (let tu = 0; tu < sh.w; tu++) {
-        const z = sh.a0 + (tu + 0.5) / ppm, y = (tv + 0.5) / ppm;
-        const zl = (z - L.yc) / L.hw;
-        let c: RGB = scale(col.lower && y < p.belt - 0.28 ? col.lower : col.body, 0.95);
-        if (y > p.belt + 0.02 && L.style !== 'bus') c = p.blackPillars ? trim : c;
-        if (y < p.sill + 0.24) c = p.bumper === 'chrome' ? chrome : p.bumper === 'black' ? [40, 41, 44] : scale(c, 0.8);
-        if (Math.abs(y - (p.sill + 0.24)) < 0.5 / ppm) c = [20, 20, 22];
+    const gTop = L.style === 'truck' ? p.nose - 0.08 : Math.min(p.nose - 0.1, p.lampY + p.lampH + 0.04), gBot = p.sill + 0.26;
+    const lampZ = lamps.length ? Math.min(...lamps.map((l) => Math.abs(l.z - L.yc) - l.w)) : L.hw * 0.5;
+    const plateY = p.sill + (end === 'front' ? 0.14 : 0.36);
+    const wx0 = end === 'front' ? 900 : 600;
+    column(Math.round(end === 'front' ? L.xNose : L.xTail));
+    for (let tu = 0; tu < sh.w; tu++) {
+      const z = sh.a0 + (tu + 0.5) / ppm;
+      const zl = (z - L.yc) / L.hw, dzc = Math.abs(z - L.yc);
+      for (let tv = 0; tv < sh.h; tv++) {
+        const y = (tv + 0.5) / ppm;
+        setC(col.lower && y < p.belt - 0.28 ? col.lower : col.body);
+        mulC(0.95);
+        if (y > p.belt + 0.02 && L.style !== 'bus' && p.blackPillars) setC(trim);
+        if (y < p.sill + 0.24) {
+          if (p.bumper === 'chrome') setC(chrome);
+          else if (p.bumper === 'black') setC(bumperBlack);
+          else mulC(0.8);
+        }
+        if (Math.abs(y - (p.sill + 0.24)) < 0.5 / ppm) setC(seamDark);
         if (end === 'front') {
           // grille between the headlamps, horizontal slats
-          const gTop = Math.min(p.nose - 0.1, p.lampY + p.lampH + 0.04), gBot = p.sill + 0.26;
-          const lampZ = lamps.length ? Math.min(...lamps.map((l) => Math.abs(l.z - L.yc) - l.w)) : L.hw * 0.5;
-          if (L.style !== 'bus' && y > gBot && y < gTop && Math.abs(z - L.yc) < lampZ - 0.05) {
+          if (L.style !== 'bus' && y > gBot && y < gTop && dzc < lampZ - 0.05) {
             const slat = Math.floor((y - gBot) * ppm) % 3 === 0;
-            c = slat ? (p.bumper === 'chrome' ? chrome : [70, 72, 76]) : [18, 18, 20];
-            if (Math.abs(z - L.yc) < 0.05 && Math.abs(y - (gBot + gTop) / 2) < 0.04) c = chrome;
+            setC(slat ? (p.bumper === 'chrome' ? chrome : slatGrey) : gap);
+            if (dzc < 0.05 && Math.abs(y - (gBot + gTop) / 2) < 0.04) setC(chrome);
           }
-          if (L.style === 'bus' && y > p.sill + 0.3 && y < p.sill + 0.5 && Math.abs(zl) < 0.5 && Math.floor(y * ppm) % 2 === 0) c = [30, 30, 32];
+          if (L.style === 'bus' && y > p.sill + 0.3 && y < p.sill + 0.5 && Math.abs(zl) < 0.5 && Math.floor(y * ppm) % 2 === 0) setC(busVent);
         } else {
           // trunk / tailgate seam and handle
-          if (Math.abs(y - (p.sill + 0.4)) < 0.5 / ppm && Math.abs(zl) < 0.7) c = scale(c, 0.6);
-          if (Math.abs(y - (p.belt - 0.1)) < 0.03 && Math.abs(z - L.yc) < 0.12) c = chrome;
+          if (Math.abs(y - (p.sill + 0.4)) < 0.5 / ppm && Math.abs(zl) < 0.7) mulC(0.6);
+          if (Math.abs(y - (p.belt - 0.1)) < 0.03 && dzc < 0.12) setC(chrome);
         }
         // licence plate
-        const plateY = p.sill + (end === 'front' ? 0.14 : 0.36);
-        if (Math.abs(z - L.yc) < 0.16 && Math.abs(y - plateY) < 0.07) c = Math.abs(z - L.yc) > 0.14 || Math.abs(y - plateY) > 0.05 ? [30, 30, 34] : (Math.floor((z - L.yc) * ppm) % 2 === 0 && Math.abs(y - plateY) < 0.02 ? [40, 50, 90] : [214, 212, 200]);
+        if (dzc < 0.16 && Math.abs(y - plateY) < 0.07) setC(dzc > 0.14 || Math.abs(y - plateY) > 0.05 ? plateRim : Math.floor((z - L.yc) * ppm) % 2 === 0 && Math.abs(y - plateY) < 0.02 ? plateInk : plate);
         // lamps: lens with a bright core and a dark bezel (the emissive lamp mesh sits on top)
         for (const l of lamps) {
           const dz = Math.abs(z - l.z), dy = Math.abs(y - l.y);
-          if (dz < l.w + 0.02 && dy < l.h + 0.02) c = dz < l.w && dy < l.h ? (end === 'front' ? (dz < l.w * 0.5 ? [236, 234, 220] : [176, 178, 172]) : (dy < l.h * 0.4 ? [210, 60, 44] : [140, 24, 20])) : [24, 24, 26];
+          if (dz < l.w + 0.02 && dy < l.h + 0.02) setC(dz < l.w && dy < l.h ? (end === 'front' ? (dz < l.w * 0.5 ? headCore : headLens) : dy < l.h * 0.4 ? tailCore : tailLens) : bezel);
         }
-        put(sh.u0 + tu, sh.v0 + tv, weather(c, z + (end === 'front' ? 30 : -30), y, y - p.sill, Math.round(end === 'front' ? L.xNose : L.xTail)));
+        emit(sh.u0 + tu, sh.v0 + tv, tu + wx0, tv, y - p.sill);
       }
+    }
   }
 
   // --- underside swatch: dark oily grime ---
@@ -336,7 +415,7 @@ export function paintSkin(L: Layout, inp: SkinInput): Skin {
     const sh = lay.sheets.under;
     for (let tv = 0; tv < sh.h; tv++) for (let tu = 0; tu < sh.w; tu++) put(sh.u0 + tu, sh.v0 + tv, [28 + ((tu + tv) % 3) * 4, 27, 26]);
   }
-  return { layout: lay, data };
+  return { layout: lay, data: new Uint8Array(data.buffer) };
 }
 
 /** Points along a closed polyline, one per texel step. */

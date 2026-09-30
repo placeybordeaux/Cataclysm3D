@@ -103,6 +103,21 @@ describe('vehicle model: geometry', () => {
       }
     });
 
+  it('builds every prototype without NaNs or exceptions (or declines it)', () => {
+    let built = 0;
+    for (const id of Object.keys(vdata.vehicles)) {
+      for (const status of [0, 1]) {
+        const v = make(id, status, 3);
+        if (!v.parts.length) continue;
+        const m = buildVehicleModel(v, 0);
+        if (!m) continue;
+        built++;
+        for (const g of [m.body, m.roof, m.parts, m.glass, m.lamps, m.tails, m.beacons]) if (g) bounds(g);
+      }
+    }
+    expect(built).toBeGreaterThan(150);
+  }, 60_000);
+
   it('returns null for odd grids (the parts renderer draws them)', () => {
     expect(buildVehicleModel(make('shopping_cart'), 0)).toBeNull();
   });

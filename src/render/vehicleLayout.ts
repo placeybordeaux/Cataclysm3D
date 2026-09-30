@@ -81,11 +81,12 @@ export const STYLE_PARAMS: Record<BodyStyle, StyleParams> = {
 export function styleFromId(id: string): BodyStyle | null {
   const s = id.toLowerCase();
   if (/motorcycle|scooter|superbike|motorbike/.test(s)) return 'motorcycle';
-  if (/wreck|plane|heli|boat|kayak|canoe|raft|ship|jetski|blimp|airship|flier|cutter|barge|sail|scuba|tank_|apc|ifv|howitzer|train|draisine|trolley|tram|loco|test|cart|chair|bed$|skateboard|wheelbarrow|wagon|harness|dogsled|sled|generator|work_light|turret|ballista|cannon|gatling|swivel|excavator|forklift|crane|roller|trencher|roadheader|autosweeper|handjack|unicycle|hovercraft|hover|reactor|split_test|none|custom/.test(s)) return 'frame';
+  if (/dukw/.test(s)) return 'truck';
+  if (/wreck|plane|heli|tractor|hopper|chassis|golf|boat|kayak|canoe|raft|ship|jetski|blimp|airship|flier|cutter|barge|sail|scuba|tank_|apc|ifv|howitzer|train|draisine|trolley|tram|loco|test|cart|chair|bed$|skateboard|wheelbarrow|wagon|harness|dogsled|sled|generator|work_light|turret|ballista|cannon|gatling|swivel|excavator|forklift|crane|roller|trencher|roadheader|autosweeper|handjack|unicycle|hovercraft|hover|reactor|split_test|none|custom/.test(s)) return 'frame';
   if (/bicycle|tandem|tricycle/.test(s)) return 'bicycle';
   if (/motorcycle|scooter|superbike|motorbike|quad_bike/.test(s)) return /quad/.test(s) ? 'frame' : 'motorcycle';
   if (/bus/.test(s)) return 'bus';
-  if (/semi_truck|tatra|military_cargo|flatbed|fire_engine|fire_truck|hazmat|tanker|truck_trailer|oldtractor/.test(s)) return 'truck';
+  if (/semi_truck|tatra|military_cargo|flatbed|fire_engine|fire_truck|hazmat|tanker|truck_trailer/.test(s)) return 'truck';
   if (/cube_van|ambulance|food_truck|icecream_truck|security_van|meth_lab|animalctrl|truck_swat|blinkie|wienermobile|rv$|surv_rv|lux_rv/.test(s)) return 'van';
   if (/hippie|camper_van|minivan/.test(s)) return 'minivan';
   if (/pickup/.test(s)) return 'pickup';
@@ -245,6 +246,8 @@ export function analyze(v: Vehicle, forceStyle?: BodyStyle): Layout {
   const style = forceStyle ?? classify(v);
   const p = { ...STYLE_PARAMS[style] };
   const livery = liveryFromId(v.protoId);
+  // School buses are the conventional kind: a bonnet ahead of the windscreen.
+  if (style === 'bus' && livery === 'school') Object.assign(p, { flatFront: false, hood: 1.4, nose: 1.25, rake: 0.35, lampY: 1.02 });
   const cols = bodyColumns(v);
   const yMin = cols[0], yMax = cols[cols.length - 1];
   const yc = (yMin + yMax) / 2;

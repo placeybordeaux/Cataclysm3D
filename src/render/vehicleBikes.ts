@@ -11,6 +11,10 @@ import type { ModelBuild } from './vehicleModel';
 // centre; the rider still sits over the saddle's tile. Parked bikes lean on the kickstand
 // (VehicleRenderer applies `parkedLean` when nobody is riding).
 
+function darkenTint(c: number): number {
+  return (Math.round(((c >> 16) & 255) * 0.6) << 16) | (Math.round(((c >> 8) & 255) * 0.6) << 8) | Math.round((c & 255) * 0.6);
+}
+
 export function buildBike(v: Vehicle, L: Layout, base: number): ModelBuild {
   const F = partFrames();
   const parts = new Batches(), lamps = new GeomBuilder(), tails = new GeomBuilder();
@@ -62,48 +66,59 @@ export function buildBike(v: Vehicle, L: Layout, base: number): ModelBuild {
     if (v.parts.some((q) => has(q, 'CONE_LIGHT'))) chamferBox(lamps, bar[0] + 0.02, bar[1] - 0.12, z - 0.04, bar[0] + 0.08, bar[1] - 0.06, z + 0.04, 0.02, F.light, F.light);
     eyeH = r + 1.2;
   } else {
-    const hx = xF - 0.3, hy = rF + 0.55;
+    // A standard / cruiser: steering head up front, teardrop tank, flat saddle, engine hung
+    // under the tank, swingarm to the rear axle, exhaust down the right side.
+    const hx = xF - 0.34, hy = rF + 0.62;
     const tint = paint;
-    // forks (chrome) and triple clamp
-    for (const s of [-1, 1]) tube(g(chrome), P(hx, hy, s * 0.09), P(xF, rF, s * 0.09), 0.032, F.chrome, 6);
-    chamferBox(g(0x333338), hx - 0.06, base + hy - 0.04, z - 0.13, hx + 0.06, base + hy + 0.04, z + 0.13, 0.03, F.metal, F.metal);
-    // front fender over the tyre
-    chamferBox(g(tint), xF - rF * 0.7, base + rF * 2 + 0.03, z - 0.08, xF + rF * 0.55, base + rF * 2 + 0.07, z + 0.08, 0.04, F.metal, F.metal);
-    // handlebars + grips + mirrors
-    const by = hy + 0.16, bx = hx - 0.1;
-    tube(g(chrome), P(hx, hy + 0.02), P(bx, by), 0.025, F.chrome);
-    tube(g(0x303034), P(bx, by, -0.36), P(bx, by, 0.36), 0.022, F.dark, 6);
+    const frame = 0x26262a;
+    // forks (chrome), triple clamp, front fender
+    for (const s of [-1, 1]) tube(g(chrome), P(hx, hy, s * 0.085), P(xF, rF, s * 0.085), 0.03, F.chrome, 6);
+    chamferBox(g(0x333338), hx - 0.06, base + hy - 0.03, z - 0.12, hx + 0.06, base + hy + 0.04, z + 0.12, 0.03, F.metal, F.metal);
+    chamferBox(g(tint), xF - rF * 0.75, base + rF * 2 + 0.03, z - 0.075, xF + rF * 0.5, base + rF * 2 + 0.07, z + 0.075, 0.035, F.metal, F.metal);
+    // handlebars on risers, grips, mirrors
+    const by = hy + 0.17, bx = hx - 0.12;
+    for (const s of [-1, 1]) tube(g(chrome), P(hx - 0.02, hy + 0.03, s * 0.06), P(bx, by, s * 0.08), 0.018, F.chrome, 5);
+    tube(g(chrome), P(bx, by, -0.34), P(bx, by, 0.34), 0.018, F.chrome, 6);
     for (const s of [-1, 1]) {
-      tube(g(black), P(bx, by, s * 0.3), P(bx, by, s * 0.42), 0.032, F.dark, 6);
-      tube(g(0x303034), P(bx, by, s * 0.28), P(bx + 0.02, by + 0.2, s * 0.32), 0.012, F.dark, 4);
-      chamferBox(g(black), bx - 0.02, base + by + 0.19, z + s * 0.32 - 0.06, bx + 0.04, base + by + 0.27, z + s * 0.32 + 0.06, 0.02, F.dark, F.dark);
+      tube(g(black), P(bx, by, s * 0.28), P(bx - 0.02, by, s * 0.4), 0.03, F.dark, 6);
+      tube(g(0x303034), P(bx, by, s * 0.24), P(bx - 0.03, by + 0.2, s * 0.3), 0.01, F.dark, 4);
+      chamferBox(g(black), bx - 0.06, base + by + 0.19, z + s * 0.3 - 0.06, bx - 0.01, base + by + 0.26, z + s * 0.3 + 0.06, 0.02, F.dark, F.dark);
     }
-    // headlamp nacelle (lit lens in `lamps`)
-    chamferBox(g(0x2a2a2e), hx + 0.02, base + hy - 0.12, z - 0.1, hx + 0.16, base + hy + 0.06, z + 0.1, 0.05, F.metal, F.metal);
+    // round headlamp (lit lens in `lamps`)
+    chamferBox(g(chrome), hx + 0.05, base + hy - 0.13, z - 0.09, hx + 0.17, base + hy + 0.03, z + 0.09, 0.05, F.chrome, F.chrome);
     const lit = v.parts.some((q) => has(q, 'CONE_LIGHT') && q.hp > 0);
-    if (lit) chamferBox(lamps, hx + 0.16, base + hy - 0.09, z - 0.075, hx + 0.19, base + hy + 0.04, z + 0.075, 0.03, F.light, F.light);
-    // tank
-    chamferBox(g(tint), hx - 0.62, base + hy - 0.2, z - 0.17, hx - 0.06, base + hy + 0.03, z + 0.17, 0.09, F.metal, F.metal);
-    chamferBox(g(tint), hx - 0.56, base + hy + 0.03, z - 0.12, hx - 0.14, base + hy + 0.08, z + 0.12, 0.08, F.metal, F.metal);
-    // saddle
-    const sx0 = xR + 0.18, sx1 = hx - 0.58;
-    chamferBox(g(0x1c1c1e), sx0, base + hy - 0.16, z - 0.15, sx1, base + hy - 0.02, z + 0.15, 0.07, F.leather, F.leather);
-    // tail cowl, taillight, rear fender
-    chamferBox(g(tint), xR - 0.12, base + hy - 0.22, z - 0.11, sx0 + 0.1, base + hy - 0.1, z + 0.11, 0.06, F.metal, F.metal);
-    chamferBox(tails, xR - 0.15, base + hy - 0.2, z - 0.06, xR - 0.11, base + hy - 0.13, z + 0.06, 0.02, F.light, F.light);
-    chamferBox(g(0x2a2a2e), xR - rR * 0.8, base + rR * 2 + 0.02, z - 0.07, xR + 0.1, base + rR * 2 + 0.05, z + 0.07, 0.03, F.dark, F.dark);
-    // engine: block with cooling fins, crankcase
-    const ex0 = xR + 0.42, ex1 = hx - 0.12;
-    chamferBox(g(0x4a4a50), ex0, base + 0.2, z - 0.16, ex1, base + hy - 0.26, z + 0.16, 0.06, F.ribbed, F.metal);
-    chamferBox(g(0x6a6a70), (ex0 + ex1) / 2 - 0.12, base + hy - 0.3, z - 0.12, (ex0 + ex1) / 2 + 0.16, base + hy - 0.19, z + 0.12, 0.04, F.ribbed, F.metal);
-    // frame: down tube, backbone, swingarm
-    tube(g(0x2a2a2e), P(hx, hy - 0.02), P(ex1 + 0.02, 0.28), 0.03, F.dark, 5);
-    tube(g(0x2a2a2e), P(hx, hy + 0.02), P(sx0 + 0.1, hy - 0.16), 0.03, F.dark, 5);
-    for (const s of [-1, 1]) tube(g(0x2a2a2e), P(ex0 + 0.05, 0.36, s * 0.1), P(xR, rR, s * 0.1), 0.03, F.dark, 5);
-    // exhaust along the right side
-    tube(g(chrome), P(ex1 - 0.02, 0.36, 0.12), P(ex0 - 0.05, 0.3, 0.2), 0.035, F.chrome, 6);
-    tube(g(chrome), P(ex0 - 0.05, 0.3, 0.2), P(xR - 0.12, rR + 0.1, 0.2), 0.045, F.chrome, 6);
-    eyeH = hy + 0.85;
+    if (lit) chamferBox(lamps, hx + 0.17, base + hy - 0.11, z - 0.07, hx + 0.19, base + hy + 0.01, z + 0.07, 0.035, F.light, F.light);
+    // teardrop tank: tall at the head, tapering toward the saddle
+    const tx1 = hx - 0.06, tx0 = hx - 0.6;
+    chamferBox(g(tint), tx0 + 0.12, base + hy - 0.16, z - 0.15, tx1, base + hy + 0.04, z + 0.15, 0.08, F.metal, F.metal);
+    chamferBox(g(tint), tx0, base + hy - 0.13, z - 0.11, tx0 + 0.2, base + hy - 0.02, z + 0.11, 0.06, F.metal, F.metal);
+    chamferBox(g(darkenTint(tint)), tx0 + 0.18, base + hy + 0.04, z - 0.04, tx1 - 0.08, base + hy + 0.06, z + 0.04, 0.02, F.metal, F.metal);
+    // saddle, side panel under it, rear fender + taillight
+    const sx0 = xR + 0.12, sx1 = tx0 + 0.04;
+    chamferBox(g(0x1c1c1e), sx0 + 0.1, base + hy - 0.15, z - 0.14, sx1, base + hy - 0.05, z + 0.14, 0.07, F.leather, F.leather);
+    chamferBox(g(0x1c1c1e), sx0, base + hy - 0.12, z - 0.1, sx0 + 0.22, base + hy - 0.07, z + 0.1, 0.05, F.leather, F.leather);
+    chamferBox(g(tint), sx0 + 0.12, base + hy - 0.34, z - 0.1, sx1 - 0.05, base + hy - 0.15, z + 0.1, 0.05, F.metal, F.metal);
+    chamferBox(g(tint), xR - rR * 0.85, base + rR * 2 + 0.02, z - 0.08, sx0 + 0.15, base + rR * 2 + 0.07, z + 0.08, 0.04, F.metal, F.metal);
+    chamferBox(tails, xR - rR * 0.85 - 0.03, base + rR * 2 + 0.02, z - 0.05, xR - rR * 0.85 + 0.01, base + rR * 2 + 0.08, z + 0.05, 0.02, F.light, F.light);
+    // engine: finned cylinders over a crankcase, gearbox behind
+    const ex0 = xR + 0.5, ex1 = hx - 0.16;
+    const em = (ex0 + ex1) / 2;
+    chamferBox(g(0x3a3a3e), ex0, base + 0.24, z - 0.13, ex1, base + 0.5, z + 0.13, 0.06, F.metal, F.metal);
+    chamferBox(g(0x8a8a90), em - 0.02, base + 0.5, z - 0.11, em + 0.2, base + hy - 0.2, z + 0.11, 0.04, F.fins, F.metal);
+    chamferBox(g(0x8a8a90), em - 0.24, base + 0.5, z - 0.11, em - 0.04, base + hy - 0.22, z + 0.11, 0.04, F.fins, F.metal);
+    chamferBox(g(0x5a5a60), ex0 - 0.08, base + 0.3, z - 0.1, ex0 + 0.12, base + 0.52, z + 0.1, 0.05, F.metal, F.metal);
+    // frame: backbone under the tank, down tube, swingarm, shocks
+    tube(g(frame), P(hx, hy - 0.02), P(sx0 + 0.25, hy - 0.2), 0.028, F.dark, 5);
+    tube(g(frame), P(hx, hy - 0.05), P(ex1 + 0.04, 0.3), 0.028, F.dark, 5);
+    for (const s of [-1, 1]) {
+      tube(g(frame), P(ex0, 0.34, s * 0.09), P(xR, rR, s * 0.09), 0.026, F.dark, 5);
+      tube(g(chrome), P(xR + 0.1, rR + 0.05, s * 0.1), P(sx0 + 0.18, hy - 0.2, s * 0.1), 0.022, F.chrome, 5);
+    }
+    // exhaust: header down from the cylinders, muffler along the right side
+    tube(g(chrome), P(em + 0.16, 0.55, 0.12), P(em + 0.1, 0.24, 0.17), 0.03, F.chrome, 6);
+    tube(g(chrome), P(em + 0.1, 0.24, 0.17), P(ex0 - 0.1, 0.25, 0.19), 0.03, F.chrome, 6);
+    tube(g(chrome), P(ex0 - 0.1, 0.25, 0.19), P(xR - 0.1, rR + 0.02, 0.19), 0.05, F.chrome, 7);
+    eyeH = hy + 0.8;
   }
   // sidecar tub on its own column
   for (const w of side) {

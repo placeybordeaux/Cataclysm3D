@@ -9,7 +9,7 @@ import { registerOption } from './options';
 import type { MonsterSystem } from '../game/monai';
 import { interactOverrides } from '../game/interact';
 import type { Renderer } from '../render/renderer';
-import { VehicleRenderer } from '../render/vehicleMesh';
+import { VEHICLE_LOOKS, VehicleRenderer } from '../render/vehicleMesh';
 import { LEVEL_HEIGHT } from '../world/coords';
 import type { UiContext } from './context';
 import { c, cssColor, getUiRoot, openMenu, openWindow, type MenuEntry } from './framework';
@@ -428,7 +428,22 @@ export async function installVehicles(game: Game, renderer: Renderer, api?: Debu
   // NPCs (installed after us: the NPC hooks look game.npcs up on each call).
   const ms = (game as unknown as { monsters?: MonsterSystem }).monsters;
   vs.creatureHooks = composeCreatureHooks([...(ms ? [monsterCreatureHooks(ms)] : []), npcCreatureHooks(game, vs)]);
-  new VehicleRenderer(renderer, game, vs);
+  const vr = new VehicleRenderer(renderer, game, vs);
+  registerOption({
+    name: 'Vehicle look',
+    value: () => (vr.look === 'model' ? 'modelled bodies' : 'part blocks'),
+    change: () => {
+      vr.look = VEHICLE_LOOKS[(VEHICLE_LOOKS.indexOf(vr.look) + 1) % VEHICLE_LOOKS.length];
+    },
+    desc: 'Modelled bodies (default): every car, truck, bus and bike is drawn as one shaped vehicle. Part blocks: the older look, one block per vehicle part (the grid Cataclysm uses). Also ?vehicles=model|parts.',
+  });
+  if (api) {
+    /** Switch the vehicle renderer ('model' | 'parts'); no argument = current. */
+    api.vehicleLook = (look?: 'model' | 'parts') => {
+      if (look) vr.look = look;
+      return vr.look;
+    };
+  }
 
   const needDriving = (fn: (v: Vehicle) => void) => () => {
     const v = vs.driving;

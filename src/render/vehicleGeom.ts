@@ -82,8 +82,8 @@ export function mergeGeometries(geos: THREE.BufferGeometry[]): THREE.BufferGeome
 
 // --- parts swatches ------------------------------------------------------------------
 
-export type PartSwatch = 'tread' | 'sidewall' | 'rim' | 'spokes' | 'fabric' | 'dark' | 'floor' | 'chrome' | 'light' | 'metal' | 'ribbed' | 'leather';
-const PART_SWATCHES: PartSwatch[] = ['tread', 'sidewall', 'rim', 'spokes', 'fabric', 'dark', 'floor', 'chrome', 'light', 'metal', 'ribbed', 'leather'];
+export type PartSwatch = 'tread' | 'sidewall' | 'rim' | 'spokes' | 'fabric' | 'dark' | 'floor' | 'chrome' | 'light' | 'metal' | 'ribbed' | 'leather' | 'fins';
+const PART_SWATCHES: PartSwatch[] = ['tread', 'sidewall', 'rim', 'spokes', 'fabric', 'dark', 'floor', 'chrome', 'light', 'metal', 'ribbed', 'leather', 'fins'];
 const SW = 32;
 
 function paintPart(kind: PartSwatch, x: number, y: number): number {
@@ -130,6 +130,9 @@ function paintPart(kind: PartSwatch, x: number, y: number): number {
       return 140 + Math.floor(n * 20) - (x % 16 === 0 || y % 16 === 0 ? 30 : 0);
     case 'ribbed':
       return x % 4 < 2 ? 150 : 110;
+    case 'fins':
+      // engine cooling fins: horizontal ridges
+      return y % 4 < 2 ? 170 + Math.floor(n * 12) : 84;
   }
 }
 
@@ -146,7 +149,8 @@ export function partSwatchPage(): { tex: THREE.Texture; frames: Record<PartSwatc
         const v = Math.max(0, Math.min(255, paintPart(k, x, y)));
         const o = (y * w + i * SW + x) * 4;
         data[o] = data[o + 1] = data[o + 2] = v;
-        data[o + 3] = 255;
+        // Wire wheels: the gaps between spokes are see-through (the world material's alpha test).
+        data[o + 3] = k === 'spokes' && v === 0 ? 0 : 255;
       }
   });
   const tex = new THREE.DataTexture(data, w, SW, THREE.RGBAFormat);

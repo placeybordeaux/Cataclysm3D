@@ -286,7 +286,9 @@ export function buildVehicleModel(v: Vehicle, base: number, opts: { reuseSkinKey
 
   // Top of the side wall (inset outline) as a function of x, for window openings.
   const topQ = Q.slice(0, nTop);
+  const topX0 = Math.min(...topQ.map((q) => q.x)), topX1 = Math.max(...topQ.map((q) => q.x));
   const ghTop = (x: number): number => {
+    x = Math.max(topX0, Math.min(topX1, x));
     let best = -Infinity;
     for (let i = 0; i < topQ.length - 1; i++) {
       const a = topQ[i], b = topQ[i + 1];
@@ -798,9 +800,11 @@ function beacons(b: Batches, L: Layout, base: number, hw: number, p: Layout['p']
     for (const s of [-1, 1]) chamferBox(b.get(0xe02020), x - 0.08, top - 0.02, L.yc + s * (hw - 0.25) - 0.1, x + 0.08, top + 0.1, L.yc + s * (hw - 0.25) + 0.1, 0.03, F.light, F.light);
     chamferBox(b.get(0xf0f0f0), x - 0.08, top - 0.02, L.yc - 0.12, x + 0.08, top + 0.08, L.yc + 0.12, 0.03, F.light, F.light);
   } else if (L.livery === 'school') {
-    const top = base + p.roof - 0.1;
-    for (const [x, c] of [[L.xNose - 0.35, 0xf0a020], [L.xTail + 0.02, 0xe02020]] as const)
-      for (const s of [-1, 1]) chamferBox(b.get(c), x - 0.04, top - 0.1, L.yc + s * (hw - 0.3) - 0.08, x + 0.04 + (x > 0 ? 0.3 : 0), top, L.yc + s * (hw - 0.3) + 0.08, 0.02, F.light, F.light);
+    // the warning lamps high on the front and rear faces
+    const top = base + p.roof - 0.08;
+    const front = (L.xCowl ?? L.xNose) - p.rake + 0.02;
+    for (const [x, c, d] of [[front, 0xf0a020, 1], [L.xTail, 0xe02020, -1]] as const)
+      for (const s of [-1, 1]) chamferBox(b.get(c), x - (d > 0 ? 0.02 : 0.05), top - 0.14, L.yc + s * (hw - 0.3) - 0.08, x + (d > 0 ? 0.05 : 0.02), top - 0.02, L.yc + s * (hw - 0.3) + 0.08, 0.02, F.light, F.light);
   }
 }
 
