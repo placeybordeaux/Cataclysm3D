@@ -7,7 +7,7 @@ import type { GameData } from '../src/data/types';
 import { spawnVehicle, type Vehicle } from '../src/game/vehicle';
 import type { VehicleDataFile } from '../src/game/vehicle_data';
 import { analyze, classify, setVehicleWidth, wheelRadius } from '../src/render/vehicleLayout';
-import { buildOutline, buildVehicleModel } from '../src/render/vehicleModel';
+import { buildOutline, buildVehicleModel, parkedSteerAngle } from '../src/render/vehicleModel';
 import { paintSkin, SKIN_PPM, skinLayout, skinLayoutInfo } from '../src/render/vehicleSkin';
 import { loadNodeData } from '../tools/lib/node_data';
 
@@ -47,7 +47,10 @@ describe('vehicle model: classification', () => {
   it('splits a sedan into hood / windscreen / cabin / rear glass / trunk', () => {
     const L = analyze(make('sedan'));
     expect(L.sections.map((s) => s.kind)).toEqual(['hood', 'shield', 'cabin', 'rearglass', 'deck']);
-    expect(L.xCowl).toBe(1.5);
+    expect(L.xCowl).toBeCloseTo(L.xOf(1.5), 9);
+    // BN grids run long: a 6-row sedan is drawn ~5.6 m, not 6
+    expect(L.xNose - L.xTail).toBeLessThan(5.7);
+    expect(L.xNose - L.xTail).toBeGreaterThan(5.3);
   });
 
   it('gives a pickup an open bed behind the cab and a box van its box', () => {
@@ -173,6 +176,21 @@ describe('vehicle model: geometry', () => {
     for (const sh of Object.values(s.layout.sheets))
       for (let v2 = 0; v2 < sh.h; v2++) for (let u = 0; u < sh.w; u++) if (s.data[((sh.v0 + v2) * s.layout.width + sh.u0 + u) * 4 + 3] !== 255) unset++;
     expect(unset).toBe(0);
+  });
+
+  it('parked front wheels: straight about half the time, never past ~23 degrees', () => {
+    const a = Array.from({ length: 400 }, (_, i) => parkedSteerAngle(i + 1));
+    const straight = a.filter((x) => x === 0).length;
+    expect(straight).toBeGreaterThan(140);
+    expect(straight).toBeLessThan(260);
+    expect(Math.max(...a.map(Math.abs))).toBeLessThanOrEqual(0.41);
+  });
+
+  it('the distance LOD drops the cabin interior', () => {
+    const v = make('sedan');
+    const near = buildVehicleModel(v, 0)!, far = buildVehicleModel(v, 0, { far: true })!;
+    const tris = (m: typeof near) => m.parts!.getIndex()!.count / 3;
+    expect(tris(far)).toBeLessThan(tris(near) * 0.7);
   });
 
   it('can hand the skin to a worker as structured-cloneable data', () => {

@@ -11,6 +11,10 @@ import { getUiRoot } from './ui/framework';
 import { registerOption } from './ui/options';
 import { AimHud, type AimHudFrame } from './ui/aimHud';
 import { sfx } from './audio/sfx';
+import { aimHooks, zoneOfPart, type Vec3 } from './game/aimmodel';
+import { pickModel } from './render/aimPick';
+import { LEVEL_HEIGHT } from './world/coords';
+import type { Monster } from './game/monster';
 
 // Wiring for the aim models (src/game/aimmodel.ts): which one is on (Options > Aim model,
 // `?aim=sway|timing|dice`, remembered in localStorage, `cdda.setAimModel`), and — every render
@@ -174,7 +178,9 @@ function installPresenter(game: Game, renderer: Renderer, monsters: MonstersHand
     },
     desc: 'Free aim: a faint trail behind the crosshair showing how it has been weaving over the last second (helps you time shots).',
   });
+  installModelHooks(game, renderer, monsters, api);
   let cross: HTMLElement | null = null;
+  let readout: HTMLElement | null = null;
   let linger = 0;
   let last = performance.now();
   let fitT = 0;
@@ -193,7 +199,7 @@ function installPresenter(game: Game, renderer: Renderer, monsters: MonstersHand
       const off = aim.offset(extra);
       vk = aim.viewKick(FEEL, extra);
       rel = { x: off.x - vk.x, y: off.y - vk.y };
-      aim.markShown(off.x, off.y, now);
+      aim.markShown(off.x, off.y, now, rel.x, rel.y);
     } else aim.shown = null;
     renderer.rig.aimView.x = vk.x;
     renderer.rig.aimView.y = vk.y;
@@ -202,6 +208,10 @@ function installPresenter(game: Game, renderer: Renderer, monsters: MonstersHand
     const px = offsetToPixels(rel, fov, H);
     cross ??= root.querySelector('.hud-cross');
     if (cross) cross.style.transform = on && (px.x || px.y) ? `translate(calc(-50% + ${px.x.toFixed(1)}px), calc(-50% + ${px.y.toFixed(1)}px))` : '';
+    // The aim readout (combatdepth.ts, 18 px under the centre) rides along under the reticle, a
+    // little lower, so the weaving crosshair never sits on its text.
+    readout ??= root.querySelector('.aim-level');
+    if (readout) readout.style.transform = on ? `translate(calc(-50% + ${px.x.toFixed(1)}px), ${(Math.max(0, px.y) + 8).toFixed(1)}px)` : 'translateX(-50%)';
     (api?.combatHud as { setReticle?: (x: number, y: number) => void } | undefined)?.setReticle?.(px.x, px.y);
     const vm = renderer.viewmodel;
     if (vm) {
@@ -257,5 +267,97 @@ function installPresenter(game: Game, renderer: Renderer, monsters: MonstersHand
     const r = reload();
     if (r && timingGames()) f.reload = { t: r.t / r.dur, band: reloadBand(r.skill), judged: r.judged };
     hud.frame(f, now);
+  });
+}
+
+/**
+ * The renderer's side of free aim: the drawn camera (aimHooks.view, so a shot follows exactly the
+ * pixel under the reticle, over the shoulder too), the drawn 3D bodies (aimHooks.pick: hit zones
+ * from the model's own head/limb boxes), and the dodge hop — a monster that dodges a swing
+ * (monsterDodge) springs up and leans away over 0.3 s on top of the slide the simulation gives it.
+ */
+function installModelHooks(game: Game, renderer: Renderer, monsters: MonstersHandle, api?: DebugApi): void {
+  const p = game.player;
+  const view = monsters.view;
+  const cam = renderer.rig.camera;
+  const e = cam.matrixWorld.elements;
+  // three.js (x, y up, z) -> game (x, y = z, h = y)
+  const v3 = (x: number, y: number, z: number): Vec3 => ({ x, y: z, h: y });
+  aimHooks.view = () => {
+    const mode = renderer.cameraMode;
+    if (mode === 'top') return null;
+    const eyeH = (p.crouching ? 1.0 : 1.6) + renderer.rig.eyeOffset + (renderer.groundAt?.(p.x, p.y, p.z) ?? 0);
+    return {
+      o: v3(e[12], e[13], e[14]), r: v3(e[0], e[1], e[2]), u: v3(e[4], e[5], e[6]), f: v3(-e[8], -e[9], -e[10]),
+      third: mode === 'third', eye: { x: p.x, y: p.y, h: p.z * LEVEL_HEIGHT + eyeH },
+    };
+  };
+  if (!view) return;
+  aimHooks.pick = (m, o, d) => {
+    const mon = m as Monster;
+    const inst = view.modelOf(mon);
+    if (!inst) return undefined;
+    const r = pickModel(inst, o, d);
+    if (!r) return r;
+    return { t: r.t, part: r.part, zone: zoneOfPart(r.part, mon.type.flags.includes('NOHEAD')) };
+  };
+  if (api) {
+    /** Debug/setup: the drawn world centre (game coords) of a monster's model part, e.g. to aim at its head. */
+    api.modelPart = (uid: number, name: string) => {
+      const m = monsters.sys.active.find((q) => q.uid === uid);
+      const inst = m && view.modelOf(m);
+      if (!inst) return null;
+      const i = inst.rig.parts.findIndex((q) => q.name === name);
+      if (i < 0) return null;
+      const e = inst.mats.subarray(i * 16, i * 16 + 16);
+      return { x: e[12], y: e[14], h: e[13], parts: inst.rig.parts.map((q) => q.name) };
+    };
+    api.modelLift = (uid: number) => {
+      const m = monsters.sys.active.find((q) => q.uid === uid);
+      const inst = m && view.modelOf(m);
+      return inst ? { lift: inst.lift, fall: inst.fall } : null;
+    };
+  }
+
+  // --- dodge hop (additive over what the monster view set this tick; see the header)
+  const HOP = 0.3;
+  const hops = new Map<Monster, { t: number; dx: number; dy: number; lift: number; fall: number; baseLift: number; baseFall: number; baseDx: number; baseDy: number }>();
+  game.events.on('monsterDodge', (ev) => {
+    const d = Math.hypot(ev.dx, ev.dy) || 1;
+    hops.set(ev.monster as Monster, { t: 0, dx: ev.dx / d, dy: ev.dy / d, lift: NaN, fall: NaN, baseLift: 0, baseFall: 0, baseDx: 0, baseDy: 1 });
+  });
+  renderer.beforeRender.unshift((dt) => {
+    for (const [m, h] of hops) {
+      const inst = view.modelOf(m);
+      h.t += dt;
+      if (!inst || m.dead) {
+        hops.delete(m);
+        continue;
+      }
+      // The monster view rewrites lift/fall every simulation tick; between ticks our last write stands.
+      if (inst.lift !== h.lift) h.baseLift = inst.lift;
+      if (inst.fall !== h.fall) {
+        h.baseFall = inst.fall;
+        h.baseDx = inst.fallDx;
+        h.baseDy = inst.fallDy;
+      }
+      const u = Math.min(1, h.t / HOP);
+      const k = Math.sin(Math.PI * u);
+      if (u >= 1 || h.baseFall > 0) {
+        inst.lift = h.baseLift;
+        inst.fall = h.baseFall;
+        inst.fallDx = h.baseDx;
+        inst.fallDy = h.baseDy;
+        inst.dirty = true;
+        hops.delete(m);
+        continue;
+      }
+      inst.lift = h.lift = h.baseLift + 0.28 * k;
+      // Lean away: the body tips toward where it's springing, about its feet.
+      inst.fall = h.fall = 0.35 * k;
+      inst.fallDx = h.dx;
+      inst.fallDy = h.dy;
+      inst.dirty = true;
+    }
   });
 }

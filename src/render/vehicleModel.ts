@@ -4,7 +4,7 @@ import { GeomBuilder, type V3 } from './geometry';
 import type { TileFrame } from './textureSource';
 import { analyze, type Layout } from './vehicleLayout';
 import { liveryBody, paintSkin, sheetUv, skinLayout, skinLayoutInfo, SKIN_PPM, type SheetName, type Skin, type SkinInput, type SkinLayoutInfo } from './vehicleSkin';
-import { Batches, chamferBox, faceNormal, partFrames, quad4, tube, wheel, type PartSwatch } from './vehicleGeom';
+import { Batches, chamferBox, faceNormal, hash, mergeGeometries, partFrames, quad4, tube, wheel, type PartSwatch } from './vehicleGeom';
 import { buildBike } from './vehicleBikes';
 import { buildFrame } from './vehicleFrame';
 
@@ -53,9 +53,10 @@ export interface ModelBuild {
   /** Identifies the skin's content: rebuilds with the same key reuse the texture. */
   skinKey: string;
   layout: Layout;
-  /** Driver eye height above the floor level (m) and the driver's visual lateral position. */
+  /** Driver eye height above the floor level (m) and the driver's drawn seat (mount space). */
   eyeH: number;
   driverZ: number | null;
+  driverX?: number;
   /** Bikes lean on their stand when nobody rides them (rad, + = right side down). */
   parkedLean: number;
   /** Frame-style builds: the roof is drawn with the parts swatches, there is no skin. */
@@ -65,6 +66,8 @@ export interface ModelBuild {
 }
 
 const FULL: TileFrame = { texture: null as unknown as THREE.Texture, uv: [0, 0, 1, 1], w: 1, h: 1, ppm: 32 };
+/** Sky-light share inside a cabin (chunk interiors use INDOOR_SKY 0.5; a car roof is closer overhead). */
+const INTERIOR_SKY = 0.35;
 
 // --- profile ---------------------------------------------------------------------------
 
@@ -265,7 +268,11 @@ function loopNormals(loop: { x: number; y: number }[]): { nx: number; ny: number
 // --- build -----------------------------------------------------------------------------
 
 /** Build the model for a vehicle (odd grids get the tidy frame build, vehicleFrame.ts). */
-export function buildVehicleModel(v: Vehicle, base: number, opts: { reuseSkinKey?: string; deferSkin?: boolean; separateWheels?: boolean } = {}): ModelBuild | null {
+/**
+ * `far`: the distance LOD — no cabin interior, mirrors or exhaust, coarser wheels (a car 50 m
+ * away is a few dozen pixels; its seats only cost triangles and build time).
+ */
+export function buildVehicleModel(v: Vehicle, base: number, opts: { reuseSkinKey?: string; deferSkin?: boolean; separateWheels?: boolean; far?: boolean } = {}): ModelBuild | null {
   const L = analyze(v);
   if (L.style === 'motorcycle' || L.style === 'bicycle') return buildBike(v, L, base);
   if (L.style === 'frame' || !L.sections.length) return buildFrame(v, L, base);
@@ -372,8 +379,8 @@ export function buildVehicleModel(v: Vehicle, base: number, opts: { reuseSkinKey
       } else if (w.kind === 'glass' || (w.kind === 'half' && r.roof) || (w.kind === 'none' && r.roof)) {
         const prev = intervals[intervals.length - 1];
         const kind = w.kind === 'none' ? 'open' : 'glass';
-        if (prev && !prev.door && prev.kind === kind && L.style !== 'bus' && Math.abs(prev.x1 - (r.x + 0.5)) < 0.01) prev.x1 = r.x - 0.5;
-        else intervals.push({ x0: r.x + 0.5, x1: r.x - 0.5, part: w.part, kind, door: false });
+        if (prev && !prev.door && prev.kind === kind && L.style !== 'bus' && Math.abs(prev.x1 - L.xOf(r.x + 0.5)) < 0.01) prev.x1 = L.xOf(r.x - 0.5);
+        else intervals.push({ x0: L.xOf(r.x + 0.5), x1: L.xOf(r.x - 0.5), part: w.part, kind, door: false });
       }
     }
     // doors reaching forward to the A-pillar overlap the row ahead: trim the earlier pane
@@ -584,8 +591,10 @@ export function buildVehicleModel(v: Vehicle, base: number, opts: { reuseSkinKey
   const floorY = p.sill + 0.1;
   const seatTop = Math.max(floorY + 0.2, p.belt - 0.45);
   const cabX0 = cab ? cab.x0 : L.xNose, cabX1 = L.sections.filter((s) => s.kind !== 'deck' && s.kind !== 'bed' && s.kind !== 'flat' && s.kind !== 'hood').reduce((m, s) => Math.min(m, s.x1), cabX0);
+  parts.sky = INTERIOR_SKY;
+  const far = !!opts.far;
   // floor across the cabin (and boxes), inside the walls
-  if (cab) {
+  if (cab && !far) {
     const fz = hw - 0.06;
     parts.get(darkenC(p.interior, 0.8)).box(cabX1 + 0.05, base + floorY - 0.04, L.yc - fz, cabX0 - 0.05, base + floorY, L.yc + fz, 4, F.floor, F.floor, base);
   }
@@ -601,6 +610,7 @@ export function buildVehicleModel(v: Vehicle, base: number, opts: { reuseSkinKey
     const wz = Math.max(0.2, hw - 0.42);
     parts.get(0x2a2a2c).box(L.xTail + 0.45, base + p.sill * 0.35, L.yc - wz, L.xNose - 0.45, base + p.sill + 0.03, L.yc + wz, 63, F.dark, F.dark, base);
   }
+  parts.sky = 1;
   // bumpers
   const bumperTint = p.bumper === 'chrome' ? 0xb8bcc2 : p.bumper === 'black' ? 0x2e2f33 : paintC;
   const bumperSw: PartSwatch = p.bumper === 'chrome' ? 'chrome' : p.bumper === 'black' ? 'dark' : 'metal';
@@ -610,7 +620,7 @@ export function buildVehicleModel(v: Vehicle, base: number, opts: { reuseSkinKey
     chamferBox(parts.get(bumperTint), xa, base + p.sill - 0.02, L.yc - bz, xb, base + p.sill + 0.22, L.yc + bz, 0.12, F[bumperSw], F[bumperSw]);
   }
   // mirrors at the A-pillar base
-  if (L.xCowl !== null) {
+  if (L.xCowl !== null && !far) {
     const mx = (p.flatFront ? L.xNose - p.rake : L.xCowl) - 0.22;
     for (const side of [-1, 1]) {
       const z = L.yc + side * (hw * tumble(mx, belt + 0.1) + 0.12);
@@ -618,6 +628,8 @@ export function buildVehicleModel(v: Vehicle, base: number, opts: { reuseSkinKey
       tube(parts.get(0x2a2a2e), [mx, base + belt + 0.06, L.yc + side * (hw - 0.02)], [mx, base + belt + 0.1, z - side * 0.08], 0.02, F.dark, 4);
     }
   }
+  // The cabin is in the roof's shade: less sky light, so seats read dark through the glass.
+  parts.sky = INTERIOR_SKY;
   // dashboard + steering wheel
   let driverZ: number | null = null;
   const dashFront = p.flatFront || L.xCowl === null ? L.xNose - 0.12 : L.xCowl - 0.02;
@@ -625,39 +637,51 @@ export function buildVehicleModel(v: Vehicle, base: number, opts: { reuseSkinKey
   // driver's seat the car is a thin band (dash, then a sliver of bonnet) under the road.
   const eyeH = Math.min(p.roof - 0.14, Math.max(seatTop + 0.68, p.hood + 0.3, belt + 0.24));
   const dashTop = Math.min(belt - 0.1, p.hood - 0.14, eyeH - 0.5);
-  if (cab) {
+  if (cab && !far) {
     const dz = hw - 0.08;
     chamferBox(parts.get(darkenC(p.interior, 0.7)), dashFront - 0.34, base + dashTop - 0.28, L.yc - dz, dashFront, base + dashTop, L.yc + dz, 0.05, F.dark, F.dark);
   }
   const ctrl = v.parts.find((q) => has(q, 'CONTROLS'));
-  if (ctrl && cab) {
-    driverZ = L.zOf(ctrl.my);
-    const sx = Math.min(dashFront - 0.46, ctrl.mx + 0.62);
+  if (ctrl && cab) driverZ = L.zOf(ctrl.my);
+  if (ctrl && cab && driverZ !== null && !far) {
+    const sx = Math.min(dashFront - 0.46, L.xOf(ctrl.mx) + 0.62);
     steeringWheel(parts.get(0x1e1e22), sx, base + dashTop - 0.16, driverZ, 0.18, F.dark);
     // instrument binnacle
     chamferBox(parts.get(0x1a1a1c), dashFront - 0.36, base + dashTop - 0.02, driverZ - 0.15, dashFront - 0.24, base + dashTop + 0.03, driverZ + 0.15, 0.03, F.dark, F.dark);
   }
   // seats
-  for (const s of v.parts.filter((q) => has(q, 'SEAT') || has(q, 'BED'))) {
+  for (const s of far ? [] : v.parts.filter((q) => has(q, 'SEAT') || has(q, 'BED'))) {
     const tint = s.hp > 0 ? p.interior : darkenC(p.interior, 0.6);
     seat(parts.get(tint), s, L, base, floorY, seatTop, F, has(s, 'BED'));
   }
+  parts.sky = 1;
   // wheels (the driven vehicle gets one mesh per wheel so the renderer can steer and spin them)
   const loose: NonNullable<ModelBuild['wheels']> = [];
+  // Parked cars were left with the wheel wherever it was: about half turned a little.
+  const parkedSteer = parkedSteerAngle(v.uid);
+  const turned: THREE.BufferGeometry[] = [];
   for (const w of L.wheels) {
     const flat = w.part.hp <= 0;
     const r = w.r;
     const cy = base + (flat ? r * 0.8 : r);
-    const wopts = { flat, sides: r > 0.4 ? 16 : 14, rimFrac: L.style === 'truck' || L.style === 'bus' ? 0.55 : 0.64 };
+    const wopts = { flat, sides: far ? 10 : r > 0.4 ? 16 : 14, rimFrac: L.style === 'truck' || L.style === 'bus' ? 0.55 : 0.64 };
     if (opts.separateWheels && !flat) {
       const one = new Batches();
       wheel(one.get(0x9a9a9a), 0, 0, 0, r, w.width, F, wopts);
       const geo = one.build();
       if (geo) loose.push({ geo, x: w.x, y: cy, z: w.z, r, steer: w.steer });
+    } else if (w.steer && parkedSteer !== 0) {
+      const one = new Batches();
+      wheel(one.get(flat ? 0x5a5656 : 0x9a9a9a), 0, 0, 0, r, w.width, F, wopts);
+      const geo = one.build();
+      if (geo) {
+        geo.applyMatrix4(new THREE.Matrix4().makeTranslation(w.x, cy, w.z).multiply(new THREE.Matrix4().makeRotationY(-parkedSteer)));
+        turned.push(geo);
+      }
     } else wheel(wheels.get(flat ? 0x5a5656 : 0x9a9a9a), w.x, cy, w.z, r, w.width, F, wopts);
   }
   // exhaust
-  tube(parts.get(0x8a8a8e), [L.xTail + 0.5, base + p.sill * 0.6, L.yc - hw * 0.45], [L.xTail - 0.04, base + p.sill * 0.6, L.yc - hw * 0.45], 0.035, F.chrome, 6);
+  if (!far) tube(parts.get(0x8a8a8e), [L.xTail + 0.5, base + p.sill * 0.6, L.yc - hw * 0.45], [L.xTail - 0.04, base + p.sill * 0.6, L.yc - hw * 0.45], 0.035, F.chrome, 6);
 
   // --- lamps (emissive when on) ---
   const lampsG = new GeomBuilder(), tailsG = new GeomBuilder(), beaconsB = new Batches();
@@ -673,13 +697,24 @@ export function buildVehicleModel(v: Vehicle, base: number, opts: { reuseSkinKey
     return geo;
   };
   const partsGeo = out(parts);
-  const wheelsGeo = out(wheels, false);
+  const wheelsBuilt = out(wheels, false);
+  const wheelList = [wheelsBuilt, ...turned].filter((g): g is THREE.BufferGeometry => !!g);
+  const wheelsGeo = wheelList.length > 1 ? mergeGeometries(wheelList) : wheelList[0] ?? null;
+  if (wheelList.length > 1) for (const g of wheelList) g.dispose();
   const merged = partsGeo && wheelsGeo ? mergeTwo(partsGeo, wheelsGeo) : partsGeo ?? wheelsGeo;
 
   return {
     body: out(body), roof: out(roof), parts: merged, glass: out(glass), lamps: out(lampsG), tails: out(tailsG), beacons: out(beaconsB),
-    skin, skinJob, skinKey, layout: L, eyeH, driverZ, parkedLean: 0, wheels: loose.length ? loose : undefined,
+    skin, skinJob, skinKey, layout: L, eyeH, driverZ, driverX: ctrl ? L.xOf(ctrl.mx) : undefined, parkedLean: 0, wheels: loose.length ? loose : undefined,
   };
+}
+
+/** Front-wheel angle a parked vehicle was left with (rad): straight ~half the time, else up to ~22 deg. */
+export function parkedSteerAngle(uid: number): number {
+  const h = hash(uid, 17, 3);
+  if (h < 0.5) return 0;
+  const a = 0.12 + ((h - 0.5) / 0.5) * 0.28;
+  return hash(uid, 5, 9) < 0.5 ? -a : a;
 }
 
 function sampleWallTop(f: (x: number) => number, x0: number, x1: number): SkinInput['wallTop'] {
@@ -774,7 +809,7 @@ function lamps(L: Layout, v: Vehicle): { head: LampSpec[]; tail: LampSpec[] } {
 }
 
 export function seat(g: GeomBuilder, s: VehiclePart, L: Layout, base: number, floorY: number, seatTop: number, F: ReturnType<typeof partFrames>, bed: boolean): void {
-  const x = s.mx, z = L.zOf(s.my);
+  const x = L.xOf(s.mx), z = L.zOf(s.my);
   const half = Math.min(0.27, Math.max(0.16, (L.zOf(1) - L.zOf(0)) * 0.46));
   const sw = F.fabric;
   // cushion

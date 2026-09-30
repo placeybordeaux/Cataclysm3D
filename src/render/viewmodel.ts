@@ -283,7 +283,36 @@ export function swingKeys(ph: SwingPhases, from: [number, number, number] = [0, 
   };
 }
 
+/**
+ * What the viewmodel computed this frame, for other renderers of the same animation
+ * (render/chars/fpView.ts draws it in 3D). Screen positions are low-res pixels from the
+ * bottom-left; offsets are fractions of the screen height; rot is the 2D pose rotation.
+ */
+export interface ViewmodelState {
+  mode: 'none' | 'fists' | 'item' | 'drawn' | 'whirl';
+  lowW: number;
+  lowH: number;
+  /** fists: left, right grip points and pose */
+  hands: { x: number; y: number; dx: number; dy: number; rot: number }[];
+  /** held item grip point and pose */
+  item: { x: number; y: number; dx: number; dy: number; rot: number; vis: boolean };
+  ads: number;
+  guard: number;
+  flash: boolean;
+  anim: AttackKind | null;
+  animT: number;
+  /** drawn bow/slingshot: grip point, rotation and draw state */
+  drawn: { kind: DrawnKind; x: number; y: number; rot: number; draw: number; nocked: boolean; kick: number } | null;
+  whirl: number;
+}
+
 export class Viewmodel {
+  /** Another renderer draws the hands (fpView.ts): keep computing, hide the sprites. */
+  hide2d = false;
+  readonly state: ViewmodelState = {
+    mode: 'none', lowW: 1, lowH: 1, hands: [{ x: 0, y: 0, dx: 0, dy: 0, rot: 0 }, { x: 0, y: 0, dx: 0, dy: 0, rot: 0 }],
+    item: { x: 0, y: 0, dx: 0, dy: 0, rot: 0, vis: false }, ads: 0, guard: 0, flash: false, anim: null, animT: 0, drawn: null, whirl: 0,
+  };
   readonly scene = new THREE.Scene();
   readonly camera = new THREE.OrthographicCamera(0, 1, 1, 0, -10, 10);
   /** Light on the hands (linear RGB), set by the renderer from the light map. */
@@ -314,7 +343,7 @@ export class Viewmodel {
   ads = false;
   /**
    * Free aim (src/game/aimmodel.ts): where the reticle sits, low-res pixels from the centre (x
-   * right, y up). The gun (fully when aiming down the sights) and a drawn bow follow it, so the
+   * right, y up). The gun (at the hip and down the sights) and a drawn bow follow it fully, so the
    * weapon visibly points where the shot will go. Set every frame by src/aim.ts.
    */
   readonly aimPx = { x: 0, y: 0 };
@@ -520,11 +549,12 @@ export class Viewmodel {
     const shake = pose.shake * lowH * 0.006;
     const kick = this.bowKick > 0 ? Math.sin((this.bowKick / 0.22) * Math.PI) * lowH * 0.025 : 0;
     // bobX/bobY already carry the knock from being hit (jolt).
-    const x = restX + (aimX - restX) * ease(d) + (bobX + this.sway) * lowH * (1 - 0.7 * d) + Math.sin(this.shakeT * 37) * shake + this.aimPx.x * (0.4 + 0.6 * d);
-    const y = restY + (aimY - restY) * ease(d) + bobY * lowH * (1 - 0.7 * d) + Math.cos(this.shakeT * 29) * shake + kick + this.aimPx.y * (0.4 + 0.6 * d);
-    b.part.mesh.visible = this.enabled;
+    const x = restX + (aimX - restX) * ease(d) + (bobX + this.sway) * lowH * (1 - 0.7 * d) + Math.sin(this.shakeT * 37) * shake + this.aimPx.x;
+    const y = restY + (aimY - restY) * ease(d) + bobY * lowH * (1 - 0.7 * d) + Math.cos(this.shakeT * 29) * shake + kick + this.aimPx.y;
+    b.part.mesh.visible = this.enabled && !this.hide2d;
     b.part.mesh.position.set(Math.round(x), Math.round(y), 0);
     b.part.mesh.rotation.z = rot - (this.bowKick > 0 ? 0.05 * Math.sin((this.bowKick / 0.22) * Math.PI) : 0);
+    this.state.drawn = { kind: b.key.startsWith('bow') ? 'bow' : 'slingshot', x, y, rot: b.part.mesh.rotation.z, draw: d, nocked: pose.nocked && this.bowKick <= 0.12, kick: this.bowKick };
   }
 
   /** Raise the weapon (or both fists) to block; never cuts a swing short. */
@@ -659,7 +689,10 @@ export class Viewmodel {
     const steady = 1 - 0.7 * this.adsBlend;
     const bobX = Math.cos(this.bobPhase) * this.bobAmp * 0.025 * steady + this.joltX;
     const bobY = -Math.abs(Math.sin(this.bobPhase)) * this.bobAmp * 0.025 * steady + this.joltY;
-    const vis = this.enabled;
+    const vis = this.enabled && !this.hide2d;
+    const st = this.state;
+    st.lowW = lowW; st.lowH = lowH; st.ads = this.adsBlend; st.guard = this.guardBlend;
+    st.anim = this.anim?.kind ?? null; st.animT = this.anim?.t ?? 0; st.flash = this.flashT > 0; st.drawn = null;
     const place = (p: Part, x: number, y: number, rot: number, shown: boolean) => {
       p.mesh.visible = vis && shown;
       // whole low-res pixels, so sprite texels never straddle pixel boundaries
@@ -678,6 +711,7 @@ export class Viewmodel {
       fl.mesh.visible = fr.mesh.visible = false;
       this.flash!.mesh.visible = false;
       this.placeBow(dt, bowPose!, lowW, lowH, bobX, bobY);
+      st.mode = 'drawn';
       return;
     }
     if (this.bow) this.bow.part.mesh.visible = false;
@@ -687,6 +721,7 @@ export class Viewmodel {
       const wx = lowW * 0.5 + lowH * (0.3 + Math.cos(w) * 0.05 + bobX);
       const wy = lowH * (0.3 + Math.sin(w) * 0.05 + bobY);
       place(this.weapon, wx, wy, w, true);
+      st.mode = 'whirl'; st.whirl = w; st.item.x = wx; st.item.y = wy; st.item.rot = w; st.item.vis = true;
       fl.mesh.visible = fr.mesh.visible = false;
       this.flash!.mesh.visible = false;
       return;
@@ -696,10 +731,11 @@ export class Viewmodel {
       this.lastPose = [a.dx, a.dy, a.rot];
       // ADS: the gun comes in toward the centre and up so the muzzle sits just under the crosshair.
       const ads = this.adsBlend;
-      const follow = 0.5 + 0.5 * ads;
-      const gx = lowW * 0.5 + lowH * ((0.42 - 0.3 * ads) + (bobX + this.sway) * steady + a.dx) + this.aimPx.x * follow;
-      const gy = lowH * (0.22 + 0.07 * ads + bobY + a.dy) + this.aimPx.y * follow;
+      const gx = lowW * 0.5 + lowH * ((0.42 - 0.3 * ads) + (bobX + this.sway) * steady + a.dx) + this.aimPx.x;
+      const gy = lowH * (0.22 + 0.07 * ads + bobY + a.dy) + this.aimPx.y;
       place(this.weapon, gx, gy, a.rot, a.vis);
+      st.mode = 'item';
+      Object.assign(st.item, { x: gx, y: gy, dx: a.dx, dy: a.dy, rot: a.rot, vis: a.vis });
       fl.mesh.visible = fr.mesh.visible = false;
       const m = this.weapon.muzzle.clone().rotateAround(new THREE.Vector2(), a.rot);
       place(this.flash!, gx + m.x, gy + m.y, 0, this.flashT > 0);
@@ -712,6 +748,8 @@ export class Viewmodel {
         const x = lowW * 0.5 + lowH * (side * (0.36 + bobX + a.dx) + this.sway);
         const y = lowH * (0.14 + bobY * (hand ? 1 : 0.8) + a.dy);
         place(this.fists![hand], x, y, 0, true);
+        st.mode = 'fists';
+        Object.assign(st.hands[hand], { x, y, dx: a.dx, dy: a.dy, rot: a.rot });
       }
       this.flash!.mesh.visible = false;
     }

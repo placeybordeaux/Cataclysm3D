@@ -15,11 +15,11 @@ lighting.
 | Options > **Vehicle look** | modelled bodies (default) / part blocks (the v2 look), persisted |
 | `?vehicles=model` / `?vehicles=parts` | URL override (anything else throws) |
 | `cdda.vehicleLook('parts')` | live; every vehicle rebuilds next frame |
-| Options > **Vehicle width** / `?vehiclewidth=real\|fill` / `cdda.vehicleWidth('fill')` | model look only: `real` (default) draws car proportions (a car ~2.6 m on its 4-tile grid, so you stop ~0.7 m short of the paint: collision is still the grid); `fill` widens bodies to ~0.3 m inside the footprint (chunkier, but you touch what you see) |
+| Options > **Vehicle width** / `?vehiclewidth=real\|fill` / `cdda.vehicleWidth('fill')` | model look only: `real` (default) draws real-world proportions; `fill` stretches bodies to the grid footprint. Collision follows the drawn body either way (below), so `real` has no invisible wall |
 
 `fill` for comparison (same views as the first two rows below):
 
-| ![](screenshots/wave3/vehicles/fill_lineup-car-sedan-car_sports.png) | ![](screenshots/wave3/vehicles/fill_lineup-suv-pickup-cube_van.png) |
+| ![](screenshots/wave3/vehicles/fill_lineup-car-sedan-car_sports.jpg) | ![](screenshots/wave3/vehicles/fill_lineup-suv-pickup-cube_van.jpg) |
 | --- | --- |
 
 ## How it works
@@ -40,9 +40,23 @@ lighting.
   deck. Wheels (diameter from BN's rim size in **cm**, `vpart_info::wheel_info` `"425 mm"` ->
   42.5, plus a sidewall), doors (the front door reaches forward to the A-pillar), side glass
   per row.
-- **Width is squeezed**: a car is 4 tiles wide; drawn to scale that is a 4 m pancake. The
-  body is `widthPerCol` per column (a car ~2.6 m). Seats keep their grid positions (`zOf`)
-  so a passenger's eye and seat agree; the driving camera uses the drawn seat.
+- **Proportions**: BN grids are fat and long (a car is 4 x 6 tiles). Bodies are drawn at
+  real-world proportions scaled ~1.15-1.2x to the world (doors and people are big here):
+  a sedan ~5.6 x 2.1 x 1.62 m vs a real one's ~4.8 x 1.8 x 1.45. Width is `widthPerCol` per
+  column, length is shortened around the grid's middle by `lengthScale` (`xOf`); seats keep
+  their columns (`zOf`) and move along with the length, and the driving camera uses the
+  drawn seat. BN's generic `car` (a roofed cargo row behind the rear seats) is drawn as a
+  notchback sedan, not a wagon.
+- **Collision follows the drawn body** (`src/game/vehicleShape.ts`): map overlays can
+  resolve collision with sub-tile shapes (`MapOverlay.shaped` / `collide`, used by
+  `physics.ts` for the player, monsters and NPCs). Each obstacle mount's cell is clipped to
+  the body outline in mount space (so a car turned 45 deg works too); open doors and aisles
+  stay walkable. Being *in* a vehicle (`playerOn`), riding along when it moves, a door
+  blocked by you standing in it, and run-overs all use the body: a zombie on the verge 0.4 m
+  from the paint is not run over, one in the lane is. The crosshair has to reach the paint.
+  Vehicle-vs-vehicle and vehicle-vs-terrain crashes stay tile-based (CDDA's model). The
+  renderer supplies the outline (`vehicleSystem.bodyShape`); headless (tests, sim) and the
+  `parts` look keep whole tiles. Real-input check: `tools/realinput.ts --only carside`.
 
 `src/render/vehicleModel.ts` builds the geometry:
 
@@ -65,6 +79,13 @@ lighting.
   shards left in the frame, flat tyres squash and the body sags onto that corner, broken
   parts rust and dent, blood splashes, heavily wrecked vehicles are burnt out.
 - Roof panels hide in top-down view (you look into the cabin, like CDDA's map).
+- Cabins get less sky light (like building interiors) and dark trim, and the glass is tinted
+  more from outside, so seats read dark through the windows instead of glowing.
+- Parked vehicles were left with the wheel wherever it was: about half have the front
+  wheels turned up to ~23 deg (per vehicle, stable). The driven vehicle's wheels steer and
+  roll; ridden bikes lean into turns.
+- **Distance LOD**: past 50 m (back inside 42 m) a vehicle is rebuilt without its cabin
+  interior, mirrors and exhaust, with coarser wheels and no shadow casting.
 
 `src/render/vehicleSkin.ts` paints the per-vehicle **skin** at **32 texels/m**, nearest
 filtering, onto five sheets the geometry projects onto by face normal (two sides, top, front,
@@ -94,26 +115,27 @@ bottom of the view with the A-pillars framing the road.
 ## Screenshots (RTX 5080, 1600x900, look `full`)
 
 Regenerate: `~/claude-stuff/bin/heavy --kind gpu --mem 2 -- nix-shell --run "npx tsx tools/vehicle-shots.ts --gpu model parts"`
-(views in `tools/vehicle-views.js`; `--views 'a;b'` to pick). Left: v2 part blocks
-(`parts`); right: modelled bodies (`model`).
+(views in `tools/vehicle-views.js`; `--views 'a;b'` to pick). JPEG q75 (at q85 these
+low-res, upscaled frames come out larger than PNG). Left: v2 part blocks (`parts`); right:
+modelled bodies (`model`).
 
 | view | before (`parts`) | after (`model`) |
 | --- | --- | --- |
-| town street, a used box van | ![](screenshots/wave3/vehicles/parts_street.png) | ![](screenshots/wave3/vehicles/model_street.png) |
-| hatchback, sedan, sports car | ![](screenshots/wave3/vehicles/parts_lineup-car-sedan-car_sports.png) | ![](screenshots/wave3/vehicles/model_lineup-car-sedan-car_sports.png) |
-| SUV, pickup, cube van | ![](screenshots/wave3/vehicles/parts_lineup-suv-pickup-cube_van.png) | ![](screenshots/wave3/vehicles/model_lineup-suv-pickup-cube_van.png) |
-| police, ambulance, hippie van | ![](screenshots/wave3/vehicles/parts_lineup-policecar-ambulance-hippie_van.png) | ![](screenshots/wave3/vehicles/model_lineup-policecar-ambulance-hippie_van.png) |
-| pickup from behind | ![](screenshots/wave3/vehicles/parts_solo-pickup-140.png) | ![](screenshots/wave3/vehicles/model_solo-pickup-140.png) |
-| transit bus | ![](screenshots/wave3/vehicles/parts_solo-bus-30-0-4.png) | ![](screenshots/wave3/vehicles/model_solo-bus-30-0-4.png) |
-| school bus | ![](screenshots/wave3/vehicles/parts_solo-schoolbus-30-0-4.png) | ![](screenshots/wave3/vehicles/model_solo-schoolbus-30-0-4.png) |
-| motorcycle | ![](screenshots/wave3/vehicles/parts_solo-motorcycle-70-0-1.5.png) | ![](screenshots/wave3/vehicles/model_solo-motorcycle-70-0-1.5.png) |
-| bicycle | ![](screenshots/wave3/vehicles/parts_solo-bicycle-70-0-1.5.png) | ![](screenshots/wave3/vehicles/model_solo-bicycle-70-0-1.5.png) |
-| smashed sedan (glass out, flat tyre, door open) | ![](screenshots/wave3/vehicles/parts_solo-sedan-30-smashed-2.png) | ![](screenshots/wave3/vehicles/model_solo-sedan-30-smashed-2.png) |
-| golf cart, tractor, APC (frame fallback) | ![](screenshots/wave3/vehicles/parts_lineup-golf_cart-tractor_plow-apc.png) | ![](screenshots/wave3/vehicles/model_lineup-golf_cart-tractor_plow-apc.png) |
-| street at night, headlights on | ![](screenshots/wave3/vehicles/parts_nightstreet.png) | ![](screenshots/wave3/vehicles/model_nightstreet.png) |
-| driving, cockpit | ![](screenshots/wave3/vehicles/parts_driveday.png) | ![](screenshots/wave3/vehicles/model_driveday.png) |
-| driving, chase cam | ![](screenshots/wave3/vehicles/parts_drivedaychase.png) | ![](screenshots/wave3/vehicles/model_drivedaychase.png) |
-| night driving, chase cam | ![](screenshots/wave3/vehicles/parts_drivechase.png) | ![](screenshots/wave3/vehicles/model_drivechase.png) |
+| town street, a used box van | ![](screenshots/wave3/vehicles/parts_street.jpg) | ![](screenshots/wave3/vehicles/model_street.jpg) |
+| hatchback, sedan, sports car | ![](screenshots/wave3/vehicles/parts_lineup-car-sedan-car_sports.jpg) | ![](screenshots/wave3/vehicles/model_lineup-car-sedan-car_sports.jpg) |
+| SUV, pickup, cube van | ![](screenshots/wave3/vehicles/parts_lineup-suv-pickup-cube_van.jpg) | ![](screenshots/wave3/vehicles/model_lineup-suv-pickup-cube_van.jpg) |
+| police, ambulance, hippie van | ![](screenshots/wave3/vehicles/parts_lineup-policecar-ambulance-hippie_van.jpg) | ![](screenshots/wave3/vehicles/model_lineup-policecar-ambulance-hippie_van.jpg) |
+| pickup from behind | ![](screenshots/wave3/vehicles/parts_solo-pickup-140.jpg) | ![](screenshots/wave3/vehicles/model_solo-pickup-140.jpg) |
+| transit bus | ![](screenshots/wave3/vehicles/parts_solo-bus-30-0-4.jpg) | ![](screenshots/wave3/vehicles/model_solo-bus-30-0-4.jpg) |
+| school bus | ![](screenshots/wave3/vehicles/parts_solo-schoolbus-30-0-4.jpg) | ![](screenshots/wave3/vehicles/model_solo-schoolbus-30-0-4.jpg) |
+| motorcycle | ![](screenshots/wave3/vehicles/parts_solo-motorcycle-70-0-1.5.jpg) | ![](screenshots/wave3/vehicles/model_solo-motorcycle-70-0-1.5.jpg) |
+| bicycle | ![](screenshots/wave3/vehicles/parts_solo-bicycle-70-0-1.5.jpg) | ![](screenshots/wave3/vehicles/model_solo-bicycle-70-0-1.5.jpg) |
+| smashed sedan (glass out, flat tyre, door open) | ![](screenshots/wave3/vehicles/parts_solo-sedan-30-smashed-2.jpg) | ![](screenshots/wave3/vehicles/model_solo-sedan-30-smashed-2.jpg) |
+| golf cart, tractor, APC (frame fallback) | ![](screenshots/wave3/vehicles/parts_lineup-golf_cart-tractor_plow-apc.jpg) | ![](screenshots/wave3/vehicles/model_lineup-golf_cart-tractor_plow-apc.jpg) |
+| street at night, headlights on | ![](screenshots/wave3/vehicles/parts_nightstreet.jpg) | ![](screenshots/wave3/vehicles/model_nightstreet.jpg) |
+| driving, cockpit | ![](screenshots/wave3/vehicles/parts_driveday.jpg) | ![](screenshots/wave3/vehicles/model_driveday.jpg) |
+| driving, chase cam | ![](screenshots/wave3/vehicles/parts_drivedaychase.jpg) | ![](screenshots/wave3/vehicles/model_drivedaychase.jpg) |
+| night driving, chase cam | ![](screenshots/wave3/vehicles/parts_drivechase.jpg) | ![](screenshots/wave3/vehicles/model_drivechase.jpg) |
 
 ## Performance
 
@@ -134,22 +156,28 @@ ms once.) Rebuilds on door / light changes reuse the painted skin (keyed by pain
 damage and blood). Memory: one ~200x300 RGBA skin per car in view (~250 kB, a bus ~750 kB).
 Build stats: `cdda.renderer.vehicleView.buildStats`.
 
+Driving through town at 40 mph (`tools/bench-stream.ts --runs drive`, 1080p, RTX 5080):
+model vs parts: frame p50 16.7 / 16.7 ms, p99 33.4 / 33.4 ms, `beforeRender` (where vehicle
+builds happen) mean 0.54 / 0.48 ms and at most 1.9 ms in the slowest frames. The hitches
+are chunk streaming and GPU waits, not vehicles.
+
 ## Tests
 
 `tests/vehicleModel.test.ts`: style classification, sections (sedan, pickup bed, box van),
 seats stay in their tiles, wheel units (cm rims, bicycle wheels), every prototype builds
 without NaNs, footprints stay inside the grid (open doors excepted), window / arch cut-outs,
 open-door leaves, skin coverage at 32 texels/m, skins survive structured cloning (worker),
-skin reuse on door / light changes, frame fallback.
+skin reuse on door / light changes, frame fallback, proportions, parked steering, LOD.
+`tests/vehicleShape.test.ts`: walking into the side stops at the paint (tile rules without a
+shape), a car turned 45 deg, walking in through an open door, closing a door from beside
+it, driving past someone on the verge, running over what's in the lane only.
 
 ## Known gaps / ideas
 
-- Only the driven vehicle's wheels steer and roll (its wheels are separate meshes; parked
-  ones are merged into one mesh per vehicle). Ridden bikes lean into turns.
-- No distance LOD: a far car gets the same skin as a near one (cheap enough so far).
-- With `real` width the collision footprint is still the grid, so you bump into air ~0.7 m
-  beside a car (`fill` trades proportions for that). A true fix needs a finer collision
-  shape in the vehicle system.
+- Parked vehicles' wheels don't roll (only the driven one's are separate meshes).
+- The collision outline is a rectangle: you touch the bumper corners a few cm before the
+  rounded paint. Vehicle-vs-vehicle / terrain crashes are still tile-based.
+- The LOD keeps the same skin (it's per vehicle, cheap).
 - Semi trucks have no trailer in BN's grid; the tractor unit reads as a long cab truck.
 - Boats, aircraft and tanks use the frame fallback (tracks are drawn as big wheels).
 - Hood / trunk lids don't open; tailgates and shutters open as a hole.

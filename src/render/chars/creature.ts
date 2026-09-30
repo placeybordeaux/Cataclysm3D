@@ -25,6 +25,8 @@ export interface CreatureState {
   visible: boolean;
   /** hostile: 1 (distance readability), else 0 */
   emph: number;
+  /** 0 solid .. 1 invisible (far figures at the draw distance) */
+  fade?: number;
   /** horizontal distance to the camera (m) */
   camDist: number;
   /** telegraph stretch / knock-back squash */
@@ -118,6 +120,8 @@ export class CreatureModel {
     c.sxz = s.sxz;
     c.emph = s.emph;
     c.far = smooth(FAR_LOD.near, FAR_LOD.far, s.camDist);
+    const fade = s.fade ?? 0;
+    if (fade !== c.fade) (c.fade = fade, c.dirty = true);
     c.setVisible(s.visible);
     // lying down: topple over (backwards, or onto the side for animals)
     const lie = this.rig.lie;

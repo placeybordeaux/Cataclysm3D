@@ -170,12 +170,12 @@ float ssao(vec2 uv, float d, vec3 n) {
 //    keeps going over the far ground ring and skyline (skyline.ts, true distance from the
 //    normal target) to fully sky at uFarEnd, so the ground meets the sky at the horizon
 //    instead of stopping at a fog wall.
-vec3 atmosphere(vec3 col, float d, vec3 skyC) {
+vec3 atmosphere(vec3 col, float d, vec3 skyC, vec3 hazeC) {
   if (uAtmos > 0.0) {
     float a = uAtmos * uHazeMax * (1.0 - exp(-d / uHazeDist));
     float l = dot(col, vec3(0.3, 0.59, 0.11));
     col = mix(col, vec3(l), a * uHazeDesat);
-    col = mix(col, skyC, a);
+    col = mix(col, hazeC, a);
   }
   float e = uEdgeLevel * smoothstep(uFogNear, uFogFar, d) + (max(uFarMax, uEdgeLevel) - uEdgeLevel) * smoothstep(uFogFar, uFarEnd, d);
   return mix(col, skyC, e * uFogMax);
@@ -193,9 +193,13 @@ void main() {
   bool skyline = abs(nS.a - 0.5) < 0.2;
 
   // the sky right behind this pixel (world-space view ray): what distance fades into
-  vec3 skyC = uAtmosMode == 1 ? skyGradient(normalize(uCamRot * vec3((vUv * 2.0 - 1.0) * uTan, -1.0))) : uFogColor;
+  vec3 ray = normalize(uCamRot * vec3((vUv * 2.0 - 1.0) * uTan, -1.0));
+  vec3 skyC = uAtmosMode == 1 ? skyGradient(ray) : uFogColor;
+  // Haze toward a low sun takes only a third of its glow: with all of it, looking into the
+  // afternoon sun washed every building past 40 m into the same bright blur
+  vec3 hazeC = uAtmosMode == 1 ? skyGradientGlow(ray, 0.35) : uFogColor;
   if (skyline) {
-    col = uAtmosMode == 1 ? atmosphere(col, nS.r * 1024.0, skyC) : mix(col, skyC, uSkylineFog);
+    col = uAtmosMode == 1 ? atmosphere(col, nS.r * 1024.0, skyC, hazeC) : mix(col, skyC, uSkylineFog);
   } else if (!sky) {
     // --- outlines -------------------------------------------------------------------
     // For planar surfaces 1/depth is affine in screen space, so comparing each neighbour
@@ -238,7 +242,7 @@ void main() {
     else if (concave > 0.5) col *= 1.0 - uCrease * 0.5 * near;
 
     // --- aerial perspective + fog -----------------------------------------------------
-    if (uAtmosMode == 1) col = atmosphere(col, dC, skyC);
+    if (uAtmosMode == 1) col = atmosphere(col, dC, skyC, hazeC);
     else if (uAtmos > 0.0) {
       // distance desaturates and shifts toward the haze colour well before the fog wall,
       // which is what separates planes of depth (full-spectrum, graded afterwards)

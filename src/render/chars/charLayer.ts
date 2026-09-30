@@ -79,6 +79,7 @@ varying vec4 vFlash;
 varying float vSkyVis;
 varying float vEmph;
 varying vec3 vLmPos;
+varying float vFade;
 uniform float uFarNear;
 uniform float uFarFar;
 `;
@@ -108,6 +109,7 @@ ${TAPER}
   float dist = length(cRoot.xyz - cameraPosition);
   vEmph = cMisc.z * smoothstep(uFarNear, uFarFar, dist);
   vLmPos = cRoot.xyz + vec3(0.0, 0.6, 0.0);
+  vFade = cRoot.w;
 }
 `;
 const FRAG_PARS = /* glsl */ `
@@ -116,10 +118,17 @@ varying vec2 vFaceUv;
 varying vec4 vFlash;
 varying float vSkyVis;
 varying float vEmph;
+varying float vFade;
 #define SKYVIS vSkyVis
 uniform float uEmphK;
 `;
 const FRAG_MAP = /* glsl */ `
+// far figures dissolve in and out at the draw distance (ordered dither on the pixel grid)
+if (vFade > 0.001) {
+  ivec2 bi = ivec2(mod(gl_FragCoord.xy, 4.0));
+  int bm[16] = int[16](0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5);
+  if ((float(bm[bi.x + bi.y * 4]) + 0.5) / 16.0 < vFade) discard;
+}
 {
   vec2 texel = vFaceRect.xy + clamp(vFaceUv * vFaceRect.zw, vec2(0.001), vFaceRect.zw - 0.001);
   vec4 c = texture2D(map, texel / vec2(${PAGE}.0));
@@ -168,6 +177,34 @@ function charDepthMaterial(): THREE.MeshDepthMaterial {
   return depthMat;
 }
 
+/**
+ * First-person arms and held items (fpView.ts): the same skins and shapes, but drawn in an
+ * overlay scene with no lights. Lit by `tint` (the renderer's light-map sample at the player,
+ * like the sprite viewmodel) with a fixed key light in 3 bands; flash colour at full strength
+ * is emitted unlit (muzzle flashes).
+ */
+export function fpMaterial(page: THREE.Texture, tint: THREE.Color): THREE.MeshLambertMaterial {
+  const m = new THREE.MeshLambertMaterial({ map: page });
+  m.onBeforeCompile = (shader) => {
+    Object.assign(shader.uniforms, charUniforms, { uTint: { value: tint } });
+    shader.vertexShader = VERT_PARS + shader.vertexShader.replace('#include <begin_vertex>', VERT_MAIN);
+    shader.fragmentShader = FRAG_PARS + 'uniform vec3 uTint;\n' + shader.fragmentShader
+      .replace('#include <map_fragment>', FRAG_MAP)
+      .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
+{
+  float l = dot(normalize(normal), normalize(vec3(-0.35, 0.85, 0.4)));
+  float band = l > 0.45 ? 1.0 : l > -0.1 ? 0.8 : 0.6;
+  totalEmissiveRadiance = diffuseColor.rgb * uTint * band;
+  if (vFlash.a > 0.99) totalEmissiveRadiance = vFlash.rgb * 1.3;
+  diffuseColor.rgb = vec3(0.0);
+}`);
+    addNormalOutput(shader, true, 1);
+  };
+  m.customProgramCacheKey = () => 'cdda-char-fp';
+  (m.userData as { mrt?: boolean }).mrt = true;
+  return m;
+}
+
 /** Unit cube (-0.5..0.5) with per-vertex face id + face-local uv (paint.ts conventions). */
 function cubeGeometry(): THREE.BufferGeometry {
   const P: number[] = [], N: number[] = [], F: number[] = [], UV: number[] = [], I: number[] = [];
@@ -212,7 +249,7 @@ class Batch {
   root!: THREE.InstancedBufferAttribute;
   shape!: THREE.InstancedBufferAttribute;
   private geo!: THREE.InstancedBufferGeometry;
-  constructor(private cube: THREE.BufferGeometry, private page: THREE.Texture, private parent: THREE.Object3D, private shadows: boolean) {
+  constructor(private cube: THREE.BufferGeometry, private page: THREE.Texture, private parent: THREE.Object3D, private shadows: boolean, private matFor: (page: THREE.Texture) => THREE.Material = charMaterial) {
     this.mesh = this.make(256);
   }
   private make(cap: number): THREE.InstancedMesh {
@@ -231,7 +268,7 @@ class Batch {
     this.root = attr('cRoot');
     this.shape = attr('cShape');
     this.geo = g;
-    const m = new THREE.InstancedMesh(g, charMaterial(this.page), cap);
+    const m = new THREE.InstancedMesh(g, this.matFor(this.page), cap);
     m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     m.frustumCulled = false; // instances span the whole view
     m.castShadow = this.shadows;
@@ -292,6 +329,10 @@ export class CharInstance {
   far = 0;
   visible = true;
   skyVis = 1;
+  /** 0 = solid .. 1 = gone (dithered): far figures fading at the draw distance */
+  fade = 0;
+  /** A full root transform (camera space for the first-person arms) instead of x/y/yaw/lean. */
+  rootOverride: THREE.Matrix4 | null = null;
   readonly pose: PoseOut;
   readonly mats: Float32Array;
   /** set when the pose/placement changed and matrices must be rebuilt */
@@ -334,17 +375,20 @@ export class CharInstance {
     const foot = this.z * LEVEL_HEIGHT + (groundAt?.(this.x, this.y, this.z) ?? 0) + this.lift;
     // root: position -> topple about the feet -> yaw -> lean -> root offset
     const root = tmpM.makeTranslation(this.x, foot, this.y);
-    if (this.fall > 0) {
+    if (this.rootOverride) root.copy(this.rootOverride);
+    else if (this.fall > 0) {
       const d = Math.hypot(this.fallDx, this.fallDy) || 1;
       // rotate "up" toward the fall direction: axis = up × dir (three.js x, z)
       AXIS.set(this.fallDy / d, 0, -this.fallDx / d);
       root.multiply(tmpM2.makeRotationAxis(AXIS, this.fall));
     }
-    root.multiply(tmpM2.makeRotationY(-this.yaw));
-    tmpE.set(po.lean[0], po.lean[1], po.lean[2]);
-    root.multiply(tmpM2.makeRotationFromEuler(tmpE));
-    root.multiply(tmpM2.makeTranslation(po.pos[0], po.pos[1], po.pos[2]));
-    root.multiply(tmpM2.makeScale(this.sxz, this.sy, this.sxz));
+    if (!this.rootOverride) {
+      root.multiply(tmpM2.makeRotationY(-this.yaw));
+      tmpE.set(po.lean[0], po.lean[1], po.lean[2]);
+      root.multiply(tmpM2.makeRotationFromEuler(tmpE));
+      root.multiply(tmpM2.makeTranslation(po.pos[0], po.pos[1], po.pos[2]));
+      root.multiply(tmpM2.makeScale(this.sxz, this.sy, this.sxz));
+    }
     const joints = this.layer!.jointScratch(parts.length);
     const fat = 1 + this.far * 0.45;
     for (let i = 0; i < parts.length; i++) {
@@ -385,7 +429,8 @@ export class CharLayer {
   private needsWrite = true;
   groundAt: ((x: number, y: number, z: number) => number) | null = null;
   skyVisAt: ((x: number, y: number, z: number) => number) | null = null;
-  constructor(private shadows = true, readonly label = 'chars') {
+  /** `matFor`: a different material per skin page (the first-person arms, fpView.ts). */
+  constructor(private shadows = true, readonly label = 'chars', private matFor?: (page: THREE.Texture) => THREE.Material) {
     this.group.name = label;
   }
 
@@ -452,7 +497,7 @@ export class CharLayer {
     for (const [pg, n] of per) {
       let b = this.batches.get(pg);
       if (!b) {
-        b = new Batch(this.cube, store.texture(pg), this.group, this.shadows);
+        b = new Batch(this.cube, store.texture(pg), this.group, this.shadows, this.matFor);
         this.batches.set(pg, b);
       }
       b.ensure(n);
@@ -476,7 +521,7 @@ export class CharLayer {
         const tp = pd.taper;
         P[k * 4] = tp ? tp[0] : 1; P[k * 4 + 1] = tp ? tp[1] : 1; P[k * 4 + 2] = tp ? tp[2] : 1; P[k * 4 + 3] = tp ? tp[3] : 1;
         F[k * 4] = i.flashColor.r; F[k * 4 + 1] = i.flashColor.g; F[k * 4 + 2] = i.flashColor.b; F[k * 4 + 3] = fk;
-        R[k * 4] = rx; R[k * 4 + 1] = ry; R[k * 4 + 2] = rz; R[k * 4 + 3] = 0;
+        R[k * 4] = rx; R[k * 4 + 1] = ry; R[k * 4 + 2] = rz; R[k * 4 + 3] = i.fade;
       }
       fill.set(i.skin.page, k);
     }
@@ -516,7 +561,10 @@ export class SkinStore {
   }
 
   get(rig: Rig, src: SkinSource): Skin {
-    const dimsKey = rig.parts.map((p) => texelDims(p.size).join('x')).join(',');
+    // viewmodel rigs paint at a higher density (seen from a few cm)
+    const tpm = rig.texels ?? 1;
+    const dimsOf = (v: readonly [number, number, number]) => texelDims([v[0] * tpm, v[1] * tpm, v[2] * tpm]);
+    const dimsKey = rig.parts.map((p) => dimsOf(p.size).join('x')).join(',');
     const styled = this.style === 'styled' && rig.shape.arch === 'humanoid';
     const key = `${src.key}|${rig.shape.arch}|${rig.shape.zombie ? 'z' : ''}|${styled ? 'st' : 'sp'}|${dimsKey}|${src.opts?.eyes?.join(',') ?? ''}`;
     const hit = this.skins.get(key);
@@ -525,7 +573,7 @@ export class SkinStore {
     const n = rig.parts.length;
     const rects = new Int32Array(n * 5);
     const nets = rig.parts.map((p) => {
-      const d = texelDims(p.size);
+      const d = dimsOf(p.size);
       return { d, wh: netSize(d[0], d[1], d[2]) };
     });
     let pageIdx = -1;

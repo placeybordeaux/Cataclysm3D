@@ -6,6 +6,7 @@ import { stepUntil } from './steps';
 import { frameStats } from '../perfDebug';
 import { puddleMaterial } from './props';
 import { worldMaterials } from './materials';
+import { glassMaterial } from './furniture/glass';
 import type { SpriteLayer, StaticSpriteGroup } from './sprites';
 import { LEVEL_HEIGHT } from '../world/coords';
 import type { TileTextureSource } from './textureSource';
@@ -286,6 +287,11 @@ export class ChunkManager {
       const pm = new THREE.Mesh(data.puddles.build(), puddleMaterial());
       pm.matrixAutoUpdate = false;
       g.add(pm);
+    }
+    if (data.glass && data.glass.vertexCount) {
+      const gm = new THREE.Mesh(data.glass.build(), glassMaterial());
+      gm.matrixAutoUpdate = false;
+      g.add(gm);
     }
     this.stat('geom', t0);
     if (this.extraObjects) {

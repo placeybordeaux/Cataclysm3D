@@ -284,7 +284,9 @@ tests/               vitest unit tests (pure logic, no DOM/WebGL)
   `vehicleModel.ts` builds a profile-lofted body with cut-out windows / arches / open doors,
   `vehicleSkin.ts` paints a 32 texel/m skin (in `vehicleSkinWorker.ts`), `vehicleBikes.ts`
   and `vehicleFrame.ts` cover bikes and odd grids, `vehicleGeom.ts` holds shared helpers.
-  VehicleRenderer keeps the parts renderer as the `parts` look.
+  VehicleRenderer keeps the parts renderer as the `parts` look. Collision follows the drawn
+  body: `MapOverlay.shaped/collide` (sub-tile shapes, used by physics.ts), the vehicle system's
+  `bodyShape` hook + `bodyRect/occupantAt`, clipping in `src/game/vehicleShape.ts`.
 ### NPCs, dialogue, trade, missions (src/game, wired by src/npcs.ts `installNpcs`)
 - Data: `public/data/npcs.json` (`npm run extract:npcs`, tools/extract/npcs.ts): npc templates,
   npc_class, talk_topic (merged like CDDA: responses append across definitions), mission_definition,
