@@ -866,6 +866,8 @@ export class VehicleRenderer {
     for (const v of [...this.entries.keys()]) if (!seen.has(v)) this.drop(v);
     rig.drive = driving ? this.driveView(driving) : null;
     rig.eyeCap = driving ? null : this.doorwayEyeCap();
+    // no rain inside the cabin in the cockpit view (the glass is ~1 m ahead)
+    this.renderer.weather.clearRadius = driving && rig.driveCam === 'cockpit' && !this.entries.get(driving)?.bike ? 1.1 : 0;
 
     const s = this.headlight;
     if (spotFor) {
