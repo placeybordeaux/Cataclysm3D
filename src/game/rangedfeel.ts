@@ -298,7 +298,9 @@ export function rangedMissReason(o: RangedMissInput): string {
   const err = o.distance * Math.tan(meanLateral(b));
   if (err < o.targetRadius * 0.6) return 'wide: unlucky shot';
   const eff = effectiveRange(b, o.targetRadius);
-  if (o.distance > Math.max(3, eff * 1.15)) return `wide: out of effective range (~${Math.max(1, Math.round(eff))} m for you)`;
+  // Say what limits the range, so the fix is clear (get closer, or train / a better weapon).
+  const cause = top === 'skill' ? `${o.skill} ${o.skillLevel}` : top === 'weapon' ? 'weapon' : top === 'dex' ? 'dexterity' : 'hands';
+  if (o.distance > Math.max(3, eff * 1.15)) return `wide: past your effective range (~${Math.max(1, Math.round(eff))} m, ${cause})`;
   if (top === 'skill') return `wide: ${o.skill} skill too low (${o.skillLevel})`;
   if (top === 'weapon') return 'wide: inaccurate weapon';
   if (top === 'dex') return 'wide: low dexterity';

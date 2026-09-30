@@ -109,13 +109,73 @@ plus screenshot bursts (`docs/screenshots/combat_feel/before_*.png`, about 80 ms
 
 ### Ranged (`playercombat.ts fireOne`, `viewmodel.recoil/reload`, `camera.ts kick/ads`, `hitFx.ts tracer/mark`)
 - The viewmodel kick and a **camera kick** (pitch plus a little random yaw, springing back) scale with the
-  round's CDDA recoil. The muzzle flash is drawn on the exact frame the round fires (`rec_gun_sheet.png` frame 6).
+  round's CDDA recoil. The muzzle flash (firearms and launchers only, see Archery below) is drawn on the exact frame the round fires (`rec_gun_sheet.png` frame 6).
 - **Tracers**: a dotted line of bright pixels from the muzzle to the impact, shown for one or two frames. This covers monster guns too.
   Rounds that hit a wall leave a dark **bullet mark** for 30 s (60 max) plus dust.
 - **ADS: RMB with a gun** zooms 70° to 50°, brings the gun toward the centre and steadies bob and sway. The CDDA
   aim-level readout (Immediate, Regular, Careful, Precise) under the crosshair is unchanged.
 - **Reload takes and shows time**: the gun dips out of view for the reload (0.7 to 2.5 s from CDDA's
   reload cost) and can't fire until it's back.
+
+### Archery and every ranged miss (`rangedfeel.ts`, `playercombat.ts draw/flights`, `bowArt.ts`, `arrowFx.ts`)
+
+The playtester's report: *"it's super hard to tell why I am missing with my long bow, also it sounds
+like a gun and has the muzzle flash lol"*. Every gun-shaped item went through the firearm path: a
+pistol kick, a muzzle flash and its light, a hitscan tracer, a bullet crack where it landed, and a
+miss said nothing at all.
+
+- **Weapon classes** from BN data (`rangedClass`): firearm, bow (BOWS / arrow ammo), crossbow
+  (CROSSBOW / *_XBOWS / bolts, spearguns), sling (SLINGS / SLINGSHOTS / skill throw / pebbles and
+  rocks), launcher, energy, air, thrown. **Only powder flashes** (`hasMuzzleFlash`: firearm and
+  launcher); a crossbow or air rifle kicks without a flash, a bow barely moves (`kickScale`).
+- **Bows are drawn**: RMB draws (BN's draw time: `item_reload_cost`, slower for a weak archer, at
+  least 0.45 s), and aim only builds at full draw. Holding costs stamina; past 4 s (Classic 2.5 s) the arms
+  shake and the aim drifts back. LMB looses, at once if drawn, else as soon as the draw completes, so a
+  bare click is a snap shot. Letting go of RMB lets the string down. RELOAD_AND_SHOOT nocks an arrow from
+  what you carry. The viewmodel is a procedural longbow (`bowArt.ts`): canted low at rest, it rises
+  with the draw until the arrowhead sits under the crosshair, and the string snaps on release. A
+  slingshot uses the same model with its fork. Slings whirl overhead on LMB. Crossbows have a trigger (LMB),
+  aim with RMB and crank on reload.
+- **BN strength rules** (`get_str_draw_penalty` and its bands). Under the bow's min_strength, damage and
+  range drop to 0.75x. Under 3/4 of it they drop to 0.5x and the spread doubles. Under half you can't draw
+  at all. Archery 4/8/10 lowers the requirement by 1/2/3. Item info shows the line ("Strength 10 to draw:
+  damage and range 0.75x (you have 8)"). Wielding a bow you can't draw properly warns at once.
+- **Visible arrows**: arrows, bolts and stones fly at 22–77 m/s (a 20 m shot takes about 0.44 s, measured
+  in real input). They follow a gravity arc that meets the crosshair at the aimed distance and falls
+  beyond it. They resolve against what they actually reach: a monster's circle (BN
+  `deal_projectile_attack` at the arrow's own speed, so dodging matters more than against bullets), a
+  wall, or the ground. Nothing is hit past BN's range. The BN dispersion roll still decides the direction,
+  so hit odds are BN's. A fading trail of dots shows where the arrow went (`arrowFx.ts`).
+- **Recovery (BN `drop_or_embed_projectile`)**: a round survives unless `one_in(dont_recover_one_in)`
+  (wooden arrows 1 in 25, bolts 1 in 35). A survivor leaves the bow as an object (`moves.takeRound`, not
+  destroyed). It sticks in a big enough monster when the cutting part of the blow beats bash + bulk
+  (`Monster.stuck`; it's drawn stuck in the body, saved with the monster, and falls when it dies).
+  Otherwise it drops where it landed, drawn stuck in the ground or wall until picked up (quick loot `r`).
+  A broken one says "Your wooden broadhead arrow breaks." Conservation is tested (unit and real input).
+- **Why it missed, for every ranged weapon** (`rangedMissReason`). The target is whatever the crosshair
+  was on at the shot. When the round misses it, the crosshair says why for ~2 s, in this order:
+  *blocked by cover*, *fell short: out of range (22 m)*, *low: hit the ground short of it*, *high: flew
+  over it*, *dodged*, then for a shot that went wide the biggest fixable cause:
+  *wide: too weak to draw fully (Str 10)*, *wide: unsteady aim — hold RMB to draw and aim* (recoil left
+  to aim away is the biggest term), *wide: past your effective range (~6 m, archery 0)*, *wide: archery
+  skill too low (0)*, *inaccurate weapon*, *low dexterity*, *hands encumbered*, and *wide: unlucky shot*
+  when the spread was small. Hits can say *grazed* or *no damage*. Refusals use the same line: *too weak
+  to draw this bow (Str 10 needed)*, *no arrows*. Guns (hitscan) use the same reasons.
+- **Spread you can see**: a dashed circle around the crosshair is the typical error of the next shot
+  (half BN's dispersion maximum, projected with the camera's FOV). It shrinks as you aim and is **green /
+  yellow / red** as it fits within / roughly matches / exceeds the body under the crosshair. The readout
+  under it adds *Drawing…*, *arms shaking*, the distance and *likely hit ≤ N m* (the distance at which
+  your typical error equals a body's radius), or *out of range (N m)*.
+- **Sounds**: a bow layers the pack's `fire_gun/<bow>` recording (quieter) over a synthesized bowstring
+  twang. Drawing creaks, a crossbow clicks and thonks and its crank ratchets, a sling whirls. Arrows land
+  with a thock (flesh), a thunk and quiver (walls), or a thud (ground) instead of the bullet crack. Monster
+  crossbows fly visibly too.
+
+Evidence (real input, `tools/realinput_archery.ts`, GPU): `docs/screenshots/archery/`: `rest.png`,
+`drawn_8m.png` (full draw, "Careful 8 m · likely hit ≤ 6 m", yellow circle), `why_8m.png`,
+`drawn_20m.png`, `why_snap.png` ("wide: unsteady aim — hold RMB to draw and aim"), `too_weak.png`,
+`landed.png` (hits, "sticks in the zombie!"). `flight_sheet.png` is frame-exact (`recordFrames`, 1/30 s):
+the draw, the release, the arrow and its trail, the hit flash, and the arrow stuck in the zombie.
 
 ### Crosshair HUD (`src/ui/combatHud.ts`)
 - **Reach brackets**: red corner ticks appear when a swing right now would connect.
@@ -147,6 +207,8 @@ real-input screenshots, and those do include the HUD.
 - side-step: the dodge roll gets the bonus without spending the turn's dodge, and Space moves you back 1.3 m.
 - surround: a stacked crowd spreads into slots, and zombies hold still once in place.
 
+`tests/rangedfeel.test.ts` (24 tests): weapon classes from BN data, draw styles, the no-muzzle-flash rule (a bow shot leaves `flashShots` at 0, a pistol flashes), BN STR_DRAW bands and skill adjust, recovery odds and the embed rule, `takeRound`, the arc, RMB-draw / LMB-loose / let-down / too-weak flows, travel time, arrow conservation over 30 shots (carried + ground + stuck + broken), arrows falling when the zombie dies, and miss-reason selection (in play too: "fell short"). Real input: `tools/realinput.ts --only archery` (14 checks).
+
 `tests/monsters.test.ts` now checks both presets: **Classic keeps CDDA's swing rate**, and Accessible stretches it to tell + recovery.
 
 ## What to try (for the human)
@@ -156,10 +218,12 @@ real-input screenshots, and those do include the HUD.
 4. Let three or four zombies come at you from one side. They should spread around you, not stack.
 5. Get grabbed and mash `e`.
 6. Pistol: RMB to aim down the sights, then fire and reload. Try `cdda.setFeel('classic')` in the console to feel the tighter timings.
+7. Longbow (`cdda.giveItem("longbow", { wield: true }); cdda.giveItem("arrow_wood", { count: 20 })`): hold RMB to draw and watch the circle shrink and the readout ("Precise 12 m · likely hit ≤ 6 m"), click to loose, and read the line above the crosshair when it misses. Try a bare click (snap shot), a zombie past 22 m, and `cdda.game.player.str_base = 7; cdda.game.player.resetStats()` (a hard pull). Walk the arrows and press `r` on them to take them back.
 
 ## Known gaps and follow-ups
 - Monster-vs-NPC fights resolve without a telegraph (the survivor isn't involved).
 - The side-step double-tap can trigger for players who stutter-strafe. Space is the main binding. The double-tap window is `FEEL.doubleTap`.
 - RMB is guard (melee) and aim (gun). If the UI v2 toolkit wants RMB for world context menus in gameplay, it needs a modifier or a different trigger. The guard reads `input.mouseButtons & 4` in `PlayerCombat.update`.
 - Tracers and bullet marks are billboards: marks don't align to the wall plane.
+- Archery: flights ignore NPCs and never hit the survivor (only monsters, walls and the ground); NPC archers still shoot hitscan. Arrows stuck in the ground/walls are billboard pixel lines drawn over the ground item icon. A skill-0 survivor misses a lot even at 8 m: that is BN's dispersion; the crosshair now says so ("past your effective range (~6 m, archery 0)") rather than changing the odds.
 - Numbers (to-hit, damage, the block formula's inputs) follow BN when the BN data port lands. Only `FEEL` belongs to this layer.

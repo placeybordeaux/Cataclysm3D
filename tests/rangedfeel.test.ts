@@ -339,7 +339,7 @@ describe('why a ranged shot missed', () => {
   it('a weak draw, then distance beyond the effective range, then skill', () => {
     expect(rangedMissReason({ ...base, kind: 'passed', spread: spread({ strMul: 2 }), strNeeded: 10 })).toBe('wide: too weak to draw fully (Str 10)');
     const eff = effectiveRange(spread(), 0.3);
-    expect(rangedMissReason({ ...base, distance: eff * 2, kind: 'passed', spread: spread() })).toMatch(/^wide: out of effective range \(~\d+ m for you\)$/);
+    expect(rangedMissReason({ ...base, distance: eff * 2, kind: 'passed', spread: spread() })).toMatch(/^wide: past your effective range \(~\d+ m, archery 0\)$/);
     expect(rangedMissReason({ ...base, distance: eff * 0.9, kind: 'passed', spread: spread() })).toBe('wide: archery skill too low (0)');
   });
   it('a tight spread that still missed was bad luck', () => {

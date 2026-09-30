@@ -321,7 +321,7 @@ function installDebug(api: DebugApi, game: Game, sys: MonsterSystem, spawner: Sp
   };
   api.clearMonsters = (radius = Infinity) => {
     let n = 0;
-    for (const m of [...sys.all]) if (!m.dead && sys.distToPlayer(m) <= radius) (sys.remove(m), n++);
+    for (const m of [...sys.all]) if (!m.dead && sys.distToPlayer(m) <= radius) (sys.dropStuck(m), sys.remove(m), n++);
     return n;
   };
   /** One attack now (ignores the swing cooldown): melee or fire depending on the weapon. */
