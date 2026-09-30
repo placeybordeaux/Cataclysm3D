@@ -103,9 +103,13 @@ function isNonRigidArmor(it: Item): boolean {
   return !it.def.rigid || it.def.armor.some((p) => p.encumbrance !== p.max_encumbrance);
 }
 
-/** Power draw in W (extractor units) or a raw string like "1560 mW". */
+/**
+ * Power draw in W. BN's JSON gives a bare integer in **milliwatts** (item.cpp: "power_draw in
+ * mW / 1000000 to give kJ (battery unit) per second"); strings like "1560 mW" also parse.
+ * Reading the integer as watts drained a flashlight's battery ~1000× too fast.
+ */
 function powerDrawW(v: unknown): number {
-  if (typeof v === 'number') return v;
+  if (typeof v === 'number') return v * 0.001;
   if (typeof v !== 'string') return 0;
   const m = /^\s*([\d.]+)\s*(mW|W|kW)\s*$/.exec(v);
   if (!m) throw new Error(`Bad power_draw "${v}"`);

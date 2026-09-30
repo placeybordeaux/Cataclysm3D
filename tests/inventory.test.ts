@@ -275,9 +275,12 @@ describe('tools and qualities', () => {
     expect(fl.typeId).toBe('flashlight_on');
     expect(fl.active).toBe(true);
     expect(fl.ammoRemaining()).toBe(2);
-    c.update(0.1); // 10 kW power_draw: 1 kJ per 0.1 s
+    // BN power_draw 10000 is milliwatts (10 W): one 1 kJ battery charge per 100 game seconds.
+    c.update(99);
+    expect(fl.ammoRemaining()).toBe(2);
+    c.update(1);
     expect(fl.ammoRemaining()).toBe(1);
-    c.update(0.1);
+    c.update(100);
     expect(fl.typeId).toBe('flashlight');
     expect(fl.active).toBe(false);
     expect(log.at(-1)).toMatch(/runs out of power/);
