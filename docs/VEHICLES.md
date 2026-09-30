@@ -22,9 +22,147 @@ lighting.
 | ![](screenshots/wave3/vehicles/fill_lineup-car-sedan-car_sports.jpg) | ![](screenshots/wave3/vehicles/fill_lineup-suv-pickup-cube_van.jpg) |
 | --- | --- |
 
+## v3 phase 1: chassis templates (drawn body = gameplay body)
+
+Vehicles v3 (`docs/design/VEHICLES_V3.md`, research in `docs/research/VEHICLE_BUILDING.md`)
+moves every vehicle onto an authored **chassis template**. Phase 1 (this) is templates +
+mapping, no building yet: the body a vehicle is drawn with, collides with, is boarded through
+and is crashed into is now one thing, owned by the game (`src/game/chassis/`), and every BN
+part sits in a typed socket of it.
+
+**Templates** (`src/game/chassis/templates.ts`), a ladder of rungs:
+
+| rung | templates (BN vehicles on them, of 257) |
+| --- | --- |
+| bike | `bicycle` 7, `scooter` 4, `motorcycle` 8 (sidecars fit) |
+| car | `hatch` 3, `sedan` 12, `sports` 8 |
+| utility | `suv` 15, `pickup` 3, `minivan` 3, `van` 1 |
+| heavy | `box_truck` 15 (cube vans, ambulances, food trucks, RVs), `bus` 4, `semi_cab` 1, `heavy_truck` 8 (fire engines, flatbeds, army trucks), `trailer` 18 (the box trailer and BN's 17 tankers) |
+| home | `rig`: the top rung (a long deck with a walkable box), defined now; nothing spawns it (built in phase 3) |
+| frame | `frame` 35 (golf carts, tractors, draisines, forklifts...), `frame_small` 27 (carts, chairs), `frame_tracked` 21 (tanks, APCs), `frame_boat` 26, `frame_air` 38 |
+
+A template has a family (`body`: an authored shell; `bike`; `frame`: an honest home-made
+grid that collides with its cells), the style the renderer draws it with, a grid envelope it
+accepts (body columns x rows), the real-scale body it promises (length / width ranges the
+tests hold every mapped vehicle to), its engine-bay rows and its dimensions (sill, belt,
+roof, box, rake... the wave-3 `STYLE_PARAMS`, which moved here from the renderer).
+
+**Sockets** (`mapping.ts`): `frame` (structure; belly tanks, non-wheel running gear),
+`wheel` (axle + wheel), `cabin` (centre parts in the cab: seats, controls, aisles), `panel`
+per side (`left` / `right` / `front` / `rear`: doors, glass, boards, armour, and protrusions
+hung on it: wing mirrors), `roof` (roof, on_roof, on_ceiling), `engine` (engine_block, the
+tanks and batteries by it) and `interior` (bed / box / deck load space). Each carries the BN
+locations it takes and the BN cell it stands for, and has a position on the body
+(`socketPos`). BN's empty-location and `on_*` parts (lights, horns, batteries, seatbelts,
+alarms) are fittings riding on their cell's host socket.
+
+**Mapping** (`mapChassis`, `pickTemplate`): the template comes from the prototype id (the
+wave-3 rules split into rungs), else the grid; a grid outside the named template's envelope
+falls back to the frame family (by what it's built from: floats, wings/rotors, tracks or
+armour, a cart-sized grid). Every installed BN part object goes into a socket, untouched
+(condition, faults, fuel, cargo items stay on it): nothing is copied, so nothing can be lost.
+A part the template has no socket for (an engine in a sedan's trunk, a part off the body's
+columns) is **kept, installed and working**, in `chassis.overflow` with the reason, and
+`VehicleSystem.add` reports it (`[chassis] ...` warning once per prototype). Stock BN data:
+**0 of 26,885 parts overflow**. The template is chosen once and saved: a stripped or modified
+vehicle keeps its body (only choosing checks the envelope).
+
+Where it is used (`src/game/chassis/index.ts`):
+
+| | |
+| --- | --- |
+| `chassisOf(v)` | template + sockets + overflow; mapped when a vehicle enters the world (`VehicleSystem.add`: mapgen spawns, debug spawns, saves) and kept current |
+| `layoutOf(v)` | the template placed on the grid: nose / tail / half width, sections, wheels, doors (cached per vehicle version and width mode). The renderer's `analyze()` is this now: **the modelled look draws the template** |
+| `chassisBodyRect(v)` | the collision outline (the renderer hands it to `VehicleSystem.bodyShape` in the modelled look): terrain, vehicles, creatures, run-overs, `playerOn`, the crosshair, doorways, cargo reach, refuelling reach all use it |
+| `hitMount(v, x, y)` | crash damage by side: the contact point's side of the body -> that side's nearest panel socket -> its BN cell -> `collisionPart` (armour, then what blocks, then the frame, as BN) |
+| `chassisSeats(v)` | every seat / bed with its drawn position (mount space, inside its cell), cushion height and whether it's the driver's. The driver is seated there; **riders** (NPCs / the survivor drawn seated) should use this: world position `v.mountToWorld(s.x, s.y)`, height `v.z * LEVEL_HEIGHT + s.h`, facing `v.facing` |
+| `noseX(v)` | the headlight beam starts at the template's nose |
+| `cellAtPoint(v, x, y)` | the part under the crosshair on the paint (a turned car no longer picks the tile centre's part) |
+
+Other gameplay changes: `e` gets you out through the nearest door you can **walk to inside**
+(the bus driver's door is across the cab; before, `e` in a bus only let go of the wheel), and
+stair flights (`src/game/stairwalk.ts` walls their footprint off for walkers) now stop
+vehicles too (`VehicleSystem.obstacle`: any other map overlay that makes a tile impassable),
+and mapgen won't place a vehicle on one. BN part stats and behaviour (engines, fuel, wheels,
+mass, speed) are unchanged. Headless (tests, the sim) and the `parts` look keep colliding with
+whole grid tiles (`bodyShape` null), exactly as before.
+
+**Data**: the vehicle extractor now reads BN's `blueprint` + `palette` prototypes and
+single-part mount entries (`{x, y, part}`), which it skipped: 26 prototypes were empty (the
+17 tankers, the airship, airboat, F-35, Harrier, airliners, catamaran...) and others had lost
+parts (the JLTVs, scooters, superbike, tractors, wagons). 64 prototypes changed; parts and
+groups are identical.
+
+**Saves**: each vehicle saves `chassis: { template, v: 1 }`. A save from before v3 (no
+`chassis`) is migrated once on load: the same mapping as spawns, keeping every part's
+condition, fuel and cargo (`console.info` says how many); saving again writes the templates.
+The dev hot-reload snapshot is a save, so it carries them too. Chassis data newer than the
+build refuses to load (loudly); an unknown template name is re-mapped with a warning.
+
+**Debug**: `cdda.chassis(uid?)` (template, why, sockets by kind, seats, overflow),
+`cdda.chassisCensus()` (templates of every vehicle in the world, overflow, migrated),
+`cdda.chassisOverlay(true)` (the template body = collision outline in yellow, sockets as
+coloured crosses: panel orange, cabin cyan, engine pink, interior blue, roof green, frame
+grey; seats white with the driver's red; overflow red X). `npx tsx tools/chassis-report.ts`
+maps all 257 prototypes and prints the table above (`--proto ID` lists one's sockets).
+
+**Tests**: `tests/chassis.test.ts`: all 257 prototypes map, every part in exactly one socket
+or the overflow; the familiar vehicles land on the familiar rungs; every shaped body is
+inside its template's promise and its grid; seats sit in their cells and the body, every
+driver can get in and the road vehicles' passengers can walk to their seats; part state and
+cargo items survive mapping and a save round trip (all 257, used and wrecked); overflow for
+an engine in the trunk and a ram off the side; the rig on a flatbed's grid; crash sides;
+the bus driver seated on the drawn seat and climbing out; stair flights stop a car (body and
+whole tiles) and refuse spawns; the pre-v3 save fixture (`tests/fixtures/vehicles_pre_v3.json`,
+`tools/dev/gen-vehicle-save-fixture.ts`) migrates with nothing lost. Real input:
+`tools/realinput.ts --only chassisdrive` drives a pickup, a cube van and a bus 40+ m through
+a town with W / Space / V / e: the drawn shell within 10 cm of the collision outline, seated
+on the template seat, no scratch, `e` climbs out to stand outside the body.
+
+BN's own data walls some seats in (no door into the room): the surv_rv's and tour bus's
+beds, the bubble car's cabin (its canopy doors open onto windscreen), the Apache's and
+Medevac wreck's gunner seats, two airliner seats and the F-15's cockpit (its canopy opens
+onto the wings). Drivers still get in from beside the vehicle (`GET_IN_RANGE`) except the
+F-15.
+
+Screenshots (half size; `before` = the `bn` branch, `after` = phase 1): see
+`docs/screenshots/vehicles-v3/phase1/`.
+
+| | before (`bn`) | after (phase 1) |
+| --- | --- | --- |
+| bike and car rungs: bicycle, scooter, motorcycle, mini, car, sports | ![](screenshots/vehicles-v3/phase1/before_bikes-cars.jpg) | ![](screenshots/vehicles-v3/phase1/after_bikes-cars.jpg) |
+| utility: SUV, pickup, minivan, van, box truck | ![](screenshots/vehicles-v3/phase1/before_utility.jpg) | ![](screenshots/vehicles-v3/phase1/after_utility.jpg) |
+| heavy: bus, semi cab, heavy truck, trailer | ![](screenshots/vehicles-v3/phase1/before_heavy.jpg) | ![](screenshots/vehicles-v3/phase1/after_heavy.jpg) |
+| frame family: golf cart, tractor (now with all its BN parts), APC, sea scooter (was drawn as a motorcycle), JLTV | ![](screenshots/vehicles-v3/phase1/before_frames.jpg) | ![](screenshots/vehicles-v3/phase1/after_frames.jpg) |
+| a BN tanker (was an empty prototype: spawning one hung the page) | (nothing) | ![](screenshots/vehicles-v3/phase1/after_tanker.jpg) |
+
+The bodies look as in wave 3 on purpose: the templates took over the wave-3 shapes, so
+drawn = gameplay changed underneath, not the paint. `cdda.chassisOverlay(true)`: template body
+(yellow) = collision outline, sockets, seats (driver red):
+
+| | |
+| --- | --- |
+| ![](screenshots/vehicles-v3/phase1/overlay_car_pickup_van.jpg) | ![](screenshots/vehicles-v3/phase1/overlay_bus.jpg) |
+| ![](screenshots/vehicles-v3/phase1/overlay_top.jpg) | real input: the bus driven through town ![](screenshots/vehicles-v3/phase1/drive_bus.jpg) |
+| pickup ![](screenshots/vehicles-v3/phase1/drive_pickup.jpg) | cube van (box truck) ![](screenshots/vehicles-v3/phase1/drive_cube_van.jpg) |
+
+Known gaps: tankers are drawn as a flat deck (their tanks aren't modelled: per-part visuals
+are phase 5); the sea scooter / flying motorcycle now get the frame look; panels hold BN's
+side parts but nothing is drawn per socket yet.
+
+What phases 2-3 build on: `v.template` (saved, authoritative) is the adopted vehicle's body;
+sockets list what can be stripped (phase 2: `socket.parts` -> items through `moves.ts`) and
+where parts install (phase 3: a socket's `accepts` + BN's per-part gating); `overflow` is the
+"doesn't fit, here's why" list the planner shows; `mapChassis(v, 'rig')` already places the
+top rung on a long grid. Missing for them: a `Vehicle.removePart` (the part index is
+append-only today), sockets that exist without a part in them (today a socket is created by
+the part that fills it: the planner needs the template's empty sockets too), and per-socket
+visuals (plates over windows, rams, roof racks: phase 5).
+
 ## How it works
 
-`src/render/vehicleLayout.ts` reads the grid (pure, unit-tested):
+`src/game/chassis/layout.ts` (was `src/render/vehicleLayout.ts`, which re-exports it) places
+the vehicle's chassis template on its grid (pure, unit-tested):
 
 - **Body style** from the prototype id with a grid fallback: sedan, hatch, sports, SUV,
   pickup, van (box vans, ambulances, RVs), minivan, bus, truck (semi, flatbed, fire,

@@ -3,6 +3,7 @@ import { has, type Vehicle, type VehiclePart } from '../game/vehicle';
 import { GeomBuilder } from './geometry';
 import { cddaColor } from './colors';
 import { wheelRadius, type Layout } from './vehicleLayout';
+import { seatTopOf } from '../game/chassis';
 import { Batches, chamferBox, partFrames, tube, wheel } from './vehicleGeom';
 import { darkenC, lampBox, seat, steeringWheel, type ModelBuild } from './vehicleModel';
 import { rimGrips, type RideAnchors } from './vehicleRider';
@@ -49,7 +50,7 @@ export function buildFrame(v: Vehicle, L0: Layout, base: number): ModelBuild {
     for (const x of new Set(xs)) tube(parts.get(0x2a2a2e), [x, Y(0.45), Math.min(...ys)], [x, Y(0.45), Math.max(...ys)], 0.06, F.dark, 6);
   }
 
-  const seatTop = 0.62;
+  const seatTop = seatTopOf(L);
   let ride: RideAnchors | undefined;
   for (const [mx, my] of mounts) {
     const ps = at(mx, my);

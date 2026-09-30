@@ -27,6 +27,8 @@ import {
   CRUISE_STEP_VMIPH, has, MPH_PER_MS, passengerImpactDamage, VMIPH_PER_MS, resolveBodyCollision, resolveCollision, spawnVehicle, Vehicle, type VehicleJSON, type VehiclePart,
 } from './vehicle';
 import { pickVehicleProto, type VehicleDataFile } from './vehicle_data';
+import { chassisOf, hitMount, seatPoint } from './chassis';
+import { warnOnce } from '../data/warn';
 
 // The vehicle system: owns every vehicle in the world, spawns mapgen vehicle requests,
 // keeps a tile index the map consults for passability/sight (GameMap.overlays), and runs
@@ -156,9 +158,11 @@ export const GET_IN_RANGE = 3.2;
 
 export class VehicleSystem implements GameSystem, MapOverlay {
   /**
-   * The drawn body outline of a vehicle in mount space (vehicleShape.ts), supplied by the
-   * renderer (modelled look). null = collide with whole grid tiles (parts look, headless).
-   * Bump `shapeEpoch` when the answer changes for reasons other than vehicle.version.
+   * The body outline of a vehicle in mount space (vehicleShape.ts): its chassis template's
+   * (chassisBodyRect, src/game/chassis), which is also what the modelled look draws. The
+   * renderer sets it for the modelled look; null = collide with whole grid tiles (the parts
+   * look, headless). Bump `shapeEpoch` when the answer changes for reasons other than
+   * vehicle.version.
    */
   bodyShape: ((v: Vehicle) => BodyRect | null) | null = null;
   shapeEpoch = 0;
@@ -332,7 +336,14 @@ export class VehicleSystem implements GameSystem, MapOverlay {
     return list[list.length - 1];
   }
 
+  /** Grid vehicles mapped onto a template on load (saves from before vehicles v3). */
+  migrated = 0;
+
   add(v: Vehicle): void {
+    // Every vehicle entering the world is on a chassis template (mapgen spawns, saves,
+    // debug spawns). Parts the template has no socket for stay on (and in) the vehicle.
+    const ch = chassisOf(v);
+    if (ch.overflow.length) warnOnce('chassis_overflow', v.protoId, `[chassis] ${v.protoId} on ${ch.template}: ${ch.overflow.length} part(s) off-template, kept: ${ch.overflow.map((o) => `${o.part.def.id} (${o.reason})`).join('; ')}`);
     this.list.push(v);
     this.reindex(v);
     for (const f of this.onAdded) f(v);
@@ -397,7 +408,7 @@ export class VehicleSystem implements GameSystem, MapOverlay {
         continue;
       }
       const ter = map.terAt(t.tx, t.ty, v.z), furn = map.furnAt(t.tx, t.ty, v.z);
-      if (ter.move_cost <= 0 || furn.move_cost_mod < 0) return false;
+      if (ter.move_cost <= 0 || furn.move_cost_mod < 0 || this.overlayBlocks(t.tx, t.ty, v.z)) return false;
     }
     return true;
   }
@@ -481,8 +492,7 @@ export class VehicleSystem implements GameSystem, MapOverlay {
     if (!c) return `The ${v.name} has no controls.`;
     const p = this.game.player;
     if (this.reachableControls() === v) return null;
-    // mount coordinates are tile centres (mountToWorld(0, 0) = the vehicle's position)
-    const [wx, wy] = v.mountToWorld(c.mx, c.my);
+    const [wx, wy] = this.driverSeatWorld(v);
     if (p.z !== v.z || Math.hypot(wx - p.x, wy - p.y) > GET_IN_RANGE) return `Get closer to the ${v.name}'s driver's seat.`;
     return null;
   }
@@ -518,11 +528,19 @@ export class VehicleSystem implements GameSystem, MapOverlay {
       const c = v.controls();
       if (!c || v.z !== p.z) continue;
       if (c.hp <= 0) continue;
-      const [wx, wy] = v.mountToWorld(c.mx, c.my);
+      const [wx, wy] = this.driverSeatWorld(v);
       const d = Math.hypot(wx - p.x, wy - p.y);
       if (d <= GET_IN_RANGE && d < bestD) (best = v), (bestD = d);
     }
     return best;
+  }
+
+  /** World position of the driver's seat: as drawn (the template's) with a shaped body, else the cell centre. */
+  driverSeatWorld(v: Vehicle): [number, number] {
+    const c = v.controls();
+    if (!c) throw new Error(`the ${v.name} has no controls`);
+    const [sx, sy] = this.bodyRect(v) ? seatPoint(v, c.mx, c.my) : [c.mx, c.my];
+    return v.mountToWorld(sx, sy);
   }
 
   /** Open the door nearest the driver's seat if it's closed (for getting in from outside). */
@@ -575,9 +593,17 @@ export class VehicleSystem implements GameSystem, MapOverlay {
     const p = this.game.player;
     const here = this.playerOn();
     if (!here || here.v !== v) return null;
-    const doors = v.parts.filter((q) => has(q, 'OPENABLE') && !has(q, 'MULTISQUARE') && Math.max(Math.abs(q.mx - here.mx), Math.abs(q.my - here.my)) <= 1);
-    const dist = (q: { mx: number; my: number }) => Math.hypot(q.mx - here.mx, q.my - here.my);
-    doors.sort((a, b) => dist(a) - dist(b));
+    // The doors you can reach from your seat: next to it, or down the aisle (a bus driver's
+    // door is across the cab at the kerb side). Walking steps through the vehicle's own cells
+    // that don't block (BN move cost > 0), nearest first.
+    const steps = this.walkInside(v, here.mx, here.my);
+    const reach = (q: VehiclePart) => {
+      let best = Infinity;
+      for (const [dx, dy] of [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]]) best = Math.min(best, steps.get(`${q.mx + dx},${q.my + dy}`) ?? Infinity);
+      return best + Math.hypot(q.mx - here.mx, q.my - here.my) * 1e-3;
+    };
+    const doors = v.parts.filter((q) => has(q, 'OPENABLE') && !has(q, 'MULTISQUARE') && reach(q) < Infinity);
+    doors.sort((a, b) => reach(a) - reach(b));
     for (const d of doors) {
       const [dx, dy] = v.mountToWorld(d.mx, d.my);
       const tx = Math.floor(dx), ty = Math.floor(dy);
@@ -594,10 +620,28 @@ export class VehicleSystem implements GameSystem, MapOverlay {
     return null;
   }
 
+  /** Steps from mount (mx, my) to every cell of `v` you can walk to inside it (4-neighbour, cells with BN move cost > 0). */
+  private walkInside(v: Vehicle, mx: number, my: number): Map<string, number> {
+    const dist = new Map<string, number>([[`${mx},${my}`, 0]]);
+    const queue: [number, number][] = [[mx, my]];
+    while (queue.length) {
+      const [x, y] = queue.shift()!;
+      const d = dist.get(`${x},${y}`)!;
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const k = `${x + dx},${y + dy}`;
+        if (dist.has(k) || !v.hasMount(x + dx, y + dy) || v.moveCostAt(x + dx, y + dy) <= 0) continue;
+        dist.set(k, d + 1);
+        queue.push([x + dx, y + dy]);
+      }
+    }
+    return dist;
+  }
+
   private seatPlayer(v: Vehicle): void {
     const s = v.driverSeat();
     if (!s) return;
-    const [wx, wy] = v.mountToWorld(s.mx, s.my);
+    // Onto the seat as drawn (the template's seat, inside its cell) when the body is shaped.
+    const [wx, wy] = this.driverSeatWorld(v);
     const p = this.game.player;
     p.x = wx;
     p.y = wy;
@@ -1136,16 +1180,18 @@ export class VehicleSystem implements GameSystem, MapOverlay {
     const z = v.z;
     const nb = rectObb(v, body, nf, nx, ny), ob = rectObb(v, body);
     const bounds = obbBounds(nb);
+    // The contact point picks the side of the body, that side's socket, and so the BN cell
+    // (and part) that takes the hit (chassis hitMount).
     const mountOf = (wx: number, wy: number) => {
       const [lx, ly] = v.worldToMount(wx, wy, nf, nx, ny);
-      return nearestMount(v, lx, ly);
+      return hitMount(v, lx, ly);
     };
     for (const o of this.vehiclesNear(v, z, bounds)) {
       for (const s of vehicleObbs(o, this.bodyRect(o))) {
         if (!obbHitsObb(nb, s) || obbHitsObb(ob, s)) continue;
         const [cx, cy] = obbContact(nb, s);
         const [olx, oly] = o.worldToMount(cx, cy);
-        const [omx, omy] = nearestMount(o, olx, oly);
+        const [omx, omy] = this.bodyRect(o) ? hitMount(o, olx, oly) : nearestMount(o, olx, oly);
         yield { kind: 'vehicle', mount: mountOf(cx, cy), other: { v: o, mx: omx, my: omy } };
         break;
       }
@@ -1163,9 +1209,26 @@ export class VehicleSystem implements GameSystem, MapOverlay {
     touched.sort((a, b) => a.d - b.d);
     for (const t of touched) {
       const mount = mountOf(t.cx, t.cy);
-      const obs = obstacleAt(map, t.tx, t.ty, z, v.partsAt(mount[0], mount[1]).some((q) => has(q, 'WHEEL')));
+      const obs = this.obstacle(t.tx, t.ty, z, v.partsAt(mount[0], mount[1]).some((q) => has(q, 'WHEEL')));
       if (obs) yield { kind: 'tile', mount, tx: t.tx, ty: t.ty, ob: obs };
     }
+  }
+
+  /**
+   * What a vehicle part runs into at a tile: BN's terrain / furniture rules (obstacleAt), then
+   * anything another map overlay walls off for walkers (a stair flight's footprint,
+   * src/game/stairwalk.ts): vehicles read terrain, and would otherwise drive onto a flight.
+   */
+  obstacle(x: number, y: number, z: number, wheel: boolean): Obstacle | null {
+    const ob = obstacleAt(this.game.map, x, y, z, wheel);
+    if (ob || !this.overlayBlocks(x, y, z)) return ob;
+    return { name: `the ${this.game.map.terAt(x, y, z).name}`, bashable: false, mass2: 1000, dens: 80, e: 0.1 };
+  }
+
+  /** Another map overlay (not this one) makes the tile impassable. */
+  overlayBlocks(x: number, y: number, z: number): boolean {
+    for (const o of this.game.map.overlays) if (o !== this && o.moveCost?.(x, y, z) === 0) return true;
+    return false;
   }
 
   /**
@@ -1232,7 +1295,7 @@ export class VehicleSystem implements GameSystem, MapOverlay {
     const partNear = (t: { mx: number; my: number }, x: number, y: number) => {
       if (!body) return collisionPart(v, t.mx, t.my);
       const [lx, ly] = v.worldToMount(x, y, nf, nx, ny);
-      const [mx, my] = nearestMount(v, lx, ly);
+      const [mx, my] = hitMount(v, lx, ly);
       return collisionPart(v, mx, my);
     };
     for (const t of cells) {
@@ -1288,7 +1351,7 @@ export class VehicleSystem implements GameSystem, MapOverlay {
       }
       // Terrain / furniture (CDDA: bashable things that aren't flat floor, then walls).
       if (!isNew || solidBody) continue;
-      const ob = obstacleAt(map, t.tx, t.ty, z, v.partsAt(t.mx, t.my).some((q) => has(q, 'WHEEL')));
+      const ob = this.obstacle(t.tx, t.ty, z, v.partsAt(t.mx, t.my).some((q) => has(q, 'WHEEL')));
       if (!ob) continue;
       if (this.crashTerrain(v, part, t.tx, t.ty, ob, velBefore)) {
         stopped = 'solid';
@@ -1380,7 +1443,7 @@ export class VehicleSystem implements GameSystem, MapOverlay {
             for (let tx = Math.floor(x0); tx <= Math.floor(x1); tx++) {
               if (!obbHitsTile(s, tx, ty)) continue;
               const ter = map.terAt(tx, ty, o.z), furn = map.furnAt(tx, ty, o.z);
-              if (ter.move_cost <= 0 || furn.move_cost_mod < 0 || !clearTile(tx, ty)) return false;
+              if (ter.move_cost <= 0 || furn.move_cost_mod < 0 || this.overlayBlocks(tx, ty, o.z) || !clearTile(tx, ty)) return false;
             }
           return this.vehiclesNear(o, o.z, [x0, y0, x1, y1]).every((w) => w === pusher.v || vehicleObbs(w, this.bodyRect(w)).every((t) => !obbHitsObb(s, t)));
         });
@@ -1505,8 +1568,13 @@ export class VehicleSystem implements GameSystem, MapOverlay {
         (opts.warn ?? console.warn)(`dropped vehicle of unknown prototype ${vj.proto}`);
         continue;
       }
-      this.add(Vehicle.fromJSON(this.vdata, data, vj, opts));
+      const v = Vehicle.fromJSON(this.vdata, data, vj, opts);
+      // Save migration (one-time, VehicleJSON.chassis absent = a pre-v3 grid): add() maps
+      // it onto a template with the same routine as spawns; saving writes the template.
+      if (!vj.chassis) this.migrated++;
+      this.add(v);
     }
+    if (this.migrated) console.info(`[chassis] mapped ${this.migrated} saved grid vehicle(s) onto chassis templates`);
     this.pending = [...(j.pending ?? [])];
     this.driving = this.list.find((v) => v.uid === j.driving) ?? null;
     if (this.driving) this.game.movementOverride = () => this.driving !== null;
@@ -1515,6 +1583,7 @@ export class VehicleSystem implements GameSystem, MapOverlay {
   /** Remove every vehicle and forget queued requests. */
   clear(): void {
     for (const v of [...this.list]) this.remove(v);
+    this.migrated = 0;
     this.pending = [];
     this.driving = null;
     this.input = { throttle: 0, steer: 0, brake: false };

@@ -3,6 +3,7 @@ import { has, type Vehicle, type VehiclePart } from '../game/vehicle';
 import { GeomBuilder, type V3 } from './geometry';
 import type { TileFrame } from './textureSource';
 import { analyze, type Layout } from './vehicleLayout';
+import { seatTopOf } from '../game/chassis';
 import { liveryBody, paintSkin, sheetUv, skinLayout, skinLayoutInfo, SKIN_PPM, type SheetName, type Skin, type SkinInput, type SkinLayoutInfo } from './vehicleSkin';
 import { Batches, chamferBox, faceNormal, hash, mergeGeometries, partFrames, quad4, tube, wheel, type PartSwatch } from './vehicleGeom';
 import { buildBike } from './vehicleBikes';
@@ -657,7 +658,8 @@ export function buildVehicleModel(v: Vehicle, base: number, opts: { reuseSkinKey
   const parts = new Batches(), wheels = new Batches();
   const paintC = liveryBody(info, v.paint);
   const floorY = p.sill + 0.1;
-  const seatTop = Math.max(floorY + 0.2, p.belt - 0.45);
+  // the template's seat height (chassis seatTopOf: riders sit on the same cushion)
+  const seatTop = seatTopOf(L);
   const cabX0 = cab ? cab.x0 : L.xNose, cabX1 = L.sections.filter((s) => s.kind !== 'deck' && s.kind !== 'bed' && s.kind !== 'flat' && s.kind !== 'hood').reduce((m, s) => Math.min(m, s.x1), cabX0);
   parts.sky = INTERIOR_SKY;
   const far = !!opts.far;

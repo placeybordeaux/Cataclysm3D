@@ -162,8 +162,43 @@ const vehicles: Record<string, VProtoDef> = {};
 const missingParts = new Set<string>();
 for (const [id, v] of fam('vehicle')) {
   const out: VProtoPart[] = [];
+  // BN "blueprint" prototypes (veh_type.cpp vehicle_prototype::load): an ASCII picture whose
+  // characters name palette entries (lists of parts); column = mount x (forward is to the
+  // right), row = mount y, both offset by -blueprint_origin. Parsed before "parts" like BN,
+  // so install order matches. 26 BN vehicles (tankers, aircraft, boats) are only defined so;
+  // skipping them left those prototypes empty.
+  const bpRows = asArr<string>(v.blueprint);
+  if (bpRows.length && v.palette && typeof v.palette === 'object') {
+    const origin = v.blueprint_origin ?? {};
+    let y = -(origin.y ?? 0);
+    for (const row of bpRows) {
+      let x = -(origin.x ?? 0) - 1;
+      for (const ch of row) {
+        x += 1;
+        const entry = v.palette[ch];
+        if (!entry) continue;
+        for (const e of asArr<any>(entry)) {
+          const pid: string = typeof e === 'string' ? e : e.part;
+          if (!parts[pid]) {
+            missingParts.add(pid);
+            continue;
+          }
+          const pp: VProtoPart = { x, y, part: pid };
+          if (typeof e === 'object' && typeof e.fuel === 'string') {
+            pp.fuel = e.fuel;
+            fuelInfo(e.fuel, false);
+          }
+          out.push(pp);
+        }
+      }
+      y += 1;
+    }
+  }
   for (const mount of asArr<any>(v.parts)) {
-    for (const e of asArr<any>(mount.parts)) {
+    // BN accepts both { x, y, parts: [...] } and one part per entry, { x, y, part, fuel? }
+    // (veh_type.cpp: part.has_string("part") -> add_part_obj on the entry itself).
+    const entries = typeof mount.part === 'string' ? [mount] : asArr<any>(mount.parts);
+    for (const e of entries) {
       const s: string = typeof e === 'string' ? e : e.part;
       const [pid, variant] = s.split('#');
       if (!parts[pid]) {
