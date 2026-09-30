@@ -1,11 +1,13 @@
-# Cataclysm: Dark Days Ahead — 3D
+# Cataclysm 3D
 
-A real-time, first-person 3D remake of [Cataclysm: Dark Days Ahead](https://cataclysmdda.org),
-running in the browser. It loads **CDDA's own JSON content** (10k items, 1.2k monsters, 5.6k
-recipes, 2.3k mapgen layouts, 3.2k dialogue topics…) and builds the world out of the
-**UltiCa pixel-art tileset**, rendered in the "3D pixel art" style of *Project Shadowglass*:
-a low-resolution, point-filtered image of a real 3D world with banded lighting, a limited
-palette, ordered dithering and outlines.
+A real-time, first-person 3D take on Cataclysm, running in the browser. The live branch
+(`bn`) plays **[Cataclysm: Bright Nights](https://github.com/cataclysmbnteam/Cataclysm-BN)**
+content and rules with a modern mouse-first interface (drag-and-drop inventory, quick-loot,
+context menus, a clean HUD) aimed at players who bounce off the classic tiles/curses UI. The
+world is built from the **UltiCa pixel-art tileset** and real 3D geometry in the style of
+*Project Shadowglass*. The original DDA-based version is tagged `v1-dda` on `master`.
+
+**Current state, backlog and how to work on it: [`docs/STATUS.md`](docs/STATUS.md).**
 
 ## Running
 
@@ -42,40 +44,13 @@ All captured in the production build at 1920×1080 on a GPU (`docs/screenshots/`
 
 ## Controls
 
-Movement is first-person: **WASD** to move, **mouse** to look (click to capture), **Shift**
-to run, **c** to crouch, **LMB** to attack or fire, **RMB** to aim, and **v** to cycle the
-camera between first person, over the shoulder (a chase camera at the wheel), and top-down
-(classic CDDA view; the mouse wheel zooms it).
-Everything else uses CDDA's keys, moved where WASD collides with them:
-
-| Key | Action | Key | Action |
-|---|---|---|---|
-| `e` | examine / open / use | `g` `,` | pick up |
-| `i` | inventory | `q` | drop |
-| `z` | wield | `O` / `T` | wear / take off |
-| `E` | eat / drink | `u` | apply / activate |
-| `r` / `U` | reload / unload | `f` | fire |
-| `b` | fire mode | `G` | throw |
-| `X` | smash | `B` | butcher / dissect |
-| `&` | craft | `*` | construct |
-| `(` | disassemble | `R` | read |
-| `F` | flashlight | `<` `>` | stairs |
-| `x` | look | `m` | overmap |
-| `@` | character sheet | `P` | message log |
-| `|` / `$` | wait / sleep | `C` / `M` | chat / missions |
-| `^` | vehicle controls | `k` `h` `n` | engine / headlights / horn |
-| `p` | bionics | `[` | mutations |
-| `_` | martial arts | `)` | achievements & scores |
-| `F5` | quicksave | `?` | help |
-| `F11` | fullscreen | `Esc` | pause menu |
-
-Menus pause the game and close on the key that opened them, **Backspace** or **Esc**; the
-mouse stays captured, so closing a menu drops you straight back into mouse-look. Outside
-fullscreen the browser always frees the mouse on Esc: the game then pauses until you click
-or press any key. In fullscreen (`F11`) Esc is an ordinary key and the mouse stays captured
-(hold Esc to leave fullscreen). Every key can be rebound in **Options > Key bindings**;
-movement follows the physical WASD positions on any layout (ZQSD on AZERTY), and
-**Options > Menu cursor = free** shows the mouse cursor in menus for pointing and clicking.
+WASD move (Shift run, `c` crouch, Space side-step), mouse look, LMB attack/fire,
+RMB guard / aim / draw a bow, `e` interact (get in and drive a car, open doors),
+`o` world action menu, `Tab`/`i` inventory, quick-loot at the crosshair (wheel, `e` take,
+`r` take all), `1`–`0` hotbar, `` ` `` tactical pause, `&` craft, `*` construct,
+`@` character, `m` map, `J` journal, `F` flashlight, `F5` save, `F11` fullscreen,
+`?` help, Esc menu, `v` camera (first person / shoulder / top-down).
+Everything is rebindable in Options → Key bindings; the full list is in `docs/STATUS.md`.
 
 ## What's in it
 
