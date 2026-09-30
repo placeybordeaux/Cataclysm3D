@@ -215,7 +215,7 @@ Rough cost and value, cheapest first. The ones marked **built** are done; the re
   you earn is BN's. `src/game/adaptation_rules.ts`.
 - **Fire safety** (Options → Fire safety: Warn outside a fire ring / No warning (BN)). Lighting a
   fire off a fire container, next to something that burns or under a roof, says why, "Fires
-  spread. A fire ring (10 rocks), a brazier or a fireplace keeps it in. Use the lighter again to
+  spread. A fire ring (10 rocks: smash a boulder with a hammer), a brazier or a fireplace keeps it in. Use the lighter again to
   light it anyway." A second try within 30 s lights it.
 - **Boil water** on a lit fire (`e` on it). With unclean water and a pot: "Boil water (2 servings
   of clean water)", which runs BN's `water_clean` recipe (same time, tools and practice). No
@@ -253,9 +253,9 @@ Hungry, Very Thirsty, unhurt).
 | 64 | **Two bottles of water were listed as two different things** in the eat picker ("clean water (plastic bottle)" and "clean water · In your plastic bottle"). | eat picker | **Fixed**: one row, "clean water (plastic bottles) · 4 servings". |
 | 65 | **A loot card next to "[e] Talk to …"** when an NPC stood in front of a pile; `e` talks. | loot card | **Fixed**: no card while a creature is under the crosshair. |
 | 66 | **Days of "Very Hungry" with no idea where food is.** | tips | **Fixed**: a "Nothing to eat" tip (very hungry, no food on you): kitchens, stores, crates; thirst first. Also: the hunger tip's list spelled "Very hungry"/"Starving!", which the game never reports. |
-| 67 | **The fire warning says "a fire ring (10 rocks)"**, but outside the walled compound there was one rock in 40 tiles. | fire safety | Kept; reported. A "where to find rocks" line should be checked against BN sources before it goes in. |
-| 68 | **The hotbar showed "water ×3"** in a slot with no such item on me. | hotbar | Reported (hotbar area). |
-| 69 | **The warehouse compound north of the shelter has no way in on its south side** (a long concrete wall); the fruit crates inside were out of reach on foot. | mapgen | Reported; not investigated. |
+| 67 | **The fire warning says "a fire ring (10 rocks)"**, but outside the walled compound there was one rock in 40 tiles. | fire safety | **Fixed** (round 7): "10 rocks: smash a boulder with a hammer". BN: `f_boulder_small` bashes into 16–32 rocks (`str_min` 16), medium 35–50, large 50–70, `f_rubble_rock` 5–10; within 90 tiles of this shelter there were 12 small and 4 medium boulders and 9 rock rubble piles. Bare hands at Str 8 "don't seem to be damaging" it; with a hammer it broke after 35 hits into 27 rocks. (BN also lets you "clear up" rock rubble with a digging tool; the port has no such action, only smashing.) |
+| 68 | **The hotbar showed "water ×3"** in a slot with no such item on me. | hotbar | **Fixed** (round 7): the first-run hotbar bound both the starting bottle ("clean water (plastic bottle)") and the water inside it; the second slot counted every clean water carried. It no longer binds the contents of a bottle it already bound. Hotbars saved before the fix keep the old slot (right-click clears it). |
+| 69 | **The warehouse compound north of the shelter has no way in on its south side** (a long concrete wall); the fruit crates inside were out of reach on foot. | mapgen | **BN as designed** (round 7): it is `lab_mutagen_6_level`, the surface of a unique underground lab. Its core and residence blocks are walled; the way in is the `lab_security_z0` checkpoint on the parking side, which connects to the road (north of the lab here: doors on the checkpoint's north face, locked gates beside). The Evac Shelter just happens to sit against the lab's south wall. The "fruit and organs" crates are lab stores. |
 
 ### Credits (round 3)
 
@@ -349,6 +349,12 @@ Round 6:
   `tests/adaptation.test.ts`; `tests/crafting.test.ts` turns the fire warning off for its
   lighter test (its test map counts as indoors).
 
+Round 7:
+- `src/ui2/ui2.css`: toasts slide in a short way with a fade (on ultrawide the first stepped
+  frame of the old full-width slide sat at the screen edge: QA wave 3 #8).
+- `src/ui2/bn/install.ts` `firstRunHotbar`: not the contents of a bottle it already bound.
+- `src/game/fire.ts`: where rocks come from.
+
 Round 4:
 - `src/ui/route.ts`, `.css`: `omtCost`, `planOmtRoute` (A* over overmap tiles), `currentRoute`,
   and the Trail and Beacon displays (DOM marks on the ui2 world layer; nothing in the renderer).
@@ -412,3 +418,6 @@ Screenshots: `docs/screenshots/wave3/adaptation/`.
 | `r6_eat_two_bottles.jpg` | Round 6: the eat picker (shot with one bottle left) |
 | `r6_fire_out_note.jpg` | Round 6: "The fire goes out before the wood on it burned up" |
 | `r6_day5_no_food.jpg` | Round 6: day 5, the journal's "Nothing to eat" entry |
+| `r7_tip_ultrawide_first_frame.jpg` | Round 7 (1720×652, 2.64:1): a discovery tip 60 ms after it appears, already in the HUD column |
+| `r7_hotbar_first_run.jpg` | Round 7: first-run hotbar, lighter / water / smartphone, no second "water" slot |
+| `r7_boulder_rocks.jpg` | Round 7: a small boulder smashed with a hammer, rocks on the ground |
