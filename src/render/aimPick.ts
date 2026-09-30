@@ -37,6 +37,32 @@ export function rayUnitBox(o: THREE.Vector3, d: THREE.Vector3): number | null {
 }
 
 /**
+ * Many rays against one model (a melee swing's fan): invert each part's matrix once, then test
+ * rays cheaply. Undefined when the model can't be tested (see pickModel).
+ */
+export function prepareModel(model: PickableModel): ((o: Vec3, d: Vec3) => { t: number; part: string } | null) | undefined {
+  if (!model.visible) return undefined;
+  const parts = model.rig.parts;
+  const inv: { m: THREE.Matrix4; l: THREE.Matrix3; name: string }[] = [];
+  for (let i = 0; i < parts.length; i++) {
+    const m = new THREE.Matrix4().fromArray(model.mats, i * 16);
+    if (Math.abs(m.determinant()) < 1e-12) return undefined;
+    m.invert();
+    inv.push({ m, l: new THREE.Matrix3().setFromMatrix4(m), name: parts[i].name });
+  }
+  return (o, d) => {
+    let best: { t: number; part: string } | null = null;
+    for (const p of inv) {
+      O.set(o.x, o.h, o.y).applyMatrix4(p.m);
+      D.set(d.x, d.h, d.y).applyMatrix3(p.l);
+      const t = rayUnitBox(O, D);
+      if (t !== null && (!best || t < best.t)) best = { t, part: p.name };
+    }
+    return best;
+  };
+}
+
+/**
  * The first part of `model` the ray `o + t·d` enters (d a unit vector): its name and t (metres
  * along d). Null when it misses every part. Undefined when the model can't be tested (hidden,
  * or its matrices were never built).

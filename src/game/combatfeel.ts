@@ -141,6 +141,9 @@ export interface FeelConstants {
   aimPerfectMul: number;
   /** Melee in free aim: a blow that visibly connects but whose BN hit roll failed lands glancing. */
   aimGlancingMul: number;
+  /** Melee zones (free aim, from the 3D model part the swing met): head and legs/limbs damage multipliers. */
+  aimMeleeHeadMul: number;
+  aimMeleeLimbMul: number;
   /** Each melee skill level widens the parry window by this share (free aim models). */
   aimParryPerSkill: number;
   /** Each weapon skill level adds this to a hit's stagger (share of HP counted for flinch/stagger). */
@@ -163,7 +166,7 @@ const ACCESSIBLE: FeelConstants = {
   drawMin: 0.45, drawStaminaPerSec: 50, drawHoldSteady: 4, drawShake: 220, slingWhirl: 0.35,
   aimSwayScale: 1.6, aimUnsteady: 0.06, aimKickScale: 0.15, aimKickView: 0.5, aimKickRecover: 5, aimKickRecoverPerSkill: 0.9,
   aimSkillDmg0: 0.75, aimSkillDmg10: 1.3, aimHeadMul: 2, aimLegMul: 0.75, aimGrazeMul: 0.5, aimWeakMul: 1.5, aimPerfectMul: 1.25,
-  aimGlancingMul: 0.5, aimParryPerSkill: 0.05, aimStaggerPerSkill: 0.04,
+  aimGlancingMul: 0.5, aimParryPerSkill: 0.05, aimStaggerPerSkill: 0.04, aimMeleeHeadMul: 1.5, aimMeleeLimbMul: 0.8,
 };
 
 /** Classic: BN's own pacing where real time allows — shorter tells, tighter parries. */

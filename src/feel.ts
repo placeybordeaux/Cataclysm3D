@@ -35,7 +35,9 @@ export function installCombatFeel(game: Game, renderer: Renderer | null, monster
   });
   interactOverrides.unshift({
     interact: () => false,
-    prompt: () => (sys.grabbedBy ? `[${game.keys.label('interact')}] Break free` : null),
+    // While grabbed the GRABBED banner (combatHud.ts) already says which key breaks free: an empty
+    // prompt keeps the crosshair clear (and hides door/item prompts that don't apply now).
+    prompt: () => (sys.grabbedBy ? '' : null),
   });
 
   // --- reload takes (and shows) time: the gun dips out of view and can't fire until it's back.

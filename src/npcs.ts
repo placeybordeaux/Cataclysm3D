@@ -139,6 +139,7 @@ export async function installNpcs(game: Game, renderer: Renderer | null, worldge
       return true;
     };
     combat.npcShot = (yaw, maxDist, shot) => sys.playerShot(yaw, maxDist, shot);
+    combat.npcRound = (n, shot, missedBy, what) => sys.playerRoundHits(n, shot, missedBy, what);
     game.activities.dangerChecks.push(() => {
       const p = game.player;
       for (const n of sys.npcs) {

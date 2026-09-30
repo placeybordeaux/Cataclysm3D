@@ -529,6 +529,8 @@ tests/               vitest unit tests (pure logic, no DOM/WebGL)
   `freeAim()`. Free aim: `combat.aim` (AimSway: sway + kick; the shot uses `shotOffset`), `castAim`,
   `freeHit`; hooks for 3D models: `aimHooks.hitZone(m, hFrac)` and `aimHooks.body(m, dist)`; events
   `monsterDodge`, `playerAttack.quality`; `rig.aimView`, `viewmodel.aimPx`, `game.runVeto`.
+  Melee picks with `combat.meleePick()` (fan of rays vs model boxes, `aimHooks.prepare`). Enemy rounds:
+  `enemyFireOf(game).fire({...})` (src/game/enemyfire.ts; monguns/npcai use it), event `nearMiss`.
 - Debug: `cdda.feel`, `cdda.setFeel(d)`, `cdda.feelState()`, `cdda.recordFrames(n, dt, each)` (frame-exact
   captures for animation timing); `tools/drive.ts seq "…"` (timed real input + screenshot bursts), `xbdown/xbup`.
 - Ranged / archery (`src/game/rangedfeel.ts`, pure): `rangedClass(item)` (firearm/bow/crossbow/sling/thrown/
