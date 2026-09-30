@@ -6,6 +6,7 @@ import type { RGB } from './colors';
 import { paintSurface, patternFor, rampAround } from './pixelArt';
 import type { ProceduralTextureSource } from './proceduralSource';
 import type { SurfaceFace, SurfaceQuery, TileFrame, TileTextureSource } from './textureSource';
+import type { SurfacePainter } from './surfaces';
 
 // TileTextureSource backed by the UltiCa atlas, layered in front of the procedural source.
 //
@@ -30,6 +31,8 @@ const tileSized = (r: FrameRef | undefined) => (r && r.w === 32 && r.h === 32 &&
 
 export class AtlasTextureSource implements TileTextureSource {
   wallStyle: WallStyle = 'tinted';
+  /** painted architectural surfaces (surfaces.ts), consulted first when active */
+  surfaces?: SurfacePainter;
   private avgCache = new Map<string, RGB | null>();
   private looksLike: (id: string) => string | undefined;
 
@@ -54,6 +57,17 @@ export class AtlasTextureSource implements TileTextureSource {
   }
 
   terrain(id: string, face: SurfaceFace, q?: SurfaceQuery): TileFrame {
+    if (this.surfaces?.active() && (face === 'wall' || face === 'side' || face === 'ceiling' || face === 'floor')) {
+      const f = this.surfaces.surface(id, face, q, () => {
+        if (face === 'floor') {
+          const hit = this.atlas.lookupWithLooksLike(id, this.looksLike, { connections: 15 });
+          return this.conv(tileSized(hit?.fg ?? hit?.bg));
+        }
+        // the unconnected wall sprite shows the wall's face (bricks, boards)
+        return this.conv(this.atlas.lookupWithLooksLike(id, this.looksLike, { connections: 0 })?.fg, false);
+      });
+      if (f) return f;
+    }
     switch (face) {
       case 'floor': {
         const hit = this.atlas.lookupWithLooksLike(id, this.looksLike, { variantSeed: q?.variantSeed, season: q?.season, connections: q?.connections ?? 15 });

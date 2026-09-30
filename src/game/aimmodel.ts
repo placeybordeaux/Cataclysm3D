@@ -150,7 +150,8 @@ export class AimSway {
   recover = 5;
   /** Wall-clock ms of the last tick (for HUD interpolation) and the last drawn reticle. */
   tickAt = 0;
-  shown: { x: number; y: number; at: number } | null = null;
+  /** x/y: the aim offset from the view centre; rx/ry: where the reticle sat relative to the drawn camera (x/y minus the view's share of the kick). */
+  shown: { x: number; y: number; rx: number; ry: number; at: number } | null = null;
   /** Off (dice model, no gun): the reticle sits at the centre. */
   active = false;
 
@@ -181,18 +182,19 @@ export class AimSway {
   }
 
   /** Remember what the HUD drew (wall-clock ms), so a click fires along it. */
-  markShown(x: number, y: number, at: number): void {
-    this.shown = { x, y, at };
+  markShown(x: number, y: number, at: number, rx = x, ry = y): void {
+    this.shown = { x, y, rx, ry, at };
   }
 
   /**
    * The offset a shot fired now leaves along: the reticle the player saw if the HUD drew one in
    * the last ~2 frames, else the simulation's own (tests, the balance sim).
    */
-  shotOffset(now = 0, freshMs = 50): { x: number; y: number } {
+  shotOffset(now = 0, freshMs = 50): { x: number; y: number; rx: number; ry: number; drawn: boolean } {
     const s = this.shown;
-    if (s && now > 0 && now - s.at <= freshMs && now >= s.at) return { x: s.x, y: s.y };
-    return this.offset(0);
+    if (s && now > 0 && now - s.at <= freshMs && now >= s.at) return { x: s.x, y: s.y, rx: s.rx, ry: s.ry, drawn: true };
+    const o = this.offset(0);
+    return { ...o, rx: o.x, ry: o.y, drawn: false };
   }
 
   /** A round's recoil: BN MOA added by the shot -> an upward kick with a little random sideways. */
@@ -226,7 +228,8 @@ export function offsetToPixels(o: { x: number; y: number }, fovDeg: number, heig
 
 // ------------------------------------------------------------------ where it hit, and how hard
 
-export type HitZone = 'head' | 'torso' | 'legs';
+/** 'limb': arms, wings, tails (the 3D models tell them apart; the height rule never picks it). */
+export type HitZone = 'head' | 'torso' | 'legs' | 'limb';
 
 export interface ZoneTarget {
   size: string;
@@ -256,7 +259,47 @@ export const aimHooks: {
   hitZone: (t: ZoneTarget, hFrac: number) => HitZone;
   /** Visible body of a monster: height (m) and how far its feet are lifted (close-range sprite lift). */
   body: ((m: unknown, dist: number) => { height: number; lift: number } | undefined) | null;
-} = { hitZone: defaultHitZone, body: null };
+  /**
+   * The exact body as drawn (src/aim.ts from the 3D character models): the first body part the
+   * ray (origin `o`, unit direction `d`; x east, y south, h up, absolute metres) enters.
+   * `undefined` = no model for this monster (use the column + hitZone rule); `null` = the model
+   * is there and the ray misses it (between the legs, past an arm). `t` = distance along `d`.
+   */
+  pick: ((m: unknown, o: Vec3, d: Vec3) => { t: number; zone: HitZone; part: string } | null | undefined) | null;
+  /**
+   * The drawn camera (src/aim.ts): its position and basis (forward, right, up; unit vectors in
+   * the same axes), whether it's an over-the-shoulder view, and the survivor's eye as drawn.
+   * Null in tests, the sim, and top-down view: the shot then leaves the eye along the view.
+   */
+  view: (() => { o: Vec3; f: Vec3; r: Vec3; u: Vec3; third: boolean; eye: Vec3 } | null) | null;
+} = { hitZone: defaultHitZone, body: null, pick: null, view: null };
+
+export interface Vec3 {
+  x: number;
+  y: number;
+  h: number;
+}
+
+/** A ray leaving a camera with basis (f, r, u) at screen offset (ox right, oy up): f + r·tan ox + u·tan oy, normalised. */
+export function basisDirection(v: { f: Vec3; r: Vec3; u: Vec3 }, ox: number, oy: number): Vec3 {
+  const tx = Math.tan(ox), ty = Math.tan(oy);
+  const d = { x: v.f.x + v.r.x * tx + v.u.x * ty, y: v.f.y + v.r.y * tx + v.u.y * ty, h: v.f.h + v.r.h * tx + v.u.h * ty };
+  const n = Math.hypot(d.x, d.y, d.h) || 1;
+  return { x: d.x / n, y: d.y / n, h: d.h / n };
+}
+
+/** Game yaw/pitch of a direction vector. */
+export function yawPitch(d: Vec3): { yaw: number; pitch: number } {
+  return { yaw: Math.atan2(d.x, -d.y), pitch: Math.atan2(d.h, Math.hypot(d.x, d.y)) };
+}
+
+/** Which zone a 3D model part is (render/chars part names); heads respect NOHEAD. */
+export function zoneOfPart(name: string, noHead = false): HitZone {
+  if (/^(head|ear|ant|fang)/.test(name)) return noHead ? 'torso' : 'head';
+  if (/^(thigh|shin|foot|leg|track)/.test(name)) return 'legs';
+  if (/^(uArm|fArm|wing|tail)/.test(name)) return 'limb';
+  return 'torso';
+}
 
 /** Standing height (m) by size when no renderer says otherwise (matches monsterView's glyph heights). */
 export const BODY_HEIGHT: Record<string, number> = { tiny: 0.45, small: 0.8, medium: 1.7, large: 2.3, huge: 3.2 };
@@ -298,6 +341,7 @@ export function hitDamageMul(q: HitQuality, f: FeelConstants = FEEL): DamagePart
   const parts: { label: string; mul: number }[] = [];
   if (q.zone === 'head') parts.push({ label: 'HEADSHOT', mul: f.aimHeadMul });
   else if (q.zone === 'legs') parts.push({ label: 'legs', mul: f.aimLegMul });
+  else if (q.zone === 'limb') parts.push({ label: 'limb', mul: f.aimLegMul });
   if (q.graze) parts.push({ label: 'graze', mul: f.aimGrazeMul });
   if (q.weakSpot) parts.push({ label: 'weak spot', mul: f.aimWeakMul });
   if (q.perfect) parts.push({ label: 'perfect', mul: f.aimPerfectMul });

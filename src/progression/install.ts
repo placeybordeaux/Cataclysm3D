@@ -92,6 +92,8 @@ export async function loadCatalogue(base = DATA_BASE): Promise<unknown> {
 const HUNGRY = new Set(['Hungry', 'Very hungry', 'Famished', 'Near starving', 'Starving!']);
 const THIRSTY = new Set(['Thirsty', 'Very thirsty', 'Dehydrated', 'Parched']);
 const COLD = new Set(['Chilly', 'Very cold!', 'Freezing!']);
+/** Discovery tips about a passing condition: re-checked when their turn to show comes. */
+const STILL_TRUE = new Set(['first_night', 'first_rain', 'first_cold']);
 
 export async function installProgression(
   game: Game,
@@ -174,6 +176,17 @@ export async function installProgression(
       return;
     }
     const d = NUDGES[n.id];
+    // Tips about a passing state are dropped (not marked shown) if the state passed while they
+    // waited: "Night falls" queued during a wait-until-dawn showed at sunrise (wave-3 playtest).
+    if (STILL_TRUE.has(n.id)) {
+      let still = false;
+      try {
+        still = probes[n.id]?.() ?? true;
+      } catch {
+        still = false;
+      }
+      if (!still) return;
+    }
     prof.mark('hintsShown', n.id);
     nudgeToast(game, { title: d.title, body: d.body, key: `nudge:${d.id}`, category: d.category });
   };
@@ -196,7 +209,8 @@ export async function installProgression(
     first_fatigue: () => p.sleepinessDescription() !== '',
     // When it actually gets dark (civil dusk), not at a fixed 20:30: in early spring that was
     // two hours after the playtester was standing in the dark (docs/ADAPTATION.md).
-    first_night: () => p.z >= 0 && isNight(game.clock),
+    // Evening only: "Night falls" at 05:30 (the end of a wait until dawn) is the wrong moment.
+    first_night: () => p.z >= 0 && isNight(game.clock) && game.clock.hourOfDay >= 12,
     first_bleed: () => p.hasEffect('bleed'),
     first_locked: () => scan(2, (x, y) => /locked/.test(game.map.terAt(x, y, p.z).id) && /door|gate/.test(game.map.terAt(x, y, p.z).id)),
     first_overweight: () => p.inv.weightCarried() > p.inv.weightCapacity(),

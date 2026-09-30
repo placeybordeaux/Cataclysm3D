@@ -121,6 +121,26 @@ describe('eat picker: one row per thing, in words', () => {
   });
 });
 
+describe('credits', () => {
+  it('carry the required attributions, taken from the licence files', async () => {
+    const { CREDITS } = await import('../src/ui/credits');
+    const text = CREDITS.map((c) => [c.title, ...c.lines, ...(c.links ?? []).flat()].join(' ')).join('\n');
+    expect(text).toMatch(/fan-made/);
+    expect(text).toMatch(/Bright Nights[\s\S]*CC BY-SA 3\.0/);
+    expect(text).toMatch(/UltimateCataclysm[\s\S]*I-am-Erk/);
+    expect(text).toMatch(/CO\.AG/);
+    expect(text).toMatch(/SIL Open Font License/);
+    expect(text).toMatch(/GNU Unifont[\s\S]*font embedding exception/);
+    // Facts the credits state must still be what the shipped licence files say.
+    const ofl = readFileSync(new URL('../public/fonts/LICENSE-OFL-Terminus-Font.txt', import.meta.url), 'utf8');
+    expect(ofl).toMatch(/Copyright \(C\) 2020 Dimitar Toshkov Zhekov/);
+    expect(ofl).toMatch(/2011-2023 Tilman Blumenbach/);
+    const audio = readFileSync(new URL('../public/audio/CREDITS.md', import.meta.url), 'utf8');
+    expect(audio).toMatch(/CC-BY-SA 4\.0/);
+    expect(audio).toMatch(/fine to use my music as long as credit is given/);
+  });
+});
+
 describe('day counter', () => {
   it('turns over at midnight, like the clock', () => {
     const start = 8 * 3600;

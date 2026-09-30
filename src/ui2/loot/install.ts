@@ -78,18 +78,46 @@ export function installLoot(game: Game, renderer: Renderer, api: DebugApi, inv: 
     const p = game.player;
     // Not during a timed job (crafting at the locker): the card covered the job's progress bar,
     // and taking something would only cancel the job.
-    return game.input.locked && !game.input.captured && surfacesOpen() === 0 && !p.dead && !p.isAsleep() && !game.vehicles?.driving && renderer.cameraMode !== 'top' && !game.activities.current;
+    return game.input.locked && !game.input.captured && surfacesOpen() === 0 && !p.dead && !p.isAsleep() && !game.vehicles?.driving && renderer.cameraMode !== 'top' && !game.activities.current && !inFight();
+  };
+  // Not in a fight either: the first kill's corpse pile opened a 13-row card over the second
+  // zombie as it closed in (wave-3 playtest). Hostile within 6 m or a hit in the last 3 s.
+  let lastHit = -1e9;
+  for (const ev of ['playerHurt', 'playerAttack'] as const) game.events.on(ev, () => void (lastHit = performance.now()));
+  const inFight = () => {
+    if (performance.now() - lastHit < 3000) return true;
+    const mons = (game as unknown as { monsters?: { visibleHostile(r: number): unknown } }).monsters;
+    return !!mons?.visibleHostile(6);
   };
   const k = (id: string) => game.keys.label(id);
   // Adaptation (docs/ADAPTATION.md): a survivor who is cold and looking at a jacket in a
-  // cupboard should be able to put it on right there, not take it, open the inventory and find
-  // the double-click. The wear key does that while the card is up, and the card says so when
-  // you're cold.
+  // cupboard should be able to put it on right there (or, hungry at a kitchen cupboard, eat),
+  // not take it, open the inventory and find the double-click. The player's own wear / eat key
+  // does that while the card is up, and the card says so when the need is there.
   const COLD = new Set(['Chilly', 'Very cold!', 'Freezing!']);
-  const wearAction = (r: QuickSpec['rows'][number] | undefined, key: string) => {
+  const HUNGRY = new Set(['Hungry', 'Very Hungry', 'Famished', 'Starving']);
+  type Verb = { label: string; keyId: 'wear' | 'eat'; act: () => unknown; hint: string | null };
+  const verbFor = (r: QuickSpec['rows'][number] | undefined, key: string): Verb | null => {
     if (!r) return null;
-    const a = model.actions(r, key).find((m) => 'label' in m && m.label === 'Wear');
-    return a && 'action' in a && a.action && !a.disabled ? a.action : null;
+    const acts = model.actions(r, key);
+    const find = (re: RegExp) => {
+      const a = acts.find((m) => 'label' in m && re.test(m.label));
+      return a && 'action' in a && a.action && !a.disabled ? a.action : null;
+    };
+    const p = game.player;
+    const wear = find(/^Wear$/);
+    if (wear) {
+      const hint = COLD.has(p.bodyTempDescription()) && (model.itemOf(r.id)?.def.warmth ?? 0) > 0 ? `You're cold: [${k('wear')}] puts it on` : null;
+      return { label: 'Wear', keyId: 'wear', act: wear, hint };
+    }
+    const eat = find(/^(Eat|Drink)$/);
+    if (eat) {
+      const drink = acts.some((m) => 'label' in m && m.label === 'Drink');
+      const need = drink ? p.thirstDescription() !== '' && !/Hydrated|Turgid/.test(p.thirstDescription()) : HUNGRY.has(p.hungerState());
+      const hint = need ? `You're ${drink ? 'thirsty' : 'hungry'}: [${k('eat')}] ${drink ? 'drinks' : 'eats'} it here` : null;
+      return { label: drink ? 'Drink' : 'Eat', keyId: 'eat', act: eat, hint };
+    }
+    return null;
   };
   const update = () => {
     const now = performance.now();
@@ -139,13 +167,11 @@ export function installLoot(game: Game, renderer: Renderer, api: DebugApi, inv: 
         else if (tot.weight[0] + adds.weight > tot.weight[1]) warn = { text: 'Heavy: taking it overburdens you', tone: 'warn' };
       } else if (tot.volume[0] >= tot.volume[1] && tot.volume[1] > 0) warn = { text: 'Bag full', tone: 'bad' };
     }
-    const canWear = quick && !!wearAction(rows[sel], t.key);
-    if (canWear && !warn && COLD.has(game.player.bodyTempDescription()) && (model.itemOf(rows[sel].id)?.def.warmth ?? 0) > 0) {
-      warn = { text: `You're cold: [${k('wear')}] puts it on`, tone: 'warn' };
-    }
+    const verb = quick ? verbFor(rows[sel], t.key) : null;
+    if (verb?.hint && !warn) warn = { text: verb.hint, tone: 'warn' };
     const keys: QuickSpec['keys'] = quick
       ? rows.length
-        ? [[k('interact'), 'Take'], ...(canWear ? [[k('wear'), 'Wear'] as [string, string]] : []), [k('reload'), 'Take all'], [k('inventory2'), 'Open'], ...(rows.length > 1 ? [['wheel', 'Select'] as [string, string]] : [])]
+        ? [[k('interact'), 'Take'], ...(verb ? [[k(verb.keyId), verb.label] as [string, string]] : []), [k('reload'), 'Take all'], [k('inventory2'), 'Open'], ...(rows.length > 1 ? [['wheel', 'Select'] as [string, string]] : [])]
         : [[k('inventory2'), 'Open']]
       : style === 'area'
         ? [[k('pickup'), 'Loot everything nearby'], [k('inventory2'), 'Open']]
@@ -224,13 +250,14 @@ export function installLoot(game: Game, renderer: Renderer, api: DebugApi, inv: 
       takeAllHere();
       return true;
     }
-    if (quick && rows.length && game.keys.keysFor('wear').includes(e.key)) {
-      const r = rows[sel], act = wearAction(r, t.key);
-      if (!act) return false;
-      void act();
+    const verb = quick && rows.length ? verbFor(rows[sel], t.key) : null;
+    if (verb && game.keys.keysFor(verb.keyId).includes(e.key)) {
+      const r = rows[sel];
+      void verb.act();
       refreshAll();
-      // Wearing is a timed action with its own bar; this only acknowledges the key.
-      setFlash(`Putting on the ${r.name.replace(/^\d+ /, '')}…`, 'good');
+      // Wearing / eating are timed actions with their own bar; this only acknowledges the key.
+      const what = r.name.replace(/^\d+ /, '');
+      setFlash(verb.label === 'Wear' ? `Putting on the ${what}…` : `${verb.label === 'Drink' ? 'Drinking' : 'Eating'} the ${what}…`, 'good');
       return true;
     }
     if (game.keys.keysFor('inventory2').includes(e.key) || game.keys.keysFor('inventory').includes(e.key)) {

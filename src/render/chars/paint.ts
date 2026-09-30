@@ -19,7 +19,7 @@
 // edge columns/rows, so the back of a zombie is the same shirt and the far side of a dog is
 // the same coat.
 
-import type { PartSrc, Role } from './rig';
+import type { Detail, PartSrc, Role } from './rig';
 
 export const TEXELS_PER_M = 32;
 
@@ -288,7 +288,7 @@ export function paintPart(dst: Img, ox: number, oy: number, dims: [number, numbe
   if (src.role || src.color) {
     const base: RGB = src.color ?? s.pal[src.role!];
     const alt: RGB = [base[0] * 0.82, base[1] * 0.82, base[2] * 0.82];
-    col = (_f, u, v) => ((Math.floor(u * 97) + Math.floor(v * 89)) % 3 === 0 ? alt : base);
+    col = src.detail ? detailPainter(src.detail, base, dims) : (_f, u, v) => ((Math.floor(u * 97) + Math.floor(v * 89)) % 3 === 0 ? alt : base);
   } else {
     const c = cropOf(s, src);
     const side = src.proj === 'side';
@@ -364,4 +364,74 @@ export function paintPart(dst: Img, ox: number, oy: number, dims: [number, numbe
       put(D + Math.ceil(W * 0.72) - 1, ey, eye);
     }
   }
+}
+
+/**
+ * Surface detail for items seen from 30-60 cm (faces: right, front, left, back, top, bottom;
+ * u right, v down as seen from outside). `along`/`across` follow the part's longest axis so
+ * wood grain runs down a stock and tape winds round a bat whichever way the part is built.
+ */
+function detailPainter(d: Detail, b: RGB, dims: [number, number, number]): (f: number, u: number, v: number) => RGB {
+  const [W, H, D] = dims;
+  const axis = H >= W && H >= D ? 'y' : D >= W ? 'z' : 'x';
+  const k = (c: RGB, m: number): RGB => [c[0] * m, c[1] * m, c[2] * m];
+  const faceDims = (f: number): [number, number] => (f === 0 || f === 2 ? [D, H] : f === 4 || f === 5 ? [W, D] : [W, H]);
+  // (along, across) texel coordinates on a face; along = null on end faces
+  const coords = (f: number, u: number, v: number): [number | null, number] => {
+    const [fw, fh] = faceDims(f);
+    if (axis === 'y') return f < 4 ? [v * fh, u * fw] : [null, u * fw];
+    if (axis === 'z') return f === 0 || f === 2 ? [u * fw, v * fh] : f >= 4 ? [v * fh, u * fw] : [null, u * fw];
+    return f === 1 || f === 3 || f >= 4 ? [u * fw, v * fh] : [null, v * fh];
+  };
+  return (f, u, v) => {
+    const [al, ac] = coords(f, u, v);
+    const [fw, fh] = faceDims(f);
+    switch (d) {
+      case 'grain': {
+        // wood: wavy lengthwise grain in three stepped tones, darker end grain
+        if (al === null) return k(b, 0.8 + 0.08 * (Math.round(ac) % 2));
+        const g = Math.sin(ac * 1.9 + 2.2 * Math.sin(al * 0.21 + ac * 0.4));
+        return k(b, g > 0.55 ? 0.82 : g < -0.7 ? 1.1 : 1);
+      }
+      case 'serration':
+        // slide serrations toward the back of the side faces
+        if ((f === 0 && u < 0.32) || (f === 2 && u > 0.68)) return Math.floor(u * fw) % 2 ? k(b, 0.62) : k(b, 1.1);
+        return f === 4 ? k(b, 1.12) : b;
+      case 'knurl':
+        return (Math.floor(u * fw) + Math.floor(v * fh)) % 2 ? k(b, 0.78) : k(b, 1.08);
+      case 'tape':
+        // grip tape wound in diagonal bands
+        if (al === null) return k(b, 0.85);
+        return Math.floor(al + ac * 0.7) % 3 === 0 ? k(b, 0.7) : b;
+      case 'port':
+        // receiver: an ejection port on the right side, pins, a lighter top rail
+        if (f === 0 && u > 0.34 && u < 0.62 && v > 0.22 && v < 0.55) return u < 0.37 || v < 0.27 ? k(b, 1.35) : k(b, 0.35);
+        if ((f === 0 || f === 2) && Math.abs(v - 0.75) < 0.5 / fh && Math.floor(u * fw) % 7 === 3) return k(b, 1.5);
+        if (f === 4) return Math.floor(al ?? 0) % 2 ? k(b, 1.25) : k(b, 1.05);
+        return b;
+      case 'vent':
+        // handguard slots
+        if ((f === 0 || f === 2) && al !== null && Math.floor(al) % 4 === 1 && v > 0.3 && v < 0.7) return k(b, 0.45);
+        return f === 4 ? k(b, 1.1) : b;
+      case 'bevel': {
+        // a blade: darker spine, the flat, a bevel and a bright 1-texel edge toward -z
+        if (f === 0 || f === 2) {
+          const e = f === 0 ? u : 1 - u; // 1 at the edge
+          if (e * fw > fw - 1) return [236, 240, 244];
+          if (e > 0.62) return k(b, 1.22);
+          if (e < 0.14) return k(b, 0.72);
+          return b;
+        }
+        if (f === 1) return [236, 240, 244];
+        return k(b, 0.7);
+      }
+      case 'metal':
+        // a highlight along the top edge of the sides, a darker underside
+        if (f === 4) return k(b, 1.2);
+        if (f === 5) return k(b, 0.65);
+        if (f < 4 && v * fh < 1) return k(b, 1.4);
+        return b;
+    }
+    return b;
+  };
 }

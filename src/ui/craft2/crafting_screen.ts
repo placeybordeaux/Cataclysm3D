@@ -19,7 +19,8 @@ import { cddaText } from '../../game/units';
 import { newRecipes } from '../../progression/discovery';
 import { attachTooltip, button, h, iconEl, itemTooltip, openPanel, type Panel } from '../../ui2';
 import { defView, itemIconRef, rememberedWindow, requirementSections, searchField, storedList } from './common';
-import { CATEGORIES, FILTERS, RecipeBook, sourcesOf, type CraftFilter, type RecipeRow } from './craft_model';
+import { ALMOST_MAX, CATEGORIES, FILTERS, RecipeBook, shortfallText, sourcesOf, type CraftFilter, type RecipeRow } from './craft_model';
+import { registerOption } from '../options';
 import './craft2.css';
 
 const favStore = storedList('cdda3d.craft.favourites');
@@ -39,6 +40,43 @@ export interface CraftingScreen {
 }
 
 let current: CraftingScreen | null = null;
+
+const ALMOST_KEY = 'cdda3d.craft.almostSection';
+/** Options > Crafting list: Craftable with an "almost" section (default) or Craftable only. */
+function almostSectionOn(): boolean {
+  try {
+    return localStorage.getItem(ALMOST_KEY) !== 'off';
+  } catch {
+    return true;
+  }
+}
+let almostOption = false;
+function registerAlmostOption(): void {
+  if (almostOption) return;
+  almostOption = true;
+  registerOption({
+    name: 'Crafting list',
+    value: () => (almostSectionOn() ? 'Craftable + one short' : 'Craftable only'),
+    change: () => {
+      try {
+        localStorage.setItem(ALMOST_KEY, almostSectionOn() ? 'off' : 'on');
+      } catch {
+        // not persisted
+      }
+    },
+    desc: 'The Craftable tab can also list recipes you are one thing short of, under "Almost", with what is missing. "Almost" has its own tab either way.',
+  });
+}
+
+/** Which tab the crafting screen opens on, from every known recipe's row. */
+export function openingFilter(all: readonly RecipeRow[], fresh: ReadonlySet<string>): CraftFilter {
+  if (all.some((r) => r.check.ok)) {
+    const freshStuck = all.some((r) => fresh.has(r.recipe.id) && !r.check.ok && r.short.count > ALMOST_MAX);
+    return freshStuck ? 'known' : 'craftable';
+  }
+  if (all.some((r) => r.short.count > 0 && r.short.count <= ALMOST_MAX)) return 'almost';
+  return 'known';
+}
 export function craftingScreen(): CraftingScreen | null {
   return current && !current.panel.closed ? current : null;
 }
@@ -49,6 +87,7 @@ export function openCraftingScreen(game: CraftHost): CraftingScreen {
     existing.panel.close();
     return existing;
   }
+  registerAlmostOption();
   const data = game.data;
   const player = game.player;
   let filter: CraftFilter = 'craftable';
@@ -162,6 +201,7 @@ export function openCraftingScreen(game: CraftHost): CraftingScreen {
       { class: `c2-row${r.check.ok ? ' ok' : ''}${r.recipe.id === selId ? ' selected' : ''}`, data: { id: r.recipe.id }, attrs: { role: 'option' } },
       iconEl(itemIconRef(data, r.recipe.result), 'row'),
       h('span', { class: 'c2-row-name', text: r.name }),
+      !r.check.ok && r.short.count <= ALMOST_MAX && shortfallText(r.short) ? h('span', { class: 'c2-row-short', text: shortfallText(r.short) }) : null,
       r.isNew ? h('span', { class: 'c2-new', text: 'NEW' }) : null,
       favourites.has(r.recipe.id) ? h('span', { class: 'c2-fav', text: '★' }) : null,
       r.source !== 'memory' ? h('span', { class: 'c2-book', title: `From ${cddaText(data.items[r.source]?.name)}`, text: '📖' }) : null,
@@ -172,16 +212,26 @@ export function openCraftingScreen(game: CraftHost): CraftingScreen {
     return el;
   };
   const renderList = () => {
-    list.replaceChildren(...rows.map(rowEl));
+    const els: HTMLElement[] = [];
+    rows.forEach((r, i) => {
+      if (filter === 'craftable' && !r.check.ok && (i === 0 || rows[i - 1].check.ok)) {
+        const sec = h('div', { class: 'c2-section ui2-small', text: 'Almost: one thing short · see all in "Almost"' });
+        sec.addEventListener('click', () => api.setFilter('almost'));
+        els.push(sec);
+      }
+      els.push(rowEl(r));
+    });
+    list.replaceChildren(...els);
     if (!rows.length) {
       const hint =
-        filter === 'craftable' ? 'Nothing you can make with what is at hand. Try "Have some" or "All known".'
+        filter === 'craftable' ? 'Nothing you can make with what is at hand. Try "Almost", "Have some" or "All known".'
+        : filter === 'almost' ? 'Nothing is one or two things short. "All known" lists every recipe.'
         : filter === 'favs' ? 'No favourites yet: star a recipe with ☆.'
         : query ? 'No recipe matches.' : 'No recipes here yet: skills and books teach more.';
       list.append(h('div', { class: 'ui2-empty', text: hint }));
     }
     const ok = rows.filter((r) => r.check.ok).length;
-    count.textContent = `${rows.length} recipe${rows.length === 1 ? '' : 's'}${filter !== 'craftable' ? ` · ${ok} craftable now` : ''}`;
+    count.textContent = filter === 'craftable' ? `${ok} craftable now` : `${rows.length} recipe${rows.length === 1 ? '' : 's'}${filter !== 'almost' ? ` · ${ok} craftable now` : ''}`;
   };
   const select = (id: string | null, scroll = true) => {
     selId = id;
@@ -197,7 +247,7 @@ export function openCraftingScreen(game: CraftHost): CraftingScreen {
     select(rows[Math.max(0, Math.min(rows.length - 1, (i < 0 ? 0 : i) + d))].recipe.id);
   };
   const rebuild = () => {
-    rows = book.rows({ filter, category, sub, query, favourites, recent: recentStore.get(), isNew: (id) => fresh.has(id) });
+    rows = book.rows({ filter, category, sub, query, favourites, recent: recentStore.get(), isNew: (id) => fresh.has(id), almostSection: almostSectionOn() });
     renderFilters();
     renderCats();
     renderList();
@@ -483,12 +533,10 @@ export function openCraftingScreen(game: CraftHost): CraftingScreen {
     refresh,
   };
   current = api;
-  // Nothing craftable: start on everything known instead of an empty list.
-  rows = book.rows({ filter, category, sub, query, favourites, recent: [], isNew: (id) => fresh.has(id) });
-  if (!rows.length) filter = 'known';
-  if ([...fresh].some((id) => book.known.some((k) => k.recipe.id === id))) {
-    filter = 'known';
-  }
+  // Open on Craftable (docs/ADAPTATION.md: "All known" opened on 305 recipes, 1 craftable).
+  // Nothing craftable: the nearest misses, then everything known. A NEW recipe that isn't
+  // craftable (announced, then its parts were used up) still gets shown.
+  filter = openingFilter(book.rows({ filter: 'known', category, sub, query, favourites, recent: [], isNew: (id) => fresh.has(id) }), fresh);
   rebuild();
   renderBottom();
   // After the opening key's keypress: focusing now would type the '&' into the field.
