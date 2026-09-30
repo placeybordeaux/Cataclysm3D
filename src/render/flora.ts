@@ -602,8 +602,13 @@ export function* buildFloraSteps(specs: TreeSpec[], ground: GroundField | null):
   const g = new GeomBuilder(); // trunks, limbs, impostors: plain world material
   const fg = new GeomBuilder(); // leaves, needles, cards, snow: foliage material (sway, near fade)
   let first = true;
+  let t0 = performance.now();
   for (const s of specs) {
-    if (!first) yield;
+    if (!first) {
+      treeTime(t0, specs[specs.indexOf(s) - 1]);
+      yield;
+      t0 = performance.now();
+    }
     first = false;
     const pal = paletteOf(s.frame);
     if (!pal) continue;
@@ -680,6 +685,7 @@ export function* buildFloraSteps(specs: TreeSpec[], ground: GroundField | null):
       }
     }
   }
+  if (specs.length) treeTime(t0, specs[specs.length - 1]);
   const out: THREE.Object3D[] = [];
   const { mat, depth } = worldMaterials(A.texture);
   for (const [b, material] of [[g, mat], [fg, foliageMaterial(A.texture)]] as const) {
@@ -693,6 +699,15 @@ export function* buildFloraSteps(specs: TreeSpec[], ground: GroundField | null):
     out.push(m);
   }
   return out;
+}
+
+/** Per-tree build cost by LOD (cdda.floraStats; perf work on the streaming budget). */
+export const floraTiming = { n: [0, 0, 0], ms: [0, 0, 0], max: [0, 0, 0], maxId: ['', '', ''] };
+function treeTime(t0: number, s: TreeSpec): void {
+  const ms = performance.now() - t0, l = s.lod ?? 0;
+  floraTiming.n[l]++;
+  floraTiming.ms[l] += ms;
+  if (ms > floraTiming.max[l]) { floraTiming.max[l] = ms; floraTiming.maxId[l] = s.id ?? ''; }
 }
 
 // --- foliage material --------------------------------------------------------------------

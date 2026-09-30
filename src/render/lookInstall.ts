@@ -9,7 +9,8 @@ import { voxelStats } from './voxel';
 import { installFurniture, installSurfaces } from './furniture/install';
 import { HAZE_NAMES, HAZES, haze, isHazeName, setHaze } from './atmosphere';
 import { setCutoutMips } from './cutoutMips';
-import { FLORA_DESC, FLORA_NAMES, flora, floraAtlas, isFloraName, setFlora } from './flora';
+import { installNearCurtain } from './nearChunks';
+import { FLORA_DESC, FLORA_NAMES, flora, floraAtlas, floraTiming, isFloraName, setFlora } from './flora';
 import { FORM_NAMES, FORMS, form, isFormName, setForm } from './formLight';
 
 // Wires the visual styles (look.ts) into the game: the Options entry, the automation API
@@ -20,7 +21,7 @@ import { FORM_NAMES, FORMS, form, isFormName, setForm } from './formLight';
 //   await cdda.benchView(5)          frame-time percentiles standing still (GPU perf)
 
 export function installLooks(game: Game, renderer: Renderer, worldgen: WorldGenerator | null, api: DebugApi): void {
-  void game;
+  installNearCurtain(game, renderer);
   if (worldgen) renderer.skyline.overmap = worldgen.overmap;
   registerOption({
     name: 'Visual style',
@@ -114,7 +115,10 @@ export function installLooks(game: Game, renderer: Renderer, worldgen: WorldGene
   a.hazes = HAZE_NAMES;
   /** Trees variant (flora.ts): 'models' | 'clumps', live, not persisted. */
   a.setFlora = (name: string) => switchFlora(name, false);
-  a.floraStats = () => ({ flora: flora.name, atlasUsed: +floraAtlas().used.toFixed(3), midRadius: renderer.chunks.midRadius });
+  a.floraStats = () => ({
+    flora: flora.name, atlasUsed: +floraAtlas().used.toFixed(3), midRadius: renderer.chunks.midRadius,
+    perTreeMs: floraTiming.n.map((n, i) => ({ lod: i, n, mean: +(floraTiming.ms[i] / Math.max(1, n)).toFixed(2), max: +floraTiming.max[i].toFixed(1), maxId: floraTiming.maxId[i] })),
+  });
   /** A/B the stable cutout mips on grass/leaf cards (cutoutMips.ts). */
   a.cutoutMips = (on = true) => setCutoutMips(on);
   /** Form-lighting preset (formLight.ts), live, not persisted; formTweak edits single values. */

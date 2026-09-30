@@ -127,12 +127,16 @@ export class SkylineLayer {
     const key = `${radius}|${this.enabled}|${this.ground}|${this.season}`;
     if (this.key === key && Math.max(Math.abs(ox - this.bx), Math.abs(oy - this.by)) < LAG) return;
     this.key = key;
+    const jump = Math.max(Math.abs(ox - this.bx), Math.abs(oy - this.by)) > LAG + 2;
     this.bx = ox;
     this.by = oy;
     // sliced (a rebuild walks ~900 overmap tiles: 10-20 ms at once); the old ring stays
     // up meanwhile, and the very first one is built at once
     this.job = this.rebuild(ox, oy, radius);
-    if (!this.mesh) runSteps(this.job);
+    // First build, or a teleport/load: the old ring (centred elsewhere) would lie right under
+    // the player until a sliced rebuild finished, so build it now (10-20 ms, behind the
+    // load curtain)
+    if (!this.mesh || jump) runSteps(this.job);
   }
 
   /** Max ms per frame spent rebuilding. */

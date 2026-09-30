@@ -84,6 +84,7 @@ uniform float uCrease;
 uniform float uLutSize;
 uniform float uExposure;
 uniform float uHurt;
+uniform float uCurtain;
 uniform float uNightVision;
 uniform vec2 uDitherOffset;
 uniform vec2 uTan;        // tan(fov/2) * (aspect, 1): view-space position from depth
@@ -262,6 +263,9 @@ void main() {
   }
 
   // hurt flash: red vignette, strongest at the edges, before grading so it gets dithered
+  // load curtain (renderer.curtain): the world fades in once the chunks around the player
+  // exist, instead of showing grass on the far ground ring for a second after a load/teleport
+  if (uCurtain > 0.0) col *= 1.0 - uCurtain;
   if (uHurt > 0.0) {
     vec2 q = (vUv - 0.5) * vec2(uRes.x / uRes.y, 1.0);
     float v = smoothstep(0.25, 0.8, length(q));
@@ -365,6 +369,8 @@ export class PixelPipeline {
   exposure = 1;
   /** 0..1 red hurt vignette (renderer.hurtFlash decays it). */
   hurt = 0;
+  /** 0..1 fade to black while the world around the player isn't meshed yet (nearChunks.ts). */
+  curtain = 0;
   /** 0..1 night-vision amplification + green tint (renderer.nightVision at night). */
   nightVision = 0;
   /** @internal signs of the view-anchored dither offset (verified with cdda.shimmerTest) */
@@ -389,7 +395,7 @@ export class PixelPipeline {
         uRes: { value: new THREE.Vector2() }, uNear: { value: 0.1 }, uFar: { value: 300 },
         uFogColor: { value: new THREE.Color() }, uFogNear: { value: 20 }, uFogFar: { value: 80 }, uFogMax: { value: 1 },
         uMode: { value: 0 }, uDither: { value: 0.05 }, uOutline: { value: 0.5 }, uCrease: { value: 0.2 },
-        uExposure: { value: 1 }, uHurt: { value: 0 }, uNightVision: { value: 0 },
+        uExposure: { value: 1 }, uHurt: { value: 0 }, uCurtain: { value: 0 }, uNightVision: { value: 0 },
         uDitherOffset: { value: new THREE.Vector2() },
         uTan: { value: new THREE.Vector2(1, 1) }, uSsao: { value: 0 }, uAtmos: { value: 0 },
         uHaze: { value: new THREE.Color() }, uSkylineFog: { value: 0.7 }, uBloom: { value: 0 }, tBloom: { value: null }, uDebugView: { value: 0 },
@@ -534,6 +540,7 @@ export class PixelPipeline {
     u.uCrease.value = o.crease;
     u.uExposure.value = this.exposure;
     u.uHurt.value = this.hurt;
+    u.uCurtain.value = this.curtain;
     u.uNightVision.value = this.nightVision;
     const ty = Math.tan((camera.fov * Math.PI) / 360);
     u.uTan.value.set(ty * camera.aspect, ty);
