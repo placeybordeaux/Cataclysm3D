@@ -60,7 +60,9 @@ export const DEFAULT_BINDINGS: Record<string, string[]> = {
   character: ['@'],
   map: ['m'],
   messages: ['P'],
-  wait: ['|'],
+  // `l` first: the pixel font draws CDDA's `|` like a lowercase L, so players pressed l and
+  // nothing happened. `|` still works.
+  wait: ['l', '|'],
   sleep: ['$'],
   help: ['?'],
   menu: ['Escape'],
