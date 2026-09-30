@@ -192,6 +192,51 @@ export function paintRug(w: number, h: number, seed: number): Img {
   return img;
 }
 
+/** A sheet of paper (letter, page, flyer): lines of "text", a folded corner. */
+export function paintPaper(seed: number): Img {
+  const w = 7, h = 9;
+  const img = new Img(w, h);
+  const c: RGB = [[226, 222, 206], [214, 206, 176], [206, 214, 222]][seed % 3] as RGB;
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) img.set(x, y, y > 1 && y % 2 === 0 && x > 0 && x < w - 1 - (hash2(y, seed, 2) % 3) ? [120, 118, 112] : c);
+  img.set(w - 1, 0, [0, 0, 0], 0);
+  return img;
+}
+
+/** Loose debris on a floor: plaster crumbs, splinters, dust (sparse, cut out). */
+export function paintDebris(seed: number): Img {
+  const w = 24, h = 24;
+  const img = new Img(w, h);
+  img.fill([0, 0, 0], 0);
+  const cols: RGB[] = [[150, 144, 132], [110, 96, 80], [180, 176, 166], [70, 64, 58]];
+  for (let i = 0; i < 26; i++) {
+    const x = hash2(i, 1, seed) % w, y = hash2(i, 2, seed) % h;
+    const r = Math.hypot(x - w / 2, y - h / 2) / (w / 2);
+    if (r > 1) continue;
+    const c = cols[hash2(i, 3, seed) % cols.length];
+    img.set(x, y, c);
+    if (hash2(i, 4, seed) % 3 === 0) img.set(x + 1, y, c);
+    if (hash2(i, 5, seed) % 4 === 0) { img.set(x, y + 1, c); img.set(x + 1, y + 1, sh(c, 0.8)); }
+  }
+  return img;
+}
+
+/** Broken glass on a floor: pale shards and glints. */
+export function paintShards(seed: number): Img {
+  const w = 24, h = 24;
+  const img = new Img(w, h);
+  img.fill([0, 0, 0], 0);
+  for (let i = 0; i < 14; i++) {
+    const x = hash2(i, 1, seed) % (w - 3), y = hash2(i, 2, seed) % (h - 3);
+    const k = hash2(i, 3, seed) % 3;
+    const c: RGB = k === 0 ? [236, 244, 246] : [170, 196, 204];
+    img.set(x, y, c);
+    img.set(x + 1, y, sh(c, 0.9));
+    if (k !== 2) img.set(x, y + 1, sh(c, 0.85));
+    if (k === 0) img.set(x + 2, y + 1, [220, 236, 240]);
+  }
+  return img;
+}
+
 /** Wall tiles for a bathroom / kitchen splash: 12 cm squares with grout, 1 m repeat. */
 export function paintWallTile(c: RGB): Img {
   const img = new Img(32, 32);
@@ -225,6 +270,7 @@ export class Dresser {
   private frames = new Map<string, TileFrame>();
   private lamp: ModelMesh | null = null;
   private porch: ModelMesh | null = null;
+  private piles = new Map<number, ModelMesh>();
 
   constructor(private atlas: ModelAtlas) {}
 
@@ -336,6 +382,58 @@ export class Dresser {
     if (!downspout) return;
     const px = along ? x + 0.5 : c, pz = along ? c : y + 0.5;
     g.box(px - 0.04, base - levelH + 0.05, pz - 0.04, px + 0.04, bot, pz + 0.04, 63 & ~4, f, f, base);
+  }
+
+  /** A decal lying on the floor, centred at (cx, cz), `w` x `h` metres, turned by `a`. */
+  private floorDecal(geo: Geo, f: TileFrame, cx: number, cz: number, y: number, w: number, h: number, a: number): void {
+    const c = Math.cos(a), sn = Math.sin(a);
+    const P = (u: number, v: number): V3 => [cx + u * c - v * sn, y, cz + u * sn + v * c];
+    geo(f).quad(P(-w / 2, h / 2), P(w / 2, h / 2), P(w / 2, -h / 2), P(-w / 2, -h / 2), [0, 1, 0], [0.001, 0.001, 0.999, 0.999], f);
+  }
+
+  /** Clutter on one floor tile of a run-down room: debris, papers (and a book now and then). */
+  floorClutter(geo: Geo, x: number, y: number, base: number, seed: number, level: number): void {
+    const H = (k: number) => (hash2(x, y, seed + k * 7919) % 1000) / 1000;
+    if (H(1) < 0.35 * level) {
+      const v = Math.floor(H(2) * 4);
+      const f = this.frame(`debris:${v}`, () => paintDebris(v));
+      this.floorDecal(geo, f, x + 0.3 + H(3) * 0.4, y + 0.3 + H(4) * 0.4, base + 0.005, 0.75, 0.75, H(5) * 6.28);
+    }
+    const papers = H(6) < 0.25 * level ? 1 + Math.floor(H(7) * 3) : 0;
+    for (let i = 0; i < papers; i++) {
+      const v = Math.floor(H(10 + i) * 3);
+      const f = this.frame(`paper:${v}`, () => paintPaper(v));
+      this.floorDecal(geo, f, x + 0.15 + H(20 + i) * 0.7, y + 0.15 + H(30 + i) * 0.7, base + 0.007 + i * 0.001, 0.22, 0.28, H(40 + i) * 6.28);
+    }
+  }
+
+  /** Broken glass on the floor tile (x, y) in front of a smashed window. */
+  shards(geo: Geo, x: number, y: number, base: number, seed: number): void {
+    const v = seed % 3;
+    const f = this.frame(`shards:${v}`, () => paintShards(v));
+    this.floorDecal(geo, f, x + 0.5, y + 0.5, base + 0.006, 0.75, 0.75, (seed % 628) / 100);
+  }
+
+  /** A heap of junk (boxes, planks, a bag) in a corner of a wrecked room. */
+  pile(geo: Geo, x: number, z: number, base: number, seed: number): void {
+    const v = seed % 4;
+    let m = this.piles.get(v);
+    if (!m) {
+      const b = new ModelBuilder(this.atlas);
+      const H = (k: number) => (hash2(v, k, 77) % 1000) / 1000;
+      for (let i = 0; i < 5; i++) {
+        const w = 0.14 + H(i * 5) * 0.2, d = 0.12 + H(i * 5 + 1) * 0.18, hh = 0.08 + H(i * 5 + 2) * 0.22;
+        const px = (H(i * 5 + 3) - 0.5) * 0.5, pz = (H(i * 5 + 4) - 0.5) * 0.5;
+        const kind = i % 3;
+        const col: RGB = kind === 0 ? [176, 136, 92] : kind === 1 ? [120, 90, 60] : [70, 76, 70];
+        const lift = i > 2 ? 0.12 : 0;
+        if (kind === 1) b.tiltedBox(px - 0.35, px + 0.35, lift, pz, 0.03, 0.1, 0.25 + H(i) * 0.4, F('wood', col)); // a plank leaning on the heap
+        else b.box(px - w / 2, lift, pz - d / 2, px + w / 2, lift + hh, pz + d / 2, F(kind === 0 ? 'cardboard' : 'fabric', col));
+      }
+      m = b.done();
+      this.piles.set(v, m);
+    }
+    placeModel(geo, m, { x, y: base, z, yaw: ((seed >>> 4) % 8) * 0.785 });
   }
 
   /** Graffiti on an exterior wall face now and then. */
