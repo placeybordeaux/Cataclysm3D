@@ -143,7 +143,8 @@ export class ChunkPrefetcher {
       for (let dy = -R; dy <= R; dy++)
         for (let dx = -R; dx <= R; dx++) {
           if (dx * dx + dy * dy > (R + 0.5) * (R + 0.5)) continue;
-          for (let z = Math.max(MIN_Z, pz - o.below); z <= Math.min(MAX_Z, pz + o.above); z++) {
+          // above ground the renderer draws down to the ground (chunkManager levelRadius)
+          for (let z = Math.max(MIN_Z, pz > 0 ? Math.min(0, pz - o.below) : pz - o.below); z <= Math.min(MAX_Z, pz + o.above); z++) {
             const cx = ccx + dx, cy = ccy + dy;
             if (this.map.hasChunk(cx, cy, z)) continue;
             // Priority: distance from the player, pulled toward the direction of travel;

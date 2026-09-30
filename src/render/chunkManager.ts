@@ -14,7 +14,8 @@ import type { TileTextureSource } from './textureSource';
 import { terrainShape } from './tileKinds';
 
 // Keeps chunk meshes around the player in sync with the map:
-//  - desired set = chunks within `radius` (circular) on levels [z - below, z + above]
+//  - desired set = chunks within `radius` (circular) on levels [z - below, z + above], and
+//    above ground the ground level and the storeys up to the player too (levelRadius)
 //  - an entry is rebuilt when its signature (own + 6 neighbour chunk versions) changes,
 //    since wall faces and slab edges depend on neighbours
 //  - rebuilds are nearest-first (chunks behind the camera later) under a strict per-frame
@@ -116,6 +117,33 @@ export interface ChunkStats {
   frameMs: number;
 }
 
+/**
+ * Chunk radius drawn on level `z` with the player on `pz`, or -1 for "not drawn".
+ *
+ * Around the player: [pz - below, pz + above] at the full radius R. Above ground (pz > 0) the
+ * ground itself and every storey between it and the player are drawn too: from a rooftop the
+ * street is most of the view, and with only one level below it was a flat sheet of haze under
+ * floating buildings (docs/PERF.md "Above ground"). Most of those chunks are open air, skipped
+ * without meshing, so the cost is the buildings you actually see. Up a tower the storeys in
+ * between are many; past `fullGap` of them the middle ones (not the ground, z=1 or the two just
+ * under the player's window) get a smaller radius: far lower storeys of far towers are hidden
+ * behind the near ones and the fog anyway.
+ * Basements (pz < 0) keep the window: you shouldn't see the surface through the ground.
+ */
+export function levelRadius(z: number, pz: number, R: number, below: number, above: number, fullGap = 4, ground = true): number {
+  if (z >= pz - below && z <= pz + above) return R;
+  if (!ground || pz <= 0 || z < 0 || z > pz) return -1;
+  if (z === 0) return R;
+  const gap = pz - below - 1; // storeys strictly between the ground and the player's window
+  if (gap <= fullGap || z === 1 || z >= pz - below - 2) return R;
+  return Math.max(2, Math.ceil(R / 2));
+}
+
+/** Lowest level levelRadius() can draw with the player on `pz`. */
+export function lowestLevel(pz: number, below: number, ground = true): number {
+  return ground && pz > 0 ? Math.min(0, pz - below) : pz - below;
+}
+
 const key = (cx: number, cy: number, z: number) => ((z + 16) * 4096 + (cx + 2048)) * 4096 + (cy + 2048);
 
 export class ChunkManager {
@@ -124,6 +152,9 @@ export class ChunkManager {
   radius = 6;
   levelsBelow = 1;
   levelsAbove = 1;
+  /** Above ground: 'ground' (default) also draws the ground and the storeys down to it;
+   *  'window' = only [z - below, z + above] (the old behaviour; ?below=window, cdda.drawBelow). */
+  below: 'ground' | 'window' = 'ground';
   /** Max milliseconds of meshing per frame (builds are sliced; at least one step runs). */
   budgetMs = 4;
   /** Budget when the player's own surroundings changed (a door opened, a wall smashed):
@@ -249,8 +280,16 @@ export class ChunkManager {
     //    chunks (mapgen can be slow), so this shares the frame budget with meshing.
     if (this.offsetsR !== R) this.computeOffsets(R);
     let created = 0;
+    const ground = this.below === 'ground';
+    const zLo = lowestLevel(pz, this.levelsBelow, ground), zHi = pz + this.levelsAbove;
+    const lr = this.levelR;
+    lr.length = 0;
+    for (let z = zLo; z <= zHi; z++) lr.push(levelRadius(z, pz, R, this.levelsBelow, this.levelsAbove, 4, ground));
     outer: for (const [dx, dy] of this.offsets)
-      for (let z = pz - this.levelsBelow; z <= pz + this.levelsAbove; z++) {
+      for (let z = zLo; z <= zHi; z++) {
+        const rz = lr[z - zLo];
+        // offsets are circular around the player's chunk, like computeOffsets
+        if (rz < 0 || (rz < R && dx * dx + dy * dy > (rz + 0.5) * (rz + 0.5))) continue;
         const cx = pcx + dx, cy = pcy + dy;
         const k = key(cx, cy, z);
         if (this.entries.has(k)) continue;
@@ -271,24 +310,31 @@ export class ChunkManager {
     dirty.length = 0;
     for (const [k, e] of this.entries) {
       const ddx = e.cx - pcx, ddy = e.cy - pcy;
-      if (ddx * ddx + ddy * ddy > (R + 1.5) * (R + 1.5) || e.z < pz - this.levelsBelow - 1 || e.z > pz + this.levelsAbove + 1) {
+      const dd = ddx * ddx + ddy * ddy;
+      const rz = e.z >= zLo && e.z <= zHi ? lr[e.z - zLo] : -1;
+      // hysteresis: kept one chunk past its level's radius, and one level past the player's
+      // window (not past the ground: a basement under a rooftop stays dropped)
+      const keepR = rz >= 0 ? rz : e.z >= pz - this.levelsBelow - 1 && e.z <= zHi + 1 ? R : -1;
+      if (keepR < 0 || dd > (keepR + 1.5) * (keepR + 1.5)) {
         this.probe?.drop(e.cx, e.cy, e.z, !!e.shown);
         this.dispose(e);
         this.entries.delete(k);
         continue;
       }
-      const inLevels = e.z >= pz - this.levelsBelow && e.z <= pz + this.levelsAbove;
+      // (entries in the hysteresis ring stay up and current, as they always have)
+      const inLevels = rz >= 0 && dd <= (rz + 1.5) * (rz + 1.5);
       const vis = inLevels && zVisible(e.z);
       if (vis !== e.visible) this.setVisible(e, vis);
       let sig = 0;
       for (const d of e.deps) sig = (sig * 31 + (d ? d.version + 1 : 0)) | 0;
       e.vsig = sig;
       if (this.lodRadius > 0) {
-        e.near = ddx * ddx + ddy * ddy <= this.lodRadius * this.lodRadius;
+        // storeys well below a rooftop are seen from 8+ m away: the far volumes do
+        e.near = dd <= this.lodRadius * this.lodRadius && pz - e.z <= 2;
         sig = (sig * 31 + (e.near ? 7 : 3)) | 0;
         // flora.ts middle ring (lighter tree LOD); 0 = no middle ring. Not in the signature:
         // crossing it swaps only the chunk's trees (treeSteps), not its whole mesh
-        e.mid = !e.near && ddx * ddx + ddy * ddy <= this.midRadius * this.midRadius;
+        e.mid = !e.near && dd <= this.midRadius * this.midRadius;
       }
       e.sig = sig;
       if ((sig !== e.builtSig || e.job || this.treesStale(e)) && inLevels) {
@@ -415,7 +461,8 @@ export class ChunkManager {
     }
     const inView = len < CHUNK * 1.2 || Math.acos(Math.max(-1, Math.min(1, (ccx * this.forward.x + ccy * this.forward.y) / len))) < this.viewHalf + Math.atan((CHUNK * 0.71) / len);
     if (!inView) t += speed > 4 ? 3 : 0.75;
-    if (e.z < pz) t += 1.5;
+    // basements later still; above ground the street and storeys below are in plain view
+    if (e.z < pz) t += pz > 0 && e.z >= 0 ? 0.25 : 1.5;
     else if (e.z > pz) t += 0.2;
     t += d * 0.002;
     // the player's own chunk and its 8 neighbours come first whatever the camera does: after
@@ -455,6 +502,8 @@ export class ChunkManager {
     dirty.length = n;
   }
 
+  /** this frame's levelRadius() per level from lowestLevel() up (reused array) */
+  private levelR: number[] = [];
   private offsets: [number, number][] = [];
   private offsetsR = -1;
   private computeOffsets(R: number): void {

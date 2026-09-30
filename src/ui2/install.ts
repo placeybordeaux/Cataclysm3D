@@ -19,7 +19,7 @@ import type { Game } from '../game/game';
 import type { Renderer } from '../render/renderer';
 import type { DebugApi } from '../debug';
 import type { UiContext } from '../ui/context';
-import { raycastTiles, type RayHit } from '../game/raycast';
+import { raycastTiles, terrainSolidHeight, furnitureSolidHeight, CREATURE_HEIGHT, type RayHit } from '../game/raycast';
 import type { LookCreature } from '../game/game';
 import { LEVEL_HEIGHT } from '../world/coords';
 import { openLookCard } from '../ui/look';
@@ -100,6 +100,11 @@ export function installUi2(game: Game, renderer: Renderer, ctx: UiContext, api: 
   // --- world hover + context menu while the cursor is free
   const hover = worldHover(game, renderer);
   const free = () => surfacesOpen() > 0 && !input.locked;
+  // The outline belongs to the free cursor: whatever path captured the mouse again (a key, a
+  // death screen, a window the game closed), never leave it standing in the world.
+  renderer.beforeRender.push(() => {
+    if (hover.current() && !free() && !menuOpen()) hover.clear();
+  });
   let pending: PointerEvent | null = null;
   // Only real mouse motion hovers: a picker (z, E…) frees the cursor where the crosshair was,
   // and the object behind it popped its look card over the hotbar before the mouse moved.
@@ -240,8 +245,16 @@ function worldHover(game: Game, renderer: Renderer) {
       cur = pick(x, y);
       if (!cur || cur.kind === 'ceiling') return this.clear();
       for (const f of worldHoverListeners) f(cur, x, y);
-      // A tall box for things you bump into, a flat one for floors and piles.
-      const tall = cur.kind === 'creature' ? 1.8 : cur.kind === 'furniture' ? 1.0 : cur.kind === 'terrain' || cur.kind === 'vehicle' ? LEVEL_HEIGHT : 0.06;
+      // The box hugs the solid the ray hit (the heights raycast.ts tests), a flat one for
+      // floors and piles. It draws over everything (depthTest off): a storey-high box round a
+      // knee-high roof railing next to you ran from the roof up past your eyes into the sky
+      // as two long pale lines (the rooftop report, docs/PERF.md "Above ground").
+      const hit = cur.hit as RayHit<LookCreature>;
+      const tall = cur.kind === 'creature' ? CREATURE_HEIGHT
+        : cur.kind === 'furniture' ? furnitureSolidHeight(hit.furniture) || 1.0
+        : cur.kind === 'terrain' ? terrainSolidHeight(hit.terrain) || LEVEL_HEIGHT
+        : cur.kind === 'vehicle' ? vehicleSolidHeight(game, cur.x, cur.y, cur.z) || 1.0
+        : 0.06;
       box.scale.set(1.02, tall, 1.02);
       box.position.set(cur.x + 0.5, cur.z * LEVEL_HEIGHT + tall / 2 + 0.005, cur.y + 0.5);
       box.visible = true;

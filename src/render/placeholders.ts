@@ -11,7 +11,8 @@ import type { TileFrame } from './textureSource';
 // ring's flat colour where a street of houses should be, then the houses popped in. Now the
 // column shows the skyline's silhouette of what the overmap says is there — a house box with
 // a gable roof, a block of town buildings, tree crowns — lit and fogged like the world, until
-// the real mesh replaces it. Only at ground level (z 0) and outdoors, where the far view is.
+// the real mesh replaces it. Only for ground-level (z 0) chunks, while the player is on the
+// surface or above it (rooftops look down on the street), where the far view is.
 
 /** Linear albedo for the stand-ins: the skyline's colours are tuned for its own dim shader. */
 const BRIGHTEN = 2.6;
@@ -35,10 +36,11 @@ export class PlaceholderLayer {
    * `forEachEntry`: the chunk manager's wanted entries. A column gets a stand-in while its
    * ground-level chunk has no mesh yet (not created, or never finished), inside `radius` chunks.
    */
-  update(px: number, py: number, pz: number, radius: number, forEachEntry: (fn: (e: ChunkEntryView) => void) => void): void {
+  update(px: number, py: number, pz: number, radius: number, forEachEntry: (fn: (e: ChunkEntryView) => void) => void, groundBelow = true): void {
     // every 4th frame: a stand-in a few frames late is still far ahead of the real mesh
     if ((this.tick++ & 3) !== 0) return;
-    if (!this.enabled || !this.overmap || pz !== 0) {
+    // above ground too: the ground level is drawn from rooftops (chunkManager levelRadius)
+    if (!this.enabled || !this.overmap || pz < 0 || (pz > 0 && !groundBelow)) {
       if (this.meshes.size) this.clear();
       return;
     }
@@ -120,7 +122,7 @@ export function installPlaceholders(renderer: {
   beforeRender: ((dt: number) => void)[];
   skyline: { overmap: OmtLookup | null };
   whiteFrame(): TileFrame;
-  chunks: { radius: number; forEachEntry(fn: (e: ChunkEntryView) => void): void };
+  chunks: { radius: number; below: 'ground' | 'window'; forEachEntry(fn: (e: ChunkEntryView) => void): void };
 }, player: () => { x: number; y: number; z: number }, api: Record<string, unknown>): PlaceholderLayer {
   const layer = new PlaceholderLayer(renderer.skyline.overmap, () => renderer.whiteFrame());
   const q = typeof location !== 'undefined' ? new URLSearchParams(location.search).get('placeholders') : null;
@@ -131,7 +133,7 @@ export function installPlaceholders(renderer: {
     // the overmap is attached after the renderer is made (lookInstall)
     layer.overmap ??= renderer.skyline.overmap;
     const p = player();
-    layer.update(p.x, p.y, p.z, renderer.chunks.radius, (fn) => renderer.chunks.forEachEntry(fn));
+    layer.update(p.x, p.y, p.z, renderer.chunks.radius, (fn) => renderer.chunks.forEachEntry(fn), renderer.chunks.below === 'ground');
   });
   api.placeholders = (on?: boolean) => {
     if (on !== undefined) {
