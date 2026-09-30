@@ -78,7 +78,16 @@ export function installLoot(game: Game, renderer: Renderer, api: DebugApi, inv: 
     const p = game.player;
     // Not during a timed job (crafting at the locker): the card covered the job's progress bar,
     // and taking something would only cancel the job.
-    return game.input.locked && !game.input.captured && surfacesOpen() === 0 && !p.dead && !p.isAsleep() && !game.vehicles?.driving && renderer.cameraMode !== 'top' && !game.activities.current;
+    return game.input.locked && !game.input.captured && surfacesOpen() === 0 && !p.dead && !p.isAsleep() && !game.vehicles?.driving && renderer.cameraMode !== 'top' && !game.activities.current && !inFight();
+  };
+  // Not in a fight either: the first kill's corpse pile opened a 13-row card over the second
+  // zombie as it closed in (wave-3 playtest). Hostile within 6 m or a hit in the last 3 s.
+  let lastHit = -1e9;
+  for (const ev of ['playerHurt', 'playerAttack'] as const) game.events.on(ev, () => void (lastHit = performance.now()));
+  const inFight = () => {
+    if (performance.now() - lastHit < 3000) return true;
+    const mons = (game as unknown as { monsters?: { visibleHostile(r: number): unknown } }).monsters;
+    return !!mons?.visibleHostile(6);
   };
   const k = (id: string) => game.keys.label(id);
   // Adaptation (docs/ADAPTATION.md): a survivor who is cold and looking at a jacket in a
