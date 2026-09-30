@@ -234,7 +234,9 @@ export function shadowMotion(game: Game, renderer: Renderer, o: MotionOptions) {
   if (heat) {
     // red where shadows changed on their own, over the last frame in grey
     setView(false);
+    renderer.hideViewmodel = true;
     renderer.render(0);
+    renderer.hideViewmodel = hideVm;
     renderer.three.readRenderTargetPixels(pl.postTarget, 0, 0, w, h, rgba);
     const cv = document.createElement('canvas');
     cv.width = w;

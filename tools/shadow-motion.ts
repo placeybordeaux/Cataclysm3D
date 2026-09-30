@@ -58,11 +58,11 @@ const scenarios = opt('--scenarios', 'still,time,walk,pan').split(',');
 for (const s of scenarios) if (!SCEN[s]) throw new Error(`unknown scenario ${s} (${Object.keys(SCEN).join(', ')})`);
 // which clips become GIFs (view:scenario) and the crop (fractions of the low-res image)
 const GIF_CLIPS: { view: string; scen: string; crop: [number, number, number, number] }[] = [
-  { view: 'street', scen: 'time', crop: [0.25, 0.4, 0.4, 0.45] },
-  { view: 'street', scen: 'walk', crop: [0.25, 0.4, 0.4, 0.45] },
-  { view: 'forest', scen: 'still', crop: [0.3, 0.35, 0.4, 0.45] },
-  { view: 'forest', scen: 'pan', crop: [0.3, 0.35, 0.4, 0.45] },
-  { view: 'street', scen: 'sweep', crop: [0.25, 0.4, 0.4, 0.45] },
+  { view: 'street', scen: 'time', crop: [0.3, 0.5, 0.3, 0.35] },
+  { view: 'street', scen: 'walk', crop: [0.3, 0.5, 0.3, 0.35] },
+  { view: 'forest', scen: 'time', crop: [0.3, 0.45, 0.3, 0.35] },
+  { view: 'forest', scen: 'pan', crop: [0.35, 0.45, 0.3, 0.35] },
+  { view: 'street', scen: 'sweep', crop: [0.3, 0.5, 0.3, 0.35] },
 ];
 
 if (argv.includes('--dry-run')) {
@@ -168,10 +168,11 @@ try {
           heatShots.push(hf);
         }
       }
-      if (clip && gifs) makeGif(view, scen, s.frames ?? frames);
+      // GIFs: the first 60 frames (1 s) of each clip at 30 fps; the sweep (20x time) at 20 fps
+      if (clip && gifs) makeGif(view, scen, Math.min(s.frames ?? frames, scen === 'sweep' ? 150 : 60), scen === 'sweep' ? 3 : 2);
       if (heatShots.length && scen !== 'sweep') {
         // 2x2 heat maps: red = shadow changed while the camera was held
-        execFileSync('magick', ['montage', ...fontArgs(), ...label(heatShots), '-tile', '2x', '-geometry', '+4+4', '-pointsize', '16', '-resize', '50%', join(outDir, `heat-${view}-${scen}.png`)]);
+        execFileSync('magick', ['montage', ...fontArgs(), ...label(heatShots), '-tile', '2x', '-geometry', '+4+4', '-pointsize', '16', '+dither', '-colors', '48', join(outDir, `heat-${view}-${scen}.png`)]);
       }
     }
     if (bench) {
@@ -206,10 +207,10 @@ writeFileSync(join(outDir, 'metrics.json'), JSON.stringify({ size, look: lookNam
 printTables();
 rmSync(tmp, { recursive: true, force: true });
 
-function makeGif(view: string, scen: string, n: number): void {
-  // one frame = the four modes side by side (2x2), labelled; every 2nd frame at 30 fps
+function makeGif(view: string, scen: string, n: number, every: number): void {
+  // one frame = the four modes side by side (2x2), labelled; every `every`th frame, in real time
   const frameFiles: string[] = [];
-  for (let i = 0; i < n; i += 2) {
+  for (let i = 0; i < n; i += every) {
     const tiles = modes.map((m) => join(tmp, `${view}-${scen}-${m}`, `${String(i).padStart(4, '0')}.png`));
     const out = join(tmp, `m-${view}-${scen}-${String(i).padStart(4, '0')}.png`);
     execFileSync('magick', ['montage', ...fontArgs(), ...label(tiles), '-tile', '2x', '-geometry', '+2+2', '-pointsize', '14', '-background', '#202020', '-fill', '#e0e0e0', out]);
@@ -217,7 +218,7 @@ function makeGif(view: string, scen: string, n: number): void {
   }
   const gif = join(outDir, `${view}-${scen}.gif`);
   // nearest-neighbour 2x (the game's own upscale), a shared 96-colour palette keeps it small
-  execFileSync('magick', ['-delay', '3', '-loop', '0', ...frameFiles, '-filter', 'point', '-resize', '200%', '+dither', '-colors', '96', '-layers', 'Optimize', gif]);
+  execFileSync('magick', ['-delay', String((100 * every) / 60), '-loop', '0', ...frameFiles, '-filter', 'point', '-resize', '200%', '+dither', '-colors', '64', '-layers', 'Optimize', gif]);
   console.log(`wrote ${gif}`);
 }
 
