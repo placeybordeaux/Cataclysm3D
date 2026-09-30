@@ -1,5 +1,6 @@
 import type { Game } from './game';
 import { hasFlag } from '../world/registry';
+import { furnitureSolidHeight, isBoxFurniture } from './raycast';
 
 // "What am I looking at?" for interaction keys (e / X): march the view ray from the eye out
 // to arm's reach and return the first tile worth interacting with (a door, window, furniture,
@@ -58,6 +59,10 @@ export function targetTile(game: Game, reach = REACH): TargetTile | null {
       return null;
     }
     if (horiz > reach + 0.5) break;
+    // Standing over a climbable counter/table/cupboard (passable in CDDA): looking down into
+    // it means it, not the piece next to it (the own tile used to be skipped outright).
+    if (tx === px && ty === py && h <= furnitureSolidHeight(game.map.furnAt(tx, ty, p.z)) && isBoxFurniture(game.map.furnAt(tx, ty, p.z)))
+      return { x: tx, y: ty, z: p.z, dist: horiz };
     if (key === lastKey || (tx === px && ty === py)) continue;
     lastKey = key;
     if (interesting(game, tx, ty, p.z)) return { x: tx, y: ty, z: p.z, dist: horiz };

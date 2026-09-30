@@ -137,7 +137,7 @@ window.lookView = async (name) => {
         }
     const t = found[Number(nth)];
     if (!t) throw new Error(`no ${kind} matching ${re}`);
-    const free = (x, y) => { const tt = m.terAt(x, y, 0); return tt.move_cost > 0 && !tt.flags.includes('WINDOW') && m.furnAt(x, y, 0).id === 'f_null'; };
+    const free = (x, y) => { const tt = m.terAt(x, y, 0), ff = m.furnAt(x, y, 0); return tt.move_cost > 0 && !tt.flags.includes('WINDOW') && (ff.id === 'f_null' || (ff.move_cost_mod >= 0 && !/table|chair|bench/.test(ff.id))); };
     let best = null, bs = -1;
     // no good spot at the asked distance (tight rooms): try a little further out
     for (let D = Number(dist); D <= Number(dist) + 3 && !best; D++) for (let dy = -D; dy <= D; dy++) for (let dx = -D; dx <= D; dx++) {

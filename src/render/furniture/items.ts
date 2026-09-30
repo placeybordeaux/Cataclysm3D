@@ -43,8 +43,9 @@ export function itemShape(d: Pick<ItemDef, 'id' | 'category' | 'material' | 'pha
 /** Characteristic size (m) from BN volume (ml), enlarged for readability at small sizes. */
 export function itemSize(volumeMl: number): number {
   const L = Math.cbrt(Math.max(1, volumeMl)) / 100;
-  // real sizes make a can 2 texels wide: scale small things up (a TV adaptation, not a sim)
-  return Math.min(0.42, Math.max(0.07, L * 1.35 + 0.02));
+  // real sizes make a can 2 texels wide and loot unreadable past arm's length: scale small
+  // things up (a TV adaptation, not a sim); big things stay about their size
+  return Math.min(0.45, Math.max(0.1, L * 1.9 + 0.04));
 }
 
 /** Colours: body, accent, label/light. Quantised so similar items share atlas frames. */

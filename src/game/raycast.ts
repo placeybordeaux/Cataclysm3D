@@ -95,6 +95,12 @@ export function furnitureSolidHeight(f: FurnitureDef): number {
   }
 }
 
+/** Box-shaped furniture (counters, tables, cupboards): solid pieces even when passable. */
+export function isBoxFurniture(f: FurnitureDef): boolean {
+  const s = furnitureShape(f);
+  return s === 'table' || s === 'counter' || s === 'cabinet';
+}
+
 /** Unit view direction for a yaw/pitch pair (yaw 0 = north/-y, positive pitch = up). */
 export function dirFromYawPitch(yaw: number, pitch: number): { x: number; y: number; h: number } {
   const cp = Math.cos(pitch);
@@ -156,7 +162,16 @@ export function raycastTiles<C = unknown>(
   // Safety bound on steps: each step advances at least min(tdx, tdy, tdz) metres.
   for (let steps = 0; steps < 4096; steps++) {
     const tExit = Math.min(tmx, tmy, tmz, maxDist);
-    if (!(first && skipOrigin)) {
+    if (first && skipOrigin) {
+      // Counters, tables and cupboards are climbable (passable) in CDDA, so you can stand
+      // over one. The origin cell is skipped (it's you, or the door you stand in), but not
+      // box furniture you look down into: skipping it picked the piece next to it.
+      const f = map.furnAt(cx, cy, cz);
+      if (isBoxFurniture(f)) {
+        const tf = slab(tEnter, tExit, cz * LH, furnitureSolidHeight(f));
+        if (tf !== null) return hit('furniture', cx, cy, cz, tf);
+      }
+    } else {
       const base = cz * LH;
       const cands: [number, RayHitKind, C | undefined][] = [];
       const cr = opts.creatureAt?.(cx, cy, cz);
