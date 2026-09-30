@@ -492,8 +492,7 @@ export class VehicleSystem implements GameSystem, MapOverlay {
     if (!c) return `The ${v.name} has no controls.`;
     const p = this.game.player;
     if (this.reachableControls() === v) return null;
-    // mount coordinates are tile centres (mountToWorld(0, 0) = the vehicle's position)
-    const [wx, wy] = v.mountToWorld(c.mx, c.my);
+    const [wx, wy] = this.driverSeatWorld(v);
     if (p.z !== v.z || Math.hypot(wx - p.x, wy - p.y) > GET_IN_RANGE) return `Get closer to the ${v.name}'s driver's seat.`;
     return null;
   }
@@ -529,11 +528,19 @@ export class VehicleSystem implements GameSystem, MapOverlay {
       const c = v.controls();
       if (!c || v.z !== p.z) continue;
       if (c.hp <= 0) continue;
-      const [wx, wy] = v.mountToWorld(c.mx, c.my);
+      const [wx, wy] = this.driverSeatWorld(v);
       const d = Math.hypot(wx - p.x, wy - p.y);
       if (d <= GET_IN_RANGE && d < bestD) (best = v), (bestD = d);
     }
     return best;
+  }
+
+  /** World position of the driver's seat: as drawn (the template's) with a shaped body, else the cell centre. */
+  driverSeatWorld(v: Vehicle): [number, number] {
+    const c = v.controls();
+    if (!c) throw new Error(`the ${v.name} has no controls`);
+    const [sx, sy] = this.bodyRect(v) ? seatPoint(v, c.mx, c.my) : [c.mx, c.my];
+    return v.mountToWorld(sx, sy);
   }
 
   /** Open the door nearest the driver's seat if it's closed (for getting in from outside). */
@@ -634,8 +641,7 @@ export class VehicleSystem implements GameSystem, MapOverlay {
     const s = v.driverSeat();
     if (!s) return;
     // Onto the seat as drawn (the template's seat, inside its cell) when the body is shaped.
-    const [sx, sy] = this.bodyRect(v) ? seatPoint(v, s.mx, s.my) : [s.mx, s.my];
-    const [wx, wy] = v.mountToWorld(sx, sy);
+    const [wx, wy] = this.driverSeatWorld(v);
     const p = this.game.player;
     p.x = wx;
     p.y = wy;
