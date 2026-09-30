@@ -1,6 +1,6 @@
 import type { Game } from './game';
 import { MAX_Z, MIN_Z } from '../world/coords';
-import { hasFlag } from '../world/registry';
+import { hasFlag, isDiggable } from '../world/registry';
 import { MAIN_PARTS } from './bodyparts';
 import { emitSound } from './sound';
 
@@ -122,7 +122,7 @@ export function impact(game: Game, force: number): number {
   const map = game.map;
   const x = p.tileX, y = p.tileY, z = p.z;
   const ter = map.terAt(x, y, z), furn = map.furnAt(x, y, z);
-  let eff = force + (hasFlag(ter, 'DIGGABLE') ? 0 : 3);
+  let eff = force + (isDiggable(ter) ? 0 : 3);
   if (furn.id !== 'f_null') eff = Math.max(0, eff - Number(furn.fall_damage_reduction ?? 0));
   let mod = fallDamageMod(game);
   if (eff > 30 && mod < 1) {

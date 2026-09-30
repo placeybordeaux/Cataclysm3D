@@ -1,6 +1,6 @@
 import type { GameData, RecipeComponent, QualityRequirement } from '../data/types';
 import { expandItemGroup } from '../data/itemgroups';
-import { hasFlag } from '../world/registry';
+import { hasFlag, isDiggable } from '../world/registry';
 import { CraftingInventory } from './crafting_inv';
 import { craftingInventory, hasCraftingLight, type CraftHost } from './crafting';
 import { createItem, fromSpawned, Item } from './item';
@@ -160,7 +160,7 @@ export function siteProblem(host: CraftHost, con: ConstructionDef, x: number, y:
   }
   for (const f of asList(con.deny_flags)) if (flagAt(host, x, y, z, f)) return `Not on ${furn.id !== 'f_null' ? cddaText(furn.name) : cddaText(ter.name)}.`;
   for (const f of asList(con.pre_flags)) if (!flagAt(host, x, y, z, f)) return `Needs ${f.toLowerCase().replace(/_/g, ' ')}.`;
-  if (con.needs_diggable && !hasFlag(ter, 'DIGGABLE')) return 'The ground here is too hard to dig.';
+  if (con.needs_diggable && !isDiggable(ter)) return 'The ground here is too hard to dig.';
   if (con.post_terrain && ter.id === con.post_terrain) return 'Already built.';
   if (con.post_furniture && furn.id === con.post_furniture) return 'Already built.';
   return null;
