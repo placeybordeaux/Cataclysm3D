@@ -83,14 +83,18 @@ export function showMainMenu(ctx: UiContext, hud: Hud): Promise<void> {
     };
     raf = requestAnimationFrame(spin);
 
-    const close = () => {
+    // `restoreView`: undo the title's slow pan. Not after a load: the save has its own view
+    // (loading a game then facing north every time was a wave-3 playtest find).
+    const close = (restoreView = true) => {
       cancelAnimationFrame(raf);
       window.removeEventListener('resize', onResize);
       release();
       el.remove();
       document.body.classList.remove('title-open');
-      p.yaw = saved.yaw;
-      p.pitch = saved.pitch;
+      if (restoreView) {
+        p.yaw = saved.yaw;
+        p.pitch = saved.pitch;
+      }
       game.paused = false;
       ctx.renderer.hideViewmodel = false;
       hud.setVisible(true);
@@ -128,7 +132,7 @@ export function showMainMenu(ctx: UiContext, hud: Hud): Promise<void> {
         label: 'Load', key: 'l', enabled: () => !!game.load && (game.hasSave?.() ?? true),
         desc: 'Pick up where you left off.',
         run: async () => {
-          if (await game.load!()) close();
+          if (await game.load!()) close(false);
         },
       },
       ...(prog ? [{ label: 'Journal', key: 'j', enabled: () => true, run: () => void openJournal(game, prog, false) }] : []),
@@ -158,7 +162,7 @@ export function showMainMenu(ctx: UiContext, hud: Hud): Promise<void> {
         // surprise); the full list stays under the small "Load" button.
         const cont: MainEntry = { label: 'Continue', key: 'c', enabled: () => true, weight: 'primary', desc: 'Pick up where you left off.',
           run: async () => {
-            if (await (game.continueLatest ?? game.load)!()) close();
+            if (await (game.continueLatest ?? game.load)!()) close(false);
           } };
         for (const e of entries) if (e.weight === 'primary') e.weight = 'major';
         entries.unshift(cont);
