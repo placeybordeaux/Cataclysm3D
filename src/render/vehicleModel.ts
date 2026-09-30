@@ -6,6 +6,7 @@ import { analyze, type Layout } from './vehicleLayout';
 import { liveryBody, paintSkin, sheetUv, skinLayout, skinLayoutInfo, SKIN_PPM, type SheetName, type Skin, type SkinInput, type SkinLayoutInfo } from './vehicleSkin';
 import { Batches, chamferBox, faceNormal, partFrames, quad4, tube, wheel, type PartSwatch } from './vehicleGeom';
 import { buildBike } from './vehicleBikes';
+import { buildFrame } from './vehicleFrame';
 
 // The "model" vehicle renderer: a cohesive low-poly body generated from the part grid
 // (vehicleLayout.ts decides the style and where things are), instead of one box per part.
@@ -57,6 +58,8 @@ export interface ModelBuild {
   driverZ: number | null;
   /** Bikes lean on their stand when nobody rides them (rad, + = right side down). */
   parkedLean: number;
+  /** Frame-style builds: the roof is drawn with the parts swatches, there is no skin. */
+  bodyUsesParts?: boolean;
 }
 
 const FULL: TileFrame = { texture: null as unknown as THREE.Texture, uv: [0, 0, 1, 1], w: 1, h: 1, ppm: 32 };
@@ -259,11 +262,11 @@ function loopNormals(loop: { x: number; y: number }[]): { nx: number; ny: number
 
 // --- build -----------------------------------------------------------------------------
 
-/** Build the model for a vehicle, or null for grids the model doesn't cover ('frame'). */
+/** Build the model for a vehicle (odd grids get the tidy frame build, vehicleFrame.ts). */
 export function buildVehicleModel(v: Vehicle, base: number, opts: { reuseSkinKey?: string; deferSkin?: boolean } = {}): ModelBuild | null {
   const L = analyze(v);
   if (L.style === 'motorcycle' || L.style === 'bicycle') return buildBike(v, L, base);
-  if (L.style === 'frame' || !L.sections.length) return null;
+  if (L.style === 'frame' || !L.sections.length) return buildFrame(v, L, base);
   const p = L.p;
   const F = partFrames();
   const { loop, nTop, arches } = buildOutline(L);
@@ -726,7 +729,7 @@ function shardsSide(g: GeomBuilder, a: V3, b: V3, seed: number): void {
 }
 
 /** Emissive lamp lens: a thin box proud of the face it sits on. */
-function lampBox(g: GeomBuilder, x: number, y: number, z: number, w: number, h: number, dir: number): void {
+export function lampBox(g: GeomBuilder, x: number, y: number, z: number, w: number, h: number, dir: number): void {
   const x0 = dir > 0 ? x - 0.02 : x - 0.025, x1 = dir > 0 ? x + 0.025 : x + 0.02;
   g.box(x0, y - h, z - w, x1, y + h, z + w, 63 & ~(dir > 0 ? 2 : 1), FULL, FULL, y - h);
 }
@@ -759,7 +762,7 @@ function lamps(L: Layout, v: Vehicle): { head: LampSpec[]; tail: LampSpec[] } {
   return { head, tail };
 }
 
-function seat(g: GeomBuilder, s: VehiclePart, L: Layout, base: number, floorY: number, seatTop: number, F: ReturnType<typeof partFrames>, bed: boolean): void {
+export function seat(g: GeomBuilder, s: VehiclePart, L: Layout, base: number, floorY: number, seatTop: number, F: ReturnType<typeof partFrames>, bed: boolean): void {
   const x = s.mx, z = L.zOf(s.my);
   const half = Math.min(0.27, Math.max(0.16, (L.zOf(1) - L.zOf(0)) * 0.46));
   const sw = F.fabric;
@@ -783,7 +786,7 @@ function seat(g: GeomBuilder, s: VehiclePart, L: Layout, base: number, floorY: n
   chamferBox(g, bx0 - lean - 0.02, base + top, z - half * 0.55, bx1 - lean - 0.02, base + top + 0.16, z + half * 0.55, 0.03, sw, sw);
 }
 
-function steeringWheel(g: GeomBuilder, x: number, y: number, z: number, r: number, f: TileFrame): void {
+export function steeringWheel(g: GeomBuilder, x: number, y: number, z: number, r: number, f: TileFrame): void {
   // A ring of tubes tilted ~25 deg back toward the driver, plus a column into the dash.
   const tilt = 0.45, N = 10;
   const pt = (i: number): V3 => {

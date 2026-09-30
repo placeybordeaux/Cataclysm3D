@@ -153,6 +153,7 @@ function liveryColors(L: SkinLayoutInfo, paint: number): { body: RGB; lower?: RG
     case 'icecream': return { body: rgb(0xf0ece0), stripe: rgb(0xe07aa0) };
     case 'hippie': return { body: rgb(0x3f8fa8), lower: rgb(0xe8e2cc) };
     case 'hazmat': return { body: rgb(0xe8e6de), stripe: rgb(0xd8a818) };
+    case 'transit': return { body: rgb(0xdcdad2), lower: rgb(0x2c4a86), stripe: rgb(0x2c4a86) };
     default: return { body: rgb(paint) };
   }
 }
@@ -172,6 +173,15 @@ export function paintSkin(L: SkinLayoutInfo, inp: SkinInput): Skin {
   const p = L.p;
   const ppm = SKIN_PPM;
   const col = liveryColors(L, inp.paint);
+  // Burnt-out wrecks: the paint is mostly gone, scorched toward rust and soot.
+  if (L.wear > 0.6) {
+    const t = Math.min(0.75, (L.wear - 0.6) * 2.5);
+    const burn = (c: RGB | undefined): RGB | undefined => (c ? lerpC(c, [70, 48, 36], t) : c);
+    col.body = burn(col.body)!;
+    col.lower = burn(col.lower);
+    col.stripe = burn(col.stripe);
+    col.roof = burn(col.roof);
+  }
   const wear = L.wear;
   const seed = inp.seed;
   const trim: RGB = [26, 27, 30];
@@ -319,6 +329,16 @@ export function paintSkin(L: SkinLayoutInfo, inp: SkinInput): Skin {
           if (dd > a.r - 0.02 && dd < a.r + 0.07 && y > p.sill - 0.05) put(sh.u0 + tu, sh.v0 + tv, scale(get(sh.u0 + tu, sh.v0 + tv), dd < a.r + 0.03 ? 0.35 : 0.7));
         }
     }
+    // box bodies: vertical stiffening ribs every half metre on the cargo box sides
+    for (const bx of L.sections.filter((q) => q.kind === 'box')) {
+      for (let x = bx.x1 + 0.5; x < bx.x0 - 0.2; x += 0.5) {
+        const tu = Math.round((x - sh.a0) * ppm);
+        for (let tv = Math.floor((p.belt - 0.1) * ppm); tv < Math.floor((p.box - 0.1) * ppm); tv++) {
+          put(sh.u0 + tu, sh.v0 + tv, scale(get(sh.u0 + tu, sh.v0 + tv), 0.82));
+          put(sh.u0 + tu + 1, sh.v0 + tv, scale(get(sh.u0 + tu + 1, sh.v0 + tv), 1.08));
+        }
+      }
+    }
     // side markers: amber near the nose, red near the tail
     const mv = Math.round((p.belt - 0.28) * ppm);
     for (let i = 0; i < 3; i++) {
@@ -382,6 +402,7 @@ export function paintSkin(L: SkinLayoutInfo, inp: SkinInput): Skin {
   const bumperBlack: RGB = [40, 41, 44], seamDark: RGB = [20, 20, 22], slatGrey: RGB = [70, 72, 76], gap: RGB = [18, 18, 20], busVent: RGB = [30, 30, 32];
   const plateRim: RGB = [30, 30, 34], plateInk: RGB = [40, 50, 90], plate: RGB = [214, 212, 200], bezel: RGB = [24, 24, 26];
   const headCore: RGB = [236, 234, 220], headLens: RGB = [176, 178, 172], tailCore: RGB = [210, 60, 44], tailLens: RGB = [140, 24, 20];
+  const hasBox = L.sections.some((q) => q.kind === 'box');
   for (const end of ['front', 'rear'] as const) {
     const sh = lay.sheets[end];
     const lamps = end === 'front' ? inp.headlamps : inp.taillamps;
@@ -413,7 +434,9 @@ export function paintSkin(L: SkinLayoutInfo, inp: SkinInput): Skin {
           }
           if (L.style === 'bus' && y > p.sill + 0.3 && y < p.sill + 0.5 && Math.abs(zl) < 0.5 && Math.floor(y * ppm) % 2 === 0) setC(busVent);
         } else {
-          // trunk / tailgate seam and handle
+          // trunk / tailgate seam and handle; box vans get split rear doors with a latch bar
+          if (hasBox && dzc < 0.5 / ppm && y > p.sill + 0.25 && y < p.box - 0.1) mulC(0.5);
+          if (hasBox && Math.abs(dzc - 0.08) < 0.5 / ppm && y > p.sill + 0.5 && y < p.box - 0.4) setC(chrome);
           if (Math.abs(y - (p.sill + 0.4)) < 0.5 / ppm && Math.abs(zl) < 0.7) mulC(0.6);
           if (Math.abs(y - (p.belt - 0.1)) < 0.03 && dzc < 0.12) setC(chrome);
         }

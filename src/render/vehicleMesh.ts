@@ -675,10 +675,10 @@ export class VehicleRenderer {
       if (e) this.disposeMeshes(e, skin);
       next.skin = skin;
       const parts = worldMaterials(partSwatchPage().tex);
-      const bodyMat = skin ?? this.placeholder(liveryBody(model.layout, v.paint));
+      const bodyMat = model.bodyUsesParts ? parts : skin ?? this.placeholder(liveryBody(model.layout, v.paint));
       const b = mk(model.body, bodyMat.mat, bodyMat.depth);
       next.roof = mk(model.roof, bodyMat.mat, bodyMat.depth);
-      next.skinMeshes = [b, next.roof].filter((m): m is THREE.Mesh => !!m);
+      next.skinMeshes = model.bodyUsesParts ? [] : [b, next.roof].filter((m): m is THREE.Mesh => !!m);
       mk(model.parts, parts.mat, parts.depth);
       if (model.glass) {
         mk(model.glass, this.glassOut, null);

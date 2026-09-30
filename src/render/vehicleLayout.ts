@@ -12,7 +12,7 @@ import { has, type Vehicle, type VehiclePart } from '../game/vehicle';
 // and collision and interaction keep using the grid.
 
 export type BodyStyle = 'sedan' | 'hatch' | 'sports' | 'suv' | 'pickup' | 'van' | 'minivan' | 'bus' | 'truck' | 'motorcycle' | 'bicycle' | 'frame';
-export type Livery = 'plain' | 'police' | 'ambulance' | 'school' | 'fire' | 'military' | 'fbi' | 'swat' | 'security' | 'icecream' | 'hippie' | 'prison' | 'hazmat';
+export type Livery = 'plain' | 'police' | 'ambulance' | 'school' | 'fire' | 'military' | 'fbi' | 'swat' | 'security' | 'icecream' | 'hippie' | 'prison' | 'hazmat' | 'transit';
 
 /** Style dimensions, metres above the ground (z-level floor) unless noted. */
 export interface StyleParams {
@@ -111,6 +111,7 @@ export function liveryFromId(id: string): Livery {
   if (/icecream|ice_cream/.test(s)) return 'icecream';
   if (/hippie/.test(s)) return 'hippie';
   if (/hazmat/.test(s)) return 'hazmat';
+  if (/^bus($|_tour)/.test(s)) return 'transit';
   return 'plain';
 }
 

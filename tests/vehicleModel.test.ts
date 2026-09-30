@@ -118,8 +118,18 @@ describe('vehicle model: geometry', () => {
     expect(built).toBeGreaterThan(150);
   }, 60_000);
 
-  it('returns null for odd grids (the parts renderer draws them)', () => {
-    expect(buildVehicleModel(make('shopping_cart'), 0)).toBeNull();
+  it('draws odd grids as a tidy frame, every part on its own tile', () => {
+    for (const id of ['shopping_cart', 'golf_cart', 'tractor_plow', 'apc', 'car_chassis']) {
+      const v = make(id);
+      const m = buildVehicleModel(v, 0)!;
+      expect([id, m.bodyUsesParts]).toEqual([id, true]);
+      const b = bounds(m.parts!);
+      const [x0, y0, x1, y1] = v.bounds();
+      expect(b.min[2]).toBeGreaterThan(y0 - 0.6);
+      expect(b.max[2]).toBeLessThan(y1 + 0.6);
+      expect(b.max[0]).toBeLessThan(x1 + 1.5); // turret barrels reach forward
+      expect(b.min[0]).toBeGreaterThan(x0 - 0.6);
+    }
   });
 
   it('cuts window panes and wheel arches into a sedan', () => {
