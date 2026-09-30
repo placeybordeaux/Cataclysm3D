@@ -67,11 +67,80 @@ generator's `generate`, `onChunkGenerated`/`onChunkEvicted` listeners.
 
 ## What was found
 
-RESULTS
+Measured with the new telemetry on the user's settings (voxel, radius 8, 3440x1304, RTX 5080),
+ghost car through the densest straight roads of Holden (the town by the start, size 6) and
+Columbia Falls (size 18), headless Chromium and headless Firefox, both on the GPU:
+
+1. **The road ahead was simply not built.** Driving into a city at 40 mph an unbuilt chunk was
+   in clear view for the **whole 30 s run** (Chromium 22-23 s, Firefox 22 s; Holden 10-11 s);
+   a chunk waited 5-7.5 s (p50) from wanted to shown, up to 20 s. The runway fell to 1.7-3.4 s.
+   It is not a frame-rate problem: frames stayed at ~60 Hz in town, the meshing just built the
+   wrong things.
+2. **Two thirds of the meshing went to LOD flips next to the car.** The near ring (1.8 chunks:
+   3D trees and voxel props at full detail) moves with you, so every chunk you pass is rebuilt
+   when it enters the ring and again when it leaves it. City at 40 mph: 606 rebuilds vs 503 first
+   builds; the rebuilds cost **2.9 s of meshing vs 1.5 s** for the first builds (event log,
+   rebuilds at 1-2 chunks from the player). Those rebuilds are *near* the player, so the old
+   distance-squared order ranked them before every unbuilt chunk ahead.
+3. **Chunks were built that were never needed**: 261 wanted chunks were dropped before they were
+   ever shown (behind or beside the car), and the order paid no attention to where the car was
+   going (only to where the camera looked).
+4. **Mapgen is not the bottleneck** (so no Web Worker for it): 5-12 ms per second of driving
+   inside frames, the slowest chunk 1-6 ms (a town house, a lab). But the idle-time prefetcher
+   **never ran**: it needed 8 ms of idle time, and at 3440x1304 a 60 Hz frame leaves ~5-7 ms, so
+   all 2000-3000 chunk generations per run happened inside frames.
+5. **Where the mesh time goes** (city, `--detail`): of 2.9 ms/frame of mesh data, painted surfaces
+   0.68, furniture models 0.56, set dressing 0.17, rooms 0.14; the rest is terrain and
+   architecture. 3D trees 0.25 ms/frame.
+6. **Firefox** behaves like Chromium on the same machine (same holes before, same fix after), with
+   longer single steps (tree 28-31 ms, geometry 17-21 ms once each: GC or first-JIT, not a
+   pattern) and a more expensive draw: 5.3-7.6 ms CPU per frame for ~600-980 draw calls in the
+   city vs 3.1-3.6 in Chromium.
+7. In the city the frame budget is tight regardless of streaming: sim 3.5-3.9 ms (monsters,
+   NPCs, vehicles: `beforeRender` 1.7-2.2), draw 3-7.6 ms, and headless Chromium adds ~9 ms of
+   presentation before our callback at this size, so the city runs at 30-45 fps in the
+   benchmark with or without the fixes.
 
 ## What was fixed
 
-FIXES
+* **Build order by need** (`chunkManager.ts`, `schedule = 'need'`, default; `?stream=distance`
+  or `cdda.streamSchedule('distance')` gives back the old order). Every entry that needs work is
+  classified: *hole* (never shown), *edit* (its chunk or a neighbour changed), or cosmetic LOD
+  flips (*up* into the near ring, *down* out of it, *trees* across the flora middle ring).
+  Holes and edits are ranked by **seconds until needed**: 0 inside the fog range and in view;
+  beyond it the distance left to cover at the speed the player closes on it (velocity tracked
+  from positions; 1 m/s floor so standing still fills in nearest first); out of view +0.75 s
+  (+3 s when driving: the camera follows the road); basements +1.5 s; the player's own 3x3
+  always first (the load curtain). Cosmetic work comes after all of it, and is **deferred**:
+  up/tree swaps only when no hole is needed within 3 s, downgrades only when standing still
+  with nothing unbuilt (the detailed mesh is already up; the far version only saves a little
+  render time).
+* **Boost budget when behind**: while an unbuilt chunk is in view or needed within 0.5 s the
+  meshing budget is 8 ms instead of 4 (`boostBudgetMs`); in the benchmark that is 0-14 % of
+  frames.
+* **Stand-ins** (`src/render/placeholders.ts`, default on; `?placeholders=0`,
+  `cdda.placeholders(false)`): a wanted column whose ground-level chunk has no mesh yet shows the
+  skyline's silhouette of what the overmap says is there (house box with a gable roof, town
+  blocks, tree crowns), lit and fogged by the world material, removed when the real mesh
+  lands. A late chunk now reads as "not detailed yet" instead of a missing street.
+* **Prefetch in real idle gaps**: `minIdleMs` 8 → 3 (up to 8 chunks per idle period).
+* Telemetry-driven fixes are covered by `tests/render/chunkSchedule.test.ts`.
+
+Before/after (same machine, same load ~15, 3440x1304, voxel, radius 8; "before" =
+`?stream=distance&placeholders=0`, which is the old code path):
+
+| route | browser | unbuilt in view (s) | runway p10 (s) | wanted→shown p50 / p95 (ms) | rebuilds / first builds | loop p99 (ms) |
+| --- | --- | --- | --- | --- | --- | --- |
+| Holden 40 mph | Chromium | 11.2 → **0** | 4.4 → **10.3** | 3501 / 14114 → **318 / 1159** | 266 / 699 → 147 / 777 | 16.8 → 17.7 |
+| city 40 mph | Chromium | 23.1 → **0** | 2.4 → **9.1** | 7491 / 10082 → **875 / 6173** | 405 / 360 → 358 / 849 | 20.8 → 29.7 |
+| city 60 mph | Chromium | (not run before) → **0** | → 6.6 | → 446 / 2436 | → 180 / 1173 | → 19.8 |
+| Holden 40 mph | Firefox | 10.3 → **0** | 4.5 → **9.9** | 2556 / 14087 → **298 / 820** | 278 / 716 → 157 / 781 | 19 → 20 |
+| city 40 mph | Firefox | 22.0 → **0** | 4.3 → **9.3** | 5355 / 7870 → **797 / 5310** | 697 / 581 → 324 / 855 | 30 → 36 |
+
+The cost: in the city the loop p99 rises (the boost budget, and ~60 % more of the city is
+actually drawn: 600 → 980 draw calls, 1.1 → 1.65 M triangles, Firefox draw 5.3 → 7.6 ms/frame).
+Frame-interval p99 is unchanged (33-50 ms in the city, 17-33 in town) because the city was
+already below 60 Hz in the benchmark.
 
 ## Benchmarks and budgets
 
