@@ -7,6 +7,7 @@ import { atlasOf, omtLabel, playerOmt, type UiContext } from './context';
 import { openScreen } from './screen2';
 import { mapMarks, noteAt, removeNote, setNote, type MapNote } from './mapmarks';
 import { mapMarkers } from '../game/mapmarkers';
+import { currentRoute } from './route';
 
 // 'm' map (CDDA overmap_ui.cpp, rebuilt for the mouse): the world at one UltiCa overmap sprite
 // per overmap tile (OMT) when zoomed in, one pixel of the sprite's average colour when zoomed
@@ -378,6 +379,24 @@ export function openOvermap(ctx: UiContext): Panel | null {
       label(fx - 0.5, fy - 1.3, `${mk.tracked ? '★ ' : ''}${mk.label}`, 'mission');
     }
     const d = marks.destination;
+    // The walking route to it (src/ui/route.ts): a dashed line from you, roads first.
+    const route = d && d.z === cz ? currentRoute(game, wg.overmap) : null;
+    if (route && route.omts.length > 1) {
+      const p = game.player;
+      g.save();
+      g.strokeStyle = 'rgba(232, 192, 112, 0.85)';
+      g.lineWidth = Math.max(2, 2 * dpr);
+      g.setLineDash([4 * dpr, 4 * dpr]);
+      g.beginPath();
+      const start = toScreen(p.x / CHUNK, p.y / CHUNK);
+      g.moveTo(start.sx * dpr, start.sy * dpr);
+      for (const o of route.omts.slice(1)) {
+        const s = toScreen(o.x + 0.5, o.y + 0.5);
+        g.lineTo(s.sx * dpr, s.sy * dpr);
+      }
+      g.stroke();
+      g.restore();
+    }
     if (d && d.z === cz) {
       const { sx, sy } = toScreen(d.x + 0.5, d.y + 0.5);
       g.strokeStyle = '#e0b050';
@@ -385,7 +404,7 @@ export function openOvermap(ctx: UiContext): Panel | null {
       g.beginPath();
       g.arc(sx * dpr, sy * dpr, Math.max(6 * dpr, cell * 0.45), 0, Math.PI * 2);
       g.stroke();
-      label(d.x, d.y - 0.9, `◆ ${d.label}`, 'dest');
+      label(d.x, d.y - 0.9, `◆ ${d.label}${route ? ` · ${Math.round(route.metres)} m walk` : ''}`, 'dest');
     }
     labels.replaceChildren(...L);
     // For tests (tools/realinput.ts): where the view is and how far it's zoomed.

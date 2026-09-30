@@ -4,7 +4,7 @@
 //
 //   street            a town street with the parked / wrecked cars mapgen put there (3/4 view)
 //   lineup:<a,b,..>   the prototypes side by side in a field, seen from the front 3/4
-//   solo:<proto>[:<angle>[:<status>[:<dist>[:<hour>]]]]  (status: 0 intact, -1 used, 1 wrecked, smashed)
+//   solo:<proto>[:<angle>[:<status>[:<dist>[:<hour>]]]]  (status: 0 intact, -1 used, 1 wrecked, smashed, trunk, burnt)
 //                     one prototype, camera `angle` deg from its nose (90 = right side),
 //                     spawn status (0 intact, -1 light damage, 1 wrecked), dist m off the body
 //   drive / drivechase / driveday / drivedaychase   driving a car (night: headlights on)
@@ -61,9 +61,24 @@ window.vehicleView = async (name) => {
     c.setHour(Number(hour));
     field();
     // status 'smashed': intact car with every window broken, a flat tyre and a door open
-    const smashed = status === 'smashed';
-    const r = c.spawnVehicle(proto, 6, 0, 0, { fuel: 50, status: smashed ? 0 : Number(status), force: true });
+    const smashed = status === 'smashed', trunk = status === 'trunk', burnt = status === 'burnt';
+    const r = c.spawnVehicle(proto, 6, 0, 0, { fuel: 50, status: smashed || trunk ? 0 : burnt ? 1 : Number(status), force: true });
     if (!r) throw new Error(`spawn ${proto} failed`);
+    if (trunk || burnt) {
+      const v = c.vehicleSystem.list.find((q) => q.uid === r.uid);
+      v.parts.forEach((q, i) => {
+        q.open = trunk && q.def.flags.includes('MULTISQUARE');
+        // burnt out: nearly everything wrecked, glass gone, one door hanging
+        if (burnt && !q.def.flags.includes('WHEEL')) q.hp = (i * 7919) % 10 < 8 ? 0 : Math.round(q.def.durability * 0.2);
+      });
+      if (burnt) {
+        v.wheels[0].hp = 0;
+        v.wheels[1].hp = 0;
+        const d = v.parts.find((q) => q.def.flags.includes('OPENABLE') && q.my < 0 && !q.def.flags.includes('MULTISQUARE'));
+        if (d) d.open = true;
+      }
+      v.version++;
+    }
     if (smashed) {
       const v = c.vehicleSystem.list.find((q) => q.uid === r.uid);
       for (const q of v.parts) {

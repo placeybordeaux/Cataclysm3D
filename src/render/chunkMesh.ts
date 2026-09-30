@@ -16,6 +16,7 @@ import { frameAverage } from './framePixels';
 import type { VoxelProps } from './voxel';
 import { runSteps } from './steps';
 import { isBareTree, type TreeSpec } from './trees';
+import { wantsFlora3d } from './flora';
 import type { ModelFactory } from './furniture';
 import type { SurfacePainter } from './surfaces';
 
@@ -84,6 +85,8 @@ export interface MeshExtras {
   voxels?: VoxelProps;
   /** Chunk is near the player: expensive volumes (3D trees, voxel props) only here. */
   near: boolean;
+  /** Chunk is in the middle ring (chunkManager midRadius): flora.ts builds a lighter LOD. */
+  mid?: boolean;
   /** furniture style 'model' (furniture/): modelled pieces replace voxels and billboards */
   models?: ModelFactory;
   /** painted surfaces (surfaces.ts) active: interior wall finishes, baseboards, crown */
@@ -574,7 +577,7 @@ export function* buildChunkMeshSteps(
           // Tall trees dissolve (dithered) when the camera is right next to them instead of
           // filling the view with a handful of giant texels. (A 3D trunk box was tried: it
           // never lines up with the billboard's drawn trunk and looked worse.)
-          if (LF?.trees3d && extras?.near && !isBareTree(f, shape === S.shrub)) trees.push({ x: x + 0.5 + jx, y: y + 0.5 + jy, z, frame: f, height: h, shrub: shape === S.shrub, seed: seed ^ 0x5bd1e995 });
+          if (wantsFlora3d(!!LF?.trees3d, !!extras?.near, isBareTree(f, shape === S.shrub))) trees.push({ x: x + 0.5 + jx, y: y + 0.5 + jy, z, frame: f, height: h, shrub: shape === S.shrub, seed: seed ^ 0x5bd1e995, id: def.id, season, lod: extras?.near ? 0 : extras?.mid ? 1 : 2 });
           else sprites.push({ x: x + 0.5 + jx, y: y + 0.5 + jy, z, frame: f, height: h, kind: 'tree', fadeNear: shape === S.tree });
           break;
         }

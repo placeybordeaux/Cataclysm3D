@@ -144,3 +144,38 @@ describe('collision with the drawn vehicle body', () => {
     expect(beside.hp).toBe(beside.hpMax);
   });
 });
+
+describe('getting in (playtest bugs)', () => {
+  it('^ reaches the controls from beside any front door, outside the body', () => {
+    const { game, vs, car } = world(true);
+    const b = vs.bodyRect(car)!;
+    for (const [mx, side] of [[0, b.y0 - 0.5], [0, b.y1 + 0.5], [-1, b.y0 - 0.5]] as const) {
+      [game.player.x, game.player.y] = car.mountToWorld(mx, side);
+      expect(vs.enterableControls()).toBe(car);
+    }
+  });
+
+  it('an open door offers to get in (any side), a closed rear one opens', () => {
+    const { vs, car } = world(true);
+    const pdoor = car.parts.find((p) => p.def.id === 'door_front_right')!;
+    const rdoor = car.parts.find((p) => p.def.id === 'door_rear_right')!;
+    const [x, y] = car.mountToWorld(pdoor.mx, pdoor.my + 0.7);
+    vs.game.player.x = x;
+    vs.game.player.y = y;
+    expect(vs.driveOffer(car, rdoor.mx, rdoor.my)).toBe(false);
+    rdoor.open = true;
+    expect(vs.driveOffer(car, rdoor.mx, rdoor.my)).toBe(true);
+  });
+
+  it('doors swing shut once you drive off', () => {
+    const { game, vs, car } = world(true);
+    const d = car.parts.find((p) => p.def.id === 'door_front_left')!;
+    [game.player.x, game.player.y] = car.mountToWorld(0, 0);
+    vs.takeControls(car);
+    d.open = true;
+    vs.scriptedInput = true;
+    car.velocity = 3;
+    game.tick(1 / 30);
+    expect(d.open).toBe(false);
+  });
+});

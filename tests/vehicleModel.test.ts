@@ -21,11 +21,13 @@ beforeAll(() => {
 
 const make = (id: string, status = 0, seed = 1): Vehicle => spawnVehicle(vdata, data, id, { x: 0.5, y: 0.5, z: 0, facing: 0, fuel: 50, status, rng: new Rng(seed) });
 
-function bounds(g: THREE.BufferGeometry): { min: number[]; max: number[] } {
+/** Bounds of a geometry; `aboveY` skips vertices lower than it (debris lying on the road). */
+function bounds(g: THREE.BufferGeometry, aboveY = -Infinity): { min: number[]; max: number[] } {
   const pos = g.getAttribute('position');
   const min = [Infinity, Infinity, Infinity], max = [-Infinity, -Infinity, -Infinity];
   for (let i = 0; i < pos.count; i++)
     for (let k = 0; k < 3; k++) {
+      if (pos.getY(i) < aboveY) continue;
       const v = pos.getComponent(i, k);
       expect(Number.isFinite(v)).toBe(true);
       min[k] = Math.min(min[k], v);
@@ -106,7 +108,8 @@ describe('vehicle model: geometry', () => {
         // out a little past the side columns and nothing leaves the grid
         const doorSlack = v.parts.some((p) => p.open && p.my !== Math.round((y0 + y1) / 2)) ? 1.3 : 0;
         for (const g of bodyish) {
-          const b = bounds(g);
+          // glass on the road and a burnt wreck's scorch lie beyond the body
+          const b = bounds(g, 0.03);
           expect(b.min[0]).toBeGreaterThan(x0 - 0.5 - 0.1);
           expect(b.max[0]).toBeLessThan(x1 + 0.5 + 0.1 + doorSlack * 0.3);
           expect(b.min[2]).toBeGreaterThan(y0 - 0.5 - 0.3 - doorSlack);
@@ -191,6 +194,45 @@ describe('vehicle model: geometry', () => {
     const near = buildVehicleModel(v, 0)!, far = buildVehicleModel(v, 0, { far: true })!;
     const tris = (m: typeof near) => m.parts!.getIndex()!.count / 3;
     expect(tris(far)).toBeLessThan(tris(near) * 0.7);
+  });
+
+  it('an open hatch lifts above the roof', () => {
+    const v = make('car_hatch');
+    const top = () => {
+      const m = buildVehicleModel(v, 0)!;
+      return Math.max(bounds(m.body!).max[1], m.glass ? bounds(m.glass).max[1] : 0);
+    };
+    for (const p of v.parts) p.open = false;
+    const closed = top();
+    const lids = v.parts.filter((p) => p.def.flags.includes('MULTISQUARE'));
+    expect(lids.length).toBeGreaterThan(0);
+    for (const p of lids) p.open = true;
+    expect(top()).toBeGreaterThan(closed + 0.2);
+  });
+
+  it('the driven build has a cockpit: wheel, two dials, a windscreen film', () => {
+    const v = make('sedan');
+    expect(buildVehicleModel(v, 0)!.cockpit).toBeUndefined();
+    const m = buildVehicleModel(v, 0, { separateWheels: true })!;
+    const c = m.cockpit!;
+    expect(c.dials.map((d) => d.kind)).toEqual(['speed', 'fuel']);
+    expect(c.film).not.toBeNull();
+    // the wheel is ahead of the driver's seat and below the eye
+    expect(c.wheel.y).toBeLessThan(m.eyeH);
+    expect(c.wheel.x).toBeGreaterThan(m.driverX!);
+  });
+
+  it('smashed glass leaves flecks on the road', () => {
+    const v = make('sedan');
+    const low = (m: ReturnType<typeof buildVehicleModel>) => {
+      const pos = m!.parts!.getAttribute('position');
+      let n = 0;
+      for (let i = 0; i < pos.count; i++) if (pos.getY(i) < 0.03) n++;
+      return n;
+    };
+    const intact = low(buildVehicleModel(v, 0));
+    for (const p of v.parts) if (p.def.flags.includes('WINDSHIELD')) p.hp = 0;
+    expect(low(buildVehicleModel(v, 0))).toBeGreaterThan(intact + 30);
   });
 
   it('can hand the skin to a worker as structured-cloneable data', () => {

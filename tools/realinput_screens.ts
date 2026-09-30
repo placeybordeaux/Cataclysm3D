@@ -264,6 +264,60 @@ export function screenScenarios(c: ScreensCtx): Scenario[] {
       check('walking into the tail stops at the bumper', tail < 0.45 && tail > 0.2, tail);
       await shot('carside_tail');
     }],
+    ['cardoors', "vehicle doors (playtest): e at an open passenger door drives; ^ from beside the car; no camera through the roof in the doorway; doors shut when you drive off", async () => {
+      await reset();
+      // Setup only: a parked car on a road, doors shut; `place` stands you `off` m outside a door, facing it.
+      const place = (door: string, off: number, open: boolean) => js<string | null>(`(() => {
+        const vs = cdda.vehicleSystem;
+        let v = vs.list.find((q) => q.uid === window.__cardoors);
+        if (vs.driving) { vs.driving.velocity = 0; vs.releaseControls(); }
+        if (!v) {
+          const r = cdda.roadTrip('car'); if (!r) return null;
+          v = vs.driving; vs.releaseControls(); v.velocity = 0; v.engineOn = false;
+          window.__cardoors = v.uid;
+          // earlier scenarios' road trips parked cars on the same spot: clear them away
+          for (const o of [...vs.list]) if (o !== v && Math.hypot(o.x - v.x, o.y - v.y) < 12) vs.remove(o);
+        }
+        for (const q of v.parts) if (q.def.id.startsWith('door')) q.open = false;
+        const d = v.parts.find((q) => q.def.id === ${JSON.stringify(door)});
+        d.open = ${open};
+        v.version++;
+        const b = vs.bodyRect(v), side = d.my < 0.5 ? -1 : 1, edge = side < 0 ? b.y0 : b.y1;
+        const [tx, ty] = v.mountToWorld(d.mx, edge), [ox, oy] = v.mountToWorld(d.mx - 0.1, edge + side * ${off});
+        const p = cdda.game.player; Object.assign(p, { x: ox, y: oy, z: v.z, yaw: Math.atan2(tx - ox, -(ty - oy)), pitch: -0.15 });
+        return v.name; })()`);
+      const name = await place('door_front_right', 0.9, true);
+      check('setup: a car, you by its open passenger door', !!name, name);
+      await c.toGameplay();
+      await sleep(400);
+      let prompt = await js<string>(`document.querySelector('.hud-prompt')?.textContent ?? ''`);
+      check(`an open passenger door offers "Drive the ${name}" (closing is under More…)`, prompt.includes(`Drive the ${name}`) && prompt.includes('More'), prompt);
+      await shot('cardoors_open_prompt');
+      await c.x().key('e');
+      await sleep(300);
+      check('e there gets in and takes the controls', await js<boolean>(`cdda.vehicleSystem.driving?.uid === window.__cardoors`));
+      await c.x().key('k'); // start the engine
+      await sleep(300);
+      await c.x().hold('w', 1600);
+      await sleep(200);
+      const doors = await js<{ moving: number; open: string[] }>(`(() => { const v = cdda.vehicleSystem.driving; return { moving: v.velocity, open: v.parts.filter((q) => q.def.id.startsWith('door') && q.open).map((q) => q.def.id) }; })()`);
+      check('driving off shuts the doors', doors.moving > 1 && !doors.open.length, doors);
+      await place('door_front_left', 1.0, false);
+      await c.toGameplay();
+      await sleep(300);
+      await c.x().key('asciicircum');
+      await sleep(300);
+      const ctl = await js<{ driving: boolean; log: string[] }>(`({ driving: cdda.vehicleSystem.driving?.uid === window.__cardoors, log: cdda.ui.log().slice(-2) })`);
+      check('^ from beside the (closed) driver door takes the controls', ctl.driving, ctl);
+      await place('door_front_left', -0.25, true);
+      await c.toGameplay();
+      await sleep(400);
+      const cam = await js<{ camY: number; roof: number }>(`(() => { const v = cdda.vehicleSystem.list.find((q) => q.uid === window.__cardoors); return { camY: cdda.renderer.camera.position.y, roof: v.z * 2.6 + 1.62 }; })()`);
+      check('standing in the doorway the camera stays under the roof', cam.camY < cam.roof - 0.1, cam);
+      await shot('cardoors_doorway');
+      prompt = await js<string>(`document.querySelector('.hud-prompt')?.textContent ?? ''`);
+      check('…and it still offers to drive', prompt.includes(`Drive the ${name}`), prompt);
+    }],
     ['body', 'bionics (p), mutations ([), martial arts (_): panels, switches by mouse', async () => {
       await reset();
       await js(`cdda.installBionic('bio_power_storage'); cdda.installBionic('bio_flashlight'); cdda.givePower(100)`);

@@ -15,6 +15,10 @@ import type { Renderer } from './renderer';
 import type { TileFrame } from './textureSource';
 import { Batches, hash, partSwatchPage } from './vehicleGeom';
 import { buildVehicleModel } from './vehicleModel';
+import { pointInBody } from '../game/vehicleShape';
+import { Cockpit, type HandColors } from './vehicleCockpit';
+import { AtlasTextureSource } from './atlasSource';
+import { spriteInfo } from './chars/index';
 import { bodyRectFor, setVehicleWidth, vehicleWidth, type VehicleWidth } from './vehicleLayout';
 import { liveryBody } from './vehicleSkin';
 
@@ -515,6 +519,10 @@ interface Entry {
   pending: { id: number; key: string } | null;
   /** Built for the driven vehicle: separate wheel meshes that steer and spin. */
   driven: boolean;
+  /** Driven vehicle: wheel, hands, dials, windscreen film (vehicleCockpit.ts). */
+  cockpit: Cockpit | null;
+  /** Model look: roof height above the floor level (m), null without a roof. */
+  roofY: number | null;
   /** Built at the distance LOD (no interior, no shadow casting). */
   far: boolean;
   wheels: { mesh: THREE.Mesh; r: number; steer: boolean; spin: number }[];
@@ -665,6 +673,7 @@ export class VehicleRenderer {
   private disposeMeshes(e: Entry, keepSkin: Skin | null): void {
     this.group.remove(e.obj);
     for (const m of e.meshes) m.geometry.dispose();
+    e.cockpit?.dispose();
     if (e.skin && e.skin !== keepSkin) {
       e.skin.tex.dispose();
       e.skin.mat.dispose();
@@ -703,7 +712,7 @@ export class VehicleRenderer {
     };
     const next: Entry = {
       obj, lean, meshes, roof: null, lamps: null, tails: null, beacons: null, skin: null, skinMeshes: [], pending: null,
-      driven: v === this.system.driving, wheels: [], bike: false, far,
+      driven: v === this.system.driving, wheels: [], bike: false, far, roofY: null, cockpit: null,
       version: v.version, z: v.z, look: this.lookMode, eyeH: null, driverZ: null, driverX: null, parkedLean: 0, beam: e?.beam ?? [],
     };
     const t0 = performance.now();
@@ -740,7 +749,12 @@ export class VehicleRenderer {
         next.wheels.push({ mesh, r: w.r, steer: w.steer, spin: 0 });
       }
       next.bike = model.layout.style === 'motorcycle' || model.layout.style === 'bicycle';
+      if (model.cockpit) {
+        next.cockpit = new Cockpit(model.cockpit, parts.mat, this.handColors());
+        pivot.add(next.cockpit.group);
+      }
       next.eyeH = model.eyeH;
+      next.roofY = model.layout.cabin && model.body ? model.layout.p.roof : null;
       next.driverX = model.driverX ?? null;
       next.driverZ = model.driverZ;
       next.parkedLean = model.parkedLean;
@@ -814,6 +828,7 @@ export class VehicleRenderer {
       if (e.parkedLean && v !== driving && Math.abs(v.velocity) < 0.3) e.lean.rotation.x = -e.parkedLean;
       else e.lean.rotation.x = e.bike ? Math.max(-0.45, Math.min(0.45, v.steer * Math.abs(v.velocity) * 0.12)) : 0;
       // Front wheels follow the steering; all of them roll with the speed.
+      if (e.cockpit) e.cockpit.update(v, dt, fuelFraction(v));
       for (const w of e.wheels) {
         w.spin -= (v.velocity * dt) / w.r;
         w.mesh.rotation.set(0, w.steer ? -v.steer : 0, w.spin);
@@ -847,6 +862,7 @@ export class VehicleRenderer {
     }
     for (const v of [...this.entries.keys()]) if (!seen.has(v)) this.drop(v);
     rig.drive = driving ? this.driveView(driving) : null;
+    rig.eyeCap = driving ? null : this.doorwayEyeCap();
 
     const s = this.headlight;
     if (spotFor) {
@@ -860,6 +876,43 @@ export class VehicleRenderer {
       s.target.updateMatrixWorld();
       s.intensity = this.headlightIntensity;
     } else s.intensity = 0;
+  }
+
+  /**
+   * On foot in (or leaning into) a roofed vehicle: the eye stays under its roof, like ducking
+   * into a car, instead of the camera clipping through the roof panel.
+   */
+  private doorwayEyeCap(): number | null {
+    const p = this.game.player;
+    for (const [v, e] of this.entries) {
+      if (e.roofY === null || v.z !== p.z || Math.hypot(v.x - p.x, v.y - p.y) > 12) continue;
+      const b = this.system.bodyRect(v);
+      if (!b || !pointInBody(v, b, p.x, p.y, 0.3)) continue;
+      if (e.roofY > 1.95) continue;
+      return v.z * LEVEL_HEIGHT + e.roofY - 0.2;
+    }
+    return null;
+  }
+
+  private handCache: { key: string; colors: HandColors } | null = null;
+  /** Sleeve and skin colours for the hands on the wheel: from your outfit, like the on-foot arms. */
+  private handColors(): HandColors {
+    const p = this.game.player;
+    const worn = p.inv.worn.map((w) => w.typeId);
+    const key = `${worn.join(',')}|${p.male}`;
+    if (this.handCache?.key === key) return this.handCache.colors;
+    let colors: HandColors = { sleeve: 0x3a4250, skin: 0xc89878 };
+    const src = this.renderer.source;
+    if (src instanceof AtlasTextureSource) {
+      const f = src.composite(src.layersFor(worn.length ? worn : ['jeans', 'tshirt', 'jacket_flannel'], null, p.male ? 'male' : 'female'));
+      const pal = f ? spriteInfo(f)?.pal : null;
+      if (pal) {
+        const hex = (c: readonly number[]) => (Math.round(c[0]) << 16) | (Math.round(c[1]) << 8) | Math.round(c[2]);
+        colors = { sleeve: hex(pal.main), skin: hex(pal.skin) };
+      }
+    }
+    this.handCache = { key, colors };
+    return colors;
   }
 
   private lastDriving: Vehicle | null = null;
@@ -901,4 +954,13 @@ export class VehicleRenderer {
     const [, , x1] = v.bounds();
     return v.mountToWorld(x1 + 0.5 + ahead, (v.bounds()[1] + v.bounds()[3]) / 2);
   }
+}
+
+/** Fraction of the main (non-battery) fuel left, for the fuel gauge; the battery for EVs. */
+function fuelFraction(v: Vehicle): number {
+  const fuels = v.engineFuels();
+  const gas = fuels.filter((f) => f !== 'battery' && f !== 'muscle')[0] ?? (fuels.includes('battery') ? 'battery' : null);
+  if (!gas) return 0;
+  const cap = v.fuelCapacity(gas);
+  return cap > 0 ? v.fuelLeft(gas) / cap : 0;
 }
