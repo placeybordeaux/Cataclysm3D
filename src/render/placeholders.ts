@@ -39,7 +39,7 @@ export class PlaceholderLayer {
   update(px: number, py: number, pz: number, radius: number, forEachEntry: (fn: (e: ChunkEntryView) => void) => void, groundBelow = true): void {
     // every 4th frame: a stand-in a few frames late is still far ahead of the real mesh
     if ((this.tick++ & 3) !== 0) return;
-    // above ground too: the ground level is drawn from rooftops (chunkManager levelRadius)
+    // above ground too: the ground level is drawn from rooftops (src/world/levels.ts)
     if (!this.enabled || !this.overmap || pz < 0 || (pz > 0 && !groundBelow)) {
       if (this.meshes.size) this.clear();
       return;

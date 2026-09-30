@@ -151,6 +151,27 @@ export class ChunkManager {
    * 83 ms in the benchmark). Floors budgetMs / boostBudgetMs, caps 12 / 20 ms.
    */
   slackShare = 0.5;
+  /**
+   * 'need', after a load or teleport: while the player's own 3x3 is unbuilt the view is
+   * curtained (nearChunks.ts), there is nothing to keep smooth, so builds get this much per
+   * frame and entries are made for the 3x3 only (a load used to create all ~900 wanted entries
+   * first — mapgen for every level out to 168 m — at 8 ms a frame while the near builds got
+   * the 1-2 ms left over: 1.5 s to the first near chunk in Chromium, 4 s in Firefox).
+   */
+  curtainBudgetMs = 40;
+  /**
+   * 'need': budget while unbuilt chunks are in view and the player stands still (after a load,
+   * a teleport, an Options change that rebuilds everything): watching the town assemble at
+   * ~40 fps for a few seconds beats watching it at 60 fps for twice as long. Moving, the boost
+   * budget applies instead (driving stays smooth).
+   */
+  settleBudgetMs = 16;
+  /** 'need': creating entries (mapgen) may take this share of the budget while builds are pending */
+  createShare = 0.5;
+  /** the view is curtained this frame (telemetry) */
+  curtained = false;
+  private pendingLast = 0;
+  private curtainSince = -1;
   boostSlackShare = 0.7;
   /** budget in force this frame (telemetry) */
   effBudgetMs = 4;
@@ -260,11 +281,20 @@ export class ChunkManager {
     // slack beyond what this frame's chunk work already takes (loopEma includes it)
     const slack = Math.max(0, this.ivEma - this.loopEma - Math.max(2, this.ivEma * 0.15));
     const base = need ? Math.min(12, this.budgetMs + slack * this.slackShare) : this.budgetMs;
-    const boost = need ? Math.min(20, this.boostBudgetMs + slack * this.boostSlackShare) : this.boostBudgetMs;
+    let boost = need ? Math.min(20, this.boostBudgetMs + slack * this.boostSlackShare) : this.boostBudgetMs;
+    if (need && Math.hypot(this.vel.x, this.vel.y) < 1.5) boost = Math.max(boost, this.settleBudgetMs);
+    // (as nearChunks.ts, give up after 4 s: a stuck build must not hold the big budget)
+    let curtain = need && !unlimited && this.nearUnbuilt(px, py, pz) > 0;
+    if (!curtain) this.curtainSince = -1;
+    else if (this.curtainSince < 0) this.curtainSince = t0;
+    else if (t0 - this.curtainSince > 4000) curtain = false;
+    this.curtained = curtain;
     // 1. make sure desired entries exist, nearest first. Creating an entry generates map
-    //    chunks (mapgen can be slow), so this shares the frame budget with meshing.
+    //    chunks (mapgen can be slow), so this shares the frame budget with meshing: while
+    //    builds are waiting it gets a share, and behind the curtain only the 3x3 is created.
     if (this.offsetsR !== R) this.computeOffsets(R);
     let created = 0;
+    const createBudget = curtain ? this.curtainBudgetMs : (this.behind ? boost : base) * (need && this.pendingLast > 0 ? this.createShare : 1);
     // which levels exist: src/world/levels.ts, per column from what the world contains
     const lv = this.levels;
     const pol = lv.policy;
@@ -278,13 +308,14 @@ export class ChunkManager {
     const [zLo, zHi] = lv.span(pz);
     outer: for (const [dx, dy] of this.offsets)
       for (let z = zLo; z <= zHi; z++) {
+        if (curtain && (Math.abs(dx) > 1 || Math.abs(dy) > 1)) break outer; // offsets are nearest first
         const cx = pcx + dx, cy = pcy + dy;
         const rz = lv.radiusAt(cx, cy, z, pz);
         // offsets are circular around the player's chunk, like computeOffsets
         if (rz < 0 || (rz < R && dx * dx + dy * dy > (rz + 0.5) * (rz + 0.5))) continue;
         const k = key(cx, cy, z);
         if (this.entries.has(k)) continue;
-        if (!unlimited && created > 0 && performance.now() - t0 > (this.behind ? boost : base)) break outer;
+        if (!unlimited && created > 0 && performance.now() - t0 > createBudget) break outer;
         const deps = this.depsOf(cx, cy, z);
         if (!deps[0]) continue; // outside MIN_Z..MAX_Z
         created++;
@@ -294,7 +325,7 @@ export class ChunkManager {
         });
         this.probe?.want(cx, cy, z);
       }
-    const creationDone = !created || unlimited || performance.now() - t0 <= (this.behind ? boost : base);
+    const creationDone = !curtain && (!created || unlimited || performance.now() - t0 <= createBudget);
     this.stats.frameCreateMs = performance.now() - t0;
     frameStats.lap('chunks.create');
     // 2. signatures, visibility, eviction
@@ -348,7 +379,7 @@ export class ChunkManager {
       // exist the view is curtained (nearChunks.ts).
       const nearP = e.z === pz && Math.abs(e.cx - pctx) <= 1 && Math.abs(e.cy - pcty) <= 1;
       const urgent = nearP && (!e.shown || (e.builtSig !== -1 && e.chunk.version !== e.builtVer));
-      const budget = urgent ? Math.max(this.urgentBudgetMs, boost) : this.behind ? boost : base;
+      const budget = curtain ? this.curtainBudgetMs : urgent ? Math.max(this.urgentBudgetMs, boost) : this.behind ? boost : base;
       const now = performance.now();
       if (!unlimited && (built > 0 || created > 0) && now - t0 > budget) break;
       if (e.builtSig === -1 && e.z === pz && !e.job) {
@@ -386,11 +417,12 @@ export class ChunkManager {
       this.stats.maxBuildMs = Math.max(this.stats.maxBuildMs, job.ms);
       if (job.ms > 8) this.stats.slowBuilds++;
     }
-    this.effBudgetMs = this.behind ? boost : base;
+    this.effBudgetMs = curtain ? this.curtainBudgetMs : this.behind ? boost : base;
     this.stats.frameMs = performance.now() - t0;
     this.stats.maxFrameMs = Math.max(this.stats.maxFrameMs, this.stats.frameMs);
     this.stats.builtThisFrame = built;
     this.stats.pending = dirty.length - built;
+    this.pendingLast = this.stats.pending;
     this.stats.entries = this.entries.size;
     if (this.audit && (unlimited || ++this.auditTick % 60 === 0)) this.auditLevels(px, py, pz, creationDone && this.stats.pending === 0);
   }

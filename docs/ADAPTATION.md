@@ -490,3 +490,59 @@ look): `grab_push_shoulder.jpg` (mid-push, shoulder camera, the banner), `grab_n
 (a diagonal nudge pushed it out of reach: "You let go of the dresser."), `grab_cart.jpg` (pushing a
 shopping cart). `e` on furniture keeps doing what it did (look in the dresser, examine the chair):
 Grab only joins `e` menus that already had a choice.
+
+## Reload help: "what does this take, and where did I see some?"
+
+User report: "an annoying thing about flashlights and exo-skeletons is that I thought maybe I have
+the batteries I need, but then I try to reload them and it says 'no ammo'". BN's reload_ui says
+"You need a compatible magazine to reload the flashlight!" / "You don't have any batteries to
+reload your …". That's true, but it doesn't say *which* battery. BN has ultra-light, light, light
+high-capacity, medium and heavy batteries, each disposable, rechargeable or plutonium, and a
+flashlight takes exactly two of them. A veteran knows this. A new player walks past the right
+battery in the next drawer.
+
+Now a failed reload (the reload key, the inventory's Reload, NPCs too) or a tool that won't switch
+on (the hotbar / activate: "The flashlight's batteries are dead.") says **what it takes** in plain
+words, taken from BN's fields (`magazines` well, `ammo` types, `NO_RELOAD`, `USE_UPS`, `RECHARGE`).
+It gives 1–3 examples, picked in this order: (a) ones you **saw** recently, and where ("You saw 2
+light batteries in a dresser 40 m northwest."); (b) else the **most common** in BN spawn data (item
+group weights); (c) else any that fit. It also names the failure:
+
+| Situation | Message (real BN items) |
+|---|---|
+| none carried | "Your flashlight takes a light disposable battery or a light battery. You have none. The light disposable battery is the most common." |
+| …after looking at a pile | "… You have none. You saw 2 light batteries on the floor 4 m northeast." |
+| batteries all flat | "Your light batteries are all flat. Rechargeable ones need a battery charger, and there's no charging in this version yet. Disposable ones come charged, like the light disposable battery." |
+| wrong size | "Your medium battery doesn't fit: the flashlight takes a light disposable battery or a light battery." |
+| loose rounds, no magazine | "You have 9x19mm JHPs, but the Glock 19 loads from a magazine: it takes a Glock magazine, … (9x19mm)." |
+| other calibre loaded | "The S&W 619 still has .38 Specials in it: unload it first to load .357 magnum FMJs." |
+| exo-suit / power armor | "Your powered survivor suit can't be reloaded: it runs on a UPS you carry. … A UPS takes a heavy battery or a heavy battery (high-capacity)." |
+| smartphone | "Your smartphone can't be reloaded: it's recharged from a battery charger or a UPS, and there's no charging in this version yet." |
+| dead tool, charged battery carried | "The flashlight's batteries are dead. You have a light disposable battery with charge: reload the flashlight with it." |
+| full | unchanged: "The Glock 19 is already fully loaded!" |
+
+The same **"Takes: …"** line (plus "You saw …" when you have) is on the ui2 item tooltip (the
+inventory and the hotbar), the examine card and the look card for any item that reloads.
+
+Memory: `src/game/seenitems.ts` remembers only reload-relevant items (ammo, magazines, batteries,
+UPSes): up to 3 places per type, at most 400 types, saved as the `seenItems` section. The scan
+(`src/ui2/loot/seen.ts`, once a second) sees what the pile markers see: floor piles and furniture
+tops in line of sight within 12 tiles, and storage you've searched (`LootMemory`), never the
+inside of a drawer you haven't opened. A place is dropped from the hints once its tile is
+loaded and the item is gone.
+
+Rule changes that came with it, from BN: `NO_RELOAD` items (smartphones, exo-suits) are refused
+(BN `item::is_reloadable`). `USE_UPS` tools draw from the UPSes you carry once their own charge is
+gone, for switching on and for running (BN `item::units_remaining` / `use_charges(itype_UPS)`).
+Before this, an exo-suit could never be powered here. A flat battery still goes in (BN allows it),
+but the message says it's flat. Not ported: battery chargers and recharging stations (so
+rechargeables found flat stay flat, and the messages say so), the power-armor interface CBM,
+and power armor's `set_transform` activation.
+
+Code: `src/game/reloadhelp.ts` (UI-free), wired into `Inventory.reload` / `useTransform`.
+Tests: `tests/reloadhelp.test.ts` is a table over real BN items (flashlight, heavy-duty
+flashlight, headlamps, UPS, smartphone, exo-suits, power armor, Glock 19, S&W 619, bows,
+crossbow, magazines, batteries). It also covers example order, every failure mode, the UPS draw,
+and the memory's scan / save / load / stale pile. Real input: `tools/realinput.ts --only
+reloadhelp` (a flashlight with no battery, `r`, look at a pile of light batteries, `r` again, hover
+the hotbar slot). Screenshots: `docs/screenshots/wave3/reload-help/`.

@@ -169,6 +169,48 @@ street simply isn't there), the old order with stand-ins, and the new order (def
 | --- | --- | --- |
 | ![](screenshots/wave3/perf/city40_before_holes.jpg) | ![](screenshots/wave3/perf/city40_standins.jpg) | ![](screenshots/wave3/perf/city40_after.jpg) |
 
+## Loads and teleports (round 2: the user's "HUGE performance blip")
+
+The user's F3 dump (Firefox, seed 443226190, a dev hot reload in a city, then driving a pickup
+off through a horde) showed an 800 ms first frame (sim 488 ms, draw 183 ms), the first chunk
+shown 4.1 s after the page came up, wanted→shown p50 9.8 s, and 58-83 ms sim spikes for the
+first 2.5 s. Reproduced (save in that spot, reload; `perf-bench` routes below) and CPU-profiled
+in Chromium (`perf-bench --profile DIR`):
+
+1. **Every wanted chunk was created before anything was built.** A load wants ~900 entries
+   (225 columns x 4 levels); creating one generates its map chunk and 6 neighbours. Entry
+   creation took the whole 8 ms budget for ~35 frames while the player's own 3x3 (behind the
+   black load curtain) got the 1-2 ms left over.
+2. **The near chunks cost 30-80 ms each** (full-detail ring) at 8 ms a frame, behind a curtain
+   where frame rate doesn't matter.
+3. **A stats check generated 8 overmap regions in the first frame**: progression's "which town
+   am I in" called `closestCity(radius 1)`, 160 ms in Chromium (the user's 488 ms sim frame).
+4. **Frames ran before the save was applied**: the page streamed and generated around the
+   *new-game shelter* (a shelter search plus its chunks) until the save moved the player.
+5. Monster visuals for a horde were all built in one frame (the 43 ms `beforeRender`).
+
+Fixes: behind the curtain (the player's 3x3 unbuilt, `curtainBudgetMs` 40, 4 s cap) only the 3x3
+entries are created and builds get 40 ms a frame; afterwards entry creation gets at most half the
+budget while builds are waiting (`createShare`); standing still with unbuilt chunks in view the
+budget is 16 ms (`settleBudgetMs`: the town assembles twice as fast, moving keeps the smooth
+budget); the stats check only reads regions that exist (`closestCity(..., generate = false)`); a
+pending load puts the player at the saved spot from the start and starts frames and prefetch once
+it is applied (`main.ts`); monster visuals beyond 20 m are created at most 4 ms per frame.
+
+`perf-bench` load routes (3440x1304, from ready or from the jump; before → after):
+
+| | Chromium: 3x3 shown / all in view | Firefox: 3x3 shown / all in view |
+| --- | --- | --- |
+| `load` (save in the city, reload) | 1550 / 4650 → **700 / 3450 ms** | 1617 / 4317 → **566 / 2866 ms** |
+| `teleport` (city → Holden) | 1727 / 3477 → **974 / 2341 ms** | 1256 / 2673 → **734 / 1834 ms** |
+| `loaddrive`: unbuilt in view driving off at 40 mph | 5.6 → 5.0 s | 4.1 → 3.6 s |
+
+Longest frame after the curtain lifts: 50 ms standing (both); driving off, 133 ms Chromium, and one
+~280 ms gap between frames in Firefox about a second in, outside our code (both before and
+after; most likely a major GC — Firefox has no headless profiler here to confirm). Driving off
+the moment the curtain lifts still outruns streaming for a few seconds in a dense city
+(stand-ins show there); the frames stay smooth, which was the ask.
+
 ## Benchmarks and budgets
 
 ### `npm run perf` (GPU, pass/fail)
@@ -192,6 +234,11 @@ chunks:
 
 The baseline was recorded with the machine at load ~15 (other agents' jobs), so its timing
 metrics are pessimistic; the streaming metrics (holes, runway) barely move with load.
+
+Plus `teleport`, `load` and `loaddrive` (above): ms from ready / the jump to the player's 3x3
+shown and to nothing unbuilt in view, the longest frame behind and after the curtain; limits
+3x3 ≤ 2 s, all in view ≤ 10 s, frame after the curtain ≤ 250 ms (loaddrive 350, holes 8 s).
+`--profile DIR` writes a Chromium CPU profile per route.
 
 Per route it records the telemetry and checks: **longest continuous unbuilt-in-view stretch**,
 total unbuilt-in-view time, runway p10, frame-interval p99, loop p99, longest single build

@@ -52,6 +52,8 @@ export interface ItemView {
   description?: string;
   /** A highlighted line above the description (how long food stays fresh). */
   note?: string;
+  /** What it reloads with and where you saw some (reloadhelp.ts): "Takes: a light battery …". */
+  takes?: string;
   icon?: IconRef;
   /** Body parts it covers when worn (BN `covers` ids: head, eyes, mouth, torso, arm_l, …). */
   covers?: string[];

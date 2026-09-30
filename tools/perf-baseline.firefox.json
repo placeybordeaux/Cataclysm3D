@@ -1,5 +1,5 @@
 {
-  "note": "tools/perf-bench.ts budgets: a route fails when a metric is worse than this by more than the tolerance (relative and absolute). Re-record with --write-baseline after an intended change; see docs/PERF.md. Firefox: recorded from a --browser firefox run (town40, city40).",
+  "note": "tools/perf-bench.ts budgets: a route fails when a metric is worse than this by more than the tolerance (relative and absolute). Re-record with --write-baseline after an intended change; see docs/PERF.md.",
   "date": "2026-09-30",
   "size": "3440x1304",
   "tolerance": {
@@ -50,6 +50,34 @@
       "loopP99": 38,
       "maxStepMs": 18,
       "genSyncMsPerS": 14.7
+    },
+    "teleport": {
+      "maxStepMs": 30,
+      "genSyncMsPerS": 33.4,
+      "nearMs": 734,
+      "fullMs": 1834,
+      "maxFrameMs": 34,
+      "curtainFrameMs": 83
+    },
+    "load": {
+      "maxStepMs": 22,
+      "genSyncMsPerS": 61,
+      "nearMs": 566,
+      "fullMs": 2866,
+      "maxFrameMs": 50,
+      "curtainFrameMs": 267
+    },
+    "loaddrive": {
+      "maxHoleS": 3.6,
+      "holeS": 3.6,
+      "runwayP10": 3.22,
+      "p99": 50.22,
+      "loopP99": 35,
+      "maxStepMs": 17,
+      "genSyncMsPerS": 17.2,
+      "nearMs": 550,
+      "maxFrameMs": 283,
+      "curtainFrameMs": 266
     }
   }
 }

@@ -134,3 +134,34 @@ export const PERF_PAGE = `(() => {
   };
 })()`;
 
+
+/**
+ * Load/teleport monitor (tools/perf-bench.ts routes load, loaddrive, teleport): from `start()`
+ * — or, installed with evaluateOnNewDocument, from the moment the game is ready — records when
+ * the player's own 3x3 chunks are shown (the curtain lifts), when nothing in view is unbuilt any
+ * more ("full"), and the longest frame before and after the curtain lifted. window.__perfMon.
+ */
+export const PERF_MONITOR = `(() => {
+  const m = window.__perfMon = { ready: null, near: null, full: null, maxCurtain: 0, maxAfter: 0, last: null, frames: 0 };
+  window.__perfMonStart = () => Object.assign(m, { ready: performance.now(), near: null, full: null, maxCurtain: 0, maxAfter: 0, frames: 0 });
+  const tick = (now) => {
+    const c = window.cdda;
+    if (m.ready === null && c?.ready) m.ready = now;
+    if (m.ready !== null && m.full === null && m.last !== null) {
+      const d = now - m.last;
+      if (m.near === null) m.maxCurtain = Math.max(m.maxCurtain, d);
+      else m.maxAfter = Math.max(m.maxAfter, d);
+      m.frames++;
+    }
+    m.last = now;
+    if (m.ready !== null && c?.renderer) {
+      const p = c.game.player;
+      if (m.near === null && c.renderer.chunks.nearUnbuilt(p.x, p.y, p.z) === 0) m.near = now;
+      const r = c.perf?.tel?.ring;
+      // the stream-health scan runs every 100 ms: only trust a scan made after the curtain lifted
+      if (m.near !== null && m.full === null && r && r.size && r.t[r.back(0)] + c.perf.tel.t0 > m.near + 150 && r.cols.holesFog[r.back(0)] === 0) m.full = now;
+    }
+    requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+})()`;

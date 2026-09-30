@@ -416,7 +416,7 @@ export function itemActions(who: Character, it: Item, loc: Loc): ItemAction[] {
   if (acts.length) out.push({ id: 'activate', label: cddaText(acts[0].menu_text) || 'Activate', moves: 100, run: () => inv.use(it, undefined, 0, loc) });
   if (it.isBook()) out.push({ id: 'read', label: 'Read', moves: 0, run: () => ({ ok: false, msg: 'Reading is started from the read menu.' }) });
   if (it.isGun() || it.isMagazine() || it.takesMagazines() || it.hasIntegralMagazine() || it.isBandolier())
-    out.push({ id: 'reload', label: 'Reload', moves: 100, disabled: it.ammoRemaining() >= it.ammoCapacity() && !it.takesMagazines() ? `The ${it.baseName()} is already fully loaded!` : undefined, run: () => inv.reload(it) });
+    out.push({ id: 'reload', label: 'Reload', moves: 100, disabled: it.hasFlag('NO_RELOAD') ? inv.whyNoReload(it) : it.ammoRemaining() >= it.ammoCapacity() && !it.takesMagazines() ? `The ${it.baseName()} is already fully loaded!` : undefined, run: () => inv.reload(it) });
   if (it.hasContents() || it.magazine || (it.ammoRemaining() > 0 && (it.hasIntegralMagazine() || it.isMagazine()))) {
     const probe = unloadItem(it, ground ? [L.inv(who), ground] : [L.inv(who)], { actor: who, dryRun: true, quiet: true });
     out.push({ id: 'unload', label: it.isContainer() ? 'Empty' : 'Unload', moves: probe.moves, disabled: probe.ok || probe.liquids.length ? undefined : probe.msg, run: () => inv.unload(it) });

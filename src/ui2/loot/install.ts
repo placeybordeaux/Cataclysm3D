@@ -30,6 +30,7 @@ import { BnInventoryModel } from '../bn/model';
 import { nearbyCargo, type BnInventoryHandle } from '../bn/install';
 import { quickPanel, type QuickSpec } from './quick';
 import { installMarkers } from './markers';
+import { installSeenItems } from './seen';
 import { lootTargetAt, type LootTarget } from './sources';
 import { AREA_ID, areaGroups, areaOpen, openArea, type AreaEnv } from './area';
 import { shortSummary, summaryTitle } from './summary';
@@ -51,6 +52,8 @@ export function installLoot(game: Game, renderer: Renderer, api: DebugApi, inv: 
     load: (j) => void (memory = LootMemory.fromJSON(j)),
     missing: () => void (memory = new LootMemory()),
   });
+  // What you've seen lying around, for the reload helper's "you saw 2 light batteries in …".
+  const seenItems = installSeenItems(game, () => memory);
 
   // --- a model over what's in reach (plus the tile aimed at, which can be a step further)
   let extra: { x: number; y: number; z: number }[] = [];
@@ -352,6 +355,8 @@ export function installLoot(game: Game, renderer: Renderer, api: DebugApi, inv: 
     memory: () => memory.toJSON(),
     searchState: (x: number, y: number, z: number) => memory.state(x, y, z),
     markers: () => markers.state(),
+    /** The reload helper's memory of seen ammo / batteries (scan now, then read). */
+    seenItems: () => (seenItems.scan(), seenItems.seen().toJSON()),
   };
 }
 

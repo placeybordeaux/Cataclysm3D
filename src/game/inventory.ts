@@ -6,6 +6,7 @@ import type { Character } from './character';
 import { asArray, Item, type ItemJSON } from './item';
 import { cddaText, toSeconds } from './units';
 import { unwieldyWarning } from './combat';
+import { explainNoPower, explainNoReload, plainName, reloadHintsFor, reloadNeeds } from './reloadhelp';
 import {
   bodyLocs, canMove, carriedAs, consumeItem, consumeNew, handlingCost, L, locate, moveItem, registerInventorySlots, spawnItem, transaction,
   unloadItem, type InvSlots, type Loc, type MoveResult,
@@ -703,7 +704,11 @@ export class Inventory {
 
   private useTransform(it: Item, ua: { [k: string]: any }): ActionResult {
     const need = (ua.need_charges as number | undefined) ?? 0;
-    if (need > 0 && it.ammoRemaining() < need) return this.say(false, cddaText(ua.need_charges_msg) || `Your ${it.name()} has no power.`);
+    if (need > 0 && it.ammoRemaining() + (it.hasFlag('USE_UPS') ? this.upsCharges() : 0) < need) {
+      // What it takes and where you saw some (reloadhelp.ts), not just "the batteries are dead".
+      const why = explainNoPower(it, this.allItems(), reloadHintsFor(this.owner));
+      return this.say(false, [cddaText(ua.need_charges_msg) || `Your ${it.name()} has no power.`, why].filter(Boolean).join(' '));
+    }
     const target = ua.target as string;
     if (!this.owner.data.items[target]) throw new Error(`transform target ${target} missing for ${it.typeId}`);
     it.convert(target);
@@ -790,6 +795,9 @@ export class Inventory {
    */
   reload(target: Item | null = this.s.wielded): ActionResult {
     if (!target) return this.say(false, "You're not wielding anything.");
+    // BN item::is_reloadable: NO_RELOAD items (a smartphone, an exo-suit) are charged, not reloaded.
+    const kind = reloadNeeds(target).kind;
+    if (target.hasFlag('NO_RELOAD') || kind === 'ups') return this.say(false, this.whyNoReload(target));
     if (target.takesMagazines() && !target.isMagazine()) {
       const cur = target.magazine;
       const mags = this.everything().filter(({ item }) => item !== cur && item.isMagazine() && target.acceptsMagazine(item) && item !== target);
@@ -818,20 +826,28 @@ export class Inventory {
         });
         if (!r.ok) return this.res(r);
         void dropped;
-        return this.say(true, `You reload the ${target.baseName()}.`, fillCost + this.reloadCost(target, best.item, 1));
+        // BN lets a flat battery go in; say so, or the flashlight "reloaded" and still won't light.
+        const flat = target.ammoRemaining() <= 0 ? ` ${this.whyNoReload(target)}` : '';
+        return this.say(true, `${flat ? `You put the ${best.item.baseName()} in the ${plainName(target)}.` : `You reload the ${target.baseName()}.`}${flat}`, fillCost + this.reloadCost(target, best.item, 1));
       }
-      if (cur && cur.ammoRemaining() < cur.ammoCapacity()) return this.reloadMagazine(cur);
+      if (cur && cur.ammoRemaining() < cur.ammoCapacity()) return this.reloadMagazine(cur, target);
       if (cur) return this.say(false, `The ${target.baseName()} is already fully loaded!`);
-      return this.say(false, `You don't have a magazine to reload your ${target.baseName()}!`);
+      return this.say(false, this.whyNoReload(target));
     }
     if (target.isMagazine() || target.hasIntegralMagazine() || target.isBandolier()) return this.reloadMagazine(target);
     return this.say(false, `You can't reload the ${target.baseName()}.`);
   }
 
-  private reloadMagazine(target: Item): ActionResult {
+  /** Why nothing could be loaded: what it takes, which failure it is, where you saw some. */
+  whyNoReload(target: Item): string {
+    return explainNoReload(target, this.allItems(), reloadHintsFor(this.owner));
+  }
+
+  /** `host`: the gun / tool the magazine sits in, which the failure message is about. */
+  private reloadMagazine(target: Item, host?: Item): ActionResult {
     if (target.ammoRemaining() >= target.ammoCapacity()) return this.say(false, `The ${target.baseName()} is already fully loaded!`);
     const { loaded, ammo, moves } = this.fillFromLoose(target);
-    if (!loaded || !ammo) return this.say(false, `You don't have any ammo to reload your ${target.baseName()}!`);
+    if (!loaded || !ammo) return this.say(false, this.whyNoReload(host ?? target));
     return this.say(true, `You reload the ${target.baseName()} with ${ammo.baseName(2)}.`, moves);
   }
 
@@ -853,6 +869,23 @@ export class Inventory {
     return canMove(it, from, to, { actor: this.owner });
   }
 
+  /** Charge in the UPSes you carry (BN Character::charges_of(itype_UPS): IS_UPS items). */
+  upsCharges(): number {
+    let n = 0;
+    for (const it of this.allItems()) if (it.hasFlag('IS_UPS')) n += it.ammoRemaining();
+    return n;
+  }
+
+  /** Draw up to n charges from carried UPSes (BN use_charges(itype_UPS)); returns how many. */
+  useUpsCharges(n: number): number {
+    let left = n;
+    for (const it of this.allItems()) {
+      if (left <= 0) break;
+      if (it.hasFlag('IS_UPS') && it.ammoRemaining() > 0) left -= it.ammoConsume(Math.min(left, it.ammoRemaining()));
+    }
+    return n - left;
+  }
+
   // ------------------------------------------------------------ time
   /** Active items drain charges (power_draw in W, 1 battery charge = 1 kJ; or turns_per_charge). */
   update(dt: number): void {
@@ -865,7 +898,10 @@ export class Inventory {
       while (acc >= perCharge) {
         acc -= perCharge;
         // Turns off as soon as the last charge is spent (or if it had none to begin with).
-        if (it.ammoConsume(1) === 0 || it.ammoRemaining() === 0) {
+        // USE_UPS items (exo-suits, power armor) run on the UPS you carry once their own is gone.
+        const ups = it.hasFlag('USE_UPS');
+        const used = it.ammoRemaining() > 0 ? it.ammoConsume(1) : ups ? this.useUpsCharges(1) : 0;
+        if (used === 0 || (it.ammoRemaining() === 0 && !(ups && this.upsCharges() > 0))) {
           const revert = it.def.revert_to;
           const name = it.label();
           if (revert && this.owner.data.items[revert]) it.convert(revert);
