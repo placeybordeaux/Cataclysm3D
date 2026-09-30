@@ -89,9 +89,17 @@ export function curtainsScenarios(c: CurtainsCtx): Scenario[] {
     return { text, letter };
   };
 
+  // The finders search 40 tiles round the survivor, so start each scenario at the start town's
+  // nearest house rather than wherever an earlier scenario left us (failed in a mixed batch).
+  const toTown = () =>
+    js(`(() => { const s = cdda.startLocation();
+      const town = cdda.cities().filter((t) => t.size >= 4).sort((a, b) => Math.hypot(a.x - s.omx, a.y - s.omy) - Math.hypot(b.x - s.omx, b.y - s.omy))[0];
+      cdda.teleportOmt(town.x, town.y); const h = cdda.findOmt('house', 40); cdda.teleportOmt(h.x, h.y, 0, 12, -1); cdda.step(0.2); })()`);
+
   return [
     ['curtains', 'a curtained window: e offers curtains and window apart; drawn curtains darken the room and hide it from outside; peek; save/load; outside only examine/pry', async () => {
       await toGameplay();
+      await toTown();
       const s = await js<Spot | null>(FIND_WINDOW);
       check('found a curtained house window near the start', !!s, s);
       if (!s) return;
@@ -158,6 +166,7 @@ export function curtainsScenarios(c: CurtainsCtx): Scenario[] {
 
     ['smashsound', 'smash a door (X, melee swings) and a window: every logged "whump!" played a sample at the door; a zombie bashing a door is heard', async () => {
       await toGameplay();
+      await toTown();
       await js(`(() => { cdda.godMode(true); cdda.setHour(12); cdda.clearMonsters(60); cdda.giveItem('bat', { wield: true }); })()`);
       const smashes = async (x: number, y: number, since: number) =>
         js<Heard[]>(`cdda.audio.history.filter((e) => e.seq > ${since} && /^smash/.test(e.id) && e.pos && Math.floor(e.pos.x) === ${x} && Math.floor(e.pos.y) === ${y}).map((e) => ({ id: e.id, variant: e.variant, outcome: e.outcome, x: e.pos.x, y: e.pos.y }))`);
