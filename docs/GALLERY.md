@@ -81,7 +81,7 @@ All are live (no reload needed). "Proof" is the scene the automated pixel-diff c
 | First-person hands | 3D · sprites | Options > First-person hands | `?viewmodel=` | fp_pistol | 11 % |
 | First-person bow | 2D art · 3D bow | console only (`cdda.chars({fpBow})`) | — | fp_bow | 10 % |
 | Props | world-fixed cards · billboards (v2) | URL only | `?props=` | props | 1.8 % |
-| Furniture | Modelled · Voxel | Options > Furniture | `?furniture=` | kitchen | 17 % |
+| Furniture | Modelled · Voxel | Options > Furniture | `?furniture=` | kitchen | 37 % |
 | Surfaces | Painted · Tileset | Options > Surfaces | `?surfaces=` | living | 65 % |
 | Set dressing | on · bare rooms | URL only | `?dressing=` | living | 6 % |
 | Trees | models · clumps | Options > Trees | `?flora=` | lineup | 12 % |

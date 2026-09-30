@@ -189,7 +189,7 @@ export const SCENES: Scene[] = [
   { id: 'props', group: 'Creatures', label: 'Props: fire, loot, mannequin', run: char('props') },
   // --- interiors
   { id: 'house', group: 'Interiors', label: 'House, main room', run: look('house') },
-  { id: 'kitchen', group: 'Interiors', label: 'Kitchen', run: look('furn:^f_fridge$:0:3:-14') },
+  { id: 'kitchen', group: 'Interiors', label: 'Kitchen', run: look('furn:^f_oven$:0:3:-16') },
   { id: 'living', group: 'Interiors', label: 'Living room', run: look('furn:^f_sofa$:0:3:-14') },
   { id: 'bathroom', group: 'Interiors', label: 'Bathroom', run: look('furn:^f_toilet$:0:2:-24') },
   { id: 'bedroom', group: 'Interiors', label: 'Bedroom', run: look('furn:^f_bed$:0:3:-16') },
