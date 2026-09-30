@@ -338,7 +338,13 @@ export class FpView {
         place(this.rootR, at(it.x, it.y, 0.42), [0, 0, it.rot]);
       } else {
         // melee: the 2D swing rotation becomes a roll across the view plus a chop forward
-        place(this.rootR, at(it.x, it.y, 0.56 + Math.max(0, it.dy) * 0.4), [it.rot * 0.55, -it.rot * 0.25, it.rot * 0.85]);
+        // At rest a long weapon (bat, spear, sword, pipe...) is carried low and leaned out toward
+        // the right edge so it doesn't stand in the middle of a wide view (QA on 3440x1304);
+        // the lean fades out as soon as a swing or the guard moves the hands.
+        const long = this.cls === 'bat' || this.cls === 'spear' || this.cls === 'sword' || this.cls === 'pipe' || this.cls === 'axe' || this.cls === 'hammer' || this.cls === 'machete';
+        const rest = long ? Math.max(0, 1 - Math.abs(it.rot) * 3 - Math.abs(it.dy) * 6 - Math.abs(it.dx) * 6 - st.guard * 1.5) : 0;
+        place(this.rootR, at(it.x + H * 0.16 * rest, it.y - H * 0.16 * rest, 0.56 + Math.max(0, it.dy) * 0.4),
+          [it.rot * 0.55 + 0.35 * rest, -it.rot * 0.25, it.rot * 0.85 - 1.35 * rest]);
       }
       this.setRoot(R, this.rootR);
       show(R, it.vis);
