@@ -5,9 +5,10 @@
 // into grey haze and the far end of a street was unreadable. The presets here keep a depth
 // cue but put the contrast back:
 //
-//   clear   (default) light, sky-coloured aerial perspective; the draw-distance edge fades
-//           into the exact sky colour behind it over the last ~20% of the range, so
-//           silhouettes stay crisp until the very end and there is no fog wall
+//   clear   (default) light, sky-coloured aerial perspective; from 60% of the draw distance
+//           things fade only partly (25%) toward the exact sky colour behind them, then the
+//           far ground ring and skyline (skyline.ts) carry the fade on to the horizon, so
+//           silhouettes stay crisp and there is no fog wall (docs/READABILITY.md)
 //   light   more haze (planes of depth separate more), still sky-coloured and no wall
 //   legacy  the v2 behaviour (grey fog from 35% of the range + heavy haze), for comparison
 //
