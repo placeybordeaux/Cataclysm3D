@@ -266,6 +266,8 @@ export function netSize(W: number, H: number, D: number): [number, number] {
 export interface PaintOpts {
   /** eye colour override (hostile readability); null = the sprite's own darkest */
   eyes?: RGB | null;
+  /** styled people: palette overrides (NPC variety: skin tone, hair colour, hat colour) */
+  person?: { skin?: RGB; hair?: RGB; bald?: boolean; hat?: RGB };
 }
 
 /**
@@ -425,6 +427,10 @@ function detailPainter(d: Detail, b: RGB, dims: [number, number, number]): (f: n
         if (f === 1) return [236, 240, 244];
         return k(b, 0.7);
       }
+      case 'stripes':
+        // wasp/bee bands across the long axis: the colour and near-black
+        if (al === null) return k(b, 0.6);
+        return Math.floor(al / 3) % 2 ? [34, 28, 22] : b;
       case 'metal':
         // a highlight along the top edge of the sides, a darker underside
         if (f === 4) return k(b, 1.2);

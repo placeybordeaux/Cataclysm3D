@@ -574,7 +574,7 @@ export class SkinStore {
     const dimsOf = (v: readonly [number, number, number]) => texelDims([v[0] * tpm, v[1] * tpm, v[2] * tpm]);
     const dimsKey = rig.parts.map((p) => dimsOf(p.size).join('x')).join(',');
     const styled = this.style === 'styled' && rig.shape.arch === 'humanoid';
-    const key = `${src.key}|${rig.shape.arch}|${rig.shape.zombie ? 'z' : ''}|${styled ? 'st' : 'sp'}|${dimsKey}|${src.opts?.eyes?.join(',') ?? ''}`;
+    const key = `${src.key}|${rig.shape.arch}|${rig.shape.zombie ? 'z' : ''}|${styled ? 'st' : 'sp'}|${dimsKey}|${src.opts?.eyes?.join(',') ?? ''}|${src.opts?.person ? JSON.stringify(src.opts.person) : ''}`;
     const hit = this.skins.get(key);
     if (hit) return hit;
     // flat-coloured rigs (effects, held items) need no sprite: a neutral stand-in palette
@@ -611,7 +611,7 @@ export class SkinStore {
       if (!info) fillGrey(pg.img, x, y, nt.wh[0], nt.wh[1]);
       else if (styled && part.src.region) {
         const side = /R$/.test(part.name) ? 1 : /L$/.test(part.name) ? -1 : 0;
-        paintStyled(pg.img, x, y, nt.d, part.src.region, personPalette(info, rig.shape.zombie), seedOfKey(src.key), side);
+        paintStyled(pg.img, x, y, nt.d, part.src.region, { ...personPalette(info, rig.shape.zombie), ...(src.opts?.person ?? {}) }, seedOfKey(src.key), side);
       } else paintPart(pg.img, x, y, nt.d, part.src, info, src.opts);
     });
     pg.dirty = true;

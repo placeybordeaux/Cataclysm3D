@@ -18,6 +18,8 @@ export interface PersonPalette {
   shirt: RGB;
   /** a second clear torso colour (undershirt/open jacket), or null */
   inner: RGB | null;
+  /** hat/cap colour for the 'hat' region (NPCs wearing headgear) */
+  hat?: RGB;
   /** second colour of a patterned (check) shirt, for sleeves up close; null = plain */
   check: RGB | null;
   upperArm: RGB;
@@ -244,6 +246,15 @@ export function paintStyled(dst: Img, ox: number, oy: number, dims: [number, num
       }
       case 'neck':
         return mul(pp.skin, 0.86);
+      case 'hair':
+        // strands: darker lines running down the hair, a lighter crown
+        if (f === 4) return mul(pp.hair, 1.1);
+        return x % 3 === 1 ? mul(pp.hair, 0.8) : pp.hair;
+      case 'hat': {
+        const c = pp.hat ?? [70, 72, 78];
+        if (f < 4 && y === fh - 1) return mul(c, 0.7); // band
+        return f === 4 ? mul(c, 1.08) : c;
+      }
       // ---- first-person arms (fpView.ts), seen from 30 cm: fabric and knuckles, not plank
       case 'fpSleeveLower':
       case 'fpSleeveUpper': {

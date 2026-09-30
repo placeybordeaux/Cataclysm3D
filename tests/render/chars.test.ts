@@ -244,3 +244,29 @@ describe('weapon variants', () => {
     }
   });
 });
+
+describe('round 6 body plans', () => {
+  it('picks distinct plans for common bugs, fliers and zombie kinds', () => {
+    const v = (id: string) => bodyShapeOf(MON[id]).variant;
+    expect(v('mon_wasp')).toBe('wasp');
+    expect(v('mon_bee')).toBe('bee');
+    expect(v('mon_ant')).toBe('ant');
+    expect(v('mon_spider_wolf_giant')).toBe('spider');
+    expect(v('mon_mosquito_giant')).toBe('mosquito');
+    expect(v('mon_crow')).toBe('bird');
+    expect(v('mon_bat')).toBe('bat');
+    expect(v('mon_boomer')).toBe('bloated');
+    expect(v('mon_zombie_hulk')).toBe('hulk');
+    expect(v('mon_skeleton')).toBe('skeletal');
+  });
+  it('builds them all with valid parents, and hair/headgear pieces for people', () => {
+    for (const id of ['mon_wasp', 'mon_bee', 'mon_ant', 'mon_fly', 'mon_mosquito_giant', 'mon_dragonfly_giant', 'mon_crow', 'mon_bat', 'mon_boomer', 'mon_zombie_hulk', 'mon_skeleton', 'mon_zombie_acidic', 'mon_zombie_electric', 'mon_zombie_scorched']) {
+      const rig = makeRig(bodyShapeOf(MON[id]));
+      rig.parts.forEach((p, i) => expect(p.parent < i, `${id}:${p.name}`).toBe(true));
+    }
+    for (const hair of ['short', 'long', 'ponytail', 'cap', 'hat', 'helmet'] as const) {
+      const rig = makeRig({ ...bodyShapeOf({ id: 'npc', bodytype: 'human', species: ['HUMAN'] }), hair });
+      expect(rig.parts.some((p) => p.name.startsWith('head') && p.name !== 'head'), hair).toBe(true);
+    }
+  });
+});
