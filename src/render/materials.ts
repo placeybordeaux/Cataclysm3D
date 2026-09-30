@@ -231,10 +231,20 @@ const WORLD_MAP = /* glsl */ `
 #ifdef USE_MAP
   vec2 texel = vMapUv * vUvRect.zw * vec2(textureSize(map, 0));
   vec2 ddx = dFdx(texel), ddy = dFdy(texel);
-  float lod = clamp(0.5 * log2(max(dot(ddx, ddx), dot(ddy, ddy))) - 0.35, 0.0, 3.0);
+  float lodRaw = 0.5 * log2(max(dot(ddx, ddx), dot(ddy, ddy))) - 0.35;
+  float lod = clamp(lodRaw, 0.0, 3.0);
   vec2 tileUv = clamp(fract(vMapUv), 0.0005, 0.9995);
   vec2 atlasUv = vUvRect.xy + tileUv * vUvRect.zw;
   vec4 sampledDiffuseColor = textureLod( map, atlasUv, lod );
+  if (lodRaw > 3.0) {
+    // Past the clamp a tile is smaller than a few pixels and lod-3 texels alias into
+    // crawling speckle on distant roads and lawns (worst when walking). The mip chain can't
+    // go further without bleeding atlas neighbours, so fade to the tile's own average
+    // (four lod-3 taps at the quadrant centres) instead.
+    vec4 avg = textureLod( map, vUvRect.xy + vec2(0.25, 0.25) * vUvRect.zw, 3.0 ) + textureLod( map, vUvRect.xy + vec2(0.75, 0.25) * vUvRect.zw, 3.0 )
+             + textureLod( map, vUvRect.xy + vec2(0.25, 0.75) * vUvRect.zw, 3.0 ) + textureLod( map, vUvRect.xy + vec2(0.75, 0.75) * vUvRect.zw, 3.0 );
+    sampledDiffuseColor = mix( sampledDiffuseColor, avg * 0.25, smoothstep(3.0, 4.2, lodRaw) );
+  }
   // Coverage comes from the full-resolution texel: a mip texel at a tile's edge averages in
   // the transparent gutter around the frame, and the alpha test then punched dotted holes
   // along every floor/ceiling seam (the sky showed through on real GPUs). Undo the darkening

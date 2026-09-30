@@ -184,6 +184,42 @@ function evalTerm(t: string, w: WeatherPoint): number | null {
   return null;
 }
 
+/**
+ * BN weather_type "requirements" (weather_type.h weather_requirements). Thresholds are strict
+ * (min < value < max), temperatures in °F, and humidity/pressure are OR'd unless
+ * humidity_and_pressure (default true) says AND.
+ */
+export interface BnWeatherRequirements {
+  pressure_min?: number; pressure_max?: number;
+  humidity_min?: number; humidity_max?: number;
+  temperature_min?: number; temperature_max?: number;
+  windpower_min?: number; windpower_max?: number;
+  humidity_and_pressure?: boolean;
+  acidic?: boolean;
+  time?: 'day' | 'night' | 'both';
+  required_weathers?: string[];
+}
+
+/**
+ * One step of BN weather_generator::get_weather_conditions: does this type's requirements
+ * hold, given the type chosen so far? The acid test uses the region's base_acid, which is 0
+ * for the default region, so acidic types never match.
+ */
+export function meetsBnRequirements(r: BnWeatherRequirements, w: WeatherPoint, current: string, day: boolean): boolean {
+  const lo = (v: number | undefined) => v ?? -Infinity, hi = (v: number | undefined) => v ?? Infinity;
+  const pressure = hi(r.pressure_max) > w.pressure && lo(r.pressure_min) < w.pressure;
+  const humidity = hi(r.humidity_max) > w.humidity && lo(r.humidity_min) < w.humidity;
+  if ((r.humidity_and_pressure ?? true) ? !(pressure && humidity) : !(pressure || humidity)) return false;
+  const f = (w.temperature * 9) / 5 + 32;
+  if (!(hi(r.temperature_max) > f && lo(r.temperature_min) < f)) return false;
+  if (!(hi(r.windpower_max) > w.windpower && lo(r.windpower_min) < w.windpower)) return false;
+  if (r.acidic) return false;
+  if (r.required_weathers?.length && !r.required_weathers.includes(current)) return false;
+  if (r.time === 'day' && !day) return false;
+  if (r.time === 'night' && day) return false;
+  return true;
+}
+
 interface WeatherTypeDef {
   id: string;
   name?: string;
@@ -191,6 +227,8 @@ interface WeatherTypeDef {
   priority?: number;
   required_weathers?: string[];
   condition?: unknown;
+  /** BN form; when present it replaces `condition` / `required_weathers` (the DDA form). */
+  requirements?: BnWeatherRequirements;
   precip?: string;
   rains?: boolean;
   light_modifier?: number;
@@ -208,10 +246,20 @@ function sortedTypes(data: GameData): WeatherTypeDef[] {
   return s;
 }
 
-/** weather_generator::get_weather_conditions: last matching type in priority order. */
+/**
+ * weather_generator::get_weather_conditions: last matching type in priority (BN: region list)
+ * order. BN data carries `requirements`; before this read them, every BN type matched (no
+ * DDA `condition` → true) and the last one, snowstorm, won every time — the "Snowstorm on a
+ * green spring morning" bug.
+ */
 export function weatherConditions(data: GameData, w: WeatherPoint, day: boolean): string {
   let current = 'clear';
   for (const t of sortedTypes(data)) {
+    if (t.id === 'null') continue;
+    if (t.requirements) {
+      if (meetsBnRequirements(t.requirements, w, current, day)) current = t.id;
+      continue;
+    }
     const req = t.required_weathers ?? [];
     if (req.length && !req.includes(current)) continue;
     if (evalWeatherCondition(t.condition, w, day)) current = t.id;
@@ -245,6 +293,32 @@ export function renderWeatherKind(id: string): 'clear' | 'rain' | 'storm' | 'sno
 /** Short aliases accepted by cdda.setWeather (renderer names) → CDDA ids. */
 const ALIASES: Record<string, string> = { storm: 'thunder', snow: 'snowing' };
 
+// ------------------------------------------------------------------ climate calendar
+
+/**
+ * Days the weather's year runs ahead of the game clock. BN starts a new world INITIAL_DAY = 15
+ * days into a 30-day spring (options.cpp), i.e. an eighth of the year in: mid-spring, ~8 °C.
+ * This port's clock starts at spring day 1 (the calendar and everything keyed to time since the
+ * cataclysm — spawn groups, rot — count from there), which in the seasonal cycle is the tail of
+ * winter: -2 °C mornings, snow a third of the time, under the green spring world the renderer
+ * paints. Shifting only the climate by BN's eighth of a year (45 of our 91-day-season days)
+ * makes the weather match both BN's default start and the season on screen; the coldest days
+ * then fall at the start of winter, when the world turns white. 0 = the old alignment.
+ */
+export const BN_START_CLIMATE_OFFSET_DAYS = 45;
+let climateOffsetDays = BN_START_CLIMATE_OFFSET_DAYS;
+export function setClimateOffsetDays(days: number): void {
+  if (!Number.isInteger(days)) throw new Error(`climate offset must be whole days (got ${days}): a fraction would shift the daily cycle`);
+  climateOffsetDays = days;
+}
+export function climateOffsetDaysNow(): number {
+  return climateOffsetDays;
+}
+/** Game-clock seconds → the time the weather generator is evaluated at. */
+export function climateSeconds(seconds: number): number {
+  return seconds + climateOffsetDays * SECONDS_PER_DAY;
+}
+
 // ------------------------------------------------------------------ system
 
 export interface WeatherHooks {
@@ -269,7 +343,7 @@ const wstates = new WeakMap<Game, WState>();
 export function refreshWeather(game: Game): WeatherState {
   const st = wstates.get(game);
   const forced = st?.forced ?? null;
-  const w = weatherPoint(game.seed, game.clock.seconds);
+  const w = weatherPoint(game.seed, climateSeconds(game.clock.seconds));
   const id = forced ?? weatherConditions(game.data, w, isDay(game.clock));
   const prev = game.weather?.id;
   game.weather = makeWeatherState(game.data, id, w, forced);

@@ -28,8 +28,9 @@ import { h, ui2Layers, attachTooltip, palette, iconEl } from '../ui2';
 import { colorize } from './framework';
 import { logLine, type MessageLog } from './format';
 import { omtLabel, playerOmt, type UiContext } from './context';
+import { activityBarEnabled } from './activity_ring';
 import {
-  bearing, CARDINALS, dangerLevel, feedAlpha, lightLabel, messageTone, needStates, partTone, relativeAngle, stripPos,
+  EFFECTS_SHOWN_AS_NEEDS, bearing, CARDINALS, dangerLevel, feedAlpha, lightLabel, messageTone, needStates, partTone, relativeAngle, stripPos,
   type NeedState, type PartTone,
 } from './hud_logic';
 import { BODY_H, BODY_W, PART_BOX, paintBody, pixelIcon, type BodyKey } from './pixelart';
@@ -413,7 +414,7 @@ export class ModernHud {
     const chips: HTMLElement[] = [];
     for (const e of p.effects.all()) {
       const name = e.name();
-      if (!name || EFFECT_SKIP.has(e.id) || seen.has(name + (e.bp ?? ''))) continue;
+      if (!name || EFFECT_SKIP.has(e.id) || EFFECTS_SHOWN_AS_NEEDS.has(e.id) || seen.has(name + (e.bp ?? ''))) continue;
       seen.add(name + (e.bp ?? ''));
       const r = e.type.def.rating;
       const tone = r === 'good' ? 'good' : r === 'bad' ? 'bad' : r === 'mixed' ? 'warn' : 'dim';
@@ -546,7 +547,7 @@ export class ModernHud {
   private renderActivity(): void {
     const a = this.ctx.game.activities.current;
     // Activities with their own progress UI (crafting, construction, reading: src/ui/craft2).
-    if (!a || a.spec.customUi) {
+    if (!a || a.spec.customUi || !activityBarEnabled()) {
       if (this.activity.style.display !== 'none') this.activity.style.display = 'none';
       return;
     }
