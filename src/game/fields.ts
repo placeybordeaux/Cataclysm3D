@@ -127,6 +127,22 @@ export function fireAt(game: Game, x: number, y: number, z: number): number {
   return findField(game, x, y, z, 'fd_fire')?.intensity ?? 0;
 }
 
+let lastFireOutNote = -Infinity;
+/**
+ * A fire near you went out: say so, and why (docs/ADAPTATION.md). BN is silent; the playtester
+ * lit a fire to boil water, turned to the pot, and it had already been rained out.
+ */
+function fireOutNote(game: Game, x: number, y: number, z: number): void {
+  const p = game.player;
+  if (z !== p.z || Math.max(Math.abs(x - p.tileX), Math.abs(y - p.tileY)) > 8) return;
+  const now = Date.now();
+  if (now - lastFireOutNote < 20_000) return;
+  lastFireOutNote = now;
+  const w = game.weather;
+  const rained = !!w?.rains && isOutside(game.map, x, y, z);
+  game.message(rained ? 'The fire goes out: the rain put it out.  Light it under a roof or in a fire ring, with more fuel.' : 'The fire goes out: it has burned through its fuel.  Put more wood on it to keep one going.', 'c_light_gray');
+}
+
 /**
  * Heat damage a monster standing here takes this turn (map::monster_in_field, fd_fire):
  * none from small fires, 10 % of turns in a fire, every turn in a raging one; flesh +3,
@@ -409,9 +425,13 @@ export function processFields(game: Game, turns: number, extra = 0): void {
         if (!ft) continue;
         if (f.type === 'fd_fire') {
           processFire(game, x, y, c.z, f, st);
-          if (!(c.fields.get(i)?.includes(f))) continue;
+          if (!(c.fields.get(i)?.includes(f))) {
+            fireOutNote(game, x, y, c.z);
+            continue;
+          }
         } else if (ft.phase === 'gas') spreadGas(game, x, y, c.z, f, ft, st.rng);
         decay(game, x, y, c.z, f, ft, st.rng, 1);
+        if (f.type === 'fd_fire' && !(c.fields.get(i)?.includes(f))) fireOutNote(game, x, y, c.z);
       }
     }
     playerInFields(game, st.rng);

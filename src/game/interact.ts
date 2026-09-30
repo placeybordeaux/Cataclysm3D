@@ -439,7 +439,9 @@ export function interact(game: Game, target: TargetTile | null = targetTile(game
     return true;
   }
   const t = game.map.terAt(tt.x, tt.y, tt.z), f = game.map.furnAt(tt.x, tt.y, tt.z);
-  ui.menu((f.id !== 'f_null' ? f.name : t.name).replace(/^./, (c) => c.toUpperCase()), list);
+  // A burning tile is "Fire", not "Grass" (its boil-water menu read oddly).
+  const title = fieldsFire(game, tt.x, tt.y, tt.z) ? 'fire' : f.id !== 'f_null' ? f.name : t.name;
+  ui.menu(title.replace(/^./, (c) => c.toUpperCase()), list);
   return true;
 }
 

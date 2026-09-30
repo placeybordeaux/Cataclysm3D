@@ -121,7 +121,10 @@ export function installLoot(game: Game, renderer: Renderer, api: DebugApi, inv: 
   };
   const update = () => {
     const now = performance.now();
-    const t = gameplay() ? lootTargetAt(game) : null;
+    let t = gameplay() ? lootTargetAt(game) : null;
+    // A burning pile is a fire, not loot: `e` on it should offer the fire's actions (boil
+    // water), not take the firewood out of it (playtest).
+    if (t && t.key.startsWith('ground:') && game.map.fieldsAt(t.x, t.y, t.z).some((f) => f.type === 'fd_fire')) t = null;
     if (!t) {
       target = null;
       rows = [];

@@ -262,10 +262,13 @@ function cancel(): void {
 /** Brief floating text at a point: why a drop failed, "Only 3 fit", "Bound to 4". */
 export function flashNote(x: number, y: number, text: string, tone: 'bad' | 'warn' | 'good' | 'info' = 'info'): void {
   const el = h('div', { class: `ui2-flash tone-${tone}`, text });
-  el.style.left = `${x}px`;
+  el.style.left = `${Math.max(8, Math.min(innerWidth - 8, x))}px`;
   el.style.top = `${y}px`;
+  // Long messages (the fire-safety warning) need reading time: ~1.6 s plus 45 ms a character.
+  const ms = Math.min(7000, Math.max(1600, 1600 + (text.length - 40) * 45));
+  el.style.animationDuration = `${ms}ms`;
   ui2Layers().drag.appendChild(el);
-  setTimeout(() => el.remove(), 1600);
+  setTimeout(() => el.remove(), ms);
 }
 
 function shake(el: HTMLElement): void {

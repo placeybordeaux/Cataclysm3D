@@ -82,9 +82,10 @@ export function useFirestarter(host: CraftHost, tool: Item, ua: { moves?: number
   const risk = fireSpreadRisk(host, x, y, z);
   if (risk && adaptationRules.fireWarning) {
     const key = `${x},${y},${z}`;
-    const now = host.clock.seconds;
-    // Second try at the same spot within a minute: they've read it, go ahead.
-    if (!(lastWarning && lastWarning.key === key && now - lastWarning.at < 60)) {
+    // Second try at the same spot within 30 real seconds: they've read it, go ahead. Real
+    // time, not game time: game time runs ~20x faster and a menu in between used up a minute.
+    const now = Date.now() / 1000;
+    if (!(lastWarning && lastWarning.key === key && now - lastWarning.at < 30)) {
       lastWarning = { key, at: now };
       return say(false, `${risk}  Fires spread.  A fire ring (10 rocks), a brazier or a fireplace keeps it in.  Use the lighter again to light it anyway.`, 'c_yellow');
     }
