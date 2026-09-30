@@ -1,3 +1,5 @@
+import { cardsOn, crossCards, flatCard } from './cards';
+import { bakeFigure, isFigure } from './chars/figures';
 import type * as THREE from 'three';
 import { CHUNK, LEVEL_HEIGHT, chunkOf, localOf } from '../world/coords';
 import type { Chunk, GameMap } from '../world/map';
@@ -640,7 +642,9 @@ export function* buildChunkMeshSteps(
         const fdef = map.furniture.defs[fi];
         const fs = shapes.furniture(fi);
         const fb = base + raiseOf(x, y);
-        if (MD && MD.furniture(geo, glassGeo, src, fdef.id, x, y, fb, seed, {
+        if (cardsOn() && isFigure(fdef.id) && bakeFigure(geo, fdef.id, x, y, fb, Math.PI - facingYaw(nShape, isWall), seed)) {
+          // mannequins and statues: a posed humanoid (render/chars/figures.ts)
+        } else if (MD && MD.furniture(geo, glassGeo, src, fdef.id, x, y, fb, seed, {
           wall: nShape.map(wallLike),
           furn: (dx, dy) => (dx || dy ? map.furnAt(x + dx, y + dy, z).id : fdef.id),
           wallAt: (dx, dy) => wallLike(shapeAt(here, x + dx, y + dy)),
@@ -650,7 +654,9 @@ export function* buildChunkMeshSteps(
           // drawn as a voxel volume
         } else if (fs === 'billboard') {
           const f = src.furniture(fdef.id, 'sprite');
-          sprites.push({ x: x + 0.5, y: y + 0.5, z, frame: f, height: f.h / (f.ppm ?? 16), kind: 'furniture' });
+          // world-fixed crossed cards instead of a camera-facing billboard (render/cards.ts)
+          if (cardsOn()) crossCards(geo, f, x + 0.5, y + 0.5, fb, f.h / (f.ppm ?? 16), seed, 2);
+          else sprites.push({ x: x + 0.5, y: y + 0.5, z, frame: f, height: f.h / (f.ppm ?? 16), kind: 'furniture' });
         } else {
           const top = src.furniture(fdef.id, 'top');
           const side = src.furniture(fdef.id, 'side');
@@ -685,7 +691,8 @@ export function* buildChunkMeshSteps(
           // pile offsets: deterministic per tile so rebuilds don't shuffle the heap
           const a = ((seed >> (k * 3)) & 7) * 0.785 + k * 2.1;
           const r = k === 0 ? 0 : 0.2;
-          sprites.push({ x: x + 0.5 + Math.cos(a) * r, y: y + 0.5 + Math.sin(a) * r, z, frame: f, height: h, kind: 'item', lift: itemLift - 0.12 * h });
+          if (cardsOn()) flatCard(geo, f, x + 0.5 + Math.cos(a) * r, y + 0.5 + Math.sin(a) * r, base + heightLocal(x + 0.5, y + 0.5) + itemLift + k * 0.004, h * 1.3, a * 1.7 + k);
+          else sprites.push({ x: x + 0.5 + Math.cos(a) * r, y: y + 0.5 + Math.sin(a) * r, z, frame: f, height: h, kind: 'item', lift: itemLift - 0.12 * h });
         }
       }
       // Fields: floor decals (blood, bile...) go into the chunk geometry; smoke/gas are
@@ -695,7 +702,8 @@ export function* buildChunkMeshSteps(
         const st = fieldStyle(fd.type);
         const lvl = Math.max(1, Math.min(3, fd.intensity));
         if (st.kind === 'fire') {
-          sprites.push({ x: x + 0.5, y: y + 0.5, z, frame: src.sprite(`${fd.type}_int${lvl}`), height: 0.5 + lvl * 0.25, kind: 'fire' });
+          if (cardsOn()) crossCards(geo, src.sprite(`${fd.type}_int${lvl}`), x + 0.5, y + 0.5, base + heightLocal(x + 0.5, y + 0.5), 0.5 + lvl * 0.25, seed, 3);
+          else sprites.push({ x: x + 0.5, y: y + 0.5, z, frame: src.sprite(`${fd.type}_int${lvl}`), height: 0.5 + lvl * 0.25, kind: 'fire' });
         } else if (st.kind === 'decal') {
           const f = src.sprite(`${fd.type}_int${lvl}`);
           // random quarter turn per tile breaks up repeats; rotate is honoured by topQuad

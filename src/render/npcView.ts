@@ -12,6 +12,8 @@ import { charLayers, charSettings, frameKey, spriteInfo, type CharLayers } from 
 import { bodyShapeOf, weaponOf } from './chars/archetype';
 import { CreatureModel, FallingBody } from './chars/creature';
 import { makeRig, type Rig } from './chars/rig';
+import { FxMeshes } from './chars/fxMeshes';
+import { cardsOn } from './cards';
 
 // NPCs: CDDA's npc_male / npc_female body with the worn clothing and wielded item overlays
 // stacked on top (like the tileset draws characters), composited once per outfit. In 'model'
@@ -73,6 +75,7 @@ export class NpcView implements GameSystem {
   private shots: SpriteHandle[] = [];
   private bodyCheck = 0;
   private chars: CharLayers | null = null;
+  private fx: FxMeshes | null = null;
   private rigs = new Map<string, Rig>();
 
   constructor(readonly game: Game, readonly renderer: Renderer, readonly sys: NpcSystem) {
@@ -280,10 +283,18 @@ export class NpcView implements GameSystem {
     }
     for (const h of this.shots) h.remove();
     this.shots.length = 0;
+    this.fx ??= cardsOn() ? new FxMeshes(this.renderer) : null;
+    this.fx?.begin();
     for (const s of this.sys.shots) {
+      // 3D: a spark mesh where the bullet stopped; billboards: the glyph
+      if (this.fx) {
+        this.fx.place('spark', s.x1, s.y1, s.z, 1.2, [1, 0, 0], [255, 226, 120]);
+        continue;
+      }
       const frame = this.atlas ? toFrame(this.atlas.glyph('*', 'yellow')) : this.renderer.source.glyph('*', 'yellow');
       this.shots.push(this.renderer.sprites.add({ x: s.x1, y: s.y1, z: s.z, frame, height: 0.3, anchor: 'center', lift: 1.2 }));
     }
+    this.fx?.end();
   }
 }
 
