@@ -9,6 +9,7 @@ import { voxelStats } from './voxel';
 import { installFurniture } from './furniture/install';
 import { HAZE_NAMES, HAZES, haze, isHazeName, setHaze } from './atmosphere';
 import { setCutoutMips } from './cutoutMips';
+import { FLORA_DESC, FLORA_NAMES, flora, floraAtlas, isFloraName, setFlora } from './flora';
 import { FORM_NAMES, FORMS, form, isFormName, setForm } from './formLight';
 
 // Wires the visual styles (look.ts) into the game: the Options entry, the automation API
@@ -48,6 +49,29 @@ export function installLooks(game: Game, renderer: Renderer, worldgen: WorldGene
     },
     desc: FORM_NAMES.map((n) => `${FORMS[n].label}: ${FORMS[n].desc}`).join('\n'),
   });
+  // Trees (flora.ts): modelled species with a middle LOD ring, or the v2 clump trees.
+  // The middle ring rides on the look's lodRadius (applyLook runs every look layer).
+  const floraLayer = () => {
+    renderer.chunks.midRadius = look.f.trees3d && flora.name === 'models' ? 3.3 : 0;
+  };
+  renderer.lookLayers.push({ name: 'flora', apply: floraLayer });
+  floraLayer();
+  const switchFlora = (name: string, persist: boolean) => {
+    if (!isFloraName(name)) throw new Error(`unknown flora ${name} (expected ${FLORA_NAMES.join('|')})`);
+    setFlora(name, persist);
+    floraLayer();
+    renderer.chunks.invalidateAll();
+    return name;
+  };
+  registerOption({
+    name: 'Trees',
+    value: () => flora.name,
+    change: (d) => {
+      const i = FLORA_NAMES.indexOf(flora.name);
+      switchFlora(FLORA_NAMES[(i + d + FLORA_NAMES.length) % FLORA_NAMES.length], true);
+    },
+    desc: FLORA_NAMES.map((n) => `${n}: ${FLORA_DESC[n]}`).join('\n') + '\n(Needs the Voxel or Full visual style.)',
+  });
   // Draw distance in chunks (OMTs). Past it the far ground ring and skyline carry the
   // horizon, so 6 reads well; 8 costs ~65% more chunks (+0.5-1 ms render, +100 MB heap,
   // more meshing while moving: docs/LOOKS.md), 5 is for slow machines.
@@ -79,6 +103,9 @@ export function installLooks(game: Game, renderer: Renderer, worldgen: WorldGene
   const a = api as DebugApi & Record<string, unknown>;
   a.looks = LOOK_NAMES;
   a.hazes = HAZE_NAMES;
+  /** Trees variant (flora.ts): 'models' | 'clumps', live, not persisted. */
+  a.setFlora = (name: string) => switchFlora(name, false);
+  a.floraStats = () => ({ flora: flora.name, atlasUsed: +floraAtlas().used.toFixed(3), midRadius: renderer.chunks.midRadius });
   /** A/B the stable cutout mips on grass/leaf cards (cutoutMips.ts). */
   a.cutoutMips = (on = true) => setCutoutMips(on);
   /** Form-lighting preset (formLight.ts), live, not persisted; formTweak edits single values. */

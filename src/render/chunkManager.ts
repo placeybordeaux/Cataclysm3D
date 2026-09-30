@@ -38,6 +38,8 @@ interface Entry {
   d2: number;
   /** inside lodRadius (volumetric trees/props) at the last signature */
   near: boolean;
+  /** inside midRadius but not lodRadius */
+  mid?: boolean;
   /** in-progress (time-sliced) build and the signature it started from */
   job: { gen: Generator<void, void>; sig: number; ver: number; ms: number } | null;
   /** own chunk version at the last finished build (edits vs. LOD/neighbour changes) */
@@ -93,6 +95,8 @@ export class ChunkManager {
   extras: ((near: boolean) => MeshExtras | undefined) | null = null;
   /** Chunks within this many chunk widths get the near-only volumes (0 = none). */
   lodRadius = 0;
+  /** Beyond lodRadius and within this: the middle ring (flora.ts lighter trees; 0 = none). */
+  midRadius = 0;
   /** Builds extra per-chunk objects from mesh data (3D trees; time-sliced); added to the chunk group. */
   extraObjects: ((data: ChunkMeshData, cx: number, cy: number, z: number) => Generator<void, THREE.Object3D[]>) | null = null;
 
@@ -158,6 +162,9 @@ export class ChunkManager {
       if (this.lodRadius > 0) {
         e.near = ddx * ddx + ddy * ddy <= this.lodRadius * this.lodRadius;
         sig = (sig * 31 + (e.near ? 7 : 3)) | 0;
+        // flora.ts middle ring (lighter tree LOD); 0 = no middle ring
+        e.mid = !e.near && ddx * ddx + ddy * ddy <= this.midRadius * this.midRadius;
+        if (this.midRadius > 0) sig = (sig * 31 + (e.mid ? 5 : 2)) | 0;
       }
       e.sig = sig;
       if ((sig !== e.builtSig || e.job) && inLevels) {
@@ -260,7 +267,9 @@ export class ChunkManager {
       return;
     }
     let t0 = performance.now();
-    const gen = buildChunkMeshSteps(this.map, this.shapes, this.source, e.chunk, this.season, undefined, this.extras?.(e.near));
+    const ex = this.extras?.(e.near);
+    if (ex) ex.mid = e.mid;
+    const gen = buildChunkMeshSteps(this.map, this.shapes, this.source, e.chunk, this.season, undefined, ex);
     let data: ChunkMeshData;
     for (;;) {
       const r = gen.next();
