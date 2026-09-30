@@ -413,11 +413,21 @@ air), so the bay was lit and ambient-shaded as outdoors. Same bug class as the r
 | hotel tower roof z5, before | 2.7 / 12.2 | 1.2 | 154 | 0.22 M | 450 |
 | hotel tower roof z5, after | 10.6 / 17.2 | 5.4 | 1190 | 2.04 M | 1028 |
 
-  On a roof the new cost is the city you now see (before: nothing below the window). At street
-  level (`npm run perf` city40, 3 alternating A/B pairs) the loop p99 is unchanged (37-40 ms both)
-  and unbuilt-in-view time is within this machine's noise (window 0-3.97 s, world 0.22-7.42 s over
-  6 pairs; both modes break the city40 hole budget on some runs under this load). Towns, forest,
-  rural, teleport, load and loaddrive pass.
+  On a roof the new cost is the city you now see (before: nothing below the window).
+
+  **Street level** (`npm run perf`): towns, forest, rural, teleport, load and loaddrive are
+  unchanged. **city40 is measurably worse and flaky under this machine's load (~4, other agents'
+  GPU jobs)**: in town40-then-city40 sequences, unbuilt-in-view total was window 0-3.5 s vs
+  world 0.4-11 s (10 A/B pairs; single isolated city40 runs overlap: window 0-3.97, world
+  0.22-7.42). Frame work +1.5-2.4 ms/frame mean in the city. A CPU profile diff puts it in:
+  more 3D characters drawn (dormant figures on storeys that are now drawn: ~0.4 ms/frame), tower
+  top meshing (~7 ms/s), the stairs index for the new levels, and level lookups (columnSpan,
+  drawn, roofAbove, chunkKey: ~0.2 ms/frame). Mitigations in place: storeys above the window go
+  to R - 2 only, are a deferred `'high'` class while the street is behind, and `roofAbove` checks
+  the level above first. Both modes break the city40 hole budget on some runs here; world mode
+  more often. Next steps if the lead wants the budget firm: hide dormant far figures on other
+  levels when they stand under cover (they are behind walls), and far-tower shells (no interior
+  for levels above the window).
 
 ## Not done / next
 
