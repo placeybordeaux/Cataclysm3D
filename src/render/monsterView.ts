@@ -311,6 +311,11 @@ export class MonsterView implements GameSystem {
     return { bottom: rig.height * 0.15 + rig.hover, top: rig.height * 0.95 + rig.hover, radius };
   }
 
+  /** The drawn 3D body of a monster (src/aim.ts: exact hit zones, the dodge hop), or null. */
+  modelOf(m: Monster): CreatureModel['inst'] | null {
+    return this.views.get(m)?.c?.inst ?? null;
+  }
+
   flash(m: Monster, color: number, seconds: number): void {
     const v = this.views.get(m);
     v?.h?.flash(color, seconds);
