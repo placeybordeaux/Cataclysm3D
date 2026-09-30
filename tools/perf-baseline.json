@@ -86,6 +86,34 @@
       "loopP99": 23.8,
       "maxStepMs": 15.6,
       "genSyncMsPerS": 19
+    },
+    "teleport": {
+      "maxStepMs": 34.6,
+      "genSyncMsPerS": 25.9,
+      "nearMs": 974,
+      "fullMs": 2341,
+      "maxFrameMs": 50,
+      "curtainFrameMs": 117
+    },
+    "load": {
+      "maxStepMs": 26.4,
+      "genSyncMsPerS": 49.8,
+      "nearMs": 700,
+      "fullMs": 3450,
+      "maxFrameMs": 50,
+      "curtainFrameMs": 233
+    },
+    "loaddrive": {
+      "maxHoleS": 5,
+      "holeS": 5,
+      "runwayP10": 1.78,
+      "p99": 66.6,
+      "loopP99": 53.2,
+      "maxStepMs": 21.1,
+      "genSyncMsPerS": 23.9,
+      "nearMs": 667,
+      "maxFrameMs": 133,
+      "curtainFrameMs": 233
     }
   }
 }
