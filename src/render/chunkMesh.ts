@@ -660,6 +660,9 @@ export function* buildChunkMeshSteps(
           sprites.push({ x: x + 0.5, y: y + 0.5, z, frame: f, height: 1.2 + lvl * 0.35, kind: 'cloud', lift: 0.15, opacity: 0.3 + lvl * 0.15 });
         }
       }
+      // first sight of many new furniture/item models (painting their faces) can make a
+      // row expensive: yield mid-row then (furniture/index.ts yieldHint)
+      if (MD?.yieldHint()) yield;
     }
   }
   return { pages, sprites, puddles: pud.g, trees: trees.length ? trees : undefined, glass: glassB.g };

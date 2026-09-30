@@ -69,6 +69,18 @@ export class ModelFactory {
   private itemMeshes = new Map<string, { m: ModelMesh; h: number } | null>();
   /** item definitions (set by the renderer): shape and size come from category / volume */
   itemDefs: Record<string, ItemDef> = {};
+  /** model-building ms since the mesher last asked (see yieldHint) */
+  private sinceYield = 0;
+
+  /**
+   * True when enough new models were built (and painted) since the last call that the chunk
+   * mesher should yield mid-row: a store row of never-seen items is otherwise one 8 ms step.
+   */
+  yieldHint(): boolean {
+    if (this.sinceYield < 1.5) return false;
+    this.sinceYield = 0;
+    return true;
+  }
 
   /**
    * Bake ground item `typeId` (the k-th from the top of its pile) on tile (x, y) resting at
@@ -89,7 +101,7 @@ export class ModelFactory {
         buildItem(b, shape, s, pal, hashString(typeId));
         e = { m: b.done(), h: itemHeight(shape, s) };
         modelStats.built++;
-        modelStats.buildMs += performance.now() - tb;
+        { const dt = performance.now() - tb; modelStats.buildMs += dt; this.sinceYield += dt; }
       }
       this.itemMeshes.set(typeId, e);
     }
@@ -126,11 +138,13 @@ export class ModelFactory {
     const key = `w|${id}|${H.toFixed(2)}`;
     let m = this.meshes.get(key);
     if (!m) {
+      const tb = performance.now();
       const b = new ModelBuilder(this.atlas);
       buildWindow(b, windowState(id), H, curtainColour(this.terrainPalette(src, id)));
       m = b.done();
       this.meshes.set(key, m);
       modelStats.built++;
+      { const dt = performance.now() - tb; modelStats.buildMs += dt; this.sinceYield += dt; }
     }
     const yaw = alongX ? (inward > 0 ? 0 : Math.PI) : inward > 0 ? Math.PI / 2 : -Math.PI / 2;
     placeModel(geo, m, { x: x + 0.5, y: sill, z: y + 0.5, yaw }, glass);
@@ -148,12 +162,14 @@ export class ModelFactory {
     const key = `d|${id}|${height.toFixed(2)}`;
     let m = this.meshes.get(key);
     if (!m) {
+      const tb = performance.now();
       const b = new ModelBuilder(this.atlas);
       b.aoHeight = 0.12;
       buildDoorLeaf(b, kind, id, this.terrainPalette(src, id), 0.96, height);
       m = b.done();
       this.meshes.set(key, m);
       modelStats.built++;
+      { const dt = performance.now() - tb; modelStats.buildMs += dt; this.sinceYield += dt; }
     }
     // door-local frame like the window's (+z = inside); hinge at local (-0.48, 0)
     const Y = alongX ? (inward > 0 ? 0 : Math.PI) : inward > 0 ? Math.PI / 2 : -Math.PI / 2;
@@ -229,7 +245,7 @@ export class ModelFactory {
       m = b.done();
       this.meshes.set(variant, m);
       modelStats.built++;
-      modelStats.buildMs += performance.now() - tb;
+      { const dt = performance.now() - tb; modelStats.buildMs += dt; this.sinceYield += dt; }
     }
     placeModel(geo, m, { x: x + 0.5, y: base, z: y + 0.5, yaw: YAW_FACING[face] }, glass);
     modelStats.placed++;
