@@ -54,6 +54,87 @@ function classify(id: string): Kind {
   return 'town';
 }
 
+export type QuadFn = (a: number[], b: number[], c: number[], d: number[], n: number[], k: number[]) => void;
+export type TriFn = (a: number[], b: number[], c: number[], k: number[]) => void;
+
+/**
+ * The silhouette of OMT (X, Y) with overmap id `id`: house boxes with gable roofs, blocky town
+ * buildings, clumps of tree crowns, or nothing (fields, roads, water). World coordinates, ground
+ * at y = 0, linear colours tuned for the skyline shader. Also used for the stand-ins of chunks
+ * not built yet (placeholders.ts).
+ */
+export function emitSilhouette(X: number, Y: number, id: string, quad: QuadFn, tri: TriFn): void {
+  const box = (x0: number, z0: number, x1: number, z1: number, h: number, k: number[]) => {
+    quad([x0, 0, z1], [x1, 0, z1], [x1, h, z1], [x0, h, z1], [0, 0, 1], k);
+    quad([x1, 0, z0], [x0, 0, z0], [x0, h, z0], [x1, h, z0], [0, 0, -1], k);
+    quad([x1, 0, z1], [x1, 0, z0], [x1, h, z0], [x1, h, z1], [1, 0, 0], k);
+    quad([x0, 0, z0], [x0, 0, z1], [x0, h, z1], [x0, h, z0], [-1, 0, 0], k);
+    quad([x0, h, z1], [x1, h, z1], [x1, h, z0], [x0, h, z0], [0, 1, 0], k);
+  };
+  const crown = (cx: number, cz: number, r: number, y0: number, h: number, k: number[], pine: boolean) => {
+    // a 6-sided bulb (or cone for pines)
+    const n = 6;
+    const ring = (y: number, rr: number, ph: number) => Array.from({ length: n }, (_, i) => [cx + Math.cos(ph + (i / n) * 6.283) * rr, y, cz + Math.sin(ph + (i / n) * 6.283) * rr]);
+    const top = [cx, y0 + h, cz];
+    if (pine) {
+      const b = ring(y0, r, 0);
+      for (let i = 0; i < n; i++) tri(b[i], top, b[(i + 1) % n], k);
+    } else {
+      const b = ring(y0, r * 0.7, 0), m = ring(y0 + h * 0.45, r, 0.5);
+      for (let i = 0; i < n; i++) {
+        const j = (i + 1) % n;
+        tri(b[i], m[i], b[j], k);
+        tri(b[j], m[i], m[j], k);
+        tri(m[i], top, m[j], k);
+      }
+    }
+  };
+  const kind = classify(id);
+  if (kind === 'none') return;
+  const r = (i: number) => hash2(X, Y, 500 + i) / 4294967296;
+  const bx = X * CHUNK, bz = Y * CHUNK;
+  if (kind === 'forest') {
+    const n = 5 + Math.floor(r(0) * 5);
+    for (let i = 0; i < n; i++) {
+      const pine = r(10 + i) < 0.35;
+      const g = 0.035 + r(20 + i) * 0.03;
+      crown(bx + 2 + r(30 + i) * 20, bz + 2 + r(40 + i) * 20, 3 + r(50 + i) * 3, 1.5, 8 + r(60 + i) * 7, pine ? [g * 0.6, g * 1.2, g * 0.8] : [g, g * 1.5, g * 0.7], pine);
+    }
+  } else {
+    const tall = kind === 'tall';
+    const nb = kind === 'house' ? 1 : 1 + Math.floor(r(1) * 2);
+    for (let i = 0; i < nb; i++) {
+      const w = kind === 'house' ? 8 + r(2 + i) * 5 : 9 + r(2 + i) * 9;
+      const dpt = kind === 'house' ? 7 + r(4 + i) * 4 : 8 + r(4 + i) * 9;
+      const x0 = bx + 2 + r(6 + i) * (22 - w), z0 = bz + 2 + r(8 + i) * (22 - dpt);
+      const h = kind === 'house' ? 3 + r(9 + i) * 2.8 : tall ? 12 + r(9 + i) * 20 : 4 + r(9 + i) * 7;
+      const v = 0.05 + r(12 + i) * 0.05;
+      const k = [v * 1.05, v, v * 0.95];
+      box(x0, z0, x0 + w, z0 + dpt, h, k);
+      if (kind === 'house') {
+        // gable roof along the longer side
+        const rh = 2.2 + r(14 + i);
+        const kr = [v * 0.7, v * 0.62, v * 0.6];
+        if (w >= dpt) {
+          const zm = z0 + dpt / 2;
+          quad([x0 - 0.4, h, z0 + dpt + 0.4], [x0 + w + 0.4, h, z0 + dpt + 0.4], [x0 + w + 0.4, h + rh, zm], [x0 - 0.4, h + rh, zm], [0, 0.7, 0.7], kr);
+          quad([x0 + w + 0.4, h, z0 - 0.4], [x0 - 0.4, h, z0 - 0.4], [x0 - 0.4, h + rh, zm], [x0 + w + 0.4, h + rh, zm], [0, 0.7, -0.7], kr);
+          tri([x0, h, z0], [x0, h, z0 + dpt], [x0, h + rh, zm], k);
+          tri([x0 + w, h, z0 + dpt], [x0 + w, h, z0], [x0 + w, h + rh, zm], k);
+        } else {
+          const xm = x0 + w / 2;
+          quad([x0 + w + 0.4, h, z0 + dpt + 0.4], [x0 + w + 0.4, h, z0 - 0.4], [xm, h + rh, z0 - 0.4], [xm, h + rh, z0 + dpt + 0.4], [0.7, 0.7, 0], kr);
+          quad([x0 - 0.4, h, z0 - 0.4], [x0 - 0.4, h, z0 + dpt + 0.4], [xm, h + rh, z0 + dpt + 0.4], [xm, h + rh, z0 - 0.4], [-0.7, 0.7, 0], kr);
+          tri([x0 + w, h, z0], [x0, h, z0], [xm, h + rh, z0], k);
+          tri([x0, h, z0 + dpt], [x0 + w, h, z0 + dpt], [xm, h + rh, z0 + dpt], k);
+        }
+      }
+    }
+    // a street tree or two
+    if (r(70) < 0.5) crown(bx + r(71) * 24, bz + r(72) * 24, 2.5, 1.5, 6 + r(73) * 3, [0.04, 0.06, 0.03], false);
+  }
+}
+
 const NEAR = 140;
 /** Rebuild after the player's OMT moved this far from the ring's centre. */
 const LAG = 2;
@@ -162,31 +243,6 @@ export class SkylineLayer {
       const l = Math.hypot(n[0], n[1], n[2]) || 1;
       for (const p of [a, b, c]) { pos.push(p[0], p[1], p[2]); nrm.push(n[0] / l, n[1] / l, n[2] / l); col.push(k[0], k[1], k[2]); }
     };
-    const box = (x0: number, z0: number, x1: number, z1: number, h: number, k: number[]) => {
-      quad([x0, 0, z1], [x1, 0, z1], [x1, h, z1], [x0, h, z1], [0, 0, 1], k);
-      quad([x1, 0, z0], [x0, 0, z0], [x0, h, z0], [x1, h, z0], [0, 0, -1], k);
-      quad([x1, 0, z1], [x1, 0, z0], [x1, h, z0], [x1, h, z1], [1, 0, 0], k);
-      quad([x0, 0, z0], [x0, 0, z1], [x0, h, z1], [x0, h, z0], [-1, 0, 0], k);
-      quad([x0, h, z1], [x1, h, z1], [x1, h, z0], [x0, h, z0], [0, 1, 0], k);
-    };
-    const crown = (cx: number, cz: number, r: number, y0: number, h: number, k: number[], pine: boolean) => {
-      // a 6-sided bulb (or cone for pines)
-      const n = 6;
-      const ring = (y: number, rr: number, ph: number) => Array.from({ length: n }, (_, i) => [cx + Math.cos(ph + (i / n) * 6.283) * rr, y, cz + Math.sin(ph + (i / n) * 6.283) * rr]);
-      const top = [cx, y0 + h, cz];
-      if (pine) {
-        const b = ring(y0, r, 0);
-        for (let i = 0; i < n; i++) tri(b[i], top, b[(i + 1) % n], k);
-      } else {
-        const b = ring(y0, r * 0.7, 0), m = ring(y0 + h * 0.45, r, 0.5);
-        for (let i = 0; i < n; i++) {
-          const j = (i + 1) % n;
-          tri(b[i], m[i], b[j], k);
-          tri(b[j], m[i], m[j], k);
-          tri(m[i], top, m[j], k);
-        }
-      }
-    };
     const flat = (x0: number, z0: number, x1: number, z1: number, k: number[]) =>
       quad([x0, GROUND_Y, z1], [x1, GROUND_Y, z1], [x1, GROUND_Y, z0], [x0, GROUND_Y, z0], [0, 1, 0], k);
     const snow = this.season === 'winter';
@@ -215,50 +271,7 @@ export class SkylineLayer {
           } else flat(bx, bz, bx + CHUNK, bz + CHUNK, snow && g !== 'water' ? SNOW : GROUND[g]);
         }
         if (!this.enabled || d < inner) continue;
-        const kind = classify(id);
-        if (kind === 'none') continue;
-        const r = (i: number) => hash2(X, Y, 500 + i) / 4294967296;
-        const bx = X * CHUNK, bz = Y * CHUNK;
-        if (kind === 'forest') {
-          const n = 5 + Math.floor(r(0) * 5);
-          for (let i = 0; i < n; i++) {
-            const pine = r(10 + i) < 0.35;
-            const g = 0.035 + r(20 + i) * 0.03;
-            crown(bx + 2 + r(30 + i) * 20, bz + 2 + r(40 + i) * 20, 3 + r(50 + i) * 3, 1.5, 8 + r(60 + i) * 7, pine ? [g * 0.6, g * 1.2, g * 0.8] : [g, g * 1.5, g * 0.7], pine);
-          }
-        } else {
-          const tall = kind === 'tall';
-          const nb = kind === 'house' ? 1 : 1 + Math.floor(r(1) * 2);
-          for (let i = 0; i < nb; i++) {
-            const w = kind === 'house' ? 8 + r(2 + i) * 5 : 9 + r(2 + i) * 9;
-            const dpt = kind === 'house' ? 7 + r(4 + i) * 4 : 8 + r(4 + i) * 9;
-            const x0 = bx + 2 + r(6 + i) * (22 - w), z0 = bz + 2 + r(8 + i) * (22 - dpt);
-            const h = kind === 'house' ? 3 + r(9 + i) * 2.8 : tall ? 12 + r(9 + i) * 20 : 4 + r(9 + i) * 7;
-            const v = 0.05 + r(12 + i) * 0.05;
-            const k = [v * 1.05, v, v * 0.95];
-            box(x0, z0, x0 + w, z0 + dpt, h, k);
-            if (kind === 'house') {
-              // gable roof along the longer side
-              const rh = 2.2 + r(14 + i);
-              const kr = [v * 0.7, v * 0.62, v * 0.6];
-              if (w >= dpt) {
-                const zm = z0 + dpt / 2;
-                quad([x0 - 0.4, h, z0 + dpt + 0.4], [x0 + w + 0.4, h, z0 + dpt + 0.4], [x0 + w + 0.4, h + rh, zm], [x0 - 0.4, h + rh, zm], [0, 0.7, 0.7], kr);
-                quad([x0 + w + 0.4, h, z0 - 0.4], [x0 - 0.4, h, z0 - 0.4], [x0 - 0.4, h + rh, zm], [x0 + w + 0.4, h + rh, zm], [0, 0.7, -0.7], kr);
-                tri([x0, h, z0], [x0, h, z0 + dpt], [x0, h + rh, zm], k);
-                tri([x0 + w, h, z0 + dpt], [x0 + w, h, z0], [x0 + w, h + rh, zm], k);
-              } else {
-                const xm = x0 + w / 2;
-                quad([x0 + w + 0.4, h, z0 + dpt + 0.4], [x0 + w + 0.4, h, z0 - 0.4], [xm, h + rh, z0 - 0.4], [xm, h + rh, z0 + dpt + 0.4], [0.7, 0.7, 0], kr);
-                quad([x0 - 0.4, h, z0 - 0.4], [x0 - 0.4, h, z0 + dpt + 0.4], [xm, h + rh, z0 + dpt + 0.4], [xm, h + rh, z0 - 0.4], [-0.7, 0.7, 0], kr);
-                tri([x0 + w, h, z0], [x0, h, z0], [xm, h + rh, z0], k);
-                tri([x0, h, z0 + dpt], [x0 + w, h, z0 + dpt], [xm, h + rh, z0 + dpt], k);
-              }
-            }
-          }
-          // a street tree or two
-          if (r(70) < 0.5) crown(bx + r(71) * 24, bz + r(72) * 24, 2.5, 1.5, 6 + r(73) * 3, [0.04, 0.06, 0.03], false);
-        }
+        emitSilhouette(X, Y, id, quad, tri);
       }
     }
     if (this.mesh) {

@@ -19,7 +19,9 @@
     "atlas": "tsx tools/atlas/index.ts",
     "shot": "tsx tools/shot.ts",
     "sim": "NODE_OPTIONS='--import ./tools/lib/css-register.mjs' tsx tools/balance_sim.ts",
-    "audio": "tsx tools/audio/index.ts"
+    "audio": "tsx tools/audio/index.ts",
+    "perf": "tsx tools/perf-bench.ts",
+    "perf:report": "tsx tools/perf-report.ts"
   },
   "dependencies": {
     "three": "^0.186.1"

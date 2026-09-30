@@ -90,6 +90,8 @@ export const DEFAULT_BINDINGS: Record<string, string[]> = {
   tactical_pause: ['`', 'Pause'],
   // --- progression (src/progression): tips, recipes, places, unlock progress ---
   journal: ['J'],
+  // --- performance overlay (src/perf/install.ts): Shift+F3 saves the last 60 s ---
+  perf_overlay: ['F3'],
   // --- inside menus only (keymap.ts MENU_ACTIONS): never fires in gameplay, where Space side-steps ---
   close_menu: [' '], // closes the top window/menu; advertised instead of Esc, which frees the mouse
 };

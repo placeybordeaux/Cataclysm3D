@@ -36,6 +36,7 @@ import { installDifficulty } from './difficulty';
 import { installTacticalPause } from './pause';
 import { installScreens } from './screens/install';
 import { installChunkEviction } from './save/eviction';
+import { installPerf } from './perf/install';
 import { installStairs, installStairNpcs } from './stairs';
 import { installStairsView } from './render/stairs/install';
 
@@ -139,6 +140,8 @@ async function main(): Promise<void> {
   // Generate one ring beyond what's drawn so chunks entering the draw circle are ready to mesh.
   prefetch.opts.radius = renderer.chunks.radius + 1;
   if (params.get('prefetch') !== '0') prefetch.start();
+  // Performance telemetry: F3 overlay, Shift+F3 dump, cdda.perf (src/perf, docs/PERF.md).
+  installPerf(game, renderer, api, prefetch);
 
   let last = performance.now();
   const loop = (now: number) => {
