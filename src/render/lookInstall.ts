@@ -6,7 +6,7 @@ import { LOOK_NAMES, LOOKS, isLookName, look } from './look';
 import type { Renderer } from './renderer';
 import { frameStats, summarize } from '../perfDebug';
 import { voxelStats } from './voxel';
-import { installFurniture } from './furniture/install';
+import { installFurniture, installSurfaces } from './furniture/install';
 import { HAZE_NAMES, HAZES, haze, isHazeName, setHaze } from './atmosphere';
 
 // Wires the visual styles (look.ts) into the game: the Options entry, the automation API
@@ -84,6 +84,7 @@ export function installLooks(game: Game, renderer: Renderer, worldgen: WorldGene
   };
   a.voxelStats = voxelStats;
   installFurniture(renderer, api);
+  installSurfaces(renderer, api, game);
   a.setLook = (name: string) => {
     if (!isLookName(name)) throw new Error(`unknown look ${name}`);
     renderer.setLook(name);

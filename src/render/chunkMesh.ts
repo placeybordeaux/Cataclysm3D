@@ -15,6 +15,7 @@ import type { VoxelProps } from './voxel';
 import { runSteps } from './steps';
 import { isBareTree, type TreeSpec } from './trees';
 import type { ModelFactory } from './furniture';
+import type { SurfacePainter } from './surfaces';
 
 // Builds the static geometry of one chunk at one z-level: merged quads grouped by texture
 // page (one draw call per page), plus the billboards the chunk contributes. Light sources
@@ -83,6 +84,8 @@ export interface MeshExtras {
   near: boolean;
   /** furniture style 'model' (furniture/): modelled pieces replace voxels and billboards */
   models?: ModelFactory;
+  /** painted surfaces (surfaces.ts) active: interior wall finishes, baseboards, crown */
+  surfaces?: SurfacePainter;
 }
 
 const SHAPES: TerrainShape[] = ['none', 'floor', 'liquid', 'wall', 'halfwall', 'window', 'door', 'door_open', 'fence', 'tree', 'shrub', 'stairs_up', 'stairs_down'];
@@ -100,6 +103,10 @@ function renderShape(id: string): TerrainShape | null {
   // (boarded/reinforced frames stay walls of boards: tileKinds)
   if (BROKEN_WINDOW.test(id) && !/boarded|reinforced|enhanced/.test(id)) return 'window';
   if (BROKEN_DOOR.test(id)) return 'door';
+  // locked doors carry no DOOR flag (you can't open them) and stained glass is flagged WALL:
+  // both classified as plain walls, so a locked front door was a brick in the wall
+  if (/^t_(door|rdoor|mdoor)(_[a-z]+)*_(locked|pickable)(_[a-z]+)*$/.test(id) && !/_o(_|$)/.test(id)) return 'door';
+  if (/^t_window_stained_/.test(id)) return 'window';
   return null;
 }
 
@@ -168,6 +175,9 @@ export function* buildChunkMeshSteps(
   const glassB = { g: undefined as GeomBuilder | undefined };
   const glassGeo = () => (glassB.g ??= new GeomBuilder());
   const MD = LF?.voxelProps ? extras?.models : undefined;
+  const SP = extras?.surfaces?.active() ? extras.surfaces : undefined;
+  // interior finishes are chosen per building: one seed per chunk (≈ one OMT, one house)
+  const buildingSeed = (Math.imul(chunk.cx, 73856093) ^ Math.imul(chunk.cy, 19349663)) >>> 0;
   const A = LF?.archDetail ? extras?.arch : undefined;
   // pitched roofs: shingle/thatch/tile roof regions get a hipped roof (arch.ts)
   const pitched = (tx: number, ty: number) => PITCHED.test(terDefs[here.ter(tx, ty)].id);
@@ -414,7 +424,16 @@ export function* buildChunkMeshSteps(
             if (isWall(nShape[d])) continue;
             // a wall face is lit like the space it faces (street vs. room)
             curSky = skyOf(x + DX[d], y + DY[d]);
-            sideFace(geo(side), x, y, d, base, base + top, side, base, 1);
+            // painted surfaces: a room-facing side gets the building's interior finish,
+            // with a baseboard and a crown moulding
+            const roomSide = !!SP && curSky < 1 && z >= 0 && floorish(nShape[d]);
+            const face = roomSide ? src.terrain(def.id, 'wall', { connections: conn, indoor: true, variantSeed: buildingSeed }) : side;
+            sideFace(geo(face), x, y, d, base, base + top, face, base, 1);
+            if (roomSide && SP) {
+              const trim = SP.trim();
+              wallBand(geo(trim), trim, x, y, d, base, base + 0.1, 0.014, base);
+              if (shape === S.wall) wallBand(geo(trim), trim, x, y, d, base + WALL_TOP - 0.07, base + WALL_TOP, 0.022, base);
+            }
             if (A && shape === S.wall && outdoorFace(d)) {
               wallBand(geo(A.plinth), A.plinth, x, y, d, base, base + 0.32, 0.06, base);
               // cornice on the top storey, just under the roof slab

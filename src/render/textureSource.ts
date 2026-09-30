@@ -37,6 +37,8 @@ export interface SurfaceQuery {
   connections?: number;
   /** Stable per-tile hash for picking random variants (floors, grass). */
   variantSeed?: number;
+  /** wall face looking into a room (painted surfaces give it an interior finish) */
+  indoor?: boolean;
   season?: 'spring' | 'summer' | 'autumn' | 'winter';
 }
 
