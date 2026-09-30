@@ -208,7 +208,8 @@ window.lookView = async (name) => {
     await window.lookView('house');
     c.setHour(23.2);
     c.flashlight(true);
-  } else if (name.startsWith('furn:') || name.startsWith('ter:')) {
+  } else if (name.startsWith('furn:') || name.startsWith('ter:') || name.startsWith('wfurn:')) {
+    // wfurn: like furn, only in wrecked buildings (dressing.ts building state 2)
     // furniture/fixture close-ups (docs/FURNITURE.md): furn:<id regex>[:<n-th match>[:<dist>[:<pitch>[:<hour>]]]]
     // Finds the n-th match around the town, stands `dist` tiles away on open floor in the
     // same room (the side with the most free floor) and looks at it.
@@ -219,7 +220,7 @@ window.lookView = async (name) => {
     c.settle();
     const m = c.game.map, rx = new RegExp(re);
     const P = c.game.player, px = Math.floor(P.x), py = Math.floor(P.y);
-    const hit = (x, y) => kind === 'furn' ? rx.test(m.furnAt(x, y, 0).id) : rx.test(m.terAt(x, y, 0).id);
+    const hit = (x, y) => kind === 'wfurn' ? rx.test(m.furnAt(x, y, 0).id) && c.buildingLevel(Math.floor(x / 24), Math.floor(y / 24)) === 2 : kind === 'furn' ? rx.test(m.furnAt(x, y, 0).id) : rx.test(m.terAt(x, y, 0).id);
     const found = [];
     for (let r = 0; r <= 70 && found.length <= Number(nth); r++)
       for (let y = py - r; y <= py + r; y++)
