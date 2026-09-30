@@ -186,7 +186,7 @@ export function paintWall(m: WallMat, c: RGB, mortar: RGB, seed: number): Img {
       // calm render: soft mottling, the odd pit; concrete gets form-tie holes
       const img = new Img(32, 32);
       for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) {
-        const n = (H(x >> 2, y >> 2, 9) % 5) * 0.012 + (H(x, y, 10) % 17 === 0 ? -0.06 : 0);
+        const n = (H(x >> 2, y >> 2, 9) % 3) * 0.01 + (H(x, y, 10) % 41 === 0 ? -0.05 : 0);
         img.set(x, y, sh(c, 0.97 + n));
       }
       if (m === 'concrete') for (const [x, y] of [[8, 8], [24, 8], [8, 24], [24, 24]]) img.set(x, y, sh(c, 0.7));
@@ -200,9 +200,9 @@ export function paintInterior(m: InteriorMat, c: RGB, accent: RGB, seed: number)
   const H = (x: number, y: number, s = 0) => hash2(x, y, seed + s);
   const img = new Img(32, 32);
   for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) {
-    // drywall is flat: single-texel specks turn into crawling noise under the luminance
-    // bump and the dither, so only a very soft large-scale shade
-    let col = sh(c, 0.985 + ((H(x >> 3, y >> 3, 11) % 3) * 0.008));
+    // drywall is flat: any texel variation (even 1-2 %) turns into blotches under the
+    // renderer's luminance bump and dither
+    let col = c;
     if (m === 'stripes' && (x % 8 === 0 || x % 8 === 1)) col = mix(col, accent, 0.35);
     if (m === 'damask' && ((x + (y >> 3) * 4) % 8 === 3) && y % 8 === 3) col = mix(col, accent, 0.5);
     if (m === 'damask' && ((x + (y >> 3) * 4) % 8 === 3) && (y % 8 === 2 || y % 8 === 4)) col = mix(col, accent, 0.25);
@@ -266,7 +266,7 @@ export function paintFloor(m: FloorMat, c: RGB, seed: number, variant: number): 
     case 'asphalt': case 'tar': {
       for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) {
         const n = H(x, y, 21) % 13;
-        img.set(x, y, n === 0 ? sh(c, 1.35) : n === 1 ? sh(c, 0.8) : n === 2 ? sh(c, 1.15) : c);
+        img.set(x, y, n === 0 ? sh(c, 1.18) : n === 1 ? sh(c, 0.88) : n === 2 ? sh(c, 1.08) : c);
       }
       if (H(0, 0, 22) % 3 === 0) {
         // a hairline crack
@@ -289,7 +289,7 @@ export function paintFloor(m: FloorMat, c: RGB, seed: number, variant: number): 
 export function paintCeiling(m: CeilMat, c: RGB): Img {
   const img = new Img(32, 32);
   for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) {
-    let col = sh(c, 0.985 + (hash2(x >> 3, y >> 3, 31) % 3) * 0.008);
+    let col = c;
     if (m === 'tiles') {
       // 50 cm drop-ceiling tiles on a light grid, fissured
       if (x % 16 === 0 || y % 16 === 0) col = mix(c, [236, 236, 232], 0.6);
