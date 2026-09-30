@@ -434,7 +434,8 @@ export function interact(game: Game, target: TargetTile | null = targetTile(game
   }
   // Open/close/stairs are unambiguous actions; others with alternatives get a menu.
   const primary = list[0];
-  if (list.length === 1 || ['open', 'close', 'stairs_up', 'stairs_down'].includes(primary.id) || !ui.menu) {
+  // (filling up the car at a pump is what `e` on a pump means: refuel.ts)
+  if (list.length === 1 || ['open', 'close', 'stairs_up', 'stairs_down'].includes(primary.id) || primary.id.startsWith('fill_') || !ui.menu) {
     primary.run();
     return true;
   }
