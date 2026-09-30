@@ -32,6 +32,7 @@ import { driveScenarios } from './realinput_drive';
 import { perfScenarios } from './realinput_perf';
 import { chassisScenarios } from './realinput_chassis';
 import { stairsScenarios } from './realinput_stairs';
+import { grabScenarios } from './realinput_grab';
 
 const argv = process.argv.slice(2);
 const opt = (n: string, d: string) => (argv.includes(n) ? argv[argv.indexOf(n) + 1] : d);
@@ -1514,6 +1515,8 @@ scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...qaScenarios(
 scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...galleryScenarios({ page: () => page, x: () => x, js, check, shot, toGameplay, sleep, errors: () => errors, gameUrl: () => gameUrl, quickStart }));
 // Walkable stairs (docs/STAIRS.md): the shelter flight, a zombie following, a spiral, the roof ladder.
 scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...stairsScenarios({ x: () => x, js, check, shot, toGameplay, sleep }));
+// grab / drag (tools/realinput_grab.ts) and the hotbar's longbow
+scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...grabScenarios({ x: () => x, js, check, shot, toGameplay, sleep }));
 
 if (argv.includes('--list') || argv.includes('--dry-run')) {
   for (const [n, what] of scenarios) console.log(`${only && !only.has(n) ? '  (skip)' : '  run   '} ${n.padEnd(11)} ${what}`);

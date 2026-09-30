@@ -104,7 +104,8 @@ get out when stopped) · `o` world action menu · `Tab`/`i` inventory · quick-l
 crosshair: wheel select, `e` take, `r` take all · `g` pick up / Area loot · `1`–`0` hotbar ·
 `` ` `` tactical pause · `&` craft · `*` construct · `@` character · `m` map · `J` journal ·
 `M` missions · `C` chat · `p` bionics · `[` mutations · `_` martial arts · `)` achievements ·
-`F` flashlight · `r` reload · `b` fire mode · `X` smash (or just hit things) · `F5` save ·
+`F` flashlight · `r` reload · `b` fire mode · `X` smash (or just hit things) · `G` grab / let go
+(walk to push or pull furniture and carts) · `t` throw · `F5` save ·
 `F11` fullscreen · `?` help · Esc pause menu · **Space closes any menu** (so does the key that
 opened it; rebindable as `close_menu`) and keeps the mouse captured.
 

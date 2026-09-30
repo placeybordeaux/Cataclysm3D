@@ -421,3 +421,68 @@ Screenshots: `docs/screenshots/wave3/adaptation/`.
 | `r7_tip_ultrawide_first_frame.jpg` | Round 7 (1720×652, 2.64:1): a discovery tip 60 ms after it appears, already in the HUD column |
 | `r7_hotbar_first_run.jpg` | Round 7: first-run hotbar, lighter / water / smartphone, no second "water" slot |
 | `r7_boulder_rocks.jpg` | Round 7: a small boulder smashed with a hammer, rocks on the ground |
+
+## Grab and drag (BN `G`), and the hotbar's quick-draw
+
+User report: "When I have long bow in my quick bar and press it, it wears it. The expectation
+is that it wields it. Also I remember being able to drag items in Cataclysm, is that no longer
+there? Was that skipped in the transition?" — it was skipped; both are fixed.
+
+### Hotbar: weapons are wielded
+
+The hotbar ran the item's double-click action, which prefers **Wear** for anything with armor
+data — and BN gives every bow armor data (it can be slung, layer BELTED). A hotbar slot is a
+quick-draw now (`src/game/hotbar_choice.ts`, rule table in `docs/UI2.md`): any gun (bows,
+crossbows, slings, pistols, rifles; carried or slung) and any melee weapon (BN
+`weapon_category`, or melee damage above BN's `MELEE_STAT` 5) is **wielded**; clothing, packs,
+holsters and shields are worn; food, drinks and bandages are consumed; tools are used. Pressing
+the slot of what you hold puts it away (unchanged). A worn holster's slot draws from it. When
+the chosen action is impossible the slot says why instead of doing something else.
+`tests/hotbar_choice.test.ts` is a table over real BN items; real input: `--only hotbow`.
+
+### Grab and drag
+
+BN's grab (handle_action.cpp `grab()`, game.cpp `grabbed_furn_move`, grab.cpp
+`grabbed_veh_move`, map.cpp `move_furn`), ported rule for rule onto the tile grid
+(`src/game/grab.ts`) and played in real time (`src/grab.ts`):
+
+- **`G`** grabs the furniture or vehicle you aim at (or the tile in front of you) — adjacent
+  only, like BN — and `G` again lets go. Also: **`o`** on it → "Grab the dresser (drag it)",
+  `e` menus that already offer a choice, and a vehicle part's `e` menu. Throwing moved from `G`
+  to BN's own `t` (both rebindable). The HUD banner says "Holding the dresser · Walk to push or
+  pull · [G] let go".
+- **Walking while holding** is tile steps: WASD relative to where you look, snapped to 8
+  directions. Toward it pushes, straight away pulls (you need room behind you), sideways nudges
+  it while you stay (twice → out of reach → you let go). Each step lasts the BN time it costs:
+  your walk plus `str_req × 10` moves for furniture (a dresser at Str 10: ~0.6 s a tile),
+  `400 × str_req / str` for a vehicle. You glide tile to tile; the furniture model slides
+  (`src/render/grabView.ts`: a stand-in drawn until the chunk mesh has the piece in its new
+  tile); carts roll and turn to face the way they go. Mouse look stays free.
+- **Strength**: furniture `required_str` (+1 per 4 kg of items on the tile); BN's strain roll
+  ("You strain yourself trying to move the heavy safe!", pain), "The safe is really heavy!"
+  (3000+ moves) within 3 points, "too heavy for you to budge" below that. Vehicles: BN's mass /
+  wheels / terrain formula (a shopping cart needs Str 1; a car ~7 on a road), "You lack the
+  strength to move the …".
+- **Blocked**: walls, other furniture, vehicles, creatures, traps, non-FLAT ground ("The dresser
+  collides with something."), a cluttered tile for non-container furniture ("There's stuff in
+  the way."); vehicles use `VehicleSystem.dragBlocker` (BN's just-detect collision, honouring the
+  drawn body): nothing is damaged. A bump is reported once; hold the key again after changing it.
+- **Contents**: container furniture (dressers, lockers, safes: BN `CONTAINER`/`SEALED`) carries
+  its items; other furniture leaves them behind ("Stuff spills from the table!") — BN, and it
+  surprises veterans too. Every item moves through `moves.ts` (conserved; test). A small fire
+  moves with a pushed brazier.
+- **Noise**: "a scraping noise." at `min(80, 40 + 2 × required_str)` — zombies hear you
+  barricading.
+- **Barricades**: the moved furniture is ordinary map furniture, so monsters path around it or
+  bash it (the pathfinder prices a bashable dresser in a doorway by its bash strength; test).
+- **Ends** on `G`, death, sleep, driving, a z-level change, or being moved off your tile.
+  Saved mid-drag (save section `grab`).
+
+Not ported: grabbing creatures (BN's `G` on a monster), dragging up/down ramps, harnessed
+animals, vehicle theft checks, BN's exact wheel traction (FLAT ground 1, else 0.5 here).
+Refrigerators can't be grabbed — BN data gives `f_fridge` `required_str: -1`.
+
+Tests: `tests/grab.test.ts` (push, pull, nudge, wall, too heavy, strain, contents conserved,
+stuff in the way, barricade pathing, shopping cart push/pull/wall). Real input: `tools/realinput.ts
+--only grab` (push a dresser into a wall, o-menu grab + pull a chair, push a cart, a safe too
+heavy, save/load while holding). Screenshots: `docs/screenshots/wave3/hotbar-grab/`.

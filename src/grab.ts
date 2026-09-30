@@ -173,6 +173,8 @@ export function installGrab(game: Game, renderer: Renderer | null, api?: DebugAp
         return;
       }
       if (game.input.captured && !game.input.menuWalk) return;
+      // (normal walking, which reads Shift, is off while holding something)
+      p.running = (game.input.held.has('ShiftLeft') || game.input.held.has('ShiftRight')) && !game.runVeto?.();
       const d = wantedStep();
       if (!d) {
         bumped = null;

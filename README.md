@@ -48,7 +48,8 @@ WASD move (Shift run, `c` crouch, Space side-step), mouse look, LMB attack/fire,
 RMB guard / aim / draw a bow, `e` interact (get in and drive a car, open doors),
 `o` world action menu, `Tab`/`i` inventory, quick-loot at the crosshair (wheel, `e` take,
 `r` take all), `1`–`0` hotbar, `` ` `` tactical pause, `&` craft, `*` construct,
-`@` character, `m` map, `J` journal, `F` flashlight, `F5` save, `F11` fullscreen,
+`@` character, `m` map, `J` journal, `F` flashlight, `G` grab (walk to drag furniture or
+push a cart; `G` lets go), `t` throw, `F5` save, `F11` fullscreen,
 `?` help, Esc pause menu, `v` camera (first person / shoulder / top-down). Space (or the key
 that opened it) closes any menu and keeps the mouse in the game.
 Everything is rebindable in Options → Key bindings; the full list is in `docs/STATUS.md`.

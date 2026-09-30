@@ -366,6 +366,7 @@ function grabbedVehMove(game: Game, dpx: number, dpy: number): GrabStep {
   const grabbedMount: [number, number] = [occ.mx, occ.my];
   if (vs.at(px, py, z)?.v === v) {
     // standing on it: BN turns the grab around and lets you walk
+    if (!isEmpty(game, px + dpx, py + dpy, z)) return { handled: true, moves: 0 };
     g.dx = -dpx;
     g.dy = -dpy;
     return { handled: false, moves: 0 };
@@ -378,7 +379,9 @@ function grabbedVehMove(game: Game, dpx: number, dpy: number): GrabStep {
   if (dpx === g.dx && dpy === g.dy) {
     vdx = dpx; vdy = dpy; // pushing
   } else if (Math.abs(dpx + vdx) !== 2 && Math.abs(dpy + vdy) !== 2) {
-    // walking around it: nothing moves but you
+    // walking around it: nothing moves but you (and only if you can take the step: BN would
+    // shift the grab point even when the walk then fails)
+    if (!isEmpty(game, nextX, nextY, z)) return { handled: true, moves: 0 };
     g.dx = prevGrab.dx - dpx;
     g.dy = prevGrab.dy - dpy;
     return { handled: false, moves: 0 };
