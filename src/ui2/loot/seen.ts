@@ -59,7 +59,9 @@ export function installSeenItems(game: Game, lootMemory: () => LootMemory): { se
         for (const top of items) for (const it of top.walk()) if (reloadRelevant(it)) counts.set(it.typeId, (counts.get(it.typeId) ?? 0) + (it.countByCharges ? it.charges : 1));
         if (!counts.size) continue;
         if (!lineOfSight(game, p.tileX, p.tileY, x, y, p.z)) continue;
-        const where = f.id === 'f_null' ? 'on the ground' : `${container ? 'in' : 'on'} ${withArticle(f.name)}`;
+        // Under a roof it's a floor: "on the floor" reads right for a house, "on the ground" outside.
+        const floor = map().hasFloor(x, y, p.z + 1) ? 'on the floor' : 'on the ground';
+        const where = f.id === 'f_null' ? floor : `${container ? 'in' : 'on'} ${withArticle(f.name)}`;
         for (const [id, n] of counts) seen.record(id, n, x, y, p.z, where, t);
       }
   };
