@@ -382,7 +382,9 @@ export function* buildChunkMeshSteps(
 
       // Floor slab underside + exposed slab edges: anything with a floor at this level
       // that has air (or a non-solid tile) under it.
-      const hasSlab = shape !== S.none && shape !== S.liquid && shape !== S.stairs_down;
+      // painted look: roof gutters are a trough under the eave, not a floor slab ledge
+      const gutter = !!SP && A !== undefined && /^t_gutter/.test(def.id);
+      const hasSlab = shape !== S.none && shape !== S.liquid && shape !== S.stairs_down && !gutter;
       if (hasSlab && z > -10) {
         const belowShape = shapeAt(below, x, y);
         if (!isWall(belowShape) && belowShape !== S.stairs_up) {
@@ -415,6 +417,10 @@ export function* buildChunkMeshSteps(
         case S.stairs_down:
           break;
         case S.floor:
+          if (gutter) {
+            for (let d = 0; d < 4; d++) if (pitched(x + DX[d], y + DY[d])) DR?.gutter(geo, x, y, d, base, /downspout|drop/.test(def.id), LEVEL_HEIGHT);
+            break;
+          }
           if (GROUND_OVERLAY.test(def.id)) {
             // tileset draws felled trunks/stumps as cut-outs over the ground: lay them on
             // the surrounding ground instead of punching see-through holes in the floor
@@ -552,7 +558,7 @@ export function* buildChunkMeshSteps(
             const [pa, pb] = alongX ? [0, 2] : [3, 1];
             const ra = roomAt(x + DX[pa], y + DY[pa]), rbm = roomAt(x + DX[pb], y + DY[pb]);
             const outD = ra && !rbm && floorish(nShape[pb]) ? pb : rbm && !ra && floorish(nShape[pa]) ? pa : -1;
-            if (outD >= 0) DR.frontDoor(geo, x, y, outD, base, buildingSeed, isWall(nShapeAt(x + DX[FACE_ENDS[outD][0]], y + DY[FACE_ENDS[outD][0]])));
+            if (outD >= 0) DR.frontDoor(geo, x, y, outD, base, (buildingSeed ^ Math.imul(x, 668265263) ^ Math.imul(y, 374761393)) >>> 0, isWall(nShapeAt(x + DX[FACE_ENDS[outD][0]], y + DY[FACE_ENDS[outD][0]])));
           }
           if (A && !freeGate) doorCasing(geo, A, x, y, alongX, base, base + DOOR_H);
           const slab = src.terrain(def.id, 'pane');
