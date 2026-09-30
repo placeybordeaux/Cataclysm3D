@@ -365,20 +365,18 @@ export class Dresser {
   }
 
   /**
-   * Rain gutter on gutter tile (x, y) along its edge toward the roof in direction d: a trough
-   * just under the eave (arch.ts EAVE 0.38 m out, 0.19 m below the roof base) and, on
-   * downspout tiles, a pipe down to the ground below.
+   * Rain gutter along the outer edge (direction d, open air beyond) of a gutter tile: a trough
+   * hung on the edge of the flat eave and, on downspout tiles, a pipe down to the ground.
    */
   gutter(geo: Geo, x: number, y: number, d: number, base: number, downspout: boolean, levelH: number): void {
     const f = this.frame('gutter', () => { const i = new Img(8, 8); for (let yy = 0; yy < 8; yy++) for (let xx = 0; xx < 8; xx++) i.set(xx, yy, yy === 0 ? [236, 234, 228] : yy === 7 ? [150, 150, 146] : [206, 204, 198]); return i; });
     const g = geo(f);
-    const out = 0.44, w = 0.1, top = base - 0.2, bot = base - 0.31;
-    // edge toward the roof: N edge at y, E edge at x+1, S at y+1, W at x; trough runs along it
+    const w = 0.12, top = base + 0.1, bot = base - 0.05;
     const along = d === 0 || d === 2;
-    const e = d === 0 ? y : d === 1 ? x + 1 : d === 2 ? y + 1 : x;
-    const c = e - (d === 0 || d === 3 ? -1 : 1) * out; // out from the roof edge into this tile
-    if (along) g.box(x - 0.02, bot, c - w / 2, x + 1.02, top, c + w / 2, 63, f, f, base);
-    else g.box(c - w / 2, bot, y - 0.02, c + w / 2, top, y + 1.02, 63, f, f, base);
+    const e = d === 0 ? y : d === 1 ? x + 1 : d === 2 ? y + 1 : x; // the tile edge toward d
+    const c = e + (d === 0 || d === 3 ? -1 : 1) * (w / 2); // just outside it
+    if (along) g.box(x - 0.01, bot, c - w / 2, x + 1.01, top, c + w / 2, 63, f, f, base);
+    else g.box(c - w / 2, bot, y - 0.01, c + w / 2, top, y + 1.01, 63, f, f, base);
     if (!downspout) return;
     const px = along ? x + 0.5 : c, pz = along ? c : y + 0.5;
     g.box(px - 0.04, base - levelH + 0.05, pz - 0.04, px + 0.04, bot, pz + 0.04, 63 & ~4, f, f, base);
