@@ -132,6 +132,65 @@ left; the hands and what they hold are now 3D in the same kit, drawn as the over
 - Also this round: far figures **dither-fade** over the last 12 m before the draw distance
   instead of popping; zombies **shamble** — a per-individual lurch and sway onto the good leg.
 
+## Round 4: first-person art pass
+
+- **Fists** are modelled, rooted at a narrower wrist: domed back of the hand, a palm, four
+  fingers in two curled segments (a knuckle row on top, separation shading between them, the
+  little finger shorter) and a thumb wrapping across the front. Holding something, the hand
+  rolls so the grip runs *through* the curled fingers (`heldRig`: hand = hold · Rz 90°).
+- **Sleeves** are painted for 30 cm: readable cloth (dark UltiCa cloth lifted to a legible
+  level keeping its hue — the default flannel reads red, not a black slab), a woven grid,
+  drifting fold creases, an underside seam, a darker cuff and bare skin at the wrist.
+- **Lighting**: the first-person layer has its own camera-relative key (upper left) and a cool
+  fill (lower right), both stepped, scaled by the light-map sample at the player so night
+  still darkens the hands.
+- **Items** are painted at 256 texels/m with surface detail (`Detail` in rig.ts, painted in
+  paint.ts): wood grain, slide serrations, knurled grips, grip tape, a receiver ejection port
+  and rail, handguard vents, blade bevels with a bright edge, metal highlights. Round things
+  (bat, barrels, shafts, flashlight, knob) are 8-sided (a box plus a twin turned 45°). The
+  rifle has a front sight block and post and a rear aperture; the stock is hidden in first
+  person (under the arm at the hip, at the shoulder down the sights).
+- **Pistol at the hip** is held higher, nearer and turned in so the gun itself reads (the
+  playtest saw only a fist); one-handed at the hip.
+- **Bows and slingshots stay 2D** while drawn: in side-by-side shots `bowArt`'s hand-drawn
+  bend and string read better than the 3D bow. `cdda.chars({ fpBow: true })` shows the 3D bow.
+- **Honest verdict** (see `uw_before_fp_*` / `uw_after_fp_*` at 3440×1304): held weapons are
+  clearly better in 3D (the sprite pistol is a fist with a stub, the sprite rifle a curved
+  blob); bare fists are a draw — the sprite fists are cleaner icons, the 3D ones add sleeves and
+  depth. Default stays **model**; the Options switch is there to compare.
+- **Zombie heads** are now ~1/7.5 of body height (0.23 × 0.20 m, was 0.25 × 0.24 × 0.25): the
+  combat hit zones read the model boxes (aimPick.ts), so the headshot zone shrank with them.
+
+## Round 5: the last camera-facing billboards
+
+Audit of what still turned to face you in the default `full` look (code search for
+`sprites.add` / chunk `sprites.push`), and what happened to each:
+
+| Thing | Was | Now |
+|---|---|---|
+| Fire (`fd_fire` fields) | billboard | 3 crossed world-fixed cards (`render/cards.ts`), in the chunk geometry |
+| Far furniture billboards (flowers, shrubs, props with no model/voxel) | billboard | 2 crossed world-fixed cards |
+| Mannequins, statues | voxel lump / billboard | a posed humanoid rig baked into the chunk (`chars/figures.ts`): plastic dummy, stone statue with a raised arm |
+| Loose loot beyond the top voxel/model item of a pile | small billboards | the item sprite lying flat on the floor / furniture top |
+| Arrows, bolts, sling stones (flying, stuck in ground/walls/monsters) | rows of pixel-dot billboards | tiny meshes: head, 8-sided shaft, crossed fletching (`chars/fxMeshes.ts`); the flight trail stays dots |
+| Monster projectiles (acid, bile) | glyph billboard | a coloured glob mesh with a tail |
+| Bullet impact sparks (player tracers, NPC shots) | `*` glyph billboard | a small spark mesh |
+| Smoke / gas clouds | dithered billboard | **kept**: translucent round puffs don't read as turning cards, and the world material has no transparency |
+| Blood/dust/spark particles, bullet-hole dots | 1–3 px billboards | **kept**: point particles |
+| Loot "?" pile markers | DOM overlay | **kept**: UI, drawn in the HUD layer with UI styling |
+| Trees (far impostors) | billboard | skipped: the readability agent owns trees |
+| Player body / creatures in `?chars=billboard` | billboard | only in that variant |
+
+`?props=billboard` restores the old billboards for fire, props, loot and projectiles.
+
+**Weapon variants** (`heldVariant`, from BN `weapon_category` then id/looks_like): revolver
+(cylinder, round barrel, wooden grip, hammer) / M1911 (steel slide, wooden checkered grip,
+hammer) / polymer autos; pump vs double- and single-barrel break-action shotguns; AR (carry
+rail, straight mag) vs AK (wooden furniture, banana mag) vs bolt/lever hunting rifles (full
+wooden stock, bolt handle, scope); crowbar (claw, chisel) vs pipe; kitchen knife (riveted
+handle, wide thin blade) vs combat knife; sledgehammer vs hammer; hatchet vs red fire axe vs
+axe.
+
 ## Performance
 
 `tools/char-shots.ts --gpu --bench --views bench` (60 hostile zombies and dogs 8–45 m down
@@ -153,13 +212,14 @@ moved; bodies are static once they land. Skins: a zombie is ~4 k texels; one 102
 
 ## Screenshots
 
-`docs/screenshots/wave3/characters/` (JPEG q85) — `before_*` are the billboards, `after_*`
+`docs/screenshots/wave3/characters/` (JPEG q85, half size; `--full` for full size) — `before_*` are the billboards, `after_*`
 the models: zombie horde near / mid / far / down a long road (66–110 m) and at dusk, a dog,
 NPCs (with weapons), corpses, a melee wind-up, critters, plus `after_zoo` (one of each body
 plan), `after_night` (flashlight) and `after_third` (the survivor's own body), and the
 first-person set `after_fp_*` (fists, punch, pistol firing, rifle hip/ADS/reload, shotgun,
 bat idle/swing/guard, knife, axe, spear, katana, flashlight, bow at draw) with
-`before_fp_*` for the sprite viewmodel. `tools/char-shots.ts --views fp_...` regenerates them.
+`before_fp_*` for the sprite viewmodel, and `uw_before_fp_*` / `uw_after_fp_*` pairs at the
+user's 3440×1304. `tools/char-shots.ts --views fp_...` regenerates them.
 Regenerate with
 
     ~/claude-stuff/bin/heavy --kind gpu --mem 2 -- nix-shell --run 'npx tsx tools/char-shots.ts --gpu --prefix after'

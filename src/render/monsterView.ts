@@ -13,6 +13,9 @@ import { charLayers, charSettings, frameKey, spriteInfo, type CharLayers } from 
 import { bodyShapeOf } from './chars/archetype';
 import { CreatureModel, DEATH_TOTAL as MODEL_DEATH_TOTAL, FallingBody } from './chars/creature';
 import { makeRig, type Rig } from './chars/rig';
+import { FxMeshes } from './chars/fxMeshes';
+import { cardsOn } from './cards';
+import { cddaColor } from './atlasIndex';
 import type { MonsterDef } from '../data/types';
 
 // Billboards for monsters, their corpses and projectiles (blood/bile/acid decals are drawn by
@@ -205,6 +208,7 @@ export class MonsterView implements GameSystem {
   private corpseCheck = 0;
   private kicks = new Map<Monster, { dx: number; dy: number; t: number; amt: number }>();
   private chars: CharLayers | null = null;
+  private fx: FxMeshes | null = null;
   /** dormant monsters drawn as far figures (farFigures) */
   private far: Monster[] = [];
   private farSet = new Set<Monster>();
@@ -580,7 +584,14 @@ export class MonsterView implements GameSystem {
     // Projectiles (acid globs, bile, thrown items).
     for (const h of this.projectiles) h.remove();
     this.projectiles.length = 0;
+    // (3D: a glob mesh in the glyph's colour flying along its path; billboards: the glyph)
+    this.fx ??= cardsOn() ? new FxMeshes(this.renderer) : null;
+    this.fx?.begin();
     for (const pr of this.sys.projectiles) {
+      if (this.fx) {
+        this.fx.place('glob', pr.x, pr.y, pr.z, 1.1, [pr.vx || 1e-3, pr.vy, 0], cddaColor(pr.glyph.color));
+        continue;
+      }
       const frame = this.atlas ? toFrame(this.atlas.glyph(pr.glyph.symbol, pr.glyph.color)) : this.renderer.source.glyph(pr.glyph.symbol, pr.glyph.color);
       this.projectiles.push(this.renderer.sprites.add({ x: pr.x, y: pr.y, z: pr.z, frame, height: 0.35, anchor: 'center', lift: 1.1 }));
     }
@@ -599,9 +610,14 @@ export class MonsterView implements GameSystem {
     }
     this.lastShots = shots;
     for (const t of tracers) {
+      if (this.fx) {
+        this.fx.place('spark', t.x1, t.y1, t.z, 1.2, [1, 0, 0], [255, 226, 120]);
+        continue;
+      }
       const frame = this.atlas ? toFrame(this.atlas.glyph('*', 'yellow')) : this.renderer.source.glyph('*', 'yellow');
       this.tracerSprites.push(this.renderer.sprites.add({ x: t.x1, y: t.y1, z: t.z, frame, height: 0.3, anchor: 'center', lift: 1.2 }));
     }
+    this.fx?.end();
     if (this.muzzle) {
       this.muzzleT -= dt;
       if (this.muzzleT <= 0) this.muzzle.intensity = 0;
@@ -633,3 +649,4 @@ export class MonsterView implements GameSystem {
     this.onBodyLanded?.(v.x0 + v.dx, v.y0 + v.dy, c.z, this.sys.bloodType(this.game.data.monsters[c.monId]));
   }
 }
+

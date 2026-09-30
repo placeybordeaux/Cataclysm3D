@@ -421,7 +421,8 @@ export class VehicleSystem implements GameSystem, MapOverlay {
     if (!c) return `The ${v.name} has no controls.`;
     const p = this.game.player;
     if (this.reachableControls() === v) return null;
-    const [wx, wy] = v.mountToWorld(c.mx + 0.5, c.my + 0.5);
+    // mount coordinates are tile centres (mountToWorld(0, 0) = the vehicle's position)
+    const [wx, wy] = v.mountToWorld(c.mx, c.my);
     if (p.z !== v.z || Math.hypot(wx - p.x, wy - p.y) > GET_IN_RANGE) return `Get closer to the ${v.name}'s driver's seat.`;
     return null;
   }
@@ -438,6 +439,9 @@ export class VehicleSystem implements GameSystem, MapOverlay {
     const c = v.controls();
     if (!c || c.hp <= 0 || this.getInReason(v) !== null) return false;
     const parts = v.partsAt(mx, my);
+    // An open (side) door is the way in: offer to get in wherever you open one (playtest:
+    // `e` at the open passenger door closed it again). Closing stays in the context menu.
+    if (parts.some((q) => has(q, 'OPENABLE') && q.open && !has(q, 'MULTISQUARE'))) return true;
     const ownAction = parts.some((q) => has(q, 'OPENABLE') || has(q, 'CARGO'));
     // Manhattan 1: the driver's own door counts, the rear door diagonally behind it doesn't.
     return !ownAction || Math.abs(mx - c.mx) + Math.abs(my - c.my) <= 1;
@@ -453,7 +457,8 @@ export class VehicleSystem implements GameSystem, MapOverlay {
     for (const v of this.list) {
       const c = v.controls();
       if (!c || v.z !== p.z) continue;
-      const [wx, wy] = v.mountToWorld(c.mx + 0.5, c.my + 0.5);
+      if (c.hp <= 0) continue;
+      const [wx, wy] = v.mountToWorld(c.mx, c.my);
       const d = Math.hypot(wx - p.x, wy - p.y);
       if (d <= GET_IN_RANGE && d < bestD) (best = v), (bestD = d);
     }
@@ -681,8 +686,28 @@ export class VehicleSystem implements GameSystem, MapOverlay {
     if (this.driving && !this.scriptedInput) this.readKeys();
     if (this.driving && this.driveMode === 'cruise') this.updateCruise(this.driving, realDt);
     for (const v of this.list) this.simulate(v, realDt);
+    if (this.driving) this.closeDoorsUnderway(this.driving);
     const p = game.player;
     this.engineSounds.update(this.list, { x: p.x, y: p.y, z: p.z }, this.driving, realDt);
+  }
+
+  /**
+   * Doors swing shut once the vehicle you drive gets moving (playtest: the driver's door
+   * you got in by stayed open all the way down the road). Trunk lids, tailgates and rear
+   * shutters (MULTISQUARE / end doors) stay as you left them: that's cargo, not a door.
+   */
+  private closeDoorsUnderway(v: Vehicle): void {
+    if (Math.abs(v.velocity) < 1.5) return;
+    let closed = false;
+    for (const q of v.parts) {
+      if (!q.open || !has(q, 'OPENABLE') || has(q, 'MULTISQUARE')) continue;
+      q.open = false;
+      closed = true;
+    }
+    if (closed) {
+      v.version++;
+      this.emitSound(v, 3, 'a door slamming', ['vehicle_close', pickVariant('vehicle_close', 'door', 'door')]);
+    }
   }
 
   private readKeys(): void {

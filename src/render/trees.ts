@@ -9,6 +9,7 @@ import { paintSurface, rampAround } from './pixelArt';
 import type { ProceduralTextureSource } from './proceduralSource';
 import type { TileFrame } from './textureSource';
 import { runSteps } from './steps';
+import { buildFloraSteps, flora } from './flora';
 
 // 3D trees (look.ts `trees3d`), built from the tree's own UltiCa sprite so species, colour
 // and season all carry over:
@@ -31,6 +32,11 @@ export interface TreeSpec {
   height: number;
   shrub: boolean;
   seed: number;
+  /** terrain id (flora.ts picks the species family from it) */
+  id?: string;
+  season?: 'spring' | 'summer' | 'autumn' | 'winter';
+  /** flora.ts detail: 0 near (full), 1 middle ring, 2 far (impostor cards) */
+  lod?: 0 | 1 | 2;
 }
 
 interface TreeShape {
@@ -270,6 +276,8 @@ export function buildTrees(specs: TreeSpec[], ground: GroundField | null, proc: 
 
 /** buildTrees yielding after each tree (a forest chunk is ~10 ms of trees; see chunkManager). */
 export function* buildTreesSteps(specs: TreeSpec[], ground: GroundField | null, proc: ProceduralTextureSource, white: TileFrame): Generator<void, THREE.Object3D[]> {
+  // Trees option "models" (flora.ts): modelled species at every distance
+  if (flora.name === 'models') return yield* buildFloraSteps(specs, ground);
   const trunkG = new GeomBuilder();
   // bare crowns: the sprite's own branch drawing on three crossed planes (per atlas page)
   const planes = new Map<THREE.Texture, GeomBuilder>();

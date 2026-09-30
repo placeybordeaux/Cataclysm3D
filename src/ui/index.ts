@@ -22,6 +22,7 @@ import { installTipsOption, openHints } from './tips';
 import { installActivityRing } from './activity_ring';
 import { installAdaptation } from './adaptation';
 import { installRestUi } from './rest_ui';
+import { installRouteGuide } from './route';
 import { installLiquidUi } from './liquid_ui';
 import { applyBuild, defaultBuild, openCharGen } from './chargen';
 import { registerSaveable } from '../save/registry';
@@ -71,6 +72,7 @@ export async function installUi(game: Game, renderer: Renderer, worldgen: WorldG
   installTipsOption();
   installAdaptation(game);
   installRestUi(game);
+  installRouteGuide(game, renderer, () => worldgen?.overmap ?? null);
   installActivityRing(game, () => {
     const e = h.log.entries[h.log.entries.length - 1];
     return e ? e.text.replace(/<[^>]+>/g, '') : null;

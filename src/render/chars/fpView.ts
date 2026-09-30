@@ -5,7 +5,7 @@ import type { Viewmodel, ViewmodelItem, ViewmodelState } from '../viewmodel';
 import { AtlasTextureSource } from '../atlasSource';
 import { bodyShapeOf } from './archetype';
 import { CharLayer, fpMaterial, type CharInstance } from './charLayer';
-import { buildHeld, heldClass, type HeldBuild } from './held';
+import { buildHeld, heldClass, heldVariant, type HeldBuild, type HeldClass } from './held';
 import { charLayers, charSettings, frameKey, spriteInfo } from './index';
 import { analyseSprite, type Palette } from './paint';
 import { newPoseOut, type PartDef, type Rig } from './rig';
@@ -22,21 +22,46 @@ import type { TileFrame } from '../textureSource';
 //   ?viewmodel=model|sprite · Options → First-person hands · cdda.chars({ viewmodel: 'sprite' })
 
 const FOV = 56;
-const TEXELS = 2.5; // arms and items are seen from 30 cm: 80 texels/m
+// arms and items are seen from 30-60 cm, where a low-res pixel is ~1 mm: paint at 256 texels/m
+// so a knuckle is a few texels and a slide has room for serrations
+const TEXELS = 8;
 const FLASH_COLOR = new THREE.Color(1.0, 0.55, 0.12);
 
 type Side = 1 | -1;
 
-/** Forearm + fist (+ upper arm) seen from the shoulder: the hand is the root. */
-function armParts(side: Side): PartDef[] {
-  return [
-    { name: 'hand', parent: -1, joint: [0, 0, 0], size: [0.085, 0.085, 0.1], center: [0, 0, 0], taper: [0.95, 0.9, 1, 1], taperAxis: 'z', src: { region: 'hand' }, kind: 'limb' },
-    { name: 'fArm', parent: 0, joint: [side * 0.005, -0.015, 0.045], size: [0.075, 0.072, 0.3], center: [0, 0, 0.15], rest: [0.5, side * 0.3, 0], taper: [0.85, 0.85, 1.05, 1.05], taperAxis: 'z', src: { region: 'foreArm' }, kind: 'limb' },
-    { name: 'uArm', parent: 1, joint: [0, 0, 0.3], size: [0.09, 0.088, 0.3], center: [0, 0, 0.15], rest: [-0.5, side * 0.25, 0], src: { region: 'upperArm' }, kind: 'limb' },
-    // a fist is not a cube: a knuckle ridge along the front, a thumb folded across on the inside
-    { name: 'knuckles', parent: 0, joint: [0, 0.028, -0.05], size: [0.082, 0.03, 0.022], center: [0, 0, 0], src: { region: 'hand' }, kind: 'limb' },
-    { name: 'thumb', parent: 0, joint: [-side * 0.036, -0.012, -0.02], size: [0.026, 0.026, 0.06], center: [0, 0, 0], rest: [0, side * 0.5, 0], src: { region: 'hand' }, kind: 'limb' },
+/** Index of the hand in armParts (the rolled frame the fingers and a held grip live in). */
+const HAND = 1;
+
+/**
+ * Forearm + upper arm + a modelled fist, rooted at the wrist. Hand frame: x across the
+ * knuckles, y out of the back of the hand, -z toward the knuckles. Four fingers curl round a
+ * grip along x (proximal row = the knuckles, middle row curled under), the thumb wraps across
+ * the front of them, the back of the hand is domed, the wrist is narrower than the hand. A
+ * held item's grip passes through the curled fingers (heldRig rolls the hand to match it).
+ */
+function armParts(side: Side, handRest: [number, number, number] = [0, 0, 0]): PartDef[] {
+  const P: PartDef[] = [
+    { name: 'wrist', parent: -1, joint: [0, 0, 0], size: [0.001, 0.001, 0.001], center: [0, 0, 0], src: { color: [0, 0, 0] }, kind: 'thin' },
+    { name: 'hand', parent: 0, joint: [0, 0, -0.045], size: [0.08, 0.034, 0.078], center: [0, 0.012, 0.004], rest: handRest, taper: [1.04, 1, 0.9, 0.95], taperAxis: 'z', src: { region: 'fpBack' }, kind: 'limb' },
+    { name: 'dome', parent: 1, joint: [0, 0.03, 0.006], size: [0.062, 0.012, 0.06], center: [0, 0, 0], src: { region: 'fpBack' }, kind: 'limb' },
+    { name: 'palm', parent: 1, joint: [0, -0.017, 0.008], size: [0.074, 0.03, 0.068], center: [0, 0, 0], src: { region: 'fpPalm' }, kind: 'limb' },
+    // the forearm runs back toward the elbow (+z, down a little): its +y end is the wrist
+    { name: 'fArm', parent: 0, joint: [0, -0.004, 0.012], size: [0.066, 0.3, 0.062], center: [0, -0.15, 0], rest: [-1.07, side * 0.3, 0], taper: [1.14, 1.12, 0.86, 0.86], src: { region: 'fpSleeveLower' }, kind: 'limb' },
+    { name: 'uArm', parent: 4, joint: [0, -0.3, 0], size: [0.086, 0.3, 0.082], center: [0, -0.15, 0], rest: [-0.5, 0, 0], src: { region: 'fpSleeveUpper' }, kind: 'limb' },
   ];
+  // fingers, index (thumb side) to little, the little finger a touch shorter
+  for (let i = 0; i < 4; i++) {
+    const x = side * (-0.0285 + i * 0.019);
+    const shrink = i === 3 ? 0.85 : 1;
+    const prox = P.length;
+    P.push({ name: `prox${i}`, parent: HAND, joint: [x, 0.004, -0.047], size: [0.0172, 0.028 * shrink, 0.03], center: [0, 0, -0.004], taper: [1, 1, 0.94, 0.94], taperAxis: 'z', src: { region: 'fpFinger' }, kind: 'limb' });
+    P.push({ name: `mid${i}`, parent: prox, joint: [0, -0.012, -0.016], size: [0.016, 0.03 * shrink, 0.022], center: [0, -0.012, 0.002], rest: [0.25, 0, 0], src: { region: 'fpFinger' }, kind: 'limb' });
+  }
+  // thumb: base along the inner side, tip lying across the front of the curled fingers
+  const tb = P.length;
+  P.push({ name: 'thumbBase', parent: HAND, joint: [-side * 0.037, -0.018, -0.018], size: [0.024, 0.026, 0.044], center: [0, 0, -0.012], rest: [0, -side * 0.25, 0], src: { region: 'fpThumb' }, kind: 'limb' });
+  P.push({ name: 'thumbTip', parent: tb, joint: [side * 0.004, -0.004, -0.034], size: [0.044, 0.02, 0.021], center: [side * 0.016, 0, 0], rest: [0, side * 0.2, 0], taper: [0.86, 0.9, 1, 1], taperAxis: 'y', src: { region: 'fpThumb' }, kind: 'limb' });
+  return P;
 }
 
 function rigOf(parts: PartDef[]): Rig {
@@ -47,12 +72,23 @@ function rigOf(parts: PartDef[]): Rig {
   };
 }
 
-/** Right arm holding an item: arm parts, a pivot carrying the grip rotation, the item. */
+const _hm = new THREE.Matrix4();
+const _he = new THREE.Euler();
+
+/**
+ * Right arm holding an item: the item hangs from a pivot at the fist's centre (its `hold`
+ * rotation), and the hand is rolled so its knuckle row runs along the item's grip (item +y):
+ * hand = hold · Rz(90°). The fingers then curl round the grip instead of a block floating beside it.
+ */
 function heldRig(h: HeldBuild | null): { rig: Rig; pivot: number } {
-  const parts = armParts(1);
-  if (!h) return { rig: rigOf(parts), pivot: -1 };
+  if (!h) return { rig: rigOf(armParts(1)), pivot: -1 };
+  _hm.makeRotationFromEuler(_he.set(h.hold[0], h.hold[1], h.hold[2]));
+  _hm.multiply(new THREE.Matrix4().makeRotationZ(Math.PI / 2));
+  _he.setFromRotationMatrix(_hm, 'XYZ');
+  const parts = armParts(1, [_he.x, _he.y, _he.z]);
   const pivot = parts.length;
-  parts.push({ name: 'pivot', parent: 0, joint: [0, 0, 0], size: [0.001, 0.001, 0.001], center: [0, 0, 0], rest: h.hold, src: { color: [0, 0, 0] }, kind: 'thin' });
+  // the grip runs through the curled fingers; undo the hand's roll so the item keeps `hold`
+  parts.push({ name: 'pivot', parent: HAND, joint: [0, -0.014, -0.05], size: [0.001, 0.001, 0.001], center: [0, 0, 0], rest: [0, 0, -Math.PI / 2], src: { color: [0, 0, 0] }, kind: 'thin' });
   for (const p of h.parts) parts.push({ ...p, parent: p.parent < 0 ? pivot : p.parent + pivot + 1 });
   return { rig: rigOf(parts), pivot };
 }
@@ -63,11 +99,12 @@ const vmAimY = (vm: Viewmodel) => vm.aimPx.y;
 
 /** Left fist on a bow: riser, two limbs, two string halves, an arrow (pose sets their angles). */
 function bowRig(kind: 'bow' | 'slingshot', pal: Palette): Rig {
-  const parts = armParts(-1);
+  // left fist rolled knuckles-up round the riser, which runs through the curled fingers
+  const parts = armParts(-1, [0, 0, Math.PI / 2]);
   const L = BOW_L[kind];
   const wood = pal.main;
   const riser = parts.length;
-  parts.push({ name: 'riser', parent: 0, joint: [0, 0, 0], size: [0.03, kind === 'bow' ? 0.14 : 0.1, 0.034], center: [0, kind === 'bow' ? 0 : 0.03, 0], src: { color: wood }, kind: 'thin' });
+  parts.push({ name: 'riser', parent: 0, joint: [0.014, 0, -0.095], size: [0.03, kind === 'bow' ? 0.14 : 0.1, 0.034], center: [0, kind === 'bow' ? 0 : 0.03, 0], src: { color: wood }, kind: 'thin' });
   parts.push({ name: 'limbU', parent: riser, joint: [0, kind === 'bow' ? 0.07 : 0.08, 0], size: [0.022, L, 0.028], center: [0, L / 2, 0], taper: [1, 1, 0.55, 0.6], src: { color: wood }, kind: 'thin' });
   parts.push({ name: 'limbD', parent: riser, joint: [0, kind === 'bow' ? -0.07 : 0.08, 0], size: [0.022, L, 0.028], center: [0, -L / 2, 0], taper: [0.55, 0.6, 1, 1], src: { color: wood }, kind: 'thin' });
   parts.push({ name: 'stringU', parent: riser, joint: [0, 0, 0], size: [0.006, 1, 0.006], center: [0, 0.5, 0], src: { color: kind === 'bow' ? [226, 220, 200] : [120, 60, 40] }, kind: 'thin' });
@@ -110,6 +147,7 @@ export class FpView {
   private key = '';
   private held: HeldBuild | null = null;
   private pivot = -1;
+  private cls: HeldClass | null = null;
   private rootR = new THREE.Matrix4();
   private rootL = new THREE.Matrix4();
   private rootF = new THREE.Matrix4();
@@ -166,7 +204,8 @@ export class FpView {
       return;
     }
     const cls = item ? heldClass(item as never) : null;
-    this.held = item && cls ? buildHeld(cls, pal!, item.def?.volume) : null;
+    this.cls = cls;
+    this.held = item && cls ? buildHeld(cls, pal!, item.def?.volume, heldVariant(item as never, cls)) : null;
     const hr = heldRig(this.held);
     this.pivot = hr.pivot;
     this.right = add(hr.rig, `R:${item?.typeId ?? ''}`);
@@ -187,6 +226,14 @@ export class FpView {
       return null;
     }
     const st = vm.state;
+    // Drawn bows/slingshots stay 2D: bowArt's hand-drawn bend and string read better than the
+    // 3D bow in side-by-side shots (docs/CHARACTERS.md round 4), so hand that pose back (cdda.chars({ fpBow: true }) shows the 3D bow).
+    if (st.mode === 'drawn' && !charSettings.fpBow) {
+      vm.hide2d = false;
+      if (this.right) this.drop();
+      this.key = '';
+      return null;
+    }
     const item = this.game.player.inv.wielded as unknown as ViewmodelItem | null;
     const W = st.lowW, H = st.lowH;
     this.camera.aspect = W / H;
@@ -217,7 +264,7 @@ export class FpView {
       const a = -0.1 + (kind === 'bow' ? 0.32 : 0.1) * d;
       const riserY = kind === 'bow' ? 0.07 : 0.08;
       const nockZ = 0.04 + (kind === 'bow' ? 0.34 : 0.26) * d;
-      const base = 5; // parts after the arm (hand, forearm, upper arm, knuckles, thumb)
+      const base = armParts(-1).length; // bow parts follow the arm
       po.rot[(base + 1) * 3] = a;
       po.rot[(base + 2) * 3] = -a;
       const tipU: [number, number] = [riserY + Lb * Math.cos(a), Lb * Math.sin(a)];
@@ -252,7 +299,7 @@ export class FpView {
       for (const [i, inst, side] of [[1, R, 1], [0, L, -1]] as const) {
         const h = st.hands[i];
         const reach = Math.max(0, h.dy) * 0.55;
-        place(i ? this.rootR : this.rootL, at(h.x, h.y + H * 0.05, 0.58 + reach * 0.3), [0.12 + h.dy * 0.8, -side * 0.12, -h.rot]);
+        place(i ? this.rootR : this.rootL, at(h.x, h.y + H * 0.06, 0.52 + reach * 0.3), [0.12 + h.dy * 0.8, -side * 0.12, -h.rot]);
         _v.set(0, 0, -reach);
         (i ? this.rootR : this.rootL).multiply(_m.makeTranslation(_v.x, _v.y, _v.z));
         if (inst) this.setRoot(inst, i ? this.rootR : this.rootL);
@@ -270,16 +317,23 @@ export class FpView {
         // shoulder below and behind the view. Hip: where the 2D viewmodel put the grip.
         // The 2D pose's offsets (recoil kick, the reload dip) are sized for a flat sprite that
         // fills a third of the screen: halve them in 3D so a reloading gun dips, not vanishes.
-        const hip = at(it.x - it.dx * H * 0.5, it.y - it.dy * H * 0.55, 0.46);
-        const aim = at(W / 2 + vmAimX(this.vm), H / 2 + vmAimY(this.vm), 0.5);
+        // a pistol is small: hold it higher, nearer and turned in so it reads as a gun at the
+        // hip rather than a fist with something behind it
+        const pistol = this.cls === 'pistol';
+        const hip = at(it.x - it.dx * H * 0.5 - (pistol ? H * 0.08 : 0), it.y - it.dy * H * 0.55 + (pistol ? H * 0.1 : 0), pistol ? 0.34 : 0.4);
+        // the grip sits ~9.5 cm ahead of the wrist root
+        const aim = at(W / 2 + vmAimX(this.vm), H / 2 + vmAimY(this.vm), 0.405);
         const sightY = h.muzzle ? h.muzzle[1] + 0.03 : 0.08;
         aim[1] -= sightY;
         const k = st.ads;
         place(this.rootR, [hip[0] + (aim[0] - hip[0]) * k, hip[1] + (aim[1] - hip[1]) * k, hip[2] + (aim[2] - hip[2]) * k + Math.max(0, it.dy) * 0.15],
-          [it.rot * 0.9, 0.08 * (1 - k), 0]);
+          [it.rot * 0.9, (pistol ? 0.28 : 0.1) * (1 - k), 0]);
         // down the sights the stock is at the shoulder, below the view: don't let it slab the screen
         const stock = R.rig.parts.findIndex((q) => q.name === 'stock');
-        if (stock >= 0) R.pose.scl.set(k > 0.5 ? [0.0001, 0.0001, 0.0001] : [1, 1, 1], stock * 3);
+        // the stock is under the forearm at the hip and at the shoulder down the sights: out of view either way
+        if (stock >= 0) R.pose.scl.set([0.0001, 0.0001, 0.0001], stock * 3);
+        const butt = R.rig.parts.findIndex((q) => q.name === 'butt');
+        if (butt >= 0) R.pose.scl.set([0.0001, 0.0001, 0.0001], butt * 3);
       } else if (st.mode === 'whirl') {
         place(this.rootR, at(it.x, it.y, 0.42), [0, 0, it.rot]);
       } else {
@@ -291,15 +345,17 @@ export class FpView {
       // the off hand on a two-handed grip, else out of view
       if (L) {
         if (h.support) {
-          _m.copy(this.rootR).multiply(place(new THREE.Matrix4(), [0, 0, 0], h.hold));
+          // the off hand's grip hole on the support point, its forearm coming in from the left
+          _m.copy(this.itemFrame(R, this.rootR));
           _m.multiply(new THREE.Matrix4().makeTranslation(h.support[0], h.support[1], h.support[2]));
-          _m.multiply(place(new THREE.Matrix4(), [0, 0, 0], [-h.hold[0], -h.hold[1], -h.hold[2]]));
+          _m.multiply(place(new THREE.Matrix4(), [0, 0, 0], h.gun ? [0.2, -0.75, 0.25] : [-h.hold[0], -h.hold[1] - 0.6, -h.hold[2]]));
+          _m.multiply(new THREE.Matrix4().makeTranslation(0, 0.014, 0.095));
           this.setRoot(L, _m);
           show(L, it.vis);
         } else show(L, false);
       }
       if (F && h.muzzle) {
-        this.rootF.copy(this.rootR).multiply(place(new THREE.Matrix4(), [0, 0, 0], h.hold)).multiply(new THREE.Matrix4().makeTranslation(h.muzzle[0], h.muzzle[1], h.muzzle[2]));
+        this.rootF.copy(this.itemFrame(R, this.rootR)).multiply(new THREE.Matrix4().makeTranslation(h.muzzle[0], h.muzzle[1], h.muzzle[2]));
         this.setRoot(F, this.rootF);
         F.flashT = F.flashDur = 1; // full strength: the material emits flash colour unlit
         show(F, st.flash && it.vis);
@@ -307,6 +363,21 @@ export class FpView {
     }
     this.layer.flush(dt, charLayers(this.renderer).store);
     return this;
+  }
+
+  /** The held item's frame (the pivot in the fist) for a root: joints and rests down the chain. */
+  private itemFrame(inst: CharInstance, root: THREE.Matrix4): THREE.Matrix4 {
+    const parts = inst.rig.parts;
+    const chain: number[] = [];
+    for (let i = this.pivot; i >= 0; i = parts[i].parent) chain.unshift(i);
+    const m = new THREE.Matrix4().copy(root);
+    for (const i of chain) {
+      const p = parts[i];
+      m.multiply(place(new THREE.Matrix4(), p.joint, [0, 0, 0]));
+      const r = p.rest ?? [0, 0, 0];
+      m.multiply(new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler(r[0], r[1], r[2])));
+    }
+    return m;
   }
 
   private setRoot(inst: CharInstance, m: THREE.Matrix4): void {

@@ -112,6 +112,58 @@ Cockpit camera: eye height and lateral position come from the model (seat top + 
 kept above the bonnet), the dash sits under the bonnet line so the car is a band at the
 bottom of the view with the A-pillars framing the road.
 
+### The driver's seat (round 3, `src/render/vehicleCockpit.ts`)
+
+Built only for the vehicle you drive (the model's `cockpit` anchors, placed from the eye so
+it all sits between the bonnet line, ~14 deg down, and the view's bottom edge, 36 deg):
+
+- **Dials**: a hooded binnacle with a speedometer (0-120 mph, red from 100) and a fuel gauge
+  (E-F, red at E), 64x64 pixel-art faces painted in code (3x5 pixel numerals). The needles
+  follow the real values (`v.velocity`, main fuel tank or the battery for EVs) with a little
+  lag. Unlit (readable at night too).
+- **Steering wheel** as its own mesh, turning with the front wheels (x2.6); your **fists**
+  ride on the rim at ten-to-two and the forearms stretch from the elbows each frame. Sleeve
+  and skin colours come from your outfit composite (like the on-foot 3D arms,
+  `src/render/chars/fpView.ts`), so a red jacket drives in red sleeves.
+- **Windscreen film**: a faint lit (goes dark at night) texture inside the glass: dust haze
+  thicker at the base and corners, two wiper arcs swept cleaner, the odd fleck and a soft
+  diagonal reflection band. A few % alpha: the road reads through it.
+- **Wipers** parked at the base of the windscreen and an **interior mirror** under the roof
+  (every car, not only yours). **A-pillars** are one shoulder quad now (the windscreen glass
+  runs further into the rounding).
+
+### Lids, wrecks and more silhouettes (round 3)
+
+- **Trunk lids and hatches open**: BN's `door_trunk` (the only lid part: BN has no bonnet part
+  or engine-bay interaction, so bonnets stay shut) swings up on its hinge when opened through
+  the part menu (cargo access needs it open): a sedan's lid at the foot of the rear window, a
+  hatchback's / SUV's glass hatch at the roof's rear edge; long lids (limousines) open less so
+  they clear a z-level. Pickup tailgates and box-van shutters stay openings.
+- **Wrecks** (status 1 is what BN spawns on city roads, so most road cars): glass flecks on the
+  road by every smashed window (sideways out of doors, ahead of / behind a broken windscreen /
+  rear window), a soot scorch under burnt-out shells, soot on their paint instead of rust,
+  open doors that *hang* (swung wider, drooping at the far end) on damaged doors / wrecks,
+  and the body sits lower on destroyed tyres. BN's placements only give axis-aligned facings
+  (`road_vehicles.json` `*_wrecks`: 90/180/270), so wrecks aren't yawed; the tilt comes from
+  their flat tyres.
+- **Silhouettes by spawn frequency**: `tools/vehicle-freq.ts` generates the world around the
+  start for several seeds and ranks what mapgen spawns with the style each gets. The road
+  vehicles were covered; round 3 fixed the ones that read wrong: **RVs** (a tall box over
+  the cab with the overcab bunk, motorhome two-tone), **food trucks** (cab + tall box, orange
+  stripe), **fire engines** (crew cab + locker body), **semis** (sleeper cab, chrome stacks,
+  fifth wheel), **trailers** (one tall box on high sills), **limousines** (the chauffeur's
+  partition glass no longer cuts the cabin in two). Carts, forklifts, quad bikes and golf
+  carts stay on the tidy frame look.
+
+### Playtest fixes (round 3)
+
+- `e` at an open door (any side) offers **Drive / Get in**; closing is under More...
+- `^` from beside the car finds the controls (the seat distance was measured from a tile
+  corner); broken controls are skipped.
+- Standing in a doorway ducks the camera under the roof (`rig.eyeCap`) instead of clipping.
+- Doors (not trunk lids / shutters) swing shut once you drive off (> 1.5 m/s).
+- Real input: `tools/realinput.ts --only cardoors` checks all four.
+
 ## Screenshots (RTX 5080, 1600x900, look `full`)
 
 Regenerate: `~/claude-stuff/bin/heavy --kind gpu --mem 2 -- nix-shell --run "npx tsx tools/vehicle-shots.ts --gpu model parts"`
@@ -136,6 +188,21 @@ modelled bodies (`model`).
 | driving, cockpit | ![](screenshots/wave3/vehicles/parts_driveday.jpg) | ![](screenshots/wave3/vehicles/model_driveday.jpg) |
 | driving, chase cam | ![](screenshots/wave3/vehicles/parts_drivedaychase.jpg) | ![](screenshots/wave3/vehicles/model_drivedaychase.jpg) |
 | night driving, chase cam | ![](screenshots/wave3/vehicles/parts_drivechase.jpg) | ![](screenshots/wave3/vehicles/model_drivechase.jpg) |
+
+Round 3 (model look only):
+
+| | |
+| --- | --- |
+| cockpit, day: dials, wheel, hands, wipers, film | ![](screenshots/wave3/vehicles/r3_driveday.jpg) |
+| cockpit, night: the dials stay readable | ![](screenshots/wave3/vehicles/r3_drive.jpg) |
+| hatchback with the hatch open | ![](screenshots/wave3/vehicles/r3_solo-car_hatch-200-trunk-2.jpg) |
+| burnt-out wreck | ![](screenshots/wave3/vehicles/r3_solo-sedan-40-burnt-2.jpg) |
+| smashed glass on the road | ![](screenshots/wave3/vehicles/r3_solo-sedan-30-smashed-2.jpg) |
+| RV / motorhome | ![](screenshots/wave3/vehicles/r3_solo-rv-40-0-4.jpg) |
+| semi tractor | ![](screenshots/wave3/vehicles/r3_solo-semi_truck-50-0-4.jpg) |
+| food truck | ![](screenshots/wave3/vehicles/r3_solo-food_truck-40-0-3.jpg) |
+| limousine | ![](screenshots/wave3/vehicles/r3_solo-limousine-70-0-4.jpg) |
+| a town street (wrecks as mapgen left them) | ![](screenshots/wave3/vehicles/r3_street-1.jpg) |
 
 ## Performance
 
@@ -178,7 +245,10 @@ it, driving past someone on the verge, running over what's in the lane only.
 - The collision outline is a rectangle: you touch the bumper corners a few cm before the
   rounded paint. Vehicle-vs-vehicle / terrain crashes are still tile-based.
 - The LOD keeps the same skin (it's per vehicle, cheap).
-- Semi trucks have no trailer in BN's grid; the tractor unit reads as a long cab truck.
+- Semi tractors and trailers are separate BN vehicles and aren't coupled.
 - Boats, aircraft and tanks use the frame fallback (tracks are drawn as big wheels).
-- Hood / trunk lids don't open; tailgates and shutters open as a hole.
+- Bonnets never open (BN has no bonnet part); tailgates and shutters open as a hole.
+- Wipers don't sweep (rain doesn't reach inside the car yet); the mirror shows a flat tint,
+  not a reflection.
+- Only the driven vehicle gets the cockpit rig; a passenger seat has no view extras.
 - The part-block look (`parts`) is kept as it was in v2, including its door bug.

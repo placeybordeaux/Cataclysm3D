@@ -7,6 +7,7 @@ import { liveryBody, paintSkin, sheetUv, skinLayout, skinLayoutInfo, SKIN_PPM, t
 import { Batches, chamferBox, faceNormal, hash, mergeGeometries, partFrames, quad4, tube, wheel, type PartSwatch } from './vehicleGeom';
 import { buildBike } from './vehicleBikes';
 import { buildFrame } from './vehicleFrame';
+import type { CockpitAnchors } from './vehicleCockpit';
 
 // The "model" vehicle renderer: a cohesive low-poly body generated from the part grid
 // (vehicleLayout.ts decides the style and where things are), instead of one box per part.
@@ -61,6 +62,8 @@ export interface ModelBuild {
   parkedLean: number;
   /** Frame-style builds: the roof is drawn with the parts swatches, there is no skin. */
   bodyUsesParts?: boolean;
+  /** Driven builds: where the cockpit rig goes (vehicleCockpit.ts). */
+  cockpit?: CockpitAnchors;
   /** With `separateWheels`: each wheel built around its own centre, to steer and spin. */
   wheels?: { geo: THREE.BufferGeometry; x: number; y: number; z: number; r: number; steer: boolean }[];
 }
@@ -104,6 +107,15 @@ export function buildOutline(L: Layout): { loop: OP[]; nTop: number; arches: { x
     // slim A-pillars: a tighter shoulder along the windscreen
     pts[pts.length - 2].b = pts[pts.length - 1].b = Math.min(p.shoulder, 0.07);
     cur = p.roof;
+    if (p.overcab && secs.some((s) => s.kind === 'box')) {
+      // the bunk: out over the windscreen, rounded, then the box roof runs back from it
+      const xr = xc - p.rake;
+      add(xr + 0.28, p.roof + 0.05);
+      add(xr + 0.42, p.roof + 0.3);
+      add(xr + 0.3, p.box - 0.06);
+      add(xr + 0.1, p.box);
+      cur = p.box;
+    }
     i0 = shieldI + 1;
   } else if (shieldI >= 0) {
     add(xn, p.belt - 0.04);
@@ -134,7 +146,7 @@ export function buildOutline(L: Layout): { loop: OP[]; nTop: number; arches: { x
       case 'hood':
       case 'shield':
       case 'cabin':
-        step(s.x0, p.roof);
+        step(s.x0, p.overcab && cur >= p.box ? p.box : p.roof);
         break;
       case 'box':
         step(s.x0, p.box);
@@ -486,6 +498,25 @@ export function buildVehicleModel(v: Vehicle, base: number, opts: { reuseSkinKey
   const tailOpen = !!endDoor && endDoor.open;
   const brokenGlass = { shield: glassBroken(shieldParts), rear: glassBroken(rearParts), tail: endDoor ? endDoor.hp <= 0 : glassBroken(rearParts) };
   const shards: [V3, V3][] = [];
+  const shieldQuads: [V3[], V3[]][] = [];
+  // An open trunk lid / hatch swings up on its hinge instead of vanishing: the hinge is the
+  // foot of a sedan's rear window, or the top of a hatchback's / SUV's tail glass. Tailgates
+  // and roller shutters (pickups, box vans) have no lid to lift: they stay an opening.
+  let lid: { from: number; hx: number; hy: number } | null = null;
+  if (tailOpen && ['sedan', 'hatch', 'sports', 'suv', 'minivan'].includes(L.style)) {
+    const rearEnd = loop.findIndex((q, idx) => idx < nTop && q.glass === 'rear');
+    const tailStart = loop.findIndex((q, idx) => idx < nTop && q.glass === 'tail');
+    const h = rearEnd >= 0 && L.sections.some((s) => s.kind === 'deck') ? rearEnd : tailStart > 0 ? tailStart - 1 : -1;
+    if (h >= 0) lid = { from: h, hx: Q[h].x, hy: Q[h].y };
+  }
+  // a long lid (a limousine's trunk) opens less, so it stays under a z-level's ceiling
+  const LID_ANGLE = lid ? -Math.min(1.2, Math.asin(Math.min(1, 1.05 / Math.max(0.5, lid.hx - L.xTail)))) : 0;
+  const lidRot = (q: V3): V3 => {
+    if (!lid) return q;
+    const dx = q[0] - lid.hx, dy = q[1] - base - lid.hy;
+    const c = Math.cos(LID_ANGLE), s = Math.sin(LID_ANGLE);
+    return [lid.hx + dx * c - dy * s, base + lid.hy + dx * s + dy * c, q[2]];
+  };
   for (let i = 0; i < Q.length; i++) {
     const j = (i + 1) % Q.length;
     const A = sections[i], B = sections[j];
@@ -495,12 +526,34 @@ export function buildVehicleModel(v: Vehicle, base: number, opts: { reuseSkinKey
     if (segLen < 1e-4) continue;
     // an open tailgate / shutter / hatch leaves the tail face open (side walls stay)
     const onTail = Math.max(loop[i].x, loop[j].x) < L.xTail + 0.35 && i < nTop - 1 && Math.min(loop[i].y, loop[j].y) > p.sill + 0.2;
-    if (tailOpen && onTail) kind = 'open';
+    const onLid = !!lid && i >= lid.from && i < nTop - 1 && Math.min(loop[i].y, loop[j].y) > p.sill + 0.25;
+    if (tailOpen && onTail && !lid) kind = 'open';
     const isGlass = kind === 'glass';
+    if (onLid) {
+      const broken = isGlass && pt.glass ? brokenGlass[pt.glass] : false;
+      for (let k = 0; k < 10; k++) {
+        const q = [A[k], A[k + 1], B[k + 1], B[k]];
+        const r = q.map(lidRot);
+        if (isGlass && k >= 3 && k < 7) {
+          if (!broken) quadB(glass, r[0], r[1], r[2], r[3]);
+          continue;
+        }
+        // texture as it lay closed (the sheet follows the original face, not the lifted one)
+        const sh = sheetFor(faceNormal(q[0], q[1], q[2]), kind);
+        tri(body, r[0], r[1], r[2], kind, sh, 1, [q[0], q[1], q[2]]);
+        tri(body, r[0], r[2], r[3], kind, sh, 1, [q[0], q[2], q[3]]);
+      }
+      continue;
+    }
     const broken = isGlass && pt.glass ? brokenGlass[pt.glass] : false;
     const target = inRoofZone((Q[i].x + Q[j].x) / 2, Math.min(Q[i].y, Q[j].y)) && kind === 'paint' ? roof : body;
+    // The windscreen's glass runs into the shoulder, leaving a slim A-pillar (one quad), so
+    // from the driver's seat the pillars frame the road instead of hiding a lane of it.
+    const glassFrom = isGlass && pt.glass === 'shield' ? 1 : 3, glassTo = isGlass && pt.glass === 'shield' ? 9 : 7;
+    const shieldSeg = isGlass && pt.glass === 'shield' && !broken;
+    if (shieldSeg) shieldQuads.push([A, B]);
     for (let k = 0; k < 10; k++) {
-      const middle = k >= 3 && k < 7;
+      const middle = k >= glassFrom && k < glassTo;
       const a = A[k], a2 = A[k + 1], b = B[k], b2 = B[k + 1];
       if (middle && kind === 'open') continue;
       if (middle && isGlass) {
@@ -557,13 +610,16 @@ export function buildVehicleModel(v: Vehicle, base: number, opts: { reuseSkinKey
     for (const dh of doorHoles[side]) {
       if (L.style === 'bus') continue;
       const d = dh.d;
-      const ang = 1.15;
+      // A wrecked car's open door hangs: swung wide on a bent hinge and drooping at the far end.
+      const sprung = d.part.hp < d.part.def.durability * 0.5 || L.wear > 0.45;
+      const ang = sprung ? 1.45 + (v.uid % 3) * 0.08 : 1.15;
+      const droop = sprung ? 0.16 : 0;
       const hx = d.x0, cs = Math.cos(ang), sn = Math.sin(ang);
       const swing = (x: number, y: number, zOff: number): V3 => {
         const at = P3(x, y, side * (hw + zOff));
         const zh = P3(hx, y, side * hw)[2];
         const dx = x - hx, dz = at[2] - zh;
-        return [hx + dx * cs, at[1], zh + side * -dx * sn + dz * cs];
+        return [hx + dx * cs, at[1] + dx * droop, zh + side * -dx * sn + dz * cs];
       };
       const leaf = dh.pts.map(([x, y]) => new THREE.Vector2(x, y));
       if (THREE.ShapeUtils.isClockWise(leaf)) leaf.reverse();
@@ -608,7 +664,8 @@ export function buildVehicleModel(v: Vehicle, base: number, opts: { reuseSkinKey
   // chassis block between the wheels: grounds the body (you see under a car, not through it)
   {
     const wz = Math.max(0.2, hw - 0.42);
-    parts.get(0x2a2a2c).box(L.xTail + 0.45, base + p.sill * 0.35, L.yc - wz, L.xNose - 0.45, base + p.sill + 0.03, L.yc + wz, 63, F.dark, F.dark, base);
+    // a slab no deeper than ~25 cm: under a high trailer a full-height block read as a wall
+    parts.get(0x2a2a2c).box(L.xTail + 0.45, base + Math.max(p.sill * 0.35, p.sill - 0.25), L.yc - wz, L.xNose - 0.45, base + p.sill + 0.03, L.yc + wz, 63, F.dark, F.dark, base);
   }
   parts.sky = 1;
   // bumpers
@@ -643,11 +700,80 @@ export function buildVehicleModel(v: Vehicle, base: number, opts: { reuseSkinKey
   }
   const ctrl = v.parts.find((q) => has(q, 'CONTROLS'));
   if (ctrl && cab) driverZ = L.zOf(ctrl.my);
+  let cockpit: CockpitAnchors | undefined;
   if (ctrl && cab && driverZ !== null && !far) {
-    const sx = Math.min(dashFront - 0.46, L.xOf(ctrl.mx) + 0.62);
-    steeringWheel(parts.get(0x1e1e22), sx, base + dashTop - 0.16, driverZ, 0.18, F.dark);
-    // instrument binnacle
-    chamferBox(parts.get(0x1a1a1c), dashFront - 0.36, base + dashTop - 0.02, driverZ - 0.15, dashFront - 0.24, base + dashTop + 0.03, driverZ + 0.15, 0.03, F.dark, F.dark);
+    // Placed from the driver's eye (the cockpit camera, vehicleMesh.ts EYE_FORWARD ahead of
+    // the seat): the rim's top third and your hands on it at the bottom of the view, the
+    // dials peeking over it, all under the bonnet line so the road stays clear.
+    const ex = L.xOf(ctrl.mx) + 0.15, ey = base + eyeH;
+    // (72 deg vertical FOV: the bottom edge is 36 deg down; the bonnet line ~14 deg)
+    const wx = Math.min(dashFront - 0.5, ex + 0.42), wy = ey - 0.33;
+    const tilt = 0.45, r = 0.18;
+    // column into the dash
+    tube(parts.get(0x1e1e22), [wx, wy, driverZ], [wx + 0.4, wy - 0.12, driverZ], 0.03, F.dark, 5);
+    if (!opts.separateWheels) steeringWheel(parts.get(0x34343a), wx, wy, driverZ, r, F.leather);
+    // instrument binnacle: a hooded box behind the wheel, its face tilted toward your eye
+    // the dials sit just above the rim's top, ~21 deg down: in view, under the bonnet line
+    const cx = Math.min(dashFront - 0.3, ex + 0.68), cy = ey - 0.26;
+    const bz = 0.17;
+    chamferBox(parts.get(0x1a1a1c), cx, Math.min(cy - 0.09, base + dashTop - 0.02), driverZ - bz, cx + 0.14, cy + 0.08, driverZ + bz, 0.03, F.dark, F.dark);
+    chamferBox(parts.get(0x141416), cx - 0.04, cy + 0.06, driverZ - bz, cx + 0.14, cy + 0.09, driverZ + bz, 0.02, F.dark, F.dark);
+    if (opts.separateWheels) {
+      const eye: V3 = [ex, ey, driverZ];
+      const c0: V3 = [cx - 0.012, cy, driverZ];
+      let n: V3 = [eye[0] - c0[0], eye[1] - c0[1], 0];
+      const nl = Math.hypot(n[0], n[1]);
+      n = [n[0] / nl, n[1] / nl, 0];
+      const up: V3 = [-n[1], n[0], 0];
+      if (up[1] < 0) (up[0] = -up[0]), (up[1] = -up[1]);
+      // right-handed: right = up x n; the dial's +x is the driver's right (+z)
+      const right: V3 = [0, 0, 1];
+      const dials: CockpitAnchors['dials'] = [
+        { kind: 'speed', c: [c0[0], c0[1], driverZ - 0.075], right, up, n, r: 0.062 },
+        { kind: 'fuel', c: [c0[0], c0[1], driverZ + 0.08], right, up, n, r: 0.05 },
+      ];
+      // film: the windscreen quads again, just inside the glass, UVs across / up the screen
+      const fb = new GeomBuilder();
+      const ys = shieldQuads.flatMap(([A, B]) => [A[1][1], B[1][1]]);
+      const y0 = Math.min(...ys), y1 = Math.max(...ys);
+      const zA = L.yc - hw, zB = L.yc + hw;
+      const uvOf2 = (q: V3): [number, number] => [Math.min(0.999, Math.max(0.001, (q[2] - zA) / (zB - zA))), Math.min(0.999, Math.max(0.001, (q[1] - y0) / Math.max(0.1, y1 - y0)))];
+      for (const [A, B] of shieldQuads)
+        for (let k = 1; k < 9; k++) {
+          const q = [A[k], A[k + 1], B[k + 1], B[k]].map((pnt) => [pnt[0] - 0.01, pnt[1], pnt[2]] as V3);
+          const uvs = q.map(uvOf2);
+          fb.tri(q[0], q[1], q[2], [-1, 0, 0], [...uvs[0], ...uvs[1], ...uvs[2]], FULL, [1, 1, 1]);
+          fb.tri(q[0], q[2], q[3], [-1, 0, 0], [...uvs[0], ...uvs[2], ...uvs[3]], FULL, [1, 1, 1]);
+        }
+      cockpit = {
+        wheel: { x: wx, y: wy, z: driverZ, r, tilt },
+        dials,
+        elbows: [[ex - 0.12, ey - 0.62, driverZ - 0.26], [ex - 0.12, ey - 0.62, driverZ + 0.26]],
+        film: fb.vertexCount ? fb.build() : null,
+      };
+    }
+  }
+  // wipers resting on the windscreen's base, and an interior mirror under the roof
+  if (shieldQuads.length && !far && L.xCowl !== null) {
+    const [A0] = shieldQuads[0];
+    const [, B1] = shieldQuads[shieldQuads.length - 1];
+    const lo = A0[5], hi = B1[5];
+    const gl = Math.hypot(hi[0] - lo[0], hi[1] - lo[1]);
+    const upv: V3 = [(hi[0] - lo[0]) / gl, (hi[1] - lo[1]) / gl, 0];
+    const out: V3 = [upv[1], -upv[0], 0];
+    for (const pz of [L.yc - hw * 0.42, L.yc + hw * 0.1]) {
+      const piv: V3 = [lo[0] + upv[0] * 0.06 + out[0] * 0.02, lo[1] + upv[1] * 0.06 + out[1] * 0.02, pz];
+      const len = hw * 0.72, a = 0.12;
+      const tip: V3 = [piv[0] + upv[0] * len * Math.sin(a), piv[1] + upv[1] * len * Math.sin(a), pz + len * Math.cos(a)];
+      tube(parts.get(0x151517), piv, tip, 0.012, F.dark, 4);
+      chamferBox(parts.get(0x151517), piv[0] - 0.02, piv[1] - 0.02, pz - 0.02, piv[0] + 0.02, piv[1] + 0.02, pz + 0.02, 0.01, F.dark, F.dark);
+    }
+    if (cab && driverZ !== null) {
+      const mx = hi[0] - 0.14, my = hi[1] - 0.12, mz = L.yc + (driverZ - L.yc) * 0.25;
+      tube(parts.get(0x1a1a1c), [hi[0] - 0.04, hi[1] - 0.02, mz], [mx, my, mz], 0.012, F.dark, 4);
+      chamferBox(parts.get(0x1a1a1c), mx - 0.03, my - 0.04, mz - 0.13, mx + 0.01, my + 0.035, mz + 0.13, 0.02, F.dark, F.dark);
+      chamferBox(parts.get(0x8894a0), mx - 0.034, my - 0.03, mz - 0.12, mx - 0.028, my + 0.025, mz + 0.12, 0.01, F.chrome, F.chrome);
+    }
   }
   // seats
   for (const s of far ? [] : v.parts.filter((q) => has(q, 'SEAT') || has(q, 'BED'))) {
@@ -680,6 +806,20 @@ export function buildVehicleModel(v: Vehicle, base: number, opts: { reuseSkinKey
       }
     } else wheel(wheels.get(flat ? 0x5a5656 : 0x9a9a9a), w.x, cy, w.z, r, w.width, F, wopts);
   }
+  // semi tractors: chrome stacks behind the cab and a fifth wheel on the deck
+  const flat = L.sections.find((s) => s.kind === 'flat');
+  if (L.style === 'truck' && flat && !far) {
+    const sx = flat.x0 - 0.12;
+    for (const s of [-1, 1]) {
+      const z = L.yc + s * (hw - 0.14);
+      tube(parts.get(0xc8ccd2), [sx, base + p.sill + 0.4, z], [sx, base + Math.min(p.roof + 0.55, 2.88), z], 0.07, F.chrome, 8);
+      chamferBox(parts.get(0x9a9ea4), sx - 0.2, base + p.sill + 0.05, z - 0.18 * s - 0.2, sx + 0.2, base + p.sill + 0.38, z - 0.18 * s + 0.2, 0.12, F.chrome, F.chrome);
+    }
+    const fx = (flat.x0 + flat.x1) / 2 + 0.3;
+    chamferBox(parts.get(0x202022), fx - 0.55, base + p.sill + 0.5, L.yc - 0.5, fx + 0.45, base + p.sill + 0.62, L.yc + 0.5, 0.3, F.dark, F.metal);
+  }
+  // --- the wreck's surroundings: glass on the road, a scorch under a burnt-out shell ---
+  debris(parts, v, L, base, hw, far);
   // exhaust
   if (!far) tube(parts.get(0x8a8a8e), [L.xTail + 0.5, base + p.sill * 0.6, L.yc - hw * 0.45], [L.xTail - 0.04, base + p.sill * 0.6, L.yc - hw * 0.45], 0.035, F.chrome, 6);
 
@@ -705,7 +845,7 @@ export function buildVehicleModel(v: Vehicle, base: number, opts: { reuseSkinKey
 
   return {
     body: out(body), roof: out(roof), parts: merged, glass: out(glass), lamps: out(lampsG), tails: out(tailsG), beacons: out(beaconsB),
-    skin, skinJob, skinKey, layout: L, eyeH, driverZ, driverX: ctrl ? L.xOf(ctrl.mx) : undefined, parkedLean: 0, wheels: loose.length ? loose : undefined,
+    skin, skinJob, skinKey, layout: L, eyeH, driverZ, driverX: ctrl ? L.xOf(ctrl.mx) : undefined, parkedLean: 0, cockpit, wheels: loose.length ? loose : undefined,
   };
 }
 
@@ -715,6 +855,47 @@ export function parkedSteerAngle(uid: number): number {
   if (h < 0.5) return 0;
   const a = 0.12 + ((h - 0.5) / 0.5) * 0.28;
   return hash(uid, 5, 9) < 0.5 ? -a : a;
+}
+
+/**
+ * Broken glass glinting on the ground by each smashed window (side glass falls outside the
+ * door, the windscreen onto the bonnet and the road ahead), and a soot scorch on the road under
+ * a burnt-out wreck. Deterministic per vehicle. Drawn with the parts (not sagged: it's on the road).
+ */
+function debris(b: Batches, v: Vehicle, L: Layout, base: number, hw: number, far: boolean): void {
+  const F = partFrames();
+  let n = 0;
+  const rnd = () => hash(v.uid, n++, 71);
+  const fleck = (x: number, z: number) => {
+    const y = base + 0.012 + rnd() * 0.004, s = 0.025 + rnd() * 0.035, a = rnd() * Math.PI;
+    const c = Math.cos(a) * s, sn = Math.sin(a) * s;
+    b.get(rnd() < 0.5 ? 0xc8dce8 : 0x8aa4b4).tri([x + c, y, z + sn], [x - sn * 0.6, y, z + c * 0.6], [x - c, y, z - sn], [0, 1, 0], [0.2, 0.2, 0.8, 0.3, 0.5, 0.8], F.light, [1, 1, 1]);
+  };
+  if (!far) {
+    for (const q of v.parts) {
+      if (q.hp > 0 || !(has(q, 'WINDSHIELD') || has(q, 'WINDOW'))) continue;
+      const x = L.xOf(q.mx);
+      const side = q.my < L.yc - 0.3 ? -1 : q.my > L.yc + 0.3 ? 1 : 0;
+      for (let k = 0; k < 12; k++) {
+        if (side) fleck(x + (rnd() - 0.5) * 1.1, L.yc + side * (hw + 0.1 + rnd() * rnd() * 1.2));
+        else {
+          // windscreen / rear glass: out past the nose or the tail
+          const front = x > (L.xNose + L.xTail) / 2;
+          fleck(front ? L.xNose + 0.1 + rnd() * rnd() * 1.4 : L.xTail - 0.1 - rnd() * rnd() * 1.4, L.yc + (rnd() - 0.5) * hw * 2.2);
+        }
+      }
+    }
+  }
+  if (L.wear > 0.6) {
+    // soot: an irregular dark blot a little larger than the body
+    const cx = (L.xNose + L.xTail) / 2, rx = (L.xNose - L.xTail) / 2 + 0.5, rz = hw + 0.6;
+    const N = 18, y = base + 0.01;
+    const pt = (i: number): V3 => {
+      const a = (i / N) * Math.PI * 2, k = 0.75 + hash(v.uid, i, 13) * 0.35;
+      return [cx + Math.cos(a) * rx * k, y, L.yc + Math.sin(a) * rz * k];
+    };
+    for (let i = 0; i < N; i++) b.get(0x141210).tri([cx, y, L.yc], pt(i + 1), pt(i), [0, 1, 0], [0.5, 0.5, 0.5, 0.5, 0.5, 0.5], F.dark, [0.35, 0.35, 0.35]);
+  }
 }
 
 function sampleWallTop(f: (x: number) => number, x0: number, x1: number): SkinInput['wallTop'] {
@@ -880,7 +1061,8 @@ function sagPlane(L: Layout): Sag | null {
   const cx = (L.xNose + L.xTail) / 2, cz = L.yc;
   let drop = 0, sx = 0, sz = 0;
   for (const w of flats) {
-    const d = w.r * 0.22;
+    // a wreck sits right down on its rims
+    const d = w.r * (L.wear > 0.45 ? 0.34 : 0.22);
     drop += d / L.wheels.length;
     sx += (d * (w.x - cx)) / Math.max(1, ((L.xNose - L.xTail) / 2) ** 2) / 2;
     sz += (d * (w.z - cz)) / Math.max(0.5, L.hw ** 2) / 2;
