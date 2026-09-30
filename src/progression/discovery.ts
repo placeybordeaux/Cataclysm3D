@@ -80,6 +80,17 @@ export const NUDGES: Record<string, NudgeDef> = Object.fromEntries([
   N('first_book', 'Items', 4, 'A book',
     'Read it with <keybind:read>: books teach skills and recipes.',
     'Books teach skills and contain recipes. <keybind:read> reads one (you need light). Fun books lift your mood; manuals and textbooks train skills.'),
+  // Combat lessons taught by short crosshair hints (src/ui/combatHints.ts) rather than toasts:
+  // they are only marked discovered here so the journal keeps the longer explanation.
+  N('aim_sway', 'Combat', 0, 'Your aim sways',
+    'Your aim sways: fire as it crosses the target.',
+    'In first person your shot goes exactly where the crosshair is. The less skilled you are, the more the crosshair weaves (and walking, running, pain and exhaustion make it worse); holding right mouse steadies it. Fire as it crosses the target. Skill also makes every hit do more damage.'),
+  N('aim_headshot', 'Combat', 0, 'Headshots',
+    'Aim for the head: ×2 damage.',
+    'Where a shot or a blow lands matters: the head takes double damage (a club to the head can stun), legs and arms less (a blow to the legs can knock a zombie down). The line above the crosshair says why a hit was strong or weak.'),
+  N('melee_guard', 'Combat', 0, 'Guard',
+    'Hold right mouse to guard · Space to side-step.',
+    'Zombies rear back before they strike. Hold right mouse to raise your guard as the blow comes — just in time is a parry that staggers them — or tap Space to side-step out of reach.'),
   N('first_rain', 'World', 3, 'Rain',
     'Getting wet chills you. Head indoors, or wear something waterproof.',
     'Rain soaks your clothes, and wet clothes make you cold. It also muffles sound and limits sight — for them as well as for you.'),

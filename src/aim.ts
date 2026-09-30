@@ -15,6 +15,7 @@ import { aimHooks, zoneOfPart, type Vec3 } from './game/aimmodel';
 import { pickModel, prepareModel } from './render/aimPick';
 import { EnemyFireFx } from './render/enemyFireFx';
 import { enemyFireOf } from './game/enemyfire';
+import { CombatHints } from './ui/combatHints';
 import { LEVEL_HEIGHT } from './world/coords';
 import type { Monster } from './game/monster';
 
@@ -181,6 +182,9 @@ function installPresenter(game: Game, renderer: Renderer, monsters: MonstersHand
     desc: 'Free aim: a faint trail behind the crosshair showing how it has been weaving over the last second (helps you time shots).',
   });
   installModelHooks(game, renderer, monsters, api);
+  // First-fight onboarding: short crosshair lines the first few times (src/ui/combatHints.ts).
+  const hints = new CombatHints(game, combat, root);
+  if (api) api.combatHints = hints;
   // Enemy rounds in flight, and the near-miss cue: a zip past your ear and a small flinch of
   // the view and the hands toward the side it passed (src/game/enemyfire.ts).
   new EnemyFireFx(game, renderer, () => enemyFireOf(game));
@@ -231,6 +235,8 @@ function installPresenter(game: Game, renderer: Renderer, monsters: MonstersHand
       vm.aimPx.x = lp.x;
       vm.aimPx.y = -lp.y;
     }
+
+    hints.frame(dt, on ? px : { x: 0, y: 0 }, view);
 
     // --- the overlay
     if (!view) {
