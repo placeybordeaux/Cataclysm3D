@@ -1,7 +1,12 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { beforeAll, describe, expect, it } from 'vitest';
-import type * as THREE from 'three';
+import * as THREE from 'three';
+import { bodyShapeOf } from '../src/render/chars/archetype';
+import { HUM, makeRig } from '../src/render/chars/rig';
+import { CharLayer } from '../src/render/chars/charLayer';
+import { rimGrips } from '../src/render/vehicleRider';
+import { GRIP_TURN_MAX } from '../src/render/vehicleCockpit';
 import { Rng } from '../src/core/rng';
 import type { GameData } from '../src/data/types';
 import { spawnVehicle, type Vehicle } from '../src/game/vehicle';
@@ -294,6 +299,32 @@ describe('vehicle model: where the rider sits (vehicleRider.ts)', () => {
       // head top (~0.8 m over the hips) stays under the roof line
       expect(a.hip[1] + 0.8).toBeLessThan(m.layout.p.roof + 0.05);
       for (const g of a.grips) expect(g[0]).toBeGreaterThan(a.hip[0] + 0.3);
+    }
+  });
+
+  it('cars: both hands stay on the rim through the whole steering range (full lock x2.6)', () => {
+    const rig = makeRig(bodyShapeOf({ id: 'player_male', bodytype: 'human', species: ['HUMAN'], volume: 62500 }));
+    const dm = rig.dims!;
+    for (const id of ['car', 'car_sports', 'suv', 'pickup', 'bus', 'cube_van']) {
+      const m = buildVehicleModel(make(id), 0, { separateWheels: true })!;
+      const a = m.ride!, w = m.cockpit!.wheel;
+      const n = new THREE.Vector3(Math.cos(w.tilt), Math.sin(w.tilt), 0);
+      for (let turn = -1.6; turn <= 1.6; turn += 0.2) {
+        // the cockpit turns the rim about its axis by -angle; grips ride with it
+        const q = new THREE.Quaternion().setFromAxisAngle(n, -Math.max(-GRIP_TURN_MAX, Math.min(GRIP_TURN_MAX, turn)));
+        const hands = rimGrips(0, 0, 0, w.r, w.tilt).map((g) => {
+          const p = new THREE.Vector3(...g).applyQuaternion(q).add(new THREE.Vector3(w.x, w.y, w.z));
+          return [p.z - a.hip[2], p.y - a.hip[1] + dm.hipY, -(p.x - a.hip[0])] as [number, number, number];
+        });
+        const layer = new CharLayer(false);
+        const inst = layer.add(rig, { page: 0, rects: new Int32Array(rig.parts.length * 5), refs: 0 });
+        inst.setPose({ t: 0, phase: 0, gait: 0, windup: null, windKind: 'melee', strike: 0, down: 0, flinch: 0, dead: false, seed: 0.3, ride: { lean: a.lean, hands: [hands[0], hands[1]], feet: [[0.1, 0.3, -0.5], [-0.1, 0.3, -0.5]] } });
+        inst.build(null);
+        for (const [part, want] of [[HUM.handR, hands[0]], [HUM.handL, hands[1]]] as const) {
+          const got = new THREE.Vector3().applyMatrix4(new THREE.Matrix4().fromArray(inst.mats, part * 16));
+          expect(got.distanceTo(new THREE.Vector3(...want)), `${id} at ${turn.toFixed(1)}`).toBeLessThan(0.02);
+        }
+      }
     }
   });
 });

@@ -744,9 +744,9 @@ export function buildVehicleModel(v: Vehicle, base: number, opts: { reuseSkinKey
     // the driver's body (chase / top-down cameras): back in the seat, a slight recline, hands
     // at ten-to-two (the cockpit's turning grips replace these on the driven car), feet on the
     // floor under the pedals
-    const hipX = L.xOf(ctrl.mx) - 0.1;
+    const hipX = L.xOf(ctrl.mx) - 0.02;
     ride = {
-      kind: 'seat', hip: [hipX, base + seatTop + 0.07, driverZ], lean: -0.12,
+      kind: 'seat', hip: [hipX, base + seatTop + 0.07, driverZ], lean: -0.04,
       grips: rimGrips(wx, wy, driverZ, r, tilt),
       feet: [[hipX + 0.62, base + floorY + 0.1, driverZ + 0.11], [hipX + 0.62, base + floorY + 0.1, driverZ - 0.11]],
     };

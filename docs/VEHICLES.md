@@ -216,7 +216,9 @@ player model used to hide whenever you drove. Now, with 3D characters, outside f
 - **Pedalling**: the ridden bicycle's crank (arms + pedals) is its own mesh turning with the
   distance ridden (`CRANK_M_PER_TURN` = 5 m a turn); the crank and the feet on it update at the
   characters' stepped rate (`charSettings.fps`), like other body animation.
-- **Cars**: the hands follow the cockpit's turning wheel (`Cockpit.gripPoints`); the
+- **Cars**: the hands follow the cockpit's turning wheel (`Cockpit.gripPoints`) up to ~57 deg
+  (`GRIP_TURN_MAX`), then slide round the rim (full lock is 90 deg of wheel, out of a seated
+  body's reach; a test sweeps the range for six body styles); the
   first-person fists hide while the body is drawn, and the driven car's outside glass is
   tinted lighter (0.4 instead of 0.72 opacity) so you can see yourself through it.
 - **Unchanged**: first person / the cockpit camera (the fists on the wheel), the billboard
