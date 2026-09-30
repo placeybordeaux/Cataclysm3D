@@ -16,6 +16,13 @@ Switch with **Options > Visual style** (persisted), `?look=<name>`, or `cdda.set
 (live). Individual features: `cdda.lookTweak({ssao: 0, grass: false})` (names in
 `src/render/look.ts`). The palette look stays one Options entry away (Colour grading).
 
+**Distance readability (wave 3)**, applies to every look: a sky-matched distance fade instead of
+the grey fog wall, a far ground ring to the horizon, lighter aerial perspective, overcast weather,
+no washed-out sky around the sun. **Options > Distance haze** (`clear` default / `light` /
+`legacy` = the old fog; `?haze=`, `cdda.setHaze`, `cdda.hazeTweak`) and **Options > Draw
+distance** (96 / 120 / 168 m). Details, before/after shots and perf: [READABILITY.md](READABILITY.md).
+The shots below were regenerated with it.
+
 ## Comparison (1920x1080, RTX 5080)
 
 Columns: classic, crisp, voxel, terrain, full. Regenerate with

@@ -118,11 +118,14 @@ export class SkyState {
   night = 0;
   /** whether the directional light currently represents the moon */
   moonLit = false;
+  /** 0..1 how much of the sun/moon disc shows through the clouds (atmosphere.ts overcast) */
+  sunVisible = 1;
 
   update(hour: number, sun?: SkySun): void {
     // Keyframes are authored for a 06:00-20:00 day; with real sunrise/sunset (which move with
     // the season) the hour is remapped so dawn colours arrive at the actual dawn.
     const h = sun ? canonicalHour(hour, sun.sunrise, sun.sunset) : hour;
+    this.sunVisible = 1;
     let i = 0;
     while (i < KEYS.length - 2 && KEYS[i + 1].h <= h) i++;
     const a = KEYS[i], b = KEYS[i + 1];
