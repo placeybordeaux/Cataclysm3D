@@ -103,3 +103,11 @@ not played through (combat feel is its own area). The weather and ring fixes app
 | Climate | Options → Climate: Mid-spring start (BN) / Early spring (old) | `?climate=bn\|old` |
 
 Screenshots: `docs/screenshots/wave3/adaptation/`.
+
+| Screenshot (1920×1080, GPU, full look) | Shows |
+|---|---|
+| `title_classic_before.png` | The old one-line menu (still `?title=classic`) |
+| `title_center.png`, `title_side.png` | The two button layouts |
+| `start_spring_weather.png` | Day 1 at 08:00: "Light Drizzle 6 °C" (was "Snowstorm -7 °C") |
+| `activity_ring.png`, `activity_interrupted.png` | The crosshair ring, and the flash when moving interrupts it |
+| `sleep_menu.png` | The sleep menu in words |
