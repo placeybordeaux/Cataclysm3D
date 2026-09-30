@@ -26,6 +26,7 @@ import { carriedAs, isAt, itemsAt, L, moveItem, transaction, type Loc, type Move
 import { cddaText } from '../../game/units';
 import { takeOrder } from '../../game/loot';
 import { hotbarChoice } from '../../game/hotbar_choice';
+import { reloadHintsFor, seenLine, takesLine } from '../../game/reloadhelp';
 import type { DropVerdict } from '../logic/dnd';
 import { fmtVolume, type Badge, type ItemStat, type ItemView } from '../logic/items';
 import type { MenuItem } from '../menu';
@@ -206,6 +207,7 @@ export class BnInventoryModel implements InventoryModel {
       badges,
       description: cddaText(it.def.description) || undefined,
       note: freshnessText(it) ?? undefined,
+      takes: this.takes(it),
       icon: { typeId: it.typeId, looksLike: it.def.looks_like, symbol: it.def.symbol, color: it.def.color },
       covers: node.covers,
       stats: this.stats(it),
@@ -213,6 +215,14 @@ export class BnInventoryModel implements InventoryModel {
     if (inside && inside.fill.unit === 'ml') v.capacity = { volume: inside.fill.max, weight: Infinity };
     if (inside?.items.length) v.contents = inside.items.map((n) => ({ id: n.key, typeId: n.typeId, name: n.name, count: n.count, stackable: false, weight: n.weight / Math.max(1, n.count), volume: n.volume / Math.max(1, n.count) }));
     return v;
+  }
+
+  /** "Takes: a light battery or …" plus where you last saw one, for anything that reloads. */
+  private takes(it: Item): string | undefined {
+    const t = takesLine(it);
+    if (!t) return undefined;
+    const s = seenLine(it, reloadHintsFor(this.who));
+    return s ? `${t} ${s}` : t;
   }
 
   private stats(it: Item): ItemStat[] {

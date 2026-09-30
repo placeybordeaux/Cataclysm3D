@@ -181,6 +181,7 @@ export function itemTooltip(it: ItemView, o: ItemTipOpts = {}): HTMLElement {
     if (cmp) card.append(h('div', { class: 'ui2-dim ui2-small', text: `▲▼ compared with ${cmp.name}` }));
   }
   if (it.note) card.append(h('div', { class: 'ui2-itemtip-note tone-info', text: it.note }));
+  if (it.takes) card.append(h('div', { class: 'ui2-itemtip-note tone-dim', attrs: { 'data-testid': 'item-takes' }, text: it.takes }));
   if (it.description) card.append(h('div', { class: 'ui2-itemtip-desc', text: it.description }));
   for (const s of o.sections ?? []) card.append(s);
   const hints = o.hints ?? ['Drag to move', 'Right-click: actions', 'Double-click: use'];

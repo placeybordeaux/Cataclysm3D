@@ -10,6 +10,7 @@ import { describeVehicleAt, vehicleSolidHeight } from './vehicle_ui';
 import { acquireSurface, h, iconEl, pushKeys, ui2Layers, worldMenu, closeMenu, type MenuItem, type WorldTarget } from '../ui2';
 import { targetFromHit, worldHoverListeners } from '../ui2/install';
 import { meter } from './screen2';
+import { reloadHintsFor, seenLine, takesLine } from '../game/reloadhelp';
 import './screens2.css';
 
 // Looking at things, v2: a card anchored to the object in the world (a diamond on it and a
@@ -139,6 +140,9 @@ export function lookCardContent(ctx: UiContext, t: WorldTarget, actions: boolean
     if (items.length > 6) list.append(h('div', { class: 'ui2-dim', text: `… and ${items.length - 6} more` }));
     out.push(list);
     if (items.length === 1 && items[0].def.description) out.push(h('div', { class: 'lk-desc', text: cddaText(items[0].def.description as string) }));
+    // A flashlight on the floor: what it takes, and whether you've seen any (reloadhelp.ts).
+    const takes = items.length === 1 ? takesLine(items[0]) : null;
+    if (takes) out.push(h('div', { class: 'ui2-small ui2-dim', attrs: { 'data-testid': 'look-takes' }, text: [takes, seenLine(items[0], reloadHintsFor(g.player))].filter(Boolean).join(' ') }));
   } else if (furn) {
     if (furn.description) out.push(h('div', { class: 'lk-desc', text: cddaText(furn.description) }));
     if (items.length) out.push(h('div', { class: 'ui2-small tone-info', text: `${items.length} item${items.length > 1 ? 's' : ''} here` }));
