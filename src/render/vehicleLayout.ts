@@ -12,7 +12,7 @@ import { has, type Vehicle, type VehiclePart } from '../game/vehicle';
 // and collision and interaction keep using the grid.
 
 export type BodyStyle = 'sedan' | 'hatch' | 'sports' | 'suv' | 'pickup' | 'van' | 'minivan' | 'bus' | 'truck' | 'motorcycle' | 'bicycle' | 'frame';
-export type Livery = 'plain' | 'police' | 'ambulance' | 'school' | 'fire' | 'military' | 'fbi' | 'swat' | 'security' | 'icecream' | 'hippie' | 'prison' | 'hazmat' | 'transit';
+export type Livery = 'plain' | 'police' | 'ambulance' | 'school' | 'fire' | 'military' | 'fbi' | 'swat' | 'security' | 'icecream' | 'hippie' | 'prison' | 'hazmat' | 'transit' | 'motorhome' | 'food';
 
 /** Style dimensions, metres above the ground (z-level floor) unless noted. */
 export interface StyleParams {
@@ -47,6 +47,8 @@ export interface StyleParams {
   lengthScale: number;
   /** Nose face goes straight up into the windscreen (bus, cab-over van). */
   flatFront: boolean;
+  /** Motorhomes: the box body runs forward over the cab (the overcab bunk). */
+  overcab?: boolean;
   /** Tyre sidewall added to the rim radius, and an extra scale for chunky off-roaders. */
   wheelScale: number;
   bumper: 'chrome' | 'black' | 'body';
@@ -116,6 +118,8 @@ export function liveryFromId(id: string): Livery {
   if (/hippie/.test(s)) return 'hippie';
   if (/hazmat/.test(s)) return 'hazmat';
   if (/^bus($|_tour)/.test(s)) return 'transit';
+  if (/(^|_)rv$/.test(s)) return 'motorhome';
+  if (/food_truck/.test(s)) return 'food';
   return 'plain';
 }
 
@@ -270,6 +274,9 @@ export function analyze(v: Vehicle, forceStyle?: BodyStyle): Layout {
   const style = forceStyle ?? classify(v);
   const p = { ...STYLE_PARAMS[style] };
   const livery = liveryFromId(v.protoId);
+  // Motorhomes: a taller box that runs forward over the cab.
+  if (style === 'van' && /(^|_)rv$|motorhome|camper_rv/.test(v.protoId)) Object.assign(p, { overcab: true, box: 2.85 });
+  if (style === 'truck' && /trailer/.test(v.protoId)) Object.assign(p, { box: 3.1, sill: 0.95 });
   // School buses are the conventional kind: a bonnet ahead of the windscreen.
   if (style === 'bus' && livery === 'school') Object.assign(p, { flatFront: false, hood: 1.4, nose: 1.25, rake: 0.35, lampY: 1.02 });
   const cols = bodyColumns(v);
@@ -393,8 +400,10 @@ export function buildSections(rows: RowInfo[], style: BodyStyle, p: StyleParams)
   for (let i = 0; i < rows.length; i++) {
     const r = rows[i];
     if (front < 0) {
-      // No windscreen: everything with a roof is cabin, the rest deck.
-      kinds.push(r.roof || r.seat ? 'cabin' : r.fullBoard ? 'box' : 'deck');
+      // No windscreen: everything with a roof is cabin, the rest deck. A truck-class grid
+      // without seats (a semi trailer) is one cargo box.
+      const boxy = (style === 'truck' || style === 'van') && !rows.some((q) => q.seat);
+      kinds.push(boxy && (r.fullBoard || r.cargo || r.roof) ? 'box' : r.roof || r.seat ? 'cabin' : r.fullBoard ? 'box' : 'deck');
       continue;
     }
     if (i < front) {
@@ -408,12 +417,30 @@ export function buildSections(rows: RowInfo[], style: BodyStyle, p: StyleParams)
     }
     if (phase === 'cabin') {
       if (r.innerGlass && sawSeat) {
+        // Glass across a limousine's cabin is the chauffeur's partition, not a rear window.
+        if (rows.slice(i + 1).some((q) => q.seat && q.roof)) {
+          kinds.push('cabin');
+          continue;
+        }
         kinds.push('rearglass');
         phase = 'after';
         continue;
       }
+      // Vans and trucks: a full-board row behind the seats starts the box body (an RV's
+      // living area, a food truck's kitchen, a fire engine's lockers), roofed or not.
+      if ((style === 'van' || style === 'truck') && sawSeat && r.fullBoard && !r.seat) {
+        phase = 'after';
+        const boxRun = rows.slice(i).findIndex((q) => !q.fullBoard && !q.roof);
+        // a single board row closing a truck cab (the sleeper's back wall) stays cab
+        if (style === 'truck' && boxRun === 1) {
+          kinds.push('cabin');
+          continue;
+        }
+      }
       // A full-board partition without a roof ends the cab (cube van row behind the seats).
-      if (r.fullBoard && !r.roof && !r.seat) {
+      if (phase === 'after') {
+        // (set just above)
+      } else if (r.fullBoard && !r.roof && !r.seat) {
         phase = 'after';
       } else if (style === 'sedan' && sawSeat && !r.seat && r.roof && i < rows.length - 1) {
         // A roofed cargo row behind the rear seats (BN's generic "car"): draw a sedan's
@@ -430,6 +457,10 @@ export function buildSections(rows: RowInfo[], style: BodyStyle, p: StyleParams)
     // behind the cabin
     if (style === 'pickup') kinds.push('bed');
     else if (r.fullBoard && (r.roof || p.box > 0)) kinds.push('box');
+    // a van's box has windows too (an RV's living area): roofed rows stay box
+    else if (style === 'van' && r.roof && kinds.includes('box')) kinds.push('box');
+    // behind a sedan's real rear window it's all trunk
+    else if (r.roof && (style === 'sedan' || style === 'sports') && kinds.includes('rearglass')) kinds.push('deck');
     else if (r.roof && (style === 'suv' || style === 'hatch' || style === 'minivan' || style === 'bus' || style === 'sedan' || style === 'sports')) kinds.push('cabin');
     else if (r.halfBoard && r.cargo && !r.roof && r.side[-1].kind !== 'none' && style === 'truck') kinds.push('bed');
     else if (r.halfBoard || r.endDoor || r.roof) kinds.push('deck');

@@ -63,6 +63,12 @@ export class CameraRig {
   suppressBob = false;
   /** Added to the eye height (metres): swimming puts the head at the water line (src/nature.ts). */
   eyeOffset = 0;
+  /**
+   * Highest the first-person eye may be (absolute, metres), or null: standing in a car's
+   * doorway ducks you under its roof instead of putting the camera through it
+   * (VehicleRenderer sets it every frame).
+   */
+  eyeCap: number | null = null;
   /** Aim-down-sights target 0..1 (src/feel.ts sets it while RMB is held with a gun) and its FOV. */
   ads = 0;
   adsFov = 50;
@@ -147,7 +153,7 @@ export class CameraRig {
       cam.fov = fovFirst;
       const bobY = Math.abs(Math.sin(this.bobPhase)) * this.bobAmp * 1.6 - this.bobAmp * 0.8;
       const bobX = Math.cos(this.bobPhase) * this.bobAmp * 0.6;
-      cam.position.set(p.x - fwdZ * bobX, base + eyeH + bobY, p.y + fwdX * bobX);
+      cam.position.set(p.x - fwdZ * bobX, Math.min(base + eyeH + bobY, this.eyeCap ?? Infinity), p.y + fwdX * bobX);
       if (this.snapRotation) {
         const q = (2 * Math.tan((cam.fov * Math.PI) / 360)) / lowResHeight;
         cam.rotation.set(Math.round(p.pitch / q) * q + this.kickPitch + this.aimView.y, -Math.round(p.yaw / q) * q - this.kickYaw - this.aimView.x, 0, 'YXZ');
