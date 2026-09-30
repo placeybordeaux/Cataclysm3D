@@ -17,6 +17,7 @@
 //   --params '<q>'     extra URL params (e.g. 'radius=6', 'look=full')
 //   --browser firefox  headless Firefox (also on the GPU) instead of Chromium
 //   --save DIR         write each route's telemetry dump (tools/perf-report.ts reads them)
+//   --profile DIR      Chromium: a CPU profile per route (<route>.cpuprofile; DevTools > Performance loads it)
 //   --shots DIR        JPEG screenshots at 1/3 and 2/3 of each route (<route>_<s>s.jpg)
 //   --baseline FILE    budgets to compare with (default tools/perf-baseline.json, .firefox.json for Firefox)
 //   --write-baseline   record this run as the new baseline (keeps the tolerances)
@@ -231,12 +232,19 @@ try {
     const jump = r.kind === 'load' || r.kind === 'loaddrive' || r.kind === 'teleport';
     const route = await page.evaluate(`__perfBench.pick(${JSON.stringify(jump ? (r.kind === 'teleport' ? 'town' : 'city') : r.kind)})`);
     let mon: Mon | null = null;
+    const profDir = opt('--profile', '');
+    const cdp = profDir && browserKind === 'chromium' ? await page.createCDPSession() : null;
+    if (cdp) {
+      await cdp.send('Profiler.enable');
+      await cdp.send('Profiler.setSamplingInterval', { interval: 250 });
+    }
     if (jump) {
       // start in the city, streamed in; then the jump
       const from = await page.evaluate(`__perfBench.pick('city')`);
       await page.evaluate(`__perfBench.place(${JSON.stringify(from)})`);
       await waitStreamed(page, 30_000);
       await new Promise((res) => setTimeout(res, 1500));
+      if (cdp) await cdp.send('Profiler.start');
       if (r.kind === 'teleport') {
         await page.evaluate(PERF_MONITOR);
         await page.evaluate(`(() => { cdda.perf.reset(); __perfMonStart(); __perfBench.place(${JSON.stringify(route)}); })()`);
@@ -251,13 +259,15 @@ try {
         await page.evaluate(PERF_PAGE);
       }
       mon = await waitMon(page, r.kind === 'loaddrive' ? 'near' : 'full', 20_000);
-      if (r.kind === 'loaddrive') await page.evaluate(`(() => { __perfBench.place(${JSON.stringify(from)}); __perfBench.go(${r.mph * MPH}); })()`);
+      // the save kept you at the wheel of the car placed before it (vehicles restore the driver)
+      if (r.kind === 'loaddrive') await page.evaluate(`(() => { if (!cdda.vehicleSystem.driving) throw new Error('not at the wheel after the load'); __perfBench.go(${r.mph * MPH}); })()`);
       else await page.evaluate(`__perfBench.stop = () => {}`);
     } else {
       await page.evaluate(`__perfBench.place(${JSON.stringify(route)})`);
       // let the start area stream in completely, then measure from standing start at full speed
       await waitStreamed(page, 30_000);
       await new Promise((res) => setTimeout(res, 1500));
+      if (cdp) await cdp.send('Profiler.start');
       await page.evaluate(`(() => { Object.assign(cdda.renderer.chunks.stats, { maxStepMs: 0, maxStep: '', maxFrameMs: 0, maxBuildMs: 0, slowBuilds: 0 }); cdda.perf.reset(); __perfBench.go(${r.mph * MPH}); })()`);
     }
     const shotsDir = opt('--shots', '');
@@ -271,6 +281,12 @@ try {
       await new Promise((res) => setTimeout(res, (seconds * 1000) / 3));
     } else await new Promise((res) => setTimeout(res, seconds * 1000));
     const out = (await page.evaluate(`(() => { __perfBench.stop(); return { dump: cdda.perf.dump(${seconds + 5}), chunks: { ...cdda.renderer.chunks.stats } }; })()`)) as { dump: PerfDump; chunks: { maxStepMs: number; maxStep: string } };
+    if (cdp) {
+      const { profile } = (await cdp.send('Profiler.stop')) as { profile: unknown };
+      mkdirSync(profDir, { recursive: true });
+      writeFileSync(join(profDir, `${name}.cpuprofile`), JSON.stringify(profile));
+      await cdp.detach();
+    }
     const s = summarize(out.dump);
     const m = metricsOf(s, out.chunks);
     if (mon) {
