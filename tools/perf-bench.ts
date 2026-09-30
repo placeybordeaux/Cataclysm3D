@@ -58,7 +58,7 @@ interface Route {
 export const ROUTES: Record<string, Route> = {
   town40: { what: 'into and through the nearest town (Holden) at 40 mph, on the straight road with the most buildings along it', kind: 'town', mph: 40, seconds: 25 },
   town60: { what: 'the same road at 60 mph', kind: 'town', mph: 60, seconds: 25 },
-  city40: { what: 'into and through the biggest nearby city (Madrid, size 16) at 40 mph', kind: 'city', mph: 40, seconds: 30 },
+  city40: { what: 'into and through the biggest town within ~100 OMTs (seed 1: Columbia Falls, size 18) at 40 mph', kind: 'city', mph: 40, seconds: 30 },
   city60: { what: 'the same city road at 60 mph', kind: 'city', mph: 60, seconds: 25 },
   forest: { what: 'straight through thick forest at 40 mph (3D trees, flora LOD rings)', kind: 'forest', mph: 40, seconds: 20 },
   rural: { what: 'the longest straight road outside town at 60 mph', kind: 'rural', mph: 60, seconds: 25 },

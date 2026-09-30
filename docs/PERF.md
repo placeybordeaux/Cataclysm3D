@@ -37,7 +37,7 @@ The overlay (top left, never takes the mouse):
 * **gpu**: draw calls, triangles, geometries, textures, JS heap (Chromium only).
 * **stand-ins / schedule / prefetch**: see "What was fixed".
 
-Cost: the rolling recording is always on (a few microseconds a frame: ~50 floats into
+Cost: the rolling recording is always on (~7 µs a frame amortised, measured in Node with radius 8's 1156 entries: ~50 floats into
 preallocated columns, a 10 Hz scan of the chunk entries); `?perf=off` disables it. The overlay
 itself adds ~0.1 ms/frame; its per-kind mesher timing patches four prototypes (two
 `performance.now()` per call) and is only active while the overlay shows.
