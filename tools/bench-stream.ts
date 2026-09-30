@@ -11,6 +11,7 @@
 // Options: --look <name> (default full), --size WxH (default 1920x1080), --seconds N (per run,
 // default 30), --runs sprint,drive (default both: 7 and 17.9 tiles/s), --speed N (one run at
 // that speed instead), --yaw deg (default: along the street view), --params '<url params>',
+// --view <look-views name> (default street; 'forest' + --yaw -20 runs through woods),
 // --uncapped (no vsync/frame cap: leaves no idle time, so idle-time mapgen never runs),
 // --json (print raw results), --dry-run, --help.
 import { createServer } from 'vite';
@@ -33,6 +34,7 @@ const seconds = Number(opt('--seconds', '30'));
 const speedArg = opt('--speed', '');
 const yawArg = opt('--yaw', '');
 const params = opt('--params', '');
+const viewArg = opt('--view', 'street');
 const runs: [string, number][] = speedArg
   ? [[`${speedArg} t/s`, Number(speedArg)]]
   : opt('--runs', 'sprint,drive').split(',').map((r) => {
@@ -65,8 +67,8 @@ try {
   await page.waitForFunction('window.cdda?.ready || window.cddaError', { timeout: 180_000 });
   await page.evaluate(readFileSync(resolve('tools/look-views.js'), 'utf8'));
   for (const [name, speed] of runs) {
-    // start every run from the same spot: the street view, running along the street
-    await page.evaluate(`lookView('street')`);
+    // start every run from the same spot: the street view (or --view), running along it
+    await page.evaluate(`lookView(${JSON.stringify(viewArg)})`);
     await new Promise((r) => setTimeout(r, 2000));
     const r = await page.evaluate(`(async () => {
       const c = window.cdda;

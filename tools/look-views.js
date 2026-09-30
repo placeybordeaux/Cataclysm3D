@@ -162,7 +162,30 @@ window.lookView = async (name) => {
     const s = c.renderer.skyState.sunDir;
     const yaw = Math.atan2(s.x, -s.z) * 180 / Math.PI + (name === 'backsun' ? 180 : 0);
     c.look(yaw, name === 'intosun' ? -6 : -2);
-  } else if (name === 'dusk') {
+  } else if (name === 'autumn' || name === 'winterforest' || name === 'springforest') {
+    // the forest view in another season (trees/flora colours, bare branches, snow)
+    c.setSeason(name === 'autumn' ? 'autumn' : name === 'springforest' ? 'spring' : 'winter', 20);
+    await window.lookView('forest');
+  } else if (name.startsWith('lineup')) {
+    // One of every tree/bush family in a row on open ground (flora.ts): lineup (8 m away),
+    // lineupfar (60 m: the middle/far LOD), lineup-autumn / lineup-winter / lineup-spring.
+    const season = name.split('-')[1];
+    if (season) c.setSeason(season, 20);
+    c.setHour(10.5);
+    c.teleportOmt(town.x, town.y);
+    const f = c.findOmt('field', 40);
+    c.teleportOmt(f.x, f.y, 0, 12, 20);
+    const p = c.game.player, m = c.game.map;
+    const ids = ['t_tree', 't_tree_maple', 't_tree_pine', 't_tree_birch', 't_tree_apple', 't_tree_cherry', 't_tree_young', 't_tree_dead', 't_tree_willow',
+      't_shrub_rose', 't_shrub_hydrangea', 't_shrub_blueberry', 't_underbrush', 't_fern'];
+    const far = name.startsWith('lineupfar');
+    const dist = far ? 60 : 14;
+    ids.forEach((id, i) => {
+      const x = Math.floor(p.x) + Math.round((i - ids.length / 2) * (far ? 3.2 : 2.4)), y = Math.floor(p.y) - dist - (i % 2);
+      m.setTer(x, y, p.z, id);
+    });
+    c.look(0, far ? -1 : 3);
+  } else if (name === 'dusk') {  } else if (name === 'dusk') {
     await window.lookView('street');
     c.setHour(window.duskHour());
   } else if (name === 'rain') {

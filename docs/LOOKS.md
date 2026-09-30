@@ -22,7 +22,8 @@ no washed-out sky around the sun. **Options > Distance haze** (`clear` default /
 `legacy` = the old fog; `?haze=`, `cdda.setHaze`, `cdda.hazeTweak`) and **Options > Draw
 distance** (96 / 120 / 168 m). Round 2 added **Options > Form lighting** (`toon` default /
 `bold` / `soft` = v2; `?form=`, `cdda.setForm`, `cdda.formTweak`), stable cutout mips on grass and
-leaf cards, and a screen-round sun. Details, before/after shots and perf: [READABILITY.md](READABILITY.md).
+leaf cards, and a screen-round sun. Round 3 replaced the trees and bushes with modelled species
+(**Options > Trees**: `models` default / `clumps` = v2; see [FLORA.md](FLORA.md)). Details, before/after shots and perf: [READABILITY.md](READABILITY.md).
 The shots below were regenerated with it.
 
 ## Comparison (1920x1080, RTX 5080)
