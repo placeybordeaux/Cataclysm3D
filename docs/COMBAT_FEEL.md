@@ -185,11 +185,66 @@ Screenshots (JPEG): `r2_zombie_headshot.jpg`, `r2_dog_headshot.jpg`, `r2_third_p
 `tests/aimpick.test.ts`: ray-vs-model zones for a zombie and a side-on dog, a ray between the
 legs misses, unbuilt/hidden models defer to the column rule.
 
-Known gaps: melee target selection (the swept arc) doesn't use the model boxes, only ranged does;
-the arms hang in front of the torso, so a centre-mass shot on a model sometimes reads "limb ×0.75"
-(that is what's drawn in front); monster ranged dodges don't exist in free aim (BN's bullet dodge
-was ~0 anyway); the melee arc has no sway (a swing's timing is the skill); in the dice model the
-third-person shot still leaves the eye parallel to the camera (as before).
+### Round 3: melee on the models, enemy fire you can read, first-fight hints
+
+**Melee on the model boxes** (`PlayerCombat.meleePick`, `aimmodel.swingFan`, `aimHooks.prepare` →
+`render/aimPick.ts prepareModel`). At contact the swing casts a fan of rays from the eye — the
+crosshair first, then outward in 4° steps across its arc (±40° swing, ±22° thrust, ±28° punch)
+and a ±8°/±16° vertical band — against the posed part boxes of every monster in reach. The
+first ray that meets a body within reach (+0.3 m) decides: in a crowd that is the zombie under
+(or nearest) the crosshair, and the part it met is the zone. If no ray meets a body (a zombie
+crawling at your feet, billboard look), the swept arc decides as before, zone torso — so the
+swing still clips what's beside you. Zones (free aim only): head ×1.5 (`aimMeleeHeadMul`), +0.5
+stagger, and a blunt or heavy weapon may **stun** (30 % + 4 %/skill, 0.6 s + 0.05 s/skill);
+legs/limbs ×0.8 (`aimMeleeLimbMul`), a leg blow makes it **stumble** (0.5 s flinch) and may
+**knock it down** (20 % + 4 %/skill, 1.2 s; not huge or immobile monsters). The crosshair line
+names it: "HEAD ×1.5 · stunned", "legs ×0.8 · knocked down". Real input (`--only combat3`): with
+three zombies shoulder to shoulder at arm's length, 5/5 swings hit the one under the crosshair.
+`tests/meleezones.test.ts`.
+
+**Enemy fire** (`src/game/enemyfire.ts`, drawn by `src/render/enemyFireFx.ts`). Every round a
+monster (`monguns.ts`: guns, bows, thrown rocks) or an NPC (`npcai.ts shoot`) fires is now a real
+round in the air: bullets 90 m/s (a 20 m shot takes 0.22 s, drawn as a 3 m streak of hot
+pixels), arrows/bolts at their flight speed (a dark shaft, pale head), stones 14 m/s. The
+shooter still rolls BN's dispersion for the direction (so enemy accuracy is BN's, and a hit still
+runs BN's `deal_projectile_attack` severity on the survivor); the world decides what it meets:
+the first wall (cover works — duck behind one and nothing gets through), the survivor, an NPC or
+a follower in the line (friendly fire), and for NPC rounds any monster. A miss flies on past you
+and out to its range. **Near misses** (a round passing within 1.4 m) raise `nearMiss`: a quick
+zip (`sfx.nearMiss`, the whoosh pitched up for bullets) and a small flinch of the view and hands
+toward the side it passed. The survivor's arrows, bolts and stones now hit NPCs on the way
+(`PlayerCombat.npcRound` → `NpcSystem.playerRoundHits`; followers too). Fixed on the way: monster
+guns now use the monster's own starting ammo when it fits (a light turret carries 9mmfmj and
+used to click empty). Real input: a rifle turret at 16 m over 9 s — up to 4 rounds in the air
+at once, 17 hits and 10 near misses; behind a wall, none. `tests/enemyfire.test.ts`.
+
+**First-fight hints** (`src/ui/combatHints.ts`). Three short lines by the crosshair, each at the
+moment it matters, at most 3 times per profile, never twice within 20 s, one at a time, gone
+once you've done the thing, and off with Discovery hints off: "Your aim sways — fire as it
+crosses" (the first times you aim a gun at a hostile), "Aim for the head — ×2 damage" (after a
+body hit; learned on a headshot), "Hold right mouse: guard · Space: side-step" (a zombie winding
+up at arm's length; clears when you raise the guard; learned after guarding twice). The first
+showing files the longer text in the Survival Journal (Combat: *Your aim sways*, *Headshots*,
+*Guard*) without a toast. `tests/combathints.test.ts`.
+
+**Playtest notes addressed.** *Zombies close fast*: a plain zombie on Accessible (90 % speed)
+takes 7.9 s to walk from 15 m to arm's length (sim, `HOLD_FIRE=1 RANGE_DIST=15`); a runner
+4.9 s. A newcomer (0.3 s reaction) with a pistol at skill 0 kills a walker from 15 m in 4.1 s
+with 3 aimed shots, a runner in 3.7 s — the 2–3 aimed shots are there; two zombies arriving in
+~4 s were most likely runners or dogs (speed 105), which close twice as fast. Speeds unchanged.
+*Grabbed prompt overlap*: while grabbed only the GRABBED banner shows the key; the crosshair
+prompt is empty.
+
+Screenshots (JPEG): `r3_melee_crowd_head.jpg` (the middle of three: "HEAD ×1.5 · stunned"),
+`r3_enemy_rounds.jpg`, `r3_hint_sway.jpg`, `r3_hint_headshot.jpg`, `r3_hint_guard.jpg`.
+
+Known gaps: the arms hang in front of the torso, so a centre-mass shot on a model sometimes
+reads "limb ×0.75" (that is what's drawn in front); monsters don't dodge rounds in free aim
+(BN's bullet dodge was ~0 anyway); enemy rounds fly straight (no arrow drop) and at the aimed
+height only (BN's dispersion is horizontal); explosive monster rounds (grenade launchers)
+still resolve through the same round without a blast arc; the melee arc has no sway (a swing's
+timing is the skill); in the dice model the third-person shot still leaves the eye parallel to
+the camera (as before).
 
 ## Diagnosis (before)
 
