@@ -7,6 +7,7 @@ import type { Renderer } from './renderer';
 import { frameStats, summarize } from '../perfDebug';
 import { voxelStats } from './voxel';
 import { installFurniture } from './furniture/install';
+import { HAZE_NAMES, HAZES, haze, isHazeName, setHaze } from './atmosphere';
 
 // Wires the visual styles (look.ts) into the game: the Options entry, the automation API
 // and the per-look scene layers that need game/world access (skyline from the overmap).
@@ -27,8 +28,60 @@ export function installLooks(game: Game, renderer: Renderer, worldgen: WorldGene
     },
     desc: LOOK_NAMES.map((n) => `${LOOKS[n].label}: ${LOOKS[n].desc}`).join('\n'),
   });
+  registerOption({
+    name: 'Distance haze',
+    value: () => HAZES[haze.name].label,
+    change: (d) => {
+      const i = HAZE_NAMES.indexOf(haze.name);
+      setHaze(HAZE_NAMES[(i + d + HAZE_NAMES.length) % HAZE_NAMES.length], true);
+    },
+    desc: HAZE_NAMES.map((n) => `${HAZES[n].label}: ${HAZES[n].desc}`).join('\n'),
+  });
+  // Draw distance in chunks (OMTs). Past it the far ground ring and skyline carry the
+  // horizon, so 6 reads well; 8 costs ~65% more chunks (+0.5-1 ms render, +100 MB heap,
+  // more meshing while moving: docs/LOOKS.md), 5 is for slow machines.
+  const RADII = [5, 6, 8];
+  const RADIUS_KEY = 'cdda3d.drawRadius';
+  if (!new URLSearchParams(location.search).get('radius')) {
+    try {
+      const r = Number(localStorage.getItem(RADIUS_KEY));
+      if (RADII.includes(r)) renderer.chunks.radius = r;
+    } catch {
+      // storage blocked: default radius
+    }
+  }
+  registerOption({
+    name: 'Draw distance',
+    value: () => `${Math.max(2, renderer.chunks.radius - 1) * 24} m`,
+    change: (d) => {
+      const i = Math.max(0, RADII.indexOf(renderer.chunks.radius));
+      const r = RADII[(i + d + RADII.length) % RADII.length];
+      renderer.chunks.radius = r;
+      try {
+        localStorage.setItem(RADIUS_KEY, String(r));
+      } catch {
+        // private mode: not persisted
+      }
+    },
+    desc: 'How far the world is built around you (beyond it the horizon is a cheap silhouette of the overmap). Farther costs memory and frame time while moving.',
+  });
   const a = api as DebugApi & Record<string, unknown>;
   a.looks = LOOK_NAMES;
+  a.hazes = HAZE_NAMES;
+  /** Distance-haze preset (atmosphere.ts), live, not persisted. */
+  a.setHaze = (name: string) => {
+    if (!isHazeName(name)) throw new Error(`unknown haze ${name} (expected ${HAZE_NAMES.join('|')})`);
+    setHaze(name);
+    return name;
+  };
+  /** Override single values of the current haze preset, e.g. {hazeMax: 0.3}. */
+  a.hazeTweak = (o: Record<string, unknown>) => {
+    for (const [k, v] of Object.entries(o)) {
+      if (!(k in haze.s)) throw new Error(`unknown haze setting ${k}`);
+      (haze.s as unknown as Record<string, unknown>)[k] = v;
+    }
+    return haze.s;
+  };
   a.voxelStats = voxelStats;
   installFurniture(renderer, api);
   a.setLook = (name: string) => {

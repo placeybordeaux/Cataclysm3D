@@ -3,6 +3,7 @@
 // you've been, and every unlock with progress ("Police Officer: kill 10 zombies — 4/10").
 // The Record tab has lifetime statistics, the progression options and export/import.
 
+import { runDay } from '../ui/hud_logic';
 import { button, confirmModal, h, openPanel, tabs, toast, type Panel } from '../ui2';
 import type { Game } from '../game/game';
 import { GameClock } from '../core/time';
@@ -68,14 +69,14 @@ export function openJournal(game: Game, prog: ProgressionHandle, inRun: boolean)
   const p = game.player;
   if (inRun) {
     const diff = DIFFICULTIES.find((d) => d.id === prog.run.difficulty)?.name ?? prog.run.difficulty;
-    head.textContent = `${p.name}${prog.run.title ? `, ${prog.run.title}` : ''}  ·  ${diff}  ·  day ${Math.floor((game.clock.seconds - game.stats.startSeconds) / 86400) + 1}`;
+    head.textContent = `${p.name}${prog.run.title ? `, ${prog.run.title}` : ''}  ·  ${diff}  ·  day ${runDay(game.clock.seconds, game.stats.startSeconds)}`;
   } else head.textContent = 'No survivor yet: start a game.';
 
   const entry = (title: string, body: string, meta?: string, cls = '') =>
     h('div', { class: `pg-entry ${cls}` }, h('div', { class: 'pg-entry-title', text: title }), body ? h('div', { class: 'pg-entry-body', text: body }) : null, meta ? h('div', { class: 'pg-entry-meta', text: meta }) : null);
   const when = (s: number) => {
     const c = Object.assign(new GameClock(), { seconds: s });
-    return `Day ${Math.floor((s - game.stats.startSeconds) / 86400) + 1}, ${c.format().replace(/^.*?(\d\d?:\d\d).*$/, '$1')}`;
+    return `Day ${runDay(s, game.stats.startSeconds)}, ${c.format().replace(/^.*?(\d\d?:\d\d).*$/, '$1')}`;
   };
 
   function draw(): void {

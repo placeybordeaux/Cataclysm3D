@@ -23,6 +23,7 @@ import { DATA_BASE } from '../core/assets';
 import { globalAchievements } from '../game/achievements';
 import { availableRecipes, canCraft, craftedHooks, craftingInventory, recipeName } from '../game/crafting';
 import { MAIN_PARTS } from '../game/bodyparts';
+import { isNight } from '../game/vision';
 import { CHUNK } from '../world/coords';
 import { LAB_BASEMENT_TYPES } from '../world/overmap/overmap';
 import { registerSaveable } from '../save/registry';
@@ -193,7 +194,9 @@ export async function installProgression(
     first_hunger: () => HUNGRY.has(p.hungerState()),
     first_thirst: () => THIRSTY.has(p.thirstDescription()),
     first_fatigue: () => p.sleepinessDescription() !== '',
-    first_night: () => p.z >= 0 && (game.clock.hourOfDay >= 20.5 || game.clock.hourOfDay < 5),
+    // When it actually gets dark (civil dusk), not at a fixed 20:30: in early spring that was
+    // two hours after the playtester was standing in the dark (docs/ADAPTATION.md).
+    first_night: () => p.z >= 0 && isNight(game.clock),
     first_bleed: () => p.hasEffect('bleed'),
     first_locked: () => scan(2, (x, y) => /locked/.test(game.map.terAt(x, y, p.z).id) && /door|gate/.test(game.map.terAt(x, y, p.z).id)),
     first_overweight: () => p.inv.weightCarried() > p.inv.weightCapacity(),

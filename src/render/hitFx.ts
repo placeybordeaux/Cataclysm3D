@@ -206,9 +206,11 @@ export class HitFx {
     }
     if (!m) return;
     const spr = this.view?.spriteOf(m);
-    // UltiCa art doesn't fill its frame (a 32x48 zombie is ~29 px tall), so aim for the body.
+    // UltiCa art doesn't fill its frame (a 32x48 zombie is ~29 px tall), so aim for the body
+    // (a 3D body knows its own extent).
+    const body = this.view?.bodyOf(m);
     const span = spr ? artSpan(spr.frame) : { bottom: 0, top: 1 };
-    const top = (spr?.height ?? 1.7) * span.top, bottom = (spr?.height ?? 1.7) * span.bottom;
+    const top = body ? body.top : (spr?.height ?? 1.7) * span.top, bottom = body ? body.bottom : (spr?.height ?? 1.7) * span.bottom;
     const hgt = Math.max(bottom + (top - bottom) * 0.3, this.impactHeight(m.x, m.y, bottom + (top - bottom) * 0.85));
     const view = this.view;
     const crit = e.outcome === 'crit';

@@ -8,22 +8,32 @@ import { AtlasTextureSource } from './atlasSource';
 import type { Renderer } from './renderer';
 import type { SpriteHandle } from './sprites';
 import type { TileFrame } from './textureSource';
+import { charLayers, charSettings, frameKey, spriteInfo, type CharLayers } from './chars';
+import { bodyShapeOf, weaponOf } from './chars/archetype';
+import { CreatureModel, FallingBody } from './chars/creature';
+import { makeRig, type Rig } from './chars/rig';
 
-// Billboards for NPCs: CDDA's npc_male / npc_female body with the worn clothing and wielded
-// item overlays stacked on top (like the tileset draws characters), composited once per
-// outfit. Dead NPCs crumple like monster corpses and stay while their corpse item does.
+// NPCs: CDDA's npc_male / npc_female body with the worn clothing and wielded item overlays
+// stacked on top (like the tileset draws characters), composited once per outfit. In 'model'
+// mode (render/chars, docs/CHARACTERS.md) that composite is the paint source for a 3D person
+// in the same clothes; in 'billboard' mode it is drawn as is. Dead NPCs crumple like monster
+// corpses and stay while their corpse item does.
 
 const HEIGHT = 1.75;
 const FALL_TIME = 0.35;
 
 interface View {
-  h: SpriteHandle;
+  h: SpriteHandle | null;
+  c: CreatureModel | null;
   key: string;
   frame: TileFrame;
+  /** attackCooldown last update: a jump means it just swung/fired */
+  cool: number;
 }
 
 interface Body {
-  h: SpriteHandle;
+  h: SpriteHandle | null;
+  body: FallingBody | null;
   npc: Npc;
   frame: TileFrame;
   t: number;
@@ -50,6 +60,11 @@ export function npcLayers(atlas: Atlas | null, n: Npc, looksLike: (id: string) =
   return ids;
 }
 
+function seedOf(uid: number): number {
+  const x = Math.sin(uid * 91.345 + 12.7) * 24634.6345;
+  return x - Math.floor(x);
+}
+
 export class NpcView implements GameSystem {
   readonly name = 'npc-view';
   private atlas: Atlas | null = null;
@@ -57,6 +72,8 @@ export class NpcView implements GameSystem {
   private bodies: Body[] = [];
   private shots: SpriteHandle[] = [];
   private bodyCheck = 0;
+  private chars: CharLayers | null = null;
+  private rigs = new Map<string, Rig>();
 
   constructor(readonly game: Game, readonly renderer: Renderer, readonly sys: NpcSystem) {
     loadAtlas().then(
@@ -66,12 +83,44 @@ export class NpcView implements GameSystem {
       },
       () => {},
     );
-    sys.onHurt.push((n) => this.views.get(n)?.h.flash(0xff2a2a, 0.18));
+    sys.onHurt.push((n) => {
+      const v = this.views.get(n);
+      v?.h?.flash(0xff2a2a, 0.18);
+      v?.c?.flash(0xff2a2a, 0.18);
+    });
     sys.onRemoved.push((n) => this.drop(n));
     sys.onDied.push((n) => this.died(n));
+    charSettings.listeners.push(() => this.rebuildAll());
   }
 
   private looksLike = (id: string) => this.game.data.items[id]?.looks_like as string | undefined;
+
+  private get models(): boolean {
+    return charSettings.mode === 'model';
+  }
+
+  private layers(): CharLayers {
+    return (this.chars ??= charLayers(this.renderer));
+  }
+
+  private rigFor(n: Npc): Rig {
+    // survivors are people: the humanoid body at BN's human volume, women a touch smaller,
+    // holding whatever they wield
+    const male = n.male !== false;
+    const weapon = weaponOf(n.inv.wielded);
+    const key = `${male ? 'm' : 'f'}:${weapon}`;
+    let r = this.rigs.get(key);
+    if (!r) {
+      const base = bodyShapeOf({ id: male ? 'npc_male' : 'npc_female', bodytype: 'human', species: ['HUMAN'], volume: 62500 });
+      r = makeRig(male ? { ...base, weapon } : { ...base, scale: 0.95, girth: 0.92, weapon });
+      this.rigs.set(key, r);
+    }
+    return r;
+  }
+
+  private skinFor(rig: Rig, frame: TileFrame) {
+    return this.layers().store.get(rig, { key: frameKey(frame), info: () => spriteInfo(frame) });
+  }
 
   /** Composite frame for the NPC's current outfit (memoised by the layer list). */
   frameFor(n: Npc): { key: string; frame: TileFrame } {
@@ -91,26 +140,76 @@ export class NpcView implements GameSystem {
     return this.renderer.source.glyph('@', col);
   }
 
+  private makeVisual(n: Npc, v: View): void {
+    if (this.models) {
+      const rig = this.rigFor(n);
+      v.c = new CreatureModel(this.layers().live, rig, this.skinFor(rig, v.frame), seedOf(n.uid), n.x, n.y, n.facing);
+    } else v.h = this.renderer.sprites.add({ x: n.x, y: n.y, z: n.z, frame: v.frame, height: HEIGHT });
+  }
+
   private refresh(n: Npc, v: View, force = false): void {
     const { key, frame } = this.frameFor(n);
     if (!force && key === v.key) return;
     v.key = key;
     v.frame = frame;
-    v.h.setFrame(frame, HEIGHT);
+    if (v.h) v.h.setFrame(frame, HEIGHT);
+    // a new outfit or weapon: rebuild from the new composite (the rig may differ too)
+    if (v.c) {
+      v.c.remove();
+      v.c = null;
+      this.makeVisual(n, v);
+    }
+  }
+
+  private rebuildAll(): void {
+    for (const [n, v] of this.views) {
+      v.h?.remove();
+      v.c?.remove();
+      v.h = null;
+      v.c = null;
+      this.makeVisual(n, v);
+    }
+    for (const b of this.bodies) {
+      b.h?.remove();
+      b.body?.remove();
+      b.h = null;
+      b.body = null;
+      b.t = FALL_TIME;
+      this.makeBody(b, true);
+    }
   }
 
   private drop(n: Npc): void {
     const v = this.views.get(n);
     if (!v) return;
-    v.h.remove();
+    v.h?.remove();
+    v.c?.remove();
     this.views.delete(n);
+  }
+
+  private makeBody(b: Body, done: boolean): void {
+    const n = b.npc;
+    if (this.models) {
+      const rig = this.rigFor(n);
+      const p = this.game.player;
+      const d = Math.hypot(n.x - p.x, n.y - p.y);
+      const slide = !done && d < 6 && d > 0.01 ? 0.3 : 0;
+      b.body = new FallingBody(this.layers().dead, rig, this.skinFor(rig, b.frame), seedOf(n.uid), n.x, n.y, n.z, n.facing,
+        slide ? ((n.x - p.x) / d) * slide : 0, slide ? ((n.y - p.y) / d) * slide : 0, done);
+    } else {
+      const k = Math.min(1, b.t / FALL_TIME);
+      b.h = this.renderer.sprites.add({ x: n.x, y: n.y, z: n.z, frame: b.frame, height: HEIGHT * (1 - 0.7 * k * k), width: (b.frame.w / 32) * (1 + 0.5 * k) });
+    }
   }
 
   private died(n: Npc): void {
     const v = this.views.get(n);
     const frame = v?.frame ?? this.frameFor(n).frame;
     this.drop(n);
-    this.bodies.push({ h: this.renderer.sprites.add({ x: n.x, y: n.y, z: n.z, frame, height: HEIGHT }), npc: n, frame, t: 0 });
+    const b: Body = { h: null, body: null, npc: n, frame, t: 0 };
+    this.makeBody(b, false);
+    b.body?.inst.flash(0xff2020, 0.15);
+    this.bodies.push(b);
   }
 
   update(game: Game, dt: number): void {
@@ -121,6 +220,7 @@ export class NpcView implements GameSystem {
       this.bodyCheck = 0.5;
       outfitCheck = true;
     }
+    const cam = this.renderer.rig.camera.position;
     for (const n of this.sys.npcs) {
       if (n.dead) continue;
       const inBubble = this.sys.inBubble(n);
@@ -131,33 +231,49 @@ export class NpcView implements GameSystem {
       }
       if (!v) {
         const { key, frame } = this.frameFor(n);
-        v = { h: this.renderer.sprites.add({ x: n.x, y: n.y, z: n.z, frame, height: HEIGHT }), key, frame };
+        v = { h: null, c: null, key, frame, cool: n.attackCooldown };
+        this.makeVisual(n, v);
         this.views.set(n, v);
       } else if (outfitCheck) this.refresh(n, v);
+      const downed = n.effects.has('downed') || n.isAsleep();
+      const visible = Math.abs(n.z - p.z) <= 1;
+      if (v.c) {
+        if (n.attackCooldown > v.cool + 0.05) v.c.strike();
+        v.cool = n.attackCooldown;
+        v.c.update(dt, {
+          x: n.x, y: n.y, z: n.z, facing: n.facing,
+          target: n.goal.kind === 'fight' ? { x: n.goal.x, y: n.goal.y } : null,
+          moving: n.moving, walkPhase: n.walkPhase, windup: null, flinch: 0,
+          down: downed ? 1 : 0, visible, emph: n.isEnemy() ? 1 : 0,
+          camDist: Math.hypot(n.x - cam.x, n.y - cam.z), sy: 1, sxz: 1,
+        });
+        continue;
+      }
+      const h = v.h!;
       const bob = n.moving ? Math.abs(Math.sin(n.walkPhase * Math.PI)) * 0.06 : 0;
       // Point-blank: draw as if at NEAR_CLAMP (see monsterView.ts nearClamp).
       // ...and raised to meet the crosshair at arm's length (monsterView.ts meleeAimLift)
-      const cam = this.renderer.rig.camera.position;
-      const downed = n.effects.has('downed') || n.isAsleep();
       const foot = n.z * LEVEL_HEIGHT + (this.renderer.groundAt?.(n.x, n.y, n.z) ?? 0);
       const aim = downed || this.renderer.cameraMode !== 'first' ? 0 : meleeAimLift(Math.hypot(n.x - cam.x, n.y - cam.z), cam.y - foot, HEIGHT);
       const near = nearClamp(cam, n.x, n.y, foot + aim);
-      v.h.set(n.x, n.y, n.z + (bob * near.scale + aim + near.lift) / LEVEL_HEIGHT);
-      v.h.setVisible(Math.abs(n.z - p.z) <= 1);
-      v.h.setFrame(v.frame, HEIGHT * (downed ? 0.5 : 1) * near.scale);
+      h.set(n.x, n.y, n.z + (bob * near.scale + aim + near.lift) / LEVEL_HEIGHT);
+      h.setVisible(visible);
+      h.setFrame(v.frame, HEIGHT * (downed ? 0.5 : 1) * near.scale);
     }
     // Bodies: fall over, then stay while the corpse item lies there.
     for (let i = this.bodies.length - 1; i >= 0; i--) {
       const b = this.bodies[i];
-      if (b.t < FALL_TIME) {
+      if (b.body) b.body.update(dt);
+      else if (b.t < FALL_TIME) {
         b.t = Math.min(FALL_TIME, b.t + dt);
-        const k = b.t / FALL_TIME;
-        b.h.remove();
-        b.h = this.renderer.sprites.add({ x: b.npc.x, y: b.npc.y, z: b.npc.z, frame: b.frame, height: HEIGHT * (1 - 0.7 * k * k), width: (b.frame.w / 32) * (1 + 0.5 * k) });
-      } else if (outfitCheck) {
+        b.h?.remove();
+        this.makeBody(b, false);
+      }
+      if (outfitCheck && (b.body || b.t >= FALL_TIME)) {
         const items = game.map.itemsAt(b.npc.tileX, b.npc.tileY, b.npc.z) as { vars?: Record<string, unknown> }[];
         if (!items.some((it) => it.vars?.npc === b.npc.uid)) {
-          b.h.remove();
+          b.h?.remove();
+          b.body?.remove();
           this.bodies.splice(i, 1);
         }
       }

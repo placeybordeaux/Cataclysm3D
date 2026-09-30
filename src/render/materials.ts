@@ -53,7 +53,7 @@ export function normalOutputChunk(hasNormal: boolean, flag: number): string {
 type Shader = THREE.WebGLProgramParametersWithUniforms;
 
 /** Adds the gNormal MRT output to any built-in material's fragment shader. */
-function addNormalOutput(shader: Shader, hasNormal: boolean, flag: number): void {
+export function addNormalOutput(shader: Shader, hasNormal: boolean, flag: number): void {
   shader.fragmentShader = NORMAL_OUT_DECL + shader.fragmentShader.replace(
     /}\s*$/,
     `  ${normalOutputChunk(hasNormal, flag)}\n}`,
@@ -175,7 +175,7 @@ const LIGHTS_BEGIN = patchChunk(
 /** How a banded-Lambert material gets its light-map sample. */
 type LmMode = 'world' | 'sprite' | 'none';
 
-function patchBandedLambert(shader: Shader, lm: LmMode = 'none'): void {
+export function patchBandedLambert(shader: Shader, lm: LmMode = 'none'): void {
   shader.uniforms.uBands = shared.uBands;
   shader.uniforms.uRim = shared.uRim;
   shader.uniforms.uBounce = shared.uBounce;
@@ -231,10 +231,20 @@ const WORLD_MAP = /* glsl */ `
 #ifdef USE_MAP
   vec2 texel = vMapUv * vUvRect.zw * vec2(textureSize(map, 0));
   vec2 ddx = dFdx(texel), ddy = dFdy(texel);
-  float lod = clamp(0.5 * log2(max(dot(ddx, ddx), dot(ddy, ddy))) - 0.35, 0.0, 3.0);
+  float lodRaw = 0.5 * log2(max(dot(ddx, ddx), dot(ddy, ddy))) - 0.35;
+  float lod = clamp(lodRaw, 0.0, 3.0);
   vec2 tileUv = clamp(fract(vMapUv), 0.0005, 0.9995);
   vec2 atlasUv = vUvRect.xy + tileUv * vUvRect.zw;
   vec4 sampledDiffuseColor = textureLod( map, atlasUv, lod );
+  if (lodRaw > 3.0) {
+    // Past the clamp a tile is smaller than a few pixels and lod-3 texels alias into
+    // crawling speckle on distant roads and lawns (worst when walking). The mip chain can't
+    // go further without bleeding atlas neighbours, so fade to the tile's own average
+    // (four lod-3 taps at the quadrant centres) instead.
+    vec4 avg = textureLod( map, vUvRect.xy + vec2(0.25, 0.25) * vUvRect.zw, 3.0 ) + textureLod( map, vUvRect.xy + vec2(0.75, 0.25) * vUvRect.zw, 3.0 )
+             + textureLod( map, vUvRect.xy + vec2(0.25, 0.75) * vUvRect.zw, 3.0 ) + textureLod( map, vUvRect.xy + vec2(0.75, 0.75) * vUvRect.zw, 3.0 );
+    sampledDiffuseColor = mix( sampledDiffuseColor, avg * 0.25, smoothstep(3.0, 4.2, lodRaw) );
+  }
   // Coverage comes from the full-resolution texel: a mip texel at a tile's edge averages in
   // the transparent gutter around the frame, and the alpha test then punched dotted holes
   // along every floor/ceiling seam (the sky showed through on real GPUs). Undo the darkening
@@ -313,6 +323,31 @@ export function worldMaterials(page: THREE.Texture): { mat: THREE.MeshLambertMat
   m = { mat, depth };
   worldCache.set(page, m);
   return m;
+}
+
+/**
+ * World material for a vehicle body skin (vehicleModel.ts): the chunk look (banded
+ * lighting, light map, outlines) but double-sided, because a body is a thin shell you also
+ * see from inside the cabin. Inner faces are darkened so door cards and the headliner read
+ * as interior, not as a mirrored copy of the paint. Not cached: one per vehicle skin, the
+ * caller disposes it with the texture.
+ */
+export function vehicleBodyMaterials(page: THREE.Texture): { mat: THREE.MeshLambertMaterial; depth: THREE.MeshDepthMaterial } {
+  enableMips(page);
+  const mat = new THREE.MeshLambertMaterial({ map: page, vertexColors: true, side: THREE.DoubleSide });
+  mat.onBeforeCompile = (shader) => {
+    patchWorldVertex(shader, true);
+    patchBandedLambert(shader, 'world');
+    addNormalOutput(shader, true, 1);
+    // Inside faces: a neutral trim grey keeping only a hint of the skin's pattern.
+    shader.fragmentShader = shader.fragmentShader.replace('#include <color_fragment>', '#include <color_fragment>\n  if (!gl_FrontFacing) diffuseColor.rgb = vec3(0.19, 0.19, 0.2) * (0.8 + 0.5 * dot(diffuseColor.rgb, vec3(0.3, 0.59, 0.11)));');
+  };
+  mat.customProgramCacheKey = () => 'cdda-vehicle-body';
+  (mat.userData as any).mrt = true;
+  const depth = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking, side: THREE.DoubleSide });
+  depth.onBeforeCompile = (shader) => patchWorldVertex(shader);
+  depth.customProgramCacheKey = () => 'cdda-vehicle-depth';
+  return { mat, depth };
 }
 
 // --- sprite (billboard) material -----------------------------------------------------

@@ -3,12 +3,17 @@ import { monsterSize, type Monster } from '../game/monster';
 import type { CorpseRecord, MonsterSystem } from '../game/monai';
 import type { PlayerCombat } from '../game/playercombat';
 import { sfx } from '../audio/sfx';
-import { LEVEL_HEIGHT } from '../world/coords';
+import { CHUNK, LEVEL_HEIGHT } from '../world/coords';
 import { loadAtlas, type Atlas, type FrameRef } from './atlas';
 import type { Renderer } from './renderer';
 import type { SpriteHandle } from './sprites';
 import type { TileFrame } from './textureSource';
 import type { LightHandle } from './lights';
+import { charLayers, charSettings, frameKey, spriteInfo, type CharLayers } from './chars';
+import { bodyShapeOf } from './chars/archetype';
+import { CreatureModel, DEATH_TOTAL as MODEL_DEATH_TOTAL, FallingBody } from './chars/creature';
+import { makeRig, type Rig } from './chars/rig';
+import type { MonsterDef } from '../data/types';
 
 // Billboards for monsters, their corpses and projectiles (blood/bile/acid decals are drawn by
 // render/worldFx.ts from the map fields the monster system adds). Runs as a
@@ -23,8 +28,15 @@ import type { LightHandle } from './lights';
 //  - downed monsters lie flat; the dead stagger along the killing blow, fall, bounce and thud
 //
 // Scale: UltiCa human sprites are 32x48 px for a ~1.75 m person, so MON_PPM px per metre.
+//
+// Two ways to draw a creature (charSettings.mode, docs/CHARACTERS.md): 'model' = a low-poly
+// procedural body (render/chars) textured from the sprite, turning to face where it goes and
+// posed at a stepped frame rate; 'billboard' = the sprite itself, always facing the camera.
+// Both get the same combat-feel inputs computed below.
 
 const MON_PPM = 48 / 1.75;
+/** Dormant monsters are drawn out to the draw distance, capped here (m). */
+export const FAR_FIGURE_MAX = 130;
 const GLYPH_HEIGHT = { tiny: 0.45, small: 0.8, medium: 1.7, large: 2.3, huge: 3.2 } as const;
 /** Fallen corpses: squashed to this fraction of standing height, this much wider. */
 const FALLEN = 0.3;
@@ -38,7 +50,10 @@ const DIE_TOTAL = DIE_STAGGER + DIE_FALL + DIE_BOUNCE;
 const DOWN_TIME = 0.22;
 
 interface MonView {
-  h: SpriteHandle;
+  /** billboard mode */
+  h: SpriteHandle | null;
+  /** model mode */
+  c: CreatureModel | null;
   frame: TileFrame;
   height: number;
   typeId: string;
@@ -51,7 +66,8 @@ interface MonView {
 }
 
 interface CorpseView {
-  h: SpriteHandle;
+  h: SpriteHandle | null;
+  body: FallingBody | null;
   rec: CorpseRecord;
   frame: TileFrame;
   height: number;
@@ -170,6 +186,12 @@ function toFrame(r: FrameRef, flip = false): TileFrame {
   return { texture: r.texture, uv, w: r.w, h: r.h, ppm: 32 };
 }
 
+/** Hash a uid to 0..1 (per-creature animation offset). */
+function seedOf(uid: number): number {
+  const x = Math.sin(uid * 12.9898 + 78.233) * 43758.5453;
+  return x - Math.floor(x);
+}
+
 export class MonsterView implements GameSystem {
   readonly name = 'monster-view';
   private atlas: Atlas | null = null;
@@ -182,6 +204,12 @@ export class MonsterView implements GameSystem {
   private lastShots = 0;
   private corpseCheck = 0;
   private kicks = new Map<Monster, { dx: number; dy: number; t: number; amt: number }>();
+  private chars: CharLayers | null = null;
+  /** dormant monsters drawn as far figures (farFigures) */
+  private far: Monster[] = [];
+  private farSet = new Set<Monster>();
+  private farScan = 0;
+  private rigs = new Map<string, Rig>();
   /** A body hit the ground (hitFx puts dust/blood there). */
   onBodyLanded: ((x: number, y: number, z: number, blood: string | null) => void) | null = null;
 
@@ -191,18 +219,20 @@ export class MonsterView implements GameSystem {
         this.atlas = a;
         // Re-skin anything created with glyph fallbacks before the atlas arrived.
         for (const [m, v] of this.views) this.refresh(m, v);
+        for (const [c, v] of this.corpses) this.remakeCorpse(c, v);
       },
       () => {},
     );
-    sys.onHurt.push((m) => this.views.get(m)?.h.flash(0xff2a2a, 0.18));
+    sys.onHurt.push((m) => this.flash(m, 0xff2a2a, 0.18));
     sys.onDied.push((m, c) => this.died(m, c));
     sys.onRemoved.push((m) => this.drop(m));
     sys.onCorpseGone.push((c) => this.dropCorpse(c));
     sys.onCorpse.push((c) => {
-      const f = this.frameFor({ type: game.data.monsters[c.monId], uid: 0, size: monsterSize(game.data.monsters[c.monId]) });
-      const h = this.renderer.sprites.add({ x: c.x, y: c.y, z: c.z, frame: f.frame, height: f.height });
-      h.setSize((f.frame.w / MON_PPM) * FALLEN_WIDE, f.height * FALLEN);
-      this.corpses.set(c, { h, rec: c, frame: f.frame, height: f.height, t: DIE_TOTAL, x0: c.x, y0: c.y, dx: 0, dy: 0, heavy: false });
+      const def = game.data.monsters[c.monId];
+      const f = this.frameFor({ type: def, uid: 0, size: monsterSize(def) });
+      const v: CorpseView = { h: null, body: null, rec: c, frame: f.frame, height: f.height, t: DIE_TOTAL, x0: c.x, y0: c.y, dx: 0, dy: 0, heavy: false };
+      this.makeCorpseVisual(v, def, 0, true);
+      this.corpses.set(c, v);
     });
     sys.onSpawned.push((m) => {
       const v = this.views.get(m);
@@ -215,10 +245,11 @@ export class MonsterView implements GameSystem {
       const p = game.player;
       if (e.phase === 'windup') {
         v.warned = false;
-        v.h.flash(0xffd890, 0.14);
+        this.flash(m, 0xffd890, 0.14);
       } else if (e.phase === 'resolved' || e.phase === 'whiff') {
         // Lunge: shove the sprite toward its target (a kick from the far side).
         this.kick(m, 2 * m.x - p.x, 2 * m.y - p.y, e.heavy ? 0.9 : 0.6);
+        v.c?.strike();
       }
     });
     game.events.on('playerAttack', (e) => {
@@ -226,6 +257,30 @@ export class MonsterView implements GameSystem {
       const v = m && this.views.get(m);
       if (v && e.hitStop) v.hold = Math.max(v.hold, e.hitStop);
     });
+    charSettings.listeners.push(() => this.rebuildAll());
+  }
+
+  private get models(): boolean {
+    return charSettings.mode === 'model';
+  }
+
+  private layers(): CharLayers {
+    return (this.chars ??= charLayers(this.renderer));
+  }
+
+  /** Procedural body for a monster type (shared by every monster of the type). */
+  rigFor(def: MonsterDef): Rig {
+    let r = this.rigs.get(def.id);
+    if (!r) {
+      const shape = bodyShapeOf({ id: def.id, bodytype: (def as { bodytype?: string }).bodytype, species: def.species, flags: def.flags, symbol: def.symbol, volume: def.volume });
+      r = makeRig(shape, { turret: def.symbol === '2' || /turret/.test(def.id) });
+      this.rigs.set(def.id, r);
+    }
+    return r;
+  }
+
+  private skinFor(rig: Rig, frame: TileFrame) {
+    return this.layers().store.get(rig, { key: frameKey(frame), info: () => spriteInfo(frame) });
   }
 
   /**
@@ -243,8 +298,23 @@ export class MonsterView implements GameSystem {
     return v && { frame: v.frame, height: v.height };
   }
 
+  /**
+   * Where a monster's body is, for effects that aim at it (blood sprays, stuck arrows):
+   * metres above its feet and its half-width. null = no view (billboard art span applies).
+   */
+  bodyOf(m: Monster): { bottom: number; top: number; radius: number } | null {
+    const v = this.views.get(m);
+    if (!v?.c) return null;
+    const rig = v.c.rig;
+    const core = rig.parts.find((p) => p.kind === 'core');
+    const radius = core ? Math.max(0.08, Math.min(core.size[0], core.size[2]) * 0.55) : m.radius;
+    return { bottom: rig.height * 0.15 + rig.hover, top: rig.height * 0.95 + rig.hover, radius };
+  }
+
   flash(m: Monster, color: number, seconds: number): void {
-    this.views.get(m)?.h.flash(color, seconds);
+    const v = this.views.get(m);
+    v?.h?.flash(color, seconds);
+    v?.c?.flash(color, seconds);
   }
 
   /** Sprite frame + height for a monster type (atlas sprite, looks_like chain, glyph fallback). */
@@ -276,10 +346,24 @@ export class MonsterView implements GameSystem {
 
   private create(m: Monster): MonView {
     const { frame, height } = this.frameFor(m);
-    const h = this.renderer.sprites.add({ x: m.x, y: m.y, z: m.z, frame, height });
-    const v = { h, frame, height, typeId: m.type.id, down: 0, hold: 0, warned: false };
+    const v: MonView = { h: null, c: null, frame, height, typeId: m.type.id, down: 0, hold: 0, warned: false };
+    this.makeVisual(m, v);
     this.views.set(m, v);
     return v;
+  }
+
+  private makeVisual(m: Monster, v: MonView): void {
+    if (this.models) {
+      const rig = this.rigFor(m.type);
+      v.c = new CreatureModel(this.layers().live, rig, this.skinFor(rig, v.frame), seedOf(m.uid), m.x, m.y, m.facing);
+    } else v.h = this.renderer.sprites.add({ x: m.x, y: m.y, z: m.z, frame: v.frame, height: v.height });
+  }
+
+  private dropVisual(v: MonView): void {
+    v.h?.remove();
+    v.c?.remove();
+    v.h = null;
+    v.c = null;
   }
 
   private refresh(m: Monster, v: MonView): void {
@@ -287,13 +371,51 @@ export class MonsterView implements GameSystem {
     v.frame = frame;
     v.height = height;
     v.typeId = m.type.id;
-    v.h.setFrame(frame, height);
+    if (v.h) v.h.setFrame(frame, height);
+    else if (v.c) {
+      this.dropVisual(v);
+      this.makeVisual(m, v);
+    }
+  }
+
+  /** Display mode switched: rebuild every creature and body in the other style. */
+  private rebuildAll(): void {
+    for (const [m, v] of this.views) {
+      this.dropVisual(v);
+      this.makeVisual(m, v);
+    }
+    for (const [c, v] of this.corpses) this.remakeCorpse(c, v);
+  }
+
+  private remakeCorpse(c: CorpseRecord, v: CorpseView): void {
+    const def = this.game.data.monsters[c.monId];
+    const f = this.frameFor({ type: def, uid: 0, size: monsterSize(def) });
+    v.frame = f.frame;
+    v.height = f.height;
+    v.h?.remove();
+    v.body?.remove();
+    v.h = null;
+    v.body = null;
+    v.t = Math.max(v.t, DIE_TOTAL);
+    this.makeCorpseVisual(v, def, 0, true);
+  }
+
+  /** The lying (or about to fall) body: a billboard or a 3D body on the corpse layer. */
+  private makeCorpseVisual(v: CorpseView, def: MonsterDef, uid: number, done: boolean): void {
+    const c = v.rec;
+    if (this.models) {
+      const rig = this.rigFor(def);
+      v.body = new FallingBody(this.layers().dead, rig, this.skinFor(rig, v.frame), seedOf(uid || Math.floor(c.x * 7 + c.y * 13)), v.x0, v.y0, c.z, c.facing, v.dx, v.dy, done);
+    } else {
+      v.h = this.renderer.sprites.add({ x: v.x0 + v.dx, y: v.y0 + v.dy, z: c.z, frame: v.frame, height: v.height });
+      if (done) v.h.setSize((v.frame.w / MON_PPM) * FALLEN_WIDE, v.height * FALLEN);
+    }
   }
 
   private drop(m: Monster): void {
     const v = this.views.get(m);
     if (!v) return;
-    v.h.remove();
+    this.dropVisual(v);
     this.views.delete(m);
   }
 
@@ -307,30 +429,42 @@ export class MonsterView implements GameSystem {
     const p = this.game.player;
     const d = Math.hypot(m.x - p.x, m.y - p.y);
     const slide = d < 6 && d > 0.01 ? 0.35 : 0;
-    const h = this.renderer.sprites.add({ x: m.x, y: m.y, z: c.z, frame: f.frame, height: f.height });
-    h.flash(0xff2020, 0.15);
-    this.corpses.set(c, {
-      h, rec: c, frame: f.frame, height: f.height, t: 0, x0: m.x, y0: m.y,
+    const cv: CorpseView = {
+      h: null, body: null, rec: c, frame: f.frame, height: f.height, t: 0, x0: m.x, y0: m.y,
       dx: slide ? ((m.x - p.x) / d) * slide : 0, dy: slide ? ((m.y - p.y) / d) * slide : 0, heavy: m.size === 'large' || m.size === 'huge',
-    });
+    };
+    // the dying body keeps the facing it had, so a 3D body falls from where it stood
+    c.facing = m.facing;
+    this.makeCorpseVisual(cv, m.type, m.uid, false);
+    if (cv.h) cv.h.set(m.x, m.y, c.z);
+    cv.h?.flash(0xff2020, 0.15);
+    cv.body?.inst.flash(0xff2020, 0.15);
+    this.corpses.set(c, cv);
   }
 
   private dropCorpse(c: CorpseRecord): void {
     const v = this.corpses.get(c);
     if (!v) return;
-    v.h.remove();
+    v.h?.remove();
+    v.body?.remove();
     this.corpses.delete(c);
   }
 
   update(game: Game, dt: number): void {
     const p = game.player;
     const cam = this.renderer.rig.camera.position;
-    // Live monsters: only those in the bubble have sprites.
-    for (const m of this.sys.active) {
+    // Live monsters: those in the bubble, plus dormant ones out to the draw distance (see farFigures).
+    this.farScan -= dt;
+    if (this.farScan <= 0) {
+      this.farScan = 0.5;
+      this.farFigures(p);
+    }
+    for (const m of this.sys.active.length ? [...this.sys.active, ...this.far] : this.far) {
       if (m.dead) continue;
       let v = this.views.get(m);
       if (!v) v = this.create(m);
-      v.h.setVisible(Math.abs(m.z - p.z) <= 1);
+      const visible = Math.abs(m.z - p.z) <= 1;
+      v.h?.setVisible(visible);
       // Hit-stop: the struck sprite holds exactly where the blow found it.
       if (v.hold > 0) {
         v.hold = Math.max(0, v.hold - dt);
@@ -341,7 +475,7 @@ export class MonsterView implements GameSystem {
       const sway = m.has('STUMBLES') && m.moving ? Math.sin(m.wobble) * 0.06 : 0;
       v.down += ((m.hasEffect('downed') ? 1 : 0) - v.down) * Math.min(1, dt / DOWN_TIME * 3);
       // Stagger: out fast, back slowly, with a slight squash at the peak of the shove.
-      let kx = 0, ky = 0, squash = 1;
+      let kx = 0, ky = 0, squash = 1, kickK = 0;
       const k = this.kicks.get(m);
       if (k) {
         k.t += dt;
@@ -351,6 +485,7 @@ export class MonsterView implements GameSystem {
           const a = k.amt * (u < 0.25 ? u / 0.25 : 1 - (u - 0.25) / 0.75);
           kx = k.dx * a;
           ky = k.dy * a;
+          kickK = a / KICK_DIST;
           squash = 1 - 0.08 * Math.sin(Math.min(1, u * 2) * Math.PI);
         }
       }
@@ -377,22 +512,38 @@ export class MonsterView implements GameSystem {
         }
         if (!v.warned && u >= 0.72) {
           v.warned = true;
-          v.h.flash(0xfff4d0, 0.12);
+          this.flash(m, 0xfff4d0, 0.12);
         }
       }
+      if (v.c) {
+        // 3D body: the pose carries the bob, telegraph and flinch; the sway and shoves move it.
+        const x = m.x + kx + sway * Math.cos(m.facing), y = m.y + ky + sway * Math.sin(m.facing);
+        const dP = Math.hypot(m.x - p.x, m.y - p.y);
+        const fighting = m.z === p.z && m.attitude() === 'attack' && (!!w || dP < 2.5);
+        v.c.update(dt, {
+          x, y, z: m.z, facing: m.facing, target: fighting ? { x: p.x, y: p.y } : null,
+          moving: m.moving, walkPhase: m.walkPhase,
+          windup: w ? { elapsed: w.total - w.t, total: w.total, kind: w.kind } : null,
+          flinch: Math.min(1, Math.max(m.flinch * 4, kickK)), down: v.down, visible,
+          emph: m.attitude() === 'attack' ? 1 : 0, camDist: Math.hypot(x - cam.x, y - cam.z),
+          sy: 1 + (stretch - 1) * 0.5 - (1 - squash) * 0.5, sxz: 1 - (1 - narrow) * 0.5,
+        });
+        continue;
+      }
+      const h = v.h!;
       const x = m.x + sway * Math.cos(p.yaw) + kx, y = m.y + sway * Math.sin(p.yaw) + ky;
       // foot height as drawn (the sprite layer adds the look's ground relief itself)
       const foot = m.z * LEVEL_HEIGHT + (this.renderer.groundAt?.(x, y, m.z) ?? 0);
       const aim = v.down > 0 || this.renderer.cameraMode !== 'first' ? 0 : meleeAimLift(Math.hypot(x - cam.x, y - cam.z), cam.y - foot, v.height);
       const near = nearClamp(cam, x, y, foot + aim);
-      v.h.set(x, y, m.z + (bob * near.scale + aim + near.lift) / LEVEL_HEIGHT);
+      h.set(x, y, m.z + (bob * near.scale + aim + near.lift) / LEVEL_HEIGHT);
       // Lying down: short and wide instead of the old half-height stand.
       const lie = v.down;
       const hgt = v.height * (1 - (1 - FALLEN) * lie) * squash * stretch * near.scale;
       const wid = (v.height * (v.frame.w / v.frame.h)) * (1 + (FALLEN_WIDE - 1) * lie) * (2 - squash) * narrow * near.scale;
-      v.h.setSize(wid, hgt);
+      h.setSize(wid, hgt);
     }
-    for (const [m] of this.views) if (m.dead || m.dormant) this.drop(m);
+    for (const [m] of this.views) if (m.dead || (m.dormant && !this.farSet.has(m))) this.drop(m);
     for (const [m] of this.kicks) if (m.dead || m.dormant) this.kicks.delete(m);
 
     // Corpses: stagger -> fall -> bounce, then persist until the item is gone.
@@ -404,14 +555,15 @@ export class MonsterView implements GameSystem {
         this.dropCorpse(c);
         continue;
       }
-      if (v.t < DIE_TOTAL) {
+      if (v.body) {
+        if (v.body.t < MODEL_DEATH_TOTAL && v.body.update(dt)) this.landed(v, c);
+        continue;
+      }
+      if (v.t < DIE_TOTAL && v.h) {
         const before = deathPose(v.t);
         v.t = Math.min(DIE_TOTAL, v.t + dt);
         const pose = deathPose(v.t);
-        if (pose.landed && !before.landed) {
-          sfx.bodyFall({ x: v.x0 + v.dx, y: v.y0 + v.dy, z: c.z }, v.heavy);
-          this.onBodyLanded?.(v.x0 + v.dx, v.y0 + v.dy, c.z, this.sys.bloodType(this.game.data.monsters[c.monId]));
-        }
+        if (pose.landed && !before.landed) this.landed(v, c);
         v.h.set(v.x0 + v.dx * pose.slide, v.y0 + v.dy * pose.slide, c.z);
         v.h.setSize((v.frame.w / MON_PPM) * pose.wide, v.height * pose.hgt);
       }
@@ -447,5 +599,28 @@ export class MonsterView implements GameSystem {
       if (this.muzzleT <= 0) this.muzzle.intensity = 0;
     }
     this.sys.playerLight = () => (this.renderer.flashlightOn ? 60 : 0);
+  }
+
+  /**
+   * Dormant monsters (outside monai's ACTIVE_RADIUS reality bubble) aren't simulated, but a
+   * horde 80 m down a long road should still be seen coming: they are drawn where they stand
+   * (or drift) out to the draw distance, idling, with the same far-LOD silhouette and hostile
+   * emphasis as live ones. Rescanned twice a second; sys.all can be long.
+   */
+  private farFigures(p: { x: number; y: number; z: number }): void {
+    this.far.length = 0;
+    this.farSet.clear();
+    const range = Math.min(FAR_FIGURE_MAX, (this.renderer.chunks.radius + 0.5) * CHUNK);
+    for (const m of this.sys.all) {
+      if (m.dead || !m.dormant || Math.abs(m.z - p.z) > 1) continue;
+      if (Math.hypot(m.x - p.x, m.y - p.y) > range) continue;
+      this.far.push(m);
+      this.farSet.add(m);
+    }
+  }
+
+  private landed(v: CorpseView, c: CorpseRecord): void {
+    sfx.bodyFall({ x: v.x0 + v.dx, y: v.y0 + v.dy, z: c.z }, v.heavy);
+    this.onBodyLanded?.(v.x0 + v.dx, v.y0 + v.dy, c.z, this.sys.bloodType(this.game.data.monsters[c.monId]));
   }
 }

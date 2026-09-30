@@ -24,6 +24,7 @@ import { installNpcs } from './npcs';
 import { installMutBio } from './mutbio';
 import { installCombatDepth } from './combatdepth';
 import { installCombatFeel } from './feel';
+import { installAim } from './aim';
 import { installLabs } from './labs';
 import { installChunkTracking } from './save/tracking';
 import { installSave, takePendingLoad } from './save/install';
@@ -111,6 +112,8 @@ async function main(): Promise<void> {
   installCombatDepth(game, renderer, monsters, api);
   // Combat feel layer (telegraphs, guard, side-step, hit-stop, crosshair HUD); wraps reload/interact.
   installCombatFeel(game, renderer, monsters, api);
+  // Aim model (sway / timing / classic dice): moving reticle, timing games, Options entry; wraps reload.
+  installAim(game, renderer, monsters, api);
   // After installMonsters (wraps PlayerCombat for attack events) and installSave (its saveable).
   const achievements = await installAchievements(game, worldgen, api);
   // Unlocks, discovery tips, the journal; the title screen's Start / New Game use it.

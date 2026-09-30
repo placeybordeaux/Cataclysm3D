@@ -19,6 +19,14 @@
 //          drinks (sleeps 23:00–07:00), in game time and in real minutes of play.
 //   cold   the first night spent in the shelter with the starting kit (and a blanket from the
 //          shelter's lockers when there is one): lowest body temperature and cold wake-ups.
+//   range  a zombie walking in from 20 m at a survivor with a pistol, rifle, shotgun or longbow at
+//          skill 0 and 5 (docs/COMBAT_FEEL.md "Aim models"): shots, hit rate, time to kill.
+//          The shooter tracks the chest perfectly (a mouse) and holds RMB; under the dice model
+//          it fires once aimed (or after 1.2 s), under free aim it fires when the weaving reticle
+//          is about to be on the body (0.15 s human reaction), or after 2 s regardless.
+//
+// --aim sway|timing|dice picks the aim model for every scenario (default sway), so melee duels
+// and the first fight can be compared between free aim and BN's dice too.
 
 import { parseArgs } from 'node:util';
 import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
@@ -37,6 +45,10 @@ import { openDoor } from '../src/game/interact';
 import { findPath } from '../src/game/pathfind';
 import { applyDifficultySettings, DIFFICULTY_PRESETS, formatKnob, KNOBS, registerDifficultyTargets, settingsFor, type DifficultySettings, type PresetId } from '../src/game/difficulty';
 import { Character, BODYTEMP, SLEEPINESS, THIRST } from '../src/game/character';
+import { aimFloorMoa } from '../src/game/combat';
+import { isAimModel, setAimModel } from '../src/game/aimmodel';
+import { loadAmmo } from '../src/game/item';
+import { spawnItem } from '../src/game/moves';
 import { MAIN_PARTS } from '../src/game/bodyparts';
 import { SECONDS_PER_HOUR } from '../src/core/time';
 import { applyBuild, defaultBuild } from '../src/ui/chargen';
@@ -49,7 +61,8 @@ const HELP = `balance_sim: headless difficulty-preset simulation (see docs/BALAN
 
   --preset accessible|classic   preset to simulate (default accessible)
   --seeds N                     world seeds (default 20), starting at --seed0 (default 1)
-  --scenario all|day1|duel|first|needs|cold (default all)
+  --scenario all|day1|duel|first|needs|cold|range (default all)
+  --aim sway|timing|dice        aim model for every scenario (default sway)
   --hours H                     day1 length in game hours from 08:00 (default 24)
   --set key=value[,key=value]   override preset knobs (e.g. --set spawnScale=0.5,safeRadius=16)
   --out FILE                    append JSON-lines records here
@@ -65,6 +78,7 @@ const { values: args } = parseArgs({
     seeds: { type: 'string', default: '20' },
     seed0: { type: 'string', default: '1' },
     scenario: { type: 'string', default: 'all' },
+    aim: { type: 'string', default: 'sway' },
     hours: { type: 'string', default: '24' },
     set: { type: 'string' },
     out: { type: 'string' },
@@ -96,7 +110,9 @@ function presetSettings(): DifficultySettings {
   }
   return s;
 }
-const label = preset + (args.set ? `[${args.set}]` : '');
+if (!isAimModel(args.aim)) throw new Error(`--aim must be sway, timing or dice, got ${args.aim}`);
+setAimModel(args.aim);
+const label = preset + (args.set ? `[${args.set}]` : '') + (args.aim !== 'sway' ? ` aim=${args.aim}` : '');
 
 function fakeInput(): Input {
   return {
@@ -589,6 +605,124 @@ function duel(seed: number, weapon: string, foes: number, o: { mash?: boolean } 
   };
 }
 
+// ------------------------------------------------------------------ ranged: a zombie walking in
+
+const RANGED: Record<string, { gun: string; mag?: string; ammo: string; skill: string }> = {
+  pistol: { gun: 'glock_19', mag: 'glockmag', ammo: '9mm', skill: 'pistol' },
+  rifle: { gun: 'ar15', mag: 'stanag30', ammo: '223', skill: 'rifle' },
+  shotgun: { gun: 'remington_870', ammo: 'shot_00', skill: 'shotgun' },
+  bow: { gun: 'longbow', ammo: 'arrow_wood', skill: 'archery' },
+};
+
+function rangeDuel(seed: number, weapon: string, skill: number, dist: number): Record<string, number | string | boolean> {
+  const { game: gd } = data();
+  const clicks: number[] = [];
+  const input = { ...fakeInput(), clicks, consumeClicks: () => clicks.splice(0) } as unknown as Input & { mouseButtons: number };
+  const game = new Game(gd, seed, input);
+  game.map.generator = {
+    generate(map, c) {
+      c.ter.fill(map.terrain.index(c.z === 0 ? 't_dirt' : c.z > 0 ? 't_open_air' : 't_rock'));
+      c.empty = false;
+    },
+  };
+  const mons = installMonsters(game, null, null as never);
+  registerDifficultyTargets(game, { spawner: mons.spawner });
+  applyDifficultySettings(game, preset, presetSettings());
+  const p = game.player;
+  p.x = 30.5;
+  p.y = 60.5;
+  p.z = 0;
+  p.onMessage = null;
+  const ctx = { game, data: { names: uiNames() } } as unknown as UiContext;
+  const b = defaultBuild(ctx);
+  b.density = undefined;
+  applyBuild(ctx, b);
+  for (let cy = 0; cy <= 4; cy++) for (let cx = 0; cx <= 3; cx++) game.map.chunk(cx, cy, 0);
+  const w = RANGED[weapon];
+  if (!w) throw new Error(`range: unknown weapon ${weapon}`);
+  p.setSkill('gun', skill);
+  p.setSkill(w.skill, skill);
+  if (weapon === 'bow') {
+    p.str_base = Math.max(p.str_base, 10);
+    p.resetStats();
+  }
+  const gun = createItem(gd, w.gun);
+  if (w.mag) spawnItem(createItem(gd, w.mag, { ammo: w.ammo }), L.mag(gun));
+  else if (weapon !== 'bow') loadAmmo(gun, w.ammo);
+  if (!p.inv.wield(gun, null).ok) throw new Error(`range: can't wield ${w.gun}`);
+  p.inv.wear(createItem(gd, 'backpack'), null);
+  if (weapon === 'bow') p.inv.giveNew(createItem(gd, w.ammo, { count: 30 }));
+  const z = mons.sys.spawn(gd.monsters.mon_zombie, p.x, p.y - dist, 0);
+  const combat = mons.combat;
+  const aim = combat.aim;
+  let t = 0, aimedFor = 0, pendingAt = -1, killT = -1, contact = false, aimSum = 0, aimN = 0;
+  const hitShots = new Set<number>();
+  let dealt = 0, heads = 0;
+  game.events.on('playerAttack', (e) => {
+    if (args.trace) console.error(`    -> ${e.kind} ${e.outcome} ${e.damage} ${e.reason ?? ''} at (${e.x.toFixed(1)},${e.y.toFixed(1)}) z at (${z.x.toFixed(1)},${z.y.toFixed(1)})`);
+    if (e.kind !== 'gun' || !(e.outcome === 'hit' || e.outcome === 'crit' || e.outcome === 'kill')) return;
+    hitShots.add(combat.shots);
+    dealt += e.damage;
+  });
+  game.events.on('playerHeadshot', () => heads++);
+  input.mouseButtons = 4;
+  while (t < 40 && !z.dead && !p.dead) {
+    const d = Math.hypot(z.x - p.x, z.y - p.y);
+    if (d - z.radius <= 1.2) {
+      contact = true;
+      break;
+    }
+    // The mouse tracks the zombie's chest (a human is good at that; the weave is the hard part).
+    p.yaw = Math.atan2(z.x - p.x, -(z.y - p.y));
+    p.pitch = Math.atan2(1.1 - 1.6, d);
+    const drawn = weapon !== 'bow' || (!!combat.draw && combat.draw.t >= combat.draw.full);
+    // Like a player reading "out of range (14 m)", hold fire until it's in range.
+    const range = (Number(gun.ammoData()?.range) || 0) + (Number(gun.def.range) || 0);
+    const ready = combat.cooldown <= 0 && !combat.burst && drawn && d - z.radius <= range;
+    if (ready) aimedFor += TICK;
+    let fire = false;
+    if (ready && pendingAt >= 0 && t >= pendingAt) {
+      fire = true;
+      pendingAt = -1;
+    } else if (ready && pendingAt < 0 && aimedFor >= 0.35) {
+      // (a beat to raise the sights / settle the draw before judging the shot)
+      if (args.aim === 'dice') fire = p.recoil <= aimFloorMoa(p, gun) * 1.2 || aimedFor >= 1.2;
+      else {
+        const o = aim.offset(0.15);
+        if (Math.hypot(o.x, o.y) <= 0.7 * Math.atan2(z.radius, d)) pendingAt = t + 0.15;
+        else if (aimedFor >= 2) fire = true;
+      }
+    }
+    if (fire) {
+      if (args.trace) {
+        const o = aim.offset(0), deg = (r: number) => ((r * 180) / Math.PI).toFixed(2);
+        console.error(`  t=${t.toFixed(2)} d=${d.toFixed(1)} off=(${deg(o.x)},${deg(o.y)})° body=${deg(Math.atan2(z.radius, d))}° amp=${deg(aim.amp)}° kick=${deg(aim.kickY)}° recoil=${Math.round(p.recoil)} aimed=${aimedFor.toFixed(2)}`);
+      }
+      aimSum += aimedFor;
+      aimN++;
+      aimedFor = 0;
+      if (weapon === 'bow') clicks.push(0);
+      else if (gun.ammoRemaining() > 0) combat.fire();
+      if (weapon !== 'bow' && gun.ammoRemaining() <= 0) {
+        // Reload: the magazine refills / the shotgun tops up, ~2 s either way.
+        const mag = gun.magazineCurrent();
+        if (w.mag && mag) loadAmmo(mag, w.ammo);
+        else loadAmmo(gun, w.ammo);
+        combat.cooldown = Math.max(combat.cooldown, 2);
+      }
+    }
+    game.tick(TICK);
+    t += TICK;
+    if (args.trace) for (const f of combat.flights) console.error(`    ~ s=${f.s.toFixed(1)} (${f.x.toFixed(2)},${f.y.toFixed(2)}) h=${f.h.toFixed(2)} yaw=${f.yaw.toFixed(4)} aimDist=${f.arc.aimDist.toFixed(1)} slope=${f.arc.slope.toFixed(3)} z=(${z.x.toFixed(2)},${z.y.toFixed(2)})`);
+  }
+  if (z.dead) killT = t;
+  return {
+    weapon, skill, dist, killed: z.dead, contact, seconds: +(killT >= 0 ? killT : t).toFixed(2), shots: combat.shots, hits: hitShots.size,
+    hitRate: combat.shots ? +(hitShots.size / combat.shots).toFixed(3) : 0, dmgPerHit: hitShots.size ? +(dealt / hitShots.size).toFixed(1) : 0, heads,
+    killDist: +Math.hypot(z.x - p.x, z.y - p.y).toFixed(1), aimS: aimN ? +(aimSum / aimN).toFixed(2) : 0,
+  };
+}
+
 // ------------------------------------------------------------------ needs over 3 days
 
 interface Milestone { what: string; gameHour: number; realMin: number }
@@ -706,6 +840,10 @@ function run(): Rec[] {
     for (const weapon of ['fists', 'knife_chef', 'pipe', 'crowbar', 'bat'])
       for (const foes of [1, 2])
         for (let seed = s0; seed < s0 + n; seed++) emit({ scenario: 'duel', preset: label, seed, ...duel(seed, weapon, foes) });
+  if (want('range'))
+    for (const weapon of (process.env.RANGED_ONLY ?? Object.keys(RANGED).join(',')).split(','))
+      for (const skill of [0, 5])
+        for (let seed = s0; seed < s0 + n; seed++) emit({ scenario: 'range', preset: label, seed, ...rangeDuel(seed, weapon, skill, 20) });
   for (let seed = s0; seed < s0 + n; seed++) {
     if (want('day1')) {
       const t = Date.now();
@@ -785,12 +923,27 @@ function summarise(recs: Rec[]): void {
   if (fi.length) {
     console.log('\n## First fight: long pointy stick vs one zombie, mashing e when grabbed\n');
     console.log('| preset | runs | won | fight s (median / p90) | grabs (median / max) | grabbed s (median) | hits | misses | whiffs | HP lost |');
-    console.log('|---|---|---|---|---|---|---|---|---|---|');
+    console.log('|---|---|---|---|---|---|---|---|---|---|---|');
     for (const pr of [...new Set(fi.map((r) => r.preset))]) {
       const rs = fi.filter((r) => r.preset === pr);
       const secs = rs.map((r) => r.seconds as number).sort((a, b) => a - b);
       const m = (k: string) => median(rs.map((r) => r[k] as number));
       console.log(`| ${pr} | ${rs.length} | ${rs.filter((r) => r.won).length} | ${m('seconds').toFixed(1)} / ${secs[Math.floor(secs.length * 0.9)]?.toFixed(1)} | ${m('grabs')} / ${Math.max(...rs.map((r) => r.grabs as number))} | ${m('grabbedFor').toFixed(1)} | ${m('hits')} | ${m('misses')} | ${m('whiffs')} | ${m('hpLost')} |`);
+    }
+  }
+  const rg = recs.filter((r) => r.scenario === 'range') as unknown as (Record<string, number | string | boolean> & Rec)[];
+  if (rg.length) {
+    console.log('\n## Ranged: one zombie walking in from 20 m (tracks the chest, holds RMB)\n');
+    console.log('| preset | weapon | skill | runs | killed before contact | time to kill (median s) | shots (median) | aiming s per shot | hit rate | damage per hit | headshots |');
+    console.log('|---|---|---|---|---|---|---|---|---|---|---|');
+    const keys = [...new Set(rg.map((r) => `${r.preset}|${r.weapon}|${r.skill}`))];
+    for (const k of keys) {
+      const [pr, w, sk] = k.split('|');
+      const rs = rg.filter((r) => r.preset === pr && r.weapon === w && String(r.skill) === sk);
+      const shots = rs.reduce((a, r) => a + (r.shots as number), 0), hits = rs.reduce((a, r) => a + (r.hits as number), 0);
+      const killed = rs.filter((r) => r.killed);
+      const dph = rs.filter((r) => (r.hits as number) > 0);
+      console.log(`| ${pr} | ${w} | ${sk} | ${rs.length} | ${killed.length} | ${killed.length ? median(killed.map((r) => r.seconds as number)).toFixed(1) : '—'} | ${median(rs.map((r) => r.shots as number))} | ${median(rs.map((r) => r.aimS as number)).toFixed(2)} | ${shots ? Math.round((100 * hits) / shots) : 0}% | ${dph.length ? (dph.reduce((a, r) => a + (r.dmgPerHit as number) * (r.hits as number), 0) / hits).toFixed(1) : '—'} | ${rs.reduce((a, r) => a + (r.heads as number), 0)} |`);
     }
   }
   const cd = recs.filter((r) => r.scenario === 'cold') as unknown as (Record<string, number | string | boolean> & Rec)[];

@@ -27,6 +27,7 @@ import { paintShingle, paintSolid, type ArchFrames } from './arch';
 import { GrassLayer } from './grass';
 import { buildTreesSteps, leafGlow, leafSun } from './trees';
 import { SkylineLayer } from './skyline';
+import { applyHaze, applyWeatherSky, haze } from './atmosphere';
 import { VoxelFactory } from './voxel';
 import { ModelFactory, furnitureState } from './furniture';
 import { frameStats } from '../perfDebug';
@@ -344,8 +345,10 @@ export class Renderer {
   /** The player billboard shows outside first person, except at the wheel (you're inside the
    *  car). Checked every frame: taking/leaving the controls switches the camera mode too. */
   private spriteShown: boolean | null = null;
+  /** Another system draws the player's body (render/chars 3D model): keep the billboard hidden. */
+  playerBodyOverride = false;
   private syncPlayerSprite(): void {
-    const needPlayer = this.rig.mode !== 'first' && !this.rig.drive;
+    const needPlayer = this.rig.mode !== 'first' && !this.rig.drive && !this.playerBodyOverride;
     if (needPlayer === this.spriteShown) return;
     this.spriteShown = needPlayer;
     if (needPlayer && !this.playerSprite) {
@@ -488,6 +491,8 @@ export class Renderer {
     frameStats.lap('decor');
     this.grass.update(this.game.map, p.x, p.y, p.z, clock.season, this.source);
     frameStats.lap('grass');
+    this.skyline.ground = haze.s.mode === 1;
+    this.skyline.season = clock.season;
     this.skyline.update(p.x, p.y, p.z, this.chunks.radius);
     frameStats.lap('skyline');
     if (this.sunDay !== clock.day) {
@@ -496,6 +501,7 @@ export class Renderer {
     }
     const sunPos = sunPosition(clock.seconds);
     this.skyState.update(clock.hourOfDay, { sunrise: this.sunT.sunrise, sunset: this.sunT.sunset, altitude: sunPos.altitude, azimuth: sunPos.azimuth, season: clock.season });
+    this.sky.overcast = applyWeatherSky(this.skyState, this.game.weather, dt, this.snapExposure);
     this.lightmap.naturalLevel = naturalLightLevel(Math.asin(this.skyState.sunDir.y));
     this.lightmap.update(p.x, p.y, p.z, dt, this.time, this.lights.handles(), this.lights.handlesDirty);
     this.lights.handlesDirty = false;
@@ -506,6 +512,7 @@ export class Renderer {
     shared.uRimColor.value.copy(this.skyState.hemiSky).multiplyScalar(this.skyState.hemiIntensity * 0.35);
     shared.uBounce.value.copy(this.skyState.hemiGround).lerp(this.skyState.hemiSky, 0.4).multiplyScalar(this.skyState.hemiIntensity * 0.9 * look.f.bounce * (1 - this.skyState.night));
     this.pipeline.haze.copy(this.skyState.fog);
+    this.pipeline.setSky(this.skyState);
     puddleUniforms.uZenith.value.copy(this.skyState.zenith);
     puddleUniforms.uHorizon.value.copy(this.skyState.horizon);
     puddleUniforms.uSunDir.value.copy(this.skyState.sunDir);
@@ -547,8 +554,7 @@ export class Renderer {
     // looking down from above everything is 30-60 m away: aerial perspective would wash out
     po.atmosphere = look.f.atmosphere * (this.rig.mode === 'top' ? 0.25 : 1);
     po.fogFar = Math.max(2, this.chunks.radius - 1) * CHUNK;
-    po.fogNear = po.fogFar * 0.35;
-    po.fogMax = 1;
+    applyHaze(po); // atmosphere.ts: where the fade starts, haze strength, sky-matched or grey
     this.chunks.visibleDist = po.fogNear + (po.fogFar - po.fogNear) * 0.5;
     frameStats.lap('vm');
     this.pipeline.render(this.scene, cam, this.skyState.fog, overlay);

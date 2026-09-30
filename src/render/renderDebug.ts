@@ -114,6 +114,77 @@ export function installRenderDebug(api: DebugApi, game: Game, renderer: Renderer
     vm.scene.visible = true;
     return +(sum / (frames - 1)).toFixed(4);
   };
+  /**
+   * Flicker metric for walking (translation can't be compensated like a pan): steps the
+   * eye `step` m per frame along the view and counts pixels that change and change *back*
+   * over three consecutive frames (A -> B -> A: speckle, crawling texels, popping outlines)
+   * within the rows [y0, y1] of the image (fractions, default the band around the horizon
+   * where distant things are). Real motion rarely returns to the old value. Lower is steadier.
+   * `dt` > 0 lets swaying foliage animate too; `map` returns a heat map PNG as well.
+   */
+  api.flickerTest = (frames = 16, step = 0.04, y0 = 0.35, y1 = 0.62, map = false, dt = 0) => {
+    const pl = renderer.pipeline;
+    const w = pl.lowW, h = pl.lowH;
+    const vm = renderer.viewmodel!;
+    vm.scene.visible = false;
+    const p = game.player;
+    const x0 = p.x, yy0 = p.y;
+    const fx = Math.sin(p.yaw), fy = -Math.cos(p.yaw);
+    const shots: Uint8Array[] = [];
+    let sum = 0, n = 0;
+    // map=true: also return a PNG data URL of where it flickered (white = every frame)
+    const acc = map ? new Uint16Array(w * h) : null;
+    for (let f = 0; f < frames; f++) {
+      p.x = x0 + fx * step * f;
+      p.y = yy0 + fy * step * f;
+      // dt 0 freezes swaying foliage/grass: only the camera's own motion counts
+      renderer.render(dt);
+      const cur = new Uint8Array(w * h * 4);
+      renderer.three.readRenderTargetPixels(pl.postTarget, 0, 0, w, h, cur);
+      shots.push(cur);
+      if (shots.length >= 3) {
+        const [a, b, c] = shots.slice(-3);
+        let bad = 0, m = 0;
+        // readRenderTargetPixels rows are bottom-up
+        for (let y = Math.floor(h * (1 - y1)); y < Math.floor(h * (1 - y0)); y++)
+          for (let x = Math.floor(w * 0.05); x < Math.floor(w * 0.95); x++) {
+            const i = (y * w + x) * 4;
+            const ab = Math.abs(a[i] - b[i]) + Math.abs(a[i + 1] - b[i + 1]) + Math.abs(a[i + 2] - b[i + 2]);
+            const ac = Math.abs(a[i] - c[i]) + Math.abs(a[i + 1] - c[i + 1]) + Math.abs(a[i + 2] - c[i + 2]);
+            if (ab > 36 && ac < 12) {
+              bad++;
+              if (acc) acc[y * w + x]++;
+            }
+            m++;
+          }
+        sum += bad / m;
+        n++;
+      }
+    }
+    p.x = x0;
+    p.y = yy0;
+    vm.scene.visible = true;
+    const score = +(sum / Math.max(1, n)).toFixed(4);
+    if (!acc) return score;
+    const cv = document.createElement('canvas');
+    cv.width = w;
+    cv.height = h;
+    const ctx = cv.getContext('2d')!;
+    const img = ctx.createImageData(w, h);
+    const last = shots[shots.length - 1];
+    for (let y = 0; y < h; y++)
+      for (let x = 0; x < w; x++) {
+        const src = ((h - 1 - y) * w + x), o = (y * w + x) * 4;
+        const k = Math.min(1, (acc[src] / Math.max(1, n)) * 3);
+        const g = (last[src * 4] + last[src * 4 + 1] + last[src * 4 + 2]) / 9;
+        img.data[o] = g + k * (255 - g);
+        img.data[o + 1] = g * (1 - k);
+        img.data[o + 2] = g * (1 - k);
+        img.data[o + 3] = 255;
+      }
+    ctx.putImageData(img, 0, 0);
+    return { score, png: cv.toDataURL('image/png') };
+  };
   api.shake = (amount = 0.5) => renderer.shake(amount);
   api.hurtFlash = (amount = 0.5) => renderer.hurtFlash(amount);
   /** Viewmodel animation only: 'melee' | 'fire' | 'throw' (cdda.attack() really attacks). */

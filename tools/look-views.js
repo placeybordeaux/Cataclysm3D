@@ -2,6 +2,22 @@
 // tools/look-shots.sh: defines window.lookView(name) which sets the scene up and settles.
 // Kept as plain JS so it can be pasted into `drive.ts eval` too.
 window.lookViews = ['shelter', 'street', 'house', 'forest', 'night', 'top'];
+// hide every DOM overlay: the comparison is about the 3D image
+const hideOverlays = (root = document.body) => {
+  for (const el of root.children) {
+    if (el.tagName === 'CANVAS') continue;
+    if (el.querySelector('canvas')) hideOverlays(el);
+    else el.style.visibility = 'hidden';
+  }
+};
+// A quarter hour before today's sunset (the real sun moves with the season: a fixed 19:30 is
+// already night in early spring).
+window.duskHour = () => {
+  const r = window.cdda.renderer;
+  window.cdda.settle();
+  if (!r.sunT) throw new Error('duskHour: renderer has no sun times yet');
+  return r.sunT.sunset - 0.25;
+};
 window.lookView = async (name) => {
   const c = window.cdda;
   c.godMode(true);
@@ -9,8 +25,7 @@ window.lookView = async (name) => {
   c.setWeather('clear');
   c.flashlight(false);
   c.setCameraMode('first');
-  // hide every DOM overlay: the comparison is about the 3D image
-  for (const el of document.body.querySelectorAll('body > *')) if (el.tagName !== 'CANVAS' && !el.querySelector('canvas')) el.style.visibility = 'hidden';
+  hideOverlays();
   const s = c.startLocation();
   const town = c.cities().filter((t) => t.size >= 4).sort((a, b) => Math.hypot(a.x - s.omx, a.y - s.omy) - Math.hypot(b.x - s.omx, b.y - s.omy))[0];
   if (name === 'shelter') {
@@ -112,6 +127,36 @@ window.lookView = async (name) => {
     const h = c.findOmt('house', 40);
     c.teleportOmt(h.x, h.y, 0, 18, -1);
     c.look(-95, -4);
+  } else if (name === 'far' || name === 'fardusk' || name === 'farrain') {
+    // Long-distance readability: stand at the south end of a straight north-south road in
+    // town, looking up it, with zombies at ~15/30/50/75/100 m (can you spot them?).
+    c.setHour(14);
+    if (name === 'fardusk') c.setHour(window.duskHour());
+    if (name === 'farrain') c.setWeather('rain');
+    c.teleportOmt(town.x, town.y);
+    const p = c.game.player;
+    const ox = Math.floor(p.x / 24), oy = Math.floor(p.y / 24);
+    let at = null;
+    for (let r = 0; r <= 12 && !at; r++)
+      for (let dy = -r; dy <= r && !at; dy++)
+        for (let dx = -r; dx <= r && !at; dx++) {
+          if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+          let ok = true;
+          for (let k = 0; k < 5 && ok; k++) ok = /^road_ns/.test(c.omtAt(ox + dx, oy + dy - k).id);
+          if (ok) at = [ox + dx, oy + dy];
+        }
+    if (!at) throw new Error('far view: no straight road in town');
+    c.teleportOmt(at[0], at[1], 0, 8, 22);
+    c.look(4, -1);
+    c.clearMonsters();
+    // (monsters beyond the 60-tile reality bubble are dormant and not drawn at all)
+    for (const [dx, dy] of [[1, -15], [3, -28], [-1, -42], [4, -58]]) c.spawnMonster('mon_zombie', dx, dy, { friendly: true });
+  } else if (name === 'dusk') {
+    await window.lookView('street');
+    c.setHour(window.duskHour());
+  } else if (name === 'rain') {
+    await window.lookView('street');
+    c.setWeather('rain');
   } else if (name === 'indoornight') {
     await window.lookView('house');
     c.setHour(23.2);
@@ -202,5 +247,7 @@ window.lookView = async (name) => {
   // let the light map, exposure and shadows converge
   await new Promise((r) => setTimeout(r, 1500));
   c.settle();
+  // popups (discovery hints, spotted-monster toasts) appear after setup: hide them too
+  hideOverlays();
   return name;
 };

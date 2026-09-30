@@ -11,6 +11,136 @@ Every tunable is in one object: `FEEL` in `src/game/combatfeel.ts`, with presets
 `setFeelDifficulty(d, overrides?)`. At runtime: `cdda.feel` (live object), `cdda.setFeel('classic')`,
 `cdda.feelState()`, `cdda.recordFrames(n, dt, each)`.
 
+## Aim models (wave 3): your shot goes where you aim
+
+The user's feedback: *"making a player miss their shot because their skill isn't high enough
+really doesn't feel good in FPV. Instead … make their crosshair bob and weave more when they
+have low skill, have the skill increase the damage it does or even have a little timing minigame."*
+
+Three models, switchable at any time: **Options → Aim model**, `?aim=sway|timing|dice`
+(remembered in localStorage `cdda3d.aimModel`), or `cdda.setAimModel('dice')`. Code:
+`src/game/aimmodel.ts` (pure: model switch, sway, hit zones, damage, timing windows),
+`src/game/playercombat.ts` (`fireFree`, `castAim`, `freeHit`, `flightHitsFree`, `visibleDodge`),
+`src/aim.ts` (wiring, per-frame reticle presenter, active reload, Options), `src/ui/aimHud.ts`
+(overlay). Tunables are `FEEL.aim*` in `combatfeel.ts` (Accessible and Classic differ).
+
+| Model | Name in Options | What decides a hit |
+|---|---|---|
+| `sway` (**default**) | Steady hands | Geometry only. The round leaves along the reticle the player saw when they clicked. |
+| `timing` | Steady hands + timing | As `sway`, plus optional timing bonuses (below). |
+| `dice` | Classic dice | BN's dispersion and to-hit rolls, exactly as before (miss reasons, spread circle, aim levels). |
+
+### Free aim (`sway` and `timing`)
+- **The reticle weaves; the shot follows the reticle.** Its amplitude is BN's *mean lateral shot
+  error* — (weapon + dex + hands + skill dispersion)/2 × 2/π MOA, `Character::get_weapon_dispersion`
+  as `combat.ts dispersionBreakdown` ports it — times `FEEL.aimSwayScale` (1.0 Accessible, 1.25
+  Classic). So a weapon/skill that BN makes miss often weaves as far as its misses would have
+  gone. Skill 0 pistol aimed ≈ 1.1°, skill 5 ≈ 0.3°, skill 10 ≈ 0.1°. BN's aim state (recoil
+  above the sight floor: just raised, walking, just fired) adds a compressed "unsteady" share
+  (`aimUnsteady`), which holding RMB aims away as before. Posture multiplies it: ADS ×0.65,
+  crouch ×0.8, walking up to ×1.6, running ×1.6 more, pain, low stamina. Bows shake ×1.8 while
+  drawing, settle at full draw and shake again past `drawHoldSteady`. Low skill also weaves
+  *faster* (`swaySpeed`). The motion is smooth sine noise with a slow breath component.
+- **Exactness**: the simulation advances the weave at 30 Hz; the renderer samples it in between
+  every frame (`AimSway.offset(extra)`) and records what it drew (`markShown`); a click fires
+  along that recorded offset (`shotOffset`, fresh within 50 ms), converted to a world ray with
+  `aimDirection` (forward + right·tan x + up·tan y, i.e. exactly the camera projection).
+  The crosshair (`.hud-cross`), the combat HUD's ring/brackets (`CombatHud.setReticle`), the gun
+  in the hands (`Viewmodel.aimPx`) and a drawn bow all move to that point.
+- **Recoil is a kick, not a spread**: BN's added recoil (MOA) × `aimKickScale` (× the class's
+  `kickScale`) kicks the aim up (and a little sideways); the camera shows `aimKickView` of it,
+  the reticle the rest. It springs back at `aimKickRecover + aimKickRecoverPerSkill × skill` /s.
+- **Hits** use a 3D test against each body's visible column (`castAim`: radius ×1.1, height by
+  size, walls/furniture/floor from the tile raycast; arrows use their arc height). No
+  dodge or to-hit dice. What a hit does (`hitDamageMul`, shown above the crosshair, e.g.
+  "HEADSHOT ×2", "legs ×0.75 · pistol skill 0 ×0.75"):
+  - zone by strike height (`aimHooks.hitZone`, default `defaultHitZone`: head ≥ 83 % of an
+    upright body, legs < 45 %): head ×2 (BN's head severity cap), legs ×0.75;
+  - graze (the outer 20 % of the body, BN's grazing band) ×0.5;
+  - weak spot ×1.5, chance `0.04 + 0.025·skill + 0.01·(dex+per−16)` (BN's crit inputs);
+  - skill ×0.75 at 0 → ×1.3 at 10 (Classic ×0.65 at 0);
+  - skill also adds stagger (`aimStaggerPerSkill`: the flinch/interrupt counts the blow as bigger).
+  Misses say nothing (you saw the round go wide) except the physical reasons you might not see:
+  *blocked by cover*, *low: hit the ground short of it*, *high: flew over it*, *fell short: out of range*.
+- **The overlay** (`aimHud.ts`): a faint dot where the mouse looks; while aiming, a dashed circle
+  of the current weave size, green/yellow/red by whether it fits the body under the view centre
+  (replaces the BN spread circle). **Options → Aim trail** adds a fading trail of the reticle's
+  last second. The aim readout drops "Immediate/Careful … likely hit ≤ N m" and keeps the distance.
+- **Melee**: a swing whose arc connects always lands. A failed BN hit roll becomes a *glancing*
+  blow (×0.5, no technique, no crit; the crosshair says "glancing ×0.5 (bashing 0)"). BN already
+  scales swing speed, stamina cost and damage with skill; free aim adds stagger and widens the
+  parry window (`aimParryPerSkill`, via `DefenseState.parryMul`). **Dodges are visible**: at the
+  wind-up, a monster that BN would let dodge (hit roll ≥ 0 but under dodge × 5) hops back and aside
+  out of the arc before contact (`monsterDodge` event, `dashVx/dashVy`); the whiff then says
+  "the zombie runner dodged". Plain zombies have dodge 0 and never do.
+- Throwing (`G`) goes where you look. Reloads in every model now use BN's skill divisor
+  (`Character::item_reload_cost`: `cost / (1 + min(skill × 0.1, 1))`).
+- NPCs and monsters still shoot with BN's dice.
+
+### Timing model extras (`timing`)
+- **Hold breath**: Shift while aiming a gun (running is vetoed via `game.runVeto` meanwhile). The
+  weave eases to ×0.3 over 0.3 s; for the next `0.4 + 0.04·skill` s the reticle ring flashes and
+  the readout says **NOW**: a shot then is *perfect* (×1.25, +25 % weak-spot chance). Held past
+  `2.5 + 0.25·skill` s (less when tired) the hands shake; you gasp and need a moment to recover.
+- **Bow**: at full draw a ring closes on the reticle; it meets the target ring 0.55 s after full
+  draw; loosing within ±(0.08 + 0.015·skill) s of that is perfect.
+- **Active reload**: during a reload a bar appears under the reticle; press reload again while
+  the marker is in the bright band (42 % … +10 %+1.2 %·skill) to finish at once and make the next
+  shot perfect; outside it you fumble (+0.5 s). One try per reload.
+- **Melee beat**: a click just before (≤0.12 s) or just after (≤0.08 s + 0.012·skill) the next
+  swing is ready chains a perfect swing (×1.25, extra stagger, "on the beat ×1.25"); the ring
+  pulses yellow. Holding LMB repeats normally, without the bonus.
+
+### Measurements (before = Classic dice, after = Steady hands)
+Headless sim, one zombie walking in from 20 m, the shooter tracks the chest and holds RMB; dice
+fires once aimed (or 1.2 s), free aim fires when the reticle is about to be on the body (0.15 s
+reaction) — `npm run sim -- --scenario range --seeds 20 [--aim dice]`, Accessible, time to kill in s:
+
+| weapon | skill | dice: hit rate / TTK | free aim: hit rate / TTK / aiming per shot | free aim dmg per hit |
+|---|---|---|---|---|
+| pistol | 0 | 46 % / 7.4 | 100 % / 5.8 / 0.58 s | 23 |
+| pistol | 5 | 68 % / 5.2 | 100 % / 4.8 / 0.53 s | 33 |
+| rifle | 0 | 35 % / 4.5 | 100 % / 1.5 / 0.58 s | 32 |
+| rifle | 5 | 55 % / 2.6 | 100 % / 1.4 / 0.53 s | 47 |
+| shotgun | 0 | 42 % / 8.7 | 100 % / 4.5 / 0.87 s | 17 |
+| shotgun | 5 | 61 % / 3.4 | 100 % / 2.3 / 0.53 s | 25 |
+| longbow | 0 | 33 % / 8.4 | 77 % / 7.6 / 1.29 s | 26 |
+| longbow | 5 | 45 % / 5.2 | 78 % / 3.1 / 0.70 s | 37 |
+
+(Arrow misses in free aim are the stumbling zombie drifting sideways during the ~0.35 s flight;
+the bot doesn't lead.) Classic preset, free aim: pistol 0 7.5 s, shotgun 0 8.3 s, bow 0 10.9 s —
+about as slow as dice, so Classic stays tense. Melee first fight (long stick, 30 seeds,
+Accessible): dice 6.4 s median (4 hits, 2 misses) → free aim 5.2 s (5 hits, 0 misses). Duels:
+see docs/BALANCE.md.
+
+Real input (GPU, xdotool, `tsx tools/realinput.ts --only aim,aimtiming --gpu`), zombie pinned at
+12 m (bat: 1 m), the "player" clicking when the drawn crosshair is on the chest:
+
+| weapon | skill | free aim: hit / dmg per hit | dice: hit / dmg per hit |
+|---|---|---|---|
+| pistol | 0 / 5 | 6/6, 22 / 6/6, 32.7 | 2/6, 14 / 4/6, 34 |
+| rifle | 0 / 5 | 6/6, 31 / 6/6, 50 | 1/6, 35 / 5/6, 43.8 |
+| shotgun | 0 / 5 | 6/6, 16 / 5/5, 24.2 | 1/6, 7 / 3/5, 22.3 |
+| longbow | 0 / 5 | 6/6, 30.3 / 6/6, 38 | 1/6, 37 / 2/6, 19.5 |
+| bat | 0 / 5 | 8/8, 12.6 / 8/8, 22.4 | 7/8, 15.9 / 7/8, 19.3 |
+
+Timing (real input): NOW flash → perfect shot, perfect active reload, perfect bow loose and a
+chained swing on the beat all pass. Screenshots: `docs/screenshots/wave3/combat/`
+(`sway_pistol_skill0[_zoom].png` vs `sway_pistol_skill5[_zoom].png` with the aim trail on — the
+yellow circle is the weave, `headshot.png`, `sway_bow_skill0.png`, `timing_*_zoom.png`).
+
+Tests: `tests/aimmodel.test.ts` (23): model switch, sway from BN dispersion and posture, ray
+direction/projection, shot uses the drawn reticle, kick recovery by skill, zones and damage
+parts, timing windows; in play: skill-0 pistol never misses a centred shot (dice does), a
+reticle beside the body misses silently, head/legs follow aim height, skill raises damage, the
+zone hook, arrows, glancing melee, visible dodge, zombies never dodge, parry window, melee beat.
+
+Known gaps: sway is shown in first and third person but the third-person camera offset makes
+the projection approximate; the viewmodel gun follows the reticle only half-way at the hip; the
+hit zones are height bands until 3D models install `aimHooks.hitZone` / `aimHooks.body`;
+monster ranged dodges don't exist in free aim (BN's bullet dodge was ~0 anyway); the melee arc
+has no sway (a swing's timing is the skill).
+
 ## Diagnosis (before)
 
 Evidence: real input (xdotool clicks and holds in a headful Chromium, `tools/drive.ts --headful`)

@@ -40,7 +40,11 @@ export interface GameEvents {
     ranged?: string;
     /** Ranged: the round came to rest here (a wall or the ground), not just passed its target. */
     landed?: boolean;
+    /** Free aim (src/game/aimmodel.ts): the hit's damage multiplier; `reason` then says why ("HEADSHOT ×2"). */
+    quality?: number;
   };
+  /** A monster visibly dodged the survivor's attack (free aim: it hops out of the swing's arc). */
+  monsterDodge: { monster: unknown; x: number; y: number; z: number; dx: number; dy: number };
   /**
    * The survivor tried to attack and couldn't (too weak to draw the bow, no arrows): the
    * crosshair says why (src/ui/combatHud.ts).

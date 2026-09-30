@@ -186,7 +186,10 @@ export class ArrowFx {
     const spr = this.view?.spriteOf(m);
     const span = spr ? artSpan(spr.frame) : { bottom: 0, top: 1 };
     const H = spr?.height ?? 1.8;
-    const bottom = H * span.bottom, top = H * span.top;
+    // 3D bodies: stick to the model's own extent and half-width, not the sprite frame
+    const body = this.view?.bodyOf(m);
+    const bottom = body ? body.bottom : H * span.bottom, top = body ? body.top : H * span.top;
+    const rad = body ? body.radius : m.radius;
     for (const it of m.stuck.items) {
       const hits = m.stuck.hits.get(it) ?? [];
       const n = Math.min(it.count(), Math.max(1, hits.length));
@@ -194,7 +197,7 @@ export class ArrowFx {
         const h = hits[i] ?? { side: 0, hgt: 0.6, yaw: 0 };
         const yaw = h.yaw + m.facing;
         const dx = Math.sin(yaw), dy = -Math.cos(yaw);
-        const tip = { x: m.x - dx * m.radius * 0.2 + dy * -h.side * m.radius, y: m.y - dy * m.radius * 0.2 + dx * h.side * m.radius, h: bottom + (top - bottom) * h.hgt };
+        const tip = { x: m.x - dx * rad * 0.2 + dy * -h.side * rad, y: m.y - dy * rad * 0.2 + dx * h.side * rad, h: bottom + (top - bottom) * h.hgt };
         const len = it.def.ammo_type === 'bolt' ? 0.4 : 0.6;
         this.arrow(tip, [dx, dy, -0.05], len, m.z, 'arrow');
       }

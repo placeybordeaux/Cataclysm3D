@@ -332,11 +332,12 @@ function flickerAt(t: number, x: number, y: number): number {
 /** Items glow when they carry a CDDA LIGHT_<n> flag (lit flashlights, candles, lanterns). */
 const itemLum = new WeakMap<object, number>();
 function defaultItemLight(it: unknown): number {
-  const def = (it as any)?.def as { flags?: string[] } | undefined;
+  const def = (it as any)?.def as { flags?: string[]; light_emission?: number } | undefined;
   if (!def) return 0;
   let n = itemLum.get(def);
   if (n === undefined) {
-    n = 0;
+    // BN data: the extractor folds LIGHT_<n> flags into light_emission (the flags are gone).
+    n = def.light_emission ?? 0;
     for (const f of def.flags ?? []) if (f.startsWith('LIGHT_')) n = Math.max(n, Number(f.slice(6)) || 0);
     itemLum.set(def, n);
   }
