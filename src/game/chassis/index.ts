@@ -1,7 +1,7 @@
 import { has, type Vehicle, type VehiclePart } from '../vehicle';
 import type { BodyRect } from '../vehicleShape';
 import { layoutBodyRect, placeTemplate, seatTopOf, widthEpoch, type Layout } from './layout';
-import { fitsEnvelope, mapChassis, pickTemplate, socketPos, type Socket, type VehicleChassis } from './mapping';
+import { mapChassis, socketPos, type Socket, type VehicleChassis } from './mapping';
 import { templateOf, TEMPLATES, type TemplateId } from './templates';
 
 // The chassis of a vehicle (vehicles v3 phase 1): the one place the game, the renderer and
@@ -20,19 +20,14 @@ export { liveryFromId, placeTemplate, seatTopOf, setVehicleWidth, vehicleWidth, 
 
 /**
  * The vehicle's chassis mapping, kept current: mapped on first use (and whenever its part list
- * changed) onto `v.template`, which is picked then and kept. A saved template whose envelope
- * the grid no longer fits (the BN data changed under a save) is re-picked, and says so.
+ * changed) onto `v.template`, which is picked then and kept from then on: the template is the
+ * vehicle's body (saved), so a stripped car stays a car and parts that don't fit it go to the
+ * overflow instead of the body changing under the player. Only picking checks the envelope.
  */
 export function chassisOf(v: Vehicle): VehicleChassis {
   const c = v.chassis;
   if (c && c.template === v.template && c.partCount === v.parts.length) return c;
-  let why: string | undefined;
-  if (v.template && !fitsEnvelope(v, TEMPLATES[v.template])) {
-    const pick = pickTemplate(v);
-    why = `saved ${v.template} no longer fits, ${pick.template}`;
-    v.template = pick.template;
-  }
-  const mapped = v.template ? mapChassis(v, v.template, why ?? 'saved') : mapChassis(v);
+  const mapped = v.template ? mapChassis(v, v.template, 'saved') : mapChassis(v);
   v.template = mapped.template;
   v.chassis = mapped;
   return mapped;
