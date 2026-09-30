@@ -44,11 +44,13 @@ function keybindingsEl(ctx: UiContext): HTMLElement {
   ]);
   group('Windows and menus', [
     ['Click', 'Select; double-click uses'], ['Right-click', 'Every action for an item or object, with its time'], ['Drag', 'Move items between containers, slots and the world'],
-    ['Esc', 'Close the top window; in play, the pause menu'], ['Bksp', 'Close (the key that opened a window also closes it)'], ['↑↓ Enter', 'Move and pick in lists'],
+    [keys.label('close_menu'), 'Close the top window or menu (so does the key that opened it); back in play, the mouse is captured again'],
+    ['Bksp', 'Close where Space means something else (marking rows, dialogue, text fields)'], ['↑↓ Enter', 'Move and pick in lists'],
+    [keys.label('menu'), 'In play: the pause menu (outside fullscreen it also frees the mouse)'],
   ]);
   const listed = keys.list().sort((a, b) => a[1].localeCompare(b[1]));
   group(`Actions (rebind in Options › Key bindings)`, listed.map(([ks, name]) => [ks.length ? ks.map(keyName).join(' ') : 'unbound', name, !ks.length]));
-  out.append(h('div', { class: 'ui2-small ui2-dim', text: `Outside fullscreen the browser frees the mouse on Esc; click the view or press any key to take it back. ${keyName(keys.keyFor('fullscreen'))} fullscreen keeps it captured.` }));
+  out.append(h('div', { class: 'ui2-small ui2-dim', text: `Close menus with ${keys.label('close_menu')}, not Esc: outside fullscreen the browser frees the mouse on Esc (click the view or press any key to take it back). ${keyName(keys.keyFor('fullscreen'))} fullscreen keeps it captured.` }));
   return out;
 }
 

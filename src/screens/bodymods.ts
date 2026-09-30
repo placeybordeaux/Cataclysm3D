@@ -11,7 +11,7 @@ import { BODY_PARTS, isBodyPart } from '../game/bodyparts';
 import { cddaText } from '../game/units';
 import { currentStyle, learnStyle, maOf, selectStyle, styleBuffs, styleDef, styleWeaponValid, traitStyleChoices, BUFF_TRIGGERS, type MartialArtDef } from '../game/martialarts';
 import { techniqueDef } from '../game/techniques';
-import { attachTooltip, button, confirmModal, h, iconEl, openPanel, tabs, type IconRef, type Panel, type Tone } from '../ui2';
+import { attachTooltip, button, closeKeyLabel, confirmModal, h, iconEl, openPanel, tabs, type IconRef, type Panel, type Tone } from '../ui2';
 import { centreFirstTime, chip, markup, meter, plain, section } from './common';
 import { operationTime, surgeryPlan } from './logic/surgery';
 import { beginInstall, beginUninstall } from '../ui/mutbio_ui';
@@ -72,7 +72,8 @@ function listPanel(o: ListPanelOpts): ListPanelHandle {
         list.querySelector('.ix-brow.selected')?.scrollIntoView({ block: 'nearest' });
         return true;
       }
-      if ((e.key === 'Enter' || e.key === ' ') && sel && o.activate) return o.activate(sel), draw(), true;
+      // Enter only: Space closes (like every screen), and closing must never fire a bionic.
+      if (e.key === 'Enter' && sel && o.activate) return o.activate(sel), draw(), true;
       return false;
     },
     onClose: () => timer && clearInterval(timer),
@@ -143,7 +144,7 @@ export function openBionicsPanel(game: Game, mods: BodyMods): ListPanelHandle {
     title: 'Bionics',
     openKey: game.keys.keyFor('bionics'),
     empty: 'You have no bionics installed. An Autodoc can install Compact Bionic Modules.',
-    footer: `↑↓ choose · Enter / click the switch: turn on or off · ${game.keys.keyFor('bionics')} / Esc close`,
+    footer: `↑↓ choose · Enter / click the switch: turn on or off · ${closeKeyLabel()} / ${game.keys.keyFor('bionics')} close`,
     refreshMs: 500,
     head: () => powerMeter(mods) ?? (bio.bionics.length ? h('div', { class: 'ui2-dim', text: 'No power storage installed: active bionics need a Power Storage CBM.' }) : null),
     rows: () =>
@@ -221,7 +222,7 @@ export function openMutationsPanel(game: Game, mods: BodyMods): ListPanelHandle 
     title: 'Mutations & traits',
     openKey: game.keys.keyFor('mutations'),
     empty: 'Nothing unusual about you (yet).',
-    footer: `↑↓ choose · Enter / the switch: use an active mutation · ${game.keys.keyFor('mutations')} / Esc close`,
+    footer: `↑↓ choose · Enter / the switch: use an active mutation · ${closeKeyLabel()} / ${game.keys.keyFor('mutations')} close`,
     refreshMs: 1000,
     head: () => {
       const levels = [...mut.categoryLevels()].filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]).slice(0, 3);
@@ -280,7 +281,7 @@ export function openMartialArtsPanel(game: Game): ListPanelHandle {
     title: 'Martial arts',
     openKey: game.keys.keyFor('martial_arts'),
     empty: 'You know no styles.',
-    footer: `↑↓ choose · Enter: use (or learn) the style · ${game.keys.keyFor('martial_arts')} / Esc close`,
+    footer: `↑↓ choose · Enter: use (or learn) the style · ${closeKeyLabel()} / ${game.keys.keyFor('martial_arts')} close`,
     refreshMs: 500,
     head: () => {
       const st = currentStyle(p);
@@ -374,7 +375,7 @@ export function openAutodocPanel(game: Game, mods: BodyMods, cbms: () => { item:
     pauses: true,
     width: 'min(calc(var(--fs) * 58), 95vw)',
     height: 'min(86vh, calc(var(--fs) * 36))',
-    footer: '↑↓ choose · Enter: begin the operation · ←→ install / remove · Esc close',
+    footer: `↑↓ choose · Enter: begin the operation · ←→ install / remove · ${closeKeyLabel()} close`,
     onKey: (e) => {
       if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') return t.set(tab === 'install' ? 'remove' : 'install'), true;
       const ids = entries().map((x) => x.id);

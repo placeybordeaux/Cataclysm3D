@@ -101,7 +101,7 @@ export function openDialoguePanel(ctx: TalkCtx, d: Dialogue, onClose?: () => voi
     group: 'talk',
     pauses: true,
     titleExtras: [layoutBtn],
-    footer: h('div', { class: 'ix-footer' }, h('span', { text: '1–9 answer · ↑↓ Enter · Space skip · ? unavailable answers · Esc leave' }), pauseNote),
+    footer: h('div', { class: 'ix-footer' }, h('span', { text: '1–9 answer · ↑↓ Enter · Space skip · ? unavailable answers · Bksp leave' }), pauseNote),
     onKey,
     onClose: () => {
       stopTyping();
@@ -371,7 +371,9 @@ export function openDialoguePanel(ctx: TalkCtx, d: Dialogue, onClose?: () => voi
       render();
       return true;
     }
-    // Esc always leaves (a second press to "really" leave would feel broken).
+    // Bksp (advertised) and Esc always leave (a second press to "really" leave would feel
+    // broken). Space is not the close key here: it skips the typing, and a player tapping it to
+    // hurry the NPC along must not walk out of the conversation.
     if (e.key === 'Escape' || e.key === 'Backspace') return finish(), true;
     // Everything else is swallowed: letters must not reach gameplay mid-conversation.
     return true;

@@ -29,7 +29,8 @@ function fakeDom() {
   vi.stubGlobal('HTMLInputElement', class {});
   vi.stubGlobal('HTMLTextAreaElement', class {});
   const key = (k: string, code = k) => win.fire('keydown', { key: k, code, target: null, repeat: false, shiftKey: false, getModifierState: () => false, preventDefault: () => {} });
-  return { canvas: canvas as unknown as HTMLCanvasElement, requests, key };
+  const keyup = (code: string) => win.fire('keyup', { code });
+  return { canvas: canvas as unknown as HTMLCanvasElement, requests, key, keyup };
 }
 
 describe('Input pointer-lock retry', () => {
@@ -63,5 +64,38 @@ describe('Input pointer-lock retry', () => {
     dom.key('w', 'KeyW');
     await vi.advanceTimersByTimeAsync(1400);
     expect(dom.requests.length).toBe(2);
+  });
+});
+
+describe('Input: the key that closes the last menu', () => {
+  afterEach(() => vi.unstubAllGlobals());
+  it('is not seen as held by gameplay until released (Space would side-step)', () => {
+    const dom = fakeDom();
+    const input = new Input(dom.canvas);
+    const release = input.capture((e) => {
+      if (e.key === ' ') release();
+      return true;
+    });
+    dom.key(' ', 'Space');
+    expect(input.captured).toBe(false);
+    expect(input.held.has('Space')).toBe(false);
+    // Auto-repeat while still held: still not gameplay input.
+    dom.key(' ', 'Space');
+    expect(input.held.has('Space')).toBe(false);
+    dom.keyup('Space');
+    dom.key(' ', 'Space');
+    expect(input.held.has('Space')).toBe(true);
+  });
+  it('a key closing one menu of two is not swallowed', () => {
+    const dom = fakeDom();
+    const input = new Input(dom.canvas);
+    input.capture(() => true);
+    const top = input.capture((e) => {
+      if (e.key === ' ') top();
+      return true;
+    });
+    dom.key(' ', 'Space');
+    expect(input.captured).toBe(true);
+    expect(input.held.has('Space')).toBe(true);
   });
 });

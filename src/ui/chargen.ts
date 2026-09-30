@@ -22,7 +22,8 @@ import { bodyMods } from '../game/bodymods';
 // points, forced traits and allowed professions still apply.
 //
 // Keys: Tab / Shift+Tab (or > <) switch tabs, ↑↓ / jk move, Enter selects or toggles,
-// ←→ change stats, on DESCRIPTION: n name, ? random name, g gender, F finish. Esc goes back.
+// ←→ change stats, on DESCRIPTION: n name, ? random name, g gender, F finish. Bksp (or Esc) goes
+// back. Space isn't a close key here: it toggles traits, and leaving discards the character.
 
 export interface Build {
   scenario: ScenarioDef;
@@ -208,7 +209,8 @@ export function openCharGen(ctx: UiContext): Promise<Build | null> {
       title: 'New Character',
       width: '96vw',
       height: '92vh',
-      closeLabel: null, // the footer inside the body explains Esc (back a tab)
+      closeLabel: null, // the footer inside the body explains Bksp (back a tab)
+      closeKey: false,
       onKey: (e) => {
         const k = e.key;
         flash = '';
@@ -442,7 +444,7 @@ export function openCharGen(ctx: UiContext): Promise<Build | null> {
           <div class="wrap" style="border-left:1px solid var(--c-dark_gray);padding-left:8px;overflow:auto">${right}</div>
         </div>
         <div class="pre" style="min-height:1.2em">${flash}</div>
-        <div class="pre" style="color:var(--c-dark_gray)">${c('c_light_green', 'Tab')}/${c('c_light_green', '<>')} switch tab  ${c('c_light_green', '↑↓')} move  ${c('c_light_green', 'Enter')} ${T === 'STATS' ? 'use ←→' : T === 'DESCRIPTION' ? 'finish' : 'select'}  ${c('c_light_green', 'F')} finish &amp; play  ${c('c_light_green', 'Esc')}/${c('c_light_green', 'Bksp')} ${tab > 0 ? 'previous tab' : 'main menu'}</div>`;
+        <div class="pre" style="color:var(--c-dark_gray)">${c('c_light_green', 'Tab')}/${c('c_light_green', '<>')} switch tab  ${c('c_light_green', '↑↓')} move  ${c('c_light_green', 'Enter')} ${T === 'STATS' ? 'use ←→' : T === 'DESCRIPTION' ? 'finish' : 'select'}  ${c('c_light_green', 'F')} finish &amp; play  ${c('c_light_green', 'Bksp')} ${tab > 0 ? 'previous tab' : 'main menu'}</div>`;
       w.body.querySelectorAll<HTMLElement>('.tab[data-tab]').forEach((t) => {
         t.onclick = () => {
           tab = Number(t.dataset.tab);

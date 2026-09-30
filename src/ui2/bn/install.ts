@@ -28,7 +28,7 @@ import { flashNote } from '../dragdrop';
 import { Hotbar, HOTBAR_KEYS } from '../hotbar';
 import { itemTooltip } from '../tooltip';
 import { setLooksLike } from '../icons';
-import { settings, saveSettings } from '../host';
+import { closeKeyLabel, settings, saveSettings } from '../host';
 import { worldContextProviders } from '../world';
 import type { ItemView } from '../logic/items';
 import type { MenuItem } from '../menu';
@@ -305,7 +305,7 @@ export function installBnInventory(game: Game, ctx: UiContext, api: DebugApi, ca
     openPicker(model, {
       title: 'Drop what?', none: 'You have nothing to drop.', onNone: (msg) => game.message(msg, 'c_light_gray'), closeKeys: game.keys.keysFor('drop'),
       rows: rowsFor((v, loc) => (model.onBody(loc) ? (() => { const g = model.who.inv.groundHere(); return g ? (model.check(v.id, ground(g), v.count).kind === 'reject' ? (model.check(v.id, ground(g), v.count) as { reason: string }).reason : false) : 'Nowhere to drop it'; })() : null)),
-      note: 'Enter: drop · stacks ask how many · Esc: cancel',
+      note: `Enter: drop · stacks ask how many · ${closeKeyLabel() || 'Bksp'}: cancel`,
       run: async (r) => {
         const g = model.who.inv.groundHere();
         if (!g) return;

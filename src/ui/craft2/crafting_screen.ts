@@ -6,7 +6,8 @@
 // Below: crafts in progress (continue / take apart) and the queue.
 //
 // Keys: type to search (c: component, t: tool, s: skill, d: description), ↑/↓ PgUp/PgDn pick,
-// Enter crafts, Ctrl+Enter queues, Tab / Shift+Tab switch category, Ctrl+↑/↓ batch, Esc closes.
+// Enter crafts, Ctrl+Enter queues, Tab / Shift+Tab switch category, Ctrl+↑/↓ batch, & or Space
+// (the close key) closes — Space only while the search is empty, since a query may have spaces.
 
 import type { RecipeDef } from '../../data/types';
 import {
@@ -17,7 +18,7 @@ import type { AltEval } from '../../game/requirements';
 import { itemDisplayName, qualityName } from '../../game/requirements';
 import { cddaText } from '../../game/units';
 import { newRecipes } from '../../progression/discovery';
-import { attachTooltip, button, h, iconEl, itemTooltip, openPanel, type Panel } from '../../ui2';
+import { attachTooltip, button, closeKeyLabel, h, iconEl, itemTooltip, isCloseKey, openPanel, type Panel } from '../../ui2';
 import { defView, itemIconRef, rememberedWindow, requirementSections, searchField, storedList } from './common';
 import { ALMOST_MAX, CATEGORIES, FILTERS, RecipeBook, shortfallText, sourcesOf, type CraftFilter, type RecipeRow } from './craft_model';
 import { registerOption } from '../options';
@@ -126,7 +127,7 @@ export function openCraftingScreen(game: CraftHost): CraftingScreen {
     pauses: true,
     // Keys while focus isn't in the search field: letters go there, the rest to the screen.
     onKey: (e) => routeKeys(e),
-    footer: 'Type to search · ↑↓ pick · Enter craft · Ctrl+Enter queue · Tab category · Ctrl+↑↓ batch · Esc or & close',
+    footer: `Type to search · ↑↓ pick · Enter craft · Ctrl+Enter queue · Tab category · Ctrl+↑↓ batch · ${closeKeyLabel() ? `${closeKeyLabel()} (empty search) or ` : ''}& close`,
     onClose: () => {
       newRecipes.clear();
       current = null;
@@ -473,7 +474,7 @@ export function openCraftingScreen(game: CraftHost): CraftingScreen {
   const onKey = (e: KeyboardEvent): boolean => {
     const k = e.key;
     // Like every screen, the opening key closes it again (no recipe name has an '&').
-    if (k === 'Escape' || k === '&') panel.close();
+    if (k === 'Escape' || k === '&' || (isCloseKey(e) && search.value === '')) panel.close();
     else if (k === 'ArrowUp' && e.ctrlKey) (batch++, renderDetail());
     else if (k === 'ArrowDown' && e.ctrlKey) ((batch = Math.max(1, batch - 1)), renderDetail());
     else if (k === 'ArrowDown') move(1);
@@ -494,7 +495,8 @@ export function openCraftingScreen(game: CraftHost): CraftingScreen {
   });
   // Typing anywhere goes to the search.
   routeKeys = (e) => {
-    if (e.key.length === 1 && e.key !== '&' && !e.ctrlKey && !e.altKey) {
+    // Space with nothing typed yet is the close key, not the start of a query.
+    if (e.key.length === 1 && e.key !== '&' && !e.ctrlKey && !e.altKey && !(isCloseKey(e) && search.value === '')) {
       search.focus();
       search.value += e.key;
       query = search.value;

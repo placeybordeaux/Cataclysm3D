@@ -17,7 +17,7 @@ import { arrangeRow } from '../logic/layout';
 import { fmtVolume, fmtWeight } from '../logic/items';
 import { capacityBar, button } from '../widgets';
 import { closeGroup, findPanel, openPanel, rememberedPosition, type Panel } from '../window';
-import { pushKeys, settings } from '../host';
+import { closeKeyLabel, pushKeys, settings } from '../host';
 import { toast } from '../toast';
 import type { Hotbar } from '../hotbar';
 import { doMove, itemList, type ItemList, type ListEnv } from './lists';
@@ -82,7 +82,7 @@ export function openBnInventory(env: ListEnv, o: ScreenOpts = {}): void {
   cleanups.push(m.onChange(refreshBars));
   const pauseNote = h('div', { class: 'ui2-dim ui2-small' },
     h('div', { text: settings.pauseInInventory ? '⏸ Time is paused while the inventory is open' : '▶ Time keeps running: actions take their time (Classic)' }),
-    h('div', { text: `${o.closeKeys?.filter((k) => k !== 'Backspace').map((k) => (k === 'Tab' ? 'Tab' : k)).join(' / ') || 'i'} / Esc: close` }));
+    h('div', { text: `${[closeKeyLabel(), ...(o.closeKeys?.filter((k) => k !== 'Backspace') ?? ['i'])].filter(Boolean).join(' / ')}: close` }));
   const equip = openPanel({
     ...base,
     id: 'inv.equip',

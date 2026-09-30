@@ -11,6 +11,7 @@ import {
 import { stampTombstone } from '../src/ui/death';
 import { GameStats } from '../src/game/stats';
 import { DEFAULT_BINDINGS } from '../src/ui/keys';
+import { MENU_ACTIONS } from '../src/ui/keymap';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -219,6 +220,8 @@ describe('key bindings (src/ui/keys.ts is the single source)', () => {
   it('no key is bound twice, and none collides with movement (WASD, Space, Shift)', () => {
     const seen = new Map<string, string>();
     for (const [id, keys] of Object.entries(DEFAULT_BINDINGS)) {
+      // Menu-only actions (close_menu = Space) have their own scope: tests/keymap.test.ts.
+      if (MENU_ACTIONS.has(id)) continue;
       for (const k of keys) {
         expect(seen.get(k), `${k}: ${id} vs ${seen.get(k)}`).toBeUndefined();
         seen.set(k, id);
@@ -227,6 +230,6 @@ describe('key bindings (src/ui/keys.ts is the single source)', () => {
     }
   });
   it('every binding in the table is registered by some system (so ? help lists exactly the table)', () => {
-    for (const id of Object.keys(DEFAULT_BINDINGS)) expect(src.includes(`keys.register('${id}'`), id).toBe(true);
+    for (const id of Object.keys(DEFAULT_BINDINGS)) expect(src.includes(`keys.register('${id}'`) || src.includes(`this.register('${id}'`), id).toBe(true);
   });
 });

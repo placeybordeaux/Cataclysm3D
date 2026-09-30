@@ -1,7 +1,7 @@
 import type { Game } from '../game/game';
 import type { AchievementDef } from '../game/achievements';
 import type { AchievementsHandle } from '../achievements';
-import { h, iconEl, openPanel, tabs, toast, type Panel } from '../ui2';
+import { closeKeyLabel, h, iconEl, openPanel, tabs, toast, type Panel } from '../ui2';
 import { progressRow } from '../progression/newgame';
 import { durationText } from '../ui/format';
 import { centreFirstTime } from './common';
@@ -64,7 +64,7 @@ export function openAchievements(game: Game, ah: AchievementsHandle): Panel {
     width: 'min(calc(var(--fs) * 46), 94vw)',
     height: 'min(84vh, calc(var(--fs) * 36))',
     pauses: true,
-    footer: `←→ tabs · ↑↓ scroll · ${game.keys.keyFor('achievements')} / Esc close`,
+    footer: `←→ tabs · ↑↓ scroll · ${closeKeyLabel()} / ${game.keys.keyFor('achievements')} close`,
     onKey: (e) => {
       if (e.key === game.keys.keyFor('achievements') && !e.repeat) return panel.close(), true;
       const order: Tab[] = (['achievements', 'conducts', 'scores', 'kills'] as Tab[]).filter((x) => x !== 'conducts' || all(true).length);

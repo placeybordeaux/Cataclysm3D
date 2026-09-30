@@ -156,7 +156,7 @@ function openControls(model: Parameters<typeof openInventoryScreen>[0], invOpts:
         startProgress({ label: 'Prying the window open', seconds: 3, hint: 'move to stop', onDone: () => toast({ category: 'info', title: 'The window pops open.' }) });
       }, { small: true }),
     ),
-    h('div', { class: 'ui2-small ui2-dim sc-help', text: 'Drag = move · Shift-click = quick move · Ctrl-click = split · double-click = use · right-click = actions · wheel while dragging = amount · Esc closes/cancels · Tab inventory · 1–0 hotbar' }),
+    h('div', { class: 'ui2-small ui2-dim sc-help', text: 'Drag = move · Shift-click = quick move · Ctrl-click = split · double-click = use · right-click = actions · wheel while dragging = amount · Space closes/cancels · Tab inventory · 1–0 hotbar' }),
   );
 }
 

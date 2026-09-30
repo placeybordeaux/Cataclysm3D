@@ -17,6 +17,7 @@ import type { Item } from '../game/item';
 import {
   attachTooltip, button, capacityBar, flashNote, fmtVolume, h, iconEl, itemTooltip, makeDraggable, openPanel, registerDropTarget, ui2Layers,
   type DragPayload, type Panel,
+  closeKeyLabel,
 } from '../ui2';
 import { centreFirstTime, chip, itemView, meter, section } from './common';
 import { conditionWord, driveReadout, fuelGauges, healthTone, listOrder, partHealth, vehicleDiagram } from './logic/vehicle';
@@ -53,7 +54,7 @@ export function openVehiclePanel(game: Game, v: Vehicle, focus?: { mx: number; m
     pauses: true,
     width: 'min(calc(var(--fs) * 58), 95vw)',
     // Height follows the content (a bicycle is small), capped by the CSS max-height.
-    footer: 'Click a square to inspect it · arrows move · Enter: its main action · Esc close',
+    footer: `Click a square to inspect it · arrows move · Enter: its main action · ${closeKeyLabel()} close`,
     onKey,
     onClose: () => {
       clearInterval(timer);
@@ -220,7 +221,7 @@ export function openCargoPanel(game: Game, v: Vehicle, part: VehiclePart): Panel
     pauses: true,
     width: 'min(calc(var(--fs) * 46), 94vw)',
     height: 'min(76vh, calc(var(--fs) * 28))',
-    footer: 'Drag between the lists · click moves the whole stack · wheel while dragging: amount · Esc close',
+    footer: `Drag between the lists · click moves the whole stack · wheel while dragging: amount · ${closeKeyLabel()} close`,
     onClose: () => unregs.forEach((u) => u()),
   });
   centreFirstTime(panel);
