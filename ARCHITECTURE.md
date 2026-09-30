@@ -286,7 +286,10 @@ tests/               vitest unit tests (pure logic, no DOM/WebGL)
   and `vehicleFrame.ts` cover bikes and odd grids, `vehicleGeom.ts` holds shared helpers.
   VehicleRenderer keeps the parts renderer as the `parts` look. Collision follows the drawn
   body: `MapOverlay.shaped/collide` (sub-tile shapes, used by physics.ts), the vehicle system's
-  `bodyShape` hook + `bodyRect/occupantAt`, clipping in `src/game/vehicleShape.ts`.
+  `bodyShape` hook + `bodyRect/occupantAt`, clipping in `src/game/vehicleShape.ts`. The driven
+  vehicle gets `vehicleCockpit.ts` (live dials, wheel + hands, windscreen film); `rig.eyeCap`
+  keeps the on-foot eye under a car roof in a doorway. `tools/vehicle-freq.ts` ranks what
+  mapgen spawns by body style.
 ### NPCs, dialogue, trade, missions (src/game, wired by src/npcs.ts `installNpcs`)
 - Data: `public/data/npcs.json` (`npm run extract:npcs`, tools/extract/npcs.ts): npc templates,
   npc_class, talk_topic (merged like CDDA: responses append across definitions), mission_definition,

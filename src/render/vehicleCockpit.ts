@@ -170,9 +170,11 @@ function wheelGeometry(r: number, tilt: number, F: Record<string, TileFrame>): G
   return g;
 }
 
+/** A fist gripping the rim: knuckles over the top of it, the thumb along the inside. */
 function fistGeometry(F: Record<string, TileFrame>): GeomBuilder {
   const g = new GeomBuilder();
-  chamferBox(g, -0.045, -0.04, -0.05, 0.045, 0.04, 0.05, 0.02, F.fabric, F.fabric);
+  chamferBox(g, -0.03, -0.028, -0.035, 0.03, 0.03, 0.035, 0.014, F.fabric, F.fabric);
+  chamferBox(g, 0.018, -0.01, -0.03, 0.04, 0.034, 0.03, 0.01, F.fabric, F.fabric);
   return g;
 }
 
@@ -204,13 +206,14 @@ export class Cockpit {
     const skinMat = mat(new THREE.MeshLambertMaterial({ color: colors.skin }));
     const sleeveMat = mat(new THREE.MeshLambertMaterial({ color: colors.sleeve }));
     const fist = own(fistGeometry(F).build());
-    const arm = own(new THREE.CylinderGeometry(0.036, 0.042, 1, 6, 1).translate(0, 0.5, 0));
+    const arm = own(new THREE.CylinderGeometry(0.03, 0.04, 1, 6, 1).translate(0, 0.5, 0));
     for (const s of [-1, 1]) {
       const f = new THREE.Mesh(fist, skinMat);
       // 10-to-2: on the rim, 60 deg either side of the top
-      const ang = (s * Math.PI) / 3.2;
-      const u = Math.cos(ang) * a.wheel.r, w = Math.sin(ang) * a.wheel.r;
-      f.position.set(-u * Math.sin(a.wheel.tilt), u * Math.cos(a.wheel.tilt), w);
+      const ang = (s * Math.PI) / 2.8;
+      // a little outside the rim and toward the driver: the knuckles wrap over it
+      const R = a.wheel.r * 1.08, u = Math.cos(ang) * R, w = Math.sin(ang) * R;
+      f.position.set(-u * Math.sin(a.wheel.tilt) - 0.025 * Math.cos(a.wheel.tilt), u * Math.cos(a.wheel.tilt) - 0.025 * Math.sin(a.wheel.tilt), w);
       f.rotation.set(0, 0, a.wheel.tilt);
       this.wheel.add(f);
       this.fists.push(f);
