@@ -28,7 +28,7 @@ import { raycastTiles } from './raycast';
 import { LEVEL_HEIGHT } from '../world/coords';
 
 // The survivor's attacks in real time: LMB / `f` swings or fires, RMB aims a gun (or guards
-// with a melee weapon / bare hands), Space or a double-tapped strafe side-steps, `G` throws.
+// with a melee weapon / bare hands), Space or a double-tapped strafe side-steps, `t` throws (the `throw` binding).
 //
 // LMB melee runs through the feel layer (combatfeel.ts): wind-up -> contact -> active window ->
 // recovery. The blow resolves at contact, against whatever the weapon's swept arc finds around

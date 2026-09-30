@@ -25,6 +25,7 @@ import type { Item } from '../../game/item';
 import { carriedAs, isAt, itemsAt, L, moveItem, transaction, type Loc, type MoveResult } from '../../game/moves';
 import { cddaText } from '../../game/units';
 import { takeOrder } from '../../game/loot';
+import { hotbarChoice } from '../../game/hotbar_choice';
 import type { DropVerdict } from '../logic/dnd';
 import { fmtVolume, type Badge, type ItemStat, type ItemView } from '../logic/items';
 import type { MenuItem } from '../menu';
@@ -540,6 +541,25 @@ export class BnInventoryModel implements InventoryModel {
   /** The double-click action as a menu entry, or null. */
   primary(item: ItemView, loc: string): MenuItem | null {
     return this.actions(item, loc).find((a) => 'label' in a && a.primary && !a.disabled && 'action' in a && !!a.action) ?? null;
+  }
+
+  /**
+   * A hotbar press: the quick-draw rule (src/game/hotbar_choice.ts), not the double-click one —
+   * a longbow is wielded, not worn. Returns false when the rule has no answer (caller falls back
+   * to primary()). A disabled choice reports its reason instead of doing something else.
+   */
+  hotbarUse(item: ItemView): boolean {
+    const e = this.entries.get(item.id);
+    if (!e) return false;
+    const it = e.items[0];
+    const a = hotbarChoice(this.who, it, e.loc);
+    if (!a) return false;
+    if (a.disabled) {
+      this.hooks.notify?.(a.disabled, 'bad');
+      return true;
+    }
+    this.runAction(a, it)();
+    return true;
   }
 
   /** Run a BN item action (itemActions) through perform() so it takes its time. */

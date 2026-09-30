@@ -22,6 +22,7 @@ import type { SurfacePainter } from './surfaces';
 import { RoomMap, type Room } from './rooms';
 import { FACE_ENDS, buildingState, type Dresser } from './dressing';
 import type { StairMesher } from './stairs/mesher';
+import { furnitureHide } from './furnitureHide';
 
 // Builds the static geometry of one chunk at one z-level: merged quads grouped by texture
 // page (one draw call per page), plus the billboards the chunk contributes. Light sources
@@ -714,8 +715,8 @@ export function* buildChunkMeshSteps(
         emitProps(geo, extras.white, x, y, z, base, def, shape === S.tree || shape === S.shrub, shape === S.floor,
           chunk.furn[li] !== 0 || chunk.items.has(li), nShape.some((ns) => ns === S.tree), curSky >= 1, G ? groundLocal : null, pud);
       }
-      // Furniture
-      const fi = chunk.furn[ly * CHUNK + lx];
+      // Furniture (a piece being dragged is drawn by render/grabView.ts until it lands)
+      const fi = furnitureHide.has(x, y, z) ? 0 : chunk.furn[ly * CHUNK + lx];
       // Where items on this tile sit: on the furniture's top, or hidden inside it.
       let itemLift = 0, itemsHidden = false;
       if (fi !== 0) {

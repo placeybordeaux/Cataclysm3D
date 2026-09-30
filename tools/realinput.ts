@@ -32,6 +32,7 @@ import { driveScenarios } from './realinput_drive';
 import { perfScenarios } from './realinput_perf';
 import { chassisScenarios } from './realinput_chassis';
 import { stairsScenarios } from './realinput_stairs';
+import { grabScenarios } from './realinput_grab';
 import { curtainsScenarios } from './realinput_curtains';
 
 const argv = process.argv.slice(2);
@@ -1515,6 +1516,8 @@ scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...qaScenarios(
 scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...galleryScenarios({ page: () => page, x: () => x, js, check, shot, toGameplay, sleep, errors: () => errors, gameUrl: () => gameUrl, quickStart }));
 // Walkable stairs (docs/STAIRS.md): the shelter flight, a zombie following, a spiral, the roof ladder.
 scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...stairsScenarios({ x: () => x, js, check, shot, toGameplay, sleep }));
+// grab / drag (tools/realinput_grab.ts) and the hotbar's longbow
+scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...grabScenarios({ x: () => x, js, check, shot, toGameplay, sleep }));
 // Curtained windows (docs/FURNITURE.md) and smash sounds (docs/AUDIO.md): e menu, light, sight, peek, doors heard.
 scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...curtainsScenarios({ x: () => x, js, check, shot, toGameplay, sleep }));
 

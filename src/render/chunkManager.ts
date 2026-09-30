@@ -221,6 +221,15 @@ export class ChunkManager {
     e.job = null;
   }
 
+  /**
+   * Is the chunk's mesh current (built after the last change / invalidateChunk)? Chunks not in
+   * range count as current. Stand-ins drawn over a chunk (render/grabView.ts) wait for this.
+   */
+  upToDate(cx: number, cy: number, z: number): boolean {
+    const e = this.entries.get(key(cx, cy, z));
+    return !e || (e.builtSig !== -1 && e.builtSig === e.sig && !e.job);
+  }
+
   /** Is tile (x,y,z) under a roof/floor (anything on the level above)? Used for ambient. */
   covered(x: number, y: number, z: number): boolean {
     return terrainShape(this.map.terAt(x, y, z + 1)) !== 'none';

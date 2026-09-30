@@ -332,11 +332,17 @@ export function interactionsAt(game: Game, x: number, y: number, z: number): Int
 
   out.push(...later);
 
+  // "Grab" (src/grab.ts, via interactionProviders) is an extra: it goes last and never stands
+  // in for what `e` did before (look in the dresser, examine the chair).
+  const grabs = out.filter((i) => i.id === 'grab');
+  if (grabs.length) out.splice(0, out.length, ...out.filter((i) => i.id !== 'grab'));
+
   // --- fallback: describe it
   if (!out.length && (f.id !== 'f_null' || !map.passable(x, y, z) || tAct)) {
     const main = f.id !== 'f_null' ? f : t;
     add('describe', `Examine ${main.name}`, () => describe(game, x, y, z));
   }
+  out.push(...grabs);
   return out;
 }
 
@@ -408,8 +414,11 @@ export function interact(game: Game, target: TargetTile | null = targetTile(game
   }
   // Open/close/stairs are unambiguous actions; others with alternatives get a menu.
   const primary = list[0];
+  // "Grab" (src/grab.ts) rides along in menus but never turns a lone action into a menu: `e`
+  // on a locker still opens it (grab has its own key and the `o` menu).
+  const alone = list.filter((i) => i.id !== 'grab').length <= 1;
   // (filling up the car at a pump is what `e` on a pump means: refuel.ts)
-  if (list.length === 1 || ['open', 'close', 'stairs_up', 'stairs_down'].includes(primary.id) || primary.id.startsWith('fill_') || !ui.menu) {
+  if (alone || ['open', 'close', 'stairs_up', 'stairs_down'].includes(primary.id) || primary.id.startsWith('fill_') || !ui.menu) {
     primary.run();
     return true;
   }
@@ -433,7 +442,8 @@ export function interactionPrompt(game: Game): string | null {
   if (t) {
     const list = interactionsAt(game, t.x, t.y, t.z);
     // A bare description (walls, stools, bushes) isn't worth a prompt; `e` still shows it.
-    if (list.length && !(list.length === 1 && list[0].id === 'describe')) return `[${key}] ${list[0].label}${list.length > 1 ? ' …' : ''}`;
+    const n = list.filter((i) => i.id !== 'grab').length;
+    if (n && !(n === 1 && list[0].id === 'describe')) return `[${key}] ${list[0].label}${n > 1 ? ' …' : ''}`;
   } else {
     // Something usable a few steps away: name it, so the player knows to walk up to it.
     const far = targetTile(game, 4);
