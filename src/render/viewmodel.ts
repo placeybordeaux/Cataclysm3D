@@ -314,7 +314,7 @@ export class Viewmodel {
   ads = false;
   /**
    * Free aim (src/game/aimmodel.ts): where the reticle sits, low-res pixels from the centre (x
-   * right, y up). The gun (fully when aiming down the sights) and a drawn bow follow it, so the
+   * right, y up). The gun (at the hip and down the sights) and a drawn bow follow it fully, so the
    * weapon visibly points where the shot will go. Set every frame by src/aim.ts.
    */
   readonly aimPx = { x: 0, y: 0 };
@@ -520,8 +520,8 @@ export class Viewmodel {
     const shake = pose.shake * lowH * 0.006;
     const kick = this.bowKick > 0 ? Math.sin((this.bowKick / 0.22) * Math.PI) * lowH * 0.025 : 0;
     // bobX/bobY already carry the knock from being hit (jolt).
-    const x = restX + (aimX - restX) * ease(d) + (bobX + this.sway) * lowH * (1 - 0.7 * d) + Math.sin(this.shakeT * 37) * shake + this.aimPx.x * (0.4 + 0.6 * d);
-    const y = restY + (aimY - restY) * ease(d) + bobY * lowH * (1 - 0.7 * d) + Math.cos(this.shakeT * 29) * shake + kick + this.aimPx.y * (0.4 + 0.6 * d);
+    const x = restX + (aimX - restX) * ease(d) + (bobX + this.sway) * lowH * (1 - 0.7 * d) + Math.sin(this.shakeT * 37) * shake + this.aimPx.x;
+    const y = restY + (aimY - restY) * ease(d) + bobY * lowH * (1 - 0.7 * d) + Math.cos(this.shakeT * 29) * shake + kick + this.aimPx.y;
     b.part.mesh.visible = this.enabled;
     b.part.mesh.position.set(Math.round(x), Math.round(y), 0);
     b.part.mesh.rotation.z = rot - (this.bowKick > 0 ? 0.05 * Math.sin((this.bowKick / 0.22) * Math.PI) : 0);
@@ -696,9 +696,8 @@ export class Viewmodel {
       this.lastPose = [a.dx, a.dy, a.rot];
       // ADS: the gun comes in toward the centre and up so the muzzle sits just under the crosshair.
       const ads = this.adsBlend;
-      const follow = 0.5 + 0.5 * ads;
-      const gx = lowW * 0.5 + lowH * ((0.42 - 0.3 * ads) + (bobX + this.sway) * steady + a.dx) + this.aimPx.x * follow;
-      const gy = lowH * (0.22 + 0.07 * ads + bobY + a.dy) + this.aimPx.y * follow;
+      const gx = lowW * 0.5 + lowH * ((0.42 - 0.3 * ads) + (bobX + this.sway) * steady + a.dx) + this.aimPx.x;
+      const gy = lowH * (0.22 + 0.07 * ads + bobY + a.dy) + this.aimPx.y;
       place(this.weapon, gx, gy, a.rot, a.vis);
       fl.mesh.visible = fr.mesh.visible = false;
       const m = this.weapon.muzzle.clone().rotateAround(new THREE.Vector2(), a.rot);
