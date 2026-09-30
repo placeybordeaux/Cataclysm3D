@@ -105,3 +105,18 @@ describe('freshness on food cards', () => {
     expect(freshnessText(createItem(data, 'rock'))).toBeNull();
   });
 });
+
+describe('low morale slows learning: the note', () => {
+  it('says so while morale is low and focus suffers, at most once an hour', () => {
+    const h = world();
+    const p = h.player;
+    p.morale.add('wet', -30, -30, 36000, 36000);
+    p.focus = 60;
+    p.practice('survival', 5);
+    p.practice('survival', 5);
+    expect(h.log.filter((t: string) => /learning slowly/.test(t))).toHaveLength(1);
+    p.turn += 3600;
+    p.practice('survival', 5);
+    expect(h.log.filter((t: string) => /learning slowly/.test(t))).toHaveLength(2);
+  });
+});

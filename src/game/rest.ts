@@ -181,7 +181,9 @@ function feelsCold(game: Game): boolean {
 function sleepHints(game: Game, ci: ComfortInfo): void {
   const p = game.player;
   const bedding = (p.env.floorItemWarmth ?? 0) > 0 || p.inv.worn.some((it) => /sleeping_bag|blanket|quilt|duvet|bedroll/.test(it.typeId));
-  if (ci.comfort < COMFORT.slightly_comfortable && !bedding) survivalHint(game, 'bed');
+  // Only on bare ground/floor: on a straw bed (comfort 2) BN already says "This is a comfortable
+  // place to sleep", and "you'd sleep better in a bed" right after it contradicted it (playtest).
+  if (ci.comfort <= COMFORT.neutral && !bedding) survivalHint(game, 'bed');
   if (feelsCold(game)) survivalHint(game, 'cold');
 }
 

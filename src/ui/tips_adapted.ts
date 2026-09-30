@@ -190,8 +190,10 @@ export function registerTipsOption(): void {
  * can't read. Say how the spot feels, what would be better, and whether you'll drop off at all.
  */
 export function sleepSpotText(comfort: number, on: string, sleepiness: string): { spot: string; good: boolean; note: string } {
-  const feel = comfort <= -999 ? "you can't sleep here" : comfort < 0 ? 'uncomfortable' : comfort < 3 ? 'hard' : comfort < 5 ? 'okay' : comfort < 10 ? 'comfortable' : 'very comfortable';
-  const better = comfort < 3 && comfort > -999 ? ': a bed or sleeping bag would help' : '';
+  const feel = comfort <= -999 ? "you can't sleep here" : comfort < 0 ? 'uncomfortable' : comfort === 0 ? 'hard' : comfort < 3 ? 'a little hard' : comfort < 5 ? 'okay' : comfort < 10 ? 'comfortable' : 'very comfortable';
+  // A straw bed (comfort 2) is already a bed: "a bed would help" read as a contradiction while
+  // lying in one (playtest, round 6). Name the next step up instead.
+  const better = comfort <= -999 || comfort >= 3 ? '' : comfort > 0 ? ': a mattress, a proper bed or a sleeping bag would be better' : ': a bed or sleeping bag would help';
   const note = sleepiness ? '' : "You aren't tired yet: you may just lie awake.";
   return { spot: `${on}, ${feel}${better}`, good: comfort >= 3, note };
 }

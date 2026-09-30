@@ -531,7 +531,7 @@ export class Character {
     const mood = this.morale.level();
     if (mood <= -10 && focus < 90 && this.turn - this.lastSlowLearningNote >= 3600) {
       this.lastSlowLearningNote = this.turn;
-      this.msg(`You're learning slowly: your low morale (${mood}) makes it hard to focus.  Something tasty, warmth, rest or a good book helps.`, 'c_yellow');
+      this.msg(`You're learning slowly: your low morale (${mood}) makes it hard to focus. Something tasty, warmth, rest or a good book helps.`, 'c_yellow');
     }
     amount = this.rollRemainder((amount * focus) / 100);
     if (amount <= 0 || sk.level > cap) return false;

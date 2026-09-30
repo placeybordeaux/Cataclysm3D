@@ -1,6 +1,9 @@
 // "Boil water" at a lit fire (docs/ADAPTATION.md). Water from a river, a toilet or rain is
-// unsafe until boiled; BN does that through the crafting menu (recipe water_clean: a BOIL tool
-// and a fire in reach). Tips said "boil it" but a newcomer had to discover the recipe. Here the
+// "water", not "water_clean"; BN boils it through the crafting menu (recipe water_clean: a BOIL
+// tool and a fire in reach). Sharp edge: in BN unclean water carries no disease (no
+// contamination/parasites in its JSON; iuse::blech_because_unclean only asks "This looks
+// unclean, sure you want to drink it?"), so the label says "clean water", never "safe" or
+// "you'll get sick". Tips said "boil it" but a newcomer had to discover the recipe. Here the
 // fire itself offers it: `e` on a burning fire with dirty water and a pot, runs the same recipe
 // (same time, same tools, same skill practice), as many servings as the pot allows.
 
@@ -34,6 +37,6 @@ export function installBoilWater(game: Game): void {
       const why = canCraft(g, r, 1, inv, true).missing.join('; ');
       return [{ id: 'boil_water', label: 'Boil water (you need a pot or a can to boil it in)', run: () => g.message(`You can't boil water yet: ${why || 'you need a pot'}.`, 'c_light_red') }];
     }
-    return [{ id: 'boil_water', label: `Boil water (${n} serving${n === 1 ? '' : 's'}, makes it safe to drink)`, run: () => void startCraft(g, r, { batch: n }) }];
+    return [{ id: 'boil_water', label: `Boil water (${n} serving${n === 1 ? '' : 's'} of clean water)`, run: () => void startCraft(g, r, { batch: n }) }];
   });
 }
