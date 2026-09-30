@@ -6,7 +6,7 @@ import { DAYS_PER_SEASON, SECONDS_PER_DAY } from '../core/time';
 import { createItem, type Item } from './item';
 import { destroyWhere, L, spawnItem, spawnOnGround } from './moves';
 import { isOutside } from './vision';
-import { weatherPoint } from './weather';
+import { weatherPoint, climateSeconds } from './weather';
 import { practiceForaging } from './harvest';
 
 // Farming, after CDDA iexamine.cpp (dirtmound, aggie_plant, harvest_plant, clear_overgrown),
@@ -123,7 +123,7 @@ export function plantableFor(game: Game, x: number, y: number, z: number, seed: 
 /** Highest temperature within ±12 h of `t` (weather.cpp highest_temp_on_day, 15-min steps → hourly). */
 export function highestTempOnDay(seed: number, t: number): number {
   let hi = -Infinity;
-  for (let dt = -12 * 3600; dt <= 12 * 3600; dt += 3600) hi = Math.max(hi, weatherPoint(seed, t + dt).temperature);
+  for (let dt = -12 * 3600; dt <= 12 * 3600; dt += 3600) hi = Math.max(hi, weatherPoint(seed, climateSeconds(t + dt)).temperature);
   return hi;
 }
 

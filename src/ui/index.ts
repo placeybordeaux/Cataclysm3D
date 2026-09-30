@@ -19,6 +19,8 @@ import { applyStoredOptions, openOptions, registerOption } from './options';
 import { installMapMarks, mapMarks } from './mapmarks';
 import { DEFAULT_BINDINGS } from './keys';
 import { installTipsOption, openHints } from './tips';
+import { installActivityRing } from './activity_ring';
+import { installAdaptation } from './adaptation';
 import { installLiquidUi } from './liquid_ui';
 import { applyBuild, defaultBuild, openCharGen } from './chargen';
 import { registerSaveable } from '../save/registry';
@@ -66,6 +68,11 @@ export async function installUi(game: Game, renderer: Renderer, worldgen: WorldG
     },
   });
   installTipsOption();
+  installAdaptation(game);
+  installActivityRing(game, () => {
+    const e = h.log.entries[h.log.entries.length - 1];
+    return e ? e.text.replace(/<[^>]+>/g, '') : null;
+  });
   installLiquidUi();
 
   game.lookAt = (maxDist) => cameraLookAt(ctx, maxDist);

@@ -1,0 +1,78 @@
+/* Title screen button layouts (src/ui/title_screen.ts). The #ui2 theme variables (--u, --fs,
+   --skin-*) are copied onto .main-menu at render time, so these reuse the pixel skins of the
+   rest of the UI. Fallbacks keep it usable if the theme isn't installed yet. */
+
+#ui .main-menu.tt-center, #ui .main-menu.tt-side {
+  pointer-events: auto;
+  font-family: 'Terminus', 'Unifont', 'DejaVu Sans Mono', monospace;
+  --tt-fs: max(calc(var(--fs, 16px) * 1.5), 2.6vh);
+  --tt-u: var(--u, 2px);
+  color: var(--p-text, #d8d2c4);
+}
+#ui .main-menu.tt-center { background: radial-gradient(ellipse at 50% 45%, rgba(0,0,0,.55) 0%, rgba(0,0,0,.75) 60%, rgba(0,0,0,.85) 100%); }
+#ui .main-menu.tt-side { background: linear-gradient(90deg, rgba(0,0,0,.88) 0%, rgba(0,0,0,.78) 34%, rgba(0,0,0,.15) 62%, rgba(0,0,0,.35) 100%); }
+
+#ui .main-menu .tt-wrap {
+  position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 2vh; padding: 3vh 16px;
+}
+#ui .main-menu .tt-col {
+  position: absolute; left: max(4vw, 16px); top: 0; bottom: 0; width: min(46ch, 40vw, calc(100vw - 32px));
+  display: flex; flex-direction: column; justify-content: center; gap: 2vh;
+}
+#ui .main-menu .tt-logo { display: flex; justify-content: center; }
+#ui .main-menu.tt-side .tt-logo { justify-content: flex-start; }
+#ui .main-menu .tt-sub { color: var(--p-text-dim, #8a857a); text-shadow: 1px 1px 0 #000; font-size: var(--fs, 16px); }
+#ui .main-menu .tt-sub b { color: var(--p-text, #d8d2c4); font-weight: normal; }
+#ui .main-menu .tt-banner { text-align: center; text-shadow: 1px 1px 0 #000; white-space: pre-line; }
+#ui .main-menu.tt-side .tt-banner { text-align: left; }
+
+#ui .main-menu .tt-stack { display: flex; flex-direction: column; gap: calc(var(--tt-u) * 3); width: min(34ch, 100%); }
+#ui .main-menu.tt-center .tt-stack { width: min(40ch, calc(100vw - 32px)); }
+#ui .main-menu .tt-row { display: flex; flex-wrap: wrap; justify-content: center; gap: calc(var(--tt-u) * 3); }
+
+#ui .main-menu .tt-btn {
+  position: relative; display: grid; grid-template-columns: 1fr auto; align-items: center; column-gap: calc(var(--tt-u) * 4);
+  text-align: left; cursor: pointer; font: inherit; color: var(--p-text, #d8d2c4); background: rgba(10, 12, 18, .85);
+  border: calc(var(--tt-u) * 3) solid transparent; border-image: var(--skin-btn); border-color: #555;
+  padding: calc(var(--tt-u) * 3) calc(var(--tt-u) * 6);
+}
+#ui .main-menu .tt-btn .tt-label { font-size: var(--tt-fs); line-height: 1.1; }
+#ui .main-menu .tt-btn .tt-desc { grid-column: 1; font-size: var(--fs-s, 13px); color: var(--p-text-dim, #8a857a); margin-top: var(--tt-u); }
+#ui .main-menu .tt-btn kbd {
+  grid-column: 2; grid-row: 1 / span 2; font: inherit; font-size: var(--fs-s, 13px); color: var(--p-text-dim, #8a857a);
+  border: var(--tt-u) solid var(--p-bevel-hi, #555); padding: 0 calc(var(--tt-u) * 2); min-width: 2ch; text-align: center;
+}
+#ui .main-menu .tt-btn.sel, #ui .main-menu .tt-btn:hover { border-image: var(--skin-btn-hover); color: var(--p-text-bright, #fff); background: rgba(40, 34, 20, .9); }
+#ui .main-menu .tt-btn.sel kbd { color: var(--p-accent, #e8c070); border-color: var(--p-accent, #e8c070); }
+#ui .main-menu .tt-btn:active { border-image: var(--skin-btn-down); transform: translateY(var(--tt-u)); }
+#ui .main-menu .tt-btn.tt-primary { padding-top: calc(var(--tt-u) * 5); padding-bottom: calc(var(--tt-u) * 5); }
+#ui .main-menu .tt-btn.tt-primary .tt-label { font-size: calc(var(--tt-fs) * 1.35); color: var(--p-accent, #e8c070); }
+#ui .main-menu .tt-btn.tt-primary.sel .tt-label { color: var(--p-text-bright, #fff); }
+#ui .main-menu .tt-btn.tt-primary.sel::before {
+  /* a pixel arrow next to the focused big button: where Enter goes */
+  content: '▶'; position: absolute; left: calc(var(--tt-u) * -14); top: 50%; transform: translateY(-50%);
+  color: var(--p-accent, #e8c070); font-size: var(--tt-fs); animation: tt-nudge 0.8s steps(2) infinite;
+}
+@keyframes tt-nudge { 50% { transform: translate(calc(var(--tt-u) * 2), -50%); } }
+#ui .main-menu .tt-btn.tt-minor { padding: calc(var(--tt-u) * 1) calc(var(--tt-u) * 4); display: inline-grid; }
+#ui .main-menu .tt-btn.tt-minor .tt-label { font-size: var(--fs, 16px); }
+#ui .main-menu.tt-side .tt-btn.tt-minor { display: grid; }
+#ui .main-menu .tt-btn.off { opacity: .45; cursor: not-allowed; }
+#ui .main-menu .tt-btn.off:hover { border-image: var(--skin-btn); background: rgba(10, 12, 18, .85); color: inherit; }
+
+#ui .main-menu .tt-hint { color: var(--p-text-dim, #8a857a); font-size: var(--fs-s, 13px); text-shadow: 1px 1px 0 #000; }
+
+#ui .main-menu .tt-tip {
+  max-width: min(64ch, calc(100vw - 32px)); padding: calc(var(--tt-u) * 3) calc(var(--tt-u) * 5);
+  border: calc(var(--tt-u) * 3) solid transparent; border-image: var(--skin-tip); border-color: #444; background: rgba(10, 12, 18, .8);
+  line-height: 1.35; white-space: normal;
+}
+#ui .main-menu.tt-side .tt-tip { position: absolute; right: max(3vw, 16px); bottom: max(4vh, 16px); max-width: min(48ch, 40vw); }
+#ui .main-menu .tt-tip-head { color: var(--p-info, #7fc8d8); font-size: var(--fs-s, 13px); margin-bottom: var(--tt-u); }
+
+/* phone-ish or very short windows: the side column goes full width */
+@media (max-width: 760px) {
+  #ui .main-menu .tt-col { width: calc(100vw - 32px); left: 16px; }
+  #ui .main-menu.tt-side .tt-tip { display: none; }
+}

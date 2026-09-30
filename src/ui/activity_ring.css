@@ -1,0 +1,27 @@
+/* Timed-activity ring around the crosshair (src/ui/activity_ring.ts). Sizes follow the ui2
+   pixel unit when it's known (the ring is appended to body, so fall back to fixed px). */
+.act-ring {
+  position: fixed; left: 50%; top: 50%; width: 0; height: 0; pointer-events: none; z-index: 6;
+  opacity: 0; transition: opacity 120ms steps(2);
+  font-family: 'Terminus', 'Unifont', 'DejaVu Sans Mono', monospace;
+}
+.act-ring.on { opacity: 1; }
+.act-ring svg { position: absolute; width: 56px; height: 56px; left: -28px; top: -28px; overflow: visible; }
+.act-ring .act-track { fill: none; stroke: rgba(0, 0, 0, .55); stroke-width: 5; }
+.act-ring .act-fill { fill: none; stroke: #e8c070; stroke-width: 3; stroke-linecap: butt; }
+.act-ring[data-state='stopped'] .act-fill { stroke: #e05040; }
+.act-ring .act-text {
+  position: absolute; left: 0; bottom: 36px; transform: translateX(-50%); text-align: center; white-space: nowrap;
+  text-shadow: 1px 1px 0 #000, -1px 0 0 #000, 0 -1px 0 #000, 1px 0 0 #000;
+}
+.act-ring .act-title { color: #f0e6d0; font-size: 16px; }
+.act-ring .act-title:empty, .act-ring .act-hint:empty { display: none; }
+.act-ring .act-hint { color: #e8c070; font-size: 13px; }
+.act-ring[data-state='stopped'] .act-title { color: #ff8a70; }
+.act-ring[data-state='stopped'] .act-hint { color: #c8b8a0; }
+@media (min-height: 1000px) {
+  .act-ring svg { width: 84px; height: 84px; left: -42px; top: -42px; }
+  .act-ring .act-text { bottom: 50px; }
+  .act-ring .act-title { font-size: 22px; }
+  .act-ring .act-hint { font-size: 18px; }
+}

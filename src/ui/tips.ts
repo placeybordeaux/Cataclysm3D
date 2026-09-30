@@ -3,6 +3,7 @@ import { keyLabel } from './keymap';
 import { c, openWindow, type UiWindow } from './framework';
 import { registerOption } from './options';
 import type { UiContext } from './context';
+import { adaptedTips, registerTipsOption } from './tips_adapted';
 
 // Onboarding hints, CDDA-style: a "Hints" popup when a new game starts (disable it with
 // [d] in the popup or Options > Show hints at start), and CDDA's own "tip of the day"
@@ -30,9 +31,12 @@ export function setHintsEnabled(on: boolean): void {
   }
 }
 
-/** A random CDDA tip-of-the-day line (plain text), or '' when the data has none. */
+/**
+ * A random tip-of-the-day line (plain text), or '' when there are none. BN's tips pass
+ * through the adaptation review (tips_adapted.ts: CDDA-isms dropped or rewritten).
+ */
 export function randomTip(ctx: UiContext, rng = Math.random): string {
-  const tips = ctx.data.tips ?? [];
+  const tips = adaptedTips(ctx.data.tips ?? [], (id) => ctx.game.keys.label(id));
   return tips.length ? tips[Math.floor(rng() * tips.length)] : '';
 }
 
@@ -103,6 +107,7 @@ export function maybeShowStartHints(ctx: UiContext): Promise<void> {
 }
 
 export function installTipsOption(): void {
+  registerTipsOption();
   registerOption({
     name: 'Show hints at start',
     value: () => (hintsEnabled() ? 'on' : 'off'),

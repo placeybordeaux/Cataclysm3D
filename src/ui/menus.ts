@@ -12,6 +12,7 @@ import { runNewGame, runQuickStart } from '../progression/newgame';
 import { openJournal } from '../progression/journal';
 import { registerOption } from './options';
 import { asciiFontPx, drawPixelLogo, setTitleLogoStyle, titleLogoStyle } from './titlelogo';
+import { registerTitleLayoutOption, renderTitleButtons, titleLayout, type TitleEntryView } from './title_screen';
 
 let logoOption = false;
 /** Options > Title logo (pixel / the CDDA ASCII art), registered once. */
@@ -35,6 +36,9 @@ interface MainEntry {
   key: string;
   enabled: () => boolean;
   run: () => void | Promise<void>;
+  /** Button layouts (title_screen.ts): one sentence on what it does, and how big it is. */
+  desc?: string;
+  weight?: TitleEntryView['weight'];
 }
 
 /**
@@ -52,6 +56,7 @@ export function showMainMenu(ctx: UiContext, hud: Hud): Promise<void> {
     el.className = 'screen dim main-menu';
     root.appendChild(el);
     registerLogoOption();
+    registerTitleLayoutOption(() => el.isConnected && render());
     // Drawn once per size; render() re-creates the markup around it.
     const logo = document.createElement('canvas');
     logo.className = 'title-logo';
@@ -100,11 +105,11 @@ export function showMainMenu(ctx: UiContext, hud: Hud): Promise<void> {
     const entries: MainEntry[] = [
       ...(prog
         ? [
-            { label: 'Start', key: 's', enabled: () => true, run: async () => void ((await runQuickStart(ctx, prog, ctx.worldgen)) && startGame()) },
-            { label: 'New Game', key: 'n', enabled: () => true, run: async () => void ((await runNewGame(ctx, prog, ctx.worldgen)) && startGame()) },
+            { label: 'Start', key: 's', weight: 'primary' as const, desc: 'Wake up in an evacuation shelter and learn as you go.', enabled: () => true, run: async () => void ((await runQuickStart(ctx, prog, ctx.worldgen)) && startGame()) },
+            { label: 'New Game', key: 'n', weight: 'major' as const, desc: 'Choose who you are and where you start.', enabled: () => true, run: async () => void ((await runNewGame(ctx, prog, ctx.worldgen)) && startGame()) },
           ]
         : [{
-            label: 'New Game', key: 'n', enabled: () => true,
+            label: 'New Game', key: 'n', enabled: () => true, weight: 'primary' as const, desc: 'Create a survivor and wake up in the evac shelter.',
             run: async () => {
               el.style.display = 'none';
               const build = await openCharGen(ctx);
@@ -118,6 +123,7 @@ export function showMainMenu(ctx: UiContext, hud: Hud): Promise<void> {
           }]),
       {
         label: 'Load', key: 'l', enabled: () => !!game.load && (game.hasSave?.() ?? true),
+        desc: 'Pick up where you left off.',
         run: async () => {
           if (await game.load!()) close();
         },
@@ -135,6 +141,21 @@ export function showMainMenu(ctx: UiContext, hud: Hud): Promise<void> {
         },
       },
     ];
+
+    // Button layouts: a save makes Load the big "Continue" button at the top; everything
+    // else keeps the classic order. Entries are sorted by size so ↑↓ walks them in the order
+    // they appear on screen (the classic row keeps its left-to-right order).
+    const layout = titleLayout();
+    if (layout !== 'classic') {
+      const load = entries.find((e) => e.key === 'l');
+      if (load && load.enabled()) {
+        load.label = 'Continue';
+        for (const e of entries) if (e.weight === 'primary') e.weight = 'major';
+        load.weight = 'primary';
+      }
+      const rank = { primary: 0, major: 1, minor: 2 } as const;
+      entries.sort((a, b) => rank[a.weight ?? 'minor'] - rank[b.weight ?? 'minor']);
+    }
 
     const activate = async (i: number) => {
       const e = entries[i];
@@ -185,6 +206,9 @@ export function showMainMenu(ctx: UiContext, hud: Hud): Promise<void> {
     }
 
     function render() {
+      const lay = titleLayout();
+      if (!busy && lay !== 'classic') return renderButtons(lay);
+      el.classList.remove('tt-center', 'tt-side');
       const bar = entries.map((e, i) => {
         const first = e.label[0], rest = e.label.slice(1);
         const inner = `${c(e.enabled() ? 'c_light_green' : 'c_dark_gray', first)}${c(e.enabled() ? (i === sel ? 'c_white' : 'c_light_gray') : 'c_dark_gray', rest)}`;
@@ -212,6 +236,39 @@ export function showMainMenu(ctx: UiContext, hud: Hud): Promise<void> {
         it.onclick = () => void activate(i);
       });
     }
+    function renderButtons(lay: 'center' | 'side') {
+      const W = window.innerWidth, H = window.innerHeight;
+      let logoEl: HTMLElement = logo;
+      if (titleLogoStyle() === 'ascii') {
+        const holder = document.createElement('div');
+        holder.innerHTML = logoMarkup();
+        logoEl = holder.firstElementChild as HTMLElement;
+      } else {
+        // Side column: the logo fits the column; centre: as wide as the classic screen, but
+        // leaving room below for the buttons on short windows.
+        const key = `${lay}${W}x${H}`;
+        if (logoFor !== key) {
+          logoFor = key;
+          drawPixelLogo(logo, lay === 'side' ? Math.min(W * 0.4, H * 0.9) : Math.min(W, H * 1.5));
+        }
+      }
+      const tipHtml = tip ? c('c_light_gray', tip) : '';
+      const bannerHtml = banner.map((u) => `${c('c_light_green', u.kind === 'scenario' ? 'New scenario unlocked:' : u.kind === 'cosmetic' ? 'New title unlocked:' : u.kind === 'creator' ? 'Unlocked:' : 'New start unlocked:')} ${c('c_white', u.name)}`).join('\n');
+      const btns = renderTitleButtons(el, lay, {
+        entries: entries.map((e, i) => ({ label: e.label, key: e.key, desc: e.desc, enabled: e.enabled(), weight: e.weight ?? 'minor', selected: i === sel })),
+        logo: logoEl,
+        subtitle: `a real-time, first-person adaptation of <b>Cataclysm: Bright Nights</b>`,
+        bannerHtml,
+        tipHtml,
+      });
+      for (const b of btns) {
+        const i = Number(b.dataset.i);
+        b.onmousemove = (ev) => hoverMoved(ev) && sel !== i && ((sel = i), render());
+        b.onclick = () => void activate(i);
+      }
+    }
+    // Start with the focus on the big button (Continue when there's a save).
+    sel = Math.max(0, entries.findIndex((e) => e.weight === 'primary'));
     render();
   });
 }
