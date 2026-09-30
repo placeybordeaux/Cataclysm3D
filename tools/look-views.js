@@ -176,9 +176,15 @@ window.lookView = async (name) => {
       m.setTer(x, y, 1, 't_open_air'); m.setFurn(x, y, 1, 'f_null');
     }
     c.clearMonsters?.();
-    ids.forEach((id, i) => {
-      const gx = x0 - 4 + (i % 5) * 2, gy = y0 - 3 - Math.floor(i / 5) * 2;
-      if (id.startsWith('t_')) m.setTer(gx, gy, 0, id); else if (id.startsWith('i:')) c.placeItem(id.slice(2), gx - x0, gy - y0); else m.setFurn(gx, gy, 0, id);
+    // entries: furniture f_*, terrain t_*, items i:<id>; '&' stacks several on one tile
+    // (f_table&i:can_drink). Item-only galleries are packed one tile apart, closer in.
+    const small = ids.every((id) => id.startsWith('i:'));
+    const sp = small ? 1 : 2;
+    ids.forEach((entry, i) => {
+      const gx = x0 - 2 * sp + (i % 5) * sp, gy = y0 - (small ? 2 : 3) - Math.floor(i / 5) * sp;
+      for (const id of entry.split('&')) {
+        if (id.startsWith('t_')) m.setTer(gx, gy, 0, id); else if (id.startsWith('i:')) c.placeItem(id.slice(2), gx - x0, gy - y0); else m.setFurn(gx, gy, 0, id);
+      }
     });
     c.teleport(x0 + 0.5, y0 + 0.2, 0);
     c.look(0, -22);

@@ -6,6 +6,7 @@ import { LOOK_NAMES, LOOKS, isLookName, look } from './look';
 import type { Renderer } from './renderer';
 import { frameStats, summarize } from '../perfDebug';
 import { voxelStats } from './voxel';
+import { installFurniture } from './furniture/install';
 
 // Wires the visual styles (look.ts) into the game: the Options entry, the automation API
 // and the per-look scene layers that need game/world access (skyline from the overmap).
@@ -29,6 +30,7 @@ export function installLooks(game: Game, renderer: Renderer, worldgen: WorldGene
   const a = api as DebugApi & Record<string, unknown>;
   a.looks = LOOK_NAMES;
   a.voxelStats = voxelStats;
+  installFurniture(renderer, api);
   a.setLook = (name: string) => {
     if (!isLookName(name)) throw new Error(`unknown look ${name}`);
     renderer.setLook(name);
