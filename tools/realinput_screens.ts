@@ -218,6 +218,52 @@ export function screenScenarios(c: ScreensCtx): Scenario[] {
       const out = await js<{ driving: boolean; inside: boolean }>(`({ driving: !!cdda.vehicleSystem.driving, inside: !!cdda.vehicleAt(0, 0) })`);
       check('e again (stopped) climbs out onto the road', !out.driving && !out.inside, out);
     }],
+    ['carside', 'vehicle body collision: W into a car\'s side and tail stops at the paint (no invisible wall); e from there drives', async () => {
+      await reset();
+      // Setup only: a parked car on a road, you 3 m off its left side (then its tail), facing it.
+      const setup = (where: 'side' | 'tail') => js<string | null>(`(() => {
+        const vs = cdda.vehicleSystem;
+        let v = vs.list.find((q) => q.uid === window.__carside);
+        if (!v) {
+          const r = cdda.roadTrip('car'); if (!r) return null;
+          v = vs.driving; vs.releaseControls(); v.velocity = 0; v.engineOn = false;
+          window.__carside = v.uid;
+        }
+        for (const q of v.parts) if (q.def.id.startsWith('door')) q.open = false;
+        v.version++;
+        const b = vs.bodyRect(v); if (!b) return 'no body shape';
+        const mid = (b.y0 + b.y1) / 2, cx = (b.x0 + b.x1) / 2;
+        const side = ${JSON.stringify(where)} === 'side';
+        const [tx, ty] = side ? v.mountToWorld(-0.4, b.y0) : v.mountToWorld(b.x0, mid);
+        const [ox, oy] = side ? v.mountToWorld(-0.4, b.y0 - 3) : v.mountToWorld(b.x0 - 3, mid);
+        const p = cdda.game.player; Object.assign(p, { x: ox, y: oy, z: v.z, yaw: Math.atan2(tx - ox, -(ty - oy)), pitch: -0.1 });
+        void cx; return v.name; })()`);
+      // distance from you to the body outline (0 = touching the paint)
+      const gap = () => js<number>(`(() => { const vs = cdda.vehicleSystem, v = vs.list.find((q) => q.uid === window.__carside), b = vs.bodyRect(v), p = cdda.game.player;
+        const [lx, ly] = v.worldToMount(p.x, p.y); const dx = Math.max(b.x0 - lx, 0, lx - b.x1), dy = Math.max(b.y0 - ly, 0, ly - b.y1); return Math.hypot(dx, dy); })()`);
+      const name = await setup('side');
+      check('setup: a parked car, you 3 m off its side', !!name && name !== 'no body shape', name);
+      await c.toGameplay();
+      await c.x().hold('w', 2200);
+      await sleep(200);
+      const side = await gap();
+      check('walking into the side stops at the paint (gap < 0.45 m, the old invisible wall was ~1 m)', side < 0.45 && side > 0.2, side);
+      await shot('carside_side');
+      const prompt = await js<string>(`document.querySelector('.hud-prompt')?.textContent ?? ''`);
+      check(`from there the crosshair offers "Drive the ${name}"`, prompt.includes(`Drive the ${name}`), prompt);
+      await c.x().key('e');
+      await sleep(300);
+      check('e gets in', await js<boolean>(`cdda.vehicleSystem.driving?.uid === window.__carside`));
+      await c.x().key('e');
+      await sleep(300);
+      await setup('tail');
+      await c.toGameplay();
+      await c.x().hold('w', 2200);
+      await sleep(200);
+      const tail = await gap();
+      check('walking into the tail stops at the bumper', tail < 0.45 && tail > 0.2, tail);
+      await shot('carside_tail');
+    }],
     ['body', 'bionics (p), mutations ([), martial arts (_): panels, switches by mouse', async () => {
       await reset();
       await js(`cdda.installBionic('bio_power_storage'); cdda.installBionic('bio_flashlight'); cdda.givePower(100)`);
