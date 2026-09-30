@@ -368,8 +368,11 @@ export class ChunkManager {
         dirty.push(e);
       }
     }
-    if (this.schedule === 'need') this.deferCosmetic(dirty);
-    else this.behind = false;
+    if (this.schedule === 'need') this.deferCosmetic(dirty, unlimited);
+    else {
+      this.behind = false;
+      this.deferredHoles = 0;
+    }
     // 3. rebuild in priority order under budget; a build may take several frames
     dirty.sort((a, b) => a.d2 - b.d2);
     frameStats.lap('chunks.sig');
@@ -424,7 +427,8 @@ export class ChunkManager {
     this.stats.frameMs = performance.now() - t0;
     this.stats.maxFrameMs = Math.max(this.stats.maxFrameMs, this.stats.frameMs);
     this.stats.builtThisFrame = built;
-    this.stats.pending = dirty.length - built;
+    // deferred 'high' holes are still pending (the level audit waits for them)
+    this.stats.pending = dirty.length - built + this.deferredHoles;
     this.pendingLast = this.stats.pending;
     this.stats.entries = this.entries.size;
     if (this.audit && (unlimited || ++this.auditTick % 60 === 0)) this.auditLevels(px, py, pz, creationDone && this.stats.pending === 0);
@@ -464,6 +468,8 @@ export class ChunkManager {
   }
 
   private minHoleNeed = Infinity;
+  /** this frame: 'high' holes deferCosmetic held back */
+  private deferredHoles = 0;
   private anyHole = false;
 
   /**
@@ -520,8 +526,9 @@ export class ChunkManager {
    * detailed mesh is already up and only costs a little render time) wait until the player
    * stands still with nothing unbuilt at all; 'high' holes wait while a hole is needed within 1 s. Sets `behind` (boost budget) for this frame.
    */
-  private deferCosmetic(dirty: Entry[]): void {
+  private deferCosmetic(dirty: Entry[], unlimited: boolean): void {
     const soon = this.minHoleNeed, any = this.anyHole;
+    this.deferredHoles = 0;
     this.behind = soon < 0.5;
     this.minHoleNeed = Infinity;
     this.anyHole = false;
@@ -529,7 +536,11 @@ export class ChunkManager {
     let n = 0;
     for (const e of dirty) {
       if ((e.cls === 'up' || e.cls === 'trees') && soon < 3) continue;
-      if (e.cls === 'high' && soon < 1) continue;
+      // (a flush builds everything: tests and screenshots expect the whole view)
+      if (e.cls === 'high' && soon < 1 && !unlimited) {
+        this.deferredHoles++;
+        continue;
+      }
       if (e.cls === 'down' && (moving || any)) continue;
       dirty[n++] = e;
     }

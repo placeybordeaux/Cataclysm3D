@@ -14,6 +14,8 @@
 //   --max <share>     allowed leaking share of structural pixels per look (default 0.02)
 //   --shots <dir>     save a half-size JPEG per look (<view>_<i>.jpg)
 //   --size WxH        viewport (default 1280x480)
+//   --bench <sec>     after each viewpoint's checks, turn around for <sec> s there and print the
+//                     cost (loop p50/p99, draw ms, draw calls, triangles, chunk entries by level)
 //   --no-gpu          SwiftShader instead of the GPU (slow)
 //   --list            print the viewpoints; --dry-run: what would run; --help
 // Exit code 1 when a look leaks more than --max, or a viewpoint can't be found.
@@ -41,6 +43,7 @@ const params = opt('--params', '');
 const maxShare = Number(opt('--max', '0.02'));
 const shots = opt('--shots', '');
 const size = opt('--size', '1280x480').split('x').map(Number);
+const bench = Number(opt('--bench', '0'));
 const gpu = !argv.includes('--no-gpu');
 const flags = ['--no-gpu', '--list', '--dry-run'];
 for (const a of argv) if (!flags.includes(a)) throw new Error(`unknown argument ${a}`);
@@ -154,6 +157,18 @@ try {
         const file = resolve(`${shots}/${v.name}_${i}.jpg`);
         await page.screenshot({ path: file as `${string}.jpeg`, type: 'jpeg', quality: 85, clip: { x: 0, y: 0, width: size[0], height: size[1], scale: 0.5 } });
       }
+    }
+    if (bench > 0) {
+      await new Promise((r) => setTimeout(r, 1500));
+      await page.evaluate('cdda.perf?.reset?.()');
+      const t0 = Date.now();
+      while (Date.now() - t0 < bench * 1000) {
+        const f = (Date.now() - t0) / (bench * 1000);
+        await page.evaluate(`cdda.look(${f} * 720, ${v.looks[0][1] > 0 ? 15 : -20})`);
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      const b = await page.evaluate(`(() => { const s = cdda.perf.summary(); const st = cdda.renderStats(); const lv = {}; cdda.renderer.chunks.forEachEntry((e) => { lv[e.z] = (lv[e.z] ?? 0) + 1; }); return { loop: [s.loop.p50, s.loop.p99], interval: [s.interval.p50, s.interval.p99], draw: +s.sections.draw.toFixed(2), calls: st.calls, triangles: st.triangles, entries: lv }; })()`);
+      console.log(`  bench ${bench}s: ${JSON.stringify(b)}`);
     }
     const misses = (await page.evaluate('cdda.renderer.chunks.levelMisses?.length ?? 0')) as number;
     if (misses) console.log(`  (chunk manager level guard: ${misses} miss(es) logged)`);
