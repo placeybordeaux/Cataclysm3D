@@ -1,3 +1,4 @@
+import { runDay } from './hud_logic';
 import { button, confirmModal, h, type Panel } from '../ui2';
 import { colorize } from './framework';
 import { openOptions } from './options';
@@ -89,7 +90,7 @@ export function openEscMenu(ctx: UiContext, onQuit: () => void): Panel {
     },
   });
   const p = game.player;
-  const day = Math.floor((game.clock.seconds - game.stats.startSeconds) / 86400) + 1;
+  const day = runDay(game.clock.seconds, game.stats.startSeconds);
   panel.body.append(col, h('div', { class: 'esc-info', text: `${p.name} · day ${day} · ${game.clock.format()}` }));
   // Centre it once its buttons are in (openScreen centred the empty window).
   const r = panel.el.getBoundingClientRect();

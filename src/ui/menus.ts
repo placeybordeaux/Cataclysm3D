@@ -144,16 +144,22 @@ export function showMainMenu(ctx: UiContext, hud: Hud): Promise<void> {
       },
     ];
 
-    // Button layouts: a save makes Load the big "Continue" button at the top; everything
+    // Button layouts: a save adds a big "Continue" button at the top; everything
     // else keeps the classic order. Entries are sorted by size so ↑↓ walks them in the order
     // they appear on screen (the classic row keeps its left-to-right order).
     const layout = titleLayout();
     if (layout !== 'classic') {
       const load = entries.find((e) => e.key === 'l');
       if (load && load.enabled()) {
-        load.label = 'Continue';
+        // "Continue" means the last game, straight away (a list of saves behind it was a
+        // surprise); the full list stays under the small "Load" button.
+        const cont: MainEntry = { label: 'Continue', key: 'c', enabled: () => true, weight: 'primary', desc: 'Pick up where you left off.',
+          run: async () => {
+            if (await (game.continueLatest ?? game.load)!()) close();
+          } };
         for (const e of entries) if (e.weight === 'primary') e.weight = 'major';
-        load.weight = 'primary';
+        entries.unshift(cont);
+        load.weight = 'minor';
       }
       const rank = { primary: 0, major: 1, minor: 2 } as const;
       entries.sort((a, b) => rank[a.weight ?? 'minor'] - rank[b.weight ?? 'minor']);

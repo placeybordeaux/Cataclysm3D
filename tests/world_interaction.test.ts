@@ -167,8 +167,7 @@ describe('vision & light', () => {
     expect(playerCanSee(game, 9, 17, 0)).toBe(true); // adjacent always
   });
 
-  // TODO(BN): written for DDA data/behaviour; fails on Bright Nights core data (AssertionError: expected false to be true // Object.is equality). Port with its system.
-  it.skip('monster sight range follows CDDA and a flashlight gives you away', () => {
+  it('monster sight range follows CDDA and a flashlight gives you away', () => {
     expect(monsterSightRange(40, 3, 0)).toBe(3);
     expect(monsterSightRange(40, 3, 100)).toBe(40);
     expect(monsterSightRange(40, 3, 50)).toBe(21);
@@ -494,8 +493,7 @@ describe('traps & light items', () => {
     expect(log.some((l) => /bear trap closes/.test(l))).toBe(true);
   });
 
-  // TODO(BN): written for DDA data/behaviour; fails on Bright Nights core data (AssertionError: expected false to be true // Object.is equality). Port with its system.
-  it.skip('flashlight: F turns it on (transform), it lights the tile and drains', () => {
+  it('flashlight: F turns it on (transform), it lights the tile and drains', () => {
     const { game } = makeGame();
     game.player.inv.wield(createItem(data, 'flashlight', { ammo: 'default' }), null);
     game.clock.seconds = 24 * 3600 + 3600;
@@ -509,8 +507,7 @@ describe('traps & light items', () => {
     expect(game.player.inv.wielded!.typeId).toBe('flashlight');
   });
 
-  // TODO(BN): written for DDA data/behaviour; fails on Bright Nights core data (AssertionError: expected 42 to be greater than 42). Port with its system.
-  it.skip("lightAt prefers the renderer's exact light map, adding only the survivor's beam", () => {
+  it("lightAt prefers the renderer's exact light map, adding only the survivor's beam", () => {
     const { game } = makeGame();
     game.clock.seconds = 24 * 3600 + 3600;
     place(game, 9, 16);

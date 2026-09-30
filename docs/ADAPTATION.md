@@ -67,17 +67,40 @@ only noted here.
 | 7 | **The wait menu says "Wait 20 heartbeats".** | wait menu | **Fixed**: "20 seconds", "1 minute". |
 | 8 | **The sleep menu shows a raw rating**: "(wooden floor, comfort 0)", and doesn't say you aren't tired. | sleep menu | **Fixed**: "(wooden floor, hard: a bed or sleeping bag would help)" plus "You aren't tired yet: you may just lie awake." |
 | 9 | **Loot "?" markers draw over the title screen** (`#ui2` sits above the old `#ui` root). | title screen | **Fixed**: world/HUD layers are hidden while the title is up. |
-| 10 | **Looking at a cupboard from up close hits the wrong one.** At about 0.3 m the crosshair card showed the empty neighbour ("Empty"), and `e` said "The cupboard is empty" three times while the one in front held 10 jackets. `g` (area loot) worked. | quick-loot targeting | Open: needs `lootTargetAt` to prefer the tile in front (`cdda.frontTile`) when the ray hits a neighbour's top face. Furniture shape is another area's work, so this is left for them. |
+| 10 | **Looking at a cupboard from up close hits the wrong one.** At about 0.3 m the crosshair card showed the empty neighbour ("Empty"), and `e` said "The cupboard is empty" three times while the one in front held 10 jackets. `g` (area loot) worked. | quick-loot targeting | Open, handed to the furniture agent: `lootTargetAt` should prefer the tile in front (`cdda.frontTile`) when the ray hits a neighbour's top face. |
 | 11 | **The quick-loot card's bars look like the container's fill.** "Cupboard / Empty / 635 ml / 6.5 L / 3.25 kg / 45 kg" shows your own carried volume and weight next to the cupboard's name. | quick-loot card | **Fixed**: a "You carry" line above the bars. |
 | 12 | **"Took 2 emergency jackets. 1 left behind." then "8 left behind"** in the same toast: one counts stacks, the other items. | take all | **Fixed**: both count items ("Took 2 emergency jackets. 8 left behind:"). |
-| 13 | **Take-all on a shelter cupboard grabs 2 of 10 identical jackets.** A newcomer wanted to wear one. Double-click in the inventory wears it, but nothing suggests that when it's cold. | first loot | Open: a "Wear" button on clothing in the quick-loot card when you're chilly. |
-| 14 | **The eat menu lists the bottle and the water inside separately**, with CDDA charge notation "(2/2)". | eat menu | Open (inventory area). |
+| 13 | **Take-all on a shelter cupboard grabs 2 of 10 identical jackets.** A newcomer wanted to wear one. Double-click in the inventory wears it, but nothing suggests that when it's cold. | first loot | **Fixed (round 2)**: clothing on the quick-loot card gets "[O] Wear" (the player's wear key). When you're cold, the card also says "You're cold: [O] puts it on". |
+| 14 | **The eat menu lists the bottle and the water inside separately**, with CDDA charge notation "(2/2)". | eat menu | **Fixed (round 2)**: a container row covers what's in it, and it reads "clean water (plastic bottle) · 2 servings" (`src/ui2/bn/eat_rows.ts`). |
 | 15 | **Drinking one bottle when you're not thirsty makes you "Bloated"** (BN-faithful: excess quench). | needs | Now shown as a dim "Full" on the hunger icon. The rule is kept. |
-| 16 | **Wait and Sleep are old terminal-style menus** in an otherwise ui2 game. | menus | Wording fixed. Porting them to ui2 is open. |
+| 16 | **Wait and Sleep are old terminal-style menus** in an otherwise ui2 game. | menus | **Fixed (round 2)**: both keys open one ui2 **Rest** window (see below). Options → Rest menus → Classic keeps the old ones. |
 | 17 | **Time runs fast while you read the first toasts**: 08:01 → 08:23 in about 40 s of looking around. | clock | By design (real-time clock scale). Worth a "day length" note in the Start window. |
 
 Not covered by this run: the first zombie fight and crafting a first weapon were only started,
 not played through (combat feel is its own area). The weather and ring fixes apply to both.
+
+### Round 2: first craft, first night, next morning
+
+This was played the same way, with real input: seed 743667900, then fresh games. The run
+covered Start → putting on a jacket from a locker → crafting a makeshift sling → waiting until
+dusk → the first night (light, trying to sleep) → waiting until dawn → Continue from the title.
+
+| # | Friction | Where | Status |
+|---|---|---|---|
+| 18 | **You wake up on a road, not in the shelter**, with a zombie in view, while the log says "you wake up in the evac shelter". Another special's road connection started on the shelter's overmap tile and paved it (`road_end_east`). | `overmap.ts buildRoad` | **Fixed**: roads never start on or pave another special. `tests/start_shelter.test.ts` checks 21 seeds, including this one. Existing worlds on affected seeds get their shelter back on regeneration. |
+| 19 | **Every flashlight is dark.** BN keeps item light in `light_emission` (LIGHT_n flags fold into it). The port read the DDA-era `light` field, which no BN item has, so a flashlight or the phone's flashlight app gave 0 light. `F` said "You don't have a light source" while you carried a phone with a flashlight app. | `vision.ts`, `lightitems.ts`, `lightmap.ts` | **Fixed**: `defLight` and `itemLight` follow BN `item::getlight_emit`, including CHARGEDIM. Three skipped `TODO(BN)` light tests now run. |
+| 20 | **A sun icon after dusk.** The HUD used 06:00–20:00 as "day". "Wait until dusk" ended at 18:43 under a sun icon, in pitch black. | HUD clock | **Fixed**: it follows the sun (`isDay`). |
+| 21 | **"Night falls" came two hours late** (a fixed 20:30). | discovery tips | **Fixed**: it fires at civil dusk (`isNight`). |
+| 22 | **"You don't have a light source."** is a dead end. | `lightitems.ts` | **Fixed**: the message says where lights are found (lockers, drawers, cars, or a fire). |
+| 23 | **The phone's light ran flat overnight.** Lying down with the flashlight app on drained about 18 charges per 15 game minutes. | Rest | **Fixed**: lying down from the Rest window switches your light off and says so. |
+| 24 | **The hotbar showed "0" in red for the phone** once its flashlight app was on (the use_action changes the item's type). | hotbar | **Fixed**: a slot follows its item through a transform (by reference, or by `revert_to` after a reload). |
+| 25 | **"Day 1" at 05:30 the next morning.** The HUD counted 24-hour periods since the start, while the clock said "Spring, day 2". | HUD, Esc menu, journal | **Fixed**: `runDay` turns over at midnight. |
+| 26 | **"Continue" opened a list of saves.** | title screen | **Fixed**: Continue loads the most recent save directly (`game.continueLatest`). The list is still under the small Load button. |
+| 27 | **The loot card covered the crafting bar** when crafting next to the locker you took the parts from. | quick-loot card | **Fixed**: the card is hidden while a timed job runs. |
+| 28 | **An item card from the crafting window stayed on screen for the whole craft.** Enter closed the window and the mouse was captured, so no pointer move ever hid it. | tooltips | **Fixed**: tooltips hide on pointer-lock changes and on Enter, Esc and Backspace. |
+| 29 | **The activity ring sat on top of "[e] Go down the stairs".** | crosshair | **Fixed**: the interaction prompt hides while the ring shows. |
+| 30 | **Crafting opens on "All known": 305 recipes** (acid bomb, atomic coffee…) with 1 craftable. The discovery toast had already named the one you can make. | crafting | Open (crafting UI area): default to "Craftable" when anything is. |
+| 31 | **Waiting 21 hours straight** (until dawn, from the morning) never stops for hunger, thirst or tiredness. BN only interrupts for dangerous levels. | wait | Kept (BN). The Rest window shows your tiredness. |
 
 ## What changed (wave 3, "adaptation")
 
@@ -93,6 +116,25 @@ not played through (combat feel is its own area). The weather and ring fixes app
 - `src/game/rest.ts`, `src/worldInteraction.ts`: the wait/sleep menu wording.
 - Tests: `tests/adaptation.test.ts`, weather tests in `tests/world_interaction.test.ts`.
 
+Round 2:
+- `src/ui/rest_ui.ts`, `.css`: the Rest window (sleep and wait in one). It shows the spot in
+  words, how tired you are, whether you're indoors, "Until dawn · in 9 h", and why you can't
+  rest (a monster in view). It wraps the `sleep` and `wait` keys that `worldInteraction.ts` registers.
+- `src/ui2/bn/eat_rows.ts`: the eat picker's rows. `popups.ts` gains `PickRow.label`, and
+  `model.ts` gains `hostOf(loc)`.
+- `src/ui2/loot/install.ts`: Wear on the card, and the card hides during timed jobs.
+  `quick.ts`: the "You carry" line.
+- `src/game/vision.ts` `defLight`/`itemLight`, `lightitems.ts`, `render/lightmap.ts`: BN
+  `light_emission`.
+- `src/world/overmap/overmap.ts` `buildRoad`: specials are never paved over.
+- `src/ui/hud_logic.ts` `runDay`, used by the HUD, the Esc menu and the journal.
+  `hud_modern.ts`: the sun icon comes from `isDay`.
+- `src/progression/install.ts`: `first_night` fires at dusk.
+- `src/ui2/tooltip.ts`: tooltips hide on lock, Enter, Esc and Backspace.
+  `src/ui2/bn/install.ts`: the hotbar follows transformed items.
+- `src/game/game.ts` (hot file, one additive optional field `continueLatest`),
+  `src/save/install.ts`, `src/ui/menus.ts`: Continue.
+
 ### Switches
 
 | What | Option | URL |
@@ -101,6 +143,7 @@ not played through (combat feel is its own area). The weather and ring fixes app
 | Activity progress | Options → Activity progress: Crosshair ring / Bottom bar / Both | `?actui=ring\|bar\|both` |
 | Tips | Options → Tips: Adapted / Cataclysm originals | — |
 | Climate | Options → Climate: Mid-spring start (BN) / Early spring (old) | `?climate=bn\|old` |
+| Rest menus | Options → Rest menus: Modern (Rest window) / Classic (CDDA sleep y/n + wait list) | — |
 
 Screenshots: `docs/screenshots/wave3/adaptation/`.
 
@@ -111,3 +154,8 @@ Screenshots: `docs/screenshots/wave3/adaptation/`.
 | `start_spring_weather.png` | Day 1 at 08:00: "Light Drizzle 6 °C" (was "Snowstorm -7 °C") |
 | `activity_ring.png`, `activity_interrupted.png` | The crosshair ring, and the flash when moving interrupts it |
 | `sleep_menu.png` | The sleep menu in words |
+| `rest_window.png` | Round 2: the Rest window (sleep + wait) |
+| `eat_picker.png` | Round 2: one row for the bottle of water, "· 2 servings" |
+| `loot_wear_when_cold.png`, `loot_wear_cold_hint_classic.png` | Round 2: "[O] Wear" on the loot card, and the "You're cold" hint (classic look, 1280×720) |
+| `first_night_phone_light.png` | Round 2: 18:40, moon icon, the phone's flashlight app lighting the room |
+| `title_continue_classic.png` | Round 2: with a save, Continue on top (classic look) |

@@ -249,3 +249,12 @@ export function lightLabel(lum: number): { label: string; bars: number; tip: str
   if (lum > 3.5) return { label: 'Dark', bars: 1, tip: 'Dark: you can barely see. A flashlight helps (and makes you visible).' };
   return { label: 'Pitch black', bars: 0, tip: 'Pitch black: you cannot see. Use a light source.' };
 }
+
+/**
+ * "Day N" of the run, counted on the calendar: a new day at midnight, like the clock's own
+ * "Spring, day 2". Counting 24-hour periods since the start read "Day 1" at 05:30 the morning
+ * after the first night (wave-3 playtest).
+ */
+export function runDay(nowSeconds: number, startSeconds: number): number {
+  return Math.floor(nowSeconds / 86400) - Math.floor(startSeconds / 86400) + 1;
+}

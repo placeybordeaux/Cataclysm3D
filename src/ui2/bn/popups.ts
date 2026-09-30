@@ -23,6 +23,8 @@ export interface PickRow {
   disabled?: string;
   /** Seconds the action takes. */
   time?: number;
+  /** Shown instead of the item's name (the eat picker's "clean water (plastic bottle) · 2 servings"). */
+  label?: string;
 }
 
 export const PICKER_GROUP = 'picker';
@@ -52,7 +54,7 @@ export function openPicker(model: BnInventoryModel, o: { title: string; none: st
         'div',
         { class: `bn-pick-row${r.disabled ? ' off' : ''}` },
         iconEl(r.view.icon, 'row'),
-        h('span', { class: 'bn-pick-name', text: r.view.count > 1 ? `${r.view.name} ×${r.view.count}` : r.view.name }),
+        h('span', { class: 'bn-pick-name', text: r.label ?? (r.view.count > 1 ? `${r.view.name} ×${r.view.count}` : r.view.name) }),
         h('span', { class: 'bn-pick-where', text: model.where(r.loc) }),
         h('span', { class: 'bn-pick-time', text: r.disabled ? '' : r.time ? fmtDuration(r.time) : '' }),
       );

@@ -74,6 +74,8 @@ export class Game {
   save?: () => void | Promise<void>;
   load?: () => boolean | Promise<boolean>;
   hasSave?: () => boolean;
+  /** Load the most recent save without asking which (title screen "Continue"). */
+  continueLatest?: () => Promise<boolean>;
   /** Vehicles in the world (src/game/vehicles.ts); set by installVehicles. */
   vehicles: VehicleSystem | null = null;
   /** When it returns true, WASD doesn't walk the player (e.g. driving: src/game/vehicles.ts). */

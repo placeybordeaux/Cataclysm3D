@@ -1,0 +1,6 @@
+/* The Rest window (src/ui/rest_ui.ts). */
+#ui2 .rest-card { display: flex; flex-direction: column; gap: var(--u); padding: calc(var(--u) * 2) calc(var(--u) * 3); border: var(--b3) solid transparent; border-image: var(--skin-inset); }
+#ui2 .rest-head { display: flex; align-items: center; justify-content: space-between; gap: calc(var(--u) * 4); font-size: var(--fs-l); color: var(--p-accent); margin-bottom: var(--u); }
+#ui2 .rest-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(calc(var(--fs) * 12), 1fr)); gap: calc(var(--u) * 2); }
+#ui2 .rest-grid .ui2-btn { justify-content: space-between; }
+#ui2 .rest-block { padding: var(--u) calc(var(--u) * 3); border: var(--b3) solid transparent; border-image: var(--skin-inset-bad); }

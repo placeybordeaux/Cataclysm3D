@@ -204,6 +204,11 @@ export async function installSave(
     return s ? loadSlot(s) : false;
   };
   game.hasSave = () => mgr.hasSave();
+  game.continueLatest = async () => {
+    await mgr.refresh().catch(() => undefined);
+    const s = mgr.slots[0]?.slot;
+    return s ? loadSlot(s) : false;
+  };
 
   // Page unload: synchronous fallback (see SaveManager.saveSync).
   const onUnload = () => {

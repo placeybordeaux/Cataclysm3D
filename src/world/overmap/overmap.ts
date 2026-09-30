@@ -582,9 +582,14 @@ export class Overmap {
 
   /** A* road between two local tiles; existing roads are cheap, water is a costly causeway. */
   private buildRoad(r: Region, from: [number, number], to: [number, number], allowEdge = false): boolean {
+    // A special's connection point can land on another, already placed special (roadPath
+    // never routes through one, but it doesn't check where it starts). Paving it replaced the
+    // start shelter with a road end on some seeds: new survivors woke up on a bare road next
+    // to a zombie (wave-3 playtest, seed 743667900). Leave that connection unbuilt instead.
+    if (r.sp[from[1] * REGION + from[0]]) return false;
     const path = this.roadPath(r, from, to, allowEdge);
     if (!path) return false;
-    for (const [x, y] of path) if (!this.isRoad(r, x, y)) this.setRoad(r, x, y);
+    for (const [x, y] of path) if (!this.isRoad(r, x, y) && !r.sp[y * REGION + x]) this.setRoad(r, x, y);
     return true;
   }
 
