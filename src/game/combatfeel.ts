@@ -161,7 +161,7 @@ const ACCESSIBLE: FeelConstants = {
   holdInside: 0.2, surroundRange: 3.5,
   adsFov: 50,
   drawMin: 0.45, drawStaminaPerSec: 50, drawHoldSteady: 4, drawShake: 220, slingWhirl: 0.35,
-  aimSwayScale: 0.75, aimUnsteady: 0.06, aimKickScale: 0.15, aimKickView: 0.5, aimKickRecover: 5, aimKickRecoverPerSkill: 0.9,
+  aimSwayScale: 1, aimUnsteady: 0.06, aimKickScale: 0.15, aimKickView: 0.5, aimKickRecover: 5, aimKickRecoverPerSkill: 0.9,
   aimSkillDmg0: 0.75, aimSkillDmg10: 1.3, aimHeadMul: 2, aimLegMul: 0.75, aimGrazeMul: 0.5, aimWeakMul: 1.5, aimPerfectMul: 1.25,
   aimGlancingMul: 0.5, aimParryPerSkill: 0.05, aimStaggerPerSkill: 0.04,
 };
@@ -175,7 +175,7 @@ const CLASSIC: FeelConstants = {
   struggleBonus: 1, grabCooldownMul: 1, staggerBreaksGrab: false,
   staggerShare: 0.3,
   drawStaminaPerSec: 90, drawHoldSteady: 2.5, drawShake: 400,
-  aimSwayScale: 1, aimUnsteady: 0.08, aimKickRecover: 4, aimSkillDmg0: 0.65, aimGlancingMul: 0.4, aimParryPerSkill: 0.03,
+  aimSwayScale: 1.25, aimUnsteady: 0.08, aimKickRecover: 4, aimSkillDmg0: 0.65, aimGlancingMul: 0.4, aimParryPerSkill: 0.03,
 };
 
 export const FEEL_PRESETS: Record<FeelDifficulty, FeelConstants> = { accessible: ACCESSIBLE, classic: CLASSIC };

@@ -94,8 +94,8 @@ describe('aim model switch', () => {
 
 describe('sway amplitude (from BN dispersion)', () => {
   it('is BN mean lateral error × aimSwayScale when steady, and shrinks with skill', () => {
-    // 400 MOA of dispersion maxima: mean lateral = 200 × 2/π MOA ≈ 2.12°, × 0.75.
-    expect(deg(swayAmplitude(base))).toBeCloseTo(((200 * 2) / Math.PI / 60) * 0.75, 1);
+    // 400 MOA of dispersion maxima: mean lateral = 200 × 2/π MOA ≈ 2.12°, × FEEL.aimSwayScale.
+    expect(deg(swayAmplitude(base))).toBeCloseTo(((200 * 2) / Math.PI / 60) * FEEL.aimSwayScale, 1);
     const s0 = swayAmplitude({ ...base, staticMoa: 412 }), s5 = swayAmplitude({ ...base, staticMoa: 102, skill: 5 }), s10 = swayAmplitude({ ...base, staticMoa: 31, skill: 10 });
     expect(s0).toBeGreaterThan(s5 * 3);
     expect(s5).toBeGreaterThan(s10 * 2);
