@@ -3,7 +3,7 @@
 // street viewpoint, spawns the subject(s) ahead of the camera and waits for the pose asked for.
 // Returns a short list of what is standing where. Plain JS so it can be pasted into
 // `drive.ts eval` too.
-window.charViews = ['horde_near', 'horde_mid', 'horde_far', 'horde_road', 'horde_dusk', 'dog', 'npc', 'windup', 'critters', 'zoo', 'night', 'third', 'corpse', 'bench'];
+window.charViews = ['horde_near', 'horde_mid', 'horde_far', 'horde_road', 'horde_dusk', 'dog', 'npc', 'windup', 'critters', 'zoo', 'night', 'third', 'corpse', 'bench', 'fp_fists', 'fp_punch', 'fp_pistol', 'fp_pistol_fire', 'fp_rifle', 'fp_rifle_ads', 'fp_shotgun', 'fp_reload', 'fp_bat', 'fp_bat_swing', 'fp_guard', 'fp_knife', 'fp_axe', 'fp_spear', 'fp_katana', 'fp_flashlight', 'fp_bow'];
 window.charView = async (name) => {
   const c = window.cdda;
   const wait = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -81,6 +81,36 @@ window.charView = async (name) => {
     spawnAt('mon_zombie_cop', 7, 2, {});
     spawnAt('mon_zombie_dog', 9, 0.5, {});
     lookAt(1, 0, -12);
+  } else if (name.startsWith('fp_')) {
+    // first-person hands and held items (fpView.ts / viewmodel.ts)
+    const vm = c.renderer.viewmodel;
+    vm.freeze(null);
+    vm.ads = false;
+    vm.bowSource = c.__bowSource ?? (c.__bowSource = vm.bowSource);
+    const spec = {
+      fp_fists: [null], fp_punch: [null, 'melee', 0.3], fp_pistol: ['glock_19'], fp_pistol_fire: ['glock_19', 'fire', 0.15],
+      fp_rifle: ['m4a1'], fp_rifle_ads: ['m4a1', 'ads'], fp_shotgun: ['remington_870'], fp_reload: ['m4a1', 'reload'],
+      fp_bat: ['bat'], fp_bat_swing: ['bat', 'swing'], fp_knife: ['knife_combat'], fp_axe: ['fire_ax'], fp_spear: ['spear_wood'],
+      fp_katana: ['katana'], fp_flashlight: ['flashlight'], fp_bow: ['longbow', 'draw'], fp_guard: ['bat', 'guard'],
+    }[name];
+    if (!spec) throw new Error(`unknown view ${name}`);
+    const [id, act, t] = spec;
+    const p0 = c.game.player;
+    if (p0.inv.wielded) p0.inv.unwield();
+    if (id) c.giveItem(id, { wield: true });
+    c.look(yaw0 * 180 / Math.PI + 30, -4);
+    c.settle();
+    await wait(400);
+    // feel.ts sets ads from RMB every frame: pin it for the shot
+    Object.defineProperty(vm, 'ads', act === 'ads' ? { get: () => true, set() {}, configurable: true } : { value: false, writable: true, configurable: true });
+    if (act === 'ads') { /* pinned above */ }
+    else if (act === 'reload') { vm.reload(1.2); await wait(350); vm.freeze && (vm.frozen = true); }
+    else if (act === 'swing') vm.freeze('melee', 0.45);
+    else if (act === 'guard') vm.setGuard(true);
+    else if (act === 'draw') vm.bowSource = () => ({ style: 'draw', cls: 'bow', draw: 0.85, nocked: true, shake: 0, whirl: 0 });
+    else if (act) vm.freeze(act, t);
+    await wait(700);
+    return name;
   } else if (name === 'dog') {
     spawnAt('mon_dog', 3.5, 0.5, { friendly: true }, 100);
     spawnAt('mon_zombie_dog', 5.5, 2.5, { friendly: true }, 220);
