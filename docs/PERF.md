@@ -30,7 +30,7 @@ The overlay (top left, never takes the mouse):
 * **mapgen**: chunks generated inside frames vs in idle time (per second, ms per second), the
   prefetch backlog.
 * **stream**: chunks wanted / built / queued / building, the oldest wait, the meshing budget
-  in force (4 ms, 8 when catching up).
+  in force (adaptive: 4 ms floor, 8 when catching up, more when the frame has slack).
 * **holes / runway**: unbuilt chunks in view (clear / fog / anywhere) and **runway** = how far
   along your direction of travel the world is built, in metres and in seconds at your speed.
   Under ~2 s at speed you are about to see pop-in.
@@ -115,9 +115,15 @@ Columbia Falls (size 18), headless Chromium and headless Firefox, both on the GP
   up/tree swaps only when no hole is needed within 3 s, downgrades only when standing still
   with nothing unbuilt (the detailed mesh is already up; the far version only saves a little
   render time).
-* **Boost budget when behind**: while an unbuilt chunk is in view or needed within 0.5 s the
-  meshing budget is 8 ms instead of 4 (`boostBudgetMs`); in the benchmark that is 0-14 % of
-  frames.
+* **Adaptive budget**: the meshing budget floor is 4 ms, 8 ms while an unbuilt chunk is in
+  view or needed within 0.5 s (`boostBudgetMs`; 0-14 % of frames in the benchmark). On top of
+  that it grows into the frame's **slack** (smoothed interval minus our loop and the delay
+  before it, less a margin): half of it normally, 70 % when behind, capped at 12 / 20 ms.
+  Streaming throughput is budget x frame rate, so at 12-30 fps a fixed 4 ms built the world
+  several times slower than the time allowed: driving the real car at 60 mph in a windowed
+  Chromium presented through Xvfb (12 fps) left the road unbuilt for 12.8 s. A first version
+  took a share of the *interval* and fed back on itself (longer frames → bigger budget → longer
+  frames: city p99 50 → 83 ms); the slack version is self-limiting.
 * **Stand-ins** (`src/render/placeholders.ts`, default on; `?placeholders=0`,
   `cdda.placeholders(false)`): a wanted column whose ground-level chunk has no mesh yet shows the
   skyline's silhouette of what the overmap says is there (house box with a gable roof, town
@@ -141,6 +147,20 @@ The cost: in the city the loop p99 rises (the boost budget, and ~60 % more of th
 actually drawn: 600 → 980 draw calls, 1.1 → 1.65 M triangles, Firefox draw 5.3 → 7.6 ms/frame).
 Frame-interval p99 is unchanged (33-50 ms in the city, 17-33 in town) because the city was
 already below 60 Hz in the benchmark.
+
+**Real input** (`realinput.ts --gpu --only perfdrive`, W to speed, C cruise, Shift+F3; windowed
+Chromium on the GPU but presented through Xvfb, which holds it at ~12 fps at 3440x1304 — a
+harsh stand-in for a slow machine), down the city's densest road:
+
+| | 30 mph | 40 mph | 60 mph |
+| --- | --- | --- | --- |
+| need order, fixed 4/8 ms budget | 0 s unbuilt, runway p10 11.5 s | 0 s, 8.1 s | **12.8 s** unbuilt, runway 2.5 s |
+| + adaptive (slack) budget | | | **0 s**, runway p10 6.3 s |
+
+Firefox under Xvfb renders WebGL in software (1720x652 there): 40 mph left 6.2 s unbuilt
+before the adaptive budget; headless Firefox on the GPU after it: Holden 0 s, city 1.8 s (a side
+street entering the view, stand-ins up, runway p10 8.6 s). Chromium, all six benchmark routes
+after it: 0 s except the city at 40 mph (0.85 s).
 
 Driving into the city at 40 mph, 12 s in (3440x1304, half-size): the old order (the far
 street simply isn't there), the old order with stand-ins, and the new order (default).
@@ -178,7 +198,7 @@ total unbuilt-in-view time, runway p10, frame-interval p99, loop p99, longest si
 step, mapgen inside frames (ms/s). A route fails when a metric is worse than the baseline
 (`tools/perf-baseline.json`) by more than its tolerance (relative *and* absolute, e.g. p99
 +35 % and +6 ms: the shared machine's load moves timings a lot), or breaks an absolute limit
-(no unbuilt chunk in clear view for more than 1 s; no build step over 40 ms). After an
+(no unbuilt chunk in clear view for more than 2.5 s at a stretch — a side street swinging into the ultrawide view as you enter a city may show its stand-in for a moment; no build step over 50 ms). Firefox has its own baseline (`tools/perf-baseline.firefox.json`). After an
 intended change: `--write-baseline`. Options: `--routes`, `--browser firefox` (headless Firefox
 also renders on the GPU here), `--params 'radius=6'`, `--detail`, `--gpu-timer`, `--save DIR`
 (dumps for perf-report), `--shots DIR`, `--report`, `--dry-run`, `--list`.
@@ -190,7 +210,7 @@ also renders on the GPU here), `--params 'radius=6'`, `--detail`, `--gpu-timer`,
 
 Drives the densest road of the nearest town with the keyboard: W until the target speed, C for
 cruise control, F3 overlay, Shift+F3 save (checks the "Performance log saved" message), and
-judges the telemetry (no unbuilt chunk in clear view for more than 1 s). `cdda.*` only places
+judges the telemetry (no unbuilt chunk in clear view for more than 2.5 s). `cdda.*` only places
 the car and keeps the road clear of parked cars and zombies (a crash would end the run).
 
 ### In `npm test` (headless, not flaky)

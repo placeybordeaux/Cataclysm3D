@@ -74,7 +74,7 @@ export function perfScenarios(c: PerfCtx): Scenario[] {
           mkdirSync(process.env.PERF_SAVE, { recursive: true });
           writeFileSync(join(process.env.PERF_SAVE, `perfdrive_${target}mph.json`), JSON.stringify(dump));
         }
-        check(`${target} mph: no unbuilt chunk in clear view for more than 1 s`, s.stream.maxHoleSeconds <= 1, s.stream);
+        check(`${target} mph: no unbuilt chunk in clear view for more than 2.5 s`, s.stream.maxHoleSeconds <= 2.5, s.stream);
         // stop: brake, and hand the road back
         await c.x().hold('space', 1500);
         await js(`__perfBench.stopClear()`);

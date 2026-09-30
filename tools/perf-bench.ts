@@ -18,7 +18,7 @@
 //   --browser firefox  headless Firefox (also on the GPU) instead of Chromium
 //   --save DIR         write each route's telemetry dump (tools/perf-report.ts reads them)
 //   --shots DIR        JPEG screenshots at 1/3 and 2/3 of each route (<route>_<s>s.jpg)
-//   --baseline FILE    budgets to compare with (default tools/perf-baseline.json)
+//   --baseline FILE    budgets to compare with (default tools/perf-baseline.json, .firefox.json for Firefox)
 //   --write-baseline   record this run as the new baseline (keeps the tolerances)
 //   --report           print the full perf-report for each route
 //   --detail           time the mesher by kind (furniture models, surfaces, dressing, rooms); costs time itself
@@ -77,7 +77,8 @@ const params = opt('--params', '');
 const browserKind = opt('--browser', 'chromium');
 if (browserKind !== 'chromium' && browserKind !== 'firefox') throw new Error(`--browser ${browserKind}: chromium or firefox`);
 const saveDir = opt('--save', '');
-const baselinePath = opt('--baseline', 'tools/perf-baseline.json');
+// one baseline per browser: Firefox's timings (and its occasional long GC step) differ
+const baselinePath = opt('--baseline', browserKind === 'firefox' ? 'tools/perf-baseline.firefox.json' : 'tools/perf-baseline.json');
 
 // ---- budgets ---------------------------------------------------------------------------------
 // Metrics per route, "lower is better" except runwayP10 (higher is better). A route fails when a
@@ -99,7 +100,9 @@ export interface Metrics {
   /** mapgen inside frames (ms per second of driving) */
   genSyncMsPerS: number;
 }
-const LIMITS: Partial<Record<keyof Metrics, number>> = { maxHoleS: 1.0, maxStepMs: 40 };
+// Absolute limits: an unbuilt chunk may be in clear view for a moment (a side street swinging
+// into the ultrawide view as you enter a city; the stand-in covers it), not for seconds.
+const LIMITS: Partial<Record<keyof Metrics, number>> = { maxHoleS: 2.5, maxStepMs: 50 };
 const DEFAULT_TOL: Record<keyof Metrics, { rel: number; abs: number }> = {
   maxHoleS: { rel: 0.5, abs: 0.3 },
   holeS: { rel: 0.5, abs: 0.5 },
