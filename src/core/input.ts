@@ -9,6 +9,9 @@ export type KeyHandler = (e: KeyboardEvent) => boolean | void;
 /** How menus treat the mouse: keep it captured (keyboard menus) or free the cursor to point and click. */
 export type MenuCursor = 'captured' | 'free';
 
+/** Mouse movement ignored right after the pointer lock engages (see the mousemove listener). */
+export const LOCK_SETTLE_MS = 80;
+
 export class Input {
   /**
    * Physical codes currently held. Tracked while menus are open too (keyups always arrive), so
@@ -90,14 +93,27 @@ export class Input {
     };
     window.addEventListener('blur', release);
     document.addEventListener('visibilitychange', () => document.hidden && release());
+    // Taking the pointer (back): Chromium reports the jump of the OS cursor to where it is
+    // locked as the first movement, e.g. the click that resumes play after a menu that freed
+    // the cursor, landing far from where the cursor was. As mouse look that swung the view by
+    // up to a screen (real-input QA: 342 px = 49° of pitch, then `e` examined the pavement
+    // instead of getting into the car). Movement right after the lock engages is dropped.
+    let lockedAt = -Infinity, wasLocked = false;
+    const lockNow = () => {
+      const on = document.pointerLockElement === this.canvas;
+      if (on && !wasLocked) lockedAt = performance.now();
+      wasLocked = on;
+      return on;
+    };
     document.addEventListener('pointerlockchange', () => {
+      lockNow();
       if (!this.locked) this.mouseButtons = 0;
     });
     window.addEventListener('mousemove', (e) => {
-      if (document.pointerLockElement === this.canvas) {
-        this.mouseDX += e.movementX;
-        this.mouseDY += e.movementY;
-      }
+      // (the move can arrive before pointerlockchange: lockNow notices the new lock either way)
+      if (!lockNow() || performance.now() - lockedAt < LOCK_SETTLE_MS) return;
+      this.mouseDX += e.movementX;
+      this.mouseDY += e.movementY;
     });
     canvas.addEventListener('mousedown', (e) => {
       if (this.captureStack.length) return;
