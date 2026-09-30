@@ -28,6 +28,7 @@ The billboards are still there as a variant.
 | `charLayer.ts` | Rendering: one `InstancedMesh` of a unit cube per skin page (1024², shelf-packed), one instance per body part. Per-instance face rects (the vertex shader picks the net rect from the face id), flash colour, sky visibility and the creature root (light-map sample, distance). Banded Lambert + light map + MRT normals like everything else, so outlines, flashlight, lamps and shadow maps just work. Two layers: live creatures (rewritten every frame) and bodies (rewritten only when one is added, removed or still falling). |
 | `creature.ts` | Animation driver: stepped pose clock, gait from actual speed, facing that turns toward movement or the target it fights (9 rad/s), downed topple, and `FallingBody` (death: stagger along the killing blow, topple — backwards for people, onto a side for animals, onto the back for bugs — bounce, lie). |
 | `index.ts` | Mode switch, shared layers per renderer, sprite pixel reading (atlas page or outfit composite canvas). |
+| `playerModel.ts` | The survivor's own body in the third-person/top-down cameras, painted from the player's outfit composite (repainted when clothes change); hides the renderer's billboard via `renderer.playerBodyOverride`. |
 
 `monsterView.ts` and `npcView.ts` keep all the combat-feel logic (telegraph warm/hot flashes,
 rear-back, lunge, knock-back kicks, hit-stop, flinch shiver, downed, death sequence and the
@@ -79,7 +80,6 @@ Regenerate with
 
 ## Known gaps
 
-- The player's own body in third person is still the billboard.
 - One body plan per archetype: a moose and a dog differ in proportions, not anatomy; spiders
   and ants share the insect plan; robots are a generic tracked machine.
 - Wielded weapons aren't separate meshes (the NPC's weapon only tints its arm).

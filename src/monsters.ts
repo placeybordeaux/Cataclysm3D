@@ -9,6 +9,7 @@ import { PlayerCombat, type ViewModelHook } from './game/playercombat';
 import { MELEE_AIM, MonsterView, NEAR_CLAMP } from './render/monsterView';
 import { HitFx } from './render/hitFx';
 import { charSettings, charsApi, setCharMode } from './render/chars';
+import { PlayerModel } from './render/chars/playerModel';
 import { ArrowFx } from './render/arrowFx';
 import { butcherPracticeCap, butcherSeconds, butcherToolQuality, butcherYield, type ButcherKind, canDissect, dissectPracticeCap, dissectSeconds, dissectToolMessage, dissectToolQuality, dissectYield, readDissectables } from './game/butchery';
 import { monsterSize, type Monster } from './game/monster';
@@ -71,7 +72,8 @@ export function installMonsters(game: Game, renderer: Renderer | null, worldgen:
   let view: MonsterView | null = null;
   if (renderer) {
     view = new MonsterView(game, renderer, sys, combat);
-    game.systems.push(view);
+    // the survivor's own 3D body in third-person cameras (render/chars)
+    game.systems.push(view, new PlayerModel(renderer));
     combat.viewmodel = () => (renderer as unknown as { viewmodel?: ViewModelHook }).viewmodel;
     const fx = new HitFx(game, renderer, view);
     const arrows = new ArrowFx(game, renderer, combat, sys, view);

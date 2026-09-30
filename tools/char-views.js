@@ -3,7 +3,7 @@
 // street viewpoint, spawns the subject(s) ahead of the camera and waits for the pose asked for.
 // Returns a short list of what is standing where. Plain JS so it can be pasted into
 // `drive.ts eval` too.
-window.charViews = ['horde_near', 'horde_mid', 'horde_far', 'horde_dusk', 'dog', 'npc', 'windup', 'critters', 'corpse', 'bench'];
+window.charViews = ['horde_near', 'horde_mid', 'horde_far', 'horde_dusk', 'dog', 'npc', 'windup', 'critters', 'zoo', 'night', 'third', 'corpse', 'bench'];
 window.charView = async (name) => {
   const c = window.cdda;
   const wait = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -57,6 +57,28 @@ window.charView = async (name) => {
     const ids = ['mon_zombie', 'mon_zombie_fat', 'mon_zombie_cop', 'mon_zombie_child', 'mon_zombie_tough', 'mon_zombie_runner', 'mon_zombie_soldier', 'mon_dog', 'mon_zombie_dog', 'mon_zombie_brute'];
     for (let i = 0; i < 60; i++) spawnAt(ids[i % ids.length], 8 + (37 * i) / 59, 6 + ((i * 7) % 9) - 4, {});
     lookAt(20, 5, -2);
+  } else if (name === 'zoo') {
+    // one of every body plan, broadside, in rows (QA of the archetypes)
+    const ids = ['mon_turret', 'mon_riotbot', 'mon_triffid', 'mon_fungaloid', 'mon_rattlesnake',
+      'mon_manhack', 'mon_skeleton', 'mon_feral_human_pipe', 'mon_bat', 'mon_wasp',
+      'mon_cat', 'mon_sewer_rat', 'mon_moose', 'mon_horse', 'mon_zombear',
+      'mon_ant_soldier', 'mon_mi_go', 'mon_boomer', 'mon_chicken', 'mon_wolf'];
+    ids.forEach((id, i) => spawnAt(id, 5 + Math.floor(i / 5) * 3.5, -4 + (i % 5) * 2.5 + 2, { friendly: true }, 90));
+    lookAt(10, 2, -12);
+  } else if (name === 'night') {
+    c.setHour(23.2);
+    c.flashlight(true);
+    spawnAt('mon_zombie', 4, 0.5, { friendly: true }, 170);
+    spawnAt('mon_zombie_fat', 7, 2, { friendly: true }, 200);
+    spawnAt('mon_dog', 5.5, -1.5, { friendly: true }, 80);
+    lookAt(5, 0.5, -6);
+  } else if (name === 'third') {
+    // the survivor's own body in the third-person camera, zombies closing in
+    c.setCameraMode('third');
+    spawnAt('mon_zombie', 5, -1.5, {});
+    spawnAt('mon_zombie_cop', 7, 2, {});
+    spawnAt('mon_zombie_dog', 9, 0.5, {});
+    lookAt(1, 0, -12);
   } else if (name === 'dog') {
     spawnAt('mon_dog', 3.5, 0.5, { friendly: true }, 100);
     spawnAt('mon_zombie_dog', 5.5, 2.5, { friendly: true }, 220);

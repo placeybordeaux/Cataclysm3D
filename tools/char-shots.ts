@@ -37,7 +37,7 @@ const extraJs = opt('--js', '');
 const gpu = argv.includes('--gpu');
 const bench = argv.includes('--bench');
 const dry = argv.includes('--dry-run');
-const allViews = ['horde_near', 'horde_mid', 'horde_far', 'horde_dusk', 'dog', 'npc', 'windup', 'critters', 'corpse', 'bench'];
+const allViews = ['horde_near', 'horde_mid', 'horde_far', 'horde_dusk', 'dog', 'npc', 'windup', 'critters', 'zoo', 'night', 'third', 'corpse', 'bench'];
 const defaultViews = allViews.filter((v) => v !== 'bench');
 const views = viewsArg ? viewsArg.split(',') : defaultViews;
 for (const v of views) if (!allViews.includes(v)) throw new Error(`unknown view ${v} (have ${allViews.join(', ')})`);

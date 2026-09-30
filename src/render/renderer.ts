@@ -341,8 +341,10 @@ export class Renderer {
   /** The player billboard shows outside first person, except at the wheel (you're inside the
    *  car). Checked every frame: taking/leaving the controls switches the camera mode too. */
   private spriteShown: boolean | null = null;
+  /** Another system draws the player's body (render/chars 3D model): keep the billboard hidden. */
+  playerBodyOverride = false;
   private syncPlayerSprite(): void {
-    const needPlayer = this.rig.mode !== 'first' && !this.rig.drive;
+    const needPlayer = this.rig.mode !== 'first' && !this.rig.drive && !this.playerBodyOverride;
     if (needPlayer === this.spriteShown) return;
     this.spriteShown = needPlayer;
     if (needPlayer && !this.playerSprite) {
