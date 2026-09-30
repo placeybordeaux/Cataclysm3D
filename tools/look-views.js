@@ -39,10 +39,23 @@ window.lookView = async (name) => {
     const h = c.findOmt('house', 40);
     c.teleportOmt(h.x, h.y, 0, 18, -1);
     c.look(-95, -2);
-  } else if (name === 'house') {
+  } else if (name === 'house' || name.startsWith('house:')) {
+    // house:<level>[:<nth>] = a house whose building state (dressing.ts) is kept 0 / dirty 1 / wrecked 2
     c.setHour(11);
     c.teleportOmt(town.x, town.y);
-    const h = c.findOmt('house', 20);
+    let h = c.findOmt('house', 20);
+    if (name.includes(':')) {
+      const [, lv, nth = '0'] = name.split(':');
+      const found = [];
+      for (let r = 0; r < 25 && found.length <= Number(nth); r++)
+        for (let oy = -r; oy <= r; oy++) for (let ox = -r; ox <= r; ox++) {
+          if (Math.max(Math.abs(ox), Math.abs(oy)) !== r) continue;
+          const o = c.omtAt(town.x + ox, town.y + oy, 0);
+          if (o && /house/.test(o.id) && c.buildingLevel(town.x + ox, town.y + oy) === Number(lv)) found.push({ x: town.x + ox, y: town.y + oy });
+        }
+      if (!found[Number(nth)]) throw new Error(`no house at level ${lv}`);
+      h = found[Number(nth)];
+    }
     // stand in the middle of the biggest room, facing its nearest window
     const m = c.game.map, X0 = h.x * 24, Y0 = h.y * 24;
     c.teleportOmt(h.x, h.y, 0, 12, 12);
