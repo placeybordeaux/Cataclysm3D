@@ -50,6 +50,9 @@ export function openEscMenu(ctx: UiContext, onQuit: () => void): Panel {
       },
     },
   ];
+  // Dev builds: the style gallery (docs/GALLERY.md) in its own tab, so this game is untouched.
+  if (import.meta.env.DEV)
+    entries.push({ label: 'Style gallery (debug)', key: 'g', run: () => void window.open(`${location.pathname}?gallery`, '_blank', 'noopener') });
   let sel = 0;
   const openedAt = performance.now();
   const col = h('div', { class: 'esc-col', attrs: { 'data-testid': 'esc-menu' } });

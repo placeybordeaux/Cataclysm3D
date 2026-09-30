@@ -51,9 +51,13 @@ async function main(): Promise<void> {
     const { runUi2Showcase } = await import('./ui2/showcase');
     return runUi2Showcase(document.getElementById('view') as HTMLCanvasElement);
   }
+  // ?gallery: the style gallery (src/gallery, docs/GALLERY.md), a debug page on the real
+  // renderer. It never loads or writes saves (not even the dev hot-reload snapshot, which a
+  // tab opened from the game would otherwise inherit) and defaults to the seed its scenes use.
+  const gallery = params.has('gallery');
   // A save chosen on the previous page (title screen Load) decides the world to build.
-  const pending = await takePendingLoad();
-  const seed = pending?.file ? pending.file.world.seed : Number(params.get('seed') ?? Math.floor(Math.random() * 2 ** 31));
+  const pending = gallery ? null : await takePendingLoad();
+  const seed = pending?.file ? pending.file.world.seed : Number(params.get('seed') ?? (gallery ? 1 : Math.floor(Math.random() * 2 ** 31)));
   const genKind = pending?.file ? pending.file.world.gen : params.get('gen') ?? 'world';
   if (genKind !== 'world' && genKind !== 'test') throw new Error(`unknown gen=${genKind} (expected world or test)`);
   const canvas = document.getElementById('view') as HTMLCanvasElement;
@@ -148,6 +152,14 @@ async function main(): Promise<void> {
   // Title screen / character creation (skipped with ?skipmenu=1 and under automation),
   // unless the previous page asked to load a save.
   const loaded = pending ? await save.applyPending(pending) : false;
+  if (gallery) {
+    // No title, no mouse capture, no save session, no live bridge (tools/live.ts must keep
+    // talking to the player's own tab): the gallery owns the page from here.
+    const { runGallery } = await import('./gallery');
+    await runGallery({ game, renderer, api });
+    api.ready = true;
+    return;
+  }
   api.ready = true;
   // Dev only: live view/eval bridge for the terminal (tools/live.ts).
   installDevBridge(game, renderer, api);

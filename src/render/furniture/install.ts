@@ -55,6 +55,8 @@ export function installSurfaces(renderer: Renderer, api: DebugApi, game: Game): 
   const dressState = { on: dq !== 'off' };
   /** Building state of the chunk at OMT (cx, cy): 0 kept, 1 dirty, 2 wrecked (dressing.ts). */
   (api as DebugApi & Record<string, unknown>).buildingLevel = (cx: number, cy: number) => buildingState((Math.imul(cx, 73856093) ^ Math.imul(cy, 19349663)) >>> 0).level;
+  /** Set dressing on? (the style gallery reads it back). */
+  (api as DebugApi & Record<string, unknown>).dressing = () => dressState.on;
   (api as DebugApi & Record<string, unknown>).setDressing = (on: boolean) => {
     dressState.on = !!on;
     renderer.chunks.invalidateAll();

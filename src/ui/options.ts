@@ -69,6 +69,10 @@ const extraOptions: Opt[] = [];
 export function registerOption(o: Opt): void {
   extraOptions.push(o);
 }
+/** The registered entries (the style gallery persists "my defaults" through them, exactly as Options would). */
+export function registeredOptions(): readonly Opt[] {
+  return extraOptions;
+}
 
 export function openOptions(ctx: UiContext): Panel {
   const { game, renderer } = ctx;

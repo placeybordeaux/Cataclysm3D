@@ -102,6 +102,13 @@ export class Renderer {
    */
   nightVision = 0;
   /**
+   * Debug tools (the style gallery, src/gallery): scales the render clock. 0 freezes every
+   * render-time animation (poses, wind, rain, sway) so A/B captures of one scene match.
+   */
+  timeScale = 1;
+  /** Debug tools: the drawing-buffer size in CSS px when the canvas isn't the whole window. */
+  sizeOverride: (() => { w: number; h: number }) | null = null;
+  /**
    * Extra sprite layers for the third-person survivor between the body and the clothes, like
    * CDDA's mutation overlays (`overlay_mutation_FUR`…). Returns base ids without the
    * `overlay_[gender_]` prefix handling: full ids tried in order are
@@ -400,7 +407,8 @@ export class Renderer {
   }
 
   resize(): void {
-    const w = window.innerWidth, h = window.innerHeight;
+    const o = this.sizeOverride?.();
+    const w = o?.w ?? window.innerWidth, h = o?.h ?? window.innerHeight;
     this.three.setSize(w, h, false);
     const buf = this.three.getDrawingBufferSize(new THREE.Vector2());
     this.pipeline.setSize(buf.x, buf.y);
@@ -437,7 +445,7 @@ export class Renderer {
   /** Draw a frame. `fixedDt` (s) overrides the wall-clock step (frame-by-frame recordings). */
   render(fixedDt?: number): void {
     const now = performance.now();
-    const dt = fixedDt ?? Math.min((now - this.last) / 1000, 0.1);
+    const dt = (fixedDt ?? Math.min((now - this.last) / 1000, 0.1)) * this.timeScale;
     this.last = now;
     this.time += dt;
     this.three.info.reset();
