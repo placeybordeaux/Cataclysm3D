@@ -9,10 +9,11 @@ import { uncraftIndex } from '../../game/disassembly';
 import { itemDisplayName, qualityName } from '../../game/requirements';
 import { cddaText } from '../../game/units';
 
-export type CraftFilter = 'craftable' | 'some' | 'known' | 'favs';
+export type CraftFilter = 'craftable' | 'almost' | 'some' | 'known' | 'favs';
 
 export const FILTERS: { id: CraftFilter; label: string; hint: string }[] = [
   { id: 'craftable', label: 'Craftable', hint: 'Everything you could make right now' },
+  { id: 'almost', label: 'Almost', hint: 'One or two things short: what to look for next' },
   { id: 'some', label: 'Have some', hint: 'Recipes you have at least one component for' },
   { id: 'known', label: 'All known', hint: 'Every recipe you know or can read from a book in reach' },
   { id: 'favs', label: '★ Favourites', hint: 'Recipes you starred' },
@@ -41,7 +42,64 @@ export interface RecipeRow {
   /** At least one component alternative is at hand. */
   some: boolean;
   isNew: boolean;
+  /** What stands between you and crafting it (count 0 when craftable). */
+  short: Shortfall;
 }
+
+// ------------------------------------------------------------------ "what's missing"
+
+/**
+ * What a recipe is short of, in words, for the list (docs/ADAPTATION.md). CDDA shows a red
+ * requirement list per recipe; a newcomer scanning 300 recipes needs "missing 2 more rags"
+ * next to the name to see what's within reach. One entry per unmet requirement group (an OR
+ * group counts once), naming its most-nearly-met alternative.
+ */
+export interface Shortfall {
+  /** Unmet groups (tools, qualities, components). Light isn't counted: it's where you stand. */
+  count: number;
+  /** "2 more rags", "a cutting tool", "a hammer", one per unmet group, nearest first. */
+  items: string[];
+  /** Too dark to craft here right now. */
+  dark: boolean;
+}
+
+const article = (s: string) => (/^[aeiou]/i.test(s) ? `an ${s}` : `a ${s}`);
+
+function progressOf(a: { need: number; avail: number; kind: string }): number {
+  if (a.kind === 'quality') return a.avail > 0 ? a.avail / Math.max(1, a.need) : 0;
+  if (a.need <= 0) return a.avail > 0 ? 1 : 0;
+  return Math.min(1, Math.max(0, a.avail) / a.need);
+}
+
+export function shortfall(data: GameData, check: CraftCheck): Shortfall {
+  const items: { text: string; progress: number }[] = [];
+  for (const g of [...check.req.qualities, ...check.req.tools, ...check.req.components]) {
+    if (g.ok) continue;
+    // The alternative you're closest to: most of what's needed already at hand.
+    const best = [...g.alts].sort((a, b) => progressOf(b) - progressOf(a))[0];
+    if (!best) continue;
+    let text: string;
+    if (best.kind === 'quality') text = `${article(qualityName(data, best.id))} tool${best.need > 1 ? ` (level ${best.need})` : ''}`;
+    else if (best.kind === 'tool') text = best.need > 0 && best.avail > 0 ? `charge for the ${itemDisplayName(data, best.id)}` : article(itemDisplayName(data, best.id));
+    else {
+      const more = Math.max(1, best.need - Math.max(0, best.avail));
+      text = best.avail > 0 ? `${more} more ${itemDisplayName(data, best.id, more)}` : more === 1 ? article(itemDisplayName(data, best.id)) : `${more} ${itemDisplayName(data, best.id, more)}`;
+    }
+    items.push({ text, progress: progressOf(best) });
+  }
+  items.sort((a, b) => b.progress - a.progress);
+  return { count: items.length, items: items.map((i) => i.text), dark: !check.light };
+}
+
+/** "missing 2 more rags" / "missing 2: a hammer, 3 more nails" / "too dark here". */
+export function shortfallText(s: Shortfall): string {
+  if (s.count === 0) return s.dark ? 'too dark here' : '';
+  if (s.count === 1) return `missing ${s.items[0]}`;
+  return `missing ${s.count}: ${s.items.slice(0, 2).join(', ')}${s.count > 2 ? '…' : ''}`;
+}
+
+/** Recipes at most this far off show under "Almost" (Craftable's section shows those 1 off). */
+export const ALMOST_MAX = 2;
 
 export interface RowQuery {
   filter: CraftFilter;
@@ -53,6 +111,8 @@ export interface RowQuery {
   favourites: ReadonlySet<string>;
   recent: readonly string[];
   isNew: (id: string) => boolean;
+  /** Craftable list: append recipes one thing short, after the craftable ones. */
+  almostSection?: boolean;
 }
 
 /** Everything the screen needs per recipe, computed once per open / inventory change. */
@@ -81,11 +141,18 @@ export class RecipeBook {
       if (!match(r)) continue;
       const check = this.check(r);
       const some = check.req.components.some((g) => g.alts.some((a) => a.avail > 0)) || !check.req.components.length;
-      if (q.filter === 'craftable' && !check.ok) continue;
+      const short = shortfall(data, check);
+      // Craftable may carry an "almost" section: recipes one thing short (q.almostSection).
+      if (q.filter === 'craftable' && !check.ok && !(q.almostSection && short.count === 1)) continue;
+      if (q.filter === 'almost' && (check.ok || short.count === 0 || short.count > ALMOST_MAX)) continue;
       if (q.filter === 'some' && !some) continue;
-      out.push({ recipe: r, source: k.source, name: recipeName(data, r), check, some, isNew: q.isNew(r.id) });
+      out.push({ recipe: r, source: k.source, name: recipeName(data, r), check, some, isNew: q.isNew(r.id), short });
     }
     if (q.category === 'RECENT') out.sort((a, b) => recentIdx.get(a.recipe.id)! - recentIdx.get(b.recipe.id)!);
+    else if (q.filter === 'craftable' || q.filter === 'almost') {
+      // Craftable first, then the nearest misses; name order within each.
+      out.sort((a, b) => Number(b.check.ok) - Number(a.check.ok) || a.short.count - b.short.count || Number(b.isNew) - Number(a.isNew) || a.name.localeCompare(b.name));
+    }
     else {
       const byName = new Map(out.map((o) => [o, nameMatches(data, q.query, o.recipe)]));
       out.sort((a, b) => Number(byName.get(b)) - Number(byName.get(a)) || Number(b.isNew) - Number(a.isNew) || Number(b.check.ok) - Number(a.check.ok) || a.name.localeCompare(b.name));
