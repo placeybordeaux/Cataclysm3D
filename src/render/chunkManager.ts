@@ -136,17 +136,20 @@ export class ChunkManager {
   /** 'need': budget while an unbuilt chunk is in view or about to be (catching up beats a steady frame rate). */
   boostBudgetMs = 8;
   /**
-   * 'need': the budgets are a share of the frame interval, floored at budgetMs/boostBudgetMs.
-   * Streaming throughput is budget x frame rate, so at 12-30 fps (a big city, a slow GPU, a
-   * software-presented window) a fixed 4 ms per frame built the world 2-5x slower than at 60 Hz
-   * while the time was there: a frame that already missed vsync has room left in its slot.
-   * 0.25 of 16.7 ms is the old 4 ms; at 144 Hz the floor holds.
+   * 'need': the budgets grow into the frame's slack (interval minus our main loop, smoothed,
+   * less a margin): streaming throughput is budget x frame rate, so when frames are long for
+   * other reasons (a slow GPU, presenting a big window, a city at 30 fps with room left in the
+   * vsync slot) a fixed 4 ms built the world several times slower than the time allowed. A
+   * share of the slack, not all of it: the loop grows with the budget, which shrinks the
+   * slack (self-limiting), where a share of the *interval* fed back on itself (city p99 50 ->
+   * 83 ms in the benchmark). Floors budgetMs / boostBudgetMs, caps 12 / 20 ms.
    */
-  frameShare = 0.25;
-  boostShare = 0.45;
+  slackShare = 0.5;
+  boostSlackShare = 0.7;
   /** budget in force this frame (telemetry) */
   effBudgetMs = 4;
   private ivEma = 1000 / 60;
+  private loopEma = 8;
   private lastUpdateT = 0;
   /** Half the camera's horizontal field of view (rad), for "in view" (the renderer keeps it current). */
   viewHalf = 1.1;
@@ -231,12 +234,17 @@ export class ChunkManager {
     if (this.lastUpdateT) {
       const iv = t0 - this.lastUpdateT;
       // a hidden tab or a breakpoint is not the frame rate
-      if (iv < 250) this.ivEma += (iv - this.ivEma) * 0.05;
+      if (iv < 250) {
+        this.ivEma += (iv - this.ivEma) * 0.05;
+        this.loopEma += (frameStats.lastLoopMs - this.loopEma) * 0.05;
+      }
     }
     this.lastUpdateT = t0;
     const need = this.schedule === 'need';
-    const base = need ? Math.min(16, Math.max(this.budgetMs, this.ivEma * this.frameShare)) : this.budgetMs;
-    const boost = need ? Math.min(24, Math.max(this.boostBudgetMs, this.ivEma * this.boostShare)) : this.boostBudgetMs;
+    // slack beyond what this frame's chunk work already takes (loopEma includes it)
+    const slack = Math.max(0, this.ivEma - this.loopEma - Math.max(2, this.ivEma * 0.15));
+    const base = need ? Math.min(12, this.budgetMs + slack * this.slackShare) : this.budgetMs;
+    const boost = need ? Math.min(20, this.boostBudgetMs + slack * this.boostSlackShare) : this.boostBudgetMs;
     // 1. make sure desired entries exist, nearest first. Creating an entry generates map
     //    chunks (mapgen can be slow), so this shares the frame budget with meshing.
     if (this.offsetsR !== R) this.computeOffsets(R);

@@ -44,7 +44,11 @@ export class FrameStats {
   }
   /** Per-frame observer (src/perf/telemetry.ts): this frame's work, rAF time and section split. */
   sink: ((workMs: number, now: number, loopMs: number, sec: Readonly<Record<string, number>>) => void) | null = null;
+  /** last frame's busy time: our callback (begin() to frame()) plus the delay before it
+   *  (other tasks, presentation); the chunk manager budgets into what's left of the interval */
+  lastLoopMs = 0;
   frame(workMs: number, now: number): void {
+    if (this.beginT) this.lastLoopMs = performance.now() - this.beginT + (this.sec.wait ?? 0);
     if (this.sink) this.sink(workMs, now, performance.now() - this.beginT, this.sec);
     if (this.recording) {
       this.work.push(workMs);
