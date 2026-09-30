@@ -1,3 +1,4 @@
+import { MIN_Z } from '../world/coords';
 import { Rng, hashSeed } from '../core/rng';
 import { BALANCE } from './balance';
 import { MonsterStash } from './monstash';
@@ -497,6 +498,27 @@ export class MonsterSystem implements GameSystem {
    * Apply final (post-armor) damage to a monster. Handles HURT triggers, pack anger, blood and
    * death. `source` 'player' makes the monster (and CDDA-style its friends) hostile.
    */
+  /**
+   * Non-flyers standing on open air fall to the next floor below (they could walk off roofs and
+   * upper floors, then hovered: playtest "a tough zombie just levitating"). Damage per level
+   * roughly follows CDDA's monster fall (Creature::impact ~ 10 per z-level, randomised).
+   * Returns true when it fell this tick.
+   */
+  applyGravity(m: Monster): boolean {
+    if (m.has('FLIES')) return false;
+    const map = this.game.map;
+    const tx = Math.floor(m.x), ty = Math.floor(m.y);
+    if (map.hasFloor(tx, ty, m.z)) return false;
+    let z = m.z;
+    while (z > MIN_Z && !map.hasFloor(tx, ty, z)) z--;
+    const levels = m.z - z;
+    if (levels <= 0) return false;
+    m.z = z;
+    if (this.playerSees(m)) this.message(`${m.TheName()} falls!`, 'c_light_gray');
+    this.hurt(m, levels * this.rng.int(5, 15), null);
+    return true;
+  }
+
   hurt(m: Monster, amount: number, source: 'player' | Monster | null, opts: { bleedType?: string; crit?: boolean } = {}): void {
     if (m.dead) return;
     const dmg = Math.max(0, Math.round(amount));
@@ -741,6 +763,7 @@ export class MonsterSystem implements GameSystem {
 
     for (const m of this.active) {
       if (m.dead) continue;
+      if (this.applyGravity(m)) continue;
       this.tickTimers(m, dt);
       m.thinkTimer -= dt;
       if (m.thinkTimer <= 0) {

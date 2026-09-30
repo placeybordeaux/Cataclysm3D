@@ -731,3 +731,18 @@ describe('zombie density (CDDA SPAWN_DENSITY) and horde hearing', () => {
     expect(farHorde.wanderTime).toBe(0);
   });
 });
+
+describe('gravity', () => {
+  // Playtest: a tough zombie hovered on open air one level up after walking off a roof.
+  it('a non-flyer on open air falls to the floor below and is hurt; flyers stay up', () => {
+    const { game, sys } = world();
+    expect(game.map.hasFloor(20, 20, 1)).toBe(false);
+    const z = sys.spawnById('mon_zombie', 20.5, 20.5, 1)!;
+    const crow = sys.spawnById('mon_crow', 22.5, 20.5, 1);
+    const hp0 = z.hp;
+    step(game, 0.2);
+    expect(z.z).toBe(0);
+    expect(z.hp).toBeLessThan(hp0);
+    if (crow) expect(crow.z).toBe(1);
+  });
+});
