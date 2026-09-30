@@ -20,7 +20,7 @@ import { wantsFlora3d } from './flora';
 import type { ModelFactory } from './furniture';
 import type { SurfacePainter } from './surfaces';
 import { RoomMap, type Room } from './rooms';
-import { FACE_ENDS, type Dresser } from './dressing';
+import { FACE_ENDS, buildingState, type Dresser } from './dressing';
 
 // Builds the static geometry of one chunk at one z-level: merged quads grouped by texture
 // page (one draw call per page), plus the billboards the chunk contributes. Light sources
@@ -188,6 +188,7 @@ export function* buildChunkMeshSteps(
   // interior finishes are chosen per building: one seed per chunk (≈ one OMT, one house)
   const buildingSeed = (Math.imul(chunk.cx, 73856093) ^ Math.imul(chunk.cy, 19349663)) >>> 0;
   const DR = SP ? extras?.dressing : undefined;
+  const wreck = DR ? buildingState(buildingSeed).level : undefined;
   const A = LF?.archDetail ? extras?.arch : undefined;
   // pitched roofs: shingle/thatch/tile roof regions get a hipped roof (arch.ts)
   const pitched = (tx: number, ty: number) => PITCHED.test(terDefs[here.ter(tx, ty)].id);
@@ -387,9 +388,11 @@ export function* buildChunkMeshSteps(
 
       // Floor slab underside + exposed slab edges: anything with a floor at this level
       // that has air (or a non-solid tile) under it.
-      // painted look: roof gutters are a trough under the eave, not a floor slab ledge
+      // painted look: roof gutter tiles (the ring of flat roof around a hipped roof) get a
+      // trough along their outer edge and downspouts (the flat ring itself stays: it is the
+      // eave soffit; without it you looked up into the dark under the roof)
       const gutter = !!SP && A !== undefined && /^t_gutter/.test(def.id);
-      const hasSlab = shape !== S.none && shape !== S.liquid && shape !== S.stairs_down && !gutter;
+      const hasSlab = shape !== S.none && shape !== S.liquid && shape !== S.stairs_down;
       if (hasSlab && z > -10) {
         const belowShape = shapeAt(below, x, y);
         if (!isWall(belowShape) && belowShape !== S.stairs_up) {
@@ -423,8 +426,7 @@ export function* buildChunkMeshSteps(
           break;
         case S.floor:
           if (gutter) {
-            for (let d = 0; d < 4; d++) if (pitched(x + DX[d], y + DY[d])) DR?.gutter(geo, x, y, d, base, /downspout|drop/.test(def.id), LEVEL_HEIGHT);
-            break;
+            for (let d = 0; d < 4; d++) if (nShape[d] === S.none) DR?.gutter(geo, x, y, d, base, /downspout|drop/.test(def.id), LEVEL_HEIGHT);
           }
           if (GROUND_OVERLAY.test(def.id)) {
             // tileset draws felled trunks/stumps as cut-outs over the ground: lay them on
@@ -535,6 +537,12 @@ export function* buildChunkMeshSteps(
           }
           // modelled look: real glass / shards / curtains instead of the textured pane
           const wIn = indoorSide(here, terDefs, x, y, alongX);
+          if (DR && /window_frame|frame_domestic/.test(def.id)) {
+            for (const sgn of [1, -1]) {
+              const gx = alongX ? x : x + sgn, gy = alongX ? y + sgn : y;
+              if (floorish(nShapeAt(gx, gy))) DR.shards(geo, gx, gy, base, (Math.imul(x, 31) ^ Math.imul(y, 17) ^ (sgn + 5)) >>> 0);
+            }
+          }
           const wRoom = alongX ? roomAt(x, y + wIn) : roomAt(x + wIn, y);
           if (!(MD && MD.window(geo, glassGeo, src, def.id, x, y, base + SILL_H, base + DOOR_H, alongX, wIn, wRoom?.seed)) && !BROKEN_WINDOW.test(def.id))
             paneQuads(geo(pane), x, y, alongX, base + SILL_H, base + DOOR_H, pane, base + SILL_H);
@@ -708,6 +716,8 @@ export function* buildChunkMeshSteps(
           wall: nShape.map(wallLike),
           furn: (dx, dy) => (dx || dy ? map.furnAt(x + dx, y + dy, z).id : fdef.id),
           wallAt: (dx, dy) => wallLike(shapeAt(here, x + dx, y + dy)),
+          // only indoors: a toppled park bench chair would just look odd
+          wreck: roomAt(x, y) ? wreck : undefined,
         })) {
           // drawn as a modelled piece (furniture/)
         } else if (fs === 'billboard' && LF?.voxelProps && extras?.near && extras?.voxels && extras.voxels.furniture(geo, extras.white, src, fdef.id, x, y, fb, seed, facingYaw(nShape, isWall))) {
@@ -788,6 +798,22 @@ export function* buildChunkMeshSteps(
       if (r.ax < x0c || r.ay < y0c || r.ax >= x0c + CHUNK || r.ay >= y0c + CHUNK) continue;
       const cx = Math.round((r.x0 + r.x1) / 2), cy = Math.round((r.y0 + r.y1) / 2);
       if (RM.has(r, cx, cy) && r.tiles >= 4) DR.ceilingLamp(geo, cx + 0.5, cy + 0.5, base + WALL_TOP);
+      // run-down rooms: debris and papers on the floor, a junk heap in a free corner
+      const lvl = buildingState(buildingSeed).level;
+      if (lvl > 0) {
+        let pileDone = lvl < 2 || (r.seed & 1) === 1;
+        for (let ty = r.y0; ty <= r.y1; ty++) for (let tx = r.x0; tx <= r.x1; tx++) {
+          if (!RM.has(r, tx, ty)) continue;
+          const free = map.furnAt(tx, ty, z).id === 'f_null';
+          if (free) DR.floorClutter(geo, tx, ty, base, r.seed, lvl);
+          if (!pileDone && free && map.itemsAt(tx, ty, z).length === 0) {
+            // a corner: walls on two adjacent sides
+            const w0 = nShapeAt(tx, ty - 1) === S.wall || nShapeAt(tx, ty + 1) === S.wall;
+            const w1 = nShapeAt(tx - 1, ty) === S.wall || nShapeAt(tx + 1, ty) === S.wall;
+            if (w0 && w1) { DR.pile(geo, tx + 0.5, ty + 0.5, base, r.seed); pileDone = true; }
+          }
+        }
+      }
       // rugs under beds and tables (connected groups), most rooms
       const done = new Set<number>();
       for (let ty = r.y0; ty <= r.y1; ty++) for (let tx = r.x0; tx <= r.x1; tx++) {

@@ -52,6 +52,8 @@ export interface Around {
   furn(dx: number, dy: number): string;
   /** wall-like terrain at an offset (for pieces spanning tiles: a bed's head wall) */
   wallAt(dx: number, dy: number): boolean;
+  /** how wrecked the building is (dressing.ts buildingState level: 2 = wrecked); undefined = tidy */
+  wreck?: number;
 }
 
 /** Cost counters (cdda.furnitureStats): models built, placements, quads baked. */
@@ -287,11 +289,15 @@ export class ModelFactory {
     const connAll = [...conn] as Ctx['conn'];
     if (a.axis === 'side') conn[BACK] = conn[FRONT] = false;
     const wall = [0, 1, 2, 3].map((k) => around.wall[toWorld(k)]) as Ctx['wall'];
-    const variant = `${id}|${conn.map(Number).join('')}|${connAll[FRONT] ? 'F' : ''}|${a.kind === 'shower' || a.kind === 'cupboard' ? wall.map(Number).join('') : ''}`;
+    // wrecked houses: some chairs lie on their backs, some bookcases lie on their faces
+    const h = (seed >>> 11) % 10;
+    const topple = around.wreck === 2 && ((a.kind === 'chair' && h < 4) || (a.kind === 'bookcase' && h < 3 && around.furn(DX[face], DY[face]) === 'f_null' && around.furn(DX[face] * 2, DY[face] * 2) === 'f_null' && !around.wallAt(DX[face], DY[face])));
+    const variant = `${topple ? 'T|' : ''}${id}|${conn.map(Number).join('')}|${connAll[FRONT] ? 'F' : ''}|${a.kind === 'shower' || a.kind === 'cupboard' ? wall.map(Number).join('') : ''}`;
     let m = this.meshes.get(variant);
     if (!m) {
       const tb = performance.now();
       const b = new ModelBuilder(this.atlas);
+      if (topple) b.xform = a.kind === 'chair' ? toppleBack(-0.22, 0.7) : toppleForward(0.18, -0.62);
       a.build(b, { id, pal: this.palette(src, id), conn, connAll, wall, seed: hashString(id), p: a.p ?? {} });
       m = b.done();
       this.meshes.set(variant, m);
@@ -303,6 +309,16 @@ export class ModelFactory {
     modelStats.quads += m.quads;
     modelStats.placeMs += performance.now() - t0;
   }
+}
+
+/** Rotate 90 degrees about the X axis through (y 0, z zp) so the piece lies on its back (top
+ *  toward -z), then shift by dz along z to keep it in its tile. */
+function toppleBack(zp: number, dz: number): (p: [number, number, number]) => [number, number, number] {
+  return ([x, y, z]) => [x, z - zp, zp - y + dz];
+}
+/** Lie on its face (top toward +z) about the front edge zp, shifted by dz. */
+function toppleForward(zp: number, dz: number): (p: [number, number, number]) => [number, number, number] {
+  return ([x, y, z]) => [x, zp - z, zp + y + dz];
 }
 
 /** World direction (0 N .. 3 W) the piece's front faces. */

@@ -6,7 +6,7 @@ import type { Game } from '../../game/game';
 import { look } from '../look';
 import { AtlasTextureSource } from '../atlasSource';
 import { SURFACE_STYLES, SurfacePainter, storeSurfaceStyle, surfaceState, type SurfaceStyle } from '../surfaces';
-import { Dresser } from '../dressing';
+import { Dresser, buildingState } from '../dressing';
 
 // Options > Furniture and the automation hooks for the furniture style (docs/FURNITURE.md):
 //   cdda.setFurnitureStyle('voxel')   switch live (not persisted; Options persists)
@@ -53,6 +53,8 @@ export function installSurfaces(renderer: Renderer, api: DebugApi, game: Game): 
   const dq = typeof location !== 'undefined' ? new URLSearchParams(location.search).get('dressing') : null;
   if (dq && dq !== 'on' && dq !== 'off') throw new Error(`?dressing must be on|off, got ${dq}`);
   const dressState = { on: dq !== 'off' };
+  /** Building state of the chunk at OMT (cx, cy): 0 kept, 1 dirty, 2 wrecked (dressing.ts). */
+  (api as DebugApi & Record<string, unknown>).buildingLevel = (cx: number, cy: number) => buildingState((Math.imul(cx, 73856093) ^ Math.imul(cy, 19349663)) >>> 0).level;
   (api as DebugApi & Record<string, unknown>).setDressing = (on: boolean) => {
     dressState.on = !!on;
     renderer.chunks.invalidateAll();

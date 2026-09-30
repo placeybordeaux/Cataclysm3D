@@ -39,10 +39,23 @@ window.lookView = async (name) => {
     const h = c.findOmt('house', 40);
     c.teleportOmt(h.x, h.y, 0, 18, -1);
     c.look(-95, -2);
-  } else if (name === 'house') {
+  } else if (name === 'house' || name.startsWith('house:')) {
+    // house:<level>[:<nth>] = a house whose building state (dressing.ts) is kept 0 / dirty 1 / wrecked 2
     c.setHour(11);
     c.teleportOmt(town.x, town.y);
-    const h = c.findOmt('house', 20);
+    let h = c.findOmt('house', 20);
+    if (name.includes(':')) {
+      const [, lv, nth = '0'] = name.split(':');
+      const found = [];
+      for (let r = 0; r < 25 && found.length <= Number(nth); r++)
+        for (let oy = -r; oy <= r; oy++) for (let ox = -r; ox <= r; ox++) {
+          if (Math.max(Math.abs(ox), Math.abs(oy)) !== r) continue;
+          const o = c.omtAt(town.x + ox, town.y + oy, 0);
+          if (o && /house/.test(o.id) && c.buildingLevel(town.x + ox, town.y + oy) === Number(lv)) found.push({ x: town.x + ox, y: town.y + oy });
+        }
+      if (!found[Number(nth)]) throw new Error(`no house at level ${lv}`);
+      h = found[Number(nth)];
+    }
     // stand in the middle of the biggest room, facing its nearest window
     const m = c.game.map, X0 = h.x * 24, Y0 = h.y * 24;
     c.teleportOmt(h.x, h.y, 0, 12, 12);
@@ -195,7 +208,8 @@ window.lookView = async (name) => {
     await window.lookView('house');
     c.setHour(23.2);
     c.flashlight(true);
-  } else if (name.startsWith('furn:') || name.startsWith('ter:')) {
+  } else if (name.startsWith('furn:') || name.startsWith('ter:') || name.startsWith('wfurn:')) {
+    // wfurn: like furn, only in wrecked buildings (dressing.ts building state 2)
     // furniture/fixture close-ups (docs/FURNITURE.md): furn:<id regex>[:<n-th match>[:<dist>[:<pitch>[:<hour>]]]]
     // Finds the n-th match around the town, stands `dist` tiles away on open floor in the
     // same room (the side with the most free floor) and looks at it.
@@ -206,7 +220,7 @@ window.lookView = async (name) => {
     c.settle();
     const m = c.game.map, rx = new RegExp(re);
     const P = c.game.player, px = Math.floor(P.x), py = Math.floor(P.y);
-    const hit = (x, y) => kind === 'furn' ? rx.test(m.furnAt(x, y, 0).id) : rx.test(m.terAt(x, y, 0).id);
+    const hit = (x, y) => kind === 'wfurn' ? rx.test(m.furnAt(x, y, 0).id) && c.buildingLevel(Math.floor(x / 24), Math.floor(y / 24)) === 2 : kind === 'furn' ? rx.test(m.furnAt(x, y, 0).id) : rx.test(m.terAt(x, y, 0).id);
     const found = [];
     for (let r = 0; r <= 70 && found.length <= Number(nth); r++)
       for (let y = py - r; y <= py + r; y++)

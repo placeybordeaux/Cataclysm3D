@@ -94,6 +94,9 @@ try {
         // let chunk builds / grass rebuilds triggered by the teleport finish first
         await new Promise((r) => setTimeout(r, 2500));
         results[look][v] = await page.evaluate('cdda.benchView(6)');
+        // who caused the slowest frames (per-section split, perfDebug.ts)
+        const slow = await page.evaluate('JSON.stringify([...cdda.frameStats.slow].sort((a, b) => b.ms - a.ms).slice(0, 6))');
+        console.log(`  slowest ${look}/${v}: ${slow}`);
       }
       console.log(`  ${v} ${((Date.now() - t0) / 1000).toFixed(1)}s -> ${file}`);
     }
