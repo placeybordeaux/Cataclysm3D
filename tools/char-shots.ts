@@ -37,8 +37,9 @@ const extraJs = opt('--js', '');
 const gpu = argv.includes('--gpu');
 const bench = argv.includes('--bench');
 const dry = argv.includes('--dry-run');
-const allViews = ['horde_near', 'horde_mid', 'horde_far', 'horde_dusk', 'dog', 'npc', 'windup', 'critters', 'corpse'];
-const views = viewsArg ? viewsArg.split(',') : allViews;
+const allViews = ['horde_near', 'horde_mid', 'horde_far', 'horde_dusk', 'dog', 'npc', 'windup', 'critters', 'corpse', 'bench'];
+const defaultViews = allViews.filter((v) => v !== 'bench');
+const views = viewsArg ? viewsArg.split(',') : defaultViews;
 for (const v of views) if (!allViews.includes(v)) throw new Error(`unknown view ${v} (have ${allViews.join(', ')})`);
 if (dry) {
   for (const v of views) console.log(`would capture ${out}/${prefix}_${v}.png at ${size.join('x')}${gpu ? ' (gpu)' : ''} params=${params}`);
@@ -81,7 +82,11 @@ try {
     const file = resolve(`${out}/${prefix}_${v}.png`);
     await page.screenshot({ path: file as `${string}.png` });
     let b = '';
-    if (bench) b = ' ' + JSON.stringify(await page.evaluate('cdda.benchView(4)'));
+    if (bench) {
+      // let skins, chunk builds and grass settle before timing
+      await new Promise((r) => setTimeout(r, 2500));
+      b = ' ' + JSON.stringify(await page.evaluate('cdda.benchView(6)'));
+    }
     console.log(`  ${v} ${((Date.now() - t0) / 1000).toFixed(1)}s -> ${file}${b}`);
   }
 } finally {

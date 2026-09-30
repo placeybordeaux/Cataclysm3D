@@ -41,6 +41,8 @@ export interface SpriteInfo {
   pal: Palette;
   /** mean opaque width of the middle band relative to the box width (girth estimate) */
   midWidth: number;
+  /** the sprite's main colours (up to 16): painted texels snap to these */
+  ramp: RGB[];
 }
 
 const lum = (r: number, g: number, b: number) => 0.3 * r + 0.59 * g + 0.11 * b;
@@ -130,7 +132,37 @@ export function analyseSprite(src: Img): SpriteInfo {
     for (let x = x0; x < x1; x++) if (opaque(src, x, y)) { if (a < 0) a = x; b = x; }
     if (a >= 0) (wsum += b - a + 1, rows++);
   }
-  return { img, box, pal, midWidth: rows ? wsum / rows / (x1 - x0) : 1 };
+  return { img, box, pal, midWidth: rows ? wsum / rows / (x1 - x0) : 1, ramp: rampOf(img, box) };
+}
+
+/**
+ * The sprite's own colours, most common first (4 bits per channel bins, their means). A box
+ * face resamples the sprite at a different scale; snapping to these keeps the pixel-art
+ * palette instead of inventing in-between shades.
+ */
+function rampOf(img: Img, box: [number, number, number, number]): RGB[] {
+  const bins = new Map<number, { n: number; r: number; g: number; b: number }>();
+  let n = 0;
+  for (let y = box[1]; y < box[3]; y++) for (let x = box[0]; x < box[2]; x++) {
+    const i = (y * img.w + x) * 4;
+    if (img.data[i + 3] < 128) continue;
+    const r = img.data[i], g = img.data[i + 1], b = img.data[i + 2];
+    const k = ((r >> 4) << 8) | ((g >> 4) << 4) | (b >> 4);
+    const e = bins.get(k) ?? { n: 0, r: 0, g: 0, b: 0 };
+    e.n++; e.r += r; e.g += g; e.b += b;
+    bins.set(k, e);
+    n++;
+  }
+  return [...bins.values()].filter((e) => e.n >= Math.max(1, n * 0.008)).sort((a, b) => b.n - a.n).slice(0, 16).map((e) => [e.r / e.n, e.g / e.n, e.b / e.n] as RGB);
+}
+
+function snap(ramp: RGB[], c: RGB): RGB {
+  let best = c, bd = Infinity;
+  for (const r of ramp) {
+    const d = 3 * (r[0] - c[0]) ** 2 + 4 * (r[1] - c[1]) ** 2 + 2 * (r[2] - c[2]) ** 2;
+    if (d < bd) (bd = d, best = r);
+  }
+  return best;
 }
 
 /** A sprite crop in pixel space, trimmed to its mostly-opaque core columns when asked. */
@@ -145,7 +177,20 @@ function cropOf(s: SpriteInfo, src: PartSrc): Crop {
   const bw = bx1 - bx0, bh = by1 - by0;
   let x0 = Math.floor(bx0 + r[0] * bw), x1 = Math.max(x0 + 1, Math.ceil(bx0 + r[2] * bw));
   const y0 = Math.floor(by0 + r[1] * bh), y1 = Math.max(y0 + 1, Math.ceil(by0 + r[3] * bh));
-  if (src.core) {
+  if (src.edge) {
+    // the body's core columns for these rows, then its outer quarter on the asked side
+    const colFill = (x: number) => {
+      let k = 0;
+      for (let y = y0; y < y1; y++) if (opaque(s.img, x, y)) k++;
+      return k / (y1 - y0);
+    };
+    let a = x0, b = x1;
+    while (b - a > 2 && colFill(a) < 0.6) a++;
+    while (b - a > 2 && colFill(b - 1) < 0.6) b--;
+    const w = Math.max(2, Math.round((b - a) * 0.25));
+    if (src.edge === 'left') (x0 = a, x1 = Math.min(b, a + w));
+    else (x0 = Math.max(a, b - w), x1 = b);
+  } else if (src.core) {
     const colFill = (x: number) => {
       let k = 0;
       for (let y = y0; y < y1; y++) if (opaque(s.img, x, y)) k++;
@@ -164,10 +209,39 @@ function cropOf(s: SpriteInfo, src: PartSrc): Crop {
   return { x0, y0, x1, y1, fallback: n ? [rr / n, gg / n, bb / n] : s.pal.main };
 }
 
-/** Colour at (u, v) in 0..1 of a crop; transparent pixels borrow the nearest opaque one on their row. */
+/** Sprite pixels per texel of the face being painted (set per face by paintPart). */
+const foot = { x: 1, y: 1 };
+
+/**
+ * Colour at (u, v) in 0..1 of a crop. When a texel covers several sprite pixels it takes
+ * their most common (ramp-snapped) colour — a pixel-art downsample, not a blur — so a 16 px
+ * shirt on an 11-texel torso keeps its stripes rather than aliasing into noise.
+ */
 function sample(s: SpriteInfo, c: Crop, u: number, v: number): RGB {
   const x = Math.min(c.x1 - 1, Math.max(c.x0, Math.floor(c.x0 + u * (c.x1 - c.x0))));
   const y = Math.min(c.y1 - 1, Math.max(c.y0, Math.floor(c.y0 + v * (c.y1 - c.y0))));
+  if (foot.x > 1.3 || foot.y > 1.3) {
+    const hx = Math.floor(foot.x / 2), hy = Math.floor(foot.y / 2);
+    const counts = new Map<RGB, number>();
+    let centre: RGB | null = null;
+    for (let py = Math.max(c.y0, y - hy); py <= Math.min(c.y1 - 1, y + hy); py++) {
+      for (let px = Math.max(c.x0, x - hx); px <= Math.min(c.x1 - 1, x + hx); px++) {
+        if (!opaque(s.img, px, py)) continue;
+        const i = (py * s.img.w + px) * 4;
+        const q = snap(s.ramp, [s.img.data[i], s.img.data[i + 1], s.img.data[i + 2]]);
+        counts.set(q, (counts.get(q) ?? 0) + (px === x && py === y ? 1.5 : 1));
+        if (px === x && py === y) centre = q;
+      }
+    }
+    let best: RGB | null = centre, bn = -1;
+    for (const [q, k] of counts) if (k > bn) (bn = k, best = q);
+    if (best) return best;
+  }
+  return snap(s.ramp, samplePoint(s, c, x, y));
+}
+
+/** Pixel (x, y) of the crop; transparent pixels borrow the nearest opaque one. */
+function samplePoint(s: SpriteInfo, c: Crop, x: number, y: number): RGB {
   const d = s.img.data, w = s.img.w;
   for (let k = 0; k < 6; k++) {
     for (const [dx, dy] of k === 0 ? [[0, 0]] : [[k, 0], [-k, 0], [0, k], [0, -k]]) {
@@ -248,14 +322,26 @@ export function paintPart(dst: Img, ox: number, oy: number, dims: [number, numbe
   const rects: [number, number, number, number][] = [
     [0, D, D, H], [D, D, W, H], [D + W, D, D, H], [2 * D + W, D, W, H], [D, 0, W, D], [D + W, 0, W, D],
   ];
+  const crop = src.role ? null : cropOf(s, src);
   for (let f = 0; f < 6; f++) {
     const [fx, fy, fw, fh] = rects[f];
+    if (crop) {
+      foot.x = (crop.x1 - crop.x0) / fw;
+      foot.y = (crop.y1 - crop.y0) / fh;
+    }
+    // a 1-texel darker rim on every face (pixel-art edge): boxes keep their shape against
+    // same-coloured neighbours and at a distance
+    const rim = fw >= 3 && fh >= 3 && f !== 4;
     for (let y = 0; y < fh; y++) {
       // baked form shading: tops a little brighter, the lower rows of the sides a little darker
       const k = f === 4 ? 1.1 : f === 5 ? 0.7 : 1.04 - 0.14 * (y / Math.max(1, fh - 1));
-      for (let x = 0; x < fw; x++) put(fx + x, fy + y, col(f, (x + 0.5) / fw, (y + 0.5) / fh), k);
+      for (let x = 0; x < fw; x++) {
+        const edge = rim && (x === 0 || x === fw - 1 || y === fh - 1);
+        put(fx + x, fy + y, col(f, (x + 0.5) / fw, (y + 0.5) / fh), edge ? k * 0.84 : k);
+      }
     }
   }
+  foot.x = foot.y = 1;
   if (src.face) {
     const eye = opts.eyes ?? s.pal.dark;
     if (src.proj === 'side') {

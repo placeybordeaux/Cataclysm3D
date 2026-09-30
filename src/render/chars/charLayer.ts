@@ -118,10 +118,10 @@ const FRAG_MAP = /* glsl */ `
 const matCache = new Map<THREE.Texture, THREE.MeshLambertMaterial>();
 export const charUniforms = {
   /** distance (m) where hostile emphasis starts / is full */
-  uFarNear: { value: 16 },
-  uFarFar: { value: 45 },
+  uFarNear: { value: 12 },
+  uFarFar: { value: 40 },
   /** emissive share of albedo at full emphasis */
-  uEmphK: { value: 0.35 },
+  uEmphK: { value: 0.45 },
 };
 
 function charMaterial(page: THREE.Texture): THREE.MeshLambertMaterial {

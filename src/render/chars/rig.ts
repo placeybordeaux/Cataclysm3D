@@ -27,6 +27,12 @@ export interface PartSrc {
   core?: boolean;
   /** paint eyes on the front face (heads) */
   face?: boolean;
+  /**
+   * Arms: take the outer quarter of the mostly-opaque core of these rows, on this side of
+   * the image (the model's right arm is the sprite's left). Outstretched sprite arms and
+   * wielded-item overlays don't count as the body, so sleeves come from the shirt's edge.
+   */
+  edge?: 'left' | 'right';
 }
 
 export interface PartDef {
@@ -142,10 +148,10 @@ function humanoid(sh: BodyShape): Rig {
     { name: 'hips', parent: -1, joint: [0, hipY, 0], size: [torsoW * 0.92, 0.16, torsoD * 0.95], center: [0, -0.02, 0], src: { rect: [0.2, 0.5, 0.8, 0.6], proj: 'front', core: true }, kind: 'core' },
     { name: 'torso', parent: 0, joint: [0, 0.06, 0], size: [torsoW, 0.46, torsoD], center: [0, 0.23, 0], src: { rect: [0.15, 0.22, 0.85, 0.52], proj: 'front', core: true }, kind: 'core' },
     { name: 'head', parent: 1, joint: [0, 0.47, 0], size: [0.25 * hd, 0.27 * hd, 0.25 * hd], center: [0, 0.135 * hd, 0], src: { rect: [0.2, 0, 0.8, 0.22], proj: 'front', core: true, face: true }, kind: 'core' },
-    { name: 'uArmR', parent: 1, joint: [shoulderX, 0.42, 0], size: [armW, upperArm, armW], center: [0, -upperArm / 2 + 0.03, 0], src: { rect: [0, 0.22, 0.25, 0.4], proj: 'front' }, kind: 'limb' },
-    { name: 'fArmR', parent: 3, joint: [0, -upperArm + 0.04, 0], size: [armW * 0.92, foreArm, armW * 0.92], center: [0, -foreArm / 2, 0], src: { rect: [0, 0.38, 0.25, 0.56], proj: 'front' }, kind: 'limb' },
-    { name: 'uArmL', parent: 1, joint: [-shoulderX, 0.42, 0], size: [armW, upperArm, armW], center: [0, -upperArm / 2 + 0.03, 0], src: { rect: [0.75, 0.22, 1, 0.4], proj: 'front' }, kind: 'limb' },
-    { name: 'fArmL', parent: 5, joint: [0, -upperArm + 0.04, 0], size: [armW * 0.92, foreArm, armW * 0.92], center: [0, -foreArm / 2, 0], src: { rect: [0.75, 0.38, 1, 0.56], proj: 'front' }, kind: 'limb' },
+    { name: 'uArmR', parent: 1, joint: [shoulderX, 0.42, 0], size: [armW, upperArm, armW], center: [0, -upperArm / 2 + 0.03, 0], src: { rect: [0, 0.22, 1, 0.4], proj: 'front', edge: 'left' }, kind: 'limb' },
+    { name: 'fArmR', parent: 3, joint: [0, -upperArm + 0.04, 0], size: [armW * 0.92, foreArm, armW * 0.92], center: [0, -foreArm / 2, 0], src: { rect: [0, 0.38, 1, 0.56], proj: 'front', edge: 'left' }, kind: 'limb' },
+    { name: 'uArmL', parent: 1, joint: [-shoulderX, 0.42, 0], size: [armW, upperArm, armW], center: [0, -upperArm / 2 + 0.03, 0], src: { rect: [0, 0.22, 1, 0.4], proj: 'front', edge: 'right' }, kind: 'limb' },
+    { name: 'fArmL', parent: 5, joint: [0, -upperArm + 0.04, 0], size: [armW * 0.92, foreArm, armW * 0.92], center: [0, -foreArm / 2, 0], src: { rect: [0, 0.38, 1, 0.56], proj: 'front', edge: 'right' }, kind: 'limb' },
     { name: 'thighR', parent: 0, joint: [hipX, -0.06, 0], size: [legW, thigh, legD], center: [0, -thigh / 2, 0], src: { rect: [0.1, 0.56, 0.5, 0.76], proj: 'front', core: true }, kind: 'limb' },
     { name: 'shinR', parent: 7, joint: [0, -thigh, 0], size: [legW * 0.9, shin, legD * 0.9], center: [0, -shin / 2, 0], src: { rect: [0.1, 0.74, 0.5, 0.94], proj: 'front', core: true }, kind: 'limb' },
     { name: 'thighL', parent: 0, joint: [-hipX, -0.06, 0], size: [legW, thigh, legD], center: [0, -thigh / 2, 0], src: { rect: [0.5, 0.56, 0.9, 0.76], proj: 'front', core: true }, kind: 'limb' },
@@ -255,21 +261,22 @@ function humanoid(sh: BodyShape): Rig {
         // arms flung out, one knee up
         o.rot.fill(0);
         setRot(o, H.head, 0, 0.5 * (p.seed - 0.5), 0.4 * (p.seed - 0.5));
-        setRot(o, H.uArmR, 0.3 + p.seed, 0, -0.5);
-        setRot(o, H.fArmR, -0.4 * p.seed);
-        setRot(o, H.uArmL, 1.2 - p.seed, 0, 0.6);
-        setRot(o, H.fArmL, -0.5);
-        setRot(o, p.seed > 0.5 ? H.thighR : H.thighL, 0.5);
-        setRot(o, p.seed > 0.5 ? H.shinR : H.shinL, -0.8);
+        // (+z swings the right arm out to the side, -z the left)
+        setRot(o, H.uArmR, 0.15, 0, 0.9 + 0.5 * p.seed);
+        setRot(o, H.fArmR, 0.3 * p.seed);
+        setRot(o, H.uArmL, 0.25 - 0.3 * p.seed, 0, -(0.7 + 0.6 * (1 - p.seed)));
+        setRot(o, H.fArmL, 0.4);
+        setRot(o, p.seed > 0.5 ? H.thighR : H.thighL, 0.3);
+        setRot(o, p.seed > 0.5 ? H.shinR : H.shinL, -0.5);
         setRot(o, H.thighR, 0, 0, 0.12);
         setRot(o, H.thighL, 0, 0, -0.12);
-        setRot(o, H.footR, 0.9);
-        setRot(o, H.footL, 0.9);
+        setRot(o, H.footR, 0.4, 0, 0.3);
+        setRot(o, H.footL, 0.4, 0, -0.3);
       } else if (p.down > 0) {
         // lying on the back: limbs relax outward
         const d = p.down;
-        setRot(o, H.uArmR, -reachR * d, 0, -0.5 * d);
-        setRot(o, H.uArmL, -reachL * d, 0, 0.5 * d);
+        setRot(o, H.uArmR, -reachR * d, 0, 0.5 * d);
+        setRot(o, H.uArmL, -reachL * d, 0, -0.5 * d);
         setRot(o, H.thighR, 0, 0, 0.15 * d);
         setRot(o, H.thighL, 0, 0, -0.15 * d);
         setRot(o, H.footR, 0.8 * d);
