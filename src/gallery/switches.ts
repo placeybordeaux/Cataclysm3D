@@ -91,7 +91,7 @@ export function buildSwitches(renderer: Renderer, api: DebugApi): GallerySwitch[
   const list: GallerySwitch[] = [
     {
       id: 'look', label: 'Visual style', group: 'Image', option: 'Visual style', url: 'look',
-      values: vals(LOOK_NAMES, (n) => LOOKS[n as LookName].label), def: 'full',
+      values: vals(LOOK_NAMES, (n) => LOOKS[n as LookName].label), def: 'voxel',
       get: () => look.name, set: (v) => renderer.setLook(v as LookName), proof: 'street',
     },
     {
@@ -101,7 +101,7 @@ export function buildSwitches(renderer: Renderer, api: DebugApi): GallerySwitch[
     },
     {
       id: 'radius', label: 'Draw distance', group: 'Image', option: 'Draw distance', url: 'radius',
-      values: radii.map((r) => ({ v: String(r), label: `${(r - 1) * 24} m` })), def: '6',
+      values: radii.map((r) => ({ v: String(r), label: `${(r - 1) * 24} m` })), def: '8',
       get: () => String(renderer.chunks.radius),
       set: (v) => {
         renderer.chunks.radius = Number(v);
@@ -117,7 +117,7 @@ export function buildSwitches(renderer: Renderer, api: DebugApi): GallerySwitch[
     },
     {
       id: 'grade', label: 'Colour grading', group: 'Image', option: 'Colour grading', url: 'grade',
-      values: vals(['palette', 'smooth', 'off']), def: 'smooth',
+      values: vals(['palette', 'smooth', 'off']), def: 'palette',
       note: 'Each visual style sets its own grading; this overrides it until the style changes.',
       get: () => renderer.pipeline.options.grade, set: (v) => void (renderer.pipeline.options.grade = v as GradeMode), proof: 'street',
       // a row of the Options screen itself, not a registered entry: same storage it writes
@@ -147,7 +147,7 @@ export function buildSwitches(renderer: Renderer, api: DebugApi): GallerySwitch[
     },
     {
       id: 'viewmodel', label: 'First-person hands', group: 'Characters', option: 'First-person hands', url: 'viewmodel',
-      values: [{ v: 'model', label: '3D' }, { v: 'sprite', label: 'sprites' }], def: 'model',
+      values: [{ v: 'model', label: '3D' }, { v: 'sprite', label: 'sprites' }], def: 'sprite',
       get: () => charSettings.viewmodel, set: (v) => setViewmodelMode(v as 'model' | 'sprite'), proof: 'fp_pistol',
     },
     {

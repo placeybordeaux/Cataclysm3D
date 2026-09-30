@@ -95,7 +95,9 @@ export const LOOKS: Record<LookName, LookFeatures> = {
   full: { ...CLASSIC, ...CRISP_A, ...VOXEL_B, ...TERRAIN_C, label: 'Full', desc: 'Everything: the crisp image, volumetric props and trees, architectural detail and living terrain.' },
 };
 
-export const DEFAULT_LOOK: LookName = 'full';
+// Chosen by the user in the style gallery (2026-09-30): voxel volumes over the classic
+// palette image; 'full' adds the crisp image and living terrain on top.
+export const DEFAULT_LOOK: LookName = 'voxel';
 const STORAGE_KEY = 'cdda3d.look';
 
 /** The active look. Read-only for everyone but Renderer.setLook. */

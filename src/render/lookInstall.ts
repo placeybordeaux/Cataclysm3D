@@ -74,11 +74,14 @@ export function installLooks(game: Game, renderer: Renderer, worldgen: WorldGene
     desc: FLORA_NAMES.map((n) => `${n}: ${FLORA_DESC[n]}`).join('\n') + '\n(Needs the Voxel or Full visual style.)',
   });
   // Draw distance in chunks (OMTs). Past it the far ground ring and skyline carry the
-  // horizon, so 6 reads well; 8 costs ~65% more chunks (+0.5-1 ms render, +100 MB heap,
-  // more meshing while moving: docs/LOOKS.md), 5 is for slow machines.
+  // horizon; 8 (168 m) is the user's chosen default (style gallery, 2026-09-30) at ~65% more
+  // chunks than 6 (+0.5-1 ms render, +100 MB heap, more meshing while moving: docs/LOOKS.md);
+  // 5 is for slow machines.
   const RADII = [5, 6, 8];
+  const DEFAULT_RADIUS = 8;
   const RADIUS_KEY = 'cdda3d.drawRadius';
   if (!new URLSearchParams(location.search).get('radius')) {
+    renderer.chunks.radius = DEFAULT_RADIUS;
     try {
       // Migrate the pre-wave-3 Options entry (cdda3d.options.radius, steps 4-10) once: nearest step here.
       let stored = localStorage.getItem(RADIUS_KEY);

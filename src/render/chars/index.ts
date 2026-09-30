@@ -37,7 +37,8 @@ function initialViewmodel(): 'model' | 'sprite' {
   } catch {
     // storage blocked: default
   }
-  return 'model';
+  // The user's pick (style gallery, 2026-09-30): the flat pixel hands read cleaner than the 3D ones.
+  return 'sprite';
 }
 
 export function setViewmodelMode(m: 'model' | 'sprite'): void {

@@ -200,7 +200,7 @@ export function galleryScenarios(c: GalleryCtx): Scenario[] {
       check('Copy these as my defaults stores the visual style like Options does', stored === 'crisp', stored);
       await click('.gal-defaults .ui2-btn:nth-of-type(2)');
       await idle();
-      check('Factory defaults puts the style back to Full', (await st()).values.look === 'full');
+      check('Factory defaults puts the style back to the factory look (Voxel)', (await st()).values.look === 'voxel');
       s = await st();
       check('no gallery errors', s.errors.length === 0, s.errors);
       check('no page errors in the gallery', c.errors().length === errs0, c.errors().slice(errs0, errs0 + 3));
