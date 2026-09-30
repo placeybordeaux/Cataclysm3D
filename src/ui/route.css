@@ -11,5 +11,5 @@
   background: rgba(12, 10, 6, .7); border: 1px solid rgba(232, 192, 112, .7);
   text-shadow: 1px 1px 0 #000;
 }
-#ui2 .rt-beacon .rt-pin { width: 2px; height: 42px; background: linear-gradient(#e8c070, rgba(232, 192, 112, 0)); animation: rt-pulse 1.6s steps(4) infinite; }
+#ui2 .rt-beacon .rt-pin { width: 3px; height: 48px; background: linear-gradient(#e8c070 0%, #e8c070 40%, rgba(232, 192, 112, 0)); box-shadow: 0 0 0 1px rgba(20, 14, 6, .6); animation: rt-pulse 1.6s steps(4) infinite; }
 @keyframes rt-pulse { 50% { opacity: .45; } }

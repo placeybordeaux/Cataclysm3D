@@ -186,7 +186,10 @@ export function installRouteGuide(game: Game, renderer: Renderer, overmap: () =>
     const target = nextTarget(route);
     if (mode === 'beacon') {
       beaconAt = target;
-      (beacon.lastChild as HTMLElement).textContent = `${route.dest.label} · ${Math.round(route.metres)} m`;
+      // Walking distance: along the route from the next leg, plus the straight bit to it.
+      const rest = Math.max(0, route.omts.length - 1 - 2) * CHUNK;
+      const walk = Math.hypot(target.x - p.x, target.y - p.y) + rest;
+      (beacon.lastChild as HTMLElement).textContent = `${route.dest.label} · ${Math.round(walk)} m`;
       return;
     }
     // Trail: walkable tiles toward the next leg, the first TRAIL_TILES of them, every other one.
