@@ -20,8 +20,8 @@ import { newPoseOut, resetPose, type PoseIn, type PoseOut, type Rig } from './ri
 //   cRoot           creature root (three.js world coords), for the light-map sample and range
 
 const PAGE = 1024;
-/** Beyond this many pages every skin is dropped and repainted on demand (a very long session). */
-const MAX_PAGES = 6;
+/** More pages than this means skins are leaking (every page is 4 MB of RAM + VRAM): warn. */
+const WARN_PAGES = 6;
 
 export interface Skin {
   page: number;
@@ -502,8 +502,10 @@ export class SkinStore {
         places.push(at);
       }
       if (places.length === n) pageIdx = this.pages.length - 1;
-      else if (this.pages.length < MAX_PAGES) this.pages.push(new SkinPage());
-      else throw new Error(`SkinStore: out of skin pages (${this.skins.size} skins)`);
+      else {
+        this.pages.push(new SkinPage());
+        if (this.pages.length === WARN_PAGES + 1) console.warn(`chars: ${this.pages.length} skin pages for ${this.skins.size} skins`);
+      }
     }
     if (pageIdx < 0) throw new Error('SkinStore: a single skin does not fit a page');
     const pg = this.pages[pageIdx];

@@ -67,7 +67,18 @@ billboard path still uses the sprite's art span). The point-blank sprite hacks (
 
 ## Performance
 
-(filled in below with measurements)
+`tools/char-shots.ts --gpu --bench --views bench` (60 hostile zombies and dogs 8–45 m down
+the street, `full` look, RTX 5080, 1920×1080, `cdda.benchView(6)`):
+
+| | frame p50 | p95 | p99 | work p50 | draw calls | triangles |
+|---|---|---|---|---|---|---|
+| billboards (`?chars=billboard`) | 7.7 ms | 14.6 | 23.9 | 11.0 | 405 | 437.7 k |
+| 3D models | 7.4 ms | 14.6 | 23.6 | 10.7 | 405 | 446.4 k |
+
+No measurable cost: ~800 part instances are one or two instanced draws (plus shadow), 12
+triangles each. Matrices are rebuilt at the simulation rate (30 Hz) only for creatures that
+moved; bodies are static once they land. Skins: a zombie is ~4 k texels; one 1024² page holds
+~150–250 species/outfits; more pages are added as needed (a warning past 6 = 24 MB).
 
 ## Screenshots
 
