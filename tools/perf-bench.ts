@@ -55,6 +55,8 @@ interface Route {
   kind: 'town' | 'city' | 'rural' | 'forest' | 'load' | 'loaddrive' | 'teleport';
   mph: number;
   seconds: number;
+  /** absolute limits for this route instead of LIMITS' (merged over them) */
+  limits?: Partial<Record<keyof Metrics, number>>;
 }
 export const ROUTES: Record<string, Route> = {
   town40: { what: 'into and through the nearest town (Holden) at 40 mph, on the straight road with the most buildings along it', kind: 'town', mph: 40, seconds: 25 },
@@ -67,7 +69,10 @@ export const ROUTES: Record<string, Route> = {
   // game being ready (load) or the jump (teleport) to the player's 3x3 shown (curtain lifts) and
   // to nothing unbuilt in view, standing still; the longest frames before/after the curtain.
   load: { what: 'save in the city, reload the page (a hot reload / Load), stand still until everything in view is built', kind: 'load', mph: 0, seconds: 15 },
-  loaddrive: { what: 'the same reload, then drive off at 40 mph the moment the curtain lifts', kind: 'loaddrive', mph: 40, seconds: 15 },
+  // Driving off into a dense city the moment the curtain lifts outruns the streaming for a few
+  // seconds (stand-ins show; the fight is keeping the frames smooth): a looser hole limit, and
+  // the first build of each tree species (cold caches, one step) may take ~100 ms once.
+  loaddrive: { what: 'the same reload, then drive off at 40 mph the moment the curtain lifts', kind: 'loaddrive', mph: 40, seconds: 15, limits: { maxHoleS: 8, maxStepMs: 150 } },
   teleport: { what: 'jump from the city to Holden (~150 OMTs), stand still until everything in view is built', kind: 'teleport', mph: 0, seconds: 15 },
 };
 
@@ -151,7 +156,7 @@ function metricsOf(s: PerfSummary, chunkStats: { maxStepMs: number }): Metrics {
 
 function judge(name: string, m: Metrics, base: Baseline | null): string[] {
   const fails: string[] = [];
-  for (const [k, lim] of Object.entries(LIMITS) as [keyof Metrics, number][]) if (m[k] !== undefined && m[k]! > lim) fails.push(`${name}: ${k} ${m[k]} over the limit ${lim}`);
+  for (const [k, lim] of Object.entries({ ...LIMITS, ...ROUTES[name]?.limits }) as [keyof Metrics, number][]) if (m[k] !== undefined && m[k]! > lim) fails.push(`${name}: ${k} ${m[k]} over the limit ${lim}`);
   const b = base?.routes[name];
   if (!b) return fails;
   for (const k of Object.keys(m) as (keyof Metrics)[]) {
