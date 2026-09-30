@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { applyCutoutMips } from './cutoutMips';
 import { LEVEL_HEIGHT } from '../world/coords';
 import { framePixels, frameKey } from './framePixels';
 import { GeomBuilder, type V3 } from './geometry';
@@ -179,10 +180,9 @@ function clumpTexture(): THREE.DataTexture {
   }
   const t = new THREE.DataTexture(d, S, S, THREE.RGBAFormat);
   t.magFilter = THREE.NearestFilter;
-  t.minFilter = THREE.NearestFilter;
-  t.generateMipmaps = false;
   t.colorSpace = THREE.SRGBColorSpace;
-  t.needsUpdate = true;
+  // coarser, fixed cutout at distance instead of crawling leaf edges (cutoutMips.ts)
+  applyCutoutMips(t, 2);
   clumpTex = t;
   return t;
 }

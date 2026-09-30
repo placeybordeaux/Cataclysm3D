@@ -1,7 +1,7 @@
 # Distance readability (wave 3)
 
 Feedback: "many of [the looks] are too hard to actually see far distance". In
-`docs/screenshots/looks/full_street.png` (v2) everything past ~30 m dissolved into pale haze, the
+`docs/screenshots/looks/full_street.jpg` (v2) everything past ~30 m dissolved into pale haze, the
 sky around the sun was washed out and the far end of the street was unreadable.
 
 ## What was killing distance, per look
@@ -64,6 +64,55 @@ stayed ~flat (full far 0.016 before and after) and is only good for spotting hot
 maps show foliage and grass dominate, not the far distance). Temporal reprojection was not tried:
 it would smear the pixel art.
 
+**Round 2: near foliage/grass.** Grass blades and leaf clumps are alpha-tested cards with
+1-texel features and no mips: a few metres out they are smaller than a pixel and sparkle as you
+move. `src/render/cutoutMips.ts` gives them mips built for the alpha test (each 2x2 block is
+opaque if >= 1 (blades) or >= 2 (leaves) of its texels are, colour = average of the opaque ones,
+alpha stays binary), sampled NearestMipmapNearest: far cutouts become a coarser fixed pixel
+pattern instead of crawling (hard edges kept; lawns look slightly fuller at distance).
+Alpha-to-coverage was not an option (no MSAA on the low-res target) and dithered alpha would
+add its own crawl. A/B: `cdda.cutoutMips(false)`. Same session, mips off -> on:
+
+| view | flickerTest (walk) | shimmerTest (pan) |
+| --- | --- | --- |
+| full forest | 0.0284 -> 0.0260 | 0.0502 -> 0.0406 |
+| full street | 0.0143 -> 0.0128 | 0.0301 -> 0.0257 |
+| full far | 0.0161 -> 0.0124 | 0.0320 -> 0.0234 |
+| terrain forest | 0.0422 -> 0.0317 | 0.0565 -> 0.0377 |
+| terrain far | 0.0131 -> 0.0083 | 0.0256 -> 0.0213 |
+
+## Form lighting (round 2, `src/render/formLight.ts`)
+
+v2 had a strong hemisphere ambient, the sun in 5 bands and a fill from the anti-sun azimuth.
+Looking into the sun every visible face is a shadow side and that fill lit them all equally
+(flat); with the sun behind you it lit faces you couldn't see. Presets:
+
+| preset | bands | key | ambient | fill | billboards |
+| --- | --- | --- | --- | --- | --- |
+| `soft` (v2) | 5 | 1 | 1 | look's `fill`, anti-sun, high | flat |
+| `toon` (**default**) | 4 | 1.1 | 0.7 | >= 0.5, from 90 deg to the sun, 30 deg up | curved (0.9) |
+| `bold` | 3 | 1.2 | 0.56 | >= 0.62, 90 deg, 25 deg up | curved (1.2) |
+
+The side fill is fixed in the world (always 90 degrees counter-clockwise from the sun), never
+camera-relative, so shading doesn't change as you turn; it gives three tones: sunlit, fill-lit
+and ambient-only, so a house seen from its shadow side still shows its corner. Billboards
+(distant trees past the 3D-tree radius, props, sprite creatures) swing their normal across the
+quad (`uSpriteCurve`) so a side-lit sprite has a light and a dark half. Ambient floor: a shadow
+side stays about a quarter of a sunlit one in toon (never black). Switch: **Options > Form
+lighting** (persisted), `?form=soft|toon|bold`, `cdda.setForm`, `cdda.formTweak({...})`.
+
+Also in round 2: the aerial haze toward a low sun takes only a third of the sun's glow (with
+all of it, looking into the afternoon sun washed every building past 40 m into one bright
+blur); the edge fade still uses the full sky colour so the horizon matches.
+
+## Sun and moon discs (round 2)
+
+The sun was a 6.3-degree angular disc; 40 degrees off-axis the rectilinear projection stretches
+that into a big tilted oval (not only the side-by-side squash). Both discs are now tested on the
+image plane (screen-round wherever they are), the sun 4 degrees across at the centre with a
+warmer rim and a soft glare the dither stipples; HDR 1.6, just over the bloom threshold, so bloom
+adds only a small halo. The moon matches in size.
+
 ## Screenshots (before | after, 1080p, RTX 5080, seed 1)
 
 `tools/look-views.js` gained `far` (straight road, zombies at 15-58 m), `fardusk`, `farrain`,
@@ -71,13 +120,23 @@ it would smear the pixel art.
 
 | | |
 | --- | --- |
-| ![](screenshots/wave3/readability/full_far.png) | ![](screenshots/wave3/readability/full_street.png) |
-| ![](screenshots/wave3/readability/classic_far.png) | ![](screenshots/wave3/readability/classic_street.png) |
-| ![](screenshots/wave3/readability/crisp_far.png) | ![](screenshots/wave3/readability/crisp_street.png) |
-| ![](screenshots/wave3/readability/voxel_far.png) | ![](screenshots/wave3/readability/voxel_street.png) |
-| ![](screenshots/wave3/readability/terrain_far.png) | ![](screenshots/wave3/readability/terrain_street.png) |
-| ![](screenshots/wave3/readability/full_dusk.png) | ![](screenshots/wave3/readability/full_rain.png) |
-| ![](screenshots/wave3/readability/full_night.png) | ![](screenshots/wave3/readability/full_forest.png) |
+| ![](screenshots/wave3/readability/full_far.jpg) | ![](screenshots/wave3/readability/full_street.jpg) |
+| ![](screenshots/wave3/readability/classic_far.jpg) | ![](screenshots/wave3/readability/classic_street.jpg) |
+| ![](screenshots/wave3/readability/crisp_far.jpg) | ![](screenshots/wave3/readability/crisp_street.jpg) |
+| ![](screenshots/wave3/readability/voxel_far.jpg) | ![](screenshots/wave3/readability/voxel_street.jpg) |
+| ![](screenshots/wave3/readability/terrain_far.jpg) | ![](screenshots/wave3/readability/terrain_street.jpg) |
+| ![](screenshots/wave3/readability/full_dusk.jpg) | ![](screenshots/wave3/readability/full_rain.jpg) |
+| ![](screenshots/wave3/readability/full_night.jpg) | ![](screenshots/wave3/readability/full_forest.jpg) |
+| ![](screenshots/wave3/readability/full_intosun.jpg) | ![](screenshots/wave3/readability/full_backsun.jpg) |
+
+"After" is the current state (clear haze + toon lighting + round sun). `intosun`/`backsun` are
+town views with the afternoon sun in front of / behind the camera. Form presets side by side:
+
+![](screenshots/wave3/readability/form_intosun.jpg)
+![](screenshots/wave3/readability/form_backsun.jpg)
+
+Shots are JPEG q85 (pairs at half size); `tools/look-shots.ts` now writes half-size JPEGs by
+default (`--png` for full-size PNG).
 
 ## Performance (RTX 5080, `look-shots --bench`, shared machine: +-15 % noise)
 
@@ -96,10 +155,19 @@ window that includes a shadow pass reads higher. The additions are one sky-gradi
 per post pixel, ~2.5k ground-ring triangles and four texture taps on far world pixels: no
 measurable cost.
 
+Round 2 (toon lighting, cutout mips, sky discs), 1080p render ms: classic street/far/forest
+1.6/1.6/1.5, full 1.7/1.9/1.8: unchanged. (One full-far run had a 38 ms p99 frame interval from
+chunk streaming after the teleport; render time is unaffected.)
+
 ## Known gaps
 
 * Dormant monsters past 60 tiles are invisible (see above).
 * The ground ring is one flat colour per OMT (roads as strips); up close to the draw edge on a
   hill it can sit visibly below real ground by 0.6 m.
 * Clouds stay soft blurred blobs in the smooth grade; rain clouds are darker but not a flat deck.
-* Walking shimmer on near foliage/grass (alpha-tested point-sampled cutouts) is untouched.
+* Near shimmer is reduced, not gone: at 1-3 m the cards are magnified (no mips apply) and
+  their edges still step as you move; nearest-sampled textures on world surfaces crawl a little
+  when walking (inherent to point sampling without temporal filtering).
+* Billboard curvature is uniform per quad: a very wide or odd-shaped sprite shades like a
+  cylinder, not like its silhouette.
+* Night sky: the dark cloud blobs grade slightly green in the smooth LUT (pre-existing).

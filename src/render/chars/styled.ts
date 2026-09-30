@@ -83,7 +83,10 @@ export function personPalette(s: SpriteInfo, zombie: boolean): PersonPalette {
   const top = dominant(s, 0.25, 0, 0.75, 0.07);
   const face = dominant(s, 0.3, 0.08, 0.7, 0.2);
   const hair = top[0]?.c ?? s.pal.dark;
-  const skin = face.find((e) => dist(e.c, hair) > 25 && lum(e.c) > 50)?.c ?? face[0]?.c ?? s.pal.skin;
+  // UltiCa skin comes in a light tone and a shade: take the lightest skin-like colour of the face
+  const faceN = face.reduce((a, e) => a + e.n, 0) || 1;
+  const skinLike = face.filter((e) => e.n / faceN > 0.12 && e.c[0] + e.c[1] > e.c[2] * 2.1 && lum(e.c) > 50);
+  const skin = skinLike.sort((a, b) => lum(b.c) - lum(a.c))[0]?.c ?? face[0]?.c ?? s.pal.skin;
   const torso = dominant(s, 0.3, 0.26, 0.7, 0.5);
   const shirt = torso[0]?.c ?? s.pal.main;
   const total = torso.reduce((a, e) => a + e.n, 0) || 1;
@@ -106,7 +109,7 @@ export function personPalette(s: SpriteInfo, zombie: boolean): PersonPalette {
     if (isBlood(s.img.data[i], s.img.data[i + 1], s.img.data[i + 2])) red++;
   }
   const pp: PersonPalette = {
-    skin, hair, bald: dist(hair, skin) < 25, shirt, inner: second ? second.c : null,
+    skin, hair, bald: dist(hair, skin) < 45, shirt, inner: second ? second.c : null,
     upperArm: armAt(0.24, 0.36), foreArm: armAt(0.38, 0.5), pants, shoes,
     // lots of red is red clothing, not a bloodbath
     blood: red / Math.max(1, n) > 0.25 ? 0.15 : Math.min(1, (red / Math.max(1, n)) * 7), zombie,

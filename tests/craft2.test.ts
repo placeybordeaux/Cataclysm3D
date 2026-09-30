@@ -9,7 +9,8 @@ import { craftingInventory, findRecipe, type CraftHost } from '../src/game/craft
 import { createItem } from '../src/game/item';
 import { PlayerAvatar } from '../src/game/player';
 import { GameMap } from '../src/world/map';
-import { nameMatches, qualityIcon, RecipeBook, searchMatcher, sourcesOf, type RowQuery } from '../src/ui/craft2/craft_model';
+import { ALMOST_MAX, nameMatches, qualityIcon, RecipeBook, searchMatcher, shortfall, shortfallText, sourcesOf, type RowQuery } from '../src/ui/craft2/craft_model';
+import { openingFilter } from '../src/ui/craft2/crafting_screen';
 
 const dir = path.join(__dirname, '../public/data');
 const load = (f: string) => JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8'));
@@ -80,5 +81,41 @@ describe('recipe browser rows', () => {
     expect(s.salvage).toContain('stick_long');
     expect(sourcesOf(h, 'pointy_stick_long', new Set()).craft.map((r) => r.id)).toContain('pointy_stick_long');
     expect(qualityIcon(data, 'CUT', 1)).toBeTruthy();
+  });
+});
+
+describe('what is missing (adaptation)', () => {
+  it('a knife and no stick: the long pointy stick is one thing short, under Almost and in Craftable\'s section', () => {
+    const h = host();
+    h.player.inv.giveNew(createItem(data, 'knife_folding'));
+    const book = new RecipeBook(h, craftingInventory(h));
+    const almost = book.rows(q({ filter: 'almost' }));
+    const stick = almost.find((r) => r.recipe.id === 'pointy_stick_long')!;
+    expect(stick).toBeDefined();
+    expect(stick.short.count).toBe(1);
+    expect(shortfallText(stick.short)).toMatch(/^missing .*stick/);
+    expect(almost.every((r) => !r.check.ok && r.short.count >= 1 && r.short.count <= ALMOST_MAX)).toBe(true);
+    const withSection = book.rows(q({ filter: 'craftable', almostSection: true }));
+    expect(withSection.some((r) => r.recipe.id === 'pointy_stick_long')).toBe(true);
+    // craftable ones first, then the one-short ones
+    const firstShort = withSection.findIndex((r) => !r.check.ok);
+    expect(firstShort === -1 || withSection.slice(firstShort).every((r) => !r.check.ok && r.short.count === 1)).toBe(true);
+    expect(book.rows(q({ filter: 'craftable' })).every((r) => r.check.ok)).toBe(true);
+  });
+
+  it('partial components say how many more', () => {
+    const s = shortfall(data, {
+      ok: false, missing: ['x'], light: true, speed: 1,
+      req: { ok: false, qualities: [], tools: [], missing: ['x'], components: [{ ok: false, alts: [{ text: '', have: false, color: '', kind: 'component', id: 'rag', need: 4, avail: 1 }] }] },
+    });
+    expect(s.items).toEqual(['3 more rags']);
+    expect(shortfallText(s)).toBe('missing 3 more rags');
+  });
+
+  it('opens on Craftable when anything is craftable, else Almost, else All known', () => {
+    const row = (ok: boolean, count: number, id = 'x') => ({ recipe: { id }, check: { ok }, short: { count, items: [], dark: false } }) as never;
+    expect(openingFilter([row(true, 0), row(false, 1)], new Set())).toBe('craftable');
+    expect(openingFilter([row(false, 1), row(false, 5)], new Set())).toBe('almost');
+    expect(openingFilter([row(false, 5)], new Set())).toBe('known');
   });
 });

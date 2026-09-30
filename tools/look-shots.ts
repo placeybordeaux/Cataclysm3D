@@ -1,5 +1,5 @@
 // Screenshot the comparison viewpoints (tools/look-views.js) for each visual style into
-// docs/screenshots/looks/<look>_<view>.png. Hosts its own Vite server and Chromium (so no
+// docs/screenshots/looks/<look>_<view>.jpg. Hosts its own Vite server and Chromium (so no
 // other session can drive it), like tools/shot.ts. Run inside nix-shell, via heavy:
 //
 //   ~/claude-stuff/bin/heavy --mem 2.5 -- npx tsx tools/look-shots.ts classic crisp full
@@ -9,7 +9,9 @@
 // --size WxH (default 1920x1080), --gpu (ANGLE/Vulkan instead of SwiftShader), --bench
 // (records cdda.benchView per view and prints a table), --tweak '<json>' (cdda.lookTweak
 // before each view), --js '<expr>' (run after each view is set up), --print '<expr>' (log
-// its JSON after each shot), --format png|jpg (default png; jpg = quality 88), --dry-run, --help.
+// its JSON after each shot), --png (full-size lossless PNG; the default is JPEG q85 at half
+// size, ~100 KB a shot instead of ~300: dithered pixel art compresses badly, and the docs
+// show these as thumbnails. Half of a 2x-upscaled image loses no pixels), --dry-run, --help.
 import { createServer } from 'vite';
 import puppeteer from 'puppeteer-core';
 import { mkdirSync, readFileSync } from 'node:fs';
@@ -34,16 +36,15 @@ const tweak = opt('--tweak', '');
 const extraJs = opt('--js', '');
 const printJs = opt('--print', '');
 const params = opt('--params', '');
-const format = opt('--format', 'png');
-if (format !== 'png' && format !== 'jpg') throw new Error(`--format must be png or jpg, got ${format}`);
 const bench = argv.includes('--bench');
+const ext = argv.includes('--png') ? 'png' : 'jpg';
 const dry = argv.includes('--dry-run');
 const gpu = argv.includes('--gpu');
 const looks = argv.filter((a) => !a.startsWith('--'));
 if (!looks.length) throw new Error('name at least one look (classic crisp voxel terrain full)');
 const views = viewsArg ? viewsArg.split(',') : ['shelter', 'street', 'house', 'forest', 'night', 'top'];
 if (dry) {
-  for (const l of looks) for (const v of views) console.log(`would capture ${out}/${l}_${v}.${format} at ${size.join('x')}${gpu ? ' (gpu)' : ''}`);
+  for (const l of looks) for (const v of views) console.log(`would capture ${out}/${l}_${v}.${ext} at ${size.join('x')}${gpu ? ' (gpu)' : ''}`);
   process.exit(0);
 }
 const chrome = process.env.CHROME_PATH;
@@ -85,9 +86,9 @@ try {
       await page.evaluate(`lookView(${JSON.stringify(v)})`);
       if (extraJs) await page.evaluate(`(async () => { const cdda = window.cdda; ${extraJs}; })()`);
       await new Promise((r) => setTimeout(r, 400));
-      const file = resolve(`${out}/${look}_${v}.${format}`);
-      if (format === 'jpg') await page.screenshot({ path: file as `${string}.jpeg`, type: 'jpeg', quality: 88 });
-      else await page.screenshot({ path: file as `${string}.png` });
+      const file = resolve(`${out}/${look}_${v}.${ext}`);
+      if (ext === 'png') await page.screenshot({ path: file as `${string}.png` });
+      else await page.screenshot({ path: file as `${string}.jpeg`, type: 'jpeg', quality: 85, clip: { x: 0, y: 0, width: size[0], height: size[1], scale: 0.5 } });
       if (printJs) console.log(`  ${look}/${v}: ${JSON.stringify(await page.evaluate(`(async () => { const cdda = window.cdda; return (${printJs}); })()`))}`);
       if (bench) {
         // let chunk builds / grass rebuilds triggered by the teleport finish first

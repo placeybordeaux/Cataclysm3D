@@ -38,8 +38,8 @@ const gpu = argv.includes('--gpu');
 const bench = argv.includes('--bench');
 const dry = argv.includes('--dry-run');
 const png = argv.includes('--png');
-const allViews = ['horde_near', 'horde_mid', 'horde_far', 'horde_road', 'horde_dusk', 'dog', 'npc', 'windup', 'critters', 'zoo', 'night', 'third', 'corpse', 'bench'];
-const defaultViews = allViews.filter((v) => v !== 'bench');
+const allViews = ['horde_near', 'horde_mid', 'horde_far', 'horde_road', 'horde_dusk', 'dog', 'npc', 'windup', 'critters', 'zoo', 'night', 'third', 'corpse', 'bench', 'fp_fists', 'fp_punch', 'fp_pistol', 'fp_pistol_fire', 'fp_rifle', 'fp_rifle_ads', 'fp_shotgun', 'fp_reload', 'fp_bat', 'fp_bat_swing', 'fp_guard', 'fp_knife', 'fp_axe', 'fp_spear', 'fp_katana', 'fp_flashlight', 'fp_bow'];
+const defaultViews = allViews.filter((v) => v !== 'bench' && !v.startsWith('fp_'));
 const views = viewsArg ? viewsArg.split(',') : defaultViews;
 for (const v of views) if (!allViews.includes(v)) throw new Error(`unknown view ${v} (have ${allViews.join(', ')})`);
 if (dry) {

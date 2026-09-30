@@ -111,3 +111,8 @@
 #ui2 .c2-read-line { display: flex; justify-content: space-between; font-size: var(--fs-s); }
 #ui2 .c2-read .ui2-bar { height: calc(var(--u) * 5); }
 #ui2 .c2-read-bar-skill .ui2-bar-fill { background: var(--p-info); }
+
+/* "what's missing" (docs/ADAPTATION.md): a short line after the name, and the Craftable tab's
+   "Almost" section header. */
+#ui2 .c2-row-short { flex: 0 1 auto; min-width: 0; max-width: 55%; overflow: hidden; text-overflow: ellipsis; font-size: var(--fs-s); color: var(--p-warn); }
+#ui2 .c2-section { padding: calc(var(--u) * 2) calc(var(--u) * 2) var(--u); color: var(--p-accent); border-bottom: var(--u) solid var(--p-bg-raised); }

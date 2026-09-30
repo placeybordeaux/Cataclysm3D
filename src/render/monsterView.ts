@@ -209,6 +209,7 @@ export class MonsterView implements GameSystem {
   private far: Monster[] = [];
   private farSet = new Set<Monster>();
   private farScan = 0;
+  private farRange = FAR_FIGURE_MAX;
   private rigs = new Map<string, Rig>();
   /** A body hit the ground (hitFx puts dust/blood there). */
   onBodyLanded: ((x: number, y: number, z: number, blood: string | null) => void) | null = null;
@@ -309,6 +310,11 @@ export class MonsterView implements GameSystem {
     const core = rig.parts.find((p) => p.kind === 'core');
     const radius = core ? Math.max(0.08, Math.min(core.size[0], core.size[2]) * 0.55) : m.radius;
     return { bottom: rig.height * 0.15 + rig.hover, top: rig.height * 0.95 + rig.hover, radius };
+  }
+
+  /** The drawn 3D body of a monster (src/aim.ts: exact hit zones, the dodge hop), or null. */
+  modelOf(m: Monster): CreatureModel['inst'] | null {
+    return this.views.get(m)?.c?.inst ?? null;
   }
 
   flash(m: Monster, color: number, seconds: number): void {
@@ -526,6 +532,8 @@ export class MonsterView implements GameSystem {
           windup: w ? { elapsed: w.total - w.t, total: w.total, kind: w.kind } : null,
           flinch: Math.min(1, Math.max(m.flinch * 4, kickK)), down: v.down, visible,
           emph: m.attitude() === 'attack' ? 1 : 0, camDist: Math.hypot(x - cam.x, y - cam.z),
+          // far figures dissolve over the last 12 m before the draw distance instead of popping
+          fade: m.dormant ? Math.min(1, Math.max(0, (Math.hypot(m.x - p.x, m.y - p.y) - (this.farRange - 12)) / 12)) : 0,
           sy: 1 + (stretch - 1) * 0.5 - (1 - squash) * 0.5, sxz: 1 - (1 - narrow) * 0.5,
         });
         continue;
@@ -611,6 +619,7 @@ export class MonsterView implements GameSystem {
     this.far.length = 0;
     this.farSet.clear();
     const range = Math.min(FAR_FIGURE_MAX, (this.renderer.chunks.radius + 0.5) * CHUNK);
+    this.farRange = range;
     for (const m of this.sys.all) {
       if (m.dead || !m.dormant || Math.abs(m.z - p.z) > 1) continue;
       if (Math.hypot(m.x - p.x, m.y - p.y) > range) continue;

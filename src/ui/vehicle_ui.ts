@@ -4,6 +4,7 @@ import type { Game } from '../game/game';
 import type { Item } from '../game/item';
 import { has, MPH_PER_MS, type Vehicle, type VehiclePart } from '../game/vehicle';
 import { loadVehicleData } from '../game/vehicle_data';
+import { pointInBody } from '../game/vehicleShape';
 import { composeCreatureHooks, monsterCreatureHooks, npcCreatureHooks, registerVehicleSave, VehicleSystem, type DriveMode } from '../game/vehicles';
 import { registerOption } from './options';
 import type { MonsterSystem } from '../game/monai';
@@ -59,16 +60,19 @@ export function targetVehicle(game: Game, renderer: Renderer | null = rendererRe
   if (!vs) return null;
   const p = game.player;
   const base = p.z * LEVEL_HEIGHT;
-  const hit = (x: number, y: number, h: number): VehicleTarget | null => {
+  const hit = (x: number, y: number, h: number, shaped = true): VehicleTarget | null => {
     const tx = Math.floor(x), ty = Math.floor(y);
     const o = vs.at(tx, ty, p.z);
     if (!o || h < base + 0.1 || h > base + 2.0) return null;
+    // Modelled bodies are narrower than their tiles: the crosshair has to reach the paint.
+    const b = shaped ? vs.bodyRect(o.v) : null;
+    if (b && !pointInBody(o.v, b, x, y, 0.03)) return null;
     return { v: o.v, mx: o.mx, my: o.my, x: tx, y: ty, z: p.z };
   };
   if (!renderer || renderer.cameraMode === 'top') {
     // Top-down: the tile in front of you (like CDDA's direction prompt), else your own.
     const fx = p.x + Math.sin(p.yaw) * 0.9, fy = p.y - Math.cos(p.yaw) * 0.9;
-    return hit(fx, fy, base + 1) ?? hit(p.x, p.y, base + 1);
+    return hit(fx, fy, base + 1, false) ?? hit(p.x, p.y, base + 1, false);
   }
   const cam = renderer.camera;
   const dir = cam.getWorldDirection(tmpDir);
