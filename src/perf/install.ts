@@ -12,6 +12,7 @@ import { RoomMap } from '../render/rooms';
 import { Telemetry, type MeshKind } from './telemetry';
 import { PerfOverlay } from './overlay';
 import { ringToFrames, summarize, type PerfDump } from './analyze';
+import { installPlaceholders } from '../render/placeholders';
 
 // Wires the telemetry (telemetry.ts) into the running game and gives the player and us ways
 // to use it (docs/PERF.md):
@@ -27,6 +28,8 @@ export interface PerfApi {
   tel: Telemetry;
   show(on?: boolean): boolean;
   detail(on?: boolean): boolean;
+  /** GPU timer queries without the overlay (false where the extension is missing, e.g. Firefox) */
+  gpu(on?: boolean): boolean;
   dump(seconds?: number): PerfDump;
   summary(seconds?: number): ReturnType<typeof summarize>;
   download(seconds?: number): string;
@@ -161,7 +164,7 @@ export function installPerf(game: Game, renderer: Renderer, api: DebugApi, prefe
   // ---- overlay
   const hint = () => `${game.keys.label('perf_overlay')} hide · Shift+${game.keys.label('perf_overlay')} save last 60 s${lastDump ? `  (saved ${lastDump})` : ''}`;
   let lastDump = '';
-  const overlay = new PerfOverlay(tel, hint);
+  const overlay = new PerfOverlay(tel, hint, () => [`stand-ins ${placeholders.enabled ? placeholders.stats.shown : 'off'}   schedule ${chunks.schedule}   prefetch ${prefetch ? `${prefetch.stats.prefetched} idle / ${prefetch.stats.sync} in frame` : 'off'}`]);
   const show = (on: boolean) => {
     overlay.show(on);
     setDetail(on);
@@ -175,7 +178,7 @@ export function installPerf(game: Game, renderer: Renderer, api: DebugApi, prefe
     glInfo.triangles = info.render.triangles;
     glInfo.geometries = info.memory.geometries;
     glInfo.textures = info.memory.textures;
-    if (gpuOn) pollGpu();
+    if (inflight.length) pollGpu();
     tel.sample(workMs, now, loopMs, sec);
     overlay.update(now);
   };
@@ -271,6 +274,9 @@ export function installPerf(game: Game, renderer: Renderer, api: DebugApi, prefe
   }
   if (initial) show(true);
 
+  // ---- stand-ins for unbuilt chunks (render/placeholders.ts)
+  const placeholders = installPlaceholders(renderer, () => game.player, api as unknown as Record<string, unknown>);
+
   // ---- streaming schedule (chunkManager.ts): 'need' (default) or 'distance' (wave 3), for A/B
   const sched = params.get('stream');
   if (sched) {
@@ -287,6 +293,7 @@ export function installPerf(game: Game, renderer: Renderer, api: DebugApi, prefe
     tel,
     show: (on = !overlay.visible) => show(on),
     detail: (on = !tel.detail) => setDetail(on),
+    gpu: (on = !gpuOn) => (gpuOn = on && !!ext),
     dump,
     summary: (seconds = 60) => summarize(dump(seconds)),
     download,

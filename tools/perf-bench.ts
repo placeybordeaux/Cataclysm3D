@@ -17,10 +17,12 @@
 //   --params '<q>'     extra URL params (e.g. 'radius=6', 'look=full')
 //   --browser firefox  headless Firefox (also on the GPU) instead of Chromium
 //   --save DIR         write each route's telemetry dump (tools/perf-report.ts reads them)
+//   --shots DIR        JPEG screenshots at 1/3 and 2/3 of each route (<route>_<s>s.jpg)
 //   --baseline FILE    budgets to compare with (default tools/perf-baseline.json)
 //   --write-baseline   record this run as the new baseline (keeps the tolerances)
 //   --report           print the full perf-report for each route
 //   --detail           time the mesher by kind (furniture models, surfaces, dressing, rooms); costs time itself
+//   --gpu-timer        GPU ms per frame (EXT_disjoint_timer_query; Chromium only)
 //   --json             print raw results
 //   --dry-run          print what would run
 // Exit code 1 when a route breaks a budget.
@@ -191,6 +193,7 @@ try {
   if (err) throw new Error(String(err));
   await page.evaluate(PERF_PAGE);
   if (argv.includes('--detail')) await page.evaluate('cdda.perf.detail(true)');
+  if (argv.includes('--gpu-timer')) await page.evaluate('cdda.perf.gpu(true)');
   for (const name of routeNames) {
     const r = ROUTES[name];
     const seconds = secondsArg ? Number(secondsArg) : r.seconds;
@@ -200,7 +203,15 @@ try {
     await waitStreamed(page, 30_000);
     await new Promise((res) => setTimeout(res, 1500));
     await page.evaluate(`(() => { Object.assign(cdda.renderer.chunks.stats, { maxStepMs: 0, maxStep: '', maxFrameMs: 0, maxBuildMs: 0, slowBuilds: 0 }); cdda.perf.reset(); __perfBench.go(${r.mph * MPH}); })()`);
-    await new Promise((res) => setTimeout(res, seconds * 1000));
+    const shotsDir = opt('--shots', '');
+    if (shotsDir) {
+      mkdirSync(shotsDir, { recursive: true });
+      for (const k of [1, 2]) {
+        await new Promise((res) => setTimeout(res, (seconds * 1000) / 3));
+        await page.screenshot({ path: join(shotsDir, `${name}_${Math.round((seconds * k) / 3)}s.jpg`) as `${string}.jpg`, type: 'jpeg', quality: 80 });
+      }
+      await new Promise((res) => setTimeout(res, (seconds * 1000) / 3));
+    } else await new Promise((res) => setTimeout(res, seconds * 1000));
     const out = (await page.evaluate(`(() => { __perfBench.stop(); return { dump: cdda.perf.dump(${seconds + 5}), chunks: { ...cdda.renderer.chunks.stats } }; })()`)) as { dump: PerfDump; chunks: { maxStepMs: number; maxStep: string } };
     const s = summarize(out.dump);
     const m = metricsOf(s, out.chunks);

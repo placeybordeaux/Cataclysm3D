@@ -63,15 +63,15 @@ describe('Telemetry', () => {
     }
     const f = ringToFrames(tel.ring);
     const last = f.t.length - 1;
-    expect(f.speed[last]).toBeCloseTo(20, 0);
+    expect(f.speed![last]).toBeCloseTo(20, 0);
     // player near x = 51: 72 - 51 = ~21 m of runway, ~1 s at 20 m/s (scan every 100 ms: held values)
-    expect(f.runwayM[last]!).toBeGreaterThan(12);
-    expect(f.runwayM[last]!).toBeLessThan(27);
-    expect(f.runwayS[last]!).toBeCloseTo(f.runwayM[last]! / 20, 0);
+    expect(f.runwayM![last]!).toBeGreaterThan(12);
+    expect(f.runwayM![last]!).toBeLessThan(27);
+    expect(f.runwayS![last]!).toBeCloseTo(f.runwayM![last]! / 20, 0);
     // chunks east are in view (camera looks east) and inside the visible range
-    expect(f.holesVis[last]!).toBeGreaterThan(0);
-    expect(f.sim[last]).toBe(1);
-    expect(f.chunkBuild[last]).toBe(3);
+    expect(f.holesVis![last]!).toBeGreaterThan(0);
+    expect(f.sim![last]).toBe(1);
+    expect(f.chunkBuild![last]).toBe(3);
   });
 
   it('counts nothing when everything is built, and summarize() reports no findings', () => {

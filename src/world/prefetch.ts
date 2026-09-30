@@ -36,7 +36,10 @@ export interface PrefetchOpts {
 
 export class ChunkPrefetcher {
   readonly stats: PrefetchStats = { prefetched: 0, sync: 0, maxMs: 0, queue: 0 };
-  opts: PrefetchOpts = { radius: 6, below: 2, above: 2, lookahead: 3, minIdleMs: 8 };
+  // minIdleMs was 8: at 3440x1304 a 60 Hz frame leaves ~5-7 ms idle, so the prefetcher never
+  // ran and every chunk was generated inside a frame (telemetry, docs/PERF.md). Most chunks take
+  // well under a millisecond (a town house 1-6 ms), so starting one with 3 ms left rarely overruns.
+  opts: PrefetchOpts = { radius: 6, below: 2, above: 2, lookahead: 3, minIdleMs: 3 };
   enabled = true;
   /** true while the prefetcher itself is generating (telemetry tells sync from prefetched mapgen) */
   inPrefetch = false;
@@ -63,7 +66,7 @@ export class ChunkPrefetcher {
       if (!this.running) return;
       if (this.enabled) {
         // At most a few per idle period: a generation that overruns the gap drops a frame.
-        for (let n = 0; n < 4 && d.timeRemaining() >= this.opts.minIdleMs; n++) if (!this.step()) break;
+        for (let n = 0; n < 8 && d.timeRemaining() >= this.opts.minIdleMs; n++) if (!this.step()) break;
       }
       ric(loop);
     };
