@@ -42,7 +42,10 @@ export class FrameStats {
     this.sec[name] = (this.sec[name] ?? 0) + (t - this.lapT);
     this.lapT = t;
   }
+  /** Per-frame observer (src/perf/telemetry.ts): this frame's work, rAF time and section split. */
+  sink: ((workMs: number, now: number, loopMs: number, sec: Readonly<Record<string, number>>) => void) | null = null;
   frame(workMs: number, now: number): void {
+    if (this.sink) this.sink(workMs, now, performance.now() - this.beginT, this.sec);
     if (this.recording) {
       this.work.push(workMs);
       if (this.beginT) this.loop.push(performance.now() - this.beginT);

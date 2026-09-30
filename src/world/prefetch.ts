@@ -38,7 +38,8 @@ export class ChunkPrefetcher {
   readonly stats: PrefetchStats = { prefetched: 0, sync: 0, maxMs: 0, queue: 0 };
   opts: PrefetchOpts = { radius: 6, below: 2, above: 2, lookahead: 3, minIdleMs: 8 };
   enabled = true;
-  private inPrefetch = false;
+  /** true while the prefetcher itself is generating (telemetry tells sync from prefetched mapgen) */
+  inPrefetch = false;
   private queue: [number, number, number][] = [];
   private queueFor = '';
   private lastPos: { x: number; y: number; t: number } | null = null;

@@ -89,6 +89,8 @@ export const DEFAULT_BINDINGS: Record<string, string[]> = {
   tactical_pause: ['`', 'Pause'],
   // --- progression (src/progression): tips, recipes, places, unlock progress ---
   journal: ['J'],
+  // --- performance overlay (src/perf/install.ts): Shift+F3 saves the last 60 s ---
+  perf_overlay: ['F3'],
 };
 
 /** localStorage key for the player's rebinds (a diff over DEFAULT_BINDINGS). */

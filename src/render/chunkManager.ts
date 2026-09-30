@@ -42,7 +42,7 @@ interface Entry {
   /** inside midRadius but not lodRadius */
   mid?: boolean;
   /** in-progress (time-sliced) build and the signature it started from */
-  job: { gen: Generator<void, void>; sig: number; ver: number; ms: number } | null;
+  job: { gen: Generator<void, void>; sig: number; ver: number; ms: number; t0: number; kind: 'full' | 'trees' } | null;
   /** own chunk version at the last finished build (edits vs. LOD/neighbour changes) */
   builtVer: number;
   /** a build has finished at least once (invalidateAll keeps the old mesh up; this stays) */
@@ -52,6 +52,22 @@ interface Entry {
   trees?: TreeSpec[];
   treeObjs?: THREE.Object3D[];
   treeMid?: boolean;
+  /** performance.now() when the entry entered the wanted set (telemetry: queue age) */
+  wantT: number;
+}
+
+/** What telemetry (src/perf) may read of an entry. */
+export type ChunkEntryView = Readonly<Pick<Entry, 'cx' | 'cy' | 'z' | 'shown' | 'wantT' | 'visible' | 'job'>>;
+
+/**
+ * Optional observer (src/perf/telemetry.ts). Called only when installed, so an idle game pays
+ * one null check per event.
+ */
+export interface ChunkProbe {
+  want(cx: number, cy: number, z: number): void;
+  /** a build finished: `first` = the chunk had never been shown; `ms` = work, `wall` = start to finish */
+  built(cx: number, cy: number, z: number, first: boolean, ms: number, wall: number, kind: 'full' | 'trees' | 'empty', waitMs: number): void;
+  drop(cx: number, cy: number, z: number, shown: boolean): void;
 }
 
 export interface ChunkStats {
@@ -75,6 +91,9 @@ export interface ChunkStats {
   /** longest single uninterrupted step (ms) and its phase: the slicing granularity */
   maxStepMs: number;
   maxStep: string;
+  /** this frame: ms spent creating entries (mapgen of missing map chunks) and in total */
+  frameCreateMs: number;
+  frameMs: number;
 }
 
 const key = (cx: number, cy: number, z: number) => ((z + 16) * 4096 + (cx + 2048)) * 4096 + (cy + 2048);
@@ -94,7 +113,7 @@ export class ChunkManager {
   readonly forward = { x: 0, y: -1 };
   /** Distance (tiles) inside which a chunk appearing counts as visible pop-in (set by the renderer from the fog). */
   visibleDist = 1e9;
-  readonly stats: ChunkStats = { entries: 0, pending: 0, builtThisFrame: 0, lastBuildMs: 0, skippedEmpty: 0, lateBuilds: 0, maxBuildMs: 0, slowBuilds: 0, meshMs: 0, treeMs: 0, maxFrameMs: 0, builds: 0, maxStepMs: 0, maxStep: '' };
+  readonly stats: ChunkStats = { entries: 0, pending: 0, builtThisFrame: 0, lastBuildMs: 0, skippedEmpty: 0, lateBuilds: 0, maxBuildMs: 0, slowBuilds: 0, meshMs: 0, treeMs: 0, maxFrameMs: 0, builds: 0, maxStepMs: 0, maxStep: '', frameCreateMs: 0, frameMs: 0 };
   private entries = new Map<number, Entry>();
   private dirty: Entry[] = [];
   private shapes: ShapeTable;
@@ -107,6 +126,9 @@ export class ChunkManager {
   midRadius = 0;
   /** Builds extra per-chunk objects from mesh data (3D trees; time-sliced); added to the chunk group. */
   extraObjects: ((data: ChunkMeshData, cx: number, cy: number, z: number) => Generator<void, THREE.Object3D[]>) | null = null;
+
+  /** Telemetry observer (src/perf), null when off. */
+  probe: ChunkProbe | null = null;
 
   constructor(private map: GameMap, private sprites: SpriteLayer, public source: TileTextureSource) {
     this.group.name = 'chunks';
@@ -126,6 +148,11 @@ export class ChunkManager {
         if (!e || !e.shown) n++;
       }
     return n;
+  }
+
+  /** Every entry (wanted chunk) as telemetry sees it. */
+  forEachEntry(fn: (e: ChunkEntryView) => void): void {
+    for (const e of this.entries.values()) fn(e);
   }
 
   /** Force every chunk to rebuild (texture source swap, save loaded, season change). */
@@ -163,9 +190,11 @@ export class ChunkManager {
         created++;
         this.entries.set(k, {
           cx, cy, z, chunk: deps[0], deps, sig: 0, builtSig: -1, group: null, sprites: null,
-          visible: true, d2: 0, near: false, job: null, builtVer: -1,
+          visible: true, d2: 0, near: false, job: null, builtVer: -1, wantT: t0,
         });
+        this.probe?.want(cx, cy, z);
       }
+    this.stats.frameCreateMs = performance.now() - t0;
     frameStats.lap('chunks.create');
     // 2. signatures, visibility, eviction
     const dirty = this.dirty;
@@ -173,6 +202,7 @@ export class ChunkManager {
     for (const [k, e] of this.entries) {
       const ddx = e.cx - pcx, ddy = e.cy - pcy;
       if (ddx * ddx + ddy * ddy > (R + 1.5) * (R + 1.5) || e.z < pz - this.levelsBelow - 1 || e.z > pz + this.levelsAbove + 1) {
+        this.probe?.drop(e.cx, e.cy, e.z, !!e.shown);
         this.dispose(e);
         this.entries.delete(k);
         continue;
@@ -217,7 +247,7 @@ export class ChunkManager {
       }
       if (!e.job) {
         const full = e.sig !== e.builtSig;
-        e.job = { gen: full ? this.buildSteps(e) : this.treeSteps(e), sig: full ? e.sig : e.builtSig, ver: full ? e.chunk.version : e.builtVer, ms: 0 };
+        e.job = { gen: full ? this.buildSteps(e) : this.treeSteps(e), sig: full ? e.sig : e.builtSig, ver: full ? e.chunk.version : e.builtVer, ms: 0, t0: now, kind: full ? 'full' : 'trees' };
       }
       const job = e.job;
       const b0 = performance.now();
@@ -229,6 +259,10 @@ export class ChunkManager {
       // keeps the job's signature so the entry goes dirty again and rebuilds.
       e.builtSig = job.sig;
       e.builtVer = job.ver;
+      if (this.probe) {
+        const end = performance.now();
+        this.probe.built(e.cx, e.cy, e.z, !e.shown, job.ms, end - job.t0, job.kind === 'full' && !e.group ? 'empty' : job.kind, end - e.wantT);
+      }
       e.shown = true;
       e.job = null;
       this.stats.builds++;
@@ -236,7 +270,8 @@ export class ChunkManager {
       this.stats.maxBuildMs = Math.max(this.stats.maxBuildMs, job.ms);
       if (job.ms > 8) this.stats.slowBuilds++;
     }
-    this.stats.maxFrameMs = Math.max(this.stats.maxFrameMs, performance.now() - t0);
+    this.stats.frameMs = performance.now() - t0;
+    this.stats.maxFrameMs = Math.max(this.stats.maxFrameMs, this.stats.frameMs);
     this.stats.builtThisFrame = built;
     this.stats.pending = dirty.length - built;
     this.stats.entries = this.entries.size;
