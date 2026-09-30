@@ -67,6 +67,20 @@ street 0.018, far 0.017.
 
 ![](screenshots/wave3/flora/round3_vs_4.jpg)
 
+## Round 5: the brightness/saturation shift
+
+After round 4 the forest looked brighter and more saturated post-merge, and I suspected
+another branch. Bisected: every `bn` first-parent merge from 84ada7e to b0dec39 renders the
+forest/street views identically (mean luma 0.200 / sat 0.054 in the forest, lighting state
+the same: clear, spring, sun 2.46, hemi 1.70, fill 1.09, exposure 1, no stray lights), and my
+round 4 pre-merge shot equals the post-merge one exactly. The shift was round 4's own leaf ramp
+(x1.12-1.3 per sRGB channel pushes a red-tinged green to yellow) plus the leaf glow: crown
+region luma 0.231 (round 3) -> 0.351, saturation 0.064 -> 0.127 (v2 clumps: 0.330 / 0.071).
+
+Fix: the lit steps lift value but take the mid tone's red/green balance and 20 % less chroma,
+the lighter ramp (x1.08-1.18), less leaf glow. Now 0.322 / 0.087: v2's brightness, green
+rather than yellow. Measured with `bin/lum.py` (mean over the top 420 rows).
+
 ## LOD without pops
 
 Chunk rings (chunkManager): near (lodRadius 1.8 chunks, ~43 m) full detail; middle ring
