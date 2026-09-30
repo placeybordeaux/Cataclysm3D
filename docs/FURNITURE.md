@@ -206,7 +206,7 @@ Code: `src/render/surfaces.ts` (materials, painters, `SurfacePainter`), consulte
 `furniture/install.ts` `installSurfaces` (Options, state, mesher extras, shingles);
 `chunkMesh.ts` room-facing wall faces (`indoor` in `SurfaceQuery`), baseboards/crown,
 sills/lintels/door heads, fence and gate hooks. Painted frames share the furniture atlas
-pages (no extra draw calls). `look-shots.ts --format jpg` for JPEG screenshots.
+pages (no extra draw calls). `look-shots.ts` writes JPEG by default (bn).
 
 Perf (1080p, RTX 5080, tileset -> painted): render 1.8 -> 2.0 ms (street), 2.3 -> 2.3 ms
 (house); triangles +6-8 % (baseboards, crown, fence parts); streaming sprint meshing
