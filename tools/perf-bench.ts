@@ -11,15 +11,16 @@
 // physics) is what tools/perf-drive.ts does; this is the repeatable regression check.
 //
 // Options:
-//   --routes a,b       routes to run (default: town40,town60,forest,rural); --list shows them
+//   --routes a,b       routes to run (default: all six); --list shows them
 //   --size WxH         viewport (default 3440x1304, the user's ultrawide)
 //   --seconds N        override every route's duration
 //   --params '<q>'     extra URL params (e.g. 'radius=6', 'look=full')
-//   --browser firefox  Firefox instead of Chromium (software GL under Xvfb: CPU-side numbers only)
+//   --browser firefox  headless Firefox (also on the GPU) instead of Chromium
 //   --save DIR         write each route's telemetry dump (tools/perf-report.ts reads them)
 //   --baseline FILE    budgets to compare with (default tools/perf-baseline.json)
 //   --write-baseline   record this run as the new baseline (keeps the tolerances)
 //   --report           print the full perf-report for each route
+//   --detail           time the mesher by kind (furniture models, surfaces, dressing, rooms); costs time itself
 //   --json             print raw results
 //   --dry-run          print what would run
 // Exit code 1 when a route breaks a budget.
@@ -29,7 +30,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { summarize, type PerfDump, type PerfSummary } from '../src/perf/analyze';
 import { printReport } from './perf-report';
-import { launchBrowser, startXvfb } from './lib/realinput';
+import { PERF_PAGE } from './lib/perfRoutes';
 
 const argv = process.argv.slice(2);
 const help = () => console.log(readFileSync(new URL(import.meta.url)).toString().split('\n').filter((l) => l.startsWith('//')).map((l) => l.slice(3)).join('\n'));
@@ -48,13 +49,15 @@ interface Route {
   what: string;
   /** where: 'town' (longest straight road through the nearest town), 'rural' (longest straight road
    *  outside towns near the start), 'forest' (through the nearest thick forest) */
-  kind: 'town' | 'rural' | 'forest';
+  kind: 'town' | 'city' | 'rural' | 'forest';
   mph: number;
   seconds: number;
 }
 export const ROUTES: Record<string, Route> = {
-  town40: { what: 'through the nearest town on its longest straight road at 40 mph', kind: 'town', mph: 40, seconds: 25 },
+  town40: { what: 'into and through the nearest town (Holden) at 40 mph, on the straight road with the most buildings along it', kind: 'town', mph: 40, seconds: 25 },
   town60: { what: 'the same road at 60 mph', kind: 'town', mph: 60, seconds: 25 },
+  city40: { what: 'into and through the biggest nearby city (Madrid, size 16) at 40 mph', kind: 'city', mph: 40, seconds: 30 },
+  city60: { what: 'the same city road at 60 mph', kind: 'city', mph: 60, seconds: 25 },
   forest: { what: 'straight through thick forest at 40 mph (3D trees, flora LOD rings)', kind: 'forest', mph: 40, seconds: 20 },
   rural: { what: 'the longest straight road outside town at 60 mph', kind: 'rural', mph: 60, seconds: 25 },
 };
@@ -63,7 +66,7 @@ if (argv.includes('--list')) {
   for (const [k, r] of Object.entries(ROUTES)) console.log(`${k.padEnd(8)} ${r.seconds}s  ${r.what}`);
   process.exit(0);
 }
-const routeNames = opt('--routes', 'town40,town60,forest,rural').split(',');
+const routeNames = opt('--routes', 'town40,town60,city40,city60,forest,rural').split(',');
 for (const r of routeNames) if (!ROUTES[r]) throw new Error(`unknown route ${r} (${Object.keys(ROUTES).join(', ')})`);
 const size = opt('--size', '3440x1304').split('x').map(Number);
 if (size.length !== 2 || size.some((v) => !(v > 0))) throw new Error(`--size ${opt('--size', '')}: expected WxH`);
@@ -149,99 +152,6 @@ if (argv.includes('--dry-run')) {
   process.exit(0);
 }
 
-// ---- page side --------------------------------------------------------------------------------
-// Route picking and the ghost car, evaluated in the page (cdda.* only sets the scene up).
-const PAGE = `(() => {
-  const c = window.cdda;
-  const roadRun = (x, y, dx, dy, max) => {
-    let n = 0;
-    while (n < max && /^road_/.test(c.omtAt(x + dx * n, y + dy * n, 0).id)) n++;
-    return n;
-  };
-  const DIRS = [[1, 0, 0], [-1, 0, 180], [0, 1, 90], [0, -1, 270]]; // dx, dy, vehicle facing (0 = east, clockwise)
-  /** Longest straight road run starting within 'r' OMTs of (cx, cy): { x, y, facing, len }. */
-  const longestRoad = (cx, cy, r, step, notIn) => {
-    let best = null;
-    for (let oy = -r; oy <= r; oy += step) for (let ox = -r; ox <= r; ox += step) {
-      const x = cx + ox, y = cy + oy;
-      if (!/^road_/.test(c.omtAt(x, y, 0).id)) continue;
-      if (notIn && notIn(x, y)) continue;
-      for (const [dx, dy, f] of DIRS) {
-        // only starts of runs: the OMT behind is not road
-        if (/^road_/.test(c.omtAt(x - dx, y - dy, 0).id)) continue;
-        const len = roadRun(x, y, dx, dy, 60);
-        if (!best || len > best.len) best = { x, y, facing: f, len, dx, dy };
-      }
-    }
-    return best;
-  };
-  window.__perfBench = {
-    pick(kind) {
-      const s = c.startLocation();
-      const cities = c.cities();
-      if (kind === 'town') {
-        const town = cities.filter((t) => t.size >= 4).sort((a, b) => Math.hypot(a.x - s.omx, a.y - s.omy) - Math.hypot(b.x - s.omx, b.y - s.omy))[0];
-        const r = longestRoad(town.x, town.y, 8, 1);
-        return { ...r, town: town.name };
-      }
-      if (kind === 'rural') {
-        const inTown = (x, y) => cities.some((t) => Math.hypot(t.x - x, t.y - y) < t.size + 2);
-        return longestRoad(s.omx, s.omy, 40, 2, inTown);
-      }
-      if (kind === 'forest') {
-        const f = c.findOmt('forest_thick', 60);
-        if (!f) throw new Error('no forest_thick near the start');
-        // head away from the forest's edge: the direction with the most forest ahead
-        let best = null;
-        for (const [dx, dy, facing] of DIRS) {
-          let n = 0;
-          while (n < 30 && /forest/.test(c.omtAt(f.x + dx * n, f.y + dy * n, 0).id)) n++;
-          if (!best || n > best.len) best = { x: f.x, y: f.y, facing, len: n, dx, dy };
-        }
-        return best;
-      }
-      throw new Error('unknown route kind ' + kind);
-    },
-    /** A car at the start of the route, facing along it, you at the wheel. */
-    place(r) {
-      const vs = c.vehicleSystem;
-      if (vs.driving) { vs.driving.velocity = 0; c.exitVehicle(); }
-      c.godMode(true);
-      c.setWeather('clear');
-      c.setHour(12);
-      c.clearMonsters?.();
-      // right-hand lane of the road, 2 OMTs back so the run starts at full view
-      const X = (r.x - r.dx * 2) * 24 + 12, Y = (r.y - r.dy * 2) * 24 + 12;
-      const lx = -r.dy * 3, ly = r.dx * 3;
-      c.teleport(X + lx + 0.5, Y + ly + 0.5, 0);
-      const v = vs.spawn('car', Math.floor(X + lx), Math.floor(Y + ly), 0, r.facing, { fuel: 100, status: 0, force: true });
-      if (!v) throw new Error('could not spawn the car');
-      c.enterVehicle(v.uid);
-      return v.uid;
-    },
-    /** Move the car (and you in it) straight ahead at mps, no collision, until stop(). */
-    go(mps) {
-      const vs = c.vehicleSystem, v = vs.driving, p = c.game.player;
-      const [plx, ply] = v.worldToMount(p.x, p.y);
-      const rad = (v.facing * Math.PI) / 180;
-      const sys = {
-        name: 'perfGhost',
-        update: (_g, dt) => {
-          v.x += Math.cos(rad) * mps * dt;
-          v.y += Math.sin(rad) * mps * dt;
-          vs.reindex(v);
-          const [wx, wy] = v.mountToWorld(plx, ply);
-          p.x = wx;
-          p.y = wy;
-          for (const part of Object.values(p.hp)) part.cur = part.max;
-        },
-      };
-      c.game.systems.push(sys);
-      this.stop = () => c.game.systems.splice(c.game.systems.indexOf(sys), 1);
-    },
-  };
-})()`;
-
 async function waitStreamed(page: Page, maxMs: number): Promise<void> {
   const t0 = Date.now();
   while (Date.now() - t0 < maxMs) {
@@ -257,10 +167,13 @@ if (browserKind === 'chromium' && !chrome) throw new Error('CHROME_PATH not set:
 const server = await createServer({ server: { port: 0, host: '127.0.0.1', hmr: false }, logLevel: 'error' });
 await server.listen();
 const port = (server.httpServer!.address() as { port: number }).port;
-// Firefox has no headless GPU path here: it runs windowed under a private Xvfb (startXvfb sets DISPLAY)
-if (browserKind === 'firefox') await startXvfb(size[0] + 40, size[1] + 200);
+// Headless Firefox renders WebGL on the real GPU (EGL surfaceless; it reports a sanitized
+// "GeForce ..., or similar"), so both browsers run the same way. No timer queries in Firefox.
 const browser = browserKind === 'firefox'
-  ? await launchBrowser('firefox', size[0], size[1])
+  ? await puppeteer.launch({
+    browser: 'firefox', executablePath: process.env.FIREFOX_PATH ?? '/run/current-system/sw/bin/firefox', headless: true, protocolTimeout: 600_000,
+    extraPrefsFirefox: { 'browser.shell.checkDefaultBrowser': false, 'datareporting.policy.dataSubmissionEnabled': false },
+  })
   : await puppeteer.launch({
     executablePath: chrome, headless: true, protocolTimeout: 600_000,
     args: ['--no-sandbox', '--use-angle=vulkan', '--enable-features=Vulkan', '--ignore-gpu-blocklist', '--enable-gpu', `--window-size=${size[0]},${size[1]}`],
@@ -269,14 +182,15 @@ const results: Record<string, { route: unknown; metrics: Metrics; summary: PerfS
 const failures: string[] = [];
 try {
   const page = (await browser.pages())[0] ?? (await browser.newPage());
-  if (browserKind === 'chromium') await page.setViewport({ width: size[0], height: size[1] });
+  await page.setViewport({ width: size[0], height: size[1] });
   page.on('pageerror', (e) => console.log(`[page exception] ${(e as Error).stack ?? e}`));
   page.on('dialog', (d) => void d.accept());
   await page.goto(`http://127.0.0.1:${port}/?seed=1&skipmenu=1${params ? '&' + params : ''}`, { waitUntil: 'load' });
   await page.waitForFunction('window.cdda?.ready || window.cddaError', { timeout: 240_000 });
   const err = await page.evaluate('window.cddaError');
   if (err) throw new Error(String(err));
-  await page.evaluate(PAGE);
+  await page.evaluate(PERF_PAGE);
+  if (argv.includes('--detail')) await page.evaluate('cdda.perf.detail(true)');
   for (const name of routeNames) {
     const r = ROUTES[name];
     const seconds = secondsArg ? Number(secondsArg) : r.seconds;

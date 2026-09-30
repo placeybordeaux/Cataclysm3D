@@ -271,6 +271,18 @@ export function installPerf(game: Game, renderer: Renderer, api: DebugApi, prefe
   }
   if (initial) show(true);
 
+  // ---- streaming schedule (chunkManager.ts): 'need' (default) or 'distance' (wave 3), for A/B
+  const sched = params.get('stream');
+  if (sched) {
+    if (sched !== 'need' && sched !== 'distance') throw new Error(`?stream=${sched}: expected need or distance`);
+    chunks.schedule = sched;
+  }
+  api.streamSchedule = (mode?: 'need' | 'distance') => {
+    if (mode !== undefined && mode !== 'need' && mode !== 'distance') throw new Error(`streamSchedule: 'need' or 'distance', not ${String(mode)}`);
+    if (mode) chunks.schedule = mode;
+    return chunks.schedule;
+  };
+
   const perf: PerfApi = {
     tel,
     show: (on = !overlay.visible) => show(on),

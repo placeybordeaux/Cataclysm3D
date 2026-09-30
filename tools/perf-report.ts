@@ -2,10 +2,11 @@
 // --save): where the frame time went, whether the world streamed in ahead of the player, what
 // mapgen cost, and the worst frames with what happened in them. docs/PERF.md.
 //
-//   npx tsx tools/perf-report.ts <dump.json> [--json] [--last N]
+//   npx tsx tools/perf-report.ts <dump.json>... [--json] [--last N] [--compare]
 //
-// --json   print the summary object instead of the report
-// --last N only the last N seconds of the dump
+// --json     print the summary object instead of the report
+// --last N   only the last N seconds of the dump
+// --compare  one table, a column per dump (before/after runs of the same route)
 import { readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { summarize, type PerfDump } from '../src/perf/analyze';
@@ -37,7 +38,7 @@ export function printReport(d: PerfDump, name = 'dump'): void {
   if (m.gpu) console.log(`   GPU ${m.gpu}`);
   console.log(`\n   ${s.seconds} s, ${s.frames} frames; moving ${s.speed.movingSeconds} s at mean ${s.speed.mean} m/s (${(s.speed.mean * 2.237).toFixed(0)} mph), max ${s.speed.max} m/s`);
   const iv = s.interval, lp = s.loop;
-  console.log(`   frame interval ms  p50 ${iv.p50}  p95 ${iv.p95}  p99 ${iv.p99}  max ${iv.max}   >33 ms ${s.hitches33}  >50 ms ${s.hitches50}`);
+  console.log(`   frame interval ms  p50 ${iv.p50}  p95 ${iv.p95}  p99 ${iv.p99}  max ${iv.max}   missed a refresh ${s.missed}  >33 ms ${s.hitches33}  >50 ms ${s.hitches50}`);
   console.log(`   our loop ms        p50 ${lp.p50}  p95 ${lp.p95}  p99 ${lp.p99}  max ${lp.max}`);
   console.log('\n   where the main loop goes (mean ms per frame)');
   const max = Math.max(...Object.values(s.sections));
@@ -63,6 +64,36 @@ export function printReport(d: PerfDump, name = 'dump'): void {
   for (const f of s.findings) console.log(`   - ${f}`);
 }
 
+/** One row per headline metric, one column per dump. */
+export function printCompare(named: [string, PerfDump][]): void {
+  const rows: [string, (s: ReturnType<typeof summarize>) => string | number][] = [
+    ['seconds', (s) => s.seconds],
+    ['mean speed m/s', (s) => s.speed.mean],
+    ['unbuilt in view: total s', (s) => s.stream.holeSeconds],
+    ['unbuilt in view: longest s', (s) => s.stream.maxHoleSeconds],
+    ['unbuilt in fog s', (s) => s.stream.fogHoleSeconds],
+    ['runway min s', (s) => s.stream.runwayMin],
+    ['runway p10 s', (s) => s.stream.runwayP10],
+    ['wanted->shown p50 ms', (s) => s.stream.buildWait.p50],
+    ['wanted->shown p95 ms', (s) => s.stream.buildWait.p95],
+    ['first builds', (s) => s.stream.builds],
+    ['rebuilds', (s) => s.stream.rebuilds],
+    ['dropped unshown', (s) => s.stream.droppedUnshown],
+    ['frame p50 ms', (s) => s.interval.p50],
+    ['frame p99 ms', (s) => s.interval.p99],
+    ['frames missing a refresh', (s) => s.missed],
+    ['frames > 33 ms', (s) => s.hitches33],
+    ['loop p50 ms', (s) => s.loop.p50],
+    ['loop p99 ms', (s) => s.loop.p99],
+    ['meshing ms/frame', (s) => s.sections.chunkBuild ?? 0],
+    ['mapgen in frames ms', (s) => s.mapgen.syncMs],
+  ];
+  const sums = named.map(([, d]) => summarize(d));
+  const w = Math.max(12, ...named.map(([n]) => n.length));
+  console.log(`\n${''.padEnd(28)}${named.map(([n]) => n.padStart(w + 2)).join('')}`);
+  for (const [label, f] of rows) console.log(`${label.padEnd(28)}${sums.map((s) => String(f(s)).padStart(w + 2)).join('')}`);
+}
+
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   const argv = process.argv.slice(2);
   if (!argv.length || argv.includes('--help') || argv.includes('-h')) {
@@ -72,11 +103,16 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   const li = argv.indexOf('--last');
   const last = li >= 0 ? Number(argv[li + 1]) : undefined;
   const files = argv.filter((a, i) => !a.startsWith('--') && !(li >= 0 && i === li + 1));
-  for (const f of files) {
+  const dumps: [string, PerfDump][] = files.map((f) => {
     let d = JSON.parse(readFileSync(f, 'utf8')) as PerfDump;
     if (d.version !== 1) throw new Error(`${f}: not a perf dump (version ${String(d.version)})`);
     if (last) d = lastSeconds(d, last);
-    if (argv.includes('--json')) console.log(JSON.stringify(summarize(d), null, 2));
-    else printReport(d, f);
-  }
+    return [f, d];
+  });
+  if (argv.includes('--compare')) printCompare(dumps.map(([f, d]) => [f.split('/').slice(-2).join('/').replace(/\.json$/, ''), d]));
+  else
+    for (const [f, d] of dumps) {
+      if (argv.includes('--json')) console.log(JSON.stringify(summarize(d), null, 2));
+      else printReport(d, f);
+    }
 }

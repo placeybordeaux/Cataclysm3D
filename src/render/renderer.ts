@@ -463,6 +463,8 @@ export class Renderer {
     const fwd = this.rig.camera.getWorldDirection(this.tmpV);
     const fl = Math.hypot(fwd.x, fwd.z);
     if (fl > 0.1) { this.chunks.forward.x = fwd.x / fl; this.chunks.forward.y = fwd.z / fl; }
+    // what's "in view" for build order (ultrawide: ~62 degrees each side)
+    this.chunks.viewHalf = Math.atan(Math.tan((this.rig.camera.fov * Math.PI) / 360) * this.rig.camera.aspect);
     this.chunks.update(p.x, p.y, p.z, (z) => this.zVisible(z));
     frameStats.lap('chunks');
     this.source.flush?.();

@@ -23,6 +23,12 @@ import { terrainShape } from './tileKinds';
 //    One volumetric chunk near the player is 5-15 ms of meshing; built in one go it was the
 //    30-60 ms frame when sprinting or driving through town under the "full" look.
 //  - entries beyond radius + 1 are disposed (hysteresis avoids thrash at borders)
+//  - schedule 'need' (default, docs/PERF.md): chunks are built in the order they will be
+//    *needed* — unbuilt chunks in view first, then by the seconds until the player's motion
+//    brings them inside the fog — and LOD flips are cosmetic refinements done only when the
+//    world ahead is built. Driving through town used to spend two thirds of the meshing on
+//    near-ring LOD flips while the road ahead stayed unbuilt for 10-20 s. 'distance' is the
+//    wave-3 order (squared distance, chunks behind the camera later).
 
 interface Entry {
   cx: number;
@@ -42,7 +48,7 @@ interface Entry {
   /** inside midRadius but not lodRadius */
   mid?: boolean;
   /** in-progress (time-sliced) build and the signature it started from */
-  job: { gen: Generator<void, void>; sig: number; ver: number; ms: number; t0: number; kind: 'full' | 'trees' } | null;
+  job: { gen: Generator<void, void>; sig: number; vsig: number; near: boolean; ver: number; ms: number; t0: number; kind: 'full' | 'trees' } | null;
   /** own chunk version at the last finished build (edits vs. LOD/neighbour changes) */
   builtVer: number;
   /** a build has finished at least once (invalidateAll keeps the old mesh up; this stays) */
@@ -54,7 +60,21 @@ interface Entry {
   treeMid?: boolean;
   /** performance.now() when the entry entered the wanted set (telemetry: queue age) */
   wantT: number;
+  /** chunk versions only (sig without the LOD flag), and at the last finished full build */
+  vsig: number;
+  builtVsig: number;
+  /** near flag of the last finished full build */
+  builtNear?: boolean;
+  /** 'need' schedule: what this frame's work on the entry is (see classify) */
+  cls: WorkClass;
 }
+
+/**
+ * Why an entry needs work: never shown (a hole), content changed (an edit, an overlay, a
+ * neighbour, invalidateAll), or only its LOD changed (up = entered the near ring, down = left
+ * it, trees = crossed the flora middle ring). The last three are cosmetic.
+ */
+type WorkClass = 'hole' | 'edit' | 'up' | 'down' | 'trees';
 
 /** What telemetry (src/perf) may read of an entry. */
 export type ChunkEntryView = Readonly<Pick<Entry, 'cx' | 'cy' | 'z' | 'shown' | 'wantT' | 'visible' | 'job'>>;
@@ -111,6 +131,17 @@ export class ChunkManager {
   urgentBudgetMs = 10;
   /** Camera forward on the ground plane (x, y in tile space), for build priority. */
   readonly forward = { x: 0, y: -1 };
+  /** Build order: 'need' (default) or 'distance' (the wave-3 order); ?stream=, cdda.streamSchedule. */
+  schedule: 'need' | 'distance' = 'need';
+  /** 'need': budget while an unbuilt chunk is in view or about to be (catching up beats a steady frame rate). */
+  boostBudgetMs = 8;
+  /** Half the camera's horizontal field of view (rad), for "in view" (the renderer keeps it current). */
+  viewHalf = 1.1;
+  /** Player velocity (tiles/s), smoothed from positions between updates. */
+  readonly vel = { x: 0, y: 0 };
+  /** 'need': an unbuilt chunk is in view or needed within half a second (the boost budget applies) */
+  behind = false;
+  private lastPos: { x: number; y: number; t: number } | null = null;
   /** Distance (tiles) inside which a chunk appearing counts as visible pop-in (set by the renderer from the fog). */
   visibleDist = 1e9;
   readonly stats: ChunkStats = { entries: 0, pending: 0, builtThisFrame: 0, lastBuildMs: 0, skippedEmpty: 0, lateBuilds: 0, maxBuildMs: 0, slowBuilds: 0, meshMs: 0, treeMs: 0, maxFrameMs: 0, builds: 0, maxStepMs: 0, maxStep: '', frameCreateMs: 0, frameMs: 0 };
@@ -175,6 +206,7 @@ export class ChunkManager {
     const pcx = Math.floor(px / CHUNK), pcy = Math.floor(py / CHUNK);
     const R = this.radius;
     const t0 = performance.now();
+    this.trackVelocity(px, py, t0);
     // 1. make sure desired entries exist, nearest first. Creating an entry generates map
     //    chunks (mapgen can be slow), so this shares the frame budget with meshing.
     if (this.offsetsR !== R) this.computeOffsets(R);
@@ -184,13 +216,13 @@ export class ChunkManager {
         const cx = pcx + dx, cy = pcy + dy;
         const k = key(cx, cy, z);
         if (this.entries.has(k)) continue;
-        if (!unlimited && created > 0 && performance.now() - t0 > this.budgetMs) break outer;
+        if (!unlimited && created > 0 && performance.now() - t0 > (this.behind ? this.boostBudgetMs : this.budgetMs)) break outer;
         const deps = this.depsOf(cx, cy, z);
         if (!deps[0]) continue; // outside MIN_Z..MAX_Z
         created++;
         this.entries.set(k, {
           cx, cy, z, chunk: deps[0], deps, sig: 0, builtSig: -1, group: null, sprites: null,
-          visible: true, d2: 0, near: false, job: null, builtVer: -1, wantT: t0,
+          visible: true, d2: 0, near: false, job: null, builtVer: -1, wantT: t0, vsig: 0, builtVsig: -1, cls: 'hole',
         });
         this.probe?.want(cx, cy, z);
       }
@@ -212,6 +244,7 @@ export class ChunkManager {
       if (vis !== e.visible) this.setVisible(e, vis);
       let sig = 0;
       for (const d of e.deps) sig = (sig * 31 + (d ? d.version + 1 : 0)) | 0;
+      e.vsig = sig;
       if (this.lodRadius > 0) {
         e.near = ddx * ddx + ddy * ddy <= this.lodRadius * this.lodRadius;
         sig = (sig * 31 + (e.near ? 7 : 3)) | 0;
@@ -221,10 +254,12 @@ export class ChunkManager {
       }
       e.sig = sig;
       if ((sig !== e.builtSig || e.job || this.treesStale(e)) && inLevels) {
-        e.d2 = this.priority(e, px, py, pz);
+        e.d2 = this.schedule === 'need' ? this.needPriority(e, px, py, pz) : this.priority(e, px, py, pz);
         dirty.push(e);
       }
     }
+    if (this.schedule === 'need') this.deferCosmetic(dirty);
+    else this.behind = false;
     // 3. rebuild in priority order under budget; a build may take several frames
     dirty.sort((a, b) => a.d2 - b.d2);
     frameStats.lap('chunks.sig');
@@ -237,7 +272,7 @@ export class ChunkManager {
       // exist the view is curtained (nearChunks.ts).
       const nearP = e.z === pz && Math.abs(e.cx - pctx) <= 1 && Math.abs(e.cy - pcty) <= 1;
       const urgent = nearP && (!e.shown || (e.builtSig !== -1 && e.chunk.version !== e.builtVer));
-      const budget = urgent ? this.urgentBudgetMs : this.budgetMs;
+      const budget = urgent ? this.urgentBudgetMs : this.behind ? this.boostBudgetMs : this.budgetMs;
       const now = performance.now();
       if (!unlimited && (built > 0 || created > 0) && now - t0 > budget) break;
       if (e.builtSig === -1 && e.z === pz && !e.job) {
@@ -247,7 +282,10 @@ export class ChunkManager {
       }
       if (!e.job) {
         const full = e.sig !== e.builtSig;
-        e.job = { gen: full ? this.buildSteps(e) : this.treeSteps(e), sig: full ? e.sig : e.builtSig, ver: full ? e.chunk.version : e.builtVer, ms: 0, t0: now, kind: full ? 'full' : 'trees' };
+        e.job = {
+          gen: full ? this.buildSteps(e) : this.treeSteps(e), sig: full ? e.sig : e.builtSig, vsig: full ? e.vsig : e.builtVsig,
+          near: full ? e.near : !!e.builtNear, ver: full ? e.chunk.version : e.builtVer, ms: 0, t0: now, kind: full ? 'full' : 'trees',
+        };
       }
       const job = e.job;
       const b0 = performance.now();
@@ -258,6 +296,8 @@ export class ChunkManager {
       // A stale result (the map changed mid-build) still replaces the old mesh; builtSig
       // keeps the job's signature so the entry goes dirty again and rebuilds.
       e.builtSig = job.sig;
+      e.builtVsig = job.vsig;
+      e.builtNear = job.near;
       e.builtVer = job.ver;
       if (this.probe) {
         const end = performance.now();
@@ -293,6 +333,84 @@ export class ChunkManager {
     // finish what's started before starting a peer: half-built jobs hold their data
     if (e.job) d2 *= 0.8;
     return d2;
+  }
+
+  /** Smoothed player velocity from successive update() positions; a jump (teleport) resets it. */
+  private trackVelocity(px: number, py: number, now: number): void {
+    const l = this.lastPos;
+    if (l && now > l.t) {
+      const dt = (now - l.t) / 1000;
+      const vx = (px - l.x) / dt, vy = (py - l.y) / dt;
+      if (Math.hypot(vx, vy) < 80 && dt < 0.5) {
+        const k = Math.min(1, dt * 4);
+        this.vel.x += (vx - this.vel.x) * k;
+        this.vel.y += (vy - this.vel.y) * k;
+      } else this.vel.x = this.vel.y = 0;
+    }
+    this.lastPos = { x: px, y: py, t: now };
+  }
+
+  private minHoleNeed = Infinity;
+  private anyHole = false;
+
+  /**
+   * 'need' build order, lower first: roughly the seconds until the chunk is needed. Inside the
+   * fog range and in view = 0; beyond it, the distance still to cover at the speed the player
+   * closes on it (1 m/s floor, so standing still fills the outer ring nearest first); out of
+   * view later (much later when driving: the camera follows the road); basements later still.
+   * Cosmetic work (LOD flips) is ranked after every hole and edit.
+   */
+  private needPriority(e: Entry, px: number, py: number, pz: number): number {
+    const x0 = e.cx * CHUNK, y0 = e.cy * CHUNK;
+    const nx = Math.max(x0, Math.min(px, x0 + CHUNK)) - px, ny = Math.max(y0, Math.min(py, y0 + CHUNK)) - py;
+    const d = Math.hypot(nx, ny);
+    const ccx = x0 + CHUNK / 2 - px, ccy = y0 + CHUNK / 2 - py;
+    const len = Math.hypot(ccx, ccy);
+    const speed = Math.hypot(this.vel.x, this.vel.y);
+    // the fog is opaque from (radius - 1) chunks (renderer: fogFar); anything closer can be seen
+    const fogFar = Math.max(2, this.radius - 1) * CHUNK;
+    let t = 0;
+    if (d > fogFar) {
+      const closing = len > 0 ? (ccx * this.vel.x + ccy * this.vel.y) / len : 0;
+      t = (d - fogFar) / Math.max(closing, 1);
+    }
+    const inView = len < CHUNK * 1.2 || Math.acos(Math.max(-1, Math.min(1, (ccx * this.forward.x + ccy * this.forward.y) / len))) < this.viewHalf + Math.atan((CHUNK * 0.71) / len);
+    if (!inView) t += speed > 4 ? 3 : 0.75;
+    if (e.z < pz) t += 1.5;
+    else if (e.z > pz) t += 0.2;
+    t += d * 0.002;
+    const cls: WorkClass = !e.shown ? 'hole' : e.vsig !== e.builtVsig || e.builtSig === -1 ? 'edit' : e.near !== !!e.builtNear ? (e.near ? 'up' : 'down') : 'trees';
+    e.cls = cls;
+    if (cls === 'hole') {
+      if (t < this.minHoleNeed) this.minHoleNeed = t;
+      this.anyHole = true;
+    }
+    // finish what's started before starting a peer: half-built jobs hold their data
+    const started = e.job ? -0.05 : 0;
+    if (cls === 'hole' || cls === 'edit') return t + (cls === 'edit' ? 0.1 : 0) + started;
+    if (cls === 'down') return 50 + t + started;
+    return 5 + t + started;
+  }
+
+  /**
+   * Drop this frame's cosmetic work while the world isn't built: near-ring upgrades and tree
+   * swaps wait until no hole is needed within 3 s; downgrades (leaving the near ring: the
+   * detailed mesh is already up and only costs a little render time) wait until the player
+   * stands still with nothing unbuilt at all. Sets `behind` (boost budget) for this frame.
+   */
+  private deferCosmetic(dirty: Entry[]): void {
+    const soon = this.minHoleNeed, any = this.anyHole;
+    this.behind = soon < 0.5;
+    this.minHoleNeed = Infinity;
+    this.anyHole = false;
+    const moving = Math.hypot(this.vel.x, this.vel.y) > 1.5;
+    let n = 0;
+    for (const e of dirty) {
+      if ((e.cls === 'up' || e.cls === 'trees') && soon < 3) continue;
+      if (e.cls === 'down' && (moving || any)) continue;
+      dirty[n++] = e;
+    }
+    dirty.length = n;
   }
 
   private offsets: [number, number][] = [];

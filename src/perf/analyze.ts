@@ -41,6 +41,8 @@ export interface PerfSummary {
   frames: number;
   interval: ReturnType<typeof quantiles>;
   loop: ReturnType<typeof quantiles>;
+  /** frames that missed a refresh: interval > 1.5x the median (a dropped vsync at any refresh rate) */
+  missed: number;
   hitches33: number;
   hitches50: number;
   /** mean ms per frame by section */
@@ -148,6 +150,7 @@ export function summarize(d: PerfDump): PerfSummary {
     frames: n,
     interval: quantiles(iv),
     loop: quantiles(loop),
+    missed: 0,
     hitches33: iv.filter((v) => v > 33.4).length,
     hitches50: iv.filter((v) => v > 50).length,
     sections,
@@ -176,6 +179,7 @@ export function summarize(d: PerfDump): PerfSummary {
     worstFrames,
     findings: [],
   };
+  s.missed = iv.filter((v) => v > 1.5 * s.interval.p50).length;
   s.findings = findings(s);
   return s;
 }
@@ -193,6 +197,7 @@ function findings(s: PerfSummary): string[] {
   const sec = s.sections;
   const top = Object.entries(sec).filter(([k]) => !['mesh', 'trees', 'genSync', 'genHooks', 'kModels', 'kSurfaces', 'kDressing', 'kRooms', 'gpu', 'wait'].includes(k)).sort((a, b) => b[1] - a[1]).slice(0, 3);
   if (top.length) f.push(`Main loop per frame: ${top.map(([k, v]) => `${k} ${v} ms`).join(', ')}.`);
+  if (s.missed > s.frames * 0.05) f.push(`${s.missed} of ${s.frames} frames missed a refresh (over 1.5x the median ${s.interval.p50} ms).`);
   if (s.hitches50 > 0) f.push(`${s.hitches50} frames over 50 ms, ${s.hitches33} over 33 ms (worst ${s.interval.max} ms).`);
   if (!f.length) f.push('No streaming or frame-time problems in this window.');
   return f;
