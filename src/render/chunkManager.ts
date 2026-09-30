@@ -429,7 +429,8 @@ export class ChunkManager {
     this.stats.builtThisFrame = built;
     // deferred 'high' holes are still pending (the level audit waits for them)
     this.stats.pending = dirty.length - built + this.deferredHoles;
-    this.pendingLast = this.stats.pending;
+    // (the creation share keys on work actually queued this frame, not on deferred tower tops)
+    this.pendingLast = dirty.length - built;
     this.stats.entries = this.entries.size;
     if (this.audit && (unlimited || ++this.auditTick % 60 === 0)) this.auditLevels(px, py, pz, creationDone && this.stats.pending === 0);
   }
