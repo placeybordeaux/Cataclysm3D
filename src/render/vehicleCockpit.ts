@@ -5,6 +5,7 @@ import { GeomBuilder, type V3 } from './geometry';
 import { patchNormalOutput } from './materials';
 import type { TileFrame } from './textureSource';
 import { Batches, chamferBox, partFrames, tube } from './vehicleGeom';
+import type { WheelHands } from './vehicleHands';
 
 // The driver's-seat extras, built only for the vehicle you drive (VehicleRenderer): the
 // steering wheel as its own mesh turning with the front wheels, your forearms and fists on
@@ -23,6 +24,8 @@ export interface CockpitAnchors {
   elbows: [V3, V3];
   /** The windscreen film (inside the glass, UVs 0..1 across and up), or null if broken. */
   film: THREE.BufferGeometry | null;
+  /** Wiper pivots at the base of the windscreen, the glass's up / out directions, blade length. */
+  wipers: { pivot: V3; up: V3; out: V3; len: number }[];
 }
 
 // --- textures --------------------------------------------------------------------------
@@ -154,23 +157,32 @@ export interface HandColors {
   skin: number;
 }
 
-/** Steering wheel ring + spokes + column-less hub, centred on the origin, same tilt as the model. */
-function wheelGeometry(r: number, tilt: number, F: Record<string, TileFrame>): GeomBuilder {
-  const g = new GeomBuilder();
-  const N = 12;
-  const pt = (i: number): V3 => {
-    const a = (i / N) * Math.PI * 2;
-    const u = Math.cos(a) * r, w = Math.sin(a) * r;
+/**
+ * Steering wheel centred on the origin, tilted like the model's: a round rim (12 segments of
+ * an 8-sided tube, so it reads as a ring, not boxes), three spokes and a hub with a horn pad.
+ * The rim's upper arc is a shade lighter (worn leather catching the light).
+ */
+function wheelGeometry(r: number, tilt: number, F: Record<string, TileFrame>): THREE.BufferGeometry {
+  const b = new Batches();
+  const N = 16;
+  const pt = (a: number, rr = r): V3 => {
+    const u = Math.cos(a) * rr, w = Math.sin(a) * rr;
     return [-u * Math.sin(tilt), u * Math.cos(tilt), w];
   };
-  for (let i = 0; i < N; i++) tube(g, pt(i), pt(i + 1), 0.024, F.leather, 5);
-  // three spokes and a hub
-  for (const i of [3, 9, 6]) tube(g, [0, 0, 0], pt(i), 0.016, F.dark, 4);
-  chamferBox(g, -0.03, -0.045, -0.045, 0.02, 0.045, 0.045, 0.02, F.dark, F.dark);
-  return g;
+  for (let i = 0; i < N; i++) {
+    const a0 = (i / N) * Math.PI * 2, a1 = ((i + 1) / N) * Math.PI * 2;
+    const top = Math.cos((a0 + a1) / 2) > 0.55;
+    tube(b.get(top ? 0x44444c : 0x2a2a30), pt(a0), pt(a1), 0.017, F.dark, 8);
+  }
+  for (const a of [Math.PI / 2, -Math.PI / 2, Math.PI]) tube(b.get(0x2e2e34), pt(a, 0.035), pt(a, r - 0.015), 0.013, F.metal, 5);
+  // hub: a short fat cylinder along the column axis, a lighter horn pad on its face
+  const n: V3 = [Math.cos(tilt), Math.sin(tilt), 0];
+  tube(b.get(0x222226), [n[0] * 0.03, n[1] * 0.03, 0], [-n[0] * 0.03, -n[1] * 0.03, 0], 0.045, F.dark, 8);
+  tube(b.get(0x3a3a40), [-n[0] * 0.03, -n[1] * 0.03, 0], [-n[0] * 0.034, -n[1] * 0.034, 0], 0.036, F.metal, 8);
+  return b.build()!;
 }
 
-/** A fist gripping the rim: knuckles over the top of it, the thumb along the inside. */
+/** Fallback fist (no character renderer): a knuckle block and a thumb. */
 function fistGeometry(F: Record<string, TileFrame>): GeomBuilder {
   const g = new GeomBuilder();
   chamferBox(g, -0.03, -0.028, -0.035, 0.03, 0.03, 0.035, 0.014, F.fabric, F.fabric);
@@ -178,48 +190,78 @@ function fistGeometry(F: Record<string, TileFrame>): GeomBuilder {
   return g;
 }
 
+/** Wiper sweep: from rest (0.12 rad above the base) up to ~95 deg and back. */
+const WIPER_REST = 0.12, WIPER_TOP = 1.55;
+
 export class Cockpit {
   readonly group = new THREE.Group();
   private wheel: THREE.Mesh;
   private fists: THREE.Mesh[] = [];
   private arms: THREE.Mesh[] = [];
+  private hands: WheelHands | null;
+  private grips: [THREE.Matrix4, THREE.Matrix4] = [new THREE.Matrix4(), new THREE.Matrix4()];
+  private gripLocal: THREE.Matrix4[] = [];
+  private wipers: { mesh: THREE.Mesh; basis: THREE.Matrix4; len: number }[] = [];
+  private wipePhase = 0;
   private needles: { mesh: THREE.Mesh; kind: 'speed' | 'fuel'; value: number }[] = [];
   private steerShown = 0;
   private geos: THREE.BufferGeometry[] = [];
   private mats: THREE.Material[] = [];
   private a: CockpitAnchors;
 
-  constructor(a: CockpitAnchors, partsMat: THREE.Material, colors: HandColors) {
+  /** `hands`: the character-rig fists (vehicleHands.ts); null draws simple ones. */
+  constructor(a: CockpitAnchors, partsMat: THREE.Material, colors: HandColors, hands: WheelHands | null = null) {
     this.a = a;
+    this.hands = hands;
     const F = partFrames() as unknown as Record<string, TileFrame>;
     const own = <T extends THREE.BufferGeometry>(g: T) => (this.geos.push(g), g);
     const mat = <T extends THREE.Material>(m: T) => (this.mats.push(m), patchNormalOutput(m, false), m);
-    // wheel
-    const wb = new Batches();
-    const wg = wheelGeometry(a.wheel.r, a.wheel.tilt, F);
-    const wgeo = own(tint(wg.build(), 0x34343a));
-    void wb;
-    this.wheel = new THREE.Mesh(wgeo, partsMat);
+    this.wheel = new THREE.Mesh(own(wheelGeometry(a.wheel.r, a.wheel.tilt, F)), partsMat);
     this.wheel.position.set(a.wheel.x, a.wheel.y, a.wheel.z);
     this.group.add(this.wheel);
-    // hands: fists ride on the rim (children of the wheel), forearms are stretched each frame
-    const skinMat = mat(new THREE.MeshLambertMaterial({ color: colors.skin }));
-    const sleeveMat = mat(new THREE.MeshLambertMaterial({ color: colors.sleeve }));
-    const fist = own(fistGeometry(F).build());
-    const arm = own(new THREE.CylinderGeometry(0.03, 0.04, 1, 6, 1).translate(0, 0.5, 0));
+    // Grip frames on the rim at ten-to-two, in the wheel's frame: the fingers' curl axis (the
+    // fist's x) along the rim, the knuckles (-z) out over it and forward, the back of the
+    // hand (y) up toward the driver.
+    const t = a.wheel.tilt;
+    const U = new THREE.Vector3(-Math.sin(t), Math.cos(t), 0), Wv = new THREE.Vector3(0, 0, 1), N = new THREE.Vector3(Math.cos(t), Math.sin(t), 0);
     for (const s of [-1, 1]) {
-      const f = new THREE.Mesh(fist, skinMat);
-      // 10-to-2: on the rim, 60 deg either side of the top
-      const ang = (s * Math.PI) / 2.8;
-      // a little outside the rim and toward the driver: the knuckles wrap over it
-      const R = a.wheel.r * 1.08, u = Math.cos(ang) * R, w = Math.sin(ang) * R;
-      f.position.set(-u * Math.sin(a.wheel.tilt) - 0.025 * Math.cos(a.wheel.tilt), u * Math.cos(a.wheel.tilt) - 0.025 * Math.sin(a.wheel.tilt), w);
-      f.rotation.set(0, 0, a.wheel.tilt);
-      this.wheel.add(f);
-      this.fists.push(f);
-      const m = new THREE.Mesh(arm, sleeveMat);
+      const ang = (s * Math.PI) / 3.4;
+      const radial = U.clone().multiplyScalar(Math.cos(ang)).addScaledVector(Wv, Math.sin(ang));
+      const pos = radial.clone().multiplyScalar(a.wheel.r);
+      const tangent = U.clone().multiplyScalar(-Math.sin(ang)).addScaledVector(Wv, Math.cos(ang)).normalize();
+      const knuckles = radial.clone().multiplyScalar(0.55).addScaledVector(N, 0.85).normalize();
+      const z = knuckles.clone().negate();
+      const x = tangent.clone().sub(z.clone().multiplyScalar(tangent.dot(z))).normalize().multiplyScalar(s);
+      const y = new THREE.Vector3().crossVectors(z, x);
+      this.gripLocal.push(new THREE.Matrix4().makeBasis(x, y, z).setPosition(pos));
+    }
+    if (hands) this.group.add(hands.group);
+    else {
+      const skinMat = mat(new THREE.MeshLambertMaterial({ color: colors.skin }));
+      const sleeveMat = mat(new THREE.MeshLambertMaterial({ color: colors.sleeve }));
+      const fist = own(fistGeometry(F).build());
+      const arm = own(new THREE.CylinderGeometry(0.03, 0.04, 1, 6, 1).translate(0, 0.5, 0));
+      for (const g of this.gripLocal) {
+        const f = new THREE.Mesh(fist, skinMat);
+        f.applyMatrix4(g);
+        this.wheel.add(f);
+        this.fists.push(f);
+        const m = new THREE.Mesh(arm, sleeveMat);
+        this.group.add(m);
+        this.arms.push(m);
+      }
+    }
+    // wipers: a blade on an arm, pivoting in the glass plane (rotation about the glass normal)
+    const blade = own(new THREE.BoxGeometry(1, 0.012, 0.018).translate(0.5, 0.006, 0));
+    const wiperMat = mat(new THREE.MeshLambertMaterial({ color: 0x141416 }));
+    for (const w of a.wipers) {
+      const up = new THREE.Vector3(...w.up), out = new THREE.Vector3(...w.out), across = new THREE.Vector3(0, 0, 1);
+      // wiper frame: x = along the base (+z, across the car), y = up the glass, z = out of it
+      const basis = new THREE.Matrix4().makeBasis(across, up, out).setPosition(new THREE.Vector3(...w.pivot));
+      const m = new THREE.Mesh(blade, wiperMat);
+      m.matrixAutoUpdate = false;
       this.group.add(m);
-      this.arms.push(m);
+      this.wipers.push({ mesh: m, basis, len: w.len });
     }
     // dials: faces and needles
     const tex = dialTexture();
@@ -255,25 +297,44 @@ export class Cockpit {
   private tmpA = new THREE.Vector3();
   private tmpB = new THREE.Vector3();
   private up = new THREE.Vector3(0, 1, 0);
+  private rot = new THREE.Matrix4();
+  private scl = new THREE.Matrix4();
 
-  update(v: Vehicle, dt: number, fuelFrac: number): void {
+  /**
+   * `wipe`: 0 off, 1 intermittent-ish (drizzle / rain), 2 fast (storm). `world`: the vehicle's
+   * map position (the hands' light-map lookup).
+   */
+  update(v: Vehicle, dt: number, fuelFrac: number, wipe = 0, world = { x: v.x, y: v.y, z: v.z }): void {
     const a = this.a;
     // the wheel follows the front wheels' angle, eased like a hand on it
     this.steerShown += (v.steer * WHEEL_RATIO - this.steerShown) * Math.min(1, dt * 12);
     const n = this.tmpA.set(Math.cos(a.wheel.tilt), Math.sin(a.wheel.tilt), 0);
     this.wheel.quaternion.setFromAxisAngle(n, -this.steerShown);
     this.wheel.updateMatrix();
-    // forearms: elbow -> fist, rebuilt from the fists' new positions
-    this.fists.forEach((f, i) => {
-      const fp = this.tmpB.copy(f.position).applyMatrix4(this.wheel.matrix);
-      const e = new THREE.Vector3(...a.elbows[i]);
-      const dir = fp.clone().sub(e);
-      const len = dir.length();
-      const arm = this.arms[i];
-      arm.position.copy(e);
-      arm.quaternion.setFromUnitVectors(this.up, dir.normalize());
-      arm.scale.set(1, Math.max(0.05, len - 0.03), 1);
-    });
+    if (this.hands) {
+      this.gripLocal.forEach((g, i) => this.grips[i].copy(this.wheel.matrix).multiply(g));
+      this.hands.update(dt, this.grips, world);
+    } else
+      // forearms: elbow -> fist, rebuilt from the fists' new positions
+      this.fists.forEach((f, i) => {
+        const fp = this.tmpB.copy(f.position).applyMatrix4(this.wheel.matrix);
+        const e = new THREE.Vector3(...a.elbows[i]);
+        const dir = fp.clone().sub(e);
+        const len = dir.length();
+        const arm = this.arms[i];
+        arm.position.copy(e);
+        arm.quaternion.setFromUnitVectors(this.up, dir.normalize());
+        arm.scale.set(1, Math.max(0.05, len - 0.03), 1);
+      });
+    // wipers: a cosine sweep while it rains, parked at rest otherwise (finishing the stroke)
+    if (wipe > 0 || this.wipePhase % 1 !== 0) {
+      const rate = wipe >= 2 ? 1.3 : 0.8;
+      const next = this.wipePhase + dt * rate;
+      this.wipePhase = wipe > 0 ? next : Math.floor(this.wipePhase) === Math.floor(next) ? next : Math.ceil(this.wipePhase);
+    }
+    const sweep = (1 - Math.cos((this.wipePhase % 1) * Math.PI * 2)) / 2;
+    const ang = WIPER_REST + (WIPER_TOP - WIPER_REST) * sweep;
+    for (const w of this.wipers) w.mesh.matrix.copy(w.basis).multiply(this.rot.makeRotationZ(ang)).multiply(this.scl.makeScale(w.len, 1, 1));
     for (const nd of this.needles) {
       const target = nd.kind === 'speed' ? Math.min(1, (Math.abs(v.velocity) * MPH_PER_MS) / SPEED_MAX_MPH) : Math.max(0, Math.min(1, fuelFrac));
       nd.value += (target - nd.value) * Math.min(1, dt * NEEDLE_RATE);
@@ -282,6 +343,7 @@ export class Cockpit {
   }
 
   dispose(): void {
+    this.hands?.dispose();
     for (const g of this.geos) g.dispose();
     for (const m of this.mats) m.dispose();
   }

@@ -7,7 +7,7 @@
 //   solo:<proto>[:<angle>[:<status>[:<dist>[:<hour>]]]]  (status: 0 intact, -1 used, 1 wrecked, smashed, trunk, burnt)
 //                     one prototype, camera `angle` deg from its nose (90 = right side),
 //                     spawn status (0 intact, -1 light damage, 1 wrecked), dist m off the body
-//   drive / drivechase / driveday / drivedaychase   driving a car (night: headlights on)
+//   drive / drivechase / driveday / drivedaychase / driverain   driving a car (night: headlights on; rain: wipers)
 //   nightstreet       the street view at 23:00 with the nearest car's headlights on
 //   top[:<dist>]      top-down camera over a street car (roofs hidden)
 window.vehicleView = async (name) => {
@@ -92,7 +92,7 @@ window.vehicleView = async (name) => {
     }
     c.gotoVehicle(`^${proto}$`, { radius: 2, dist: Number(dist), angle: Number(angle) });
     if (Number(hour) > 20 || Number(hour) < 5) c.vehicleLights(true, r.uid);
-  } else if (kind === 'drive' || kind === 'drivechase' || kind === 'driveday' || kind === 'drivedaychase') {
+  } else if (kind === 'drive' || kind === 'drivechase' || kind === 'driveday' || kind === 'drivedaychase' || kind === 'driverain') {
     const night = kind === 'drive' || kind === 'drivechase';
     c.setHour(night ? 23.2 : 15);
     c.teleportOmt(town.x, town.y);
@@ -102,6 +102,7 @@ window.vehicleView = async (name) => {
     for (const v of [...c.vehicleSystem.list]) if (v !== me && Math.hypot(v.x - me.x, v.y - me.y) < 8) c.vehicleSystem.remove(v);
     if (night) c.vehicleLights(true);
     c.renderer.rig.driveCam = kind.endsWith('chase') ? 'chase' : 'cockpit';
+    if (kind === 'driverain') c.setWeather('rain');
     c.drive(0, 0, 0.2);
   } else if (kind === 'top') {
     // top-down over the street: roofs hide so you see into the cabins

@@ -342,7 +342,7 @@ export function vehicleBodyMaterials(page: THREE.Texture): { mat: THREE.MeshLamb
     patchBandedLambert(shader, 'world');
     addNormalOutput(shader, true, 1);
     // Inside faces: a neutral trim grey keeping only a hint of the skin's pattern.
-    shader.fragmentShader = shader.fragmentShader.replace('#include <color_fragment>', '#include <color_fragment>\n  if (!gl_FrontFacing) diffuseColor.rgb = vec3(0.19, 0.19, 0.2) * (0.8 + 0.5 * dot(diffuseColor.rgb, vec3(0.3, 0.59, 0.11)));');
+    shader.fragmentShader = shader.fragmentShader.replace('#include <color_fragment>', '#include <color_fragment>\n  if (!gl_FrontFacing) diffuseColor.rgb = vec3(0.27, 0.27, 0.28) * (0.8 + 0.5 * dot(diffuseColor.rgb, vec3(0.3, 0.59, 0.11)));');
   };
   mat.customProgramCacheKey = () => 'cdda-vehicle-body';
   (mat.userData as any).mrt = true;
