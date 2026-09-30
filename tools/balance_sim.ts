@@ -63,6 +63,7 @@ const HELP = `balance_sim: headless difficulty-preset simulation (see docs/BALAN
   --seeds N                     world seeds (default 20), starting at --seed0 (default 1)
   --scenario all|day1|duel|first|needs|cold|range (default all)
   --aim sway|timing|dice        aim model for every scenario (default sway)
+  --reaction S                  range: seconds from seeing the reticle on target to the shot (default 0.18)
   --hours H                     day1 length in game hours from 08:00 (default 24)
   --set key=value[,key=value]   override preset knobs (e.g. --set spawnScale=0.5,safeRadius=16)
   --out FILE                    append JSON-lines records here
@@ -79,6 +80,7 @@ const { values: args } = parseArgs({
     seed0: { type: 'string', default: '1' },
     scenario: { type: 'string', default: 'all' },
     aim: { type: 'string', default: 'sway' },
+    reaction: { type: 'string', default: '0.18' },
     hours: { type: 'string', default: '24' },
     set: { type: 'string' },
     out: { type: 'string' },
@@ -688,8 +690,10 @@ function rangeDuel(seed: number, weapon: string, skill: number, dist: number): R
       // (a beat to raise the sights / settle the draw before judging the shot)
       if (args.aim === 'dice') fire = p.recoil <= aimFloorMoa(p, gun) * 1.2 || aimedFor >= 1.2;
       else {
-        const o = aim.offset(0.15);
-        if (Math.hypot(o.x, o.y) <= 0.7 * Math.atan2(z.radius, d)) pendingAt = t + 0.15;
+        // A person: sees the reticle on the body now, and the shot goes a reaction time later
+        // (--reaction, default 0.18 s) wherever the weave has taken it by then.
+        const o = aim.offset(0);
+        if (Math.hypot(o.x, o.y) <= 0.8 * Math.atan2(z.radius, d)) pendingAt = t + Number(args.reaction);
         else if (aimedFor >= 2) fire = true;
       }
     }
