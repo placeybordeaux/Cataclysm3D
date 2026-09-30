@@ -79,7 +79,13 @@ export function installLooks(game: Game, renderer: Renderer, worldgen: WorldGene
   const RADIUS_KEY = 'cdda3d.drawRadius';
   if (!new URLSearchParams(location.search).get('radius')) {
     try {
-      const r = Number(localStorage.getItem(RADIUS_KEY));
+      // Migrate the pre-wave-3 Options entry (cdda3d.options.radius, steps 4-10) once: nearest step here.
+      let stored = localStorage.getItem(RADIUS_KEY);
+      if (stored === null) {
+        const legacy = Number((JSON.parse(localStorage.getItem('cdda3d.options') ?? '{}') as { radius?: number }).radius);
+        if (legacy > 0) stored = String(RADII.reduce((a, b) => (Math.abs(b - legacy) < Math.abs(a - legacy) ? b : a)));
+      }
+      const r = Number(stored);
       if (RADII.includes(r)) renderer.chunks.radius = r;
     } catch {
       // storage blocked: default radius
@@ -92,6 +98,9 @@ export function installLooks(game: Game, renderer: Renderer, worldgen: WorldGene
       const i = Math.max(0, RADII.indexOf(renderer.chunks.radius));
       const r = RADII[(i + d + RADII.length) % RADII.length];
       renderer.chunks.radius = r;
+      // World prefetch stays one ring ahead of what is drawn (main.ts sets it at boot).
+      const prefetch = (api as unknown as { prefetch?: { opts: { radius: number } } }).prefetch;
+      if (prefetch) prefetch.opts.radius = r + 1;
       try {
         localStorage.setItem(RADIUS_KEY, String(r));
       } catch {
