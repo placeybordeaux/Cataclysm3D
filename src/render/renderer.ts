@@ -345,6 +345,9 @@ export class Renderer {
     return this.rig.mode;
   }
 
+  /** Top-down cuts the player's level to waist height (interiors visible, as in CDDA). Off shows whole buildings with roofs (screenshot recreations). */
+  topCutaway = true;
+
   setCameraMode(mode: CameraMode): void {
     this.rig.mode = mode;
     this.syncPlayerSprite();
@@ -438,8 +441,8 @@ export class Renderer {
   }
 
   private zVisible(z: number): boolean {
-    // Top-down hides everything above the player's level, like CDDA.
-    return this.rig.mode !== 'top' || z <= this.game.player.z;
+    // Top-down hides everything above the player's level, like CDDA (unless the cutaway is off).
+    return this.rig.mode !== 'top' || !this.topCutaway || z <= this.game.player.z;
   }
 
   /** Draw a frame. `fixedDt` (s) overrides the wall-clock step (frame-by-frame recordings). */
@@ -485,8 +488,9 @@ export class Renderer {
 
     // top-down: cut walls on the current level down to waist height
     const top = this.rig.mode === 'top';
-    shared.uCutFloor.value = top ? p.z * LEVEL_HEIGHT : -1e6;
-    shared.uCutTo.value = top ? p.z * LEVEL_HEIGHT + 1.1 : 1e6;
+    const cut = top && this.topCutaway;
+    shared.uCutFloor.value = cut ? p.z * LEVEL_HEIGHT : -1e6;
+    shared.uCutTo.value = cut ? p.z * LEVEL_HEIGHT + 1.1 : 1e6;
     shared.uSpriteTilt.value = top ? 0.55 : 0;
     shared.uTime.value = this.time;
     shared.uPlayerLevel.value = p.z;

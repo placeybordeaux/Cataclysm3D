@@ -58,6 +58,10 @@ export class CameraRig {
   fovFirst = 70;
   fovTop = 36;
   topDistance = 22;
+  /** Top-down camera tilt below the horizon (radians). 60° reads depth; 90° matches the 2D game's straight-down view (screenshot recreations). */
+  topPitch = TOP_PITCH;
+  /** Centre the on-foot top-down camera here instead of on the player (screenshot framing only; null = follow the player). */
+  topFocus: { x: number; y: number } | null = null;
   thirdDistance = 2.6;
   /** Systems that carry the player without walking (driving) switch the head-bob off. */
   suppressBob = false;
@@ -183,7 +187,8 @@ export class CameraRig {
       cam.rotation.set(p.pitch, -p.yaw, 0, 'YXZ');
       this.focus.set(p.x, base + eyeH, p.y);
     } else {
-      this.placeTop(p.x, base + 0.5, p.y, p.yaw, this.topDistance, lowResHeight);
+      const tf = this.topFocus;
+      this.placeTop(tf ? tf.x : p.x, base + 0.5, tf ? tf.y : p.y, p.yaw, this.topDistance, lowResHeight);
       this.focus.set(p.x, base + 1, p.y);
     }
     cam.updateProjectionMatrix();
@@ -239,7 +244,7 @@ export class CameraRig {
       const cam = this.camera;
       cam.fov = this.fovTop;
       const target = tmpEye.set(tx, th, ty);
-      cam.rotation.set(-TOP_PITCH, -yaw, 0, 'YXZ');
+      cam.rotation.set(-this.topPitch, -yaw, 0, 'YXZ');
       cam.updateMatrixWorld();
       const right = tmpRight.setFromMatrixColumn(cam.matrixWorld, 0);
       const up = tmpUp.setFromMatrixColumn(cam.matrixWorld, 1);

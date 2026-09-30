@@ -94,5 +94,8 @@ export function fieldStyle(type: string): { kind: 'decal' | 'cloud' | 'fire' | '
   if (/smoke|gas|haze|fog|mist|steam|spores|toxic|nuke|tear|cloud/.test(type)) {
     return { kind: 'cloud', color: /toxic|nuke|fungal|spores/.test(type) ? 0x7a8a50 : /tear/.test(type) ? 0xb0b0a0 : 0x7a7a7e };
   }
+  // Live electricity (electrified fences, shocker zombies, lab traps) was not drawn at all; a pale
+  // blue dithered cloud keeps it readable as a hazard until it gets its own arc effect.
+  if (/electric/.test(type)) return { kind: 'cloud', color: 0xbcd8ff };
   return { kind: 'none', color: 0 };
 }

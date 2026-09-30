@@ -71,6 +71,7 @@ svg.chart .axis{stroke:var(--muted);stroke-width:1}
 .gallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,300px),1fr));gap:18px}
 .shot{margin:0;background:var(--surface);border:1px solid var(--rule);border-radius:6px;overflow:hidden;display:flex;flex-direction:column}
 .shot.hero{grid-column:1/-1}
+.gallery.natural .shot img{aspect-ratio:auto;object-fit:contain;image-rendering:auto}
 .shot img{display:block;width:100%;aspect-ratio:16/9;object-fit:cover;image-rendering:pixelated;background:var(--quote)}
 .shot figcaption{padding:10px 12px 12px;font-size:.88rem}
 .shot .fn{display:block;font:.72rem "IBM Plex Mono",monospace;color:var(--muted);margin-bottom:2px}
@@ -107,7 +108,7 @@ footer{margin-top:48px;font-size:.85rem;color:var(--muted)}
   <h1>Building CDDA-3D</h1>
   <p class="dek">One prompt, four multiple-choice answers and 5 h 26 min later, a lead Claude Code session and 24 subagents had a playable real-time, first-person Cataclysm in the browser. This page collects the numbers, the story, the pictures and the quotes for a long-form post.</p>
   <nav class="toc" aria-label="Sections">
-    <a href="#numbers">Numbers</a><a href="#prompt">The prompt</a><a href="#timeline">Timeline</a><a href="#charts">Tokens &amp; code</a><a href="#gallery">Images</a><a href="#differences">Differences</a><a href="#commentary">Commentary</a><a href="#outline">Post outline</a><a href="#method">Method</a>
+    <a href="#numbers">Numbers</a><a href="#prompt">The prompt</a><a href="#timeline">Timeline</a><a href="#charts">Tokens &amp; code</a><a href="#recreations">Official shots, rebuilt</a><a href="#gallery">Images</a><a href="#differences">Differences</a><a href="#commentary">Commentary</a><a href="#outline">Post outline</a><a href="#method">Method</a>
   </nav>
   <figure class="herofig"><img src="images/03-town-street-hero.jpg" alt="A Bright Nights town street rendered in CDDA-3D"><figcaption>A small-town street from Cataclysm: Bright Nights map data, rendered in the engine at 1920×1080.</figcaption></figure>
 </header>
@@ -176,6 +177,26 @@ footer{margin-top:48px;font-size:.85rem;color:var(--muted)}
 <tr><td><code>tools</code>: extractors, screenshot, real-input and bench tools</td><td class="num">58</td><td class="num">10,597</td></tr>
 <tr><td>everything else in <code>src</code> (world, audio, save, progression, gallery…)</td><td class="num">87</td><td class="num">14,637</td></tr>
 </tbody></table></div>
+</section>
+
+<section id="recreations">
+<h2>Recreating the official screenshots</h2>
+<div class="read">
+<p>Two published images, rebuilt tile by tile in the engine: the <strong>Cataclysm: Bright Nights readme title image</strong> and the <strong>Cataclysm: DDA “UltiCa showcase, Sep 2021”</strong>. Each panel was transcribed by eye into a tile grid (terrain, furniture, monsters, items, fire, blood, electricity), stamped into an empty field and photographed twice. From straight above it matches the original's framing; from the ground it shows what the same place looks like in first person.</p>
+<p>Original on the left or top, ours on the right or bottom. Default voxel look throughout. What matched and what couldn't be recreated is in <code>recreations.md</code>. For example, the temple panel comes from the Arcana mod, which we don't load, so it's rebuilt from core stone, pews and a red carpet.</p>
+<p class="note">Originals: Cataclysm: Bright Nights readme title image and Cataclysm: DDA <code>ultica-showcase-sep-2021.png</code>, both CC BY-SA 3.0, © the Cataclysm: Bright Nights and Cataclysm: DDA contributors (UltiCa tileset by its authors). They are shown cropped next to our renders. Our images are derived from CC BY-SA data and shared under the same licence.</p>
+</div>
+<div class="gallery natural">
+{{RC_WIDE}}
+</div>
+<h3>Panel by panel, from above</h3>
+<div class="gallery natural">
+{{RC_PAIRS}}
+</div>
+<h3>The same places from the ground</h3>
+<div class="gallery">
+{{RC_FP}}
+</div>
 </section>
 
 <section id="gallery">

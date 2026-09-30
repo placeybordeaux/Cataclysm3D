@@ -284,3 +284,105 @@ Seed-1 landmarks: the Evac Shelter at OMT (53,39) outside Holden; the refugee ce
 ### 79-v1-vs-now-zombies.jpg
 **Caption:** Zombies then and now: v1's camera-facing sprite billboard (left) and wave 3's modelled, sprite-painted bodies (right).
 **How:** 72 and 10 side by side.
+
+## Recreating the official screenshots
+
+Two published screenshots rebuilt tile by tile in the engine: the **Cataclysm: Bright Nights readme
+title image** and the **Cataclysm: DDA "UltiCa showcase, Sep 2021"**. Both originals are CC BY-SA
+3.0 (© the Cataclysm: Bright Nights and Cataclysm: DDA contributors; UltiCa tileset by its
+authors), copied unmodified into `images/originals/` and cropped for the comparisons. Inventories,
+method and mismatches: `recreations.md`.
+
+Rendered from `bn` plus this branch's small camera additions (`rig.topPitch`, `rig.topFocus`,
+`renderer.topCutaway`) and the electricity-field fix, seed 1, factory default look (voxel) unless
+the file says `-full`. Regenerate:
+
+```
+~/claude-stuff/bin/heavy --kind gpu --mem 2 --name "cdda3d recreations" -- \
+  npx tsx notes/blog-post/scripts/blog-shots.ts --gpu --shots notes/blog-post/scripts/recreate-shots.js --raw /tmp/rc-raw
+python3 notes/blog-post/scripts/recreate-compose.py --raw /tmp/rc-raw          # inside nix-shell (magick)
+```
+
+### rc-bn-compare.jpg
+**Caption:** The Bright Nights title image, panel by panel: the original (left, CC BY-SA 3.0, BN contributors) and our rebuild seen straight down (right).
+**How:** each panel's map area cropped from the original; ours is the matching `rc-<scene>-top` capture cropped to the same tiles. Sidebars left out.
+
+### rc-dda-compare.jpg
+**Caption:** The DDA UltiCa showcase (top, CC BY-SA 3.0, DDA contributors) and the same four scenes rebuilt in CDDA-3D (bottom), in the same layout.
+**How:** four `rc-dda_*-top` captures cropped to 19×25 tiles and scaled to the original's panel size; 75% size.
+
+### rc-bn-strip.jpg
+**Caption:** The Bright Nights title image (top) and the same four places from the ground in CDDA-3D: the burning yard, the roundabout horde, the lab fence, the temple on the lake.
+**How:** the original scaled to 1280 wide over the four `rc-bn_*-fp` views in a 2×2 grid.
+
+### rc-dda-strip.jpg
+**Caption:** The DDA UltiCa showcase (top) and the same four places from the ground: the bus and the horde, the autumn woods, the cabin farm, the lab.
+**How:** the original scaled to 1600 wide over the four `rc-dda_*-fp` views.
+
+### rc-bn_fire-pair.jpg
+**Caption:** BN title, panel 1: two houses and a grass fire with zombies walking into it. Original left, ours right.
+**How:** `recreate.stamp('bn_fire')`, straight-down camera with the cutaway off so roofs show.
+
+### rc-bn_horde-pair.jpg
+**Caption:** BN title, panel 2: a horde cut down at a roundabout. Ours is lit at 17:18 instead of 8:04 PM.
+
+### rc-bn_lab-pair.jpg
+**Caption:** BN title, panel 3: electrified chain-link fences in a science lab tower.
+
+### rc-bn_temple-pair.jpg
+**Caption:** BN title, panel 4: the Arcana mod's "floating temple", rebuilt from core stone, pews and a red carpet on deep water.
+
+### rc-dda_street-pair.jpg
+**Caption:** DDA showcase, panel A: a hulk in a bus, a special-zombie horde, and a mall with mannequins and changing rooms.
+
+### rc-dda_forest-pair.jpg
+**Caption:** DDA showcase, panel B: autumn woods with triffids. Our 3D canopies are wider than the 2D tree sprites, so the same trees cover more ground.
+
+### rc-dda_farm-pair.jpg
+**Caption:** DDA showcase, panel C: a log cabin, crop rows and swampy ground.
+
+### rc-dda_lab-pair.jpg
+**Caption:** DDA showcase, panel D: a laboratory wing with a sealed central chamber.
+
+### rc-bn_fire-fp.jpg
+**Caption:** The BN title's burning yard from the road: zombies walking into the fire between two houses.
+**How:** `recreate.fp('bn_fire')`: first person at the road, looking up the grass strip.
+
+### rc-bn_horde-fp.jpg
+**Caption:** The BN title's roundabout horde from the median, among the bodies and the blood.
+
+### rc-bn_lab-fp.jpg
+**Caption:** The BN title's lab: electrified fences, crawlers at the gate, the planter and statue.
+
+### rc-bn_temple-fp.jpg
+**Caption:** Inside our stand-in for the floating temple: pews, the red altar carpet, remains on the floor.
+
+### rc-dda_street-fp.jpg
+**Caption:** The DDA showcase street from the sidewalk: the bus, the horde and the blood.
+
+### rc-dda_forest-fp.jpg
+**Caption:** The DDA showcase's autumn woods from the ground.
+
+### rc-dda_farm-fp.jpg
+**Caption:** The DDA showcase's cabin farm from the fields.
+
+### rc-dda_lab-fp.jpg
+**Caption:** Inside the DDA showcase's lab: benches and scientist zombies.
+
+### rc-bn_fire-fp-full.jpg
+**Caption:** The burning yard in the `full` visual style, for comparison with the default voxel style.
+
+### rc-dda_street-fp-full.jpg
+**Caption:** The DDA showcase street in the `full` visual style.
+
+### rc-bn_fire-fp-hero.jpg
+**Caption:** Full-size (1920x1080) version of rc-bn_fire-fp: the BN title's burning yard from the road.
+
+### rc-bn_horde-fp-hero.jpg
+**Caption:** Full-size version of rc-bn_horde-fp: the roundabout horde at sunset.
+
+### rc-dda_street-fp-hero.jpg
+**Caption:** Full-size version of rc-dda_street-fp: the DDA showcase's bus and horde.
+
+### rc-dda_farm-fp-hero.jpg
+**Caption:** Full-size version of rc-dda_farm-fp: the DDA showcase's cabin farm.

@@ -10,7 +10,8 @@
 //   ~/claude-stuff/bin/heavy --kind gpu --mem 2 --name "cdda3d blog shots" -- \
 //     npx tsx notes/blog-post/scripts/blog-shots.ts [--only id1,id2] [--gpu]
 //
-// Options: --only a,b (default: every shot), --out <dir> (default notes/blog-post/images),
+// Options: --shots <file> (a shot list module, default shots.js; recreate-shots.js = the official-screenshot
+// recreations), --only a,b (default: every shot), --out <dir> (default notes/blog-post/images),
 // --raw <dir> (full-size PNGs, default $TMPDIR/cdda3d-blog-raw — scratch, kept out of the repo),
 // --port N (default 5177), --size WxH (default 1920x1080), --gpu (ANGLE/Vulkan; without it
 // SwiftShader renders at 1-3 fps and the "full" effects are slow), --probe '<js>' (evaluate
@@ -21,7 +22,7 @@ import { mkdirSync, readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
-import { shots, type Shot } from './shots.js';
+import { shots as defaultShots, type Shot } from './shots.js';
 
 const argv = process.argv.slice(2);
 if (argv.includes('--help') || argv.includes('-h')) {
@@ -39,6 +40,9 @@ const port = Number(opt('--port', '5177'));
 const size = opt('--size', '1920x1080').split('x').map(Number);
 const probe = opt('--probe', '');
 const gpu = argv.includes('--gpu');
+// --shots <module>: another shot list with the same shape (e.g. recreate-shots.js)
+const shotsFile = opt('--shots', '');
+const shots: Shot[] = shotsFile ? (await import(resolve(shotsFile))).shots : defaultShots;
 
 const wanted: Shot[] = only ? only.split(',').map((id) => {
   const s = shots.find((x) => x.id === id);
@@ -60,7 +64,7 @@ const gl = gpu
   ? ['--use-angle=vulkan', '--enable-features=Vulkan', '--ignore-gpu-blocklist', '--enable-gpu']
   : ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'];
 const browser = await puppeteer.launch({ executablePath: chrome, headless: true, args: ['--no-sandbox', ...gl, `--window-size=${size[0]},${size[1]}`] });
-const viewJs = ['tools/look-views.js', 'tools/char-views.js', 'tools/vehicle-views.js', 'notes/blog-post/scripts/tiles-view.js'].map((f) => readFileSync(resolve(f), 'utf8')).join('\n;\n');
+const viewJs = ['tools/look-views.js', 'tools/char-views.js', 'tools/vehicle-views.js', 'notes/blog-post/scripts/tiles-view.js', 'notes/blog-post/scripts/recreate-scenes.js'].map((f) => readFileSync(resolve(f), 'utf8')).join('\n;\n');
 let failed = 0;
 try {
   const page = await browser.newPage();

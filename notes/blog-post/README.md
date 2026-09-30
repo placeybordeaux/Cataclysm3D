@@ -8,6 +8,7 @@ subagents. Snapshot: 2026-09-30 11:26 PDT.
 | `index.html` | The briefing page (headline numbers, prompt, timeline, charts, gallery, differences, quotes, post outline). Self-contained; images by relative path `images/…`. Written to the artifact page contract (no `<html>/<head>/<body>` wrapper; the publisher adds it). |
 | `facts.md` | Every number, with how it was computed and what can't be counted |
 | `differences.md` | ~250 categorized differences from Cataclysm (DDA/BN), each with a why-tag and source |
+| `recreations.md` | The two official screenshots (BN readme title, DDA UltiCa showcase) rebuilt in the engine: inventories, method, mismatches; originals in `images/originals/` (CC BY-SA 3.0) |
 | `commentary.md` | Verbatim quotes from the user, the lead and subagents: fidelity bugs, lessons, corrections, debates |
 | `images/` | In-engine image suite (half-size JPEGs + `*-hero.jpg` at 1920×1080) and `captions.md` (what, how made) |
 | `data/` | Raw script output: `transcript_stats.{md,json}`, `code_stats.{md,json}`, `growth.csv`, `commits_per_hour.txt` |
