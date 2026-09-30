@@ -88,6 +88,21 @@ export interface MeshExtras {
 const SHAPES: TerrainShape[] = ['none', 'floor', 'liquid', 'wall', 'halfwall', 'window', 'door', 'door_open', 'fence', 'tree', 'shrub', 'stairs_up', 'stairs_down'];
 const S = Object.fromEntries(SHAPES.map((s, i) => [s, i])) as Record<TerrainShape, number>;
 
+/**
+ * Render-only shape overrides (game logic keeps terrainShape): broken windows and doors lose
+ * their WINDOW/DOOR flags in CDDA and classified as floor or fence, so a smashed window was a
+ * floor decal of glass shards and an empty frame a pane of floating glass texels. Drawn as
+ * the opening they are; their pane/leaf is skipped (or modelled as shards: furniture/).
+ */
+const BROKEN_WINDOW = /^t_window_(frame|empty)|_frame_domestic$|window.*_noglass$/;
+const BROKEN_DOOR = /^t_(door|rdoor)(_[a-z]+)?_b(_peep)?$|^t_(door|mdoor)(_[a-z]+)?_frame$|^t_door_frame$/;
+function renderShape(id: string): TerrainShape | null {
+  // (boarded/reinforced frames stay walls of boards: tileKinds)
+  if (BROKEN_WINDOW.test(id) && !/boarded|reinforced|enhanced/.test(id)) return 'window';
+  if (BROKEN_DOOR.test(id)) return 'door';
+  return null;
+}
+
 /** Per-registry-index shape codes, extended lazily as ids get interned. */
 export class ShapeTable {
   private ter = new Uint8Array(0);
@@ -97,7 +112,7 @@ export class ShapeTable {
     if (i >= this.ter.length) {
       const defs = this.map.terrain.defs;
       const t = new Uint8Array(defs.length);
-      for (let k = 0; k < defs.length; k++) t[k] = S[terrainShape(defs[k])];
+      for (let k = 0; k < defs.length; k++) t[k] = S[renderShape(defs[k].id) ?? terrainShape(defs[k])];
       this.ter = t;
     }
     return this.ter[i];
@@ -426,7 +441,7 @@ export function* buildChunkMeshSteps(
           g.box(x, base, y, x + 1, base + SILL_H, y + 1, faces | 4, side, cap, base, 1);
           g.box(x, base + DOOR_H, y, x + 1, base + WALL_TOP, y + 1, faces | 8, side, cap, base, 1);
           // modelled look: real glass / shards / curtains instead of the textured pane
-          if (!(MD && MD.window(geo, glassGeo, src, def.id, x, y, base + SILL_H, base + DOOR_H, alongX, indoorSide(here, terDefs, x, y, alongX))))
+          if (!(MD && MD.window(geo, glassGeo, src, def.id, x, y, base + SILL_H, base + DOOR_H, alongX, indoorSide(here, terDefs, x, y, alongX))) && !BROKEN_WINDOW.test(def.id))
             paneQuads(geo(pane), x, y, alongX, base + SILL_H, base + DOOR_H, pane, base + SILL_H);
           if (A) {
             windowDetail(geo, A, x, y, alongX, base + SILL_H, base + DOOR_H, /wood|log|board/.test(wallId));
@@ -449,6 +464,8 @@ export function* buildChunkMeshSteps(
           const g = geo(slab);
           if (MD && MD.door(geo, glassGeo, src, def.id, x, y, base, DOOR_H + 0.02, alongX, shape === S.door_open, indoorSide(here, terDefs, x, y, alongX))) {
             // modelled door leaf (furniture/openings.ts)
+          } else if (BROKEN_DOOR.test(def.id)) {
+            // smashed door / empty frame: the casing and lintel only
           } else if (shape === S.door) {
             // The leaf reaches a little into the lintel: flush, its top edge sits mid-face on
             // the lintel's underside and GPUs show a 1px line of daylight along it.

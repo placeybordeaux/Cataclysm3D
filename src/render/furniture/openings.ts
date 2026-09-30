@@ -64,19 +64,25 @@ export function buildWindow(b: ModelBuilder, s: WindowState, H: number, curtain:
     }
     if (s.taped) for (const [a, c, e, g] of panes) tapeX(b, a, c, e, g);
   } else if (s.glass === 'broken') {
-    // jagged shards left in each pane's frame: triangles from the edges pointing inward
+    // jagged shards left in each pane's frame, pointing inward from the edges. Opaque pale
+    // glass (not the dithered pane): at a glance it's the jagged silhouette that says
+    // "smashed window", and thin dithered slivers vanish.
+    const glassC: RGB = [176, 202, 210];
+    const shard = (p: [number, number], q: [number, number], r: [number, number]) => {
+      const S = F('glow', glassC, undefined, false);
+      b.quad([p[0], p[1], 0.004], [q[0], q[1], 0.004], [r[0], r[1], 0.004], [r[0], r[1], 0.004], S);
+      b.quad([q[0], q[1], -0.004], [p[0], p[1], -0.004], [r[0], r[1], -0.004], [r[0], r[1], -0.004], F('glow', shade(glassC, 0.85), undefined, false));
+    };
     let n = 0;
     for (const [a, c, e, g] of panes) {
       const w = e - a, h = g - c;
       const H2 = (i: number) => ((Math.imul(n * 97 + i * 31, 2654435761) >>> 0) % 1000) / 1000;
       n++;
-      // bottom edge: 2-3 teeth
-      b.glass([a, c, 0], [a + w * 0.45, c, 0], [a + w * (0.15 + H2(1) * 0.2), c + h * (0.25 + H2(2) * 0.3), 0], [a + w * (0.15 + H2(1) * 0.2), c + h * (0.25 + H2(2) * 0.3), 0]);
-      b.glass([a + w * 0.55, c, 0], [e, c, 0], [e - w * 0.12, c + h * (0.15 + H2(3) * 0.25), 0], [e - w * 0.12, c + h * (0.15 + H2(3) * 0.25), 0]);
-      // top edge
-      b.glass([e, g, 0], [a + w * 0.3, g, 0], [a + w * (0.55 + H2(4) * 0.2), g - h * (0.3 + H2(5) * 0.35), 0], [a + w * (0.55 + H2(4) * 0.2), g - h * (0.3 + H2(5) * 0.35), 0]);
-      // a sliver along one side
-      if (H2(6) > 0.4) b.glass([a, g, 0], [a, c + h * 0.35, 0], [a + w * 0.18, g - h * 0.2, 0], [a + w * 0.18, g - h * 0.2, 0]);
+      shard([a, c], [a + w * 0.45, c], [a + w * (0.15 + H2(1) * 0.2), c + h * (0.3 + H2(2) * 0.35)]);
+      shard([a + w * 0.5, c], [e, c], [e - w * (0.1 + H2(7) * 0.15), c + h * (0.2 + H2(3) * 0.3)]);
+      shard([e, g], [a + w * 0.35, g], [a + w * (0.55 + H2(4) * 0.2), g - h * (0.3 + H2(5) * 0.35)]);
+      if (H2(6) > 0.3) shard([a, g], [a, c + h * 0.4], [a + w * (0.15 + H2(8) * 0.15), g - h * 0.25]);
+      if (H2(9) > 0.5) shard([e, c + h * 0.3], [e, g - h * 0.1], [e - w * 0.2, c + h * 0.6]);
     }
   } else if (s.glass === 'stained') {
     const col = s.stain ?? [120, 120, 180];
