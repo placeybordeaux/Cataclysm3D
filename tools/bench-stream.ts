@@ -74,7 +74,7 @@ try {
       const c = window.cdda;
       Object.assign(c.renderer.chunks.stats, { maxBuildMs: 0, slowBuilds: 0, maxStepMs: 0, maxFrameMs: 0, builds: 0, meshMs: 0, treeMs: 0 }); Object.assign(c.voxelStats, { built: 0, buildMs: 0, placed: 0, placeMs: 0, verts: 0 });
       const res = await c.benchRun({ seconds: ${seconds}, speed: ${speed}, yawDeg: ${yawArg || -95} });
-      res.chunks = { ...c.renderer.chunks.stats }; res.voxel = { ...c.voxelStats }; res.models = c.furnitureStats?.();
+      res.chunks = { ...c.renderer.chunks.stats }; res.voxel = { ...c.voxelStats }; res.models = c.furnitureStats?.(); res.flora = c.floraStats?.();
       return res;
     })()`) as { work: Stat; loop: Stat; interval: Stat; sections: Record<string, number>; slowest: { ms: number; sec: Record<string, number> }[]; tiles: number; prefetch?: unknown; voxel: unknown; models?: unknown; chunks: Record<string, number | string> };
     out[name] = r;
@@ -91,6 +91,7 @@ try {
     console.log(`   chunk builds: ${ch.builds}, slowest ${ch.maxBuildMs.toFixed(1)} ms (sliced), >8ms ${ch.slowBuilds}, mesh ${ch.meshMs.toFixed(0)} ms, trees ${ch.treeMs.toFixed(0)} ms, longest step ${ch.maxStepMs.toFixed(1)} ms (${ch.maxStep}), most meshing in a frame ${ch.maxFrameMs.toFixed(1)} ms`);
     console.log(`   voxel ${JSON.stringify(r.voxel)}`);
     if (r.models) console.log(`   models ${JSON.stringify(r.models)}`);
+    if ((r as { flora?: unknown }).flora) console.log(`   flora ${JSON.stringify((r as { flora?: unknown }).flora)}`);
     for (const s of r.slowest.slice(0, 8)) console.log(`   ${String(s.ms).padStart(6)} ms  ${Object.entries(s.sec).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k} ${v}`).join('  ')}`);
   }
 } finally {

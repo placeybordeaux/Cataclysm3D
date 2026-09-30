@@ -171,3 +171,25 @@ chunk streaming after the teleport; render time is unaffected.)
 * Billboard curvature is uniform per quad: a very wide or odd-shaped sprite shades like a
   cylinder, not like its silhouette.
 * Night sky: the dark cloud blobs grade slightly green in the smooth LUT (pre-existing).
+
+## QA wave 3 fixes (#5, #6, #7)
+
+* **Lamp rings (#7)**: point lights and the light map's lamp term now dither (4x4 ordered,
+  `uPointDither`) across their band edges instead of stepping hard, so a ceiling lamp lights a
+  wall as a stippled pool rather than concentric rings; the sun/moon/flashlight keep hard toon
+  bands. Per form preset: toon 0.9, bold 0.7, soft (v2) 0 = the old rings.
+* **Ground after teleport/load (#6)**: never-built chunks next to the player build first under
+  the urgent budget and the image stays black until they exist, then fades in over 0.3 s
+  (`nearChunks.ts`, `pipeline.curtain`; measured ~0.4 s hold after a 30-OMT teleport; gives up
+  after 4 s). The skyline/far-ground ring rebuilds at once after a jump instead of lying under
+  the player for a sliced rebuild. Walking and driving never trigger it.
+* **Streaming (#5)**: crossing the flora middle ring used to rebuild the whole chunk (mesh +
+  furniture + trees); it is no longer in the chunk signature and swaps only the chunk's trees
+  (`chunkManager.treeSteps`). Same machine and load (~15), 20 s runs: chunk builds sprint
+  789 -> 469, drive 1630 -> 1112; `chunks` mean ms/frame sprint 1.47 -> 0.88, drive 3.63 ->
+  2.77; loop p99 sprint 14.2 -> 13.3, drive 15.8 -> 16.4 (noise at that load). Per-tree cost is
+  small (`cdda.floraStats().perTreeMs`: near 0.4-0.7 ms, middle 0.2, far 0.02-0.05). The
+  longest single step left is a 10-12 ms *mesh row* (modelled furniture/dressing rows), which
+  the per-row slicing can't split; worth a look by the furniture owner. A quiet machine
+  (load < 2) was not available during this session, so the absolute p99s are not comparable
+  to LOOKS.md's pre-wave-3 table.

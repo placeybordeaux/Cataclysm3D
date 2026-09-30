@@ -37,20 +37,22 @@ export interface FormSettings {
   fillElev: number;
   /** Billboard sprites: horizontal/vertical normal curvature across the quad (0 = flat). */
   spriteCurve: number;
+  /** Ordered dither across lamp / light-map band edges, in bands (0 = hard rings). */
+  pointDither: number;
 }
 
 export const FORMS: Record<FormName, FormSettings> = {
   soft: {
     label: 'Soft (v2)', desc: 'The old lighting: strong ambient, fill from opposite the sun, flat billboards.',
-    bands: 5, key: 1, ambient: 1, fillMode: 'opposite', fillMin: 0, fillElev: 56, spriteCurve: 0,
+    bands: 5, key: 1, ambient: 1, fillMode: 'opposite', fillMin: 0, fillElev: 56, spriteCurve: 0, pointDither: 0,
   },
   toon: {
     label: 'Toon', desc: 'Clear lit and shadow sides at any distance: stepped sun, a side fill light, rounded billboards.',
-    bands: 4, key: 1.1, ambient: 0.7, fillMode: 'side', fillMin: 0.5, fillElev: 30, spriteCurve: 0.9,
+    bands: 4, key: 1.1, ambient: 0.7, fillMode: 'side', fillMin: 0.5, fillElev: 30, spriteCurve: 0.9, pointDither: 0.9,
   },
   bold: {
     label: 'Bold', desc: 'Stronger toon: three light steps, more contrast between sun and shade.',
-    bands: 3, key: 1.2, ambient: 0.56, fillMode: 'side', fillMin: 0.62, fillElev: 25, spriteCurve: 1.2,
+    bands: 3, key: 1.2, ambient: 0.56, fillMode: 'side', fillMin: 0.62, fillElev: 25, spriteCurve: 1.2, pointDither: 0.7,
   },
 };
 
@@ -99,4 +101,5 @@ setForm(initialForm());
 export function applyForm(): void {
   shared.uBands.value = form.s.bands;
   shared.uSpriteCurve.value = form.s.spriteCurve;
+  shared.uPointDither.value = form.s.pointDither;
 }

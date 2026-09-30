@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { Chunk, GameMap } from '../world/map';
 import { CHUNK } from '../world/coords';
 import { buildChunkMeshSteps, ShapeTable, type ChunkMeshData, type MeshExtras } from './chunkMesh';
+import type { TreeSpec } from './trees';
 import { stepUntil } from './steps';
 import { frameStats } from '../perfDebug';
 import { puddleMaterial } from './props';
@@ -44,6 +45,13 @@ interface Entry {
   job: { gen: Generator<void, void>; sig: number; ver: number; ms: number } | null;
   /** own chunk version at the last finished build (edits vs. LOD/neighbour changes) */
   builtVer: number;
+  /** a build has finished at least once (invalidateAll keeps the old mesh up; this stays) */
+  shown?: boolean;
+  /** trees of the last build and the objects built from them, and the middle-ring state they
+   *  were built for: a middle-ring flip rebuilds only these (treeSteps), not the chunk */
+  trees?: TreeSpec[];
+  treeObjs?: THREE.Object3D[];
+  treeMid?: boolean;
 }
 
 export interface ChunkStats {
@@ -105,6 +113,21 @@ export class ChunkManager {
     this.shapes = new ShapeTable(map);
   }
 
+  /**
+   * Chunks on level `pz` within one chunk of the player that have never been built (a
+   * teleport or load). While any exist their builds are urgent and the view stays curtained.
+   */
+  nearUnbuilt(px: number, py: number, pz: number): number {
+    const pcx = Math.floor(px / CHUNK), pcy = Math.floor(py / CHUNK);
+    let n = 0;
+    for (let dy = -1; dy <= 1; dy++)
+      for (let dx = -1; dx <= 1; dx++) {
+        const e = this.entries.get(key(pcx + dx, pcy + dy, pz));
+        if (!e || !e.shown) n++;
+      }
+    return n;
+  }
+
   /** Force every chunk to rebuild (texture source swap, save loaded, season change). */
   invalidateAll(): void {
     for (const e of this.entries.values()) {
@@ -162,12 +185,12 @@ export class ChunkManager {
       if (this.lodRadius > 0) {
         e.near = ddx * ddx + ddy * ddy <= this.lodRadius * this.lodRadius;
         sig = (sig * 31 + (e.near ? 7 : 3)) | 0;
-        // flora.ts middle ring (lighter tree LOD); 0 = no middle ring
+        // flora.ts middle ring (lighter tree LOD); 0 = no middle ring. Not in the signature:
+        // crossing it swaps only the chunk's trees (treeSteps), not its whole mesh
         e.mid = !e.near && ddx * ddx + ddy * ddy <= this.midRadius * this.midRadius;
-        if (this.midRadius > 0) sig = (sig * 31 + (e.mid ? 5 : 2)) | 0;
       }
       e.sig = sig;
-      if ((sig !== e.builtSig || e.job) && inLevels) {
+      if ((sig !== e.builtSig || e.job || this.treesStale(e)) && inLevels) {
         e.d2 = this.priority(e, px, py, pz);
         dirty.push(e);
       }
@@ -180,7 +203,10 @@ export class ChunkManager {
     for (const e of dirty) {
       // the player's own chunk or a neighbour was edited (a door, a smashed wall): show it
       // promptly. LOD flips (near/far volumes) while moving are not urgent.
-      const urgent = e.builtSig !== -1 && e.chunk.version !== e.builtVer && e.z === pz && Math.abs(e.cx - pctx) <= 1 && Math.abs(e.cy - pcty) <= 1;
+      // Never-built chunks next to the player (teleport, load) are urgent too: until they
+      // exist the view is curtained (nearChunks.ts).
+      const nearP = e.z === pz && Math.abs(e.cx - pctx) <= 1 && Math.abs(e.cy - pcty) <= 1;
+      const urgent = nearP && (!e.shown || (e.builtSig !== -1 && e.chunk.version !== e.builtVer));
       const budget = urgent ? this.urgentBudgetMs : this.budgetMs;
       const now = performance.now();
       if (!unlimited && (built > 0 || created > 0) && now - t0 > budget) break;
@@ -189,7 +215,10 @@ export class ChunkManager {
         const ny = Math.max(e.cy * CHUNK, Math.min(py, e.cy * CHUNK + CHUNK));
         if (Math.hypot(nx - px, ny - py) < this.visibleDist) this.stats.lateBuilds++;
       }
-      if (!e.job) e.job = { gen: this.buildSteps(e), sig: e.sig, ver: e.chunk.version, ms: 0 };
+      if (!e.job) {
+        const full = e.sig !== e.builtSig;
+        e.job = { gen: full ? this.buildSteps(e) : this.treeSteps(e), sig: full ? e.sig : e.builtSig, ver: full ? e.chunk.version : e.builtVer, ms: 0 };
+      }
       const job = e.job;
       const b0 = performance.now();
       const r = stepUntil(job.gen, unlimited ? Infinity : t0 + budget);
@@ -200,6 +229,7 @@ export class ChunkManager {
       // keeps the job's signature so the entry goes dirty again and rebuilds.
       e.builtSig = job.sig;
       e.builtVer = job.ver;
+      e.shown = true;
       e.job = null;
       this.stats.builds++;
       this.stats.lastBuildMs = job.ms;
@@ -256,6 +286,40 @@ export class ChunkManager {
     }
   }
 
+  private treesStale(e: Entry): boolean {
+    return !!e.shown && !!e.trees && !!e.group && !!e.mid !== !!e.treeMid;
+  }
+
+  /** Middle-ring flip: rebuild the chunk's trees at the new LOD and swap only them. */
+  private *treeSteps(e: Entry): Generator<void, void> {
+    const specs = e.trees!;
+    const mid = !!e.mid;
+    const lod: 0 | 1 | 2 = e.near ? 0 : mid ? 1 : 2;
+    const trees = specs.map((t) => ({ ...t, lod }));
+    let t0 = performance.now();
+    const tg = this.extraObjects!({ pages: new Map(), sprites: [], trees }, e.cx, e.cy, e.z);
+    let objs: THREE.Object3D[];
+    for (;;) {
+      const r = tg.next();
+      if (r.done) { objs = r.value; break; }
+      this.stat('tree', t0);
+      yield;
+      t0 = performance.now();
+    }
+    this.stat('tree', t0);
+    const g = e.group;
+    if (!g) return; // disposed meanwhile
+    for (const o of e.treeObjs ?? []) {
+      g.remove(o);
+      (o as THREE.Mesh).geometry?.dispose();
+      (o.userData as { dispose?: () => void }).dispose?.();
+    }
+    for (const o of objs) g.add(o);
+    e.treeObjs = objs;
+    e.trees = trees;
+    e.treeMid = mid;
+  }
+
   /** A chunk build as steps: mesh data (per row), 3D trees (per tree), then the swap. */
   private *buildSteps(e: Entry): Generator<void, void> {
     const c = e.chunk;
@@ -307,9 +371,11 @@ export class ChunkManager {
       yield;
       t0 = performance.now();
       const tg = this.extraObjects(data, e.cx, e.cy, e.z);
+      e.trees = data.trees;
+      e.treeMid = !!e.mid;
       for (;;) {
         const r = tg.next();
-        if (r.done) { for (const o of r.value) g.add(o); break; }
+        if (r.done) { for (const o of r.value) g.add(o); e.treeObjs = r.value; break; }
         this.stat('tree', t0);
         yield;
         t0 = performance.now();

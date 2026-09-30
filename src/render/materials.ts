@@ -25,6 +25,8 @@ import { lmUniforms } from './lightmap';
 /** Uniforms shared by reference across all patched materials (update .value only). */
 export const shared = {
   uBands: { value: 5.0 },
+  /** Ordered dither across lamp/light-map band edges (0 = hard rings; formLight.ts sets it). */
+  uPointDither: { value: 0.0 },
   uCutFloor: { value: -1e6 }, // only vertices above this Y are affected (current level)
   uCutTo: { value: 1e6 }, // clamp height
   uSpriteTilt: { value: 0.0 }, // 0 = upright cylindrical billboards, 1 = face camera fully
@@ -64,11 +66,22 @@ export function addNormalOutput(shader: Shader, hasNormal: boolean, flag: number
 
 const BANDED_DIRECT = /* glsl */ `
 uniform float uBands;
+uniform float uPointDither;
+// Set per light type in lights_fragment_begin (LIGHTS_BEGIN): lamps and the light map dither
+// across their band edges, the sun/moon/flashlight keep hard toon steps. A point light's
+// falloff on a flat wall is radial, so hard bands drew concentric rings around every lamp;
+// an ordered dither over part of each band turns the ring edges into pixel-art stipple.
+float gBandDither = 0.0;
+float bandBayer() {
+  ivec2 i = ivec2(mod(gl_FragCoord.xy, 4.0));
+  int m[16] = int[16](0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5);
+  return (float(m[i.x + i.y * 4]) + 0.5) / 16.0 - 0.5;
+}
 vec3 bandLight(vec3 irr) {
   float l = max(max(irr.r, irr.g), irr.b);
   if (l < 1e-4) return vec3(0.0);
   float s = sqrt(l);
-  float q = floor(s * uBands + 0.5) / uBands;
+  float q = max(0.0, floor(s * uBands + 0.5 + gBandDither * bandBayer()) / uBands);
   return irr * (q * q / l);
 }
 void RE_Direct_Lambert( const in IncidentLight directLight, const in vec3 geometryPosition, const in vec3 geometryNormal, const in vec3 geometryViewDir, const in vec3 geometryClearcoatNormal, const in LambertMaterial material, inout ReflectedLight reflectedLight ) {
@@ -151,7 +164,9 @@ void RE_IndirectDiffuse_Lambert( const in vec3 irradiance, const in vec3 geometr
     // The flat light-map term is strongest on floors: on walls a tile's light may have
     // come from either side (the point lights add the directional part).
     float up = inverseTransformDirection( geometryNormal, viewMatrix ).y;
+    gBandDither = uPointDither;
     reflectedLight.indirectDiffuse += bandLight( gLm.rgb * (0.45 + 0.55 * max(up, 0.0)) ) * BRDF_Lambert( material.diffuseColor );
+    gBandDither = 0.0;
   }
 }`;
 
@@ -167,11 +182,11 @@ function patchChunk(src: string, find: string, add: string): string {
 export const HEADLIGHT_MIN_RANGE = 50;
 const LIGHTS_BEGIN = patchChunk(
   patchChunk(
-    patchChunk(THREE.ShaderChunk.lights_fragment_begin, 'getDirectionalLightInfo( directionalLight, directLight );', 'directLight.color *= lmSunGate();'),
-    'getPointLightInfo( pointLight, geometryPosition, directLight );', 'directLight.color *= lmPointGate();',
+    patchChunk(THREE.ShaderChunk.lights_fragment_begin, 'getDirectionalLightInfo( directionalLight, directLight );', 'directLight.color *= lmSunGate(); gBandDither = 0.0;'),
+    'getPointLightInfo( pointLight, geometryPosition, directLight );', 'directLight.color *= lmPointGate(); gBandDither = uPointDither;',
   ),
   'getSpotLightInfo( spotLight, geometryPosition, directLight );',
-  `if ( spotLight.distance > ${HEADLIGHT_MIN_RANGE.toFixed(1)} && dot( geometryNormal, directLight.direction ) > 0.0 ) directLight.direction = normalize( directLight.direction + geometryNormal * 0.9 );`,
+  `gBandDither = 0.0; if ( spotLight.distance > ${HEADLIGHT_MIN_RANGE.toFixed(1)} && dot( geometryNormal, directLight.direction ) > 0.0 ) directLight.direction = normalize( directLight.direction + geometryNormal * 0.9 );`,
 );
 
 /** How a banded-Lambert material gets its light-map sample. */
@@ -179,6 +194,7 @@ type LmMode = 'world' | 'sprite' | 'none';
 
 export function patchBandedLambert(shader: Shader, lm: LmMode = 'none'): void {
   shader.uniforms.uBands = shared.uBands;
+  shader.uniforms.uPointDither = shared.uPointDither;
   shader.uniforms.uRim = shared.uRim;
   shader.uniforms.uBounce = shared.uBounce;
   shader.uniforms.uRimColor = shared.uRimColor;
