@@ -236,8 +236,15 @@ The real inventory on the BN item model (docs/INVENTORY_MODEL.md), replacing the
   (Accessible), else a progress bar for `moves / 100 / ACTION_SCALE` s, then the move (a stale
   item fails safely). One timed action at a time.
 - **Hotbar**: bindings keep the exact item (`HotbarBinding.ref` = ItemView id) and fall back to
-  another of the same type you carry; greyed with 0 when none is left. Use = the item's primary
-  action (eat, wield, …); a wielded one is put away. Mounted as soon as gameplay starts.
+  another of the same type you carry; greyed with 0 when none is left. Use = the *quick-draw*
+  rule (`src/game/hotbar_choice.ts`), not the double-click one — BN gives every bow armor data, so
+  the double-click "Wear" wore a longbow the player meant to shoot. First match wins:
+  in hands → put away (toggle) · food/drink/bandages → eat/drink · any gun (bows, crossbows,
+  slings, pistols, rifles; carried *or* slung) → wield · clothing not worn → wear (backpack, jacket,
+  holster, shield) · clothing worn → its use (holster: draw) else take off · melee weapon (BN
+  `weapon_category`, or melee damage > `MELEE_STAT` 5) → wield · tool with a use action → use
+  (flashlight on) · else the double-click action. A disabled choice says why (too weak, hands
+  full) instead of falling through. Tests: `tests/hotbar_choice.test.ts`. Mounted as soon as gameplay starts.
 - **Screenshots**: `docs/screenshots/ui2/inventory/` (1920×1080 and 3440×1304, from the real-input run).
 - **Automation**: `cdda.inv2.{model, hotbar, open(focus?), census(), rectOf(typeId, sel), where(typeId), spawn(id, dx, dy, {charges, contents})}`.
 - **Tests**: `tests/inventory_ui2.test.ts` (views, drops, liquids, the v1 bag scenario, take all, a

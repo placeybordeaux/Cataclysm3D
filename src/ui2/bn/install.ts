@@ -139,7 +139,8 @@ export function installBnInventory(game: Game, ctx: UiContext, api: DebugApi, ca
       if (found.loc === 'hands') {
         const r = game.player.inv.unwield();
         if (!r.ok) flashNote(last.x, last.y, r.msg, 'bad');
-      } else {
+      } else if (!model.hotbarUse(real.view)) {
+        // the quick-draw rule had no answer (a bag with contents, an empty bottle): double-click
         const p = model.primary(real.view, found.loc);
         if (p && 'action' in p && p.action) void p.action();
         else game.message(`Nothing to do with the ${b.name} from the hotbar.`, 'c_light_gray');

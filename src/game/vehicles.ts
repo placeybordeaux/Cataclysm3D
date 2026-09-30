@@ -1225,6 +1225,34 @@ export class VehicleSystem implements GameSystem, MapOverlay {
     return { name: `the ${this.game.map.terAt(x, y, z).name}`, bashable: false, mass2: 1000, dens: 80, e: 0.1 };
   }
 
+  /**
+   * BN vehicle::collision with just_detect (grabbed_veh_move): would `v` at pose (nx, ny, nf)
+   * run into something it doesn't already touch? The name of the first blocker, or null. Nothing
+   * is damaged or flung — a vehicle pushed by hand stops at the obstacle. The player (the one
+   * pushing) is ignored like BN's ignored_critter; other creatures block.
+   */
+  dragBlocker(v: Vehicle, nx: number, ny: number, nf: number): string | null {
+    const z = v.z;
+    const body = this.crashBody(v);
+    if (body) {
+      const c = this.bodyContacts(v, body, nx, ny, nf).next();
+      if (!c.done) return c.value.kind === 'vehicle' ? `the ${c.value.other.v.name}` : c.value.ob.name;
+    }
+    const before = new Set(this.tilesOf.get(v) ?? []);
+    for (const t of v.occupiedTiles(nf, nx, ny)) {
+      const k = tileKey(t.tx, t.ty, z);
+      if (!body && !before.has(k)) {
+        const other = (this.index.get(k) ?? []).find((o) => o.v !== v);
+        if (other) return `the ${other.v.name}`;
+        const ob = this.obstacle(t.tx, t.ty, z, v.partsAt(t.mx, t.my).some((q) => has(q, 'WHEEL')));
+        if (ob) return ob.name;
+      }
+      const c = this.creatureHooks.at(t.tx, t.ty, z);
+      if (c) return `the ${this.creatureHooks.name(c)}`;
+    }
+    return null;
+  }
+
   /** Another map overlay (not this one) makes the tile impassable. */
   overlayBlocks(x: number, y: number, z: number): boolean {
     for (const o of this.game.map.overlays) if (o !== this && o.moveCost?.(x, y, z) === 0) return true;

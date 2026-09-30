@@ -36,7 +36,8 @@ export const DEFAULT_BINDINGS: Record<string, string[]> = {
   fire: ['f'], // CDDA 'f' fire (also LMB when wielding a gun)
   reload: ['r'],
   unload: ['U'],
-  throw: ['G'], // CDDA 't' throw
+  throw: ['t'], // CDDA/BN 't' throw (was G here until grab took BN's G)
+  grab: ['G'], // BN 'G' grab: drag furniture / push carts by walking (src/grab.ts)
   look: ['x'],
   flashlight: ['F'],
   stairs_up: ['<'],
@@ -59,7 +60,9 @@ export const DEFAULT_BINDINGS: Record<string, string[]> = {
   character: ['@'],
   map: ['m'],
   messages: ['P'],
-  wait: ['|'],
+  // `l` first: the pixel font draws CDDA's `|` like a lowercase L, so players pressed l and
+  // nothing happened. `|` still works.
+  wait: ['l', '|'],
   sleep: ['$'],
   help: ['?'],
   menu: ['Escape'],

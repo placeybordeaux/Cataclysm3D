@@ -10,6 +10,7 @@ import { fromSpawned } from './item';
 import { spawnOnGround } from './moves';
 import { emitSound, soundClock } from './sound';
 import { sfx } from '../audio/sfx';
+import { bashMaterial } from '../audio/bashSounds';
 import { frontTile, targetTile, type TargetTile } from './targeting';
 import { ACTION_SCALE } from '../core/time';
 
@@ -119,8 +120,8 @@ function addFieldIfKnown(game: Game, x: number, y: number, z: number, f: unknown
   game.map.addField(x, y, z, f[0], Math.max(1, Math.min(3, num(f[1], 1))));
 }
 
-function playBashSfx(x: number, y: number, z: number, success: boolean, id: string, sound: string, glass: boolean): void {
-  sfx.smash({ x: x + 0.5, y: y + 0.5, z }, { success, targetId: id, glass: glass || /glass/i.test(sound) });
+function playBashSfx(x: number, y: number, z: number, success: boolean, def: TerrainDef | FurnitureDef): void {
+  sfx.smash({ x: x + 0.5, y: y + 0.5, z }, { success, targetId: def.id, material: bashMaterial(def) });
 }
 
 /** map::bash on terrain/furniture at (x, y, z). */
@@ -140,11 +141,12 @@ export function bash(game: Game, x: number, y: number, z: number, strength: Bash
   // Floors only break when asked to (smashing downward / explosions).
   if (!isFurn && info && info.bash_below && !opts.bashFloor && !opts.destroy) info = undefined;
   const src = opts.source ?? (opts.byPlayer ? game.player : undefined);
-  const emit = (sound: string, volume: number, success: boolean, id: string, glass = false) => {
+  const emit = (sound: string, volume: number, success: boolean, what: TerrainDef | FurnitureDef) => {
     res.sound = sound;
     res.volume = volume;
     if (opts.silent || !sound) return;
-    playBashSfx(x, y, z, success, id, sound, glass);
+    // Played at the bashed tile for whoever bashes (you, a zombie at the door, a car).
+    playBashSfx(x, y, z, success, what);
     // Monsters still hear it, but the survivor's own smashing isn't narrated back as
     // "You hear whack!" after every swing (the smash messages already say what happened).
     emitSound(game, { x, y, z }, volume, sound, { category: 'combat', source: src, sfxId: '', ambient: src === game.player });
@@ -154,12 +156,11 @@ export function bash(game: Game, x: number, y: number, z: number, strength: Bash
     if (!map.passable(x, y, z) && ter.id !== 't_null') {
       res.didBash = true;
       res.target = ter.name;
-      emit('thump!', 18, false, ter.id);
+      emit('thump!', 18, false, ter);
     }
     return res;
   }
   res.target = def.name;
-  const glass = hasFlag(def, 'WINDOW') || /glass/i.test(String(info.sound ?? ''));
   const strMin = num(info.str_min, 0), strMax = num(info.str_max, strMin);
   let success = !!opts.destroy;
   if (!opts.destroy) {
@@ -183,7 +184,7 @@ export function bash(game: Game, x: number, y: number, z: number, strength: Bash
   res.didBash = true;
 
   if (!success) {
-    emit(String(info.sound_fail ?? 'thump!'), num(info.sound_fail_vol, 12), false, def.id, false);
+    emit(String(info.sound_fail ?? 'thump!'), num(info.sound_fail_vol, 12), false, def);
     addFieldIfKnown(game, x, y, z, info.hit_field);
     return res;
   }
@@ -203,7 +204,7 @@ export function bash(game: Game, x: number, y: number, z: number, strength: Bash
   addFieldIfKnown(game, x, y, z, info.hit_field);
   addFieldIfKnown(game, x, y, z, info.destroyed_field);
   game.events.emit('mapChanged', { x, y, z });
-  emit(String(info.sound ?? ''), volume, true, def.id, glass);
+  emit(String(info.sound ?? ''), volume, true, def);
   return res;
 }
 

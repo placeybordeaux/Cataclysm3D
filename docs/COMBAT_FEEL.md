@@ -87,7 +87,7 @@ Three models, switchable at any time: **Options → Aim model**, `?aim=sway|timi
   "the zombie runner dodged". Plain zombies have dodge 0 and never do. On the 3D model the
   dodge is a hop: it springs 0.28 m and leans 0.35 rad away over 0.3 s on top of the slide
   (`src/aim.ts installModelHooks`, adding to the model's lift/topple between monster-view ticks).
-- Throwing (`G`) goes where you look. Reloads in every model now use BN's skill divisor
+- Throwing (`t`; it was `G` before grab took BN's key) goes where you look. Reloads in every model now use BN's skill divisor
   (`Character::item_reload_cost`: `cost / (1 + min(skill × 0.1, 1))`).
 - NPCs and monsters still shoot with BN's dice.
 

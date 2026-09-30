@@ -1,6 +1,7 @@
 import type { AudioEngine, PlayOptions, Voice } from './audio';
 import type { Vec3 } from './spatial';
 import { rangeForLoudness } from './spatial';
+import { bashSound, type BashMaterial } from './bashSounds';
 
 // Typed helpers other systems call directly (combat, doors, monsters, UI). Each one maps a
 // game fact to CDDA's sound_effect id/variant with the same selection rules CDDA uses in
@@ -23,11 +24,33 @@ export function getAudioEngine(): AudioEngine | null {
   return engine;
 }
 
+/**
+ * Every sfx request, newest last, while recording (unit tests: recordSfx()). Recorded before the
+ * engine check so game-logic tests can assert "smashing a door asked for smash_fail/t_door_c"
+ * without WebAudio; in the browser cdda.audio.history says what actually reached the speakers.
+ */
+export const sfxRequests: { id: string; variant: string; pos?: Vec3 }[] = [];
+let recording = false;
+export function recordSfx(on = true): void {
+  recording = on;
+  sfxRequests.length = 0;
+}
+/** Exact-variant lookup to use without an engine (tests: a Soundset built from the shipped pack). */
+let catalog: ((id: string, variant: string) => boolean) | null = null;
+export function setSfxCatalog(has: ((id: string, variant: string) => boolean) | null): void {
+  catalog = has;
+}
+
 function play(id: string, variant: string, opts: PlayOptions = {}): Voice | null {
+  if (recording) {
+    sfxRequests.push({ id, variant, pos: opts.pos });
+    if (sfxRequests.length > 256) sfxRequests.shift();
+  }
   return engine ? engine.play(id, variant, opts) : null;
 }
 function has(id: string, variant: string): boolean {
-  return engine ? engine.has(id, variant, true) : false;
+  if (engine) return engine.has(id, variant, true);
+  return catalog ? catalog(id, variant) : false;
 }
 
 export type MeleeSkill = 'bashing' | 'cutting' | 'stabbing' | 'unarmed' | 'other';
@@ -189,8 +212,16 @@ export const sfx = {
    */
   door(action: 'open' | 'close', pos?: Vec3, terFurnId?: string): Voice | null {
     const id = action === 'open' ? 'open_door' : 'close_door';
-    const variant = terFurnId && has(id, terFurnId) ? terFurnId : action === 'open' ? 't_door_c' : 't_door_o';
+    let variant = action === 'open' ? 't_door_c' : 't_door_o';
+    if (terFurnId && has(id, terFurnId)) variant = terFurnId;
+    // Every other window slides like the pack's house window, not like a wooden door.
+    else if (terFurnId && /window|pane_glass|glass_with_curtain|tempered_glass/.test(terFurnId)) variant = action === 'open' ? 't_window_domestic' : 't_window_open';
+    else if (terFurnId && /metal|mdoor|bulkhead|safe/.test(terFurnId) && has(id, action === 'open' ? 't_door_metal_c' : 't_door_metal_o')) variant = action === 'open' ? 't_door_metal_c' : 't_door_metal_o';
     return play(id, variant, { pos, pitchJitter: 0.08 });
+  },
+  /** Curtains drawn or opened: fabric swish and rings along the rod (synthesized; no pack has it). */
+  curtains(action: 'open' | 'close', pos?: Vec3, volume = 1): Voice | null {
+    return play('synth_curtain', action, { pos, pitchJitter: 0.08, volume, range: 12 });
   },
   doorLocked(pos?: Vec3): Voice | null {
     return play('synth_door_locked', 'default', { pos });
@@ -198,12 +229,15 @@ export const sfx = {
 
   /**
    * Bashing terrain/furniture (map.cpp bash): smash_success/<id> when it breaks,
-   * smash_fail/<id> otherwise, synthesized crunch/thud when the pack lacks the id.
+   * smash_fail/<id> otherwise; ids the pack doesn't name play their material's sound
+   * (bashSounds.ts), so no bash is silent. `glass` (no id) is a bare pane breaking.
    */
-  smash(pos: Vec3, opts: { success?: boolean; targetId?: string; glass?: boolean } = {}): Voice | null {
-    if (opts.glass) return play('smash', 'glass', { pos, pitchJitter: 0.1 });
-    const id = opts.success === false ? 'smash_fail' : 'smash_success';
-    return play(id, opts.targetId ?? 'default', { pos, pitchJitter: 0.1 });
+  smash(pos: Vec3, opts: { success?: boolean; targetId?: string; material?: BashMaterial; glass?: boolean } = {}): Voice | null {
+    const success = opts.success !== false;
+    if (opts.glass && !opts.targetId) return play('smash', 'glass', { pos, pitchJitter: 0.1 });
+    const material = opts.material ?? (opts.glass ? 'glass' : 'other');
+    const [id, variant] = bashSound(has, opts.targetId ?? '', material, success);
+    return play(id, variant, { pos, pitchJitter: 0.1, range: id === 'explosion' ? 60 : undefined });
   },
 
   /** CDDA plays mon_death/zombie_death for every monster (mondeath.cpp), gibbed separately. */

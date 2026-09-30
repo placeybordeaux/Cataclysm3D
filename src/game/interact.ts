@@ -8,12 +8,14 @@ import { hasFlag } from '../world/registry';
 import { cddaText } from './units';
 import { emitSound } from './sound';
 import { sfx } from '../audio/sfx';
-import { isOutside } from './vision';
+import { invalidateNaturalLight, isOutside } from './vision';
 import { interesting, targetTile, type TargetTile } from './targeting';
 import { goStairs } from './zlevels';
 import { goToSleep, comfortAt } from './rest';
 import { ignite, fieldName } from './fields';
 import { playerSeesTrap, trapAt, trapDef } from './traps';
+import { curtainInteractions } from './curtains';
+import { pryAttempt, pryInfo } from './pry';
 
 // Examine / interact (`e`), after CDDA iexamine.cpp and map::open_door / close_door.
 // interactionsAt() lists what can be done with a tile (pure, testable); the key handler
@@ -82,6 +84,7 @@ export function openDoor(game: Game, x: number, y: number, z: number): string | 
   if (t.open && map.terrain.has(t.open)) {
     if (openCloseFlags(t) && !inside) return hasFlag(t, 'LOCKED') ? `The ${t.name} is locked.` : `You can't open the ${t.name} from outside.`;
     map.setTer(x, y, z, t.open);
+    invalidateNaturalLight(game);
     sfx.door('open', { x: x + 0.5, y: y + 0.5, z }, t.id);
     emitSound(game, { x, y, z }, 6, 'swish', { category: 'movement', source: game.player, sfxId: '' });
     game.events.emit('mapChanged', { x, y, z });
@@ -109,6 +112,7 @@ export function closeDoor(game: Game, x: number, y: number, z: number): string |
     if (map.itemsAt(x, y, z).length) return `There's ${map.itemsAt(x, y, z).length > 1 ? 'some stuff' : 'something'} in the way!`;
     if (f.id !== 'f_null') return `There's a ${f.name} in the way!`;
     map.setTer(x, y, z, t.close);
+    invalidateNaturalLight(game);
     sfx.door('close', { x: x + 0.5, y: y + 0.5, z }, t.id);
     emitSound(game, { x, y, z }, 10, 'swish', { category: 'movement', source: p, sfxId: '' });
     game.events.emit('mapChanged', { x, y, z });
@@ -181,29 +185,6 @@ function lockpickAttempt(game: Game, x: number, y: number, z: number, def: Terra
   });
 }
 
-function pryAttempt(game: Game, x: number, y: number, z: number, def: TerrainDef): void {
-  const p = game.player;
-  const pry = def.prying as { result?: string; message?: string; prying_data?: { difficulty?: number; prying_level?: number; noisy?: boolean; failure?: string } } | undefined;
-  if (!pry?.result) return say(game, `You can't pry the ${def.name} open.`);
-  const level = pry.prying_data?.prying_level ?? 1;
-  const tool = toolWith(game, 'PRY', level);
-  if (!tool) return say(game, `You need a tool with prying ${level} to pry that open.`);
-  game.activities.start({
-    name: 'prying',
-    duration: 60,
-    onComplete: () => {
-      // iexamine prying: str + tool quality vs difficulty.
-      const diff = pry.prying_data?.difficulty ?? 5;
-      const roll = p.rng.int(0, p.str + tool.qualityLevel('PRY') * 2);
-      if (pry.prying_data?.noisy) emitSound(game, { x, y, z }, 12, 'crunch!', { category: 'destructive_activity', source: p });
-      if (roll >= diff) {
-        game.map.setTer(x, y, z, pry.result!);
-        say(game, pry.message ?? 'You pry it open.', 'c_green');
-      } else say(game, pry.prying_data?.failure ?? "You pry, but can't get it open.", 'c_light_red');
-    },
-  });
-}
-
 /** Everything the player can do with tile (x, y, z), most relevant first. */
 export function interactionsAt(game: Game, x: number, y: number, z: number): Interaction[] {
   const map = game.map;
@@ -223,8 +204,8 @@ export function interactionsAt(game: Game, x: number, y: number, z: number): Int
   const locked = hasFlag(t, 'LOCKED') || tAct === 'locked_object' || tAct === 'locked_object_pickable';
   if (locked && !inside) {
     const canPick = !!toolWith(game, 'LOCKPICK') && typeof t.lockpick_result === 'string';
-    const pry = t.prying as { prying_data?: { prying_level?: number } } | undefined;
-    const canPry = !!pry && !!toolWith(game, 'PRY', pry.prying_data?.prying_level ?? 1);
+    // BN's `pry` object (DDA's `prying` too): pry.ts
+    const canPry = !!pryInfo(t)?.canPry(game);
     if (canPick) add('lockpick', `Pick the lock of the ${t.name}`, () => lockpickAttempt(game, x, y, z, t, false));
     if (canPry) add('pry', `Pry open the ${t.name}`, () => pryAttempt(game, x, y, z, t));
     if (!canPick && !canPry)
@@ -234,19 +215,9 @@ export function interactionsAt(game: Game, x: number, y: number, z: number): Int
       });
   }
 
-  // --- curtains (CDDA iexamine::curtains)
-  if (tAct === 'curtains' && inside) {
-    if (t.open) add('open', `Open the ${t.name}`, () => say(game, openDoor(game, x, y, z)));
-    if (t.close) add('close', `Close the ${t.name}`, () => say(game, closeDoor(game, x, y, z)));
-    const ct = typeof t.curtain_transform === 'string' ? t.curtain_transform : null;
-    if (ct && map.terrain.has(ct))
-      add('tear_curtains', 'Tear down the curtains', () => {
-        map.setTer(x, y, z, ct);
-        for (const [id, n] of [['sheet', 2], ['stick', 1], ['string_36', 1]] as const)
-          for (let i = 0; i < n; i++) if (game.data.items[id]) spawnOnGround(map, p.tileX, p.tileY, p.z, createItem(game.data, id));
-        say(game, 'You tear the curtains and curtain rod off the window frame.');
-        emitSound(game, { x, y, z }, 8, 'rrrip!', { category: 'destructive_activity', source: p });
-      });
+  // --- curtained windows (BN iexamine::curtains): curtains and window named apart (curtains.ts)
+  if (tAct === 'curtains') {
+    out.push(...curtainInteractions(game, x, y, z, inside, game.keys.keyFor('smash')));
   } else if (!locked || inside) {
     // --- doors, windows, gates: open / close (terrain, then furniture)
     const isDoorish = hasFlag(t, 'DOOR') || hasFlag(t, 'WINDOW') || !!t.open || !!t.close;
@@ -361,11 +332,17 @@ export function interactionsAt(game: Game, x: number, y: number, z: number): Int
 
   out.push(...later);
 
+  // "Grab" (src/grab.ts, via interactionProviders) is an extra: it goes last and never stands
+  // in for what `e` did before (look in the dresser, examine the chair).
+  const grabs = out.filter((i) => i.id === 'grab');
+  if (grabs.length) out.splice(0, out.length, ...out.filter((i) => i.id !== 'grab'));
+
   // --- fallback: describe it
   if (!out.length && (f.id !== 'f_null' || !map.passable(x, y, z) || tAct)) {
     const main = f.id !== 'f_null' ? f : t;
     add('describe', `Examine ${main.name}`, () => describe(game, x, y, z));
   }
+  out.push(...grabs);
   return out;
 }
 
@@ -437,8 +414,11 @@ export function interact(game: Game, target: TargetTile | null = targetTile(game
   }
   // Open/close/stairs are unambiguous actions; others with alternatives get a menu.
   const primary = list[0];
+  // "Grab" (src/grab.ts) rides along in menus but never turns a lone action into a menu: `e`
+  // on a locker still opens it (grab has its own key and the `o` menu).
+  const alone = list.filter((i) => i.id !== 'grab').length <= 1;
   // (filling up the car at a pump is what `e` on a pump means: refuel.ts)
-  if (list.length === 1 || ['open', 'close', 'stairs_up', 'stairs_down'].includes(primary.id) || primary.id.startsWith('fill_') || !ui.menu) {
+  if (alone || ['open', 'close', 'stairs_up', 'stairs_down'].includes(primary.id) || primary.id.startsWith('fill_') || !ui.menu) {
     primary.run();
     return true;
   }
@@ -462,7 +442,8 @@ export function interactionPrompt(game: Game): string | null {
   if (t) {
     const list = interactionsAt(game, t.x, t.y, t.z);
     // A bare description (walls, stools, bushes) isn't worth a prompt; `e` still shows it.
-    if (list.length && !(list.length === 1 && list[0].id === 'describe')) return `[${key}] ${list[0].label}${list.length > 1 ? ' …' : ''}`;
+    const n = list.filter((i) => i.id !== 'grab').length;
+    if (n && !(n === 1 && list[0].id === 'describe')) return `[${key}] ${list[0].label}${n > 1 ? ' …' : ''}`;
   } else {
     // Something usable a few steps away: name it, so the player knows to walk up to it.
     const far = targetTile(game, 4);

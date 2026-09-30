@@ -28,7 +28,8 @@ export function windowState(id: string): WindowState {
       : k(/empty|noglass|grate_window(_with_curtain(_open)?)?_noglass/) ? 'none' : 'intact';
   let curtains: WindowState['curtains'] = 'none';
   if (id === 't_curtains' || k(/with_curtain$|with_curtain_open_window_closed$|bars_curtains|_with_curtain_noglass$/)) curtains = 'closed';
-  else if (k(/window_domestic|with_curtain_open|frame_domestic|empty_domestic/)) curtains = 'open';
+  // t_window_open is BN's house window opened (curtains still hanging, pulled aside)
+  else if (id === 't_window_open' || k(/window_domestic|bars_domestic|with_curtain_open|frame_domestic|empty_domestic/)) curtains = 'open';
   if (k(/open_window_closed$/)) curtains = 'open';
   const stain: Record<string, RGB> = { blue: [70, 110, 200], green: [70, 160, 90], red: [190, 60, 60] };
   return {
