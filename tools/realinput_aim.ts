@@ -47,14 +47,17 @@ const SETUP = (weapon: string, skill: number, d: number, model: string, mon = 'm
   const W = ${JSON.stringify(WEAPONS)}['${weapon}'];
   p.str_base = 10; p.dex_base = 8; p.per_base = 8; p.resetStats();
   for (const s of ['gun', 'pistol', 'rifle', 'shotgun', 'archery', 'bashing', 'melee']) p.setSkill(s, ${skill});
-  if (p.inv.wielded?.typeId !== W.gun) cdda.giveItem(W.gun, { wield: true });
+  // A fresh weapon each time (the old one is dropped): a previous run may have left the magazine nearly empty.
+  if (p.inv.wielded) p.inv.drop(p.inv.wielded);
+  cdda.giveItem(W.gun, { wield: true });
   const gun = p.inv.wielded;
   if (W.gun === 'longbow') cdda.giveItem(W.ammo, { count: 40 });
   else if (W.ammo && gun) {
     // Spare magazines / rounds in the pack, then the reload key's own code loads the gun (setup).
     if (W.mag) for (let i = 0; i < 3; i++) cdda.giveItem(W.mag, { ammo: W.ammo });
     cdda.giveItem(W.ammo, { count: 60 });
-    if (gun.ammoRemaining() <= 0) g.keys.handler('reload')?.();
+    // Top up (a previous scenario may have left it nearly empty): reload until it stops loading.
+    for (let i = 0; i < 3; i++) { const before = gun.ammoRemaining(); g.keys.handler('reload')?.(); if (gun.ammoRemaining() <= before) break; }
     cdda.combat.cooldown = 0; cdda.renderer.viewmodel?.freeze(null);
   }
   p.x = window.__aimSpot[0]; p.y = window.__aimSpot[1]; p.stamina = p.staminaMax(); p.recoil = 3000; p.crouching = false;
