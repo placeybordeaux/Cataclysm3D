@@ -895,6 +895,13 @@ const scenarios: Scenario[] = [
     await until((t) => t.panels.includes('Equipment'), 3000);
     const c0 = await censusNow();
     let r = await rectOf('hat_hard', NEARBY);
+    // The Nearby list can lag the window by a few frames on a slow page (Firefox's software GL,
+    // headful 3440x1304): wait for the row instead of failing on a null rect (QA_WAVE3).
+    for (let i = 0; i < 30 && !r; i++) {
+      await sleep(100);
+      r = await rectOf('hat_hard', NEARBY);
+    }
+    if (!check('the hard hat is listed in Nearby', !!r, await whereIs('hat_hard'))) return;
     await drag([r!.x, r!.y], (await center(`${EQUIP} [data-part="head"]`))!);
     check('dropping the hard hat on the head slot wears it', (await whereIs('hat_hard')).some((l) => l.startsWith('worn')), await whereIs('hat_hard'));
     await shot('inv_worn_hat');
