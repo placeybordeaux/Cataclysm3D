@@ -34,6 +34,7 @@ import { chassisScenarios } from './realinput_chassis';
 import { stairsScenarios } from './realinput_stairs';
 import { grabScenarios } from './realinput_grab';
 import { curtainsScenarios } from './realinput_curtains';
+import { reloadScenarios } from './realinput_reload';
 
 const argv = process.argv.slice(2);
 const opt = (n: string, d: string) => (argv.includes(n) ? argv[argv.indexOf(n) + 1] : d);
@@ -1520,6 +1521,8 @@ scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...stairsScenar
 scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...grabScenarios({ x: () => x, js, check, shot, toGameplay, sleep }));
 // Curtained windows (docs/FURNITURE.md) and smash sounds (docs/AUDIO.md): e menu, light, sight, peek, doors heard.
 scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...curtainsScenarios({ x: () => x, js, check, shot, toGameplay, sleep }));
+// Reload help (src/game/reloadhelp.ts): a battery-less flashlight says what it takes and where you saw some.
+scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...reloadScenarios({ x: () => x, js, check, shot, toGameplay, sleep }));
 
 if (argv.includes('--list') || argv.includes('--dry-run')) {
   for (const [n, what] of scenarios) console.log(`${only && !only.has(n) ? '  (skip)' : '  run   '} ${n.padEnd(11)} ${what}`);

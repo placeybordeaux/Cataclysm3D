@@ -4,6 +4,7 @@ import { armorPortion, covers, materialIds } from '../game/inventory';
 import { asArray, type Item } from '../game/item';
 import { cddaText } from '../game/units';
 import { drawStyle, rangedClass, strRequirementLine } from '../game/rangedfeel';
+import { reloadHintsFor, seenLine, takesLine } from '../game/reloadhelp';
 import { c, colorize } from './framework';
 import { durationText, kg, liters } from './format';
 
@@ -134,6 +135,14 @@ export function itemInfo(it: Item, who: Character): string {
     const dm = asArray(d.damage);
     if (dm.length) L.push(`Damage: ${dm.map((u) => `${num(u.amount ?? 0)} ${u.damage_type ?? ''}`).join(', ')}`);
     if (d.range) L.push(`Range: ${num(d.range)}`);
+  }
+  // What it reloads with, in words, and where you last saw some (src/game/reloadhelp.ts).
+  const takes = takesLine(it);
+  if (takes) {
+    if (!it.isGun() && !it.isMagazine()) L.push(SEP);
+    L.push(c('c_light_gray', esc(takes)));
+    const seen = seenLine(it, reloadHintsFor(who));
+    if (seen) L.push(c('c_light_green', esc(seen)));
   }
   if (it.isBook()) {
     L.push(SEP);
