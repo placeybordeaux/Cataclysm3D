@@ -4,6 +4,7 @@ import { CHUNK, LEVEL_HEIGHT, MAX_Z } from '../world/coords';
 import { hasFlag } from '../world/registry';
 import { displayIrradiance, LightField, type LightSource } from './lightfield';
 import { terrainShape } from './tileKinds';
+import { roofAbove } from '../world/levels';
 
 // GPU side of the CDDA-style light map (see lightfield.ts for the model):
 //  - builds the LightField for the player's z-level from chunk data (opacity, open sky,
@@ -193,7 +194,9 @@ export class LightMap {
       for (let cx = c0x; cx <= c1x; cx++) {
         const here = this.map.hasChunk(cx, cy, z) ? this.map.chunk(cx, cy, z) : null;
         const above: ({ ter: Uint16Array } | null)[] = [];
-        for (let dz = 1; dz <= 3 && z + dz <= MAX_Z; dz++) above.push(this.map.hasChunk(cx, cy, z + dz) ? this.map.chunk(cx, cy, z + dz) : null);
+        // every level up to the sky (src/world/levels.ts roofAbove): a two-storey engine bay is
+        // open air at z+1 under a roof at z+3, and three levels was the old fixed reach
+        for (let dz = 1; z + dz <= MAX_Z; dz++) above.push(this.map.hasChunk(cx, cy, z + dz) ? this.map.chunk(cx, cy, z + dz) : null);
         for (let ly = 0; ly < CHUNK; ly++) {
           const gy = cy * CHUNK + ly - f.oy;
           if (gy < 0 || gy >= S) continue;
@@ -208,7 +211,7 @@ export class LightMap {
             for (let k = 0; k < above.length; k++) {
               const a = above[k];
               if (!a || ter.none[a.ter[li]]) continue;
-              if (k === 0) f.outside[gi] = 0;
+              f.outside[gi] = 0;
               this.coverData[gi] = (z + k + 1) * LEVEL_HEIGHT;
             }
           }
@@ -312,7 +315,7 @@ export class LightMap {
     const exact = this.exactLightAt(x, y, z);
     if (exact !== null) return exact;
     const tx = Math.floor(x), ty = Math.floor(y);
-    const covered = terrainShape(this.map.terAt(tx, ty, z + 1)) !== 'none';
+    const covered = roofAbove(this.map, tx, ty, z);
     return (covered ? this.field.indoorAmbient : 1) * this.naturalLevel;
   }
 }

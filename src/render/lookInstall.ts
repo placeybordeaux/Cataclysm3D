@@ -22,7 +22,11 @@ import { FORM_NAMES, FORMS, form, isFormName, setForm } from './formLight';
 
 export function installLooks(game: Game, renderer: Renderer, worldgen: WorldGenerator | null, api: DebugApi): void {
   installNearCurtain(game, renderer);
-  if (worldgen) renderer.skyline.overmap = worldgen.overmap;
+  if (worldgen) {
+    renderer.skyline.overmap = worldgen.overmap;
+    // how tall each column is (src/world/levels.ts): what exists is derived from the world
+    renderer.chunks.levels.overmap = worldgen.overmap;
+  }
   registerOption({
     name: 'Visual style',
     value: () => LOOKS[look.name].label,

@@ -830,7 +830,8 @@ export class VehicleRenderer {
     const now = t0 / 1000;
     for (const v of this.system.list) {
       const d = Math.hypot(v.x - p.x, v.y - p.y);
-      if (d > VIEW_RANGE || Math.abs(v.z - p.z) > 1) {
+      // drawn iff its level is (src/world/levels.ts), not within one level of the player
+      if (d > VIEW_RANGE || !this.renderer.chunks.levels.drawn(v.x, v.y, v.z)) {
         if (this.entries.has(v)) this.drop(v);
         continue;
       }

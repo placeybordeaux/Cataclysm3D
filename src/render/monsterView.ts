@@ -477,7 +477,8 @@ export class MonsterView implements GameSystem {
       if (m.dead) continue;
       let v = this.views.get(m);
       if (!v) v = this.create(m);
-      const visible = Math.abs(m.z - p.z) <= 1;
+      // drawn iff its level is (src/world/levels.ts), not within one level of the player
+      const visible = this.renderer.chunks.levels.drawn(m.x, m.y, m.z);
       v.h?.setVisible(visible);
       // Hit-stop: the struck sprite holds exactly where the blow found it.
       if (v.hold > 0) {
@@ -642,7 +643,7 @@ export class MonsterView implements GameSystem {
     const range = Math.min(FAR_FIGURE_MAX, (this.renderer.chunks.radius + 0.5) * CHUNK);
     this.farRange = range;
     for (const m of this.sys.all) {
-      if (m.dead || !m.dormant || Math.abs(m.z - p.z) > 1) continue;
+      if (m.dead || !m.dormant || !this.renderer.chunks.levels.drawn(m.x, m.y, m.z)) continue;
       if (Math.hypot(m.x - p.x, m.y - p.y) > range) continue;
       this.far.push(m);
       this.farSet.add(m);

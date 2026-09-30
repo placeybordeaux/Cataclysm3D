@@ -289,16 +289,16 @@ export function installPerf(game: Game, renderer: Renderer, api: DebugApi, prefe
     return chunks.schedule;
   };
 
-  // ---- levels drawn above ground (chunkManager.ts levelRadius): 'ground' (default) or 'window'
-  const below = params.get('below');
-  if (below) {
-    if (below !== 'ground' && below !== 'window') throw new Error(`?below=${below}: expected ground or window`);
-    chunks.below = below;
+  // ---- which levels exist (src/world/levels.ts): 'world' (default, per-column extent) or 'window'
+  const lvq = params.get('levels');
+  if (lvq) {
+    if (lvq !== 'world' && lvq !== 'window') throw new Error(`?levels=${lvq}: expected world or window`);
+    chunks.levels.policy.mode = lvq;
   }
-  api.drawBelow = (mode?: 'ground' | 'window') => {
-    if (mode !== undefined && mode !== 'ground' && mode !== 'window') throw new Error(`drawBelow: 'ground' or 'window', not ${String(mode)}`);
-    if (mode) chunks.below = mode;
-    return chunks.below;
+  api.drawLevels = (mode?: 'world' | 'window') => {
+    if (mode !== undefined && mode !== 'world' && mode !== 'window') throw new Error(`drawLevels: 'world' or 'window', not ${String(mode)}`);
+    if (mode) chunks.levels.policy.mode = mode;
+    return chunks.levels.policy.mode;
   };
 
   const perf: PerfApi = {

@@ -273,7 +273,8 @@ export class NpcView implements GameSystem {
         this.views.set(n, v);
       } else if (outfitCheck) this.refresh(n, v);
       const downed = n.effects.has('downed') || n.isAsleep();
-      const visible = Math.abs(n.z - p.z) <= 1;
+      // drawn iff its level is (src/world/levels.ts), not within one level of the player
+      const visible = this.renderer.chunks.levels.drawn(n.x, n.y, n.z);
       if (v.c) {
         if (n.attackCooldown > v.cool + 0.05) v.c.strike();
         v.cool = n.attackCooldown;

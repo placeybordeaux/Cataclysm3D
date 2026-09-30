@@ -9,13 +9,14 @@ import { puddleMaterial } from './props';
 import { worldMaterials } from './materials';
 import { glassMaterial } from './furniture/glass';
 import type { SpriteLayer, StaticSpriteGroup } from './sprites';
-import { LEVEL_HEIGHT } from '../world/coords';
+import { LEVEL_HEIGHT, MAX_Z } from '../world/coords';
 import type { TileTextureSource } from './textureSource';
-import { terrainShape } from './tileKinds';
+import { VisibleLevels, roofAbove } from '../world/levels';
 
 // Keeps chunk meshes around the player in sync with the map:
-//  - desired set = chunks within `radius` (circular) on levels [z - below, z + above], and
-//    above ground the ground level and the storeys up to the player too (levelRadius)
+//  - desired set = chunks within `radius` (circular) on the levels src/world/levels.ts says
+//    exist for the eye: the player's window [z - below, z + above], and on the surface or above
+//    every level of each column from the ground up to its top (roofs, towers, catwalks)
 //  - an entry is rebuilt when its signature (own + 6 neighbour chunk versions) changes,
 //    since wall faces and slab edges depend on neighbours
 //  - rebuilds are nearest-first (chunks behind the camera later) under a strict per-frame
@@ -117,33 +118,6 @@ export interface ChunkStats {
   frameMs: number;
 }
 
-/**
- * Chunk radius drawn on level `z` with the player on `pz`, or -1 for "not drawn".
- *
- * Around the player: [pz - below, pz + above] at the full radius R. Above ground (pz > 0) the
- * ground itself and every storey between it and the player are drawn too: from a rooftop the
- * street is most of the view, and with only one level below it was a flat sheet of haze under
- * floating buildings (docs/PERF.md "Above ground"). Most of those chunks are open air, skipped
- * without meshing, so the cost is the buildings you actually see. Up a tower the storeys in
- * between are many; past `fullGap` of them the middle ones (not the ground, z=1 or the two just
- * under the player's window) get a smaller radius: far lower storeys of far towers are hidden
- * behind the near ones and the fog anyway.
- * Basements (pz < 0) keep the window: you shouldn't see the surface through the ground.
- */
-export function levelRadius(z: number, pz: number, R: number, below: number, above: number, fullGap = 4, ground = true): number {
-  if (z >= pz - below && z <= pz + above) return R;
-  if (!ground || pz <= 0 || z < 0 || z > pz) return -1;
-  if (z === 0) return R;
-  const gap = pz - below - 1; // storeys strictly between the ground and the player's window
-  if (gap <= fullGap || z === 1 || z >= pz - below - 2) return R;
-  return Math.max(2, Math.ceil(R / 2));
-}
-
-/** Lowest level levelRadius() can draw with the player on `pz`. */
-export function lowestLevel(pz: number, below: number, ground = true): number {
-  return ground && pz > 0 ? Math.min(0, pz - below) : pz - below;
-}
-
 const key = (cx: number, cy: number, z: number) => ((z + 16) * 4096 + (cx + 2048)) * 4096 + (cy + 2048);
 
 export class ChunkManager {
@@ -152,9 +126,10 @@ export class ChunkManager {
   radius = 6;
   levelsBelow = 1;
   levelsAbove = 1;
-  /** Above ground: 'ground' (default) also draws the ground and the storeys down to it;
-   *  'window' = only [z - below, z + above] (the old behaviour; ?below=window, cdda.drawBelow). */
-  below: 'ground' | 'window' = 'ground';
+  /** Which levels exist for the eye (src/world/levels.ts): the one source of truth other
+   *  systems (prefetch, telemetry, creature/vehicle views) ask too. Its overmap is attached by
+   *  lookInstall; `levels.policy.mode = 'window'` is the old fixed window (?levels=window). */
+  readonly levels = new VisibleLevels();
   /** Max milliseconds of meshing per frame (builds are sliced; at least one step runs). */
   budgetMs = 4;
   /** Budget when the player's own surroundings changed (a door opened, a wall smashed):
@@ -211,6 +186,7 @@ export class ChunkManager {
   constructor(private map: GameMap, private sprites: SpriteLayer, public source: TileTextureSource) {
     this.group.name = 'chunks';
     this.shapes = new ShapeTable(map);
+    this.levels.map = map;
   }
 
   /**
@@ -263,7 +239,7 @@ export class ChunkManager {
 
   /** Is tile (x,y,z) under a roof/floor (anything on the level above)? Used for ambient. */
   covered(x: number, y: number, z: number): boolean {
-    return terrainShape(this.map.terAt(x, y, z + 1)) !== 'none';
+    return roofAbove(this.map, x, y, z, this.levels.columnTop(Math.floor(x / CHUNK), Math.floor(y / CHUNK)));
   }
 
   update(px: number, py: number, pz: number, zVisible: (z: number) => boolean, unlimited = false): void {
@@ -289,17 +265,23 @@ export class ChunkManager {
     //    chunks (mapgen can be slow), so this shares the frame budget with meshing.
     if (this.offsetsR !== R) this.computeOffsets(R);
     let created = 0;
-    const ground = this.below === 'ground';
-    const zLo = lowestLevel(pz, this.levelsBelow, ground), zHi = pz + this.levelsAbove;
-    const lr = this.levelR;
-    lr.length = 0;
-    for (let z = zLo; z <= zHi; z++) lr.push(levelRadius(z, pz, R, this.levelsBelow, this.levelsAbove, 4, ground));
+    // which levels exist: src/world/levels.ts, per column from what the world contains
+    const lv = this.levels;
+    const pol = lv.policy;
+    pol.radius = R;
+    pol.below = this.levelsBelow;
+    pol.above = this.levelsAbove;
+    lv.eye.x = px;
+    lv.eye.y = py;
+    lv.eye.z = pz;
+    lv.beginFrame();
+    const [zLo, zHi] = lv.span(pz);
     outer: for (const [dx, dy] of this.offsets)
       for (let z = zLo; z <= zHi; z++) {
-        const rz = lr[z - zLo];
+        const cx = pcx + dx, cy = pcy + dy;
+        const rz = lv.radiusAt(cx, cy, z, pz);
         // offsets are circular around the player's chunk, like computeOffsets
         if (rz < 0 || (rz < R && dx * dx + dy * dy > (rz + 0.5) * (rz + 0.5))) continue;
-        const cx = pcx + dx, cy = pcy + dy;
         const k = key(cx, cy, z);
         if (this.entries.has(k)) continue;
         if (!unlimited && created > 0 && performance.now() - t0 > (this.behind ? boost : base)) break outer;
@@ -312,6 +294,7 @@ export class ChunkManager {
         });
         this.probe?.want(cx, cy, z);
       }
+    const creationDone = !created || unlimited || performance.now() - t0 <= (this.behind ? boost : base);
     this.stats.frameCreateMs = performance.now() - t0;
     frameStats.lap('chunks.create');
     // 2. signatures, visibility, eviction
@@ -320,10 +303,10 @@ export class ChunkManager {
     for (const [k, e] of this.entries) {
       const ddx = e.cx - pcx, ddy = e.cy - pcy;
       const dd = ddx * ddx + ddy * ddy;
-      const rz = e.z >= zLo && e.z <= zHi ? lr[e.z - zLo] : -1;
+      const rz = lv.radiusAt(e.cx, e.cy, e.z, pz);
       // hysteresis: kept one chunk past its level's radius, and one level past the player's
       // window (not past the ground: a basement under a rooftop stays dropped)
-      const keepR = rz >= 0 ? rz : e.z >= pz - this.levelsBelow - 1 && e.z <= zHi + 1 ? R : -1;
+      const keepR = rz >= 0 ? rz : e.z >= pz - this.levelsBelow - 1 && e.z <= pz + this.levelsAbove + 1 ? R : -1;
       if (keepR < 0 || dd > (keepR + 1.5) * (keepR + 1.5)) {
         this.probe?.drop(e.cx, e.cy, e.z, !!e.shown);
         this.dispose(e);
@@ -409,6 +392,7 @@ export class ChunkManager {
     this.stats.builtThisFrame = built;
     this.stats.pending = dirty.length - built;
     this.stats.entries = this.entries.size;
+    if (this.audit && (unlimited || ++this.auditTick % 60 === 0)) this.auditLevels(px, py, pz, creationDone && this.stats.pending === 0);
   }
 
   /**
@@ -511,8 +495,51 @@ export class ChunkManager {
     dirty.length = n;
   }
 
-  /** this frame's levelRadius() per level from lowestLevel() up (reused array) */
-  private levelR: number[] = [];
+  /**
+   * The guard for the "only a few levels around the player" bug class (docs/PERF.md "Levels
+   * from the world"): on by default in dev builds and tests. Every 60 frames (every frame when
+   * flushed) it checks, for every column inside the draw radius:
+   *  - content: every generated, non-empty chunk on the surface or above (with the eye there)
+   *    is on a level the column draws. A miss means the extent (levels.ts) is wrong: something
+   *    exists that can never be drawn (a roof with the sky showing through).
+   *  - built: once streaming is idle, every wanted level has a built entry.
+   * Each miss is logged once (console.warn) and kept in `levelMisses` for tests and tools.
+   */
+  audit = !!(import.meta as { env?: { DEV?: boolean } }).env?.DEV;
+  readonly levelMisses: { cx: number; cy: number; z: number; why: 'content' | 'built' }[] = [];
+  private auditTick = 0;
+  private auditSeen = new Set<number>();
+  auditLevels(px: number, py: number, pz: number, idle: boolean): void {
+    const lv = this.levels, m = this.map;
+    const pcx = Math.floor(px / CHUNK), pcy = Math.floor(py / CHUNK);
+    const [zLo, zHi] = lv.span(pz);
+    const miss = (cx: number, cy: number, z: number, why: 'content' | 'built') => {
+      const k = key(cx, cy, z) * 2 + (why === 'built' ? 1 : 0);
+      if (this.auditSeen.has(k)) return;
+      this.auditSeen.add(k);
+      this.levelMisses.push({ cx, cy, z, why });
+      console.warn(`[levels] ${why === 'content' ? 'chunk with content is on no drawn level' : 'wanted level never built'}: chunk ${cx},${cy},${z} (eye z ${pz}, column top ${lv.columnTop(cx, cy)})`);
+    };
+    // inside the radius less the hysteresis ring
+    const R = Math.max(0, this.radius - 1);
+    for (const [dx, dy] of this.offsets) {
+      if (dx * dx + dy * dy > R * R) break; // offsets are sorted by distance
+      const cx = pcx + dx, cy = pcy + dy;
+      if (pz >= 0 && lv.policy.mode === 'world')
+        for (let z = 0; z <= MAX_Z; z++) {
+          if (!m.hasChunk(cx, cy, z) || m.chunk(cx, cy, z)!.empty) continue;
+          if (lv.radiusAt(cx, cy, z, pz) < 0) miss(cx, cy, z, 'content');
+        }
+      if (idle)
+        for (let z = zLo; z <= zHi; z++) {
+          const r = lv.radiusAt(cx, cy, z, pz);
+          if (r < 0 || dx * dx + dy * dy > (r + 0.5) * (r + 0.5)) continue;
+          const e = this.entries.get(key(cx, cy, z));
+          if ((!e || !e.shown) && m.hasChunk(cx, cy, z)) miss(cx, cy, z, 'built');
+        }
+    }
+  }
+
   private offsets: [number, number][] = [];
   private offsetsR = -1;
   private computeOffsets(R: number): void {

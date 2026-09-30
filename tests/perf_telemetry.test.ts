@@ -29,6 +29,7 @@ function source(player: { x: number; y: number; z: number }, unbuilt: (cx: numbe
     view: () => ({ fx: 1, fy: 0, hfov: Math.PI / 2 }),
     chunks: {
       radius: R, levelsBelow: 0, levelsAbove: 1, visibleDist: 60, budgetMs: 4, effBudgetMs: 4,
+      levels: { radiusAt: (_cx: number, _cy: number, z: number, pz: number) => (z >= pz && z <= pz + 1 ? R : -1), span: (pz: number): [number, number] => [pz, pz + 1] },
       stats: { entries: 0, pending: 0, builtThisFrame: 0, meshMs: 0, treeMs: 0, frameCreateMs: 0, frameMs: 0, builds: 0 },
       forEachEntry: (fn) => entries.forEach(fn),
     },

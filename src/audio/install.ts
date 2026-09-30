@@ -1,4 +1,5 @@
 import type { Game } from '../game/game';
+import { roofAbove } from '../world/levels';
 import { AudioEngine } from './audio';
 import { isNight } from './ambience';
 import { footstepVariant, strideLength } from './footsteps';
@@ -50,7 +51,8 @@ export function installAudio(game: Game, debugApi?: Record<string, any>): AudioH
       const tx = Math.floor(p.x), ty = Math.floor(p.y);
       const season = g.clock.season;
       const underground = p.z < 0;
-      const sheltered = underground || g.map.hasFloor(tx, ty, p.z + 1);
+      // anything overhead at any height (src/world/levels.ts), not just the level above
+      const sheltered = underground || roofAbove(g.map, tx, ty, p.z);
       const night = isNight(g.clock.hourOfDay, season);
       engine.env = { season, indoors: sheltered, night };
 
