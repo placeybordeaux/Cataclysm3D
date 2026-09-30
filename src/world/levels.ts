@@ -169,7 +169,8 @@ export function isAir(omtId: string): boolean {
  * with the eye on `pz`, or -1 for "not drawn".
  *  - the player's window [pz - below, pz + above]: R.
  *  - underground (pz < 0): nothing else (rock hides it; no surface through the ground).
- *  - on the surface or above: every level from the ground (0) up to the column's top: R. Up a
+ *  - on the surface or above: every level from the ground (0) up to the column's top: R, but
+ *    R - 2 above the window (tower tops, high roofs: far ones are deep in the haze). Up a
  *    tower more than 4 storeys above the ground, the middle storeys (not the ground, z 1, the
  *    two under the player's window, or anything at or above it) get half the radius: far lower
  *    storeys of far towers are hidden behind the near ones and the fog.
@@ -179,6 +180,9 @@ export function levelRadius(z: number, pz: number, R: number, below: number, abo
   if (pz < 0 || z < 0) return -1;
   const t = Number.isNaN(top) ? pz + above : top;
   if (z > t) return -1;
+  // above the window (tower tops, high roofs): out to R - 2, where the haze is already thick;
+  // full radius cost ~2x the unbuilt-street time driving through a city (perf city40)
+  if (z > pz + above) return Math.max(2, R - 2);
   const gap = pz - below - 1; // storeys strictly between the ground and the player's window
   if (z >= pz - below || gap <= 4 || z <= 1 || z >= pz - below - 2) return R;
   return Math.max(2, Math.ceil(R / 2));
@@ -190,10 +194,19 @@ export function levelRadius(z: number, pz: number, R: number, below: number, abo
  * map's outside flag). Looking only one level up let the sun into a two-storey engine bay whose
  * z+1 is open air under a roof at z+3. `top` = the column's top if known.
  */
-export function roofAbove(map: { terAt(x: number, y: number, z: number): TerrainDef }, x: number, y: number, z: number, top = NaN): boolean {
-  // the column's top (VisibleLevels.columnTop) bounds the scan: an open field doesn't generate
-  // five levels of open air to find nothing
-  const hi = Number.isNaN(top) ? MAX_Z : Math.min(MAX_Z, Math.max(top, z + 1));
-  for (let zz = z + 1; zz <= hi; zz++) if (terrainShape(map.terAt(x, y, zz)) !== 'none') return true;
+export function roofAbove(map: { terAt(x: number, y: number, z: number): TerrainDef; hasChunk?(cx: number, cy: number, z: number): boolean }, x: number, y: number, z: number, top: number | (() => number) = NaN): boolean {
+  // the level above first (almost always the answer, and it's called per character per frame)
+  if (terrainShape(map.terAt(x, y, z + 1)) !== 'none') return true;
+  // then up to the column's top (VisibleLevels.columnTop), read only now: an open field doesn't
+  // generate five levels of open air to find nothing
+  const t = typeof top === 'function' ? top() : top;
+  const hi = Number.isNaN(t) ? MAX_Z : Math.min(MAX_Z, t);
+  // without a known top, only levels already generated (the chunk manager generates every level
+  // a column has): asking about a far tile must not run mapgen up to the sky
+  const cx = Math.floor(x / CHUNK), cy = Math.floor(y / CHUNK);
+  for (let zz = z + 2; zz <= hi; zz++) {
+    if (Number.isNaN(t) && map.hasChunk && !map.hasChunk(cx, cy, zz)) continue;
+    if (terrainShape(map.terAt(x, y, zz)) !== 'none') return true;
+  }
   return false;
 }

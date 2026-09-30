@@ -262,7 +262,7 @@ export class ChunkManager {
 
   /** Is tile (x,y,z) under a roof/floor (anything on the level above)? Used for ambient. */
   covered(x: number, y: number, z: number): boolean {
-    return roofAbove(this.map, x, y, z, this.levels.columnTop(Math.floor(x / CHUNK), Math.floor(y / CHUNK)));
+    return roofAbove(this.map, x, y, z, () => this.levels.columnTop(Math.floor(x / CHUNK), Math.floor(y / CHUNK)));
   }
 
   update(px: number, py: number, pz: number, zVisible: (z: number) => boolean, unlimited = false): void {
@@ -538,7 +538,7 @@ export class ChunkManager {
     for (const e of dirty) {
       if ((e.cls === 'up' || e.cls === 'trees') && soon < 3) continue;
       // (a flush builds everything: tests and screenshots expect the whole view)
-      if (e.cls === 'high' && soon < 1 && !unlimited) {
+      if (e.cls === 'high' && !unlimited && (soon < 3 || (moving && any && soon < 6))) {
         this.deferredHoles++;
         continue;
       }

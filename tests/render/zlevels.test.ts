@@ -76,7 +76,9 @@ describe('VisibleLevels', () => {
     lv.policy = { radius: 8, below: 1, above: 2, mode: 'window' };
     expect(lv.radiusAt(0, 0, 3, 0)).toBe(-1);
     lv.policy.mode = 'world';
-    expect(lv.radiusAt(0, 0, 3, 0)).toBe(8);
+    // above the window: R - 2 (far tower tops are deep in the haze)
+    expect(lv.radiusAt(0, 0, 3, 0)).toBe(6);
+    expect(lv.radiusAt(0, 0, 2, 0)).toBe(8);
   });
 
   it('drawn(): a zombie on the street is drawn from the roof; one in a far basement is not', () => {
@@ -166,6 +168,10 @@ describe('ChunkManager levels', () => {
 describe('roofAbove', () => {
   it('sees the fire station roof three levels up (the sky-light test)', () => {
     const m = world();
+    // without a column top it reads only generated levels (no mapgen up to the sky)
+    expect(roofAbove(m, 5, 5, 0)).toBe(false);
+    expect(roofAbove(m, 5, 5, 0, 4)).toBe(true);
+    for (let z = 0; z <= 4; z++) m.chunk(0, 0, z);
     expect(roofAbove(m, 5, 5, 0)).toBe(true);
     expect(roofAbove(m, 30, 5, 0)).toBe(false);
   });
