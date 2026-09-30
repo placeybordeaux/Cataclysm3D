@@ -19,6 +19,8 @@ import { isBareTree, type TreeSpec } from './trees';
 import { wantsFlora3d } from './flora';
 import type { ModelFactory } from './furniture';
 import type { SurfacePainter } from './surfaces';
+import { RoomMap, type Room } from './rooms';
+import { FACE_ENDS, type Dresser } from './dressing';
 
 // Builds the static geometry of one chunk at one z-level: merged quads grouped by texture
 // page (one draw call per page), plus the billboards the chunk contributes. Light sources
@@ -91,6 +93,8 @@ export interface MeshExtras {
   models?: ModelFactory;
   /** painted surfaces (surfaces.ts) active: interior wall finishes, baseboards, crown */
   surfaces?: SurfacePainter;
+  /** set dressing for painted rooms (dressing.ts) */
+  dressing?: Dresser;
 }
 
 const SHAPES: TerrainShape[] = ['none', 'floor', 'liquid', 'wall', 'halfwall', 'window', 'door', 'door_open', 'fence', 'tree', 'shrub', 'stairs_up', 'stairs_down'];
@@ -183,6 +187,7 @@ export function* buildChunkMeshSteps(
   const SP = extras?.surfaces?.active() ? extras.surfaces : undefined;
   // interior finishes are chosen per building: one seed per chunk (≈ one OMT, one house)
   const buildingSeed = (Math.imul(chunk.cx, 73856093) ^ Math.imul(chunk.cy, 19349663)) >>> 0;
+  const DR = SP ? extras?.dressing : undefined;
   const A = LF?.archDetail ? extras?.arch : undefined;
   // pitched roofs: shingle/thatch/tile roof regions get a hipped roof (arch.ts)
   const pitched = (tx: number, ty: number) => PITCHED.test(terDefs[here.ter(tx, ty)].id);
@@ -206,6 +211,19 @@ export function* buildChunkMeshSteps(
   const here = new LevelSampler(map, z);
   const above = new LevelSampler(map, z + 1);
   const below = new LevelSampler(map, z - 1);
+  // rooms (rooms.ts): interior finishes, curtains and set dressing are chosen per room; a
+  // covered region open to the outside (a porch) is not a room. Scanned with a margin so a
+  // room across a chunk border resolves the same way from both chunks.
+  const RM = SP && z >= 0 ? new RoomMap({
+    cls: (tx, ty) => {
+      const sh = shapeAt(here, tx, ty);
+      return sh === S.floor || sh === S.stairs_up || sh === S.stairs_down ? 'floor' : sh === S.wall || sh === S.halfwall ? 'wall'
+        : sh === S.window || sh === S.door || sh === S.door_open ? 'opening' : 'other';
+    },
+    covered: (tx, ty) => shapeAt(above, tx, ty) !== S.none,
+    furn: (tx, ty) => map.furnAt(tx, ty, z).id,
+  }, chunk.cx * CHUNK - 14, chunk.cy * CHUNK - 14, chunk.cx * CHUNK + CHUNK + 14, chunk.cy * CHUNK + CHUNK + 14, z) : null;
+  const roomAt = (tx: number, ty: number): Room | null => (RM ? RM.room(tx, ty) : null);
   const pages = new Map<THREE.Texture, GeomBuilder>();
   const sprites: ChunkSprite[] = [];
   // Ambient multiplier for faces emitted next; set per tile / per side face.
@@ -218,6 +236,7 @@ export function* buildChunkMeshSteps(
   };
   const terDefs = map.terrain.defs;
   const shapeAt = (s: LevelSampler, x: number, y: number) => shapes.terrain(s.ter(x, y));
+  const nShapeAt = (tx: number, ty: number) => shapeAt(here, tx, ty);
   const isWall = (s: number) => s === S.wall;
   const wallLike = (s: number) => s === S.wall || s === S.halfwall || s === S.window || s === S.door || s === S.door_open;
   const floorish = (s: number) => s === S.floor || s === S.stairs_up;
@@ -350,15 +369,27 @@ export function* buildChunkMeshSteps(
         if (!SP || z < 0) return 0;
         const bits = [32, 1, 16, 2];
         let m = 0;
-        for (let d = 0; d < 4; d++) if (faces & bits[d] && floorish(nShape[d]) && skyOf(x + DX[d], y + DY[d]) < 1) m |= bits[d];
+        for (let d = 0; d < 4; d++) if (faces & bits[d] && roomAt(x + DX[d], y + DY[d])) m |= bits[d];
         return m;
+      };
+      /** Box faces (bits of `rb`) in the interior finish of the room each one looks into. */
+      const roomBoxes = (wallId: string, cap: TileFrame, x0: number, y0: number, z0: number, x1: number, y1: number, z1: number, rb: number) => {
+        const bits = [32, 1, 16, 2];
+        for (let d = 0; d < 4; d++) {
+          if (!(rb & bits[d])) continue;
+          const r = roomAt(x + DX[d], y + DY[d]);
+          const inner = src.terrain(wallId, 'wall', { indoor: true, variantSeed: r?.seed ?? buildingSeed });
+          geo(inner).box(x0, y0, z0, x1, y1, z1, bits[d], inner, cap, base, 1);
+        }
       };
       const ownSky = skyOf(x, y);
       curSky = ownSky;
 
       // Floor slab underside + exposed slab edges: anything with a floor at this level
       // that has air (or a non-solid tile) under it.
-      const hasSlab = shape !== S.none && shape !== S.liquid && shape !== S.stairs_down;
+      // painted look: roof gutters are a trough under the eave, not a floor slab ledge
+      const gutter = !!SP && A !== undefined && /^t_gutter/.test(def.id);
+      const hasSlab = shape !== S.none && shape !== S.liquid && shape !== S.stairs_down && !gutter;
       if (hasSlab && z > -10) {
         const belowShape = shapeAt(below, x, y);
         if (!isWall(belowShape) && belowShape !== S.stairs_up) {
@@ -391,6 +422,10 @@ export function* buildChunkMeshSteps(
         case S.stairs_down:
           break;
         case S.floor:
+          if (gutter) {
+            for (let d = 0; d < 4; d++) if (pitched(x + DX[d], y + DY[d])) DR?.gutter(geo, x, y, d, base, /downspout|drop/.test(def.id), LEVEL_HEIGHT);
+            break;
+          }
           if (GROUND_OVERLAY.test(def.id)) {
             // tileset draws felled trunks/stumps as cut-outs over the ground: lay them on
             // the surrounding ground instead of punching see-through holes in the floor
@@ -439,14 +474,34 @@ export function* buildChunkMeshSteps(
             curSky = skyOf(x + DX[d], y + DY[d]);
             // painted surfaces: a room-facing side gets the building's interior finish,
             // with a baseboard and a crown moulding
-            const roomSide = !!SP && curSky < 1 && z >= 0 && floorish(nShape[d]);
-            const face = roomSide ? src.terrain(def.id, 'wall', { connections: conn, indoor: true, variantSeed: buildingSeed }) : side;
-            sideFace(geo(face), x, y, d, base, base + top, face, base, 1);
+            const room = floorish(nShape[d]) ? roomAt(x + DX[d], y + DY[d]) : null;
+            const roomSide = !!room;
+            const isOpening = nShape[d] === S.window || nShape[d] === S.door || nShape[d] === S.door_open;
+            if (RM && isOpening) {
+              // the reveal of a window / door: each half takes the finish of its own side
+              for (const p of [(d + 1) & 3, (d + 3) & 3]) {
+                const r = roomAt(x + DX[p], y + DY[p]);
+                const f = r ? src.terrain(def.id, 'wall', { connections: conn, indoor: true, variantSeed: r.seed }) : side;
+                halfSideFace(geo(f), x, y, d, p, base, base + top, f, base, 1);
+              }
+            } else {
+              const face = roomSide ? src.terrain(def.id, 'wall', { connections: conn, indoor: true, variantSeed: room!.seed }) : side;
+              sideFace(geo(face), x, y, d, base, base + top, face, base, 1);
+            }
             if (roomSide && SP) {
               const trim = SP.trim();
               wallBand(geo(trim), trim, x, y, d, base, base + 0.1, 0.014, base);
               if (shape === S.wall) wallBand(geo(trim), trim, x, y, d, base + WALL_TOP - 0.07, base + WALL_TOP, 0.022, base);
-            }
+              if (DR && shape === S.wall) {
+                const endDoor = (e: number) => { const sh2 = nShapeAt(x + DX[e], y + DY[e]); return sh2 === S.door || sh2 === S.door_open; };
+                const fid = map.furnAt(x + DX[d], y + DY[d], z).id;
+                DR.wallFace(geo, {
+                  x, y, d, base, wallTop: WALL_TOP, room: room!, buildingSeed,
+                  doorEnd: [endDoor(FACE_ENDS[d][0]), endDoor(FACE_ENDS[d][1])],
+                  blocked: /wardrobe|bookcase|fridge|freezer|locker|rack|shelf|cabinet|vending|piano|bunkbed|gunsafe|water_heater/.test(fid),
+                });
+              }
+            } else if (DR && shape === S.wall && outdoorFace(d)) DR.exteriorFace(geo, x, y, d, base, buildingSeed);
             if (A && shape === S.wall && outdoorFace(d)) {
               wallBand(geo(A.plinth), A.plinth, x, y, d, base, base + 0.32, 0.06, base);
               // cornice on the top storey, just under the roof slab
@@ -475,12 +530,13 @@ export function* buildChunkMeshSteps(
           g.box(x, base, y, x + 1, base + SILL_H, y + 1, (faces & ~rb) | 4, side, cap, base, 1);
           g.box(x, base + DOOR_H, y, x + 1, base + WALL_TOP, y + 1, (faces & ~rb) | 8, side, cap, base, 1);
           if (rb) {
-            const inner = src.terrain(wallId, 'wall', { indoor: true, variantSeed: buildingSeed });
-            geo(inner).box(x, base, y, x + 1, base + SILL_H, y + 1, rb, inner, cap, base, 1);
-            geo(inner).box(x, base + DOOR_H, y, x + 1, base + WALL_TOP, y + 1, rb, inner, cap, base, 1);
+            roomBoxes(wallId, cap, x, base, y, x + 1, base + SILL_H, y + 1, rb);
+            roomBoxes(wallId, cap, x, base + DOOR_H, y, x + 1, base + WALL_TOP, y + 1, rb);
           }
           // modelled look: real glass / shards / curtains instead of the textured pane
-          if (!(MD && MD.window(geo, glassGeo, src, def.id, x, y, base + SILL_H, base + DOOR_H, alongX, indoorSide(here, terDefs, x, y, alongX))) && !BROKEN_WINDOW.test(def.id))
+          const wIn = indoorSide(here, terDefs, x, y, alongX);
+          const wRoom = alongX ? roomAt(x, y + wIn) : roomAt(x + wIn, y);
+          if (!(MD && MD.window(geo, glassGeo, src, def.id, x, y, base + SILL_H, base + DOOR_H, alongX, wIn, wRoom?.seed)) && !BROKEN_WINDOW.test(def.id))
             paneQuads(geo(pane), x, y, alongX, base + SILL_H, base + DOOR_H, pane, base + SILL_H);
           if (A) {
             windowDetail(geo, A, x, y, alongX, base + SILL_H, base + DOOR_H, /wood|log|board/.test(wallId));
@@ -501,9 +557,13 @@ export function* buildChunkMeshSteps(
           // a gate in a fence line has no wall above it (modelled look: no floating lintel)
           const freeGate = !!MD && !foundWall && /gate|fence/.test(def.id);
           if (!freeGate) geo(side).box(x, base + DOOR_H, y, x + 1, base + WALL_TOP, y + 1, (dfaces & ~drb) | 8, side, cap, base, 1);
-          if (drb && !freeGate) {
-            const inner = src.terrain(wallId, 'wall', { indoor: true, variantSeed: buildingSeed });
-            geo(inner).box(x, base + DOOR_H, y, x + 1, base + WALL_TOP, y + 1, drb, inner, cap, base, 1);
+          if (drb && !freeGate) roomBoxes(wallId, cap, x, base + DOOR_H, y, x + 1, base + WALL_TOP, y + 1, drb);
+          if (DR && RM && z === 0 && !freeGate && shape === S.door) {
+            // a building's outside door: house number over it, a porch lamp beside it
+            const [pa, pb] = alongX ? [0, 2] : [3, 1];
+            const ra = roomAt(x + DX[pa], y + DY[pa]), rbm = roomAt(x + DX[pb], y + DY[pb]);
+            const outD = ra && !rbm && floorish(nShape[pb]) ? pb : rbm && !ra && floorish(nShape[pa]) ? pa : -1;
+            if (outD >= 0) DR.frontDoor(geo, x, y, outD, base, (buildingSeed ^ Math.imul(x, 668265263) ^ Math.imul(y, 374761393)) >>> 0, isWall(nShapeAt(x + DX[FACE_ENDS[outD][0]], y + DY[FACE_ENDS[outD][0]])));
           }
           if (A && !freeGate) doorCasing(geo, A, x, y, alongX, base, base + DOOR_H);
           const slab = src.terrain(def.id, 'pane');
@@ -720,6 +780,39 @@ export function* buildChunkMeshSteps(
       if (MD?.yieldHint()) yield;
     }
   }
+  if (RM && DR) {
+    // resolve every room touching this chunk, then dress the ones anchored here (so each
+    // room's lamp and rugs are emitted once)
+    for (let ly = 0; ly < CHUNK; ly++) for (let lx = 0; lx < CHUNK; lx++) roomAt(x0c + lx, y0c + ly);
+    for (const r of RM.rooms) {
+      if (r.ax < x0c || r.ay < y0c || r.ax >= x0c + CHUNK || r.ay >= y0c + CHUNK) continue;
+      const cx = Math.round((r.x0 + r.x1) / 2), cy = Math.round((r.y0 + r.y1) / 2);
+      if (RM.has(r, cx, cy) && r.tiles >= 4) DR.ceilingLamp(geo, cx + 0.5, cy + 0.5, base + WALL_TOP);
+      // rugs under beds and tables (connected groups), most rooms
+      const done = new Set<number>();
+      for (let ty = r.y0; ty <= r.y1; ty++) for (let tx = r.x0; tx <= r.x1; tx++) {
+        const k = (tx + 32768) * 65536 + (ty + 32768);
+        if (done.has(k) || !RM.has(r, tx, ty)) continue;
+        const fid = map.furnAt(tx, ty, z).id;
+        if (!/^f_(bed|table|coffee_table)$/.test(fid)) continue;
+        let gx0 = tx, gy0 = ty, gx1 = tx, gy1 = ty;
+        const st: [number, number][] = [[tx, ty]];
+        done.add(k);
+        while (st.length) {
+          const [qx, qy] = st.pop()!;
+          gx0 = Math.min(gx0, qx); gy0 = Math.min(gy0, qy); gx1 = Math.max(gx1, qx); gy1 = Math.max(gy1, qy);
+          for (let dd = 0; dd < 4; dd++) {
+            const nx2 = qx + DX[dd], ny2 = qy + DY[dd], nk = (nx2 + 32768) * 65536 + (ny2 + 32768);
+            if (!done.has(nk) && map.furnAt(nx2, ny2, z).id === fid) { done.add(nk); st.push([nx2, ny2]); }
+          }
+        }
+        if ((r.seed ^ (gx0 * 31 + gy0)) % 5 > 2) continue;
+        const m = fid === 'f_coffee_table' ? 0.45 : 0.35;
+        const rx0 = Math.max(r.x0, gx0 - m), rx1 = Math.min(r.x1 + 1, gx1 + 1 + m), ry0 = Math.max(r.y0, gy0 - m), ry1 = Math.min(r.y1 + 1, gy1 + 1 + m);
+        DR.rug(geo, rx0, ry0, rx1, ry1, base + 0.006, r.seed >>> 3);
+      }
+    }
+  }
   return { pages, sprites, puddles: pud.g, trees: trees.length ? trees : undefined, glass: glassB.g };
 }
 
@@ -764,6 +857,25 @@ function sideFace(g: GeomBuilder, x: number, y: number, d: number, y0: number, y
     case 2: g.quad([x, y0, y + 1], [x + 1, y0, y + 1], [x + 1, y1, y + 1], [x, y1, y + 1], [0, 0, 1], [x, v0, x + 1, v1], f, AO, cut); break;
     case 3: g.quad([x, y0, y], [x, y0, y + 1], [x, y1, y + 1], [x, y1, y], [-1, 0, 0], [y, v0, y + 1, v1], f, AO, cut); break;
   }
+}
+
+/**
+ * Half of the vertical face on tile (x, y)'s edge toward d: the half nearer direction p
+ * (perpendicular to d). Window/door reveals take a different finish on each side.
+ */
+function halfSideFace(g: GeomBuilder, x: number, y: number, d: number, p: number, y0: number, y1: number, f: TileFrame, vBase: number, cut = 0): void {
+  const v0 = y0 - vBase, v1 = y1 - vBase;
+  const AO = [0.78, 0.78, 1, 1];
+  // full-face corners (bottom, CCW from outside) as in sideFace, then clip to the half
+  const P: [number, number][] = d === 0 ? [[x + 1, y], [x, y]] : d === 1 ? [[x + 1, y + 1], [x + 1, y]] : d === 2 ? [[x, y + 1], [x + 1, y + 1]] : [[x, y], [x, y + 1]];
+  const U = d === 0 ? [-x - 1, -x] : d === 1 ? [-y - 1, -y] : d === 2 ? [x, x + 1] : [y, y + 1];
+  const mid: [number, number] = [(P[0][0] + P[1][0]) / 2, (P[0][1] + P[1][1]) / 2];
+  const um = (U[0] + U[1]) / 2;
+  // which end lies toward p?
+  const toward = (q: [number, number]) => (q[0] - mid[0]) * DX[p] + (q[1] - mid[1]) * DY[p] > 0;
+  const [a, b, ua, ub] = toward(P[0]) ? [P[0], mid, U[0], um] : [mid, P[1], um, U[1]];
+  const n: [number, number, number] = [DX[d], 0, DY[d]];
+  g.quad([a[0], y0, a[1]], [b[0], y0, b[1]], [b[0], y1, b[1]], [a[0], y1, a[1]], n, [ua, v0, ub, v1], f, AO, cut);
 }
 
 /** Double-sided thin pane through the tile centre (two back-to-back quads). */

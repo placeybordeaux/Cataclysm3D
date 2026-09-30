@@ -6,6 +6,7 @@ import type { Game } from '../../game/game';
 import { look } from '../look';
 import { AtlasTextureSource } from '../atlasSource';
 import { SURFACE_STYLES, SurfacePainter, storeSurfaceStyle, surfaceState, type SurfaceStyle } from '../surfaces';
+import { Dresser } from '../dressing';
 
 // Options > Furniture and the automation hooks for the furniture style (docs/FURNITURE.md):
 //   cdda.setFurnitureStyle('voxel')   switch live (not persisted; Options persists)
@@ -47,6 +48,16 @@ const SLABEL: Record<SurfaceStyle, string> = { painted: 'Painted', sprite: 'Tile
 export function installSurfaces(renderer: Renderer, api: DebugApi, game: Game): void {
   // shares the furniture atlas pages: no extra draw call per chunk
   const painter = new SurfacePainter(game.data.terrain, renderer.models.atlas);
+  const dresser = new Dresser(renderer.models.atlas);
+  // set dressing (dressing.ts) rides on painted surfaces; `?dressing=off` / cdda.setDressing(false) for the bare rooms
+  const dq = typeof location !== 'undefined' ? new URLSearchParams(location.search).get('dressing') : null;
+  if (dq && dq !== 'on' && dq !== 'off') throw new Error(`?dressing must be on|off, got ${dq}`);
+  const dressState = { on: dq !== 'off' };
+  (api as DebugApi & Record<string, unknown>).setDressing = (on: boolean) => {
+    dressState.on = !!on;
+    renderer.chunks.invalidateAll();
+    return dressState.on;
+  };
   const sync = () => {
     surfaceState.enabled = look.f.archDetail;
   };
@@ -61,7 +72,7 @@ export function installSurfaces(renderer: Renderer, api: DebugApi, game: Game): 
   renderer.chunks.extras = (near) => {
     const e = prev?.(near);
     if (!e || !painter.active()) return e;
-    return { ...e, surfaces: painter, arch: e.arch ? { ...e.arch, shingle: painter.shingles() } : e.arch };
+    return { ...e, surfaces: painter, dressing: dressState.on ? dresser : undefined, arch: e.arch ? { ...e.arch, shingle: painter.shingles() } : e.arch };
   };
   const set = (s: SurfaceStyle, persist: boolean) => {
     if (!SURFACE_STYLES.includes(s)) throw new Error(`unknown surface style ${s}: ${SURFACE_STYLES.join('|')}`);
