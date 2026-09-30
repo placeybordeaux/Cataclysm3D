@@ -6,6 +6,7 @@ import { has, MPH_PER_MS, type Vehicle, type VehiclePart } from '../game/vehicle
 import { loadVehicleData } from '../game/vehicle_data';
 import { installRefuel } from '../game/refuel';
 import { pointInBody } from '../game/vehicleShape';
+import { cellAtPoint } from '../game/chassis';
 import { composeCreatureHooks, monsterCreatureHooks, npcCreatureHooks, registerVehicleSave, VehicleSystem, type DriveMode } from '../game/vehicles';
 import { registerOption } from './options';
 import type { MonsterSystem } from '../game/monai';
@@ -68,7 +69,10 @@ export function targetVehicle(game: Game, renderer: Renderer | null = rendererRe
     // Modelled bodies are narrower than their tiles: the crosshair has to reach the paint.
     const b = shaped ? vs.bodyRect(o.v) : null;
     if (b && !pointInBody(o.v, b, x, y, 0.03)) return null;
-    return { v: o.v, mx: o.mx, my: o.my, x: tx, y: ty, z: p.z };
+    // On a shaped body the part is the one under the crosshair (its cell), not the one at the
+    // tile's centre: they differ on a turned vehicle.
+    const [mx, my] = b ? cellAtPoint(o.v, ...o.v.worldToMount(x, y)) : [o.mx, o.my];
+    return { v: o.v, mx, my, x: tx, y: ty, z: p.z };
   };
   if (!renderer || renderer.cameraMode === 'top') {
     // Top-down: the tile in front of you (like CDDA's direction prompt), else your own.

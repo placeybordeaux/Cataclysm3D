@@ -1,107 +1,22 @@
-import { has, type Vehicle, type VehiclePart } from '../game/vehicle';
+import { has, type Vehicle, type VehiclePart } from '../vehicle';
+import { templateParams, type BodyStyle, type ChassisTemplate, type RowKind, type StyleParams, type TemplateId } from './templates';
 
-// Reads a vehicle's part grid (CDDA mount points, +x forward, +y right) and decides how its
-// body should look: a body style (sedan, pickup, bus...), style dimensions, and where the
-// grid puts the things the model must honour (hood / windscreen / cabin / bed / box rows,
-// wheels, doors, side windows). Pure data: no three.js, unit-tested in
-// tests/vehicleModel.test.ts. vehicleModel.ts turns a Layout into geometry.
+// A template placed on one vehicle's part grid (CDDA mount points, +x forward, +y right):
+// the body's extent in mount space (nose, tail, half width), where the grid puts the things
+// the body must honour (hood / windscreen / cabin / bed / box rows, wheels, doors, side
+// windows), and the row -> body mapping (xOf / zOf). Pure data: no three.js. The chassis
+// (index.ts) caches one per vehicle; the renderer draws it (vehicleModel.ts), collision uses
+// its outline (vehicleShape.ts), sockets and seats are placed with it (mapping.ts).
 //
 // This is an adaptation, not a simulation: a CDDA car is 4 tiles wide, which drawn to scale
-// is a 4 m wide pancake. The model squeezes the width (widthPerCol): the side walls, doors
-// and wheels move in from the outer columns, while seats keep their grid positions (`zOf()`)
-// and collision and interaction keep using the grid.
+// is a 4 m wide pancake. The template's body is narrower (widthPerCol): the side walls, doors
+// and wheels move in from the outer columns, while seats keep their grid positions (`zOf()`).
+// (Moved here from src/render/vehicleLayout.ts in vehicles v3 phase 1.)
 
-export type BodyStyle = 'sedan' | 'hatch' | 'sports' | 'suv' | 'pickup' | 'van' | 'minivan' | 'bus' | 'truck' | 'motorcycle' | 'bicycle' | 'frame';
+export type { BodyStyle, RowKind, StyleParams } from './templates';
+export { STYLE_PARAMS } from './templates';
+
 export type Livery = 'plain' | 'police' | 'ambulance' | 'school' | 'fire' | 'military' | 'fbi' | 'swat' | 'security' | 'icecream' | 'hippie' | 'prison' | 'hazmat' | 'transit' | 'motorhome' | 'food';
-
-/** Style dimensions, metres above the ground (z-level floor) unless noted. */
-export interface StyleParams {
-  /** Underside of the body (ground clearance). */
-  sill: number;
-  /** Beltline: bottom of the side windows, top of the doors. */
-  belt: number;
-  /** Bonnet height at the windscreen and at the nose. */
-  hood: number;
-  nose: number;
-  /** Roof of the cabin. */
-  roof: number;
-  /** Trunk lid / bed rail / flat deck height behind the cabin. */
-  deck: number;
-  /** Cargo box / sleeper roof (0 = no box). */
-  box: number;
-  /** Horizontal run of the windscreen (m): long = raked (sports), short = upright (bus). */
-  rake: number;
-  /** Horizontal run of the rear glass (sedans / fastbacks). */
-  rearRake: number;
-  /** Bulge of hood / roof / nose across the width (m). */
-  crown: number;
-  /** Radius of the rounded edge between the sides and the top (m). */
-  shoulder: number;
-  /** How much narrower the greenhouse is at the roof than at the beltline (fraction of width). */
-  tumble: number;
-  /** Visual width per grid column (m). */
-  widthPerCol: number;
-  /** Visual length per grid row: BN grids run long (a car is 6 rows), so bodies are
-   * shortened around the grid's middle toward real proportions (~4.8 m x 1.8 x 1.45 for a
-   * sedan, drawn ~1.17x to match the world's scale). */
-  lengthScale: number;
-  /** Nose face goes straight up into the windscreen (bus, cab-over van). */
-  flatFront: boolean;
-  /** Motorhomes: the box body runs forward over the cab (the overcab bunk). */
-  overcab?: boolean;
-  /** Tyre sidewall added to the rim radius, and an extra scale for chunky off-roaders. */
-  wheelScale: number;
-  bumper: 'chrome' | 'black' | 'body';
-  /** Pillars and window frames painted black (modern) or body colour (older / utility). */
-  blackPillars: boolean;
-  /** Headlamp centre height and half-size (m). */
-  lampY: number;
-  lampW: number;
-  lampH: number;
-  /** Interior trim colour. */
-  interior: number;
-}
-
-const BASE: StyleParams = {
-  sill: 0.3, belt: 0.98, hood: 0.98, nose: 0.78, roof: 1.62, deck: 1.02, box: 0, rake: 0.8, rearRake: 0.8,
-  crown: 0.06, shoulder: 0.12, tumble: 0.14, widthPerCol: 0.53, lengthScale: 0.93, flatFront: false, wheelScale: 1, bumper: 'black',
-  blackPillars: true, lampY: 0.7, lampW: 0.2, lampH: 0.06, interior: 0x2e2e32,
-};
-
-export const STYLE_PARAMS: Record<BodyStyle, StyleParams> = {
-  sedan: { ...BASE },
-  hatch: { ...BASE, roof: 1.64, rake: 0.78 },
-  sports: { ...BASE, sill: 0.22, belt: 0.82, hood: 0.8, nose: 0.6, roof: 1.3, widthPerCol: 0.54, lengthScale: 0.94, deck: 0.84, rake: 1.05, rearRake: 1.3, crown: 0.07, shoulder: 0.14, tumble: 0.2, lampY: 0.55, lampW: 0.22, lampH: 0.05 },
-  suv: { ...BASE, sill: 0.42, belt: 1.16, hood: 1.14, nose: 1.0, roof: 1.95, widthPerCol: 0.54, lengthScale: 0.88, deck: 1.16, rake: 0.8, crown: 0.05, shoulder: 0.1, tumble: 0.1, wheelScale: 1.15, lampY: 0.9, lampW: 0.22, lampH: 0.08 },
-  pickup: { ...BASE, sill: 0.44, belt: 1.18, hood: 1.2, nose: 1.08, roof: 1.95, widthPerCol: 0.55, lengthScale: 0.92, deck: 1.18, rake: 0.75, crown: 0.04, shoulder: 0.08, tumble: 0.08, wheelScale: 1.15, bumper: 'chrome', lampY: 0.95, lampW: 0.2, lampH: 0.09 },
-  van: { ...BASE, sill: 0.4, belt: 1.25, hood: 1.28, nose: 1.1, roof: 2.2, deck: 1.25, box: 2.6, rake: 0.55, crown: 0.03, shoulder: 0.08, tumble: 0.06, widthPerCol: 0.54, lengthScale: 0.95, wheelScale: 1.05, lampY: 0.95, lampW: 0.18, lampH: 0.1, blackPillars: false },
-  minivan: { ...BASE, sill: 0.34, belt: 1.12, hood: 1.08, nose: 0.92, roof: 2.05, lengthScale: 0.86, deck: 1.1, rake: 0.7, crown: 0.05, shoulder: 0.16, tumble: 0.06, lampY: 0.85, lampW: 0.18, lampH: 0.09 },
-  bus: { ...BASE, sill: 0.34, belt: 1.35, hood: 1.35, nose: 1.2, roof: 2.55, deck: 1.35, rake: 0.3, crown: 0.04, shoulder: 0.14, tumble: 0.03, widthPerCol: 0.53, lengthScale: 0.97, flatFront: true, wheelScale: 1.1, lampY: 0.75, lampW: 0.16, lampH: 0.1, blackPillars: true },
-  truck: { ...BASE, sill: 0.5, belt: 1.5, hood: 1.55, nose: 1.4, roof: 2.45, deck: 1.1, box: 2.6, rake: 0.45, crown: 0.03, shoulder: 0.08, tumble: 0.05, widthPerCol: 0.5, lengthScale: 0.97, wheelScale: 1.1, bumper: 'chrome', lampY: 1.0, lampW: 0.18, lampH: 0.11, blackPillars: false },
-  motorcycle: { ...BASE, lengthScale: 1 },
-  bicycle: { ...BASE, lengthScale: 1 },
-  frame: { ...BASE, blackPillars: false, lengthScale: 1 },
-};
-
-/** Map a prototype id to a style; null = decide from the grid. */
-export function styleFromId(id: string): BodyStyle | null {
-  const s = id.toLowerCase();
-  if (/motorcycle|scooter|superbike|motorbike/.test(s)) return 'motorcycle';
-  if (/dukw/.test(s)) return 'truck';
-  if (/wreck|plane|heli|tractor|hopper|chassis|golf|boat|kayak|canoe|raft|ship|jetski|blimp|airship|flier|cutter|barge|sail|scuba|tank_|apc|ifv|howitzer|train|draisine|trolley|tram|loco|test|cart|chair|bed$|skateboard|wheelbarrow|wagon|harness|dogsled|sled|generator|work_light|turret|ballista|cannon|gatling|swivel|excavator|forklift|crane|roller|trencher|roadheader|autosweeper|handjack|unicycle|hovercraft|hover|reactor|split_test|none|custom/.test(s)) return 'frame';
-  if (/bicycle|tandem|tricycle/.test(s)) return 'bicycle';
-  if (/motorcycle|scooter|superbike|motorbike|quad_bike/.test(s)) return /quad/.test(s) ? 'frame' : 'motorcycle';
-  if (/bus/.test(s)) return 'bus';
-  if (/semi_truck|tatra|military_cargo|flatbed|fire_engine|fire_truck|hazmat|tanker|truck_trailer/.test(s)) return 'truck';
-  if (/cube_van|ambulance|food_truck|icecream_truck|security_van|meth_lab|animalctrl|truck_swat|blinkie|wienermobile|rv$|surv_rv|lux_rv/.test(s)) return 'van';
-  if (/hippie|camper_van|minivan/.test(s)) return 'minivan';
-  if (/pickup/.test(s)) return 'pickup';
-  if (/suv|humvee|jltv|4x4|whillys|armored_car|policesuv/.test(s)) return 'suv';
-  if (/sports|racing|formula|muscle|rara|roadwarrior|bubble/.test(s)) return 'sports';
-  if (/hatch|mini|beetle|golf/.test(s)) return 'hatch';
-  if (/car|sedan|police|fbi|limo|hearse|taxi/.test(s)) return 'sedan';
-  return null;
-}
 
 export function liveryFromId(id: string): Livery {
   const s = id.toLowerCase();
@@ -147,8 +62,6 @@ export interface SideWall {
   part: VehiclePart | null;
 }
 
-export type RowKind = 'hood' | 'shield' | 'cabin' | 'rearglass' | 'box' | 'bed' | 'deck' | 'flat';
-
 export interface Section {
   kind: RowKind;
   /** Front and rear edges, mount x units (x0 > x1). */
@@ -180,6 +93,10 @@ export interface DoorInfo {
 }
 
 export interface Layout {
+  /** The chassis template this layout places (templates.ts). */
+  template: TemplateId;
+  /** 'frame' templates collide with their cells; 'body' / 'bike' with the outline. */
+  family: ChassisTemplate['family'];
   style: BodyStyle;
   livery: Livery;
   p: StyleParams;
@@ -203,6 +120,12 @@ export interface Layout {
   cabin: { x0: number; x1: number } | null;
   /** Fraction of parts broken or badly damaged: drives grime, rust and sag. */
   wear: number;
+  /** Body columns (mount y) the template's shell spans; parts beyond them are off the body. */
+  yMin: number;
+  yMax: number;
+  /** Grid rows (mount x) the body spans, inclusive. */
+  xMin: number;
+  xMax: number;
 }
 
 const INNER_GLASS = (p: VehiclePart) => has(p, 'WINDSHIELD') || (has(p, 'WINDOW') && !has(p, 'OPENABLE'));
@@ -228,29 +151,12 @@ function sideWall(parts: VehiclePart[]): SideWall {
   return { kind: 'none', part: null };
 }
 
-function bodyColumns(v: Vehicle): number[] {
+/** Columns (mount y) holding structure, protrusions (rams, mirrors) excluded: the body's width. */
+export function bodyColumns(v: Vehicle): number[] {
   const cols = new Set<number>();
   for (const p of v.parts) if (p.def.location === 'structure' && !has(p, 'PROTRUSION') && !has(p, 'PROTUSION')) cols.add(p.my);
   if (!cols.size) for (const p of v.parts) cols.add(p.my);
   return [...cols].sort((a, b) => a - b);
-}
-
-/** Decide the style from the id, falling back to the grid's shape. */
-export function classify(v: Vehicle): BodyStyle {
-  const byId = styleFromId(v.protoId);
-  if (byId) return byId;
-  const cols = bodyColumns(v);
-  const ncols = cols.length;
-  const [x0, , x1] = v.bounds();
-  const len = x1 - x0 + 1;
-  const wheels = v.wheels.length;
-  if (ncols === 1 && wheels >= 2) return wheels >= 2 && v.wheels.every((w) => (w.def.wheel?.diameter ?? 0) >= 60) ? 'bicycle' : 'motorcycle';
-  const shield = v.parts.some((p) => has(p, 'WINDSHIELD'));
-  if (!shield || ncols < 3 || wheels < 3) return 'frame';
-  const boxes = v.parts.filter((p) => has(p, 'FULL_BOARD')).length;
-  if (len >= 10) return 'bus';
-  if (boxes >= 6) return 'van';
-  return 'sedan';
 }
 
 /**
@@ -262,28 +168,35 @@ export function classify(v: Vehicle): BodyStyle {
 export type VehicleWidth = 'real' | 'fill';
 export const VEHICLE_WIDTHS: VehicleWidth[] = ['real', 'fill'];
 let widthMode: VehicleWidth = 'real';
+/** Bumped on every width change: cached layouts (index.ts) are keyed on it. */
+export let widthEpoch = 0;
 export function setVehicleWidth(w: VehicleWidth): void {
   if (!VEHICLE_WIDTHS.includes(w)) throw new Error(`unknown vehicle width ${w}`);
+  if (w !== widthMode) widthEpoch++;
   widthMode = w;
 }
 export function vehicleWidth(): VehicleWidth {
   return widthMode;
 }
 
-export function analyze(v: Vehicle, forceStyle?: BodyStyle): Layout {
-  const style = forceStyle ?? classify(v);
-  const p = { ...STYLE_PARAMS[style] };
+/**
+ * Place template `t` on `v`'s grid. Uncached: use layoutOf (index.ts), which also picks the
+ * vehicle's template.
+ */
+export function placeTemplate(v: Vehicle, t: ChassisTemplate): Layout {
+  const style = t.style;
+  const p = templateParams(t);
   const livery = liveryFromId(v.protoId);
   // Motorhomes: a taller box that runs forward over the cab.
   if (style === 'van' && /(^|_)rv$|motorhome|camper_rv/.test(v.protoId)) Object.assign(p, { overcab: true, box: 2.85 });
-  if (style === 'truck' && /trailer/.test(v.protoId)) Object.assign(p, { box: 3.1, sill: 0.95 });
   // School buses are the conventional kind: a bonnet ahead of the windscreen.
   if (style === 'bus' && livery === 'school') Object.assign(p, { flatFront: false, hood: 1.4, nose: 1.25, rake: 0.35, lampY: 1.02 });
-  const cols = bodyColumns(v);
+  // An empty prototype (BN's "none") still gets a (degenerate) layout at mount (0, 0).
+  const cols = v.parts.length ? bodyColumns(v) : [0];
   const yMin = cols[0], yMax = cols[cols.length - 1];
   const yc = (yMin + yMax) / 2;
   const ncols = yMax - yMin + 1;
-  const [bx0, , bx1] = v.bounds();
+  const [bx0, , bx1] = v.parts.length ? v.bounds() : [0, 0, 0, 0];
 
   // Visual width: squeezed (see the header); bikes are narrow whatever their grid says.
   let hw = style === 'motorcycle' ? 0.4 : style === 'bicycle' ? 0.3 : Math.max(0.5, (ncols * p.widthPerCol) / 2);
@@ -383,7 +296,7 @@ export function analyze(v: Vehicle, forceStyle?: BodyStyle): Layout {
   const hurt = v.parts.reduce((a, q) => a + (q.def.durability > 0 ? 1 - Math.max(0, q.hp) / q.def.durability : 0), 0);
   const wear = v.parts.length ? Math.min(1, (broken * 1.5 + hurt) / v.parts.length / 1.2) : 0;
 
-  return { style, livery, p, xNose, xTail, yc, hw, zOf, xOf, rows, sections, wheels, doors, xCowl, cabin, wear };
+  return { template: t.id, family: t.family, style, livery, p, xNose, xTail, yc, hw, zOf, xOf, rows, sections, wheels, doors, xCowl, cabin, wear, yMin, yMax, xMin: bx0, xMax: bx1 };
 }
 
 /**
@@ -498,13 +411,23 @@ function findDoors(rows: RowInfo[], sections: Section[], xCowl: number | null): 
 }
 
 /**
- * The body outline collision should use (vehicleShape.ts BodyRect, mount space), or null
- * when the drawing fills the grid (frame-style builds). Wheels sit a few cm proud of the
- * sides, so they count.
+ * The body outline collision uses (vehicleShape.ts BodyRect, mount space): the template's
+ * shell, or null for frame templates (they collide with their cells). Wheels sit a few cm
+ * proud of the sides, so they count.
  */
-export function bodyRectFor(v: Vehicle): { x0: number; x1: number; y0: number; y1: number } | null {
-  const L = analyze(v);
-  if (L.style === 'frame' || (!L.sections.length && L.style !== 'motorcycle' && L.style !== 'bicycle')) return null;
+export function layoutBodyRect(L: Layout): { x0: number; x1: number; y0: number; y1: number } | null {
+  if (L.family === 'frame' || (L.family === 'body' && !L.sections.length)) return null;
   const w = L.hw + 0.04;
   return { x0: L.xTail, x1: L.xNose, y0: L.yc - w, y1: L.yc + w };
+}
+
+/** Seat cushion top above the floor level (m): what the renderer draws and riders sit on. */
+export function seatTopOf(L: Layout): number {
+  if (L.family === 'frame') return 0.62;
+  if (L.family === 'bike') {
+    const r = Math.max(0.2, ...L.wheels.map((w) => w.r));
+    return r + (L.style === 'bicycle' ? 0.5 : 0.6);
+  }
+  const floorY = L.p.sill + 0.1;
+  return Math.max(floorY + 0.2, L.p.belt - 0.45);
 }

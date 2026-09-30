@@ -16,6 +16,11 @@ import type { VehicleSystem } from './vehicles';
 export const PUMP_L_PER_S = 4 / 6;
 /** How close (tiles, centre to nearest mount) a vehicle must be to reach it with the hose. */
 export const HOSE_REACH = 2.5;
+/**
+ * The same reach measured to a shaped body's paint (the chassis template, vehicles v3): a
+ * body's side is ~0.4 m in from its outer tiles' centres, so this matches HOSE_REACH.
+ */
+export const HOSE_REACH_BODY = 2.1;
 
 /** The fuel item on a pump tile (gasoline, diesel...), if any is left. */
 export function pumpFuel(game: Game, x: number, y: number, z: number) {
@@ -36,7 +41,14 @@ export function tankRoom(v: Vehicle, fuel: string): number {
 /** Vehicles whose body is within hose reach of the pump, nearest first. */
 export function vehiclesByPump(vs: VehicleSystem, x: number, y: number, z: number): Vehicle[] {
   const cx = x + 0.5, cy = y + 0.5;
-  const dist = (v: Vehicle) => Math.min(...v.occupiedTiles().map((t) => Math.hypot(t.tx + 0.5 - cx, t.ty + 0.5 - cy)));
+  // To the body as drawn (its chassis template) when it has one, else to its tiles.
+  const dist = (v: Vehicle) => {
+    const b = vs.bodyRect(v);
+    if (!b) return Math.min(...v.occupiedTiles().map((t) => Math.hypot(t.tx + 0.5 - cx, t.ty + 0.5 - cy)));
+    const [lx, ly] = v.worldToMount(cx, cy);
+    const dx = Math.max(b.x0 - lx, 0, lx - b.x1), dy = Math.max(b.y0 - ly, 0, ly - b.y1);
+    return Math.hypot(dx, dy) + (HOSE_REACH - HOSE_REACH_BODY);
+  };
   return vs.list.filter((v) => v.z === z && Math.hypot(v.x - cx, v.y - cy) < 16 && dist(v) <= HOSE_REACH).sort((a, b) => dist(a) - dist(b));
 }
 

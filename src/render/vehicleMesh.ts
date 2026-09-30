@@ -21,6 +21,7 @@ import { makeWheelHands } from './vehicleHands';
 import { AtlasTextureSource } from './atlasSource';
 import { spriteInfo } from './chars/index';
 import { bodyRectFor, setVehicleWidth, vehicleWidth, type VehicleWidth } from './vehicleLayout';
+import { noseX } from '../game/chassis';
 import { liveryBody } from './vehicleSkin';
 
 // 3D meshes for vehicles, built from their parts mount by mount, as low-poly boxes wearing
@@ -963,10 +964,11 @@ export class VehicleRenderer {
     return out;
   }
 
-  /** World point `ahead` metres in front of the vehicle's front row. */
+  /** World point `ahead` metres in front of the vehicle's nose (its template's, in the model look). */
   private front(v: Vehicle, ahead: number): [number, number] {
-    const [, , x1] = v.bounds();
-    return v.mountToWorld(x1 + 0.5 + ahead, (v.bounds()[1] + v.bounds()[3]) / 2);
+    const [, y0, x1, y1] = v.bounds();
+    const nose = this.lookMode === 'model' ? noseX(v) : x1 + 0.5;
+    return v.mountToWorld(nose + ahead, (y0 + y1) / 2);
   }
 }
 

@@ -5,6 +5,8 @@ import { warnOnce } from '../data/warn';
 import { createItem, fromSpawned, Item, type ItemJSON } from './item';
 import { L, spawnItem } from './moves';
 import type { VehicleDataFile, VPartDef } from './vehicle_data';
+import type { VehicleChassis } from './chassis/mapping';
+import { CHASSIS_VERSION, TEMPLATES, type TemplateId } from './chassis/templates';
 
 // A CDDA vehicle: parts installed on a grid of mount points, placed in the world at a
 // position + facing. Pure simulation (no map, DOM or three.js): the VehicleSystem
@@ -106,6 +108,11 @@ export interface VehicleJSON {
   cruise?: number;
   paint: number;
   parts: VehiclePartJSON[];
+  /**
+   * The chassis template the grid is mapped onto (vehicles v3). Absent in saves from before
+   * it: VehicleSystem maps those once on load (the save migration).
+   */
+  chassis?: { template: string; v: number };
 }
 
 export const mountKey = (mx: number, my: number): number => (mx + 512) * 1024 + (my + 512);
@@ -139,6 +146,13 @@ export class Vehicle {
   private byMount = new Map<number, number[]>();
   /** Bumped when anything the renderer draws changes (doors, damage, lights). */
   version = 0;
+  /**
+   * Chassis template (src/game/chassis): authoritative once set, and saved, so a stripped
+   * vehicle keeps its body. null = not mapped yet (chassisOf maps it on first use).
+   */
+  template: TemplateId | null = null;
+  /** The parts' sockets on `template` (derived from the grid, not saved; chassisOf keeps it current). */
+  chassis: VehicleChassis | null = null;
 
   constructor(readonly vdata: VehicleDataFile, readonly protoId: string) {
     const proto = vdata.vehicles[protoId];
@@ -503,6 +517,7 @@ export class Vehicle {
       uid: this.uid, proto: this.protoId, name: this.name, x: this.x, y: this.y, z: this.z, facing: this.facing,
       velocity: this.velocity, engineOn: this.engineOn, lightsOn: this.lightsOn, locked: this.locked, alarmOn: this.alarmOn, paint: this.paint,
       ...(this.cruiseVelocity ? { cruise: this.cruiseVelocity } : {}),
+      ...(this.template ? { chassis: { template: this.template, v: CHASSIS_VERSION } } : {}),
       parts: this.parts.map((p) => {
         const j: VehiclePartJSON = { id: p.def.id, mx: p.mx, my: p.my, hp: p.hp };
         if (p.variant) j.variant = p.variant;
@@ -527,6 +542,12 @@ export class Vehicle {
     v.uid = j.uid;
     nextUid = Math.max(nextUid, j.uid + 1);
     Object.assign(v, { name: j.name, x: j.x, y: j.y, z: j.z, facing: j.facing, velocity: j.velocity, engineOn: j.engineOn, lightsOn: j.lightsOn, locked: j.locked, alarmOn: !!j.alarmOn, paint: j.paint, cruiseVelocity: j.cruise ?? 0 });
+    if (j.chassis) {
+      if (j.chassis.v > CHASSIS_VERSION) throw new Error(`vehicle ${j.proto}: chassis data v${j.chassis.v} is newer than this build reads (v${CHASSIS_VERSION})`);
+      if (TEMPLATES[j.chassis.template as TemplateId]) v.template = j.chassis.template as TemplateId;
+      // A template this build doesn't know: re-mapped from the grid on load (nothing is lost).
+      else (opts.warn ?? console.warn)(`vehicle ${j.proto}: unknown chassis template ${j.chassis.template}, re-mapped`);
+    }
     for (const pj of j.parts) {
       const def = vdata.parts[pj.id];
       if (!def) {
