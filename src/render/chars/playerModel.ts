@@ -31,9 +31,10 @@ export class PlayerModel implements GameSystem {
     const r = this.renderer;
     const models = charSettings.mode === 'model';
     r.playerBodyOverride = models;
-    const show = models && r.cameraMode !== 'first';
-    const riding = show && !!r.rig.drive && !!game.vehicles?.driving;
     const slot = riderSlot(r);
+    const atWheel = !!r.rig.drive && !!game.vehicles?.driving;
+    const show = models && r.cameraMode !== 'first' && (slot.enabled || !atWheel);
+    const riding = show && atWheel;
     if (!show) {
       this.c?.remove();
       this.c = null;

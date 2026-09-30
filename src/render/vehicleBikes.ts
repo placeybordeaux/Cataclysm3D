@@ -152,9 +152,9 @@ export function buildBike(v: Vehicle, L: Layout, base: number, driven = false): 
     eyeH = hy + 0.8;
     // astride the saddle just behind the tank, a slight crouch to the wide bars, feet on pegs
     // under the knees
-    const hipX = sx1 - 0.18;
+    const hipX = sx1 - 0.12;
     ride = {
-      kind: 'motorcycle', hip: P(hipX, hy + 0.04), lean: 0.3,
+      kind: 'motorcycle', hip: P(hipX, hy + 0.04), lean: 0.4,
       grips: [P(bx - 0.03, by, 0.31), P(bx - 0.03, by, -0.31)],
       feet: [P(hipX + 0.22, 0.34, 0.2), P(hipX + 0.22, 0.34, -0.2)],
     };

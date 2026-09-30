@@ -290,11 +290,27 @@ export function driveScenarios(c: DriveCtx): Scenario[] {
         if (!ok) continue;
         await c.toGameplay();
         check(`${proto}: chase camera (V)`, await camera('third'));
-        await sleep(500);
+        // the world streams in around the new spot before the first shot
+        await sleep(proto === 'bicycle' ? 4000 : 1500);
         let r = await rider();
         const want = proto === 'car' ? 'seat' : proto;
         check(`${proto}, stopped: the body is in the seat (${want}), hands and feet on the controls`, seated(r) && r!.kind === want, r);
         await shot(`riders_${proto}_stopped`);
+        // Mouse-look orbits the chase camera: swing round to a three-quarter view from the right
+        // front to see the pose (the view keeps that offset while riding).
+        const look = () => js<number>(`(() => { const d = cdda.game.player.yaw - (cdda.vehicleSystem.driving.facing + 90) * Math.PI / 180; return Math.atan2(Math.sin(d), Math.cos(d)); })()`);
+        for (let i = 0; i < 30 && Math.abs(await look()) < 1.95; i++) await c.x().move(60, 0, 4);
+        await sleep(300);
+        await shot(`riders_${proto}_stopped_side`);
+        if (proto === 'bicycle') {
+          // the old look for comparison (cdda.vehicleRiders(false)): a riderless "ghost" bike
+          await js(`cdda.vehicleRiders(false)`);
+          await sleep(300);
+          check('vehicleRiders(false): no body at the wheel (the old behaviour)', (await rider()) === null);
+          await shot('riders_bicycle_before_ghost');
+          await js(`cdda.vehicleRiders(true)`);
+          await sleep(300);
+        }
         await c.x().down('w');
         await sleep(proto === 'bicycle' ? 3500 : 2000);
         const e0 = await entry();
@@ -305,13 +321,21 @@ export function driveScenarios(c: DriveCtx): Scenario[] {
         if (proto === 'bicycle') check('bicycle: the pedals turn with the speed (stepped)', !!e0 && !!e1 && e1.v > 1 && e0.pedal !== e1.pedal, { e0, e1 });
         await shot(`riders_${proto}_straight`);
         await c.x().down('a');
-        await sleep(900);
+        await sleep(proto === 'car' ? 450 : 900);
         const et = await entry();
         r = await rider();
         check(`${proto}, turning: still seated${proto === 'car' ? ' (hands follow the wheel)' : ', the bike leans into the turn'}`, seated(r) && (proto === 'car' || Math.abs(et?.lean ?? 0) > 0.03), { r, et });
         await shot(`riders_${proto}_turning`);
         await c.x().up('a');
+        if (proto === 'car') {
+          // straighten up and stop on the road for the top-down view
+          await c.x().hold('d', 400);
+          await c.x().up('w');
+          await c.x().hold('s', 1800);
+        }
         await c.x().up('w');
+        // back behind it for the next one
+        for (let i = 0; i < 30 && Math.abs(await look()) > 0.3; i++) await c.x().move(-60, 0, 4);
         if (proto === 'car') {
           check('car: top-down camera (V)', await camera('top'));
           await sleep(400);

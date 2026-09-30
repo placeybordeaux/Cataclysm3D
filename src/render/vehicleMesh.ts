@@ -550,6 +550,8 @@ interface Entry {
   pedalTick: number;
   /** Mount space of the meshes (child of the lean pivot): the rider's frame. */
   pivot: THREE.Group;
+  /** Model look: the glass seen from outside (lighter while your body sits behind it). */
+  glassOut: THREE.Mesh | null;
 }
 
 /** Distance LOD thresholds (m): simplified beyond LOD_FAR, detailed again inside LOD_NEAR. */
@@ -567,6 +569,9 @@ export class VehicleRenderer {
   // inside so the cockpit view isn't hazed.
   private glassOut = new THREE.MeshLambertMaterial({ color: 0x34424e, transparent: true, opacity: 0.72, depthWrite: false, side: THREE.FrontSide });
   private glassIn = new THREE.MeshLambertMaterial({ color: 0x9ab4c4, transparent: true, opacity: 0.1, depthWrite: false, side: THREE.BackSide });
+  // With your body at the wheel (chase / top-down cameras) the driven car's glass is tinted
+  // less, so you can see yourself driving through it.
+  private glassOutRider = new THREE.MeshLambertMaterial({ color: 0x3a4a56, transparent: true, opacity: 0.4, depthWrite: false, side: THREE.FrontSide });
   private lampOn = new THREE.MeshBasicMaterial({ color: 0xfff2c8 });
   private lampOff = new THREE.MeshBasicMaterial({ color: 0x8a8a80 });
   private tailOn = new THREE.MeshBasicMaterial({ color: 0xff3020 });
@@ -592,7 +597,7 @@ export class VehicleRenderer {
     setVehicleWidth(initialVehicleWidth());
     // Creatures collide with the drawn body, not the whole grid tiles (vehicleShape.ts).
     system.bodyShape = (v) => (this.lookMode === 'model' ? bodyRectFor(v) : null);
-    for (const m of [this.glassMat, this.glassOut, this.glassIn, this.lampOn, this.lampOff, this.tailOn, this.tailOff, this.beaconMat]) patchNormalOutput(m, false);
+    for (const m of [this.glassMat, this.glassOut, this.glassOutRider, this.glassIn, this.lampOn, this.lampOff, this.tailOn, this.tailOff, this.beaconMat]) patchNormalOutput(m, false);
     this.headlight.castShadow = false;
     renderer.scene.add(this.group, this.headlight, this.headlight.target);
     renderer.vehicleView = this;
@@ -730,7 +735,7 @@ export class VehicleRenderer {
       obj, lean, meshes, roof: null, lamps: null, tails: null, beacons: null, skin: null, skinMeshes: [], pending: null,
       driven: v === this.system.driving, wheels: [], bike: false, far, roofY: null, cockpit: null,
       version: v.version, z: v.z, look: this.lookMode, eyeH: null, driverZ: null, driverX: null, eyeX: null, parkedLean: 0, beam: e?.beam ?? [],
-      ride: null, crank: null, pedal: e?.pedal ?? 0, pedalShown: e?.pedalShown ?? 0, pedalTick: 0, pivot,
+      ride: null, crank: null, pedal: e?.pedal ?? 0, pedalShown: e?.pedalShown ?? 0, pedalTick: 0, pivot, glassOut: null,
     };
     const t0 = performance.now();
     const worker = this.lookMode === 'model' ? this.skinWorker() : null;
@@ -754,7 +759,7 @@ export class VehicleRenderer {
       next.skinMeshes = model.bodyUsesParts ? [] : [b, next.roof].filter((m): m is THREE.Mesh => !!m);
       mk(model.parts, parts.mat, parts.depth);
       if (model.glass) {
-        mk(model.glass, this.glassOut, null);
+        next.glassOut = mk(model.glass, this.glassOut, null);
         mk(model.glass, this.glassIn, null);
       }
       next.lamps = mk(model.lamps, v.lightsOn ? this.lampOn : this.lampOff, null);
@@ -956,7 +961,11 @@ export class VehicleRenderer {
   private placeRider(driving: Vehicle | null, now: number): void {
     const rider = riderSlot(this.renderer).rider;
     const e = driving ? this.entries.get(driving) : undefined;
-    for (const [v, en] of this.entries) if (en.cockpit) en.cockpit.handsVisible = !(rider && v === driving);
+    for (const [v, en] of this.entries) {
+      const seated = !!rider && v === driving;
+      if (en.cockpit) en.cockpit.handsVisible = !seated;
+      if (en.glassOut) en.glassOut.material = seated ? this.glassOutRider : this.glassOut;
+    }
     if (!rider || !driving || !e) return;
     let a = e.ride;
     if (!a) {

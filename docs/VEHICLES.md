@@ -194,6 +194,49 @@ it all sits between the bonnet line, ~14 deg down, and the view's bottom edge, 3
   (every car, not only yours). **A-pillars** are one shoulder quad now (the windscreen glass
   runs further into the rounding).
 
+### Your body in the seat (riders, `src/render/vehicleRider.ts`)
+
+Playtest: "the third person view for the bicycle shows a ghost bicycle (no person)". The 3D
+player model used to hide whenever you drove. Now, with 3D characters, outside first person
+(chase and top-down cameras) the survivor sits in the seat of the vehicle being driven:
+
+- **Anchors from the model**: every build says where the rider goes (`ModelBuild.ride`, mount
+  space): hips on the saddle / seat, torso lean, hand targets (handlebar grips, or ten-to-two
+  on the steering wheel's rim), feet (pegs, the floor under the pedals, or a bicycle crank).
+  `vehicleBikes.ts` (bicycle: leaning far over flat bars, pedalling; motorcycle / scooter:
+  astride behind the tank, feet on pegs), `vehicleModel.ts` (cars: back in the driver seat,
+  slight recline), `vehicleFrame.ts` (open frames: golf carts, tractors). Anything without
+  anchors (the part-block look) gets a generic upright seat on the driver's tile.
+- **Pose**: two-bone IK per limb (`src/render/chars/ridePose.ts`, driven by `PoseIn.ride` in
+  the humanoid rig) puts the hand centres and ankles exactly on the targets (unit-tested
+  against the built matrices; out-of-reach targets straighten the limb toward them).
+- **Placement**: `VehicleRenderer.update` poses the body last, from the lean pivot's world
+  matrix, so it follows position, yaw and a bike's lean into turns in the same frame (no
+  lag); `CharInstance.rootOverride` carries the transform.
+- **Pedalling**: the ridden bicycle's crank (arms + pedals) is its own mesh turning with the
+  distance ridden (`CRANK_M_PER_TURN` = 5 m a turn); the crank and the feet on it update at the
+  characters' stepped rate (`charSettings.fps`), like other body animation.
+- **Cars**: the hands follow the cockpit's turning wheel (`Cockpit.gripPoints`); the
+  first-person fists hide while the body is drawn, and the driven car's outside glass is
+  tinted lighter (0.4 instead of 0.72 opacity) so you can see yourself through it.
+- **Unchanged**: first person / the cockpit camera (the fists on the wheel), the billboard
+  character mode (the survivor is hidden while driving, as before). `cdda.vehicleRiders(false)`
+  brings back the old riderless look for comparison; `cdda.renderer.vehicleView.riderCheck()`
+  reports hand / foot error and visibility (the `riders` real-input scenario uses it).
+- **NPCs**: nobody else rides. NPCs never board or drive vehicles in this build (no passenger
+  system), so there is nobody to seat; the `Rider` / anchors are ready for it.
+
+| before (ghost bike) | bicycle, stopped | bicycle, turning |
+| --- | --- | --- |
+| ![](screenshots/wave3/vehicles/riders/bicycle_before_ghost.jpg) | ![](screenshots/wave3/vehicles/riders/bicycle_stopped.jpg) | ![](screenshots/wave3/vehicles/riders/bicycle_turning.jpg) |
+| **motorcycle, stopped** | **motorcycle, turning** | **car, chase (crop)** |
+| ![](screenshots/wave3/vehicles/riders/motorcycle_stopped.jpg) | ![](screenshots/wave3/vehicles/riders/motorcycle_turning.jpg) | ![](screenshots/wave3/vehicles/riders/car_chase_crop.jpg) |
+| **car, chase, turning** | **car, top-down** | **bicycle, riding** |
+| ![](screenshots/wave3/vehicles/riders/car_chase_turning.jpg) | ![](screenshots/wave3/vehicles/riders/car_top.jpg) | ![](screenshots/wave3/vehicles/riders/bicycle_straight.jpg) |
+
+Real input: `heavy --kind gpu --mem 2 -- nix-shell --run 'npx tsx tools/realinput.ts --gpu --only riders'`
+(W / A / S held through xdotool, V cycles the cameras, the mouse orbits the chase camera).
+
 ### Lids, wrecks and more silhouettes (round 3)
 
 - **Trunk lids and hatches open**: BN's `door_trunk` (the only lid part: BN has no bonnet part
@@ -339,6 +382,9 @@ skin reuse on door / light changes, frame fallback, proportions, parked steering
 shape), a car turned 45 deg, walking in through an open door, closing a door from beside
 it, driving past someone on the verge, running over what's in the lane only.
 `tests/vehicleCollision.test.ts`: driving crashes against the body (see "Driving collision").
+Riders: `tests/render/ridePose.test.ts` (IK lands hands / ankles on their targets in the built
+rig), `tests/vehicleModel.test.ts` "where the rider sits" (anchors for bikes and cars, the
+ridden bicycle's crank).
 
 ## Known gaps / ideas
 
@@ -359,4 +405,8 @@ it, driving past someone on the verge, running over what's in the lane only.
 - The mirror shows a flat tint,
   not a reflection.
 - Only the driven vehicle gets the cockpit rig; a passenger seat has no view extras.
+- Riders: bicycle / motorcycle handlebars and forks don't turn with the steering (the front
+  wheel does), so the hands stay put; the rider doesn't lean further than the bike or brace
+  on a stop; a wielded weapon is simply not drawn while riding. Nobody sits in passenger seats
+  (no NPC passengers exist yet).
 - The part-block look (`parts`) is kept as it was in v2, including its door bug.

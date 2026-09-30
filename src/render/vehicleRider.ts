@@ -160,9 +160,14 @@ export class Rider {
  * Who sits in the driven vehicle's seat, per renderer: the player model (chars/playerModel.ts)
  * sets `rider` while you drive outside first person, VehicleRenderer places it each frame.
  */
-const slots = new WeakMap<object, { rider: Rider | null }>();
-export function riderSlot(renderer: object): { rider: Rider | null } {
+export interface RiderSlot {
+  rider: Rider | null;
+  /** false: the old behaviour, no body at the wheel (`cdda.vehicleRiders(false)`). */
+  enabled: boolean;
+}
+const slots = new WeakMap<object, RiderSlot>();
+export function riderSlot(renderer: object): RiderSlot {
   let s = slots.get(renderer);
-  if (!s) slots.set(renderer, (s = { rider: null }));
+  if (!s) slots.set(renderer, (s = { rider: null, enabled: true }));
   return s;
 }
