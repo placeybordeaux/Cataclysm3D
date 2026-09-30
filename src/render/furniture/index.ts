@@ -255,7 +255,17 @@ function facingDir(a: Archetype, around: Around, conn: boolean[], seed: number):
     }
     // in a corner, back onto the wall the run continues along
     if (a.axis === 'side') for (let d = 0; d < 4; d++) if (around.wall[d] && (conn[(d + 1) & 3] || conn[(d + 3) & 3])) return (d + 2) & 3;
-    for (let d = 0; d < 4; d++) if (around.wall[d]) return (d + 2) & 3;
+    // against a wall: face the open room (in a corner, the side with more free floor)
+    let best = -1, bs = -1e9;
+    for (let d = 0; d < 4; d++) {
+      if (!around.wall[d]) continue;
+      const o = (d + 2) & 3;
+      let sc = around.wall[o] ? -10 : 0;
+      if (around.furn(DX[o], DY[o]) === 'f_null') sc += 2;
+      if (!around.wallAt(DX[o] * 2, DY[o] * 2)) sc += 1;
+      if (sc > bs) { bs = sc; best = d; }
+    }
+    if (best >= 0) return (best + 2) & 3;
     // connected along x (east-west run): face north or south; along y: east or west
     if (conn[1] || conn[3]) return seed & 1 ? 2 : 0;
     if (conn[0] || conn[2]) return seed & 1 ? 1 : 3;

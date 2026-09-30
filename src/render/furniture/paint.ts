@@ -13,7 +13,7 @@ export const TPM = 32;
 
 export type MatKind =
   | 'wood' | 'paint' | 'fabric' | 'leather' | 'metal' | 'enamel' | 'plastic' | 'stone' | 'felt'
-  | 'cardboard' | 'rubber' | 'chrome' | 'sheet' | 'mattress' | 'screen' | 'foliage' | 'dark' | 'brick' | 'paper' | 'soil' | 'glow';
+  | 'cardboard' | 'rubber' | 'chrome' | 'sheet' | 'mattress' | 'screen' | 'foliage' | 'dark' | 'brick' | 'paper' | 'soil' | 'glow' | 'laminate';
 
 export interface Mat {
   kind: MatKind;
@@ -39,7 +39,7 @@ export function ramp(m: Mat): Ramp4 {
   const k = (f: number) => scale(m.c, 1 + (f - 1) * s);
   return [k(0.6), k(0.82), k(1), k(1.16)];
 }
-const SPREAD: Partial<Record<MatKind, number>> = { paint: 0.6, plastic: 0.55, enamel: 0.45, fabric: 0.7, felt: 0.5, sheet: 0.45, metal: 0.8, chrome: 1.3, screen: 1, glow: 0.3 };
+const SPREAD: Partial<Record<MatKind, number>> = { laminate: 0.5, paint: 0.6, plastic: 0.55, enamel: 0.45, fabric: 0.7, felt: 0.5, sheet: 0.45, metal: 0.8, chrome: 1.3, screen: 1, glow: 0.3 };
 
 const matKey = (m: Mat) => `${m.kind}:${m.c.map((v) => Math.round(v)).join(',')}`;
 
@@ -153,6 +153,14 @@ function pattern(img: Img, kind: MatKind, r: Ramp4, w: number, h: number, seed: 
       for (let i = 0; i < (w * h) / 45; i++) img.set(H(i, 3) % w, H(i, 4) % h, kind === 'rubber' ? r[1] : mix(r[2], r[1], 0.5));
       break;
     }
+    case 'laminate': {
+      // worktops: a calm fleck, not rock (big flat surfaces right under the camera)
+      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+        const n = H(x, y) % 19;
+        img.set(x, y, n === 0 ? r[1] : n === 1 ? r[3] : r[2]);
+      }
+      break;
+    }
     case 'stone': case 'brick': case 'soil': {
       for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
         const n = H(x, y) % 10;
@@ -165,7 +173,8 @@ function pattern(img: Img, kind: MatKind, r: Ramp4, w: number, h: number, seed: 
       break;
     }
     case 'cardboard': {
-      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) img.set(x, y, H(x, y) % 13 === 0 ? r[1] : r[2]);
+      // calm board with faint vertical flutes (speckle made it read as sponge)
+      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) img.set(x, y, x % 4 === 0 ? mix(r[2], r[1], 0.35) : H(x, y) % 41 === 0 ? r[1] : r[2]);
       break;
     }
     case 'paper': {

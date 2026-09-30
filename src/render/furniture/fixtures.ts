@@ -42,7 +42,7 @@ function baseCabinet(b: ModelBuilder, c: Ctx, front: 'doors' | 'drawers' | 'mixe
   }
   const top = worktop(c);
   const tx0 = c.conn[LEFT] ? -0.5 : x0 - 0.01, tx1 = c.conn[RIGHT] ? 0.5 : x1 + 0.01, tz0 = z0 - 0.01, tz1 = z1 + 0.035;
-  const ws = (f: string) => (f === 'py' ? F('stone', top) : F('stone', shade(top, 0.85)));
+  const ws = (f: string) => (f === 'py' ? F('laminate', top) : F('laminate', shade(top, 0.85)));
   if (!hole) {
     b.box(tx0, h - 0.04, tz0, tx1, h, tz1, ws, skipConn(c));
     return;
@@ -304,7 +304,9 @@ export const crate: Build = (b, c) => {
 };
 
 export const cardboardBox: Build = (b, c) => {
-  const col = c.pal.clusters.find((q) => hsv(q.c)[0] > 20 && hsv(q.c)[0] < 50)?.c ?? [196, 160, 110];
+  const found = c.pal.clusters.find((q) => hsv(q.c)[0] > 18 && hsv(q.c)[0] < 42 && hsv(q.c)[1] > 0.25)?.c;
+  // cardboard is a brown, whatever yellow the sprite leans to
+  const col: RGB = found ? [Math.min(found[0], 190), Math.min(found[1], found[0] * 0.78), Math.min(found[2], found[0] * 0.55)] : [176, 136, 92];
   const s = 0.32, h = 0.5;
   const tape: RGB = [214, 196, 150];
   b.box(-s, 0, -s + 0.03, s, h, s - 0.03, (f) => (f === 'py' ? F('cardboard', col, inset(0, 0.44, 1, 0.56, tape, false, false)) : F('cardboard', shade(col, f === 'pz' ? 1 : 0.94))), 'ny');
