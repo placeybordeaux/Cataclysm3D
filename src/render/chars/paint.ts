@@ -285,8 +285,8 @@ export function paintPart(dst: Img, ox: number, oy: number, dims: [number, numbe
   };
   // (u, v) on a face -> sprite colour. Role parts are a flat colour with a 2-tone dither.
   let col: (face: number, u: number, v: number) => RGB;
-  if (src.role) {
-    const base = s.pal[src.role];
+  if (src.role || src.color) {
+    const base: RGB = src.color ?? s.pal[src.role!];
     const alt: RGB = [base[0] * 0.82, base[1] * 0.82, base[2] * 0.82];
     col = (_f, u, v) => ((Math.floor(u * 97) + Math.floor(v * 89)) % 3 === 0 ? alt : base);
   } else {
@@ -322,7 +322,7 @@ export function paintPart(dst: Img, ox: number, oy: number, dims: [number, numbe
   const rects: [number, number, number, number][] = [
     [0, D, D, H], [D, D, W, H], [D + W, D, D, H], [2 * D + W, D, W, H], [D, 0, W, D], [D + W, 0, W, D],
   ];
-  const crop = src.role ? null : cropOf(s, src);
+  const crop = src.role || src.color ? null : cropOf(s, src);
   for (let f = 0; f < 6; f++) {
     const [fx, fy, fw, fh] = rects[f];
     if (crop) {
@@ -342,6 +342,11 @@ export function paintPart(dst: Img, ox: number, oy: number, dims: [number, numbe
     }
   }
   foot.x = foot.y = 1;
+  if (src.nose && W >= 2) {
+    const nx = D + Math.floor((W - 1) / 2);
+    put(nx, D, s.pal.dark);
+    if (W >= 4) put(nx + 1, D, s.pal.dark);
+  }
   if (src.face) {
     const eye = opts.eyes ?? s.pal.dark;
     if (src.proj === 'side') {

@@ -1,6 +1,6 @@
 import type { Game, GameSystem } from '../../game/game';
 import type { Renderer } from '../renderer';
-import { bodyShapeOf } from './archetype';
+import { bodyShapeOf, weaponOf, type Weapon } from './archetype';
 import { CreatureModel } from './creature';
 import { charLayers, charSettings, frameKey, spriteInfo } from './index';
 import { makeRig, type Rig } from './rig';
@@ -15,6 +15,7 @@ export class PlayerModel implements GameSystem {
   private c: CreatureModel | null = null;
   private key = '';
   private rig: Rig | null = null;
+  private weapon: Weapon = 'none';
   private lx = 0;
   private ly = 0;
   private phase = 0;
@@ -35,7 +36,13 @@ export class PlayerModel implements GameSystem {
     const frame = r.source.sprite('player');
     const key = frameKey(frame);
     const L = charLayers(r);
-    this.rig ??= makeRig(bodyShapeOf({ id: p.male ? 'player_male' : 'player_female', bodytype: 'human', species: ['HUMAN'], volume: 62500 }));
+    const weapon = weaponOf(p.inv.wielded);
+    if (!this.rig || weapon !== this.weapon) {
+      this.weapon = weapon;
+      this.rig = makeRig({ ...bodyShapeOf({ id: p.male ? 'player_male' : 'player_female', bodytype: 'human', species: ['HUMAN'], volume: 62500 }), weapon });
+      this.c?.remove();
+      this.c = null;
+    }
     if (!this.c) {
       this.c = new CreatureModel(L.live, this.rig, L.store.get(this.rig, { key, info: () => spriteInfo(frame) }), 0.37, p.x, p.y, p.yaw);
       this.key = key;

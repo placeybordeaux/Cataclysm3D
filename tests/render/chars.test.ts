@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
-import { archetypeOf, bodyShapeOf, ARCHETYPES, type Archetype } from '../../src/render/chars/archetype';
+import { archetypeOf, bodyShapeOf, weaponOf, ARCHETYPES, type Archetype } from '../../src/render/chars/archetype';
+import { paintStyled, personPalette } from '../../src/render/chars/styled';
 import { makeRig, type PoseIn } from '../../src/render/chars/rig';
 import { analyseSprite, netSize, paintPart, texelDims, type Img } from '../../src/render/chars/paint';
 import { CharLayer, type Skin } from '../../src/render/chars/charLayer';
@@ -139,5 +140,52 @@ describe('sprite painting', () => {
   it('sizes nets at 32 texels per metre', () => {
     expect(texelDims([0.25, 0.27, 0.25])).toEqual([8, 9, 8]);
     expect(texelDims([0.01, 0.01, 0.01])).toEqual([1, 1, 1]);
+  });
+});
+
+describe('styled person skins', () => {
+  // a crude 12x24 person: brown hair, pink face, red shirt, blue pants, black shoes
+  const img: Img = { w: 12, h: 24, data: new Uint8Array(12 * 24 * 4) };
+  const band = (y0: number, y1: number, c: [number, number, number]) => {
+    for (let y = y0; y < y1; y++) for (let x = 1; x < 11; x++) img.data.set([...c, 255], (y * 12 + x) * 4);
+  };
+  band(0, 2, [90, 60, 30]);
+  band(2, 5, [230, 180, 150]);
+  band(5, 13, [200, 40, 40]);
+  band(13, 22, [40, 60, 150]);
+  band(22, 24, [30, 30, 30]);
+  const info = analyseSprite(img);
+
+  it('reads a semantic palette off the sprite', () => {
+    const pp = personPalette(info, false);
+    expect(pp.hair[0]).toBeGreaterThan(pp.hair[2]);
+    expect(pp.skin[0]).toBeGreaterThan(200);
+    expect(pp.shirt[0]).toBeGreaterThan(150);
+    expect(pp.pants[2]).toBeGreaterThan(120);
+  });
+  it('paints a face on the front and hair on the back of the head', () => {
+    const pp = personPalette(info, false);
+    const dims: [number, number, number] = [8, 8, 8];
+    const [nw, nh] = netSize(...dims);
+    const dst: Img = { w: nw, h: nh, data: new Uint8Array(nw * nh * 4) };
+    paintStyled(dst, 0, 0, dims, 'head', pp, 0.5);
+    const px = (x: number, y: number) => Array.from(dst.data.slice((y * nw + x) * 4, (y * nw + x) * 4 + 3));
+    // back face (x 24..31, y 8..15): hair on the top rows
+    expect(px(27, 9)[0]).toBeLessThan(140);
+    // the front face's eye row (y = 8 + 4) has a dark pupil
+    const row = [...Array(8)].map((_, i) => px(8 + i, 12));
+    expect(Math.min(...row.map((c) => c[0] + c[1] + c[2]))).toBeLessThan(150);
+  });
+});
+
+describe('weapons', () => {
+  it('maps wielded items to meshes', () => {
+    expect(weaponOf(null)).toBe('none');
+    expect(weaponOf({ isGun: () => true, def: { skill: 'rifle', volume: 3000 } })).toBe('rifle');
+    expect(weaponOf({ isGun: () => true, def: { skill: 'pistol', volume: 400 } })).toBe('pistol');
+    expect(weaponOf({ isGun: () => false, def: { volume: 2000 } })).toBe('long');
+    expect(weaponOf({ isGun: () => false, def: { volume: 250 } })).toBe('short');
+    const rig = makeRig({ ...bodyShapeOf({ id: 'npc', bodytype: 'human', species: ['HUMAN'] }), weapon: 'rifle' });
+    expect(rig.parts[rig.parts.length - 1].name).toBe('weapon');
   });
 });

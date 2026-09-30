@@ -29,7 +29,11 @@ export interface BodyShape {
   flies: boolean;
   /** Wings on the body (birds, bats, wasps, winged zombies). */
   wings: 'none' | 'feather' | 'membrane' | 'insect';
+  /** Held weapon mesh (humanoids: NPCs and the survivor). */
+  weapon?: Weapon;
 }
+
+export type Weapon = 'none' | 'pistol' | 'rifle' | 'long' | 'short';
 
 export interface MonsterLike {
   id: string;
@@ -120,4 +124,14 @@ export function bodyShapeOf(m: MonsterLike): BodyShape {
   if (arch === 'flyer') wings = species.includes('INSECT') || m.bodytype === 'flying insect' ? 'insect' : /bat/.test(id) ? 'membrane' : species.includes('ROBOT_FLYING') ? 'none' : 'feather';
   else if (fliesFlag && arch === 'humanoid') wings = 'membrane';
   return { arch, scale, girth, legs, head, zombie, legCount, flies: fliesFlag, wings };
+}
+
+/**
+ * Which weapon mesh a person holds, from the wielded item: guns by skill (long guns vs
+ * handguns), anything else by volume (ml): a bat or spear is long, a knife short.
+ */
+export function weaponOf(item: { isGun(): boolean; def: { skill?: string; volume?: number } } | null | undefined): Weapon {
+  if (!item) return 'none';
+  if (item.isGun()) return /rifle|shotgun|smg|launcher/.test(item.def.skill ?? '') || (item.def.volume ?? 0) > 1500 ? 'rifle' : 'pistol';
+  return (item.def.volume ?? 0) >= 1250 ? 'long' : 'short';
 }

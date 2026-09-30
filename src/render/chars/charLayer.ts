@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { LEVEL_HEIGHT } from '../../world/coords';
 import { addNormalOutput, patchBandedLambert } from '../materials';
 import { netSize, paintPart, texelDims, type Img, type PaintOpts, type SpriteInfo } from './paint';
+import { paintStyled, personPalette } from './styled';
 import { newPoseOut, resetPose, type PoseIn, type PoseOut, type Rig } from './rig';
 
 // Draws every procedural character (render/chars/rig.ts bodies) as instanced boxes: one
@@ -15,7 +16,8 @@ import { newPoseOut, resetPose, type PoseIn, type PoseOut, type Rig } from './ri
 // Per-instance attributes (see VERT below):
 //   instanceMatrix  the part's box: joint chain × centre offset × size
 //   cTex            net origin + W, H in texels
-//   cMisc           D (texels), sky visibility, hostile emphasis, far-silhouette factor
+//   cMisc           D (texels), sky visibility, hostile emphasis, taper axis (0 = y, 1 = z)
+//   cShape          taper: cross-section scale at the -axis end (xy) and the +axis end (zw)
 //   cFlash          hit/telegraph flash rgb + strength
 //   cRoot           creature root (three.js world coords), for the light-map sample and range
 
@@ -69,6 +71,7 @@ attribute vec4 cTex;
 attribute vec4 cMisc;
 attribute vec4 cFlash;
 attribute vec4 cRoot;
+attribute vec4 cShape;
 attribute vec3 cFace;
 varying vec4 vFaceRect;
 varying vec2 vFaceUv;
@@ -80,8 +83,18 @@ uniform float uFarNear;
 uniform float uFarFar;
 `;
 // Face rect in the net from the face id (paint.ts layout: right, front, left, back, top, bottom).
+// Tapered boxes (limbs narrower at the wrist, shoulders wider than the waist, a snout): the
+// unit cube's cross-section is scaled along its y (or z) axis before the instance matrix.
+const TAPER = /* glsl */ `
+{
+  float tk = (cMisc.w < 0.5 ? transformed.y : transformed.z) + 0.5;
+  vec2 ts = mix(cShape.xy, cShape.zw, tk);
+  if (cMisc.w < 0.5) transformed.xz *= ts; else transformed.xy *= ts;
+}
+`;
 const VERT_MAIN = /* glsl */ `
 #include <begin_vertex>
+${TAPER}
 {
   float W = cTex.z, H = cTex.w, D = cMisc.x;
   int f = int(cFace.x + 0.5);
@@ -143,6 +156,18 @@ function charMaterial(page: THREE.Texture): THREE.MeshLambertMaterial {
   return m;
 }
 
+let depthMat: THREE.MeshDepthMaterial | null = null;
+/** Shadow pass with the same taper, so shadows match the shapes. */
+function charDepthMaterial(): THREE.MeshDepthMaterial {
+  if (depthMat) return depthMat;
+  depthMat = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking });
+  depthMat.onBeforeCompile = (shader) => {
+    shader.vertexShader = 'attribute vec4 cMisc;\nattribute vec4 cShape;\n' + shader.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n' + TAPER);
+  };
+  depthMat.customProgramCacheKey = () => 'cdda-char-depth';
+  return depthMat;
+}
+
 /** Unit cube (-0.5..0.5) with per-vertex face id + face-local uv (paint.ts conventions). */
 function cubeGeometry(): THREE.BufferGeometry {
   const P: number[] = [], N: number[] = [], F: number[] = [], UV: number[] = [], I: number[] = [];
@@ -185,6 +210,7 @@ class Batch {
   misc!: THREE.InstancedBufferAttribute;
   flash!: THREE.InstancedBufferAttribute;
   root!: THREE.InstancedBufferAttribute;
+  shape!: THREE.InstancedBufferAttribute;
   private geo!: THREE.InstancedBufferGeometry;
   constructor(private cube: THREE.BufferGeometry, private page: THREE.Texture, private parent: THREE.Object3D, private shadows: boolean) {
     this.mesh = this.make(256);
@@ -203,11 +229,13 @@ class Batch {
     this.misc = attr('cMisc');
     this.flash = attr('cFlash');
     this.root = attr('cRoot');
+    this.shape = attr('cShape');
     this.geo = g;
     const m = new THREE.InstancedMesh(g, charMaterial(this.page), cap);
     m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     m.frustumCulled = false; // instances span the whole view
     m.castShadow = this.shadows;
+    m.customDepthMaterial = charDepthMaterial();
     m.receiveShadow = true;
     m.count = 0;
     m.name = 'characters';
@@ -228,7 +256,7 @@ class Batch {
     this.count = n;
     this.mesh.count = n;
     this.mesh.instanceMatrix.needsUpdate = true;
-    for (const a of [this.tex, this.misc, this.flash, this.root]) a.needsUpdate = true;
+    for (const a of [this.tex, this.misc, this.flash, this.root, this.shape]) a.needsUpdate = true;
   }
 }
 
@@ -435,7 +463,7 @@ export class CharLayer {
       const b = this.batches.get(i.skin.page)!;
       let k = fill.get(i.skin.page) ?? 0;
       const M = b.mesh.instanceMatrix.array as Float32Array;
-      const T = b.tex.array as Float32Array, X = b.misc.array as Float32Array, F = b.flash.array as Float32Array, R = b.root.array as Float32Array;
+      const T = b.tex.array as Float32Array, X = b.misc.array as Float32Array, F = b.flash.array as Float32Array, R = b.root.array as Float32Array, P = b.shape.array as Float32Array;
       const fk = i.flashDur > 0 ? i.flashT / i.flashDur : 0;
       const sky = this.skyVisAt ? this.skyVisAt(i.x, i.y, i.z) : 1;
       const rx = i.x, ry = i.z * LEVEL_HEIGHT + i.lift, rz = i.y;
@@ -443,7 +471,10 @@ export class CharLayer {
         M.set(i.mats.subarray(p * 16, p * 16 + 16), k * 16);
         const r = i.skin.rects;
         T[k * 4] = r[p * 5]; T[k * 4 + 1] = r[p * 5 + 1]; T[k * 4 + 2] = r[p * 5 + 2]; T[k * 4 + 3] = r[p * 5 + 3];
-        X[k * 4] = r[p * 5 + 4]; X[k * 4 + 1] = sky; X[k * 4 + 2] = i.emph; X[k * 4 + 3] = i.far;
+        const pd = i.rig.parts[p];
+        X[k * 4] = r[p * 5 + 4]; X[k * 4 + 1] = sky; X[k * 4 + 2] = i.emph; X[k * 4 + 3] = pd.taperAxis === 'z' ? 1 : 0;
+        const tp = pd.taper;
+        P[k * 4] = tp ? tp[0] : 1; P[k * 4 + 1] = tp ? tp[1] : 1; P[k * 4 + 2] = tp ? tp[2] : 1; P[k * 4 + 3] = tp ? tp[3] : 1;
         F[k * 4] = i.flashColor.r; F[k * 4 + 1] = i.flashColor.g; F[k * 4 + 2] = i.flashColor.b; F[k * 4 + 3] = fk;
         R[k * 4] = rx; R[k * 4 + 1] = ry; R[k * 4 + 2] = rz; R[k * 4 + 3] = 0;
       }
@@ -466,6 +497,12 @@ export class CharLayer {
 export class SkinStore {
   private pages: SkinPage[] = [];
   private skins = new Map<string, Skin>();
+  /**
+   * People's skins: 'styled' = painted from a semantic palette read off the sprite
+   * (styled.ts); 'sprite' = the sprite projected onto the boxes (paint.ts). Animals and
+   * everything else always use the projection.
+   */
+  style: 'styled' | 'sprite' = 'styled';
 
   get pageCount(): number {
     return this.pages.length;
@@ -480,7 +517,8 @@ export class SkinStore {
 
   get(rig: Rig, src: SkinSource): Skin {
     const dimsKey = rig.parts.map((p) => texelDims(p.size).join('x')).join(',');
-    const key = `${src.key}|${rig.shape.arch}|${dimsKey}|${src.opts?.eyes?.join(',') ?? ''}`;
+    const styled = this.style === 'styled' && rig.shape.arch === 'humanoid';
+    const key = `${src.key}|${rig.shape.arch}|${rig.shape.zombie ? 'z' : ''}|${styled ? 'st' : 'sp'}|${dimsKey}|${src.opts?.eyes?.join(',') ?? ''}`;
     const hit = this.skins.get(key);
     if (hit) return hit;
     const info = src.info();
@@ -512,8 +550,12 @@ export class SkinStore {
     nets.forEach((nt, i) => {
       const [x, y] = places[i];
       rects.set([x, y, nt.d[0], nt.d[1], nt.d[2]], i * 5);
-      if (info) paintPart(pg.img, x, y, nt.d, rig.parts[i].src, info, src.opts);
-      else fillGrey(pg.img, x, y, nt.wh[0], nt.wh[1]);
+      const part = rig.parts[i];
+      if (!info) fillGrey(pg.img, x, y, nt.wh[0], nt.wh[1]);
+      else if (styled && part.src.region) {
+        const side = /R$/.test(part.name) ? 1 : /L$/.test(part.name) ? -1 : 0;
+        paintStyled(pg.img, x, y, nt.d, part.src.region, personPalette(info, rig.shape.zombie), seedOfKey(src.key), side);
+      } else paintPart(pg.img, x, y, nt.d, part.src, info, src.opts);
     });
     pg.dirty = true;
     const skin: Skin = { page: pageIdx, rects, refs: 0 };
@@ -525,6 +567,13 @@ export class SkinStore {
   upload(): void {
     for (const p of this.pages) if (p.dirty) (p.tex.needsUpdate = true, p.dirty = false);
   }
+}
+
+/** 0..1 from a skin key: the same sprite always gets the same decals. */
+function seedOfKey(k: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < k.length; i++) h = Math.imul(h ^ k.charCodeAt(i), 16777619);
+  return ((h >>> 0) % 100003) / 100003;
 }
 
 function fillGrey(img: Img, x0: number, y0: number, w: number, h: number): void {

@@ -3,7 +3,7 @@
 // street viewpoint, spawns the subject(s) ahead of the camera and waits for the pose asked for.
 // Returns a short list of what is standing where. Plain JS so it can be pasted into
 // `drive.ts eval` too.
-window.charViews = ['horde_near', 'horde_mid', 'horde_far', 'horde_dusk', 'dog', 'npc', 'windup', 'critters', 'zoo', 'night', 'third', 'corpse', 'bench'];
+window.charViews = ['horde_near', 'horde_mid', 'horde_far', 'horde_road', 'horde_dusk', 'dog', 'npc', 'windup', 'critters', 'zoo', 'night', 'third', 'corpse', 'bench'];
 window.charView = async (name) => {
   const c = window.cdda;
   const wait = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -20,7 +20,7 @@ window.charView = async (name) => {
     const fx = Math.sin(yaw0), fy = -Math.cos(yaw0);
     return [Math.round(fx * f - fy * s), Math.round(fy * f + fx * s)];
   };
-  const byUid = (uid) => c.monsterSystem.active.find((m) => m.uid === uid);
+  const byUid = (uid) => c.monsterSystem.all.find((m) => m.uid === uid);
   // Pinned: stands still (IMMOBILE, like a turret) facing `deg` relative to the camera's view
   // (0 = away from us, 180 = toward us, 90 = broadside), idling — for portraits.
   const pin = (uid, deg) => {
@@ -38,15 +38,17 @@ window.charView = async (name) => {
   };
   const lookAt = (f, s, pitch) => c.look((yaw0 + Math.atan2(s, f)) * 180 / Math.PI, pitch);
   if (name.startsWith('horde')) {
-    const range = name === 'horde_near' ? [4, 10] : name === 'horde_mid' ? [18, 30] : name === 'horde_dusk' ? [22, 48] : [38, 60];
+    const range = name === 'horde_near' ? [4, 10] : name === 'horde_mid' ? [18, 30] : name === 'horde_dusk' ? [22, 48] : name === 'horde_road' ? [66, 110] : [38, 60];
     const ids = ['mon_zombie', 'mon_zombie', 'mon_zombie_fat', 'mon_zombie_cop', 'mon_zombie_child', 'mon_zombie_brute', 'mon_zombie_tough', 'mon_zombie_runner', 'mon_zombie_fireman', 'mon_zombie_soldier', 'mon_zombie', 'mon_zombie_hulk'];
     // near: posed facing us; further out: hostile and shambling toward the camera
     const near = name === 'horde_near';
+    // stand in the road itself: the front-yard trees otherwise hide anything far down it
+    c.teleport(p.x + Math.cos(yaw0) * 6, p.y + Math.sin(yaw0) * 6, p.z);
     const uids = [];
     for (let i = 0; i < 12; i++) {
       const f = range[0] + ((range[1] - range[0]) * i) / 11;
       // on the sidewalk and the road, clear of the front-yard trees
-      uids.push(spawnAt(ids[i % ids.length], f, 6 + ((i * 7) % 5) - 2, near ? { friendly: true } : {}, near ? 160 + ((i * 37) % 40) : undefined));
+      uids.push(spawnAt(ids[i % ids.length], f, ((i * 7) % 5) - 2, near ? { friendly: true } : {}, near ? 160 + ((i * 37) % 40) : undefined));
     }
     // aim at the middle of the group as spawned (tile rounding moves them about)
     const ms = uids.map(byUid).filter(Boolean);

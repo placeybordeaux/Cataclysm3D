@@ -3,7 +3,7 @@ import { monsterSize, type Monster } from '../game/monster';
 import type { CorpseRecord, MonsterSystem } from '../game/monai';
 import type { PlayerCombat } from '../game/playercombat';
 import { sfx } from '../audio/sfx';
-import { LEVEL_HEIGHT } from '../world/coords';
+import { CHUNK, LEVEL_HEIGHT } from '../world/coords';
 import { loadAtlas, type Atlas, type FrameRef } from './atlas';
 import type { Renderer } from './renderer';
 import type { SpriteHandle } from './sprites';
@@ -35,6 +35,8 @@ import type { MonsterDef } from '../data/types';
 // Both get the same combat-feel inputs computed below.
 
 const MON_PPM = 48 / 1.75;
+/** Dormant monsters are drawn out to the draw distance, capped here (m). */
+export const FAR_FIGURE_MAX = 130;
 const GLYPH_HEIGHT = { tiny: 0.45, small: 0.8, medium: 1.7, large: 2.3, huge: 3.2 } as const;
 /** Fallen corpses: squashed to this fraction of standing height, this much wider. */
 const FALLEN = 0.3;
@@ -203,6 +205,10 @@ export class MonsterView implements GameSystem {
   private corpseCheck = 0;
   private kicks = new Map<Monster, { dx: number; dy: number; t: number; amt: number }>();
   private chars: CharLayers | null = null;
+  /** dormant monsters drawn as far figures (farFigures) */
+  private far: Monster[] = [];
+  private farSet = new Set<Monster>();
+  private farScan = 0;
   private rigs = new Map<string, Rig>();
   /** A body hit the ground (hitFx puts dust/blood there). */
   onBodyLanded: ((x: number, y: number, z: number, blood: string | null) => void) | null = null;
@@ -447,8 +453,13 @@ export class MonsterView implements GameSystem {
   update(game: Game, dt: number): void {
     const p = game.player;
     const cam = this.renderer.rig.camera.position;
-    // Live monsters: only those in the bubble have sprites.
-    for (const m of this.sys.active) {
+    // Live monsters: those in the bubble, plus dormant ones out to the draw distance (see farFigures).
+    this.farScan -= dt;
+    if (this.farScan <= 0) {
+      this.farScan = 0.5;
+      this.farFigures(p);
+    }
+    for (const m of this.sys.active.length ? [...this.sys.active, ...this.far] : this.far) {
       if (m.dead) continue;
       let v = this.views.get(m);
       if (!v) v = this.create(m);
@@ -532,7 +543,7 @@ export class MonsterView implements GameSystem {
       const wid = (v.height * (v.frame.w / v.frame.h)) * (1 + (FALLEN_WIDE - 1) * lie) * (2 - squash) * narrow * near.scale;
       h.setSize(wid, hgt);
     }
-    for (const [m] of this.views) if (m.dead || m.dormant) this.drop(m);
+    for (const [m] of this.views) if (m.dead || (m.dormant && !this.farSet.has(m))) this.drop(m);
     for (const [m] of this.kicks) if (m.dead || m.dormant) this.kicks.delete(m);
 
     // Corpses: stagger -> fall -> bounce, then persist until the item is gone.
@@ -588,6 +599,24 @@ export class MonsterView implements GameSystem {
       if (this.muzzleT <= 0) this.muzzle.intensity = 0;
     }
     this.sys.playerLight = () => (this.renderer.flashlightOn ? 60 : 0);
+  }
+
+  /**
+   * Dormant monsters (outside monai's ACTIVE_RADIUS reality bubble) aren't simulated, but a
+   * horde 80 m down a long road should still be seen coming: they are drawn where they stand
+   * (or drift) out to the draw distance, idling, with the same far-LOD silhouette and hostile
+   * emphasis as live ones. Rescanned twice a second; sys.all can be long.
+   */
+  private farFigures(p: { x: number; y: number; z: number }): void {
+    this.far.length = 0;
+    this.farSet.clear();
+    const range = Math.min(FAR_FIGURE_MAX, (this.renderer.chunks.radius + 0.5) * CHUNK);
+    for (const m of this.sys.all) {
+      if (m.dead || !m.dormant || Math.abs(m.z - p.z) > 1) continue;
+      if (Math.hypot(m.x - p.x, m.y - p.y) > range) continue;
+      this.far.push(m);
+      this.farSet.add(m);
+    }
   }
 
   private landed(v: CorpseView, c: CorpseRecord): void {

@@ -9,7 +9,7 @@ import type { Renderer } from './renderer';
 import type { SpriteHandle } from './sprites';
 import type { TileFrame } from './textureSource';
 import { charLayers, charSettings, frameKey, spriteInfo, type CharLayers } from './chars';
-import { bodyShapeOf } from './chars/archetype';
+import { bodyShapeOf, weaponOf } from './chars/archetype';
 import { CreatureModel, FallingBody } from './chars/creature';
 import { makeRig, type Rig } from './chars/rig';
 
@@ -73,8 +73,7 @@ export class NpcView implements GameSystem {
   private shots: SpriteHandle[] = [];
   private bodyCheck = 0;
   private chars: CharLayers | null = null;
-  private rigM: Rig | null = null;
-  private rigF: Rig | null = null;
+  private rigs = new Map<string, Rig>();
 
   constructor(readonly game: Game, readonly renderer: Renderer, readonly sys: NpcSystem) {
     loadAtlas().then(
@@ -105,9 +104,18 @@ export class NpcView implements GameSystem {
   }
 
   private rigFor(n: Npc): Rig {
-    // survivors are people: the humanoid body at BN's human volume, women a touch smaller
-    if (n.male !== false) return (this.rigM ??= makeRig(bodyShapeOf({ id: 'npc_male', bodytype: 'human', species: ['HUMAN'], volume: 62500 })));
-    return (this.rigF ??= makeRig({ ...bodyShapeOf({ id: 'npc_female', bodytype: 'human', species: ['HUMAN'], volume: 62500 }), scale: 0.95, girth: 0.92 }));
+    // survivors are people: the humanoid body at BN's human volume, women a touch smaller,
+    // holding whatever they wield
+    const male = n.male !== false;
+    const weapon = weaponOf(n.inv.wielded);
+    const key = `${male ? 'm' : 'f'}:${weapon}`;
+    let r = this.rigs.get(key);
+    if (!r) {
+      const base = bodyShapeOf({ id: male ? 'npc_male' : 'npc_female', bodytype: 'human', species: ['HUMAN'], volume: 62500 });
+      r = makeRig(male ? { ...base, weapon } : { ...base, scale: 0.95, girth: 0.92, weapon });
+      this.rigs.set(key, r);
+    }
+    return r;
   }
 
   private skinFor(rig: Rig, frame: TileFrame) {
@@ -145,8 +153,12 @@ export class NpcView implements GameSystem {
     v.key = key;
     v.frame = frame;
     if (v.h) v.h.setFrame(frame, HEIGHT);
-    // a new outfit: repaint from the new composite
-    if (v.c) this.layers().live.reskin(v.c.inst, this.skinFor(v.c.rig, frame));
+    // a new outfit or weapon: rebuild from the new composite (the rig may differ too)
+    if (v.c) {
+      v.c.remove();
+      v.c = null;
+      this.makeVisual(n, v);
+    }
   }
 
   private rebuildAll(): void {
