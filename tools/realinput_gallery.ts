@@ -65,11 +65,15 @@ export function galleryScenarios(c: GalleryCtx): Scenario[] {
       const x = c.x();
       // The dev-build entry in the Esc menu.
       await c.toGameplay();
-      await x.key('Escape');
-      await sleep(400);
+      // (Firefox: the first Esc may only leave pointer lock; press again until the menu is up)
+      const menuUp = () => js<boolean>(`!!document.querySelector('[data-testid="esc-menu"]')`);
+      for (let i = 0; i < 3 && !(await menuUp()); i++) {
+        await x.key('Escape');
+        for (let k = 0; k < 10 && !(await menuUp()); k++) await sleep(150);
+      }
       const entry = await js<boolean>(`[...document.querySelectorAll('[data-testid="esc-menu"] button')].some((b) => /Style gallery/.test(b.textContent ?? ''))`);
       check('Esc menu has the dev "Style gallery" entry', entry);
-      await x.key('Escape');
+      if (await menuUp()) await x.key('Escape');
       await sleep(300);
       const storage = await js<string>('JSON.stringify(Object.fromEntries(Object.entries(localStorage)))');
       const errs0 = c.errors().length;

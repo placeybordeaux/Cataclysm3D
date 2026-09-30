@@ -93,6 +93,8 @@ export async function runGallery({ game, renderer, api }: GalleryDeps): Promise<
     return p;
   };
 
+  /** UI handlers: a failure is already in the status line (and st.errors); don't leave it unhandled. */
+  const quiet = (p: Promise<unknown>) => void p.catch((e) => setStatus(String((e as Error).message ?? e), true));
   const frame = () => new Promise<void>((r) => requestAnimationFrame(() => r()));
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -124,9 +126,9 @@ export async function runGallery({ game, renderer, api }: GalleryDeps): Promise<
     h('div', { class: 'gal-title', text: 'Switches' }),
     swList,
     h('div', { class: 'gal-defaults' },
-      button('Revert to my saved', () => void revert('saved'), { small: true, title: 'Every switch back to what the game boots with (your Options).' }),
-      button('Factory defaults', () => void revert('factory'), { small: true, title: 'Every switch back to what the game ships with.' }),
-      button('Copy these as my defaults', () => void copyDefaults(), { small: true, tone: 'accent', title: 'Write the current values into Options (persisted exactly as the Options screen does).' })),
+      button('Revert to my saved', () => quiet(revert('saved')), { small: true, title: 'Every switch back to what the game boots with (your Options).' }),
+      button('Factory defaults', () => quiet(revert('factory')), { small: true, title: 'Every switch back to what the game ships with.' }),
+      button('Copy these as my defaults', () => quiet(copyDefaults()), { small: true, tone: 'accent', title: 'Write the current values into Options (persisted exactly as the Options screen does).' })),
     statusEl);
 
   const modeBar = h('div', { class: 'gal-modes' });
@@ -174,7 +176,7 @@ export async function runGallery({ game, renderer, api }: GalleryDeps): Promise<
       sceneList.append(h('div', { class: 'gal-group', text: s.group }));
       lastGroup = s.group;
     }
-    sceneList.append(h('button', { class: 'gal-scene', text: s.label, data: { scene: s.id }, title: s.id, on: { click: () => void showScene(s.id) } }));
+    sceneList.append(h('button', { class: 'gal-scene', text: s.label, data: { scene: s.id }, title: s.id, on: { click: () => quiet(showScene(s.id)) } }));
   }
 
   // --- switches (right)
@@ -187,7 +189,7 @@ export async function runGallery({ game, renderer, api }: GalleryDeps): Promise<
     }
     const seg = h('div', { class: 'gal-seg' });
     for (const v of sw.values)
-      seg.append(h('button', { class: 'gal-segbtn', text: v.label, data: { switch: sw.id, value: v.v }, title: `${sw.id}=${v.v}`, on: { click: () => void setSwitch(sw.id, v.v) } }));
+      seg.append(h('button', { class: 'gal-segbtn', text: v.label, data: { switch: sw.id, value: v.v }, title: `${sw.id}=${v.v}`, on: { click: () => quiet(setSwitch(sw.id, v.v)) } }));
     const hint = [sw.option ? `Options > ${sw.option}` : 'not in Options', sw.url ? `?${sw.url}=` : ''].filter(Boolean).join(' · ');
     const row = h('div', { class: 'gal-sw', data: { switch: sw.id } },
       h('div', { class: 'gal-swhead' }, h('span', { class: 'gal-swname', text: sw.label }), h('span', { class: 'gal-swhint', text: hint })),
@@ -204,7 +206,7 @@ export async function runGallery({ game, renderer, api }: GalleryDeps): Promise<
   tools.append(
     button('Reset camera', () => resetCamera(), { small: true, key: 'R' }),
     h('button', { class: 'ui2-btn small gal-freeze', on: { click: () => toggleFreeze() } }),
-    button('Re-run scene', () => st.scene && void showScene(st.scene.id), { small: true }),
+    button('Re-run scene', () => st.scene && quiet(showScene(st.scene.id)), { small: true }),
   );
 
   // --- A/B pane
@@ -241,7 +243,7 @@ export async function runGallery({ game, renderer, api }: GalleryDeps): Promise<
   abPane.append(
     h('div', { class: 'gal-controls' },
       h('span', { text: 'Switch' }), abSw, h('span', { text: 'A' }), abA, h('span', { text: 'B' }), abB,
-      button('Render A/B', () => void runAb(), { small: true, tone: 'accent', key: 'Enter' }),
+      button('Render A/B', () => quiet(runAb()), { small: true, tone: 'accent', key: 'Enter' }),
       h('div', { class: 'gal-seg' }, ...abViewBtns),
       button('Flip', () => flipAb(), { small: true, key: 'Space' })),
     abOut);
@@ -259,7 +261,7 @@ export async function runGallery({ game, renderer, api }: GalleryDeps): Promise<
   mxPane.append(
     h('div', { class: 'gal-controls' },
       h('span', { text: 'Switch' }), mxSw,
-      button('Generate', () => void runMatrix(), { small: true, tone: 'accent', key: 'Enter' }),
+      button('Generate', () => quiet(runMatrix()), { small: true, tone: 'accent', key: 'Enter' }),
       button('Proof scene', () => ((st.matrix.scenes = new Set([swById(st.matrix.sw).proof])), drawChips()), { small: true, title: 'Just the scene where this switch should matter most' }),
       button('Clear scenes', () => (st.matrix.scenes.clear(), drawChips()), { small: true })),
     mxScenes, mxGrid);
@@ -377,6 +379,11 @@ export async function runGallery({ game, renderer, api }: GalleryDeps): Promise<
         const target = sw.get();
         if (!sw.option) {
           if (target !== sw.def) out.push(`${sw.label}: not an Options setting, use ${sw.url ? `?${sw.url}=${target}` : 'the console'}`);
+          continue;
+        }
+        if (sw.persist) {
+          sw.persist();
+          saved[sw.id] = target;
           continue;
         }
         const o = opts.find((q) => q.name === sw.option);
@@ -632,12 +639,12 @@ export async function runGallery({ game, renderer, api }: GalleryDeps): Promise<
     }
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'PageDown' || e.key === 'PageUp' || e.key === ']' || e.key === '[') {
       const d = e.key === 'ArrowDown' || e.key === 'PageDown' || e.key === ']' ? 1 : -1;
-      void showScene(SCENES[(idx + d + SCENES.length) % SCENES.length].id);
+      quiet(showScene(SCENES[(idx + d + SCENES.length) % SCENES.length].id));
     } else if (e.key === ' ' || e.key === 'x') {
       if (st.mode === 'ab') flipAb();
     } else if (e.key === 'Enter') {
-      if (st.mode === 'ab') void runAb();
-      else if (st.mode === 'matrix') void runMatrix();
+      if (st.mode === 'ab') quiet(runAb());
+      else if (st.mode === 'matrix') quiet(runMatrix());
     } else if (e.key === '1' || e.key === '2' || e.key === '3') setMode((['live', 'ab', 'matrix'] as Mode[])[Number(e.key) - 1]);
     else if (e.code === 'KeyR') resetCamera();
     else if (e.code === 'KeyF') toggleFreeze();

@@ -11,6 +11,7 @@ import { charSettings, charsApi, setCharMode, setViewmodelMode } from '../render
 import { setCutoutMips } from '../render/cutoutMips';
 import { AIM_MODELS, aimModel, isAimModel, setAimModel } from '../game/aimmodel';
 import type { GradeMode } from '../render/post';
+import { storeGameOptions } from '../ui/options';
 
 // Every wave-3 visual/feel variant as one gallery switch (docs/GALLERY.md). `set` applies it
 // live and never persists: the owning modules' own setters sometimes write their localStorage
@@ -36,6 +37,8 @@ export interface GallerySwitch {
   set(v: string): void;
   /** The Options row that persists this (null: URL / console only). */
   option: string | null;
+  /** Persist without a registered Options entry (rows built into the Options screen itself). */
+  persist?: () => void;
   /** The URL parameter equivalent, for the hint line. */
   url?: string;
   /** Caveat shown under the control. */
@@ -117,6 +120,8 @@ export function buildSwitches(renderer: Renderer, api: DebugApi): GallerySwitch[
       values: vals(['palette', 'smooth', 'off']), def: 'smooth',
       note: 'Each visual style sets its own grading; this overrides it until the style changes.',
       get: () => renderer.pipeline.options.grade, set: (v) => void (renderer.pipeline.options.grade = v as GradeMode), proof: 'street',
+      // a row of the Options screen itself, not a registered entry: same storage it writes
+      persist: () => storeGameOptions({ grade: renderer.pipeline.options.grade }),
     },
     {
       id: 'cutout', label: 'Cutout mips', group: 'Image', option: null,
