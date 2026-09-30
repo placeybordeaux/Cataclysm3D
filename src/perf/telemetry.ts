@@ -320,9 +320,11 @@ export class Telemetry implements ChunkProbe {
     let hv = 0, hf = 0, ha = 0;
     const [zLo, zHi] = ch.levels.span(pz);
     const unbuilt = (cx: number, cy: number) => {
-      // every level the column draws at or above the player's (what's in front of the eye:
-      // walls, upper floors, roofs), plus the ground under a rooftop
-      for (let z = Math.max(zLo, pz > 0 ? 0 : pz); z <= zHi; z++) {
+      // the levels in front of the eye: the player's own and the one above (walls, upper floors,
+      // roofs), and the ground under a rooftop. Storeys further up (tower tops) are built a
+      // second later by design and are not counted, so the budgets stay comparable.
+      for (let z = Math.max(zLo, pz > 0 ? 0 : pz); z <= Math.min(zHi, pz + 1); z++) {
+        if (z > 0 && z < pz) continue;
         if (ch.levels.radiusAt(cx, cy, z, pz) < 0) continue;
         const e = map.get(ekey(cx, cy, z));
         if (!e || !e.shown) return true;

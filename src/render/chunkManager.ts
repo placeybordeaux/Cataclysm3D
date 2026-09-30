@@ -488,7 +488,9 @@ export class ChunkManager {
     if (!inView) t += speed > 4 ? 3 : 0.75;
     // basements later still; above ground the street and storeys below are in plain view
     if (e.z < pz) t += pz > 0 && e.z >= 0 ? 0.25 : 1.5;
-    else if (e.z > pz) t += 0.2;
+    // storeys above the player's window (tower tops, a high roof: src/world/levels.ts) a second
+    // later, unless overhead (within a chunk): the bay's roof is what you look up at
+    else if (e.z > pz) t += e.z > pz + this.levelsAbove && d > CHUNK ? 1 : 0.2;
     t += d * 0.002;
     // the player's own chunk and its 8 neighbours come first whatever the camera does: after
     // a teleport or a load the view stays curtained until they exist (nearChunks.ts)
