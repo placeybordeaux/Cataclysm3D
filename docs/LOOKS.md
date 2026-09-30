@@ -44,6 +44,8 @@ Columns: classic, crisp, voxel, terrain, full. Regenerate with
 
 ## Performance (RTX 5080, `--bench`)
 
+Live telemetry (F3), streaming while driving and the regression benchmark: [PERF.md](PERF.md).
+
 `render` = renderer-only ms/frame synchronised with the GPU (`cdda.benchRender`);
 fps = uncapped rAF interval, which also carries the simulation.
 

@@ -92,6 +92,7 @@ Screenshots for every area: `docs/screenshots/wave3/<area>/` (before/after pairs
 | `docs/ADAPTATION.md` | Wave 3: adaptation principles, playtest findings, switches |
 | `docs/GALLERY.md` | Style gallery (`/?gallery`): every wave-3 switch on fixed scenes, live / A/B / Matrix compare, copy as defaults |
 | `docs/QA_WAVE3.md` | Wave-3 integration QA at 3440x1304 (Chromium + Firefox): issues, realinput per scenario, perf |
+| `docs/PERF.md` | Performance: F3 overlay / Shift+F3 dump, `tools/perf-report.ts`, streaming fixes (build order by need, stand-ins), `npm run perf` budgets |
 
 ## Controls (current defaults; all rebindable in Options → Key bindings)
 
