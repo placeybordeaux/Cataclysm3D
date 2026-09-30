@@ -15,6 +15,12 @@ lighting.
 | Options > **Vehicle look** | modelled bodies (default) / part blocks (the v2 look), persisted |
 | `?vehicles=model` / `?vehicles=parts` | URL override (anything else throws) |
 | `cdda.vehicleLook('parts')` | live; every vehicle rebuilds next frame |
+| Options > **Vehicle width** / `?vehiclewidth=real\|fill` / `cdda.vehicleWidth('fill')` | model look only: `real` (default) draws car proportions (a car ~2.6 m on its 4-tile grid, so you stop ~0.7 m short of the paint: collision is still the grid); `fill` widens bodies to ~0.3 m inside the footprint (chunkier, but you touch what you see) |
+
+`fill` for comparison (same views as the first two rows below):
+
+| ![](screenshots/wave3/vehicles/fill_lineup-car-sedan-car_sports.png) | ![](screenshots/wave3/vehicles/fill_lineup-suv-pickup-cube_van.png) |
+| --- | --- |
 
 ## How it works
 
@@ -140,8 +146,9 @@ skin reuse on door / light changes, frame fallback.
 
 - Wheels don't turn with steering or spin (they're merged into one mesh per vehicle).
 - No distance LOD: a far car gets the same skin as a near one (cheap enough so far).
-- Width is squeezed but the collision footprint is still the grid, so you bump into air
-  ~0.5 m beside a car. A tighter visual would need a finer collision shape.
+- With `real` width the collision footprint is still the grid, so you bump into air ~0.7 m
+  beside a car (`fill` trades proportions for that). A true fix needs a finer collision
+  shape in the vehicle system.
 - Semi trucks have no trailer in BN's grid; the tractor unit reads as a long cab truck.
 - Boats, aircraft and tanks use the frame fallback (tracks are drawn as big wheels).
 - Hood / trunk lids don't open; tailgates and shutters open as a hole.

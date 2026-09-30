@@ -243,6 +243,23 @@ export function classify(v: Vehicle): BodyStyle {
   return 'sedan';
 }
 
+/**
+ * How wide bodies are drawn: 'real' squeezes toward real-car proportions (a car ~2.6 m on
+ * its 4-tile grid; you bump into air beside it, collision is the grid), 'fill' draws them
+ * close to the grid footprint (~0.3 m short of each side: collision agrees, proportions are
+ * chunkier). `?vehiclewidth=real|fill`, Options > Vehicle width, `cdda.vehicleWidth()`.
+ */
+export type VehicleWidth = 'real' | 'fill';
+export const VEHICLE_WIDTHS: VehicleWidth[] = ['real', 'fill'];
+let widthMode: VehicleWidth = 'real';
+export function setVehicleWidth(w: VehicleWidth): void {
+  if (!VEHICLE_WIDTHS.includes(w)) throw new Error(`unknown vehicle width ${w}`);
+  widthMode = w;
+}
+export function vehicleWidth(): VehicleWidth {
+  return widthMode;
+}
+
 export function analyze(v: Vehicle, forceStyle?: BodyStyle): Layout {
   const style = forceStyle ?? classify(v);
   const p = { ...STYLE_PARAMS[style] };
@@ -258,6 +275,7 @@ export function analyze(v: Vehicle, forceStyle?: BodyStyle): Layout {
   // Visual width: squeezed (see the header); bikes are narrow whatever their grid says.
   let hw = style === 'motorcycle' ? 0.4 : style === 'bicycle' ? 0.3 : Math.max(0.5, (ncols * p.widthPerCol) / 2);
   if (style === 'bus' || style === 'truck' || style === 'van') hw = Math.min(hw, 1.6);
+  if (widthMode === 'fill' && style !== 'motorcycle' && style !== 'bicycle') hw = Math.max(hw, ncols / 2 - 0.3);
   // Inner columns (seats) stay where the grid has them, so a passenger's eye and the seat
   // they sit in agree; only columns that would land outside the body are pulled in.
   const lim = Math.max(0, hw - 0.3);

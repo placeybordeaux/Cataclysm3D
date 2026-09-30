@@ -15,6 +15,7 @@ import type { Renderer } from './renderer';
 import type { TileFrame } from './textureSource';
 import { Batches, hash, partSwatchPage } from './vehicleGeom';
 import { buildVehicleModel } from './vehicleModel';
+import { setVehicleWidth, vehicleWidth, type VehicleWidth } from './vehicleLayout';
 import { liveryBody } from './vehicleSkin';
 
 // 3D meshes for vehicles, built from their parts mount by mount, as low-poly boxes wearing
@@ -458,6 +459,23 @@ export type VehicleLook = 'model' | 'parts';
 export const VEHICLE_LOOKS: VehicleLook[] = ['model', 'parts'];
 const LOOK_KEY = 'cdda3d.vehicleLook';
 
+const WIDTH_KEY = 'cdda3d.vehicleWidth';
+
+export function initialVehicleWidth(): VehicleWidth {
+  const q = typeof location !== 'undefined' ? new URLSearchParams(location.search).get('vehiclewidth') : null;
+  if (q) {
+    if (q !== 'real' && q !== 'fill') throw new Error(`?vehiclewidth= must be real or fill, got "${q}"`);
+    return q;
+  }
+  try {
+    const s = localStorage.getItem(WIDTH_KEY);
+    if (s === 'real' || s === 'fill') return s;
+  } catch {
+    // no storage
+  }
+  return 'real';
+}
+
 export function initialVehicleLook(): VehicleLook {
   const q = typeof location !== 'undefined' ? new URLSearchParams(location.search).get('vehicles') : null;
   if (q) {
@@ -540,6 +558,7 @@ export class VehicleRenderer {
 
   constructor(private renderer: Renderer, private game: Game, private system: VehicleSystem) {
     this.group.name = 'vehicles';
+    setVehicleWidth(initialVehicleWidth());
     for (const m of [this.glassMat, this.glassOut, this.glassIn, this.lampOn, this.lampOff, this.tailOn, this.tailOff, this.beaconMat]) patchNormalOutput(m, false);
     this.headlight.castShadow = false;
     renderer.scene.add(this.group, this.headlight, this.headlight.target);
@@ -550,6 +569,19 @@ export class VehicleRenderer {
 
   get look(): VehicleLook {
     return this.lookMode;
+  }
+  /** Body width mode (vehicleLayout.ts VehicleWidth); every vehicle rebuilds. */
+  get width(): VehicleWidth {
+    return vehicleWidth();
+  }
+  set width(w: VehicleWidth) {
+    setVehicleWidth(w);
+    try {
+      localStorage.setItem(WIDTH_KEY, w);
+    } catch {
+      // not persisted
+    }
+    for (const v of [...this.entries.keys()]) this.drop(v);
   }
   /** Switch renderer; every vehicle rebuilds on the next frame. */
   set look(l: VehicleLook) {

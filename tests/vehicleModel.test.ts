@@ -6,7 +6,7 @@ import { Rng } from '../src/core/rng';
 import type { GameData } from '../src/data/types';
 import { spawnVehicle, type Vehicle } from '../src/game/vehicle';
 import type { VehicleDataFile } from '../src/game/vehicle_data';
-import { analyze, classify, wheelRadius } from '../src/render/vehicleLayout';
+import { analyze, classify, setVehicleWidth, wheelRadius } from '../src/render/vehicleLayout';
 import { buildOutline, buildVehicleModel } from '../src/render/vehicleModel';
 import { paintSkin, SKIN_PPM, skinLayout, skinLayoutInfo } from '../src/render/vehicleSkin';
 import { loadNodeData } from '../tools/lib/node_data';
@@ -62,6 +62,18 @@ describe('vehicle model: classification', () => {
       for (const p of v.parts.filter((q) => q.def.flags.includes('SEAT'))) expect(Math.abs(L.zOf(p.my) - p.my)).toBeLessThanOrEqual(0.5 + 1e-9);
       expect(L.hw * 2).toBeLessThan(L.rows[0].cols.length + 0.01);
     }
+  });
+
+  it("'fill' width draws bodies near the grid footprint, 'real' squeezes them", () => {
+    const v = make('car');
+    const real = analyze(v).hw;
+    setVehicleWidth('fill');
+    try {
+      expect(analyze(v).hw).toBeCloseTo(4 / 2 - 0.3, 5);
+    } finally {
+      setVehicleWidth('real');
+    }
+    expect(real * 2).toBeLessThan(2.8);
   });
 
   it('sizes wheels from BN cm rims (a 42.5 cm car rim is a ~0.65 m tyre, not 1.4 m)', () => {
