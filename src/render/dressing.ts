@@ -155,16 +155,21 @@ export function paintGraffiti(w: number, h: number, seed: number): Img {
   return img;
 }
 
-/** Grime band: dithered darkening toward one edge (`fromTop` = ceiling corner). */
+/**
+ * Grime band toward one edge (`fromTop` = ceiling corner): sparse, irregular specks and a few
+ * streaks (an ordered dither read as a checkerboard), a muted tone so it dirties any paint.
+ */
 export function paintGrime(level: number, variant: number, fromTop: boolean): Img {
   const w = 32, h = 16;
   const img = new Img(w, h);
+  const col: RGB = [104, 94, 80], dark: RGB = [84, 74, 62];
   for (let y = 0; y < h; y++)
     for (let x = 0; x < w; x++) {
       const t = fromTop ? y / h : 1 - y / h; // 0 at the corner edge
-      const wob = ((hash2(x >> 2, 0, variant) % 100) / 100) * 0.25;
-      const p = Math.max(0, (1 - t - wob)) * (0.25 + level * 0.25);
-      if (bayer(x, y) < p) img.set(x, y, [58, 50, 42]);
+      const wob = ((hash2(x >> 2, 0, variant) % 100) / 100) * 0.35;
+      const p = Math.max(0, 1 - t * 1.6 - wob) * (0.12 + level * 0.14);
+      const streak = !fromTop && hash2(x, variant, 3) % 11 === 0 && t < 0.5 + ((hash2(x, variant, 4) % 30) / 100);
+      if (streak || (hash2(x, y, variant + 9) % 1000) / 1000 < p) img.set(x, y, t < 0.15 ? dark : col);
       else img.set(x, y, [0, 0, 0], 0);
     }
   return img;
@@ -253,7 +258,7 @@ export class Dresser {
       const g = this.frame(`grime:${st.level}:${Math.floor(H(1) * 4)}:b`, () => paintGrime(st.level, Math.floor(H(1) * 4), false));
       this.faceQuad(geo, g, x, y, d, base, 0, 1, 0.0, 0.5, 0.018);
       const gt = this.frame(`grime:${st.level}:${Math.floor(H(2) * 4)}:t`, () => paintGrime(st.level - 1, Math.floor(H(2) * 4) + 4, true));
-      this.faceQuad(geo, gt, x, y, d, base, 0, 1, wt - 0.45, wt - 0.02, 0.025);
+      this.faceQuad(geo, gt, x, y, d, base, 0, 1, wt - 0.32, wt - 0.02, 0.025);
     }
     // light switch next to a door, an outlet now and then
     const door0 = fi.doorEnd[0], door1 = fi.doorEnd[1];
