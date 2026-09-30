@@ -11,6 +11,7 @@
 // count is its charges. Every change goes through moves.ts (moveItem / the Inventory
 // actions), so what the UI does is exactly what the conservation tests prove safe.
 
+import { freshnessText } from '../../game/freshness';
 import { ACTION_SCALE } from '../../core/time';
 import type { BodyPartId } from '../../game/bodyparts';
 import { ALL_PARTS, BODY_PARTS } from '../../game/bodyparts';
@@ -203,6 +204,7 @@ export class BnInventoryModel implements InventoryModel {
         ? { cur: inside.fill.used, max: inside.fill.max, label: inside.items[0].item.baseName() } : undefined),
       badges,
       description: cddaText(it.def.description) || undefined,
+      note: freshnessText(it) ?? undefined,
       icon: { typeId: it.typeId, looksLike: it.def.looks_like, symbol: it.def.symbol, color: it.def.color },
       covers: node.covers,
       stats: this.stats(it),

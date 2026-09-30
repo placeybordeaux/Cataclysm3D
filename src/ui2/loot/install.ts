@@ -121,7 +121,13 @@ export function installLoot(game: Game, renderer: Renderer, api: DebugApi, inv: 
   };
   const update = () => {
     const now = performance.now();
-    const t = gameplay() ? lootTargetAt(game) : null;
+    let t = gameplay() ? lootTargetAt(game) : null;
+    // A burning pile is a fire, not loot: `e` on it should offer the fire's actions (boil
+    // water), not take the firewood out of it (playtest).
+    if (t && t.key.startsWith('ground:') && game.map.fieldsAt(t.x, t.y, t.z).some((f) => f.type === 'fd_fire')) t = null;
+    // Someone standing in front of the pile: `e` talks to them (npcs.ts), so a loot card beside
+    // "[e] Talk to …" promised the wrong thing (playtest, round 6).
+    if (t && game.lookAt?.(3)?.kind === 'creature') t = null;
     if (!t) {
       target = null;
       rows = [];

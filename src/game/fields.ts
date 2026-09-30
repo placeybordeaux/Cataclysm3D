@@ -27,6 +27,8 @@ import { sfx } from '../audio/sfx';
 
 export const FIELD_RADIUS = 2;
 const MAX_TURNS_PER_TICK = 8;
+/** Fire turns simulated one by one per bulk step (the rest decays in bulk). */
+const MAX_FIRE_TURNS_IN_BULK = 4000;
 
 export interface FieldTypeDef {
   id: string;
@@ -127,6 +129,30 @@ export function fireAt(game: Game, x: number, y: number, z: number): number {
   return findField(game, x, y, z, 'fd_fire')?.intensity ?? 0;
 }
 
+let lastFireOutNote = -Infinity;
+/**
+ * A fire near you went out: say so, and why (docs/ADAPTATION.md). BN is silent; the playtester
+ * lit a fire to boil water, turned to the pot, and it had already been rained out.
+ */
+function fireOutNote(game: Game, x: number, y: number, z: number): void {
+  const p = game.player;
+  if (z !== p.z || Math.max(Math.abs(x - p.tileX), Math.abs(y - p.tileY)) > 8) return;
+  const now = Date.now();
+  if (now - lastFireOutNote < 20_000) return;
+  lastFireOutNote = now;
+  const w = game.weather;
+  const rained = !!w?.rains && isOutside(game.map, x, y, z);
+  // Wood can be left over (a small fire burns big pieces slowly): then "burned through its fuel"
+  // would be false, so say what's left instead.
+  const left = game.map.itemsAt(x, y, z).length > 0;
+  const msg = rained
+    ? 'The fire goes out: the rain put it out.  Light it under a roof or in a fire ring, with more fuel.'
+    : left
+      ? "The fire goes out before the wood on it burned up.  Light it again; a fire ring burns hotter and keeps going."
+      : 'The fire goes out: it has burned through its fuel.  Put more wood on it to keep one going.';
+  game.message(msg, 'c_light_gray');
+}
+
 /**
  * Heat damage a monster standing here takes this turn (map::monster_in_field, fd_fire):
  * none from small fires, 10 % of turns in a fire, every turn in a raging one; flesh +3,
@@ -167,17 +193,21 @@ function flammableTile(game: Game, x: number, y: number, z: number): 'soft' | 'h
 
 interface BurnData { fuel?: number; smoke?: number; burn?: number; volume_per_turn?: number; immune?: boolean }
 
-/** item::simulate_burn: fuel (seconds of fire life), smoke and burn progress this turn. */
-function simulateBurn(game: Game, it: Item, intensity: number): { fuel: number; smoke: number; burn: number } {
+/**
+ * item::simulate_burn: fuel (seconds of fire life), smoke and burn progress this turn. A
+ * contained fire (fire ring, brazier, fireplace) burns at intensity 3's rates and independent of
+ * the item's volume, as BN's fire_data.contained does.
+ */
+function simulateBurn(game: Game, it: Item, intensity: number, contained = false): { fuel: number; smoke: number; burn: number } {
   const mats = it.def.material ?? [];
   if (!mats.length) return { fuel: 0, smoke: 0, burn: 1 };
   let fuel = 0, smoke = 0, burn = 0;
   const volL = Math.max(0.001, it.volume() / 1000);
   for (const m of mats) {
     const bdl = game.data.misc.material?.[m]?.burn_data as BurnData[] | undefined;
-    const bd = bdl?.[Math.min(intensity, bdl.length) - 1];
+    const bd = bdl?.[Math.min(contained ? 3 : intensity, bdl.length) - 1];
     if (!bd || bd.immune) return { fuel: 0, smoke: 0, burn: 0 };
-    const rate = bd.volume_per_turn ? bd.volume_per_turn / 1000 / volL : 1;
+    const rate = !contained && bd.volume_per_turn ? bd.volume_per_turn / 1000 / volL : 1;
     fuel += (bd.fuel ?? 0) * rate;
     smoke += (bd.smoke ?? 0) * rate;
     burn += (bd.burn ?? 0) * rate;
@@ -193,9 +223,9 @@ function simulateBurn(game: Game, it: Item, intensity: number): { fuel: number; 
 }
 
 /** item::burn: returns true when the item is destroyed. */
-function burnItem(game: Game, it: Item, intensity: number, rng: Rng, out: { fuel: number; smoke: number }): boolean {
+function burnItem(game: Game, it: Item, intensity: number, rng: Rng, out: { fuel: number; smoke: number }, contained = false): boolean {
   if (it.hasFlag('UNBREAKABLE')) return false;
-  const b = simulateBurn(game, it, intensity);
+  const b = simulateBurn(game, it, intensity, contained);
   out.fuel += b.fuel;
   out.smoke += b.smoke;
   if (b.burn <= 0) return false;
@@ -233,13 +263,15 @@ function processFire(game: Game, x: number, y: number, z: number, f: Field, st: 
       if (consumed >= f.intensity * 2) break;
       const it = mi as unknown as Item;
       if (!it.def) continue;
-      if (burnItem(game, it, f.intensity, rng, out)) {
+      if (burnItem(game, it, f.intensity, rng, out, !canSpread)) {
         consumeItem(it, L.ground(map, x, y, z));
         consumed++;
       }
     }
     smoke += Math.round(out.smoke);
-    timeAdded += Math.round(out.fuel);
+    // roll_remainder, as BN: a stick yields ~0.16 s of fuel a turn at intensity 1, which
+    // Math.round made 0 every turn, so a campfire died beside an unburnt woodpile (playtest).
+    timeAdded += Math.floor(out.fuel) + (rng.next() < out.fuel - Math.floor(out.fuel) ? 1 : 0);
   }
 
   if (canBurn) {
@@ -409,19 +441,41 @@ export function processFields(game: Game, turns: number, extra = 0): void {
         if (!ft) continue;
         if (f.type === 'fd_fire') {
           processFire(game, x, y, c.z, f, st);
-          if (!(c.fields.get(i)?.includes(f))) continue;
+          if (!(c.fields.get(i)?.includes(f))) {
+            fireOutNote(game, x, y, c.z);
+            continue;
+          }
         } else if (ft.phase === 'gas') spreadGas(game, x, y, c.z, f, ft, st.rng);
         decay(game, x, y, c.z, f, ft, st.rng, 1);
+        if (f.type === 'fd_fire' && !(c.fields.get(i)?.includes(f))) fireOutNote(game, x, y, c.z);
       }
     }
     playerInFields(game, st.rng);
   }
   if (extra > 0) {
+    // Fires get their turns one by one even in bulk: bulk decay knows nothing of fuel, so while
+    // time was warped (waiting, crafting, eating) a campfire aged as if it had nothing to burn
+    // and went out beside its unburnt woodpile (playtest, round 6). Fires are few; a budget
+    // keeps a big blaze during a long wait from stalling the frame.
+    let budget = MAX_FIRE_TURNS_IN_BULK;
     for (const c of chunks)
       for (const [i, list] of [...c.fields])
         for (const f of [...list]) {
           const ft = fieldType(game, f.type);
-          if (ft) decay(game, c.cx * CHUNK + (i % CHUNK), c.cy * CHUNK + Math.floor(i / CHUNK), c.z, f, ft, st.rng, extra);
+          if (!ft) continue;
+          const x = c.cx * CHUNK + (i % CHUNK), y = c.cy * CHUNK + Math.floor(i / CHUNK);
+          let left = extra;
+          if (f.type === 'fd_fire') {
+            for (; left > 0 && budget > 0 && c.fields.get(i)?.includes(f); left--, budget--) {
+              processFire(game, x, y, c.z, f, st);
+              if (c.fields.get(i)?.includes(f)) decay(game, x, y, c.z, f, ft, st.rng, 1);
+            }
+            if (!(c.fields.get(i)?.includes(f))) {
+              fireOutNote(game, x, y, c.z);
+              continue;
+            }
+          }
+          if (left > 0) decay(game, x, y, c.z, f, ft, st.rng, left);
         }
   }
 }

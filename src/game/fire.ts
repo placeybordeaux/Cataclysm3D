@@ -3,6 +3,8 @@ import type { ActionResult } from './inventory';
 import { facingTile, ADJACENT } from './construction';
 import type { CraftHost } from './crafting';
 import { Item } from './item';
+import { adaptationRules } from './adaptation_rules';
+import { isOutside } from './vision';
 
 // Lighting fires (iuse_actor.cpp firestarter_actor): apply a lighter/matches/… to the tile
 // you face. It needs something that burns there (firewood-type items, or flammable
@@ -41,6 +43,24 @@ export function fireTarget(host: CraftHost): [number, number, number] {
   return [fx, fy, fz];
 }
 
+let lastWarning: { key: string; at: number } | null = null;
+
+/**
+ * Why a fire at (x, y, z) could get out of hand, or null (docs/ADAPTATION.md). BN lights a
+ * pile of sticks in a field without a word; fire then spreads to anything flammable next to
+ * it. Safe: a FIRE_CONTAINER (fire ring, brazier, fireplace, wood stove) under it.
+ */
+export function fireSpreadRisk(host: CraftHost, x: number, y: number, z: number): string | null {
+  if (hasFlag(host.map.furnAt(x, y, z), 'FIRE_CONTAINER')) return null;
+  const roofed = !isOutside(host.map, x, y, z);
+  if (roofed) return 'That fire would be indoors, with nothing to hold it.';
+  for (const [dx, dy] of ADJACENT) {
+    if (flammableTile(host, x + dx, y + dy, z)) return 'There is something flammable right next to it.';
+    if (fuelAt(host, x + dx, y + dy, z) > 0) return 'There are things that burn right next to it.';
+  }
+  return null;
+}
+
 /**
  * firestarter_actor::use at (x, y, z). `ua` is the item's use_action (moves / moves_slow).
  * Returns CDDA's messages; lighting takes an activity, the fire appears when it completes.
@@ -59,6 +79,17 @@ export function useFirestarter(host: CraftHost, tool: Item, ua: { moves?: number
   const fuel = fuelAt(host, x, y, z);
   if (fuel <= 0 && !flammableTile(host, x, y, z) && !hasFlag(host.map.furnAt(x, y, z), 'FIRE_CONTAINER'))
     return say(false, "There's nothing to light there.");
+  const risk = fireSpreadRisk(host, x, y, z);
+  if (risk && adaptationRules.fireWarning) {
+    const key = `${x},${y},${z}`;
+    // Second try at the same spot within 30 real seconds: they've read it, go ahead. Real
+    // time, not game time: game time runs ~20x faster and a menu in between used up a minute.
+    const now = Date.now() / 1000;
+    if (!(lastWarning && lastWarning.key === key && now - lastWarning.at < 30)) {
+      lastWarning = { key, at: now };
+      return say(false, `${risk}  Fires spread.  A fire ring (10 rocks), a brazier or a fireplace keeps it in.  Use the lighter again to light it anyway.`, 'c_yellow');
+    }
+  }
   // BN firestarter_actor::load: moves_slow defaults to 10 × the fast cost.
   const fast = ua.moves ?? 100, slow = ua.moves_slow ?? fast * 10;
   if (ua.need_sunlight) {

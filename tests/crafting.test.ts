@@ -12,6 +12,7 @@ import {
 import { canBuild, cancelConstruction, continueConstruction, getConstruction, siteOk, siteProblem, startConstruction, unfinishedAt, unfinishedState } from '../src/game/construction';
 import { disassemblyRequirements, startDisassembly, uncraftRecipe } from '../src/game/disassembly';
 import { useFirestarter } from '../src/game/fire';
+import { adaptationRules } from '../src/game/adaptation_rules';
 import { createItem, defaultAmmoId, fromSpawned, Item, loadAmmo } from '../src/game/item';
 import { census, L, type Loc } from '../src/game/moves';
 import { PlayerAvatar } from '../src/game/player';
@@ -324,7 +325,11 @@ describe('fire', () => {
     h.player.inv.giveNew(lighter);
     const before = lighter.ammoRemaining();
     h.map.addItem(5, 4, 0, createItem(data, 'stick_long'));
+    // This test world is dirt at every level, so the tile counts as roofed and the fire-safety
+    // adaptation would warn first (tests/adaptation_rules.test.ts covers that); BN rule here.
+    adaptationRules.fireWarning = false;
     const r = useFirestarter(h, lighter, lighter.def.use_action as any, 5, 4, 0);
+    adaptationRules.fireWarning = true;
     expect(r.ok).toBe(true);
     h.finish();
     expect(h.map.fieldsAt(5, 4, 0).map((f) => f.type)).toEqual(['fd_fire']);

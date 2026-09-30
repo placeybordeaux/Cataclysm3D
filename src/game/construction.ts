@@ -1,3 +1,4 @@
+import { effectiveSkills, effectiveTime } from './adaptation_rules';
 import type { GameData, RecipeComponent, QualityRequirement } from '../data/types';
 import { expandItemGroup } from '../data/itemgroups';
 import { hasFlag, isDiggable } from '../world/registry';
@@ -214,8 +215,9 @@ export function canBuild(host: CraftHost, con: ConstructionDef, inv = constructi
   const c = host.player;
   const req = evaluateRequirements(host.data, con, inv);
   const missing = [...req.missing];
-  const skillsOk = (con.required_skills ?? []).every(([s, l]) => c.getSkill(s) >= l);
-  if (!skillsOk) for (const [s, l] of con.required_skills ?? []) if (c.getSkill(s) < l) missing.push(`${c.skillName(s)} ${l}`);
+  const skills = effectiveSkills(con);
+  const skillsOk = skills.every(([s, l]) => c.getSkill(s) >= l);
+  if (!skillsOk) for (const [s, l] of skills) if (c.getSkill(s) < l) missing.push(`${c.skillName(s)} ${l}`);
   const light = !!con.dark_craftable || hasCraftingLight(host);
   if (!light) missing.push('It is too dark to construct right now.');
   return { ok: missing.length === 0, missing, req, skillsOk, light };
@@ -426,7 +428,7 @@ export function continueConstruction(host: CraftHost, site: Item, x: number, y: 
     return true;
   }
   const speed = p.mutationValue('construction_speed_modifier') || 1;
-  const total = Math.max(1, con.time / speed);
+  const total = Math.max(1, effectiveTime(con) / speed);
   const base = st.progress;
   if (base > 0) host.message(`You get back to work: ${name}.`);
   return host.activities.start({

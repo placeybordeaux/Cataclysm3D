@@ -8,6 +8,8 @@ import type { Game } from '../game/game';
 import { BN_START_CLIMATE_OFFSET_DAYS, refreshWeather, setClimateOffsetDays, weatherMessages } from '../game/weather';
 import { registerOption } from './options';
 import { registerMapAtlasOption } from './overmap_ui';
+import { adaptationRules } from '../game/adaptation_rules';
+import { installBoilWater } from '../game/boil';
 
 type Climate = 'bn' | 'old';
 const KEY = 'cdda3d.climate';
@@ -33,6 +35,35 @@ function apply(game: Game): void {
 export function installAdaptation(game: Game): void {
   apply(game);
   registerMapAtlasOption();
+  installBoilWater(game);
+  // Rule switches (src/game/adaptation_rules.ts): adapted by default, BN one click away.
+  const ruleOption = (key: keyof typeof adaptationRules, name: string, on: string, off: string, desc: string) => {
+    const storeKey = `cdda3d.rule.${key}`;
+    try {
+      const v = localStorage.getItem(storeKey);
+      if (v === 'off') adaptationRules[key] = false;
+      else if (v === 'on') adaptationRules[key] = true;
+    } catch {
+      // storage blocked: defaults
+    }
+    registerOption({
+      name,
+      value: () => (adaptationRules[key] ? on : off),
+      change: () => {
+        adaptationRules[key] = !adaptationRules[key];
+        try {
+          localStorage.setItem(storeKey, adaptationRules[key] ? 'on' : 'off');
+        } catch {
+          // not persisted
+        }
+      },
+      desc,
+    });
+  };
+  ruleOption('easyBeds', 'First beds', 'No skill needed (slower)', 'Fabrication 1–2 (BN)',
+    'A straw bed or a makeshift bed can be built without Fabrication skill; it takes 1.5× as long. Bright Nights asks for Fabrication 1–2, which a new survivor does not have.');
+  ruleOption('fireWarning', 'Fire safety', 'Warn outside a fire ring', 'No warning (BN)',
+    'Lighting a fire outside a fire ring, brazier or fireplace, next to something that burns (or indoors), first says so; use the lighter again to go ahead.');
   const WM_KEY = 'cdda3d.weatherMessages';
   const wmAll = () => {
     try {

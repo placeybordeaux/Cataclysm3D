@@ -84,6 +84,7 @@ describe('activity ring text', () => {
 describe('wording', () => {
   it('the sleep menu says how the spot feels and whether you are tired', () => {
     expect(sleepSpotText(0, 'wooden floor', '')).toEqual({ spot: 'wooden floor, hard: a bed or sleeping bag would help', good: false, note: "You aren't tired yet: you may just lie awake." });
+    expect(sleepSpotText(2, 'straw bed', 'Tired').spot).toBe('straw bed, a little hard: a mattress, a proper bed or a sleeping bag would be better');
     expect(sleepSpotText(5, 'bed', 'Tired')).toEqual({ spot: 'bed, comfortable', good: true, note: '' });
     expect(sleepSpotText(-999, 'deep water', 'Tired').spot).toBe("deep water, you can't sleep here");
   });
@@ -118,6 +119,19 @@ describe('eat picker: one row per thing, in words', () => {
     ]);
     expect(rows.map((r) => r.row)).toEqual(['bottle', 'jerky']);
     expect(rows[1].label).toBe('meat jerky · 3 servings');
+  });
+
+  it('a second, stacked bottle of the same water folds into the first row with all the servings', () => {
+    const [bottle2] = expandItemGroup(realData, { subtype: 'collection', entries: [{ item: 'water_clean' }] } as never, new Rng(2)).flatMap((s) => fromSpawned(realData, s));
+    const water2 = bottle2.contents[0];
+    // The stacked view lists bottle 1 only; bottle 2's water appears with bottle 2 as its host.
+    const rows = adaptEatRows([
+      { row: 'bottle', item: bottle, host: null },
+      { row: 'water', item: water, host: bottle },
+      { row: 'water2', item: water2, host: bottle2 },
+    ]);
+    expect(rows.map((r) => r.row)).toEqual(['bottle']);
+    expect(rows[0].label).toBe(`clean water (plastic bottles) · ${water.charges + water2.charges} servings`);
   });
 });
 

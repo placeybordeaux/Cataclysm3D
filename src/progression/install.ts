@@ -89,7 +89,10 @@ export async function loadCatalogue(base = DATA_BASE): Promise<unknown> {
   return res.json();
 }
 
-const HUNGRY = new Set(['Hungry', 'Very hungry', 'Famished', 'Near starving', 'Starving!']);
+// Character.hungerState's own strings ('Very Hungry', 'Starving'); the old spellings are kept
+// in case another source reports them.
+const HUNGRY = new Set(['Hungry', 'Very Hungry', 'Very hungry', 'Famished', 'Near starving', 'Starving', 'Starving!']);
+const VERY_HUNGRY = new Set(['Very Hungry', 'Famished', 'Starving']);
 const THIRSTY = new Set(['Thirsty', 'Very thirsty', 'Dehydrated', 'Parched']);
 const COLD = new Set(['Chilly', 'Very cold!', 'Freezing!']);
 /** Discovery tips about a passing condition: re-checked when their turn to show comes. */
@@ -205,6 +208,9 @@ export async function installProgression(
   const probes: Record<string, () => boolean> = {
     first_zombie: () => !!monsters()?.visibleHostiles(40).some((m) => m.type.species?.includes('ZOMBIE')),
     first_hunger: () => HUNGRY.has(p.hungerState()),
+    // Very hungry with nothing to eat on you: where food is (playtest, round 6: days 3-5 went
+    // by "Very Hungry" with no idea where to look).
+    no_food: () => VERY_HUNGRY.has(p.hungerState()) && !p.inv.allItems().some((it) => it.def.type === 'COMESTIBLE' && !it.isLiquid()),
     first_thirst: () => THIRSTY.has(p.thirstDescription()),
     first_fatigue: () => p.sleepinessDescription() !== '',
     // When it actually gets dark (civil dusk), not at a fixed 20:30: in early spring that was

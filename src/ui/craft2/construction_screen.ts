@@ -21,6 +21,7 @@ import { hasFlag } from '../../world/registry';
 import { attachTooltip, button, h, iconEl, openPanel, palette, ui2Layers, type Panel } from '../../ui2';
 import { itemIconRef, mapIconRef, rememberedWindow, requirementSections, searchField } from './common';
 import { shortfall } from './craft_model';
+import { effectiveSkills, effectiveTime } from '../../game/adaptation_rules';
 import './craft2.css';
 
 const PANEL_ID = 'craft.construct';
@@ -88,7 +89,7 @@ export function openConstructionScreen(game: Game, renderer: Renderer): Construc
       if (check.ok) build = true;
       else {
         const why = [...shortfall(data, { ok: false, missing: check.missing, req: check.req, light: true, speed: 1 }).items];
-        for (const [sk, l] of con.required_skills ?? []) if (p.getSkill(sk) < l) why.push(`${p.skillName(sk)} skill ${l} (you have ${p.getSkill(sk)})`);
+        for (const [sk, l] of effectiveSkills(con)) if (p.getSkill(sk) < l) why.push(`${p.skillName(sk)} skill ${l} (you have ${p.getSkill(sk)})`);
         if (!check.light) why.push('light');
         if (!short || why.length < short.length) short = why;
       }
@@ -250,11 +251,11 @@ function stageCard(game: Game, con: ConstructionDef, inv: CraftingInventory, px:
     post ? iconEl(mapIconRef(data, post), 'row') : null,
     h('span', { text: post ? terOrFurnName(data, post) : con.post_special === 'done_deconstruct' ? 'taken apart' : groupName(data, con) }),
   );
-  const skills = (con.required_skills ?? []).filter(([, l]) => l > 0);
+  const skills = effectiveSkills(con).filter(([, l]) => l > 0);
   const facts = h(
     'div',
     { class: 'c2-facts' },
-    h('div', { class: 'c2-fact' }, h('span', { class: 'ui2-dim', text: 'Time' }), h('span', { text: formatDuration(con.time) })),
+    h('div', { class: 'c2-fact' }, h('span', { class: 'ui2-dim', text: 'Time' }), h('span', { text: formatDuration(effectiveTime(con)) + (effectiveTime(con) > con.time ? ' (slow without the skill)' : '') })),
     ...skills.map(([s, l]) => h('div', { class: 'c2-fact' }, h('span', { class: 'ui2-dim', text: 'Skill' }), h('span', { class: p.getSkill(s) >= l ? 'tone-good' : 'tone-bad', text: `${p.skillName(s)} ${l} (you ${p.getSkill(s)})` }))),
     con.dark_craftable ? h('div', { class: 'c2-fact' }, h('span', { class: 'ui2-dim', text: 'Works in the dark' })) : null,
   );
@@ -348,7 +349,7 @@ export function startPlacement(game: Game, renderer: Renderer, group: Constructi
     const post = stageResult(con);
     card.replaceChildren(
       h('div', { class: 'c2-place-title' }, iconEl(mapIconRef(data, post ?? ''), 'row'), h('span', { text: group.name })),
-      h('div', { class: `c2-place-state ${ok ? 'tone-good' : 'tone-bad'}`, text: ok ? `Ready: ${post ? terOrFurnName(data, post) : 'build here'} (${formatDuration(con.time)})` : why ?? "Can't build here" }),
+      h('div', { class: `c2-place-state ${ok ? 'tone-good' : 'tone-bad'}`, text: ok ? `Ready: ${post ? terOrFurnName(data, post) : 'build here'} (${formatDuration(effectiveTime(con))})` : why ?? "Can't build here" }),
       ...requirementSections(data, check.req, {}, { tools: 'Tools', comps: 'Materials' }),
       h('div', { class: 'c2-place-keys', html: '<kbd>Left click</kbd> build here · <kbd>Right click</kbd> / <kbd>Esc</kbd> cancel' }),
     );

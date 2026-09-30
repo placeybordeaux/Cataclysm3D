@@ -50,6 +50,8 @@ export interface ItemView {
   charges?: { cur: number; max: number; label?: string };
   badges?: Badge[];
   description?: string;
+  /** A highlighted line above the description (how long food stays fresh). */
+  note?: string;
   icon?: IconRef;
   /** Body parts it covers when worn (BN `covers` ids: head, eyes, mouth, torso, arm_l, …). */
   covers?: string[];
