@@ -690,10 +690,17 @@ export async function runGallery({ game, renderer, api }: GalleryDeps): Promise<
     proof: async (ids?: string[]) => {
       const out: { id: string; scene: string; diffs: Record<string, number> }[] = [];
       for (const sw of ids ? ids.map(swById) : switches) {
-        if (st.scene?.id !== sw.proof) await showScene(sw.proof);
+        // Set what this switch depends on before the scene is built, restore it after.
+        const restore: [GallerySwitch, string][] = [];
+        for (const [depId, v] of Object.entries(sw.requires ?? {})) {
+          const dep = swById(depId);
+          if (dep.get() !== v) (restore.push([dep, dep.get()]), dep.set(v));
+        }
+        if (restore.length || st.scene?.id !== sw.proof) await showScene(sw.proof);
         const cur = sw.get();
         const others = sw.values.map((v) => v.v).filter((v) => v !== cur);
         const caps = await serial(`proof ${sw.id}`, () => captureValues(sw.id, [cur, ...others], 640));
+        for (const [dep, v] of restore.reverse()) dep.set(v);
         out.push({ id: sw.id, scene: sw.proof, diffs: Object.fromEntries(others.map((v, i) => [v, +(pixelDiff(caps[0], caps[i + 1]) * 100).toFixed(2)])) });
       }
       return out;

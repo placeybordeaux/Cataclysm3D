@@ -45,6 +45,12 @@ export interface GallerySwitch {
   note?: string;
   /** Scenes where a change should visibly alter the image (the per-switch pixel-diff check). */
   proof: string;
+  /**
+   * Other switches this one only shows through (switch id -> value). The proof check sets them
+   * first and puts them back afterwards: with the user's defaults (voxel look, sprite hands) a
+   * dependent switch would otherwise read as "changes nothing".
+   */
+  requires?: Record<string, string>;
 }
 
 /** Run `fn` and put back every cdda3d.* localStorage key it changed (gallery switches are live-only). */
@@ -126,7 +132,8 @@ export function buildSwitches(renderer: Renderer, api: DebugApi): GallerySwitch[
     {
       id: 'cutout', label: 'Cutout mips', group: 'Image', option: null,
       values: [{ v: 'on', label: 'stable' }, { v: 'off', label: 'off (v2)' }], def: 'on',
-      note: 'Grass and leaf cards at distance; mostly visible in motion (shimmer). Console: cdda.cutoutMips(false).',
+      note: 'Grass and leaf cards at distance; mostly visible in motion (shimmer). Needs a look with grass (Terrain or Full). Console: cdda.cutoutMips(false).',
+      requires: { look: 'full' },
       get: () => (cutout ? 'on' : 'off'),
       set: (v) => {
         cutout = v === 'on';
@@ -153,7 +160,8 @@ export function buildSwitches(renderer: Renderer, api: DebugApi): GallerySwitch[
     {
       id: 'fpbow', label: 'First-person bow', group: 'Characters', option: null,
       values: [{ v: 'sprite', label: '2D art' }, { v: 'model', label: '3D bow' }], def: 'sprite',
-      note: 'Bows and slingshots with 3D hands. Console: cdda.chars({ fpBow: true }).',
+      note: 'Bows and slingshots; only with 3D first-person hands. Console: cdda.chars({ fpBow: true }).',
+      requires: { viewmodel: 'model' },
       get: () => (charSettings.fpBow ? 'model' : 'sprite'), set: (v) => void (charSettings.fpBow = v === 'model'), proof: 'fp_bow',
     },
     {
