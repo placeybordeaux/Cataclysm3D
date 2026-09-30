@@ -2,7 +2,7 @@ import type { Game } from './game';
 import type { Chunk } from '../world/map';
 import { CHUNK, chunkKey } from '../world/coords';
 import { hasFlag } from '../world/registry';
-import { DEFAULT_WEATHER_GEN, weatherPoint } from './weather';
+import { DEFAULT_WEATHER_GEN, weatherPoint, climateSeconds } from './weather';
 import { isOutside } from './vision';
 import { restockFruits } from './harvest';
 import { growPlant } from './farming';
@@ -49,7 +49,7 @@ export class Actualizer {
     const h = Math.floor(t / 3600);
     let v = this.tempCache.get(h);
     if (v === undefined) {
-      v = weatherPoint(this.game.seed, h * 3600 + 1800).temperature;
+      v = weatherPoint(this.game.seed, climateSeconds(h * 3600 + 1800)).temperature;
       if (this.tempCache.size > 20000) this.tempCache.clear();
       this.tempCache.set(h, v);
     }

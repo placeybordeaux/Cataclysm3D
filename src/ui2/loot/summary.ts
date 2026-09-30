@@ -6,7 +6,10 @@ export function summaryTitle(r: TakeAllResult): string {
   if (!n) return r.left.length ? 'Nothing fit.' : 'Nothing to take.';
   const names = r.taken.map((t) => (t.count > 1 ? `${t.count} ${t.name}` : t.name));
   const list = names.length <= 4 ? names.join(', ') : `${names.slice(0, 3).join(', ')} and ${names.length - 3} more`;
-  return `Took ${list}.${r.left.length ? ` ${r.left.length} left behind:` : ''}`;
+  // Count things, like "Took 2 …" does: "1 left behind" next to "8 × jackets: no room" read as a
+  // contradiction (it counted kinds). A whole-place entry has count 0 and counts as one.
+  const leftN = r.left.reduce((a, l) => a + Math.max(1, l.count), 0);
+  return `Took ${list}.${leftN ? ` ${leftN} left behind:` : ''}`;
 }
 
 /** One line for the crosshair panel: "Took 5 things · left: stepladder (too heavy)". */
