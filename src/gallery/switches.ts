@@ -3,6 +3,8 @@ import type { Renderer } from '../render/renderer';
 import { LOOK_NAMES, LOOKS, look, type LookName } from '../render/look';
 import { HAZE_NAMES, HAZES, haze, setHaze, type HazeName } from '../render/atmosphere';
 import { FORM_NAMES, FORMS, form, setForm, type FormName } from '../render/formLight';
+import { DEFAULT_SHADOW_MODE, SHADOW_MODE_NAMES, SHADOW_MODES, type ShadowModeName } from '../render/shadows';
+import { switchShadows } from '../render/shadowInstall';
 import { FLORA_NAMES, flora } from '../render/flora';
 import { furnitureState } from '../render/furniture/index';
 import { surfaceState } from '../render/surfaces';
@@ -120,6 +122,12 @@ export function buildSwitches(renderer: Renderer, api: DebugApi): GallerySwitch[
       id: 'form', label: 'Form lighting', group: 'Image', option: 'Form lighting', url: 'form',
       values: vals(FORM_NAMES, (n) => FORMS[n as FormName].label), def: 'toon',
       get: () => form.name, set: (v) => setForm(v as FormName), proof: 'street',
+    },
+    {
+      id: 'shadows', label: 'Shadows', group: 'Image', option: 'Shadows', url: 'shadows',
+      values: vals(SHADOW_MODE_NAMES, (n) => SHADOW_MODES[n as ShadowModeName].label), def: DEFAULT_SHADOW_MODE,
+      note: 'Mostly visible in motion: walk along a street, pan, or wait a minute (docs/SHADOWS.md). Stills show edge shape and reach.',
+      get: () => renderer.lights.shadows.name, set: (v) => void switchShadows(renderer, v), proof: 'street',
     },
     {
       id: 'grade', label: 'Colour grading', group: 'Image', option: 'Colour grading', url: 'grade',
