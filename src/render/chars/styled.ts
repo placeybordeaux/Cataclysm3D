@@ -40,6 +40,17 @@ function dominant(s: SpriteInfo, u0: number, v0: number, u1: number, v1: number,
   const x0 = Math.floor(bx0 + u0 * bw), x1 = Math.max(x0 + 1, Math.ceil(bx0 + u1 * bw));
   const y0 = Math.floor(by0 + v0 * bh), y1 = Math.max(y0 + 1, Math.ceil(by0 + v1 * bh));
   const bins = new Map<number, { n: number; r: number; g: number; b: number }>();
+  if (skipBlood) {
+    // a red shirt is not gore: only skip red when it's a minority of the region
+    let red = 0, all = 0;
+    for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) {
+      const i = (y * s.img.w + x) * 4;
+      if (s.img.data[i + 3] < 128) continue;
+      all++;
+      if (isBlood(s.img.data[i], s.img.data[i + 1], s.img.data[i + 2])) red++;
+    }
+    if (red > all * 0.4) skipBlood = false;
+  }
   for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) {
     const i = (y * s.img.w + x) * 4;
     const d = s.img.data;
@@ -97,7 +108,8 @@ export function personPalette(s: SpriteInfo, zombie: boolean): PersonPalette {
   const pp: PersonPalette = {
     skin, hair, bald: dist(hair, skin) < 25, shirt, inner: second ? second.c : null,
     upperArm: armAt(0.24, 0.36), foreArm: armAt(0.38, 0.5), pants, shoes,
-    blood: Math.min(1, (red / Math.max(1, n)) * 7), zombie,
+    // lots of red is red clothing, not a bloodbath
+    blood: red / Math.max(1, n) > 0.25 ? 0.15 : Math.min(1, (red / Math.max(1, n)) * 7), zombie,
   };
   palCache.set(s, pp);
   return pp;
