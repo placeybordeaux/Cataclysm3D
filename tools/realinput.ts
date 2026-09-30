@@ -26,6 +26,7 @@ import { screenScenarios } from './realinput_screens';
 import { lootScenarios } from './realinput_loot';
 import { archeryScenarios } from './realinput_archery';
 import { aimScenarios } from './realinput_aim';
+import { qaScenarios } from './realinput_qa';
 
 const argv = process.argv.slice(2);
 const opt = (n: string, d: string) => (argv.includes(n) ? argv[argv.indexOf(n) + 1] : d);
@@ -718,6 +719,18 @@ const scenarios: Scenario[] = [
     await toGameplay();
     // Setup: the starter spear, a fresh survivor's health, one zombie a few steps ahead.
     await js(`(() => { cdda.clearMonsters(20); cdda.giveItem('pointy_stick_long', { wield: true }); const p = cdda.game.player; for (const k of Object.keys(p.hp)) p.hp[k].cur = p.hp[k].max; p.stamina = p.staminaMax(); })()`);
+    // Setup: stand where the 4 tiles north are open ground. Earlier scenarios (craft's construction
+    // placement) can leave the survivor by the shelter wall, and then the zombie spawns outside a
+    // window it can never get through (QA_WAVE3: the fight timed out at 7 m, zero blows).
+    await js(`(() => {
+      const g = cdda.game, p = g.player, grid = g.monsters.grid;
+      const clear = (x, y) => { for (let s = -1; s <= 6; s++) for (let w = -1; w <= 1; w++) if (!grid.passable(x + w, y - s, p.z) || grid.opaque(x + w, y - s, p.z)) return false; return true; };
+      for (let r = 0; r < 60; r++) for (let a = 0; a < 16; a++) {
+        const x = Math.floor(p.x + Math.cos(a / 16 * 6.283) * r), y = Math.floor(p.y + Math.sin(a / 16 * 6.283) * r);
+        if (clear(x, y)) { p.x = x + 0.5; p.y = y + 0.5; return; }
+      }
+      throw new Error('firstfight: no open ground within 60 tiles');
+    })()`);
     const preset = await js<string>(`cdda.difficulty()?.preset ?? cdda.difficulty()?.id ?? ''`).catch(() => '');
     const uid = await js<number>(`cdda.spawnMonster('mon_zombie', 0, -4)`);
     const a0 = (await attacks()).length;
@@ -1413,6 +1426,8 @@ scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...screenScenar
 scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...archeryScenarios({ x: () => x, js, check, shot, toGameplay, sleep }));
 // Aim models (free aim vs classic dice, the timing games): also after the screen scenarios (it hands out weapons).
 scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...aimScenarios({ x: () => x, js, check, shot, toGameplay, sleep }));
+// Every Options row cycles (wave-3 QA): after everything else, so its toggles can't shift earlier scenarios.
+scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...qaScenarios({ x: () => x, js, check, shot, toGameplay, sleep, errors: () => errors }));
 
 if (argv.includes('--list') || argv.includes('--dry-run')) {
   for (const [n, what] of scenarios) console.log(`${only && !only.has(n) ? '  (skip)' : '  run   '} ${n.padEnd(11)} ${what}`);
