@@ -18,6 +18,8 @@ export interface PersonPalette {
   shirt: RGB;
   /** a second clear torso colour (undershirt/open jacket), or null */
   inner: RGB | null;
+  /** second colour of a patterned (check) shirt, for sleeves up close; null = plain */
+  check: RGB | null;
   upperArm: RGB;
   foreArm: RGB;
   pants: RGB;
@@ -80,22 +82,22 @@ const palCache = new WeakMap<SpriteInfo, PersonPalette>();
 export function personPalette(s: SpriteInfo, zombie: boolean): PersonPalette {
   const hit = palCache.get(s);
   if (hit && hit.zombie === zombie) return hit;
-  const top = dominant(s, 0.25, 0, 0.75, 0.07);
-  const face = dominant(s, 0.3, 0.08, 0.7, 0.2);
+  const top = dominant(s, 0.25, 0, 0.75, 0.07, zombie);
+  const face = dominant(s, 0.3, 0.08, 0.7, 0.2, zombie);
   const hair = top[0]?.c ?? s.pal.dark;
   // UltiCa skin comes in a light tone and a shade: take the lightest skin-like colour of the face
   const faceN = face.reduce((a, e) => a + e.n, 0) || 1;
   const skinLike = face.filter((e) => e.n / faceN > 0.12 && e.c[0] + e.c[1] > e.c[2] * 2.1 && lum(e.c) > 50);
   const skin = skinLike.sort((a, b) => lum(b.c) - lum(a.c))[0]?.c ?? face[0]?.c ?? s.pal.skin;
-  const torso = dominant(s, 0.3, 0.26, 0.7, 0.5);
+  const torso = dominant(s, 0.3, 0.26, 0.7, 0.5, zombie);
   const shirt = torso[0]?.c ?? s.pal.main;
   const total = torso.reduce((a, e) => a + e.n, 0) || 1;
   const second = torso.find((e) => dist(e.c, shirt) > 40 && dist(e.c, skin) > 25 && e.n / total > 0.18);
-  const pants = dominant(s, 0.3, 0.62, 0.7, 0.86)[0]?.c ?? s.pal.dark;
-  const shoes = dominant(s, 0.15, 0.93, 0.85, 1)[0]?.c ?? mul(pants, 0.6);
+  const pants = dominant(s, 0.3, 0.62, 0.7, 0.86, zombie)[0]?.c ?? s.pal.dark;
+  const shoes = dominant(s, 0.15, 0.93, 0.85, 1, zombie)[0]?.c ?? mul(pants, 0.6);
   // sleeves: the colour at the body's outer columns, upper and lower arm, snapped to skin or cloth
   const armAt = (v0: number, v1: number): RGB => {
-    const c = [...dominant(s, 0, v0, 0.22, v1), ...dominant(s, 0.78, v0, 1, v1)].sort((a, b) => b.n - a.n)[0]?.c;
+    const c = [...dominant(s, 0, v0, 0.22, v1, zombie), ...dominant(s, 0.78, v0, 1, v1, zombie)].sort((a, b) => b.n - a.n)[0]?.c;
     if (!c) return shirt;
     const cands: RGB[] = [skin, shirt, ...(second ? [second.c] : [])];
     return cands.sort((a, b) => dist(a, c) - dist(b, c))[0];
@@ -108,11 +110,15 @@ export function personPalette(s: SpriteInfo, zombie: boolean): PersonPalette {
     n++;
     if (isBlood(s.img.data[i], s.img.data[i + 1], s.img.data[i + 2])) red++;
   }
+  // A patterned shirt (flannel check): its two main colours each cover a good share
+  const third = torso.find((e) => e !== torso[0] && dist(e.c, shirt) > 40 && dist(e.c, skin) > 25 && e.n / total > 0.12);
   const pp: PersonPalette = {
     skin, hair, bald: dist(hair, skin) < 45, shirt, inner: second ? second.c : null,
     upperArm: armAt(0.24, 0.36), foreArm: armAt(0.38, 0.5), pants, shoes,
     // lots of red is red clothing, not a bloodbath
-    blood: red / Math.max(1, n) > 0.25 ? 0.15 : Math.min(1, (red / Math.max(1, n)) * 7), zombie,
+    // only the undead come bloody; a survivor's red is their clothes
+    blood: !zombie ? 0 : red / Math.max(1, n) > 0.25 ? 0.15 : Math.min(1, (red / Math.max(1, n)) * 7), zombie,
+    check: third ? third.c : null,
   };
   palCache.set(s, pp);
   return pp;
@@ -158,6 +164,22 @@ function faceColour(code: string, pp: PersonPalette): RGB {
     case 'j': return mul(sk, 0.82);
     default: return sk;
   }
+}
+
+/**
+ * A sleeve colour that reads up close: UltiCa's dark cloth (a 69,23,8 flannel) would be a
+ * black slab filling a quarter of the screen, so lift dark cloth to a readable level keeping
+ * its hue.
+ */
+function sleeveCloth(pp: PersonPalette, c: RGB): RGB {
+  if (dist(c, pp.skin) <= 20) return c;
+  const l = lum(c);
+  const want = 78;
+  if (l >= want) return c;
+  const k = want / Math.max(8, l);
+  const lifted: RGB = [Math.min(235, c[0] * k), Math.min(235, c[1] * k), Math.min(235, c[2] * k)];
+  // near-black cloth has no hue to lift: make it a charcoal instead of noise
+  return l < 18 ? [70, 72, 78] : lifted;
 }
 
 // ------------------------------------------------------------------ painting
@@ -222,6 +244,48 @@ export function paintStyled(dst: Img, ox: number, oy: number, dims: [number, num
       }
       case 'neck':
         return mul(pp.skin, 0.86);
+      // ---- first-person arms (fpView.ts), seen from 30 cm: fabric and knuckles, not plank
+      case 'fpSleeveLower':
+      case 'fpSleeveUpper': {
+        const cloth = sleeveCloth(pp, region === 'fpSleeveLower' ? pp.foreArm : pp.upperArm);
+        const lower = region === 'fpSleeveLower';
+        // the wrist end (+y, top rows): bare skin, then a darker cuff with a seam line
+        if (lower && dist(pp.foreArm, pp.skin) > 20) {
+          if (v < 0.09) return mul(pp.skin, 0.95);
+          if (v < 0.17) return v < 0.1 + 0.5 / fh ? mul(cloth, 0.6) : mul(cloth, 0.78);
+        }
+        if (lower && dist(pp.foreArm, pp.skin) <= 20) return pp.skin;
+        let c = cloth;
+        // woven fabric: a faint grid, darker every few texels (reads as flannel/denim up close)
+        if (x % 4 === 0 || y % 5 === 0) c = mul(c, 0.9);
+        // folds: soft diagonal creases that drift along the sleeve
+        const fold = Math.sin(v * 22 + u * 3 + side) + Math.sin(v * 9 - u * 5);
+        if (fold > 1.45) c = mul(c, 0.78);
+        else if (fold > 1.2) c = mul(c, 1.1);
+        // seam down the underside
+        if (f === 5 || ((f === 0 || f === 2) && Math.abs(u - 0.5) < 0.5 / fw)) c = mul(c, 0.82);
+        return c;
+      }
+      case 'fpBack': {
+        // the back of the hand: tendon lines toward each knuckle, a little lighter on top
+        const c = f === 4 ? mul(pp.skin, 1.06) : pp.skin;
+        if (f === 4 && fw >= 8 && (x === Math.round(fw * 0.25) || x === Math.round(fw * 0.5) || x === Math.round(fw * 0.75)) && v < 0.75) return mul(c, 0.9);
+        return c;
+      }
+      case 'fpPalm':
+        return f === 5 ? mul(pp.skin, 0.85) : mul(pp.skin, 0.94);
+      case 'fpFinger': {
+        // knuckle on top, a crease across the front, dark separation on the sides
+        if (f === 0 || f === 2) return mul(pp.skin, 0.72);
+        if (f === 4) return v < 0.5 ? mul(pp.skin, 1.12) : pp.skin;
+        if (f === 1 && Math.abs(v - 0.55) < 0.5 / fh) return mul(pp.skin, 0.75);
+        return pp.skin;
+      }
+      case 'fpThumb': {
+        if (f === 1 && u > 0.78) return mix(pp.skin, [235, 205, 190], 0.4); // the nail
+        if (f === 5) return mul(pp.skin, 0.8);
+        return mul(pp.skin, 1.02);
+      }
       case 'hand': {
         if (f === 1 && y === fh - 1) return mul(pp.skin, 0.8);
         return pp.skin;

@@ -54,6 +54,8 @@ export const charSettings = {
   mode: initialMode(),
   /** pose updates per second (Shadowglass-style stepped animation); 0 = every frame */
   fps: 10,
+  /** draw bows/slingshots in 3D too (off: the 2D bowArt sprite reads better) */
+  fpBow: false,
   /** first-person hands: 3D (fpView.ts) or the sprite viewmodel (?viewmodel=sprite) */
   viewmodel: initialViewmodel(),
   /** people's skins: styled.ts (default) or the projected sprite (?charpaint=sprite) */
@@ -74,10 +76,11 @@ export function setCharMode(m: CharMode): void {
 }
 
 /** Debug entry (cdda.chars): mode string, or a tweak object; returns the current settings. */
-export function charsApi(arg?: CharMode | { fps?: number; far?: [number, number]; emph?: number; paint?: 'styled' | 'sprite'; viewmodel?: 'model' | 'sprite' }): Record<string, unknown> {
+export function charsApi(arg?: CharMode | { fps?: number; far?: [number, number]; emph?: number; paint?: 'styled' | 'sprite'; viewmodel?: 'model' | 'sprite'; fpBow?: boolean }): Record<string, unknown> {
   if (typeof arg === 'string') setCharMode(arg);
   else if (arg) {
     if (arg.viewmodel) setViewmodelMode(arg.viewmodel);
+    if (arg.fpBow !== undefined) charSettings.fpBow = arg.fpBow;
     if (arg.paint) {
       if (arg.paint !== 'styled' && arg.paint !== 'sprite') throw new Error(`chars paint: ${arg.paint}`);
       charSettings.paint = arg.paint;
