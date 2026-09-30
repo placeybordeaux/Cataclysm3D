@@ -21,6 +21,7 @@ import type { ModelFactory } from './furniture';
 import type { SurfacePainter } from './surfaces';
 import { RoomMap, type Room } from './rooms';
 import { FACE_ENDS, buildingState, type Dresser } from './dressing';
+import type { StairMesher } from './stairs/mesher';
 
 // Builds the static geometry of one chunk at one z-level: merged quads grouped by texture
 // page (one draw call per page), plus the billboards the chunk contributes. Light sources
@@ -95,6 +96,8 @@ export interface MeshExtras {
   surfaces?: SurfacePainter;
   /** set dressing for painted rooms (dressing.ts) */
   dressing?: Dresser;
+  /** walkable stairs (render/stairs/): modelled flights, open stairwells */
+  stairs?: StairMesher;
 }
 
 const SHAPES: TerrainShape[] = ['none', 'floor', 'liquid', 'wall', 'halfwall', 'window', 'door', 'door_open', 'fence', 'tree', 'shrub', 'stairs_up', 'stairs_down'];
@@ -184,6 +187,8 @@ export function* buildChunkMeshSteps(
   const glassB = { g: undefined as GeomBuilder | undefined };
   const glassGeo = () => (glassB.g ??= new GeomBuilder());
   const MD = LF?.voxelProps ? extras?.models : undefined;
+  const ST = extras?.stairs?.active ? extras.stairs : undefined;
+  ST?.prepare(chunk.cx, chunk.cy, chunk.z);
   const SP = extras?.surfaces?.active() ? extras.surfaces : undefined;
   // interior finishes are chosen per building: one seed per chunk (≈ one OMT, one house)
   const buildingSeed = (Math.imul(chunk.cx, 73856093) ^ Math.imul(chunk.cy, 19349663)) >>> 0;
@@ -363,6 +368,8 @@ export function* buildChunkMeshSteps(
       const ti = chunk.ter[ly * CHUNK + lx];
       const def = terDefs[ti];
       const shape = shapes.terrain(ti);
+      // walkable stairs: 1 flight tile, 2 stairwell (open floor), 3 stair tile drawn as floor
+      const srole = ST ? ST.role(x, y, z) : 0;
       const seed = pointSeed(x, y) >>> 0;
       const nShape = [0, 1, 2, 3].map((d) => shapeAt(here, x + DX[d], y + DY[d]));
       const skyOf = (tx: number, ty: number) => (shapeAt(above, tx, ty) !== S.none ? INDOOR_SKY : 1);
@@ -396,10 +403,10 @@ export function* buildChunkMeshSteps(
       // trough along their outer edge and downspouts (the flat ring itself stays: it is the
       // eave soffit; without it you looked up into the dark under the roof)
       const gutter = !!SP && A !== undefined && /^t_gutter/.test(def.id);
-      const hasSlab = shape !== S.none && shape !== S.liquid && shape !== S.stairs_down;
+      const hasSlab = shape !== S.none && shape !== S.liquid && (shape !== S.stairs_down || srole === 3) && srole !== 2;
       if (hasSlab && z > -10) {
         const belowShape = shapeAt(below, x, y);
-        if (!isWall(belowShape) && belowShape !== S.stairs_up) {
+        if (!isWall(belowShape) && (belowShape !== S.stairs_up || ST?.role(x, y, z - 1) === 3)) {
           curSky = INDOOR_SKY; // a ceiling always faces a covered room
           const f = src.terrain(def.id, 'ceiling');
           // Tuck the ceiling's edges a little into the walls of the room below: edge-to-edge,
@@ -424,7 +431,17 @@ export function* buildChunkMeshSteps(
       }
 
       curSky = ownSky;
-      switch (shape) {
+      let stairDone = false;
+      if (srole) {
+        ST!.emit(geo, src, x, y, z, base);
+        // a stairwell has no floor; the stair tiles themselves get the floor around them
+        if (srole === 2) stairDone = true;
+        else if (shape === S.stairs_up || shape === S.stairs_down) {
+          emitFloor(x, y, neighborFloor(x, y) ?? 't_floor', seed);
+          stairDone = true;
+        }
+      }
+      if (!stairDone) switch (shape) {
         case S.none:
         case S.stairs_down:
           break;
@@ -692,7 +709,7 @@ export function* buildChunkMeshSteps(
         }
       }
       // Scattered props (rocks, twigs, litter, puddles) on this tile
-      if (LF?.props && extras) {
+      if (LF?.props && extras && srole !== 2) {
         const li = ly * CHUNK + lx;
         emitProps(geo, extras.white, x, y, z, base, def, shape === S.tree || shape === S.shrub, shape === S.floor,
           chunk.furn[li] !== 0 || chunk.items.has(li), nShape.some((ns) => ns === S.tree), curSky >= 1, G ? groundLocal : null, pud);
@@ -806,14 +823,15 @@ export function* buildChunkMeshSteps(
       if (due()) { yield; stepT = performance.now(); }
       if (r.ax < x0c || r.ay < y0c || r.ax >= x0c + CHUNK || r.ay >= y0c + CHUNK) continue;
       const cx = Math.round((r.x0 + r.x1) / 2), cy = Math.round((r.y0 + r.y1) / 2);
-      if (RM.has(r, cx, cy) && r.tiles >= 4) DR.ceilingLamp(geo, cx + 0.5, cy + 0.5, base + WALL_TOP);
+      if (RM.has(r, cx, cy) && r.tiles >= 4 && !(ST && ST.role(cx, cy, z + 1) === 2)) DR.ceilingLamp(geo, cx + 0.5, cy + 0.5, base + WALL_TOP);
       // run-down rooms: debris and papers on the floor, a junk heap in a free corner
       const lvl = buildingState(buildingSeed).level;
       if (lvl > 0) {
         let pileDone = lvl < 2 || (r.seed & 1) === 1;
         for (let ty = r.y0; ty <= r.y1; ty++) for (let tx = r.x0; tx <= r.x1; tx++) {
           if (!RM.has(r, tx, ty)) continue;
-          const free = map.furnAt(tx, ty, z).id === 'f_null';
+          const sr = ST ? ST.role(tx, ty, z) : 0;
+          const free = map.furnAt(tx, ty, z).id === 'f_null' && sr !== 1 && sr !== 2;
           if (free) DR.floorClutter(geo, tx, ty, base, r.seed, lvl);
           if (!pileDone && free && map.itemsAt(tx, ty, z).length === 0) {
             // a corner: walls on two adjacent sides

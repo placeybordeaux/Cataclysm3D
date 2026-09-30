@@ -49,6 +49,16 @@ const PLAYER_RADIUS = CREATURE_RADIUS;
 
 export type GoalKind = 'none' | 'chase' | 'wander' | 'flee' | 'idle' | 'follow';
 
+/** Stair walking (src/stairs.ts): monsters climbing flights and chasing across levels. */
+export interface MonsterStairHook {
+  /** On a flight gravity doesn't apply. */
+  busy(m: Monster): boolean;
+  /** Carry `m` along its flight (or step onto the one it's headed for); true = moved this tick. */
+  drive(m: Monster, dt: number): boolean;
+  /** After think(): may point a chaser at the flight the survivor took. */
+  plan(m: Monster, brain: { goal: GoalKind; gx: number; gy: number; speedMul: number }): void;
+}
+
 interface MonBrain {
   goal: GoalKind;
   gx: number;
@@ -137,6 +147,8 @@ export class MonsterSystem implements GameSystem {
   playerLight: () => number = () => 0;
   /** Renderer/UI listeners. */
   readonly onSpawned: ((m: Monster) => void)[] = [];
+  /** Walkable stairs (src/stairs.ts); null = monsters only fall between levels. */
+  stairs: MonsterStairHook | null = null;
   readonly onRemoved: ((m: Monster) => void)[] = [];
   readonly onDied: ((m: Monster, corpse: CorpseRecord | null) => void)[] = [];
   readonly onHurt: ((m: Monster, amount: number) => void)[] = [];
@@ -505,7 +517,7 @@ export class MonsterSystem implements GameSystem {
    * Returns true when it fell this tick.
    */
   applyGravity(m: Monster): boolean {
-    if (m.has('FLIES')) return false;
+    if (m.has('FLIES') || this.stairs?.busy(m)) return false;
     const map = this.game.map;
     const tx = Math.floor(m.x), ty = Math.floor(m.y);
     if (map.hasFloor(tx, ty, m.z)) return false;
@@ -896,6 +908,7 @@ export class MonsterSystem implements GameSystem {
       }
     }
     if (brain.goal === 'idle') brain.speedMul = 0.5;
+    this.stairs?.plan(m, brain);
     if (brain.goal !== 'none') {
       const far = Math.hypot(brain.gx - m.x, brain.gy - m.y) > 40;
       brain.direct = !far && clearWalk(this.grid, m.x, m.y, brain.gx, brain.gy, m.z, m.radius * 0.9);
@@ -925,6 +938,7 @@ export class MonsterSystem implements GameSystem {
   private act(m: Monster, dt: number): void {
     const p = this.game.player;
     const brain = this.brains.get(m)!;
+    if (this.stairs?.drive(m, dt)) return;
     if (m.windup) this.tickWindup(m, dt);
     if (m.dashTime > 0) {
       const t = Math.min(dt, m.dashTime);

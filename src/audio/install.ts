@@ -2,6 +2,7 @@ import type { Game } from '../game/game';
 import { AudioEngine } from './audio';
 import { isNight } from './ambience';
 import { footstepVariant, strideLength } from './footsteps';
+import { isClimbing } from '../game/stairwalk';
 import { setAudioEngine, sfx } from './sfx';
 import { soundForEvent } from './soundEvents';
 import { rangeForLoudness } from './spatial';
@@ -53,7 +54,8 @@ export function installAudio(game: Game, debugApi?: Record<string, any>): AudioH
       const moved = Math.hypot(p.x - lastX, p.y - lastY);
       // Carried by a vehicle (driving or riding along): the engine is the sound, not your feet.
       const riding = !!g.vehicles?.driving || !!g.vehicles?.at(tx, ty, p.z)?.v.velocity;
-      if (p.z !== lastZ || moved > 2 || riding) strideAcc = 0; // teleport / stairs / vehicle
+      // teleport / vehicle; on a flight each tread plays its own step (render/stairs/install.ts)
+      if (p.z !== lastZ || moved > 2 || riding || isClimbing(p)) strideAcc = 0;
       else if (moved > 0) {
         strideAcc += moved;
         const stride = strideLength(p.running, p.crouching);

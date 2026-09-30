@@ -4,6 +4,7 @@ import { bodyShapeOf, weaponOf, type Weapon } from './archetype';
 import { CreatureModel } from './creature';
 import { charLayers, charSettings, frameKey, spriteInfo } from './index';
 import { makeRig, type Rig } from './rig';
+import { liftOf } from '../../game/stairwalk';
 
 // The survivor's own body outside first person (third-person / top-down cameras): the same
 // 3D humanoid as NPCs, painted from the player's outfit composite (renderer source sprite
@@ -61,7 +62,7 @@ export class PlayerModel implements GameSystem {
     this.c.update(dt, {
       x: p.x, y: p.y, z: p.z, facing: p.yaw, target: null,
       moving: moved > 0.003, walkPhase: this.phase, windup: null, flinch: 0,
-      down: p.dead ? 1 : 0, visible: true, emph: 0, camDist: 0, sy: 1, sxz: 1,
+      down: p.dead ? 1 : 0, visible: true, emph: 0, camDist: 0, sy: 1, sxz: 1, lift: liftOf(p),
     });
   }
 }

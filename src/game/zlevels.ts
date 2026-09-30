@@ -16,6 +16,15 @@ import { emitSound } from './sound';
 export type StairDir = 'up' | 'down';
 export const STAIR_SEARCH = 24;
 
+/**
+ * Walkable stairs (src/stairs.ts, docs/STAIRS.md) plug in here: with a modelled flight near,
+ * `<` / `>` climb it instead of teleporting, and nobody on a flight falls.
+ */
+export const stairHooks: {
+  auto: ((dir: StairDir) => boolean) | null;
+  climbing: ((w: object) => boolean) | null;
+} = { auto: null, climbing: null };
+
 const flagFor = (dir: StairDir) => (dir === 'up' ? 'GOES_UP' : 'GOES_DOWN');
 const matching = (dir: StairDir) => (dir === 'up' ? 'GOES_DOWN' : 'GOES_UP');
 
@@ -61,6 +70,7 @@ export function stairDestination(game: Game, x: number, y: number, z: number, di
 export function goStairs(game: Game, dir: StairDir): boolean {
   const p = game.player;
   if (p.dead || p.isAsleep()) return false;
+  if (stairHooks.auto?.(dir)) return true;
   const s = stairsNear(game, dir);
   if (!s) {
     game.message(dir === 'up' ? "You can't go up here!" : "You can't go down here!");
@@ -99,6 +109,7 @@ export function fallDamageMod(game: Game): number {
 export function fallIfUnsupported(game: Game): number {
   const p = game.player;
   const map = game.map;
+  if (stairHooks.climbing?.(p)) return 0;
   let z = p.z;
   while (z > MIN_Z && !map.hasFloor(p.tileX, p.tileY, z) && map.terAt(p.tileX, p.tileY, z).id !== 't_null') z--;
   const height = p.z - z;
