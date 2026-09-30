@@ -45,6 +45,7 @@ for (const seed of seeds) {
               idx[v].ensureAround(x, y, z, 0);
               const l = idx[v].at(x, y, z);
               if (!l && idx[v].isPlain(x, y, z)) { bump(`${v}: plain tile of a wide spiral`); continue; }
+              if (l && process.argv.includes('--where') && v === 'flight' && l.tiles[0][0] === x && l.tiles[0][1] === y) console.log(`WHERE ${o.id} ${x},${y},${z} ${l.shape} run ${l.run} w ${l.width}${l.spiral ? ` sweep ${Math.round(l.spiral.sweep * 57.3)}` : ''}`);
               bump(`${v}: ${l ? `${l.shape}${l.shape === 'straight' ? ` run ${l.run} w ${l.width}` : l.spiral ? ` ${Math.round(Math.abs(l.spiral.sweep) * 180 / Math.PI)}°` : ''}` : 'none (classic)'}`);
             }
             const free = (X: number, Y: number, Z: number) => map.passable(X, Y, Z) && map.furnAt(X, Y, Z).id === 'f_null' && !hasFlag(map.terAt(X, Y, Z), 'GOES_UP') && !hasFlag(map.terAt(X, Y, Z), 'GOES_DOWN') && map.hasFloor(X, Y, Z);

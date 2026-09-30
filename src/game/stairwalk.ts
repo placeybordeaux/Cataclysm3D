@@ -90,6 +90,11 @@ export class StairWalker {
   /** called when a walker gets on or off a flight */
   readonly onAttach: ((w: Walker, l: StairLink, up: boolean) => void)[] = [];
   readonly onDetach: ((w: Walker, l: StairLink, top: boolean) => void)[] = [];
+  /**
+   * A walker held at a flight's end by a closed door on the landing: try to open it (CDDA
+   * opens doors by walking into them). Returns a message when it can't (locked); null = opened.
+   */
+  openDoor: ((w: Walker, x: number, y: number, z: number) => string | null) | null = null;
   /** the player's latest completed trip: where monsters chasing across levels head for */
   lastTrip: { link: StairLink; up: boolean; time: number } | null = null;
   time = 0;
@@ -234,7 +239,17 @@ export class StairWalker {
       if (ds < 0 && oc.s < c.s && s < oc.s + gap) s = Math.min(c.s, oc.s + gap);
     }
     const map = this.game.map;
-    const endFree = (top: boolean) => (top ? l.top : l.bottom).every(([x, y]) => map.passable(x, y, top ? l.z + 1 : l.z));
+    const endFree = (top: boolean) => {
+      const tz = top ? l.z + 1 : l.z;
+      let free = true;
+      for (const [x, y] of top ? l.top : l.bottom) {
+        if (map.passable(x, y, tz)) continue;
+        // walking into a closed door opens it; only once per hold, not every tick
+        if (this.openDoor && !c.held && map.terAt(x, y, tz).open) this.openDoor(w, x, y, tz);
+        free &&= map.passable(x, y, tz);
+      }
+      return free;
+    };
     // stop on the last step before a blocked landing (never pushed back if already past it)
     const capTop = len - LANDING_IN - 0.08, capBottom = LANDING_IN + 0.08;
     if (ds > 0 && s > capTop && !endFree(true)) {

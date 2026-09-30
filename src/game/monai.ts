@@ -57,6 +57,8 @@ export interface MonsterStairHook {
   drive(m: Monster, dt: number): boolean;
   /** After think(): may point a chaser at the flight the survivor took. */
   plan(m: Monster, brain: { goal: GoalKind; gx: number; gy: number; speedMul: number }): void;
+  /** `m` died: off the flight it was on (to the bottom landing). */
+  fall?(m: Monster): void;
 }
 
 interface MonBrain {
@@ -625,6 +627,8 @@ export class MonsterSystem implements GameSystem {
     if (m.dead) return;
     m.dead = true;
     this.dirty = true;
+    // killed on a flight: the body tumbles to the foot of it (never left hanging over a stairwell)
+    this.stairs?.fall?.(m);
     if (this.grabbedBy === m) this.releaseGrab();
     const def = m.type;
     const tx = m.tileX, ty = m.tileY;

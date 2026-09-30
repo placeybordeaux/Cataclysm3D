@@ -170,11 +170,13 @@ function straight(b: ModelBuilder, L: StairLink, st: StairStyle, solid: SolidAt)
     quadN(b, P(0, v0, 0), P(0, v1, 0), P(0, v1, top(0)), P(0, v0, top(0)), st.stringer, [-vx, 0, -vy]);
     // spandrel: close the triangle under an open side (a wall panel under the stairs)
     if (st.spandrel && !wall[side] && !steep) {
-      quadN(b, P(0.01, side === 0 ? 0 : W, 0), P(R, side === 0 ? 0 : W, 0), P(R, side === 0 ? 0 : W, bot(R)), P(0.3 / slope, side === 0 ? 0 : W, bot(0.3 / slope)), st.stringer, out);
+      // a triangle (the last corner doubled; the builder's normal comes from a, b and d)
+      const sv = side === 0 ? 0 : W;
+      quadN(b, P(0.02, sv, 0), P(R, sv, 0), P(R, sv, bot(R)), P(R, sv, bot(R)), st.stringer, out);
     }
   }
   // soffit: the underside of the flight, seen from below
-  quadN(b, P(0.3 / slope, sT, 0), P(0.3 / slope, W - sT, 0), P(R, W - sT, bot(R)), P(R, sT, bot(R)), st.stringer, norm([-vx, -1 / slope, -vy]));
+  quadN(b, P(0, sT, 0), P(0, W - sT, 0), P(R, W - sT, bot(R)), P(R, sT, bot(R)), st.stringer, norm([vx * slope, -1, vy * slope]));
   // the end under the top (facing the room below, when it isn't against a wall)
   quadN(b, P(R, sT, 0), P(R, W - sT, 0), P(R, W - sT, bot(R)), P(R, sT, bot(R)), st.stringer, U);
 

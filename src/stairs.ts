@@ -6,7 +6,8 @@ import { STAIR_VARIANTS, type StairVariant, type StairLink } from './game/stairs
 import { StairWalker, climbOf, isClimbing, liftOf } from './game/stairwalk';
 import { stairHooks } from './game/zlevels';
 import { registerSaveable } from './save/registry';
-import { emitSound } from './game/sound';
+import { openDoor } from './game/interact';
+import { L } from './game/moves';
 
 // Wires walkable stairs (docs/STAIRS.md) into the game: the variant switch (`?stairs=`,
 // Options > Stairs, cdda.stairs.setVariant), the player's movement hook, the `<` / `>`
@@ -54,6 +55,16 @@ export function installStairs(game: Game, opts: { monsters?: MonsterSystem; api?
   game.map.overlays.push(walker.overlay);
   game.stairStep = (fx, fy, dt) => walker.playerStep(fx, fy, dt);
   stairHooks.climbing = (w) => isClimbing(w);
+  let doorMsgAt = -10;
+  walker.openDoor = (w, x, y, z) => {
+    const why = openDoor(game, x, y, z);
+    // the player hears why they are stuck on the top step (once in a while, not every tick)
+    if (why && w === game.player && walker.time - doorMsgAt > 3) {
+      doorMsgAt = walker.time;
+      game.message(why);
+    }
+    return why;
+  };
   stairHooks.auto = (dir) => walker.autoClimb(game.player, dir === 'up');
   game.systems.push({
     name: 'stairs',
@@ -73,6 +84,10 @@ export function installStairs(game: Game, opts: { monsters?: MonsterSystem; api?
   if (sys) {
     sys.stairs = {
       busy: (m) => isClimbing(m),
+      fall(m) {
+        if (isClimbing(m)) walker.detach(m, false);
+        wants.delete(m);
+      },
       drive(m, dt) {
         const c = climbOf(m);
         if (c) {
@@ -129,6 +144,15 @@ export function installStairs(game: Game, opts: { monsters?: MonsterSystem; api?
       },
     };
   }
+
+  // what you drop on a flight tumbles down to its foot (not onto a stairwell's thin air)
+  const ground = game.player.groundLoc;
+  game.player.groundLoc = () => {
+    const c = climbOf(game.player);
+    if (!c) return ground?.() ?? null;
+    const [bx, by] = c.link.bottom[0];
+    return L.ground(game.map, bx, by, c.link.z);
+  };
 
   // --- saving mid-climb
   registerSaveable(game, 'stairs', {

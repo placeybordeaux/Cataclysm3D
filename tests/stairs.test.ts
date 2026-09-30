@@ -28,7 +28,7 @@ beforeAll(() => {
 
 const LEGEND: Record<string, [string, string?]> = {
   '#': ['t_wall'], '.': ['t_floor'], '<': ['t_wood_stairs_up'], '>': ['t_wood_stairs_down'],
-  H: ['t_ladder_up'], h: ['t_ladder_down'], ' ': ['t_open_air'], '+': ['t_door_c'], c: ['t_floor', 'f_chair'],
+  H: ['t_ladder_up'], h: ['t_ladder_down'], ' ': ['t_open_air'], '+': ['t_door_c'], L: ['t_door_locked'], c: ['t_floor', 'f_chair'],
 };
 
 /** Levels drawn as ASCII from (0, 0); everything else is wall (below 1) or open air. */
@@ -348,12 +348,12 @@ describe('walking the stairs', () => {
     expect(climbOf(p)).toBeUndefined();
   });
 
-  it('a closed door on the top landing holds you on the top step until it opens', () => {
-    const DOOR = {
+  it('a locked door on the top landing holds you on the top step until it opens; a closed one you just open', () => {
+    const DOOR = (door: string) => ({
       0: ['#####', '#...#', '#.<.#', '#####'],
-      1: ['#####', '##+##', '##>##', '#####'],
-    };
-    const { game, walker } = world(DOOR, 'flight');
+      1: ['#####', `##${door}##`, '##>##', '#####'],
+    });
+    const { game, walker } = world(DOOR('L'), 'flight');
     const l = standAt(game, walker, 2, 2);
     expect(l.top).toEqual([[2, 1]]);
     const p = game.player;
@@ -365,6 +365,14 @@ describe('walking the stairs', () => {
     step(game, 2);
     expect(climbOf(p)).toBeUndefined();
     expect([Math.floor(p.x), Math.floor(p.y), p.z]).toEqual([2, 1, 1]);
+
+    const w2 = world(DOOR('+'), 'flight');
+    standAt(w2.game, w2.walker, 2, 2);
+    w2.game.input.held.add('KeyW');
+    step(w2.game, 5);
+    expect(w2.game.map.terAt(2, 1, 1).id).toBe('t_door_o');
+    expect(climbOf(w2.game.player)).toBeUndefined();
+    expect(w2.game.player.z).toBe(1);
   });
 
   it('nobody falls through the stairwell mid-climb, and saving mid-climb restores the climb', () => {
@@ -416,5 +424,26 @@ describe('monsters on the stairs', () => {
     expect(z.dead).toBe(false);
     expect(z.z).toBe(1);
     expect(climbOf(z)).toBeUndefined();
+  });
+
+  it('a zombie killed on the stairs, and what you drop there, end up at the foot of the flight', () => {
+    const { game, sys, walker } = world(HALL, 'flight');
+    const l = standAt(game, walker, 4, 2);
+    const b = l.path.at(0);
+    const z = sys.spawnById('mon_zombie', b.x, b.y, 0)!;
+    walker.attach(z, l, true, { auto: -1 });
+    walker.advance(z, -1.5);
+    expect(climbOf(z)).toBeTruthy();
+    sys.die(z, null);
+    expect(climbOf(z)).toBeUndefined();
+    expect(l.bottom.some(([x, y]) => x === Math.floor(z.x) && y === Math.floor(z.y))).toBe(true);
+    expect(z.z).toBe(0);
+    // the survivor, halfway up, drops something: it tumbles down too
+    const p = game.player;
+    walker.attach(p, l, false);
+    walker.advance(p, l.path.len * 0.7);
+    expect(p.z).toBe(1);
+    const loc = p.groundLoc!() as unknown as { x: number; y: number; z: number };
+    expect([loc.x, loc.y, loc.z]).toEqual([...l.bottom[0], 0]);
   });
 });
