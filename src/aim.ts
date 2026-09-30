@@ -13,6 +13,8 @@ import { AimHud, type AimHudFrame } from './ui/aimHud';
 import { sfx } from './audio/sfx';
 import { aimHooks, zoneOfPart, type Vec3 } from './game/aimmodel';
 import { pickModel, prepareModel } from './render/aimPick';
+import { EnemyFireFx } from './render/enemyFireFx';
+import { enemyFireOf } from './game/enemyfire';
 import { LEVEL_HEIGHT } from './world/coords';
 import type { Monster } from './game/monster';
 
@@ -179,6 +181,16 @@ function installPresenter(game: Game, renderer: Renderer, monsters: MonstersHand
     desc: 'Free aim: a faint trail behind the crosshair showing how it has been weaving over the last second (helps you time shots).',
   });
   installModelHooks(game, renderer, monsters, api);
+  // Enemy rounds in flight, and the near-miss cue: a zip past your ear and a small flinch of
+  // the view and the hands toward the side it passed (src/game/enemyfire.ts).
+  new EnemyFireFx(game, renderer, () => enemyFireOf(game));
+  game.events.on('nearMiss', (e) => {
+    if (p.dead) return;
+    const k = Math.max(0, 1 - e.dist / 1.4);
+    sfx.nearMiss(e.kind, { x: e.x, y: e.y, z: e.z });
+    renderer.rig.kick(0.004 + 0.008 * k, -e.side * 0.006 * (0.5 + k));
+    renderer.viewmodel?.jolt(-e.side, 0.15 + 0.25 * k);
+  });
   let cross: HTMLElement | null = null;
   let readout: HTMLElement | null = null;
   let linger = 0;

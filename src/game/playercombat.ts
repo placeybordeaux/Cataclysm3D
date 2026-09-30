@@ -18,7 +18,7 @@ import type { MonsterSystem } from './monai';
 import { Grid, hasLOS } from './los';
 import { sfx, type MeleeSkill } from '../audio/sfx';
 import { FEEL, arcFor, defenseOf, hitStopSeconds, missReason, sweptArcTarget, swingTiming, type SwingStyle, type SwingTiming } from './combatfeel';
-import { moveWithCollision } from './physics';
+import { moveWithCollision, CREATURE_RADIUS } from './physics';
 import { projectileHit } from './projectile';
 import {
   aimDirection, aimHooks, AimSway, basisDirection, basisOf, swingFan, yawPitch, type Vec3, BODY_HEIGHT, Breath, bowPerfect, describeHit, freeAim, hitDamageMul, rhythmWindow, swayAmplitude, timingGames, weakSpotChance,
@@ -274,6 +274,8 @@ export class PlayerCombat implements GameSystem {
   attackGuard: (() => boolean) | null = null;
   npcMelee: ((reach: number, m: Monster | null) => boolean) | null = null;
   npcShot: ((yaw: number, maxDist: number, shot: ShotResult) => { x: number; y: number } | null) | null = null;
+  /** An arrow/bolt/stone the survivor loosed struck NPC `n` (npcai applies it; followers included). */
+  npcRound: ((n: unknown, shot: ShotResult, missedBy: number, what: string) => void) | null = null;
   private grid: Grid;
   private lastX = NaN;
   private lastY = NaN;
@@ -1519,6 +1521,36 @@ export class PlayerCombat implements GameSystem {
       hitS = t;
       hitPerp = perp;
       hitZone = undefined;
+    }
+    // NPCs on the way (followers too: friendly fire) take the round before anything behind them.
+    const npcHook = this.npcRound;
+    if (npcHook) {
+      const npcs = (this.game as unknown as { npcs?: { npcs: { x: number; y: number; z: number; dead?: boolean }[] } }).npcs?.npcs ?? [];
+      let hitN: { x: number; y: number; z: number } | null = null, nS = Math.min(hitS, wall), nPerp = 0;
+      for (const n of npcs) {
+        if (n.dead || n.z !== f.z) continue;
+        const ox = n.x - f.x0, oy = n.y - f.y0;
+        const t = ox * f.dx + oy * f.dy;
+        if (t <= s0 || t > end || t > f.range || t >= nS) continue;
+        const perp = Math.abs(ox * f.dy - oy * f.dx);
+        if (perp > CREATURE_RADIUS + 0.05) continue;
+        const h = arcHeight(t, f.arc);
+        if (h < 0 || h > 1.85) continue;
+        hitN = n;
+        nS = t;
+        nPerp = perp;
+      }
+      if (hitN) {
+        this.placeFlight(f, nS);
+        f.done = true;
+        f.explained = true;
+        npcHook(hitN, f.shot, nPerp / (CREATURE_RADIUS + 0.05), defName(f.ammo));
+        const round = f.round;
+        f.round = null;
+        if (round) this.placeRound(round, hitN.x, hitN.y, f.z, 0.05, f.yaw, 'ground');
+        else if (f.shot.broke) this.game.message(`Your ${defName(f.ammo)} breaks.`, 'c_dark_gray');
+        return;
+      }
     }
     if (hitM) {
       this.placeFlight(f, hitS);
