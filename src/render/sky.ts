@@ -20,17 +20,19 @@ void main() {
  * uGround, uSunDir, uSunColor, uNight.
  */
 export const SKY_GRADIENT = /* glsl */ `
-vec3 skyGradient(vec3 d) {
+// glowK scales the warm glow around the sun (the post pass's aerial haze uses less of it)
+vec3 skyGradientGlow(vec3 d, float glowK) {
   float h = d.y;
   vec3 col = mix(uHorizon, uZenith, pow(clamp(h, 0.0, 1.0), 0.55));
   // warm glow toward the sun, strong only when it is low (dawn/dusk): at midday the full
   // glow washed a third of the sky out to white around the sun
   float sunAmt = max(dot(d, uSunDir), 0.0);
   float low = 0.3 + 0.7 * (1.0 - smoothstep(0.08, 0.45, uSunDir.y));
-  col += uSunColor * pow(sunAmt, 8.0) * 0.35 * low * (1.0 - uNight);
+  col += uSunColor * pow(sunAmt, 8.0) * 0.35 * low * glowK * (1.0 - uNight);
   if (h < 0.0) col = mix(col, uGround, clamp(-h * 6.0, 0.0, 1.0));
   return col;
-}`;
+}
+vec3 skyGradient(vec3 d) { return skyGradientGlow(d, 1.0); }`;
 
 const FRAG = /* glsl */ `
 layout(location = 1) out highp vec4 gNormal;
@@ -92,17 +94,30 @@ void main() {
   }
   // sun disc (hard edge = pixel-art disc after quantization)
   float sd = dot(d, uSunDir);
-  // (1.6: just over the bloom threshold, so a small halo; at 2.0 the bloom washed a third
-  // of the sky out around the sun)
-  if (sd > 0.9985 && uSunDir.y > -0.05) col = mix(col, vec3(1.0, 0.95, 0.8) * 1.6, (1.0 - uNight * 0.8) * uSunVis);
+  // Measured on the image plane, not as an angle: a round angular disc 40 degrees off-axis
+  // is stretched by the rectilinear projection into a big tilted oval (it was 6.3 degrees
+  // across and read as a white egg). Now a screen-round disc ~4 degrees across at the
+  // centre, a warmer rim, and a soft glare the dither turns into stipple. 1.6 is just over
+  // the bloom threshold, so bloom adds only a small halo (at 2.0 it washed a third of the
+  // sky out around the sun).
+  vec3 vd = (viewMatrix * vec4(d, 0.0)).xyz, vs = (viewMatrix * vec4(uSunDir, 0.0)).xyz;
+  if (uSunDir.y > -0.05 && vs.z < -0.05 && vd.z < 0.0) {
+    float sr = length(vd.xy / -vd.z - vs.xy / -vs.z) / 0.035;
+    float sunK = (1.0 - uNight * 0.8) * uSunVis;
+    if (sr < 1.0) col = mix(col, (sr < 0.8 ? vec3(1.0, 0.96, 0.84) : vec3(1.0, 0.86, 0.62)) * 1.6, sunK);
+    else col += uSunColor * 0.16 * sunK * (1.0 - smoothstep(1.0, 2.2, sr));
+  }
   // moon disc with a darker mare blotch
   float md = dot(d, uMoonDir);
-  if (md > 0.9992 && uNight > 0.0 && uSunVis > 0.5) {
-    vec3 moon = vec3(0.85, 0.88, 0.95);
-    vec3 side = normalize(cross(uMoonDir, vec3(0.0, 1.0, 0.0)));
-    float off = dot(d - uMoonDir, side) * 800.0;
-    if (off > 0.2) moon *= 0.72;
-    col = mix(col, moon, uNight);
+  vec3 vm = (viewMatrix * vec4(uMoonDir, 0.0)).xyz;
+  if (md > 0.99 && vm.z < -0.05 && vd.z < 0.0 && uNight > 0.0 && uSunVis > 0.5) {
+    // screen-round like the sun; the right third darker (the mare / phase blotch)
+    vec2 mo = (vd.xy / -vd.z - vm.xy / -vm.z) / 0.035;
+    if (length(mo) < 1.0) {
+      vec3 moon = vec3(0.85, 0.88, 0.95);
+      if (mo.x > 0.3) moon *= 0.72;
+      col = mix(col, moon, uNight);
+    }
   }
   // Drifting clouds on a plane overhead. Value noise alone has visible lattice cells: two
   // octaves thresholded by a steep smoothstep drew its cell edges as long straight lines,

@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { applyCutoutMips } from './cutoutMips';
 import { CHUNK, LEVEL_HEIGHT } from '../world/coords';
 import type { GameMap } from '../world/map';
 import { frameAverage } from './framePixels';
@@ -73,11 +74,10 @@ function bladeTexture(): THREE.DataTexture {
   }
   const t = new THREE.DataTexture(d, TEX, TEX, THREE.RGBAFormat);
   t.magFilter = THREE.NearestFilter;
-  t.minFilter = THREE.NearestFilter;
-  t.generateMipmaps = false;
   t.colorSpace = THREE.SRGBColorSpace;
-  t.needsUpdate = true;
-  return t;
+  // 1-texel blades: keep a blade wherever any of a block's texels had one, so distant
+  // lawns stay full instead of sparkling (cutoutMips.ts)
+  return applyCutoutMips(t, 1);
 }
 
 /** Two crossed unit cards standing on y = 0 (x in [-0.5, 0.5], y in [0, 1]). */

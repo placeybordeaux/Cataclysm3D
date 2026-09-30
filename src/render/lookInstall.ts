@@ -8,6 +8,8 @@ import { frameStats, summarize } from '../perfDebug';
 import { voxelStats } from './voxel';
 import { installFurniture } from './furniture/install';
 import { HAZE_NAMES, HAZES, haze, isHazeName, setHaze } from './atmosphere';
+import { setCutoutMips } from './cutoutMips';
+import { FORM_NAMES, FORMS, form, isFormName, setForm } from './formLight';
 
 // Wires the visual styles (look.ts) into the game: the Options entry, the automation API
 // and the per-look scene layers that need game/world access (skyline from the overmap).
@@ -36,6 +38,15 @@ export function installLooks(game: Game, renderer: Renderer, worldgen: WorldGene
       setHaze(HAZE_NAMES[(i + d + HAZE_NAMES.length) % HAZE_NAMES.length], true);
     },
     desc: HAZE_NAMES.map((n) => `${HAZES[n].label}: ${HAZES[n].desc}`).join('\n'),
+  });
+  registerOption({
+    name: 'Form lighting',
+    value: () => FORMS[form.name].label,
+    change: (d) => {
+      const i = FORM_NAMES.indexOf(form.name);
+      setForm(FORM_NAMES[(i + d + FORM_NAMES.length) % FORM_NAMES.length], true);
+    },
+    desc: FORM_NAMES.map((n) => `${FORMS[n].label}: ${FORMS[n].desc}`).join('\n'),
   });
   // Draw distance in chunks (OMTs). Past it the far ground ring and skyline carry the
   // horizon, so 6 reads well; 8 costs ~65% more chunks (+0.5-1 ms render, +100 MB heap,
@@ -68,6 +79,21 @@ export function installLooks(game: Game, renderer: Renderer, worldgen: WorldGene
   const a = api as DebugApi & Record<string, unknown>;
   a.looks = LOOK_NAMES;
   a.hazes = HAZE_NAMES;
+  /** A/B the stable cutout mips on grass/leaf cards (cutoutMips.ts). */
+  a.cutoutMips = (on = true) => setCutoutMips(on);
+  /** Form-lighting preset (formLight.ts), live, not persisted; formTweak edits single values. */
+  a.setForm = (name: string) => {
+    if (!isFormName(name)) throw new Error(`unknown form lighting ${name} (expected ${FORM_NAMES.join('|')})`);
+    setForm(name);
+    return name;
+  };
+  a.formTweak = (o: Record<string, unknown>) => {
+    for (const [k, v] of Object.entries(o)) {
+      if (!(k in form.s)) throw new Error(`unknown form setting ${k}`);
+      (form.s as unknown as Record<string, unknown>)[k] = v;
+    }
+    return form.s;
+  };
   /** Distance-haze preset (atmosphere.ts), live, not persisted. */
   a.setHaze = (name: string) => {
     if (!isHazeName(name)) throw new Error(`unknown haze ${name} (expected ${HAZE_NAMES.join('|')})`);
