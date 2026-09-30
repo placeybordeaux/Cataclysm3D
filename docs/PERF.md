@@ -245,6 +245,51 @@ Radius 8 costs ~4-5 ms of main loop per frame in a city (more to draw: +50 % dra
 (`?radius=6&stream=distance&placeholders=0`: 21.2 s, runway p10 2.6 s). Radius 6 is the one to
 suggest to someone whose frame rate drops in towns; 8 stays the default the user chose.
 
+## Above ground: rooftops (wave 3, zlevels)
+
+User report: *"if you are many z levels up it renders the ground as an odd white thing."* On a
+z=3 roof only levels [z-1, z+2] were built, so the street (z 0) and z 1 were never drawn: below
+the roofs was the post pass's haze over nothing (a flat pale sheet; the far ground ring starts
+only near the draw edge) and buildings floated on it.
+
+| before (`?below=window`) | after |
+| --- | --- |
+| ![](screenshots/wave3/zlevels/before_down.jpg) | ![](screenshots/wave3/zlevels/after_down.jpg) |
+| ![](screenshots/wave3/zlevels/before_out.jpg) | ![](screenshots/wave3/zlevels/after_out.jpg) |
+
+* **Levels drawn** (`chunkManager.ts levelRadius`): around the player [z-1, z+above] as before;
+  above ground also **the ground level at the full radius and every storey down to it**. Most
+  of those chunks are open air (skipped without meshing), so the cost is the buildings you see.
+  Up a tower with more than 4 storeys between the ground and the player's window, the middle
+  ones (not z 0, z 1 or the two under the window) get half the radius. Storeys more than two
+  below the player use the far LOD (no near-ring volumes). Above-ground lower levels rank
+  +0.25 s in the need order (basements keep +1.5 s). In a basement nothing changes: no
+  surface through the ground. Stand-ins (placeholders.ts) and the prefetcher cover z 0 from
+  above too. `?below=window` / `cdda.drawBelow('window')` gives back the old window.
+* **The two pale-yellow lines** in the user's frame were the ui2 hover outline (`src/ui2/
+  install.ts worldHover`, a `LineSegments` box drawn with depthTest off): hovering a knee-high
+  roof railing with the cursor free drew a full storey-high (2.6 m) box around it, whose far
+  vertical edges ran from the roof up past the eye into the sky. The box now hugs the solid the
+  ray hit (railing 1 m, furniture/creature/vehicle heights from raycast.ts), and it is hidden on
+  any frame the cursor isn't free (a stale outline can't stay in the world).
+* **Cost** (seed 1, cathedral roof in Holden, z 3, voxel, radius 8, 3440x1304, RTX 5080,
+  `tools/zlevel-shots.ts --gpu --size 3440x1304 --bench 15`: a double turn looking down at the
+  street, then out):
+
+| | entries | draw calls | triangles | loop p50 / p99 (ms) | draw ms/frame | full rebuild of all wanted chunks |
+| --- | --- | --- | --- | --- | --- | --- |
+| roof, before | 1167 | 98 | 58 k | 1.4 / 2.5 | 0.6 | 46 ms |
+| roof, after | 1434 | 600 | 627 k | 4.3 / 6.3 | 3.2 | 1143 ms |
+| street below, after | 1434 | 798 | 805 k | 6.1 / 16.2 | 4.0 | 1311 ms |
+
+  The roof now costs about what the street it shows costs (a little less: fewer near-ring
+  volumes, the roof hides part of it). Frame interval stayed at 60 Hz throughout. `npm run perf`
+  (ground-level routes) passes unchanged.
+* Checks: `tests/render/zlevels.test.ts` (the level set by player level: surface, roof, tower,
+  basement; the manager builds and drops them), `tools/zlevel-shots.ts --gpu --check --hover`
+  (the street views are not a flat sheet: no colour covers 40 % of the lower frame, before
+  54-63 %, after 31-37 %; the railing's hover outline is 1 m and gone once the inventory closes).
+
 ## Not done / next
 
 * **Draw cost in cities** is now the biggest frame item after streaming: ~1000-1200 draw

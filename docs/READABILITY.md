@@ -161,6 +161,10 @@ chunk streaming after the teleport; render time is unaffected.)
 
 ## Known gaps
 
+* (Fixed, wave 3 zlevels) From a rooftop the street used to be a flat pale sheet: only one
+  level below the player was built. Above ground the ground and the storeys down to it are
+  drawn now (docs/PERF.md "Above ground").
+
 * Dormant monsters past 60 tiles are invisible (see above).
 * The ground ring is one flat colour per OMT (roads as strips); up close to the draw edge on a
   hill it can sit visibly below real ground by 0.6 m.

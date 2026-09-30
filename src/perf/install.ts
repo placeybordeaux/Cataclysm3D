@@ -289,6 +289,18 @@ export function installPerf(game: Game, renderer: Renderer, api: DebugApi, prefe
     return chunks.schedule;
   };
 
+  // ---- levels drawn above ground (chunkManager.ts levelRadius): 'ground' (default) or 'window'
+  const below = params.get('below');
+  if (below) {
+    if (below !== 'ground' && below !== 'window') throw new Error(`?below=${below}: expected ground or window`);
+    chunks.below = below;
+  }
+  api.drawBelow = (mode?: 'ground' | 'window') => {
+    if (mode !== undefined && mode !== 'ground' && mode !== 'window') throw new Error(`drawBelow: 'ground' or 'window', not ${String(mode)}`);
+    if (mode) chunks.below = mode;
+    return chunks.below;
+  };
+
   const perf: PerfApi = {
     tel,
     show: (on = !overlay.visible) => show(on),
