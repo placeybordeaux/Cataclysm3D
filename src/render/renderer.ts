@@ -28,6 +28,7 @@ import { GrassLayer } from './grass';
 import { buildTreesSteps, leafGlow, leafSun } from './trees';
 import { SkylineLayer } from './skyline';
 import { applyHaze, applyWeatherSky, haze } from './atmosphere';
+import { applyForm } from './formLight';
 import { VoxelFactory } from './voxel';
 import { frameStats } from '../perfDebug';
 
@@ -503,6 +504,7 @@ export class Renderer {
     frameStats.lap('lightmap');
     this.lights.setStaticLights(this.lightmap.statics);
     this.adaptExposure(dt);
+    applyForm(); // formLight.ts: bands and billboard curvature (lights.update reads the rest)
     this.lights.update(dt, this.skyState, this.rig.focus, cam);
     shared.uRimColor.value.copy(this.skyState.hemiSky).multiplyScalar(this.skyState.hemiIntensity * 0.35);
     shared.uBounce.value.copy(this.skyState.hemiGround).lerp(this.skyState.hemiSky, 0.4).multiplyScalar(this.skyState.hemiIntensity * 0.9 * look.f.bounce * (1 - this.skyState.night));

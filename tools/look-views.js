@@ -151,6 +151,17 @@ window.lookView = async (name) => {
     c.clearMonsters();
     // (monsters beyond the 60-tile reality bubble are dormant and not drawn at all)
     for (const [dx, dy] of [[1, -15], [3, -28], [-1, -42], [4, -58]]) c.spawnMonster('mon_zombie', dx, dy, { friendly: true });
+  } else if (name === 'intosun' || name === 'backsun') {
+    // Form lighting: town houses 30-100 m away, looking into the afternoon sun (everything
+    // seen from its shadow side) or with the sun behind the camera (everything front-lit).
+    c.setHour(15.5);
+    c.teleportOmt(town.x, town.y);
+    const h = c.findOmt('house', 40);
+    c.teleportOmt(h.x, h.y, 0, 18, -1);
+    c.settle();
+    const s = c.renderer.skyState.sunDir;
+    const yaw = Math.atan2(s.x, -s.z) * 180 / Math.PI + (name === 'backsun' ? 180 : 0);
+    c.look(yaw, name === 'intosun' ? -6 : -2);
   } else if (name === 'dusk') {
     await window.lookView('street');
     c.setHour(window.duskHour());
