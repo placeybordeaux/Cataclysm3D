@@ -2,7 +2,8 @@
 // ring wording.
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { adaptedTips, PORT_TIPS, unknownTips } from '../src/ui/tips_adapted';
+import { adaptedTips, PORT_TIPS, sleepSpotText, unknownTips } from '../src/ui/tips_adapted';
+import { summaryTitle } from '../src/ui2/loot/summary';
 import { EFFECTS_SHOWN_AS_NEEDS, needStates, type NeedSource } from '../src/ui/hud_logic';
 import { ringText } from '../src/ui/activity_ring';
 
@@ -19,7 +20,7 @@ describe('adapted tips', () => {
     expect(tips.length).toBeGreaterThan(40);
     const banned = /safe mode|helicopter|prone|firewood source|worlds can be made|keybindings menu|vending|peeking|mutagen|APC|shopping cart/i;
     expect(tips.filter((t) => banned.test(t))).toEqual([]);
-    expect(tips.some((t) => /Tap ` to pause/.test(t))).toBe(true);
+    expect(tips.some((t) => /Tap \[`\] to pause/.test(t))).toBe(true);
     expect(tips.filter((t) => /\{key:|\?[a-z_]+/.test(t))).toEqual([]);
     for (const t of PORT_TIPS) expect(t.length).toBeLessThan(140);
   });
@@ -70,5 +71,18 @@ describe('activity ring text', () => {
     expect(ringText({ spec: { name: 'lighting the fire' } })).toEqual({ title: 'Lighting the fire', hint: 'stand still · moving stops it' });
     expect(ringText({ spec: { name: 'waiting' } }).hint).toBe('move to stop');
     expect(ringText({ spec: { name: 'sleeping', kind: 'sleep' } }).hint).toBe('move to stop');
+  });
+});
+
+describe('wording', () => {
+  it('the sleep menu says how the spot feels and whether you are tired', () => {
+    expect(sleepSpotText(0, 'wooden floor', '')).toEqual({ spot: 'wooden floor, hard: a bed or sleeping bag would help', good: false, note: "You aren't tired yet: you may just lie awake." });
+    expect(sleepSpotText(5, 'bed', 'Tired')).toEqual({ spot: 'bed, comfortable', good: true, note: '' });
+    expect(sleepSpotText(-999, 'deep water', 'Tired').spot).toBe("deep water, you can't sleep here");
+  });
+
+  it('take-all counts what it left behind in things, like what it took', () => {
+    const r = { taken: [{ name: 'emergency jackets', count: 2 }], left: [{ name: 'emergency jackets', count: 8, reason: 'no room' }] };
+    expect(summaryTitle(r as never)).toBe('Took 2 emergency jackets. 8 left behind:');
   });
 });

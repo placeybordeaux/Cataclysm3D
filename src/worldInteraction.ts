@@ -1,3 +1,4 @@
+import { sleepSpotText } from './ui/tips_adapted';
 import type { Game } from './game/game';
 import type { Renderer } from './render/renderer';
 import type { DebugApi } from './debug';
@@ -65,10 +66,12 @@ export function installWorldInteraction(game: Game, renderer: Renderer, api: Deb
   game.keys.register('sleep', 'Sleep', () => {
     const p = game.player;
     const ci = comfortAt(game, p.tileX, p.tileY, p.z);
+    // Words, not CDDA's raw "comfort 0" (docs/ADAPTATION.md).
+    const st = sleepSpotText(ci.comfort, ci.on, p.sleepinessDescription());
     openMenu({
       title: 'Sleep',
       entries: [
-        { label: c('c_white', 'Go to sleep') + ` ${c(ci.comfort > 0 ? 'c_green' : 'c_light_red', `(${ci.on}, comfort ${ci.comfort})`)}`, value: 'sleep', hotkey: 'y' },
+        { label: c('c_white', 'Go to sleep') + ` ${c(st.good ? 'c_green' : 'c_light_red', `(${st.spot})`)}${st.note ? `\n  ${c('c_light_gray', st.note)}` : ''}`, value: 'sleep', hotkey: 'y' },
         { label: c('c_white', 'Never mind'), value: 'no', hotkey: 'n' },
       ],
       onSelect: (v) => void (v === 'sleep' && goToSleep(game)),

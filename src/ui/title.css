@@ -5,19 +5,19 @@
 #ui .main-menu.tt-center, #ui .main-menu.tt-side {
   pointer-events: auto;
   font-family: 'Terminus', 'Unifont', 'DejaVu Sans Mono', monospace;
-  --tt-fs: max(calc(var(--fs, 16px) * 1.5), 2.6vh);
+  --tt-fs: max(calc(var(--fs, 16px) * 1.6), 3vh);
   --tt-u: var(--u, 2px);
   color: var(--p-text, #d8d2c4);
 }
-#ui .main-menu.tt-center { background: radial-gradient(ellipse at 50% 45%, rgba(0,0,0,.55) 0%, rgba(0,0,0,.75) 60%, rgba(0,0,0,.85) 100%); }
-#ui .main-menu.tt-side { background: linear-gradient(90deg, rgba(0,0,0,.88) 0%, rgba(0,0,0,.78) 34%, rgba(0,0,0,.15) 62%, rgba(0,0,0,.35) 100%); }
+#ui .screen.main-menu.tt-center { background: radial-gradient(ellipse at 50% 45%, rgba(0,0,0,.55) 0%, rgba(0,0,0,.75) 60%, rgba(0,0,0,.85) 100%); }
+#ui .screen.main-menu.tt-side { background: linear-gradient(90deg, rgba(0,0,0,.9) 0%, rgba(0,0,0,.8) 36%, rgba(0,0,0,.2) 60%, rgba(0,0,0,.3) 100%); }
 
 #ui .main-menu .tt-wrap {
   position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
   gap: 2vh; padding: 3vh 16px;
 }
 #ui .main-menu .tt-col {
-  position: absolute; left: max(4vw, 16px); top: 0; bottom: 0; width: min(46ch, 40vw, calc(100vw - 32px));
+  position: absolute; left: max(5vw, 32px); top: 0; bottom: 0; width: min(max(46ch, 30vw), 40vw, calc(100vw - 48px));
   display: flex; flex-direction: column; justify-content: center; gap: 2vh;
 }
 #ui .main-menu .tt-logo { display: flex; justify-content: center; }
@@ -27,8 +27,8 @@
 #ui .main-menu .tt-banner { text-align: center; text-shadow: 1px 1px 0 #000; white-space: pre-line; }
 #ui .main-menu.tt-side .tt-banner { text-align: left; }
 
-#ui .main-menu .tt-stack { display: flex; flex-direction: column; gap: calc(var(--tt-u) * 3); width: min(34ch, 100%); }
-#ui .main-menu.tt-center .tt-stack { width: min(40ch, calc(100vw - 32px)); }
+#ui .main-menu .tt-stack { display: flex; flex-direction: column; gap: calc(var(--tt-u) * 3); width: 100%; }
+#ui .main-menu.tt-center .tt-stack { width: min(max(52ch, 30vw), calc(100vw - 32px)); }
 #ui .main-menu .tt-row { display: flex; flex-wrap: wrap; justify-content: center; gap: calc(var(--tt-u) * 3); }
 
 #ui .main-menu .tt-btn {
@@ -76,3 +76,7 @@
   #ui .main-menu .tt-col { width: calc(100vw - 32px); left: 16px; }
   #ui .main-menu.tt-side .tt-tip { display: none; }
 }
+
+/* While the title is up, the world's floating UI (loot "?" markers, pile labels) would draw over
+   it: #ui2 sits above #ui. */
+body.title-open #ui2 .ui2-layer-world, body.title-open #ui2 .ui2-layer-hud { visibility: hidden; }

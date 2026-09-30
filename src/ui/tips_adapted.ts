@@ -167,7 +167,7 @@ export function adaptedTips(bnTips: readonly string[], keyLabel: (id: string) =>
     if (KEEP.has(t)) out.push(t);
     else if (t in REVIEW && REVIEW[t] !== null) out.push(REVIEW[t]!);
   }
-  for (const t of PORT_TIPS) out.push(t.replace(/\{key:([a-z_0-9]+)\}/g, (_m, id: string) => keyLabel(id)));
+  for (const t of PORT_TIPS) out.push(t.replace(/\{key:([a-z_0-9]+)\}/g, (_m, id: string) => `[${keyLabel(id)}]`));
   return out;
 }
 
@@ -181,4 +181,17 @@ export function registerTipsOption(): void {
     change: () => setTipsMode(tipsMode() === 'original' ? 'adapted' : 'original'),
     desc: 'Tip of the day: rewritten for this game (default), or the full list from Cataclysm: Bright Nights, including tips about features this version does not have.',
   });
+}
+
+// ------------------------------------------------------------------ sleep menu wording
+
+/**
+ * The sleep menu entry in words: CDDA's "(wooden floor, comfort 0)" is a raw rating a newcomer
+ * can't read. Say how the spot feels, what would be better, and whether you'll drop off at all.
+ */
+export function sleepSpotText(comfort: number, on: string, sleepiness: string): { spot: string; good: boolean; note: string } {
+  const feel = comfort <= -999 ? "you can't sleep here" : comfort < 0 ? 'uncomfortable' : comfort < 3 ? 'hard' : comfort < 5 ? 'okay' : comfort < 10 ? 'comfortable' : 'very comfortable';
+  const better = comfort < 3 && comfort > -999 ? ': a bed or sleeping bag would help' : '';
+  const note = sleepiness ? '' : "You aren't tired yet: you may just lie awake.";
+  return { spot: `${on}, ${feel}${better}`, good: comfort >= 3, note };
 }

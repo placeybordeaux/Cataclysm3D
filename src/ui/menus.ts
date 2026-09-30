@@ -55,6 +55,7 @@ export function showMainMenu(ctx: UiContext, hud: Hud): Promise<void> {
     const el = document.createElement('div');
     el.className = 'screen dim main-menu';
     root.appendChild(el);
+    document.body.classList.add('title-open');
     registerLogoOption();
     registerTitleLayoutOption(() => el.isConnected && render());
     // Drawn once per size; render() re-creates the markup around it.
@@ -86,6 +87,7 @@ export function showMainMenu(ctx: UiContext, hud: Hud): Promise<void> {
       window.removeEventListener('resize', onResize);
       release();
       el.remove();
+      document.body.classList.remove('title-open');
       p.yaw = saved.yaw;
       p.pitch = saved.pitch;
       game.paused = false;

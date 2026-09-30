@@ -107,7 +107,7 @@ export function installActivityRing(game: Game, lastMessage: () => string | null
       flashUntil = now + 1800;
       el.dataset.state = 'stopped';
       title.textContent = lastMessage() ?? `Stopped ${prev.spec.name}`;
-      hint.textContent = prev.spec.kind === 'sleep' ? '' : 'press the key again and stand still to retry';
+      hint.textContent = ringText(prev).hint === 'move to stop' ? '' : 'press the key again and stand still to retry';
       fill.style.strokeDashoffset = `${(CIRC * (1 - prev.fraction)).toFixed(2)}`;
       lastKey = '';
     }
