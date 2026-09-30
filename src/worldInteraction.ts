@@ -17,6 +17,7 @@ import { toggleLight, playerLightState } from './game/lightitems';
 import { lightAt, playerCanSee, naturalLight, sunAltitude, tooDarkReason } from './game/vision';
 import { installWorldFx } from './render/worldFx';
 import { openMenu, openWindow, colorize, c } from './ui/framework';
+import { worldContextProviders } from './ui2/world';
 
 // Wires the world-interaction systems (sound, vision, examine, bashing, z-levels, fields,
 // wait/sleep, weather, light items, traps) into the game, keys, UI and window.cdda.
@@ -51,6 +52,19 @@ export function installWorldInteraction(game: Game, renderer: Renderer, api: Deb
         },
       });
     },
+  });
+
+  // The context menu (`o`, or right-click with a free cursor) lists the same tile actions `e`
+  // offers: a curtained window's curtains/window/peek/tear-down, a door, a lock to pick. Items
+  // and containers have their own entry (ui2/bn "Look inside") and "Look at" describes, so the
+  // pickup/describe entries are left out here.
+  worldContextProviders.push((t) => {
+    if ((t.kind !== 'terrain' && t.kind !== 'furniture') || t.z !== game.player.z) return [];
+    const pl = game.player;
+    const near = Math.max(Math.abs(t.x - pl.tileX), Math.abs(t.y - pl.tileY)) <= 1;
+    return interactionsAt(game, t.x, t.y, t.z)
+      .filter((i) => i.id !== 'pickup' && i.id !== 'describe')
+      .map((i) => ({ label: i.label, disabled: near ? undefined : 'Step closer', action: i.run }));
   });
 
   game.keys.register('interact', 'Examine / open / close / use', () => void interact(game));
