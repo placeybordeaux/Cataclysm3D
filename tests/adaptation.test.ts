@@ -11,7 +11,7 @@ import { expandItemGroup } from '../src/data/itemgroups';
 import { adaptEatRows, eatLabel } from '../src/ui2/bn/eat_rows';
 import { tirednessText } from '../src/ui/rest_ui';
 import { defLight, itemLight } from '../src/game/vision';
-import { EFFECTS_SHOWN_AS_NEEDS, needStates, type NeedSource } from '../src/ui/hud_logic';
+import { EFFECTS_SHOWN_AS_NEEDS, needStates, runDay, type NeedSource } from '../src/ui/hud_logic';
 import { ringText } from '../src/ui/activity_ring';
 
 const bnTips: string[] = JSON.parse(readFileSync(new URL('../public/data/ui.json', import.meta.url), 'utf8')).tips;
@@ -118,6 +118,15 @@ describe('eat picker: one row per thing, in words', () => {
     ]);
     expect(rows.map((r) => r.row)).toEqual(['bottle', 'jerky']);
     expect(rows[1].label).toBe('meat jerky · 3 servings');
+  });
+});
+
+describe('day counter', () => {
+  it('turns over at midnight, like the clock', () => {
+    const start = 8 * 3600;
+    expect(runDay(start, start)).toBe(1);
+    expect(runDay(23.9 * 3600, start)).toBe(1);
+    expect(runDay(86400 + 5.5 * 3600, start)).toBe(2);
   });
 });
 

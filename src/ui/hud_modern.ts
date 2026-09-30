@@ -30,7 +30,7 @@ import { logLine, type MessageLog } from './format';
 import { omtLabel, playerOmt, type UiContext } from './context';
 import { activityBarEnabled } from './activity_ring';
 import {
-  EFFECTS_SHOWN_AS_NEEDS, bearing, CARDINALS, dangerLevel, feedAlpha, lightLabel, messageTone, needStates, partTone, relativeAngle, stripPos,
+  EFFECTS_SHOWN_AS_NEEDS, runDay, bearing, CARDINALS, dangerLevel, feedAlpha, lightLabel, messageTone, needStates, partTone, relativeAngle, stripPos,
   type NeedState, type PartTone,
 } from './hud_logic';
 import { BODY_H, BODY_W, PART_BOX, paintBody, pixelIcon, type BodyKey } from './pixelart';
@@ -464,7 +464,7 @@ export class ModernHud {
     // The real sun, not 06–20: "Wait until dusk" ended at 18:43 under a sun icon (docs/ADAPTATION.md).
     const day = isDay(clk);
     const hh = String(Math.floor(hour)).padStart(2, '0'), mm = String(Math.floor((hour % 1) * 60)).padStart(2, '0');
-    const dayN = Math.floor((clk.seconds - g.stats.startSeconds) / 86400) + 1;
+    const dayN = runDay(clk.seconds, g.stats.startSeconds);
     const w = g.weather;
     const wk = this.ctx.renderer.weather?.kind ?? 'clear';
     const wIcon = wk === 'snow' ? 'snow' : wk === 'rain' || wk === 'storm' ? 'rain' : w && /cloud|overcast|fog|mist/.test(w.id) ? 'cloud' : day ? 'sun' : 'moon';
