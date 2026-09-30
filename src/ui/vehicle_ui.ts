@@ -9,7 +9,8 @@ import { registerOption } from './options';
 import type { MonsterSystem } from '../game/monai';
 import { interactOverrides } from '../game/interact';
 import type { Renderer } from '../render/renderer';
-import { VehicleRenderer } from '../render/vehicleMesh';
+import { VEHICLE_LOOKS, VehicleRenderer } from '../render/vehicleMesh';
+import { VEHICLE_WIDTHS } from '../render/vehicleLayout';
 import { LEVEL_HEIGHT } from '../world/coords';
 import type { UiContext } from './context';
 import { c, cssColor, getUiRoot, openMenu, openWindow, type MenuEntry } from './framework';
@@ -428,7 +429,35 @@ export async function installVehicles(game: Game, renderer: Renderer, api?: Debu
   // NPCs (installed after us: the NPC hooks look game.npcs up on each call).
   const ms = (game as unknown as { monsters?: MonsterSystem }).monsters;
   vs.creatureHooks = composeCreatureHooks([...(ms ? [monsterCreatureHooks(ms)] : []), npcCreatureHooks(game, vs)]);
-  new VehicleRenderer(renderer, game, vs);
+  const vr = new VehicleRenderer(renderer, game, vs);
+  registerOption({
+    name: 'Vehicle look',
+    value: () => (vr.look === 'model' ? 'modelled bodies' : 'part blocks'),
+    change: () => {
+      vr.look = VEHICLE_LOOKS[(VEHICLE_LOOKS.indexOf(vr.look) + 1) % VEHICLE_LOOKS.length];
+    },
+    desc: 'Modelled bodies (default): every car, truck, bus and bike is drawn as one shaped vehicle. Part blocks: the older look, one block per vehicle part (the grid Cataclysm uses). Also ?vehicles=model|parts.',
+  });
+  registerOption({
+    name: 'Vehicle width',
+    value: () => (vr.width === 'real' ? 'true to life' : 'fill the tiles'),
+    change: () => {
+      vr.width = VEHICLE_WIDTHS[(VEHICLE_WIDTHS.indexOf(vr.width) + 1) % VEHICLE_WIDTHS.length];
+    },
+    desc: "Modelled bodies only. True to life (default): cars are drawn car-shaped, narrower than the tiles they block, so you stop a little short of the paint. Fill the tiles: bodies widen to the footprint Cataclysm uses for collision; chunkier, but you touch what you see. Also ?vehiclewidth=real|fill.",
+  });
+  if (api) {
+    /** Body width mode for the model look ('real' | 'fill'); no argument = current. */
+    api.vehicleWidth = (w?: 'real' | 'fill') => {
+      if (w) vr.width = w;
+      return vr.width;
+    };
+    /** Switch the vehicle renderer ('model' | 'parts'); no argument = current. */
+    api.vehicleLook = (look?: 'model' | 'parts') => {
+      if (look) vr.look = look;
+      return vr.look;
+    };
+  }
 
   const needDriving = (fn: (v: Vehicle) => void) => () => {
     const v = vs.driving;

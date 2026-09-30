@@ -278,6 +278,13 @@ tests/               vitest unit tests (pure logic, no DOM/WebGL)
   nose, low dark cowl/dash, thin A-pillars, faint glass (0.14), painted panels mid-tone with
   darker tops (`panelTop`) so sunlit cars don't read as white slabs; BN wheel sizes are cm.
   Headlights: a spot aimed ~30 m out plus four light-map beam lights out to ~30 m.
+- Model look (default since wave 3, docs/VEHICLES.md; `?vehicles=model|parts`, Options >
+  Vehicle look, `cdda.vehicleLook()`): `vehicleLayout.ts` classifies the grid (style, livery,
+  sections, wheels, doors; width squeezed, seats keep their tiles via `zOf`),
+  `vehicleModel.ts` builds a profile-lofted body with cut-out windows / arches / open doors,
+  `vehicleSkin.ts` paints a 32 texel/m skin (in `vehicleSkinWorker.ts`), `vehicleBikes.ts`
+  and `vehicleFrame.ts` cover bikes and odd grids, `vehicleGeom.ts` holds shared helpers.
+  VehicleRenderer keeps the parts renderer as the `parts` look.
 ### NPCs, dialogue, trade, missions (src/game, wired by src/npcs.ts `installNpcs`)
 - Data: `public/data/npcs.json` (`npm run extract:npcs`, tools/extract/npcs.ts): npc templates,
   npc_class, talk_topic (merged like CDDA: responses append across definitions), mission_definition,
