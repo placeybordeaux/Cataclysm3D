@@ -4,6 +4,7 @@
 // screen on that place, the hotbar (live in gameplay: 1…0 use what's bound), timed actions
 // and the liquid menu. Options > "Inventory screens" switches back to the v1 lists.
 
+import { adaptEatRows } from './eat_rows';
 import type { Game } from '../../game/game';
 import type { UiContext } from '../../ui/context';
 import type { DebugApi } from '../../debug';
@@ -107,7 +108,18 @@ export function installBnInventory(game: Game, ctx: UiContext, api: DebugApi, ca
     let total = 0;
     let exact: { view: ItemView; loc: string } | null = null;
     for (const a of model.all()) {
-      if (!model.onBody(a.loc) || a.view.typeId !== typeId) continue;
+      if (!model.onBody(a.loc)) continue;
+      // The exact item even when a use_action transformed it (smartphone → "smartphone -
+      // Flashlight"): the slot read "0 left" in red while the phone lit the room.
+      // (or, after a reload when refs are new, the "on" type whose revert_to is the bound one).
+      const turnedOn = (a.item.def as { revert_to?: string }).revert_to === typeId;
+      if ((ref && a.view.id === ref && a.view.typeId !== typeId) || (turnedOn && a.view.typeId !== typeId)) {
+        if (ref && a.view.id === ref) exact = { view: a.view, loc: a.loc };
+        else byType ??= { view: a.view, loc: a.loc };
+        total += a.view.count;
+        continue;
+      }
+      if (a.view.typeId !== typeId) continue;
       total += a.view.count;
       if (ref && a.view.id === ref) exact = { view: a.view, loc: a.loc };
       byType ??= { view: a.view, loc: a.loc };
@@ -245,11 +257,12 @@ export function installBnInventory(game: Game, ctx: UiContext, api: DebugApi, ca
     const a = model.actions(r.view, r.loc).find((m) => 'label' in m && label.test(m.label));
     if (a && 'action' in a && a.action) void a.action();
   };
-  const picker = (id: string, name: string, title: string, none: string, label: RegExp, filter: (v: ItemView, loc: string, it: Item) => boolean = () => true, rank?: (it: Item) => number) =>
+  const picker = (id: string, name: string, title: string, none: string, label: RegExp, filter: (v: ItemView, loc: string, it: Item) => boolean = () => true, rank?: (it: Item) => number, adapt?: (rows: PickRow[]) => PickRow[]) =>
     reg(id, name, () => {
       let rows = rowsFor((v, loc, it) => (filter(v, loc, it) ? actionRow(label)(v, loc) : null), actionTime(label)).filter((r) => !r.disabled || model.onBody(r.loc));
       // Carried first, then by how good it is for this (the best weapon on top for z).
       if (rank) rows = rows.map((r) => ({ r, k: (model.onBody(r.loc) ? 1e6 : 0) + rank(model.itemOf(r.view.id)!) })).sort((a, b) => b.k - a.k).map((x) => x.r);
+      if (adapt) rows = adapt(rows);
       openPicker(model, {
         title, none, onNone: (msg) => game.message(msg, 'c_light_gray'), closeKeys: game.keys.keysFor(id),
         rows,
@@ -260,7 +273,10 @@ export function installBnInventory(game: Game, ctx: UiContext, api: DebugApi, ca
   picker('wield', 'Wield item', 'Wield what?', 'You have nothing to wield.', /^Wield$/, (_v, loc, it) => loc !== 'hands' && loc !== 'worn' && !it.isLiquid() && !it.isArmor(), meleeScore);
   picker('wear', 'Wear item', 'Wear what?', 'You have nothing to wear.', /^Wear$/);
   picker('takeoff', 'Take off worn item', 'Take off what?', 'You are not wearing anything.', /^Take off$/);
-  picker('eat', 'Eat / drink', 'Eat or drink what?', 'You have nothing to consume.', /^(Eat|Drink)$/, undefined, (it) => (it.goesBad() ? 1 + it.relativeRot() * 10 : 0));
+  // One row per thing you'd drink, in words (eat_rows.ts: no bottle + its water twice, no "(2/2)").
+  const adaptEat = (rows: PickRow[]) =>
+    adaptEatRows(rows.map((row) => ({ row, item: model.itemOf(row.view.id)!, host: model.hostOf(row.loc) }))).map(({ row, label }) => ({ ...row, label }));
+  picker('eat', 'Eat / drink', 'Eat or drink what?', 'You have nothing to consume.', /^(Eat|Drink)$/, undefined, (it) => (it.goesBad() ? 1 + it.relativeRot() * 10 : 0), adaptEat);
   picker('unload', 'Unload / empty item', 'Unload what?', 'You have nothing to unload.', /^(Unload|Empty|Pour out)/, (_v, loc) => model.onBody(loc));
   reg('apply', 'Activate / apply item', () => {
     openPicker(model, {

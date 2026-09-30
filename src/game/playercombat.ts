@@ -21,7 +21,7 @@ import { FEEL, arcFor, defenseOf, hitStopSeconds, missReason, sweptArcTarget, sw
 import { moveWithCollision } from './physics';
 import { projectileHit } from './projectile';
 import {
-  aimDirection, aimHooks, AimSway, BODY_HEIGHT, Breath, bowPerfect, describeHit, freeAim, hitDamageMul, rhythmWindow, swayAmplitude, timingGames, weakSpotChance,
+  aimDirection, aimHooks, AimSway, basisDirection, yawPitch, type Vec3, BODY_HEIGHT, Breath, bowPerfect, describeHit, freeAim, hitDamageMul, rhythmWindow, swayAmplitude, timingGames, weakSpotChance,
   type HitZone,
 } from './aimmodel';
 import { raycastTiles } from './raycast';
@@ -123,8 +123,9 @@ export interface Flight {
 export interface AimHit {
   x: number;
   y: number;
-  /** Height above the shooter's floor (m) and horizontal distance (m) where it ended. */
+  /** Height above the shooter's floor (m), absolute height, and horizontal distance (m) from the survivor where it ended. */
   h: number;
+  hAbs: number;
   dist: number;
   hit: Monster | null;
   /** Plan distance from the body's axis as a share of its radius (0 = dead centre). */
@@ -427,39 +428,82 @@ export class PlayerCombat implements GameSystem {
     return typeof performance !== 'undefined' ? performance.now() : 0;
   }
 
-  /**
-   * The reticle's ray (free aim): the first monster body it enters (a cylinder of the body's
-   * visible height, aimmodel.aimHooks.body), else the first solid, the floor, or `range` (m, in
-   * plan). Walls, furniture and floors come from the tile raycast; see-through tiles let rounds
-   * through, as castRay does.
-   */
-  castAim(yaw: number, pitch: number, range: number, skip?: (m: Monster) => boolean): AimHit {
+  /** The survivor's eye (absolute metres; x east, y south, h up). */
+  private eye(): Vec3 {
     const p = this.game.player;
-    const eye = p.crouching ? 1.0 : 1.6;
+    return { x: p.x, y: p.y, h: p.z * LEVEL_HEIGHT + (p.crouching ? 1.0 : 1.6) };
+  }
+
+  /**
+   * Where a free-aim shot leaves from and toward: the reticle's ray through the drawn camera
+   * (aimHooks.view: exact, including camera shake and the pixel-snapped rotation). Over the
+   * shoulder the camera isn't at the eye, so the round leaves the eye toward whatever the
+   * camera's ray reaches (the point under the crosshair). Without a renderer (tests, the sim,
+   * top-down view): from the eye along the view plus the aim offset.
+   */
+  aimRay(off: { x: number; y: number; rx: number; ry: number }, range: number): { o: Vec3; yaw: number; pitch: number } {
+    const p = this.game.player;
+    const v = aimHooks.view?.() ?? null;
+    if (!v) return { o: this.eye(), ...aimDirection(p.yaw, p.pitch, off.x, off.y) };
+    const cam = yawPitch(basisDirection(v, off.rx, off.ry));
+    if (!v.third) return { o: v.o, ...cam };
+    const far = this.castAim(cam.yaw, cam.pitch, range * 1.6 + 4, undefined, v.o);
+    const d = { x: far.x - v.eye.x, y: far.y - v.eye.y, h: far.hAbs - v.eye.h };
+    if (Math.hypot(d.x, d.y, d.h) < 0.6) return { o: v.eye, ...cam };
+    return { o: v.eye, ...yawPitch(d) };
+  }
+
+  /**
+   * The reticle's ray (free aim) from `origin` (default the eye): the first monster body it
+   * enters, else the first solid, the floor, or `range` (m, in plan, from the origin). Bodies are
+   * the drawn 3D models when there are any (aimHooks.pick: exact part boxes, so a dog's head is
+   * where it's drawn), else a column of the body's height (aimHooks.body) zoned by height. Walls,
+   * furniture and floors come from the tile raycast; see-through tiles let rounds through, as
+   * castRay does.
+   */
+  castAim(yaw: number, pitch: number, range: number, skip?: (m: Monster) => boolean, origin: Vec3 = this.eye()): AimHit {
+    const p = this.game.player;
+    const o = origin;
     const hx = Math.sin(yaw), hy = -Math.cos(yaw);
     const cp = Math.max(0.02, Math.cos(pitch));
     const slope = Math.tan(pitch);
-    const tile = raycastTiles(this.game.map, { x: p.x, y: p.y, h: p.z * LEVEL_HEIGHT + eye }, { x: hx * cp, y: hy * cp, h: Math.sin(pitch) }, { maxDist: range / cp + 0.5, throughTransparent: true });
+    const dir: Vec3 = { x: hx * cp, y: hy * cp, h: Math.sin(pitch) };
+    const tile = raycastTiles(this.game.map, o, dir, { maxDist: range / cp + 0.5, throughTransparent: true });
     let limit = range, stop: AimHit['stop'] = 'range';
     if (tile && tile.dist * cp < limit) {
       limit = tile.dist * cp;
       stop = tile.kind === 'floor' ? 'floor' : 'wall';
     }
-    let best: Monster | null = null, bestS = limit, bestPerp = 1, bestFrac = 0;
+    const pick = aimHooks.pick;
+    let best: Monster | null = null, bestS = limit, bestPerp = 1, bestFrac = 0, bestZone: HitZone = 'torso';
     for (const m of this.sys.active) {
       if (m.dead || m.z !== p.z || skip?.(m)) continue;
-      const ox = m.x - p.x, oy = m.y - p.y;
+      const ox = m.x - o.x, oy = m.y - o.y;
       const t = ox * hx + oy * hy;
-      // A little wider than the collision circle: arms and shoulders are drawn past it.
+      // A little wider than the collision circle (shoulders); models get room for outflung limbs.
       const R = m.radius * 1.1;
-      if (t <= 0 || t - R > bestS) continue;
+      const reach = pick ? Math.max(R, m.radius * 2.5, 1) : R;
+      if (t <= 0 || t - reach > bestS) continue;
       const perp = Math.abs(ox * hy - oy * hx);
+      if (perp > reach) continue;
+      const model = pick?.(m, o, dir);
+      if (model === null) continue;
+      if (model) {
+        const s = model.t * cp;
+        if (s <= 0.05 || s >= bestS) continue;
+        best = m;
+        bestS = s;
+        bestPerp = 0;
+        bestZone = model.zone;
+        continue;
+      }
       if (perp > R) continue;
       const half = Math.sqrt(R * R - perp * perp);
       const body = aimHooks.body?.(m, t) ?? { height: BODY_HEIGHT[m.size] ?? 1.7, lift: 0 };
       // The stretch of the chord through the body's column where the ray is between its feet and top.
       let s0 = Math.max(0.05, t - half), s1 = t + half;
-      const lo = body.lift - eye, hi = body.lift + body.height - eye;
+      const foot = m.z * LEVEL_HEIGHT + body.lift;
+      const lo = foot - o.h, hi = foot + body.height - o.h;
       if (Math.abs(slope) < 1e-9) {
         if (lo > 0 || hi < 0) continue;
       } else {
@@ -472,12 +516,14 @@ export class PlayerCombat implements GameSystem {
       best = m;
       bestS = s0;
       bestPerp = perp / R;
-      bestFrac = Math.max(0, Math.min(1, (eye + slope * s0 - body.lift) / body.height));
+      bestFrac = Math.max(0, Math.min(1, (o.h + slope * s0 - foot) / body.height));
+      bestZone = aimHooks.hitZone(m, bestFrac);
     }
     const s = best ? bestS : limit;
+    const x = o.x + hx * s, y = o.y + hy * s, hAbs = o.h + slope * s;
     return {
-      x: p.x + hx * s, y: p.y + hy * s, h: eye + slope * s, dist: s, hit: best, missedBy: best ? bestPerp : 1, hFrac: bestFrac,
-      zone: best ? aimHooks.hitZone(best, bestFrac) : 'torso', stop: best ? null : stop,
+      x, y, h: hAbs - p.z * LEVEL_HEIGHT, hAbs, dist: Math.hypot(x - p.x, y - p.y), hit: best, missedBy: best ? bestPerp : 1, hFrac: bestFrac,
+      zone: best ? bestZone : 'torso', stop: best ? null : stop,
     };
   }
 
@@ -1006,7 +1052,8 @@ export class PlayerCombat implements GameSystem {
     const p = game.player;
     const rng = this.sys.rng;
     const off = this.aim.shotOffset(this.nowMs());
-    const dir = aimDirection(p.yaw, p.pitch, off.x, off.y);
+    const ray = this.aimRay(off, range);
+    const dir = { yaw: ray.yaw, pitch: ray.pitch };
     this.aim.kick((shot.addedRecoil ?? 0) * kickScale(cls), rng.next() * 2 - 1);
     // Timing: a breath held into its steady flash, or a perfect active reload banked for this shot.
     const skill = this.aimSkill(gun);
@@ -1014,12 +1061,12 @@ export class PlayerCombat implements GameSystem {
     this.perfectNext = false;
     if (fliesVisibly(cls)) {
       const meant = this.rangedTarget(range * 1.6);
-      const along = this.castAim(dir.yaw, dir.pitch, range * 1.6);
+      const along = this.castAim(dir.yaw, dir.pitch, range * 1.6, undefined, ray.o);
       this.launch(gun, cls, shot, ammo, dir.yaw, range, meant, spread, { pitch: dir.pitch, aimDist: along.hit ? Math.hypot(along.hit.x - p.x, along.hit.y - p.y) : along.dist, perfect });
       return shot;
     }
     const pellets = shot.pellets ?? 1;
-    const hit = this.castAim(dir.yaw, dir.pitch, range);
+    const hit = this.castAim(dir.yaw, dir.pitch, range, undefined, ray.o);
     const npcHit = this.npcShot?.(dir.yaw, hit.dist, shot);
     if (npcHit) {
       this.tracers.push({ x0: p.x, y0: p.y, x1: npcHit.x, y1: npcHit.y, z: p.z, t: 0.08 });
@@ -1044,8 +1091,8 @@ export class PlayerCombat implements GameSystem {
     const q = hitDamageMul({ zone: 'torso', graze: false, weakSpot: false, perfect, skill });
     for (let i = 0; i < pellets; i++) {
       const a = pelletAngle(shot.shotSpreadMoa ?? 0, rng), phi = rng.next() * Math.PI * 2;
-      const d2 = aimDirection(p.yaw, p.pitch, off.x + a * Math.cos(phi), off.y + a * Math.sin(phi));
-      const h = this.castAim(d2.yaw, d2.pitch, range);
+      const d2 = aimDirection(dir.yaw, dir.pitch, a * Math.cos(phi), a * Math.sin(phi));
+      const h = this.castAim(d2.yaw, d2.pitch, range, undefined, ray.o);
       if (i < 12) this.tracers.push({ x0: p.x, y0: p.y, x1: h.x, y1: h.y, z: p.z, t: 0.06 });
       if (!h.hit) continue;
       const zoneMul = h.zone === 'head' ? FEEL.aimHeadMul : h.zone === 'legs' ? FEEL.aimLegMul : 1;
@@ -1354,11 +1401,33 @@ export class PlayerCombat implements GameSystem {
     }
     const end = Math.min(s1, ground);
     const wall = this.wallAlong(f, s0, end);
-    let hitM: Monster | null = null, hitS = Infinity, hitPerp = 0;
+    let hitM: Monster | null = null, hitS = Infinity, hitPerp = 0, hitZone: HitZone | undefined;
+    const pick = f.free ? aimHooks.pick : null;
+    // This step of the arc as a straight segment (≤ 2 m), for the exact test against drawn models.
+    const segH = arcHeight(s0, f.arc), segSlope = (arcHeight(end, f.arc) - segH) / Math.max(1e-3, end - s0);
+    const segN = Math.hypot(1, segSlope);
+    const segO: Vec3 = { x: f.x0 + f.dx * s0, y: f.y0 + f.dy * s0, h: f.z * LEVEL_HEIGHT + segH };
+    const segD: Vec3 = { x: f.dx / segN, y: f.dy / segN, h: segSlope / segN };
     for (const m of this.sys.active) {
       if (m.dead || m.z !== f.z || f.passed.has(m)) continue;
       const ox = m.x - f.x0, oy = m.y - f.y0;
       const t = ox * f.dx + oy * f.dy;
+      if (pick) {
+        const reach = Math.max(m.radius * 2.5, 1);
+        if (t + reach > s0 && t - reach <= end && Math.abs(ox * f.dy - oy * f.dx) <= reach) {
+          const r = pick(m, segO, segD);
+          if (r === null) continue;
+          if (r) {
+            const sh = s0 + r.t / segN;
+            if (sh > end || sh > f.range || sh >= hitS || sh >= wall) continue;
+            hitM = m;
+            hitS = sh;
+            hitPerp = 0;
+            hitZone = r.zone;
+            continue;
+          }
+        } else continue;
+      }
       if (t <= s0 || t > end || t > f.range || t >= hitS || t >= wall) continue;
       const perp = Math.abs(ox * f.dy - oy * f.dx);
       if (perp > m.radius * (f.free ? 1.1 : 1)) continue;
@@ -1373,10 +1442,11 @@ export class PlayerCombat implements GameSystem {
       hitM = m;
       hitS = t;
       hitPerp = perp;
+      hitZone = undefined;
     }
     if (hitM) {
       this.placeFlight(f, hitS);
-      if (!this.flightHits(f, hitM, hitPerp)) f.passed.add(hitM);
+      if (!this.flightHits(f, hitM, hitPerp, hitZone)) f.passed.add(hitM);
       return;
     }
     // Past what it was aimed at without touching it: say why now, not when it lands. (Where the
@@ -1431,11 +1501,11 @@ export class PlayerCombat implements GameSystem {
    * arrow's speed (a slow projectile is easier to dodge). Returns false when it was dodged and
    * flies on; true when it struck (it then embeds, drops at the monster's feet, or broke).
    */
-  private flightHits(f: Flight, m: Monster, perp: number): boolean {
+  private flightHits(f: Flight, m: Monster, perp: number, zone?: HitZone): boolean {
     const game = this.game;
     const p = game.player;
     const rng = this.sys.rng;
-    if (f.free) return this.flightHitsFree(f, m, perp);
+    if (f.free) return this.flightHitsFree(f, m, perp, zone);
     const skill = p.getSkill(String(f.gun.def.skill ?? 'gun'));
     const speed = (Number(f.ammo?.speed) || 100) + (Number(f.gun.def.speed) || 0);
     const r = projectileHit(
@@ -1469,11 +1539,11 @@ export class PlayerCombat implements GameSystem {
   }
 
   /** Free aim: an arrow reaching a body strikes it where it arrives (height -> zone); no dice. */
-  private flightHitsFree(f: Flight, m: Monster, perp: number): boolean {
+  private flightHitsFree(f: Flight, m: Monster, perp: number, zone?: HitZone): boolean {
     const body = aimHooks.body?.(m, Math.hypot(m.x - f.x0, m.y - f.y0)) ?? { height: BODY_HEIGHT[m.size] ?? 1.7, lift: 0 };
     const hFrac = Math.max(0, Math.min(1, (f.h - body.lift) / body.height));
     sfx.arrowHit('flesh', m);
-    const r = this.freeHit(m, f.shot.damage, { zone: aimHooks.hitZone(m, hFrac), missedBy: perp / (m.radius * 1.1), perfect: !!f.perfect, name: defName(f.ammo), cls: f.cls, gun: f.gun });
+    const r = this.freeHit(m, f.shot.damage, { zone: zone ?? aimHooks.hitZone(m, hFrac), missedBy: perp / (m.radius * 1.1), perfect: !!f.perfect, name: defName(f.ammo), cls: f.cls, gun: f.gun });
     f.explained = true;
     this.ammoEffectsAt(f.shot, m.x, m.y, m, r.total);
     return this.flightStruck(f, m, r.dealt);

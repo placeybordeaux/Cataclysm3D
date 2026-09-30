@@ -35,6 +35,8 @@ export const shared = {
   uRimColor: { value: new THREE.Color(0, 0, 0) },
   uBump: { value: 0 },
   uSpriteRound: { value: 0 },
+  /** Normal curvature across billboard quads (formLight.ts spriteCurve; 0 = flat). */
+  uSpriteCurve: { value: 0 },
   /** Interior bounce light colour (look `bounce`); black = off. */
   uBounce: { value: new THREE.Color(0, 0, 0) },
   /** Pitched roofs (cut >= 1000 + level) vanish while the player is on/above that level. */
@@ -325,6 +327,31 @@ export function worldMaterials(page: THREE.Texture): { mat: THREE.MeshLambertMat
   return m;
 }
 
+/**
+ * World material for a vehicle body skin (vehicleModel.ts): the chunk look (banded
+ * lighting, light map, outlines) but double-sided, because a body is a thin shell you also
+ * see from inside the cabin. Inner faces are darkened so door cards and the headliner read
+ * as interior, not as a mirrored copy of the paint. Not cached: one per vehicle skin, the
+ * caller disposes it with the texture.
+ */
+export function vehicleBodyMaterials(page: THREE.Texture): { mat: THREE.MeshLambertMaterial; depth: THREE.MeshDepthMaterial } {
+  enableMips(page);
+  const mat = new THREE.MeshLambertMaterial({ map: page, vertexColors: true, side: THREE.DoubleSide });
+  mat.onBeforeCompile = (shader) => {
+    patchWorldVertex(shader, true);
+    patchBandedLambert(shader, 'world');
+    addNormalOutput(shader, true, 1);
+    // Inside faces: a neutral trim grey keeping only a hint of the skin's pattern.
+    shader.fragmentShader = shader.fragmentShader.replace('#include <color_fragment>', '#include <color_fragment>\n  if (!gl_FrontFacing) diffuseColor.rgb = vec3(0.19, 0.19, 0.2) * (0.8 + 0.5 * dot(diffuseColor.rgb, vec3(0.3, 0.59, 0.11)));');
+  };
+  mat.customProgramCacheKey = () => 'cdda-vehicle-body';
+  (mat.userData as any).mrt = true;
+  const depth = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking, side: THREE.DoubleSide });
+  depth.onBeforeCompile = (shader) => patchWorldVertex(shader);
+  depth.customProgramCacheKey = () => 'cdda-vehicle-depth';
+  return { mat, depth };
+}
+
 // --- sprite (billboard) material -----------------------------------------------------
 
 const SPRITE_VERT_PARS = /* glsl */ `
@@ -337,6 +364,7 @@ varying vec4 vFlash;
 varying float vSkyVis;
 varying float vOpacity;
 varying vec4 vLmS;
+varying vec2 vQuad;
 uniform float uSpriteTilt;
 `;
 // Cylindrical billboard: the quad's right axis is the camera's right projected onto the
@@ -356,6 +384,7 @@ vec3 camUp = vec3(viewMatrix[0][1], viewMatrix[1][1], viewMatrix[2][1]);
 vec3 upAxis = normalize(mix(vec3(0.0, 1.0, 0.0), camUp, uSpriteTilt));
 vec3 transformed = camRight * position.x * instSize.x + upAxis * (position.y * instSize.y + instSize.z);
 vInstRect = instRect;
+vQuad = position.xy;
 vFlash = instFlash;
 vSkyVis = instSize.w;
 vOpacity = instExtra.x;
@@ -374,6 +403,8 @@ varying float vSkyVis;
 varying float vOpacity;
 #define SKYVIS vSkyVis
 uniform float uSpriteRound;
+uniform float uSpriteCurve;
+varying vec2 vQuad;
 vec2 gSprN = vec2(0.0);
 float spriteBayer(vec2 p) {
   ivec2 i = ivec2(mod(p, 4.0));
@@ -414,9 +445,14 @@ export function spriteMaterial(page: THREE.Texture): THREE.MeshLambertMaterial {
       .replace('#include <beginnormal_vertex>', SPRITE_BEGIN_NORMAL)
       .replace('#include <begin_vertex>', SPRITE_BEGIN);
     shader.uniforms.uSpriteRound = shared.uSpriteRound;
+    shader.uniforms.uSpriteCurve = shared.uSpriteCurve;
     shader.fragmentShader = SPRITE_FRAG_PARS + shader.fragmentShader
       .replace('#include <map_fragment>', SPRITE_MAP)
-      .replace('#include <normal_fragment_maps>', '#include <normal_fragment_maps>\nif (dot(gSprN, gSprN) > 0.0) normal = normalize(normal + vec3(gSprN.x, 0.0, 0.0) + (viewMatrix * vec4(0.0, gSprN.y, 0.0, 0.0)).xyz);')
+      .replace('#include <normal_fragment_maps>', '#include <normal_fragment_maps>\nif (dot(gSprN, gSprN) > 0.0) normal = normalize(normal + vec3(gSprN.x, 0.0, 0.0) + (viewMatrix * vec4(0.0, gSprN.y, 0.0, 0.0)).xyz);\n' +
+        // A billboard as a curved card (a tree crown, a body): the normal swings sideways
+        // across its width and up toward its top, so a side-lit sprite has a lit and a
+        // shadow half instead of one flat tone (quad x -0.5..0.5, y 0..1)
+        'if (uSpriteCurve > 0.0) normal = normalize(normal + (vec3(vQuad.x * 2.0, 0.0, 0.0) + (viewMatrix * vec4(0.0, (vQuad.y - 0.45) * 0.9, 0.0, 0.0)).xyz) * uSpriteCurve);')
       .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance += vFlash.rgb * vFlash.a * 0.8;');
     patchBandedLambert(shader, 'sprite');
     addNormalOutput(shader, true, 1);

@@ -140,8 +140,8 @@ describe('aim state and ray direction', () => {
     const a = new AimSway();
     a.update(1 / 30, 0.02, 0);
     a.markShown(0.011, -0.004, 1000);
-    expect(a.shotOffset(1020)).toEqual({ x: 0.011, y: -0.004 });
-    expect(a.shotOffset(1200)).toEqual(a.offset(0));
+    expect(a.shotOffset(1020)).toMatchObject({ x: 0.011, y: -0.004, drawn: true });
+    expect(a.shotOffset(1200)).toMatchObject({ ...a.offset(0), drawn: false });
     const lo = new AimSway(), hi = new AimSway();
     for (const s of [lo, hi]) s.kick(600, 0);
     expect(lo.kickY).toBeGreaterThan(0.01);

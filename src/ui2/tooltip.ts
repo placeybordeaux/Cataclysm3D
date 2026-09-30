@@ -91,6 +91,13 @@ if (typeof document !== 'undefined') {
   // A click starts something (drag, menu, use): get out of the way.
   document.addEventListener('pointerdown', () => hideTooltip(), true);
   document.addEventListener('wheel', () => hideTooltip(), { passive: true, capture: true });
+  // Playtest: a component's card from the crafting window stayed on screen through the whole
+  // craft (Enter closed the window, the mouse was captured, no pointermove ever hid it). Any
+  // key that closes or confirms, and grabbing the mouse for play, take the tooltip with them.
+  document.addEventListener('pointerlockchange', () => hideTooltip());
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === 'Escape' || e.key === 'Backspace') hideTooltip();
+  }, true);
 }
 
 // --- item card -----------------------------------------------------------------------------

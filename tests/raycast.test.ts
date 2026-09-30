@@ -113,6 +113,21 @@ describe('raycastTiles', () => {
     expect([hit!.x, hit!.y]).toEqual([-4, -4]);
   });
 
+  it('standing over a climbable counter, looking down into it picks that counter, not the next one', () => {
+    const COUNTER = { id: 'f_cupboard', name: 'cupboard', symbol: '#', color: 'c_white', move_cost_mod: 1, flags: ['CONTAINER', 'MOUNTABLE', 'FLAT_SURF'] } as FurnitureDef;
+    const m = world({}, { '5,5,0': COUNTER, '6,5,0': COUNTER });
+    // player's centre 0.3 m into the counter at (5,5), near its east edge, looking north-east and down
+    const down = raycastTiles(m, { x: 5.8, y: 5.7, h: EYE }, dirFromYawPitch(Math.PI / 5, -1.2));
+    expect(down?.kind).toBe('furniture');
+    expect([down!.x, down!.y]).toEqual([5, 5]);
+    // looking level over it still reaches past (the origin is not a wall)
+    expect(raycastTiles(m, { x: 5.8, y: 5.7, h: EYE }, dirFromYawPitch(Math.PI / 2, 0), { maxDist: 5 })).toBeNull();
+    // other passable furniture in the origin cell (flowers, rugs) is still skipped
+    const FLOWER = { id: 'f_dandelion', name: 'dandelion', symbol: '"', color: 'c_yellow', move_cost_mod: 0, flags: ['TRANSPARENT'] } as FurnitureDef;
+    const m2 = world({}, { '5,5,0': FLOWER });
+    expect(raycastTiles(m2, { x: 5.5, y: 5.5, h: EYE }, dirFromYawPitch(0, -1.3))?.kind).toBe('floor');
+  });
+
   it('returns null past maxDist and rejects a zero direction', () => {
     const m = world({ '0,-50,0': WALL });
     expect(raycastTiles(m, { x: 0.5, y: 0.5, h: EYE }, dirFromYawPitch(0, 0), { maxDist: 10 })).toBeNull();

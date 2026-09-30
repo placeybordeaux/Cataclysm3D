@@ -25,3 +25,6 @@
   .act-ring .act-title { font-size: 22px; }
   .act-ring .act-hint { font-size: 18px; }
 }
+
+/* While the ring shows, the interaction prompt under the crosshair would overlap it. */
+body.act-ring-on #ui .hud-prompt { visibility: hidden; }

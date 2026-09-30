@@ -20,23 +20,26 @@ Switch with **Options > Visual style** (persisted), `?look=<name>`, or `cdda.set
 the grey fog wall, a far ground ring to the horizon, lighter aerial perspective, overcast weather,
 no washed-out sky around the sun. **Options > Distance haze** (`clear` default / `light` /
 `legacy` = the old fog; `?haze=`, `cdda.setHaze`, `cdda.hazeTweak`) and **Options > Draw
-distance** (96 / 120 / 168 m). Details, before/after shots and perf: [READABILITY.md](READABILITY.md).
+distance** (96 / 120 / 168 m). Round 2 added **Options > Form lighting** (`toon` default /
+`bold` / `soft` = v2; `?form=`, `cdda.setForm`, `cdda.formTweak`), stable cutout mips on grass and
+leaf cards, and a screen-round sun. Details, before/after shots and perf: [READABILITY.md](READABILITY.md).
 The shots below were regenerated with it.
 
 ## Comparison (1920x1080, RTX 5080)
 
 Columns: classic, crisp, voxel, terrain, full. Regenerate with
 `~/claude-stuff/bin/heavy --mem 2 --kind gpu -- nix-shell --run "npx tsx tools/look-shots.ts --gpu classic crisp voxel terrain full"`
-(viewpoints in `tools/look-views.js`, seed 1).
+(viewpoints in `tools/look-views.js`, seed 1). Shots are JPEG q85 at half size (960x540,
+~100 KB each; dithered pixel art compresses badly as PNG); `--png` gives full-size PNGs.
 
 | view | classic | crisp | voxel | terrain | full |
 | --- | --- | --- | --- | --- | --- |
-| shelter | ![](screenshots/looks/classic_shelter.png) | ![](screenshots/looks/crisp_shelter.png) | ![](screenshots/looks/voxel_shelter.png) | ![](screenshots/looks/terrain_shelter.png) | ![](screenshots/looks/full_shelter.png) |
-| street | ![](screenshots/looks/classic_street.png) | ![](screenshots/looks/crisp_street.png) | ![](screenshots/looks/voxel_street.png) | ![](screenshots/looks/terrain_street.png) | ![](screenshots/looks/full_street.png) |
-| house | ![](screenshots/looks/classic_house.png) | ![](screenshots/looks/crisp_house.png) | ![](screenshots/looks/voxel_house.png) | ![](screenshots/looks/terrain_house.png) | ![](screenshots/looks/full_house.png) |
-| forest | ![](screenshots/looks/classic_forest.png) | ![](screenshots/looks/crisp_forest.png) | ![](screenshots/looks/voxel_forest.png) | ![](screenshots/looks/terrain_forest.png) | ![](screenshots/looks/full_forest.png) |
-| night + flashlight | ![](screenshots/looks/classic_night.png) | ![](screenshots/looks/crisp_night.png) | ![](screenshots/looks/voxel_night.png) | ![](screenshots/looks/terrain_night.png) | ![](screenshots/looks/full_night.png) |
-| top-down | ![](screenshots/looks/classic_top.png) | ![](screenshots/looks/crisp_top.png) | ![](screenshots/looks/voxel_top.png) | ![](screenshots/looks/terrain_top.png) | ![](screenshots/looks/full_top.png) |
+| shelter | ![](screenshots/looks/classic_shelter.jpg) | ![](screenshots/looks/crisp_shelter.jpg) | ![](screenshots/looks/voxel_shelter.jpg) | ![](screenshots/looks/terrain_shelter.jpg) | ![](screenshots/looks/full_shelter.jpg) |
+| street | ![](screenshots/looks/classic_street.jpg) | ![](screenshots/looks/crisp_street.jpg) | ![](screenshots/looks/voxel_street.jpg) | ![](screenshots/looks/terrain_street.jpg) | ![](screenshots/looks/full_street.jpg) |
+| house | ![](screenshots/looks/classic_house.jpg) | ![](screenshots/looks/crisp_house.jpg) | ![](screenshots/looks/voxel_house.jpg) | ![](screenshots/looks/terrain_house.jpg) | ![](screenshots/looks/full_house.jpg) |
+| forest | ![](screenshots/looks/classic_forest.jpg) | ![](screenshots/looks/crisp_forest.jpg) | ![](screenshots/looks/voxel_forest.jpg) | ![](screenshots/looks/terrain_forest.jpg) | ![](screenshots/looks/full_forest.jpg) |
+| night + flashlight | ![](screenshots/looks/classic_night.jpg) | ![](screenshots/looks/crisp_night.jpg) | ![](screenshots/looks/voxel_night.jpg) | ![](screenshots/looks/terrain_night.jpg) | ![](screenshots/looks/full_night.jpg) |
+| top-down | ![](screenshots/looks/classic_top.jpg) | ![](screenshots/looks/crisp_top.jpg) | ![](screenshots/looks/voxel_top.jpg) | ![](screenshots/looks/terrain_top.jpg) | ![](screenshots/looks/full_top.jpg) |
 
 ## Performance (RTX 5080, `--bench`)
 
@@ -105,6 +108,9 @@ normal/height page for atlas sprites instead of luminance bump.
 - Image: `post.ts` (SSAO, bloom, aerial perspective, skyline haze, debug views),
   `grading.ts lowResSize` (targetHeight 0 = auto), `materials.ts` (rim, bounce, bump,
   sprite rounding), `lights.ts` (fill light, `setShadow`).
+- Furniture, fixtures, doors, windows and ground items are modelled (low-poly, 32 texels/m
+  pixel textures from the sprite palette) by default in the volume looks; the voxel versions
+  stay one switch away (Options > Furniture, `?furniture=voxel`): see `docs/FURNITURE.md`.
 - Volumes: `voxel.ts` (sprite inflation/extrusion), `trees.ts` (3D trees), `arch.ts`
   (frames, casings, bands, fences, hipped roofs), wired in `chunkMesh.ts`.
 - Ground: `ground.ts` (relief + curbs, `renderer.groundAt` for sprites and the eye),

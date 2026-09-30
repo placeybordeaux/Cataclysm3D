@@ -186,6 +186,34 @@ export class GeomBuilder {
   }
 
   /**
+   * Raw quads with a per-vertex atlas rect (modelled furniture: every face has its own
+   * frame): `rect` = 4 floats per vertex [u0, v0, du, dv], uv 0..1 across that frame.
+   * Optional placement: uniform scale `s`, rotation about Y by `yaw`, then translation.
+   */
+  quadsRect(pos: ArrayLike<number>, nrm: ArrayLike<number>, uv: ArrayLike<number>, rect: ArrayLike<number>, shade: ArrayLike<number>,
+    xf?: { x: number; y: number; z: number; yaw: number; s?: number }, cut = 0): void {
+    const nv = pos.length / 3;
+    const c = xf ? Math.cos(xf.yaw) : 1, sn = xf ? Math.sin(xf.yaw) : 0, k = xf?.s ?? 1;
+    const tx = xf?.x ?? 0, ty = xf?.y ?? 0, tz = xf?.z ?? 0;
+    for (let q = 0; q < nv; q += 4) {
+      const base = this.vertexCount;
+      for (let i = q; i < q + 4; i++) {
+        const x = pos[i * 3] * k, z = pos[i * 3 + 2] * k, nx = nrm[i * 3], nz = nrm[i * 3 + 2];
+        this.pos.push3(tx + x * c + z * sn, ty + pos[i * 3 + 1] * k, tz - x * sn + z * c);
+        this.nrm.push3(nx * c + nz * sn, nrm[i * 3 + 1], -nx * sn + nz * c);
+        this.uv.push2(uv[i * 2], uv[i * 2 + 1]);
+        this.rect.push4(rect[i * 4], rect[i * 4 + 1], rect[i * 4 + 2], rect[i * 4 + 3]);
+        const s = shade[i];
+        this.col.push3(s, s, s);
+        this.cut.push1(cut);
+        this.sky.push1(this.skyVis);
+      }
+      this.idx.push3(base, base + 1, base + 2);
+      this.idx.push3(base, base + 2, base + 3);
+    }
+  }
+
+  /**
    * Axis-aligned box in three.js coordinates. `faces` bitmask: 1=+x 2=-x 4=+y 8=-y 16=+z
    * 32=-z. `side`/`top` frames texture vertical and horizontal faces. `vBase` is the world
    * Y that maps to v=0 so stacked boxes continue the texture pattern.

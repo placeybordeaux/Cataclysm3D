@@ -263,8 +263,23 @@ range` is the ranged table (in COMBAT_FEEL.md). Melee on open ground, 10 seeds, 
 
 First fight (long stick, 30 seeds): Accessible 6.4 → 5.2 s (misses 2 → 0, glancing blows
 instead); Classic 9.8 → 7.8 s. Free aim makes first fights a little shorter; no death-rate change
-in the duels. Classic keeps a larger sway (`aimSwayScale` 1.25) and a lower skill-0 damage
-(×0.65) so its ranged kill times stay close to BN's dice.
+in the duels. Classic keeps a larger sway (`aimSwayScale` 2.0, Accessible 1.6) and a lower
+skill-0 damage (×0.65, Accessible ×0.75) so its ranged kill times stay close to BN's dice.
+
+Ranged, one zombie walking in from 20 m (`--scenario range`, 20 seeds, a player who fires 0.18 s
+after seeing the crosshair on it), time to kill in s, skill 0 → skill 5:
+
+| weapon | Accessible dice | Accessible free aim | Classic dice | Classic free aim |
+|---|---|---|---|---|
+| pistol | 7.4 → 5.2 | 6.1 → 4.8 | 7.3 → 5.5 | 8.2 → 5.4 |
+| rifle | 4.5 → 2.6 | 3.0 → 1.5 | 5.4 → 3.0 | 5.3 → 1.6 |
+| shotgun | 8.7 → 3.4 | 5.3 → 2.4 | 9.1 → 6.0 | 9.6 → 3.4 |
+| longbow | 8.4 → 5.2 | 9.3 → 4.5 | 9.0 → 7.5 | 9.2 → 5.3 |
+
+Free aim makes skill matter more steeply than dice (skill 5 halves the kill time) while skill 0
+stays about as slow as BN's dice: the weave costs aiming time, and a slower player misses (at a
+0.3 s reaction, skill-0 rifle hits 67 %, shotgun 80 %, longbow 52 %). Full table with hit rates
+and aiming time in docs/COMBAT_FEEL.md. Noise is unchanged; rounds per kill drop (fewer misses).
 
 #### First night in the shelter
 

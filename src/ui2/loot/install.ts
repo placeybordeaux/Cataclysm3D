@@ -76,9 +76,21 @@ export function installLoot(game: Game, renderer: Renderer, api: DebugApi, inv: 
   let flash: { text: string; tone: 'good' | 'warn' | 'bad'; until: number } | null = null;
   const gameplay = () => {
     const p = game.player;
-    return game.input.locked && !game.input.captured && surfacesOpen() === 0 && !p.dead && !p.isAsleep() && !game.vehicles?.driving && renderer.cameraMode !== 'top';
+    // Not during a timed job (crafting at the locker): the card covered the job's progress bar,
+    // and taking something would only cancel the job.
+    return game.input.locked && !game.input.captured && surfacesOpen() === 0 && !p.dead && !p.isAsleep() && !game.vehicles?.driving && renderer.cameraMode !== 'top' && !game.activities.current;
   };
   const k = (id: string) => game.keys.label(id);
+  // Adaptation (docs/ADAPTATION.md): a survivor who is cold and looking at a jacket in a
+  // cupboard should be able to put it on right there, not take it, open the inventory and find
+  // the double-click. The wear key does that while the card is up, and the card says so when
+  // you're cold.
+  const COLD = new Set(['Chilly', 'Very cold!', 'Freezing!']);
+  const wearAction = (r: QuickSpec['rows'][number] | undefined, key: string) => {
+    if (!r) return null;
+    const a = model.actions(r, key).find((m) => 'label' in m && m.label === 'Wear');
+    return a && 'action' in a && a.action && !a.disabled ? a.action : null;
+  };
   const update = () => {
     const now = performance.now();
     const t = gameplay() ? lootTargetAt(game) : null;
@@ -127,9 +139,13 @@ export function installLoot(game: Game, renderer: Renderer, api: DebugApi, inv: 
         else if (tot.weight[0] + adds.weight > tot.weight[1]) warn = { text: 'Heavy: taking it overburdens you', tone: 'warn' };
       } else if (tot.volume[0] >= tot.volume[1] && tot.volume[1] > 0) warn = { text: 'Bag full', tone: 'bad' };
     }
+    const canWear = quick && !!wearAction(rows[sel], t.key);
+    if (canWear && !warn && COLD.has(game.player.bodyTempDescription()) && (model.itemOf(rows[sel].id)?.def.warmth ?? 0) > 0) {
+      warn = { text: `You're cold: [${k('wear')}] puts it on`, tone: 'warn' };
+    }
     const keys: QuickSpec['keys'] = quick
       ? rows.length
-        ? [[k('interact'), 'Take'], [k('reload'), 'Take all'], [k('inventory2'), 'Open'], ...(rows.length > 1 ? [['wheel', 'Select'] as [string, string]] : [])]
+        ? [[k('interact'), 'Take'], ...(canWear ? [[k('wear'), 'Wear'] as [string, string]] : []), [k('reload'), 'Take all'], [k('inventory2'), 'Open'], ...(rows.length > 1 ? [['wheel', 'Select'] as [string, string]] : [])]
         : [[k('inventory2'), 'Open']]
       : style === 'area'
         ? [[k('pickup'), 'Loot everything nearby'], [k('inventory2'), 'Open']]
@@ -206,6 +222,15 @@ export function installLoot(game: Game, renderer: Renderer, api: DebugApi, inv: 
     if (e.repeat) return false;
     if (quick && rows.length && game.keys.keysFor('reload').includes(e.key)) {
       takeAllHere();
+      return true;
+    }
+    if (quick && rows.length && game.keys.keysFor('wear').includes(e.key)) {
+      const r = rows[sel], act = wearAction(r, t.key);
+      if (!act) return false;
+      void act();
+      refreshAll();
+      // Wearing is a timed action with its own bar; this only acknowledges the key.
+      setFlash(`Putting on the ${r.name.replace(/^\d+ /, '')}…`, 'good');
       return true;
     }
     if (game.keys.keysFor('inventory2').includes(e.key) || game.keys.keysFor('inventory').includes(e.key)) {

@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { LEVEL_HEIGHT } from '../world/coords';
+import { form } from './formLight';
 
 // All scene lights. The *number* of each light type is fixed at construction so shader
 // programs never recompile at runtime.
@@ -318,8 +319,9 @@ export class LightManager {
     this.time += dt;
     // Directional: sun by day, moon by night (one light so the shader never changes).
     const dir = sky.moonLit ? sky.moonDir : sky.sunDir;
+    const fs = form.s;
     this.sun.color.copy(sky.sunColor);
-    this.sun.intensity = sky.sunIntensity;
+    this.sun.intensity = sky.sunIntensity * fs.key;
     // Shadow camera follows the focus, snapped to whole shadow texels along the light's
     // axes so shadow edges don't crawl as the player moves (pixel stabilization).
     const ext = this.shadowExtent;
@@ -336,12 +338,18 @@ export class LightManager {
     this.sun.target.updateMatrixWorld();
     this.hemi.color.copy(sky.hemiSky);
     this.hemi.groundColor.copy(sky.hemiGround);
-    this.hemi.intensity = sky.hemiIntensity;
-    // fill: from the opposite azimuth, fairly high, sky-coloured
+    this.hemi.intensity = sky.hemiIntensity * fs.ambient;
+    // fill, sky-coloured (formLight.ts): 'opposite' = from the anti-sun azimuth, fairly high
+    // (v2); 'side' = from 90 degrees to the sun, always the same world side so shading
+    // doesn't change as the camera turns, lower so it models walls rather than roofs
     this.fill.color.copy(sky.hemiSky);
-    this.fill.intensity = this.fillK * sky.hemiIntensity * 0.9;
+    this.fill.intensity = Math.max(this.fillK, fs.fillMin) * sky.hemiIntensity * 0.9;
     this.fill.target.position.copy(snapped);
-    this.fill.position.set(snapped.x - dir.x * 40, snapped.y + 60, snapped.z - dir.z * 40);
+    if (fs.fillMode === 'side') {
+      const hl = Math.hypot(dir.x, dir.z) || 1;
+      const e = (fs.fillElev * Math.PI) / 180;
+      this.fill.position.set(snapped.x - (dir.z / hl) * Math.cos(e) * 60, snapped.y + Math.sin(e) * 60, snapped.z + (dir.x / hl) * Math.cos(e) * 60);
+    } else this.fill.position.set(snapped.x - dir.x * 40, snapped.y + 60, snapped.z - dir.z * 40);
     this.fill.target.updateMatrixWorld();
 
     // Pick nearest point sources.

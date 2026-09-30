@@ -10,9 +10,13 @@ import { cddaColor } from './colors';
 import { GeomBuilder } from './geometry';
 import type { LightHandle } from './lights';
 import { headingFromFacing, eyeHeightFor, type DriveView } from './driveCamera';
-import { patchNormalOutput, worldMaterials } from './materials';
+import { patchNormalOutput, vehicleBodyMaterials, worldMaterials } from './materials';
 import type { Renderer } from './renderer';
 import type { TileFrame } from './textureSource';
+import { Batches, hash, partSwatchPage } from './vehicleGeom';
+import { buildVehicleModel } from './vehicleModel';
+import { setVehicleWidth, vehicleWidth, type VehicleWidth } from './vehicleLayout';
+import { liveryBody } from './vehicleSkin';
 
 // 3D meshes for vehicles, built from their parts mount by mount, as low-poly boxes wearing
 // small procedural pixel-art swatches (UltiCa's vp_* sprites are 3/4-view drawings for a
@@ -55,12 +59,6 @@ const BEAM: [number, number, number][] = [[3, 1.1, 7], [10, 1.0, 9], [19, 0.9, 1
 type Swatch = 'panel' | 'panelTop' | 'dark' | 'tire' | 'fabric' | 'light' | 'floor' | 'hub' | 'grille';
 const SWATCHES: Swatch[] = ['panel', 'panelTop', 'dark', 'tire', 'fabric', 'light', 'floor', 'hub', 'grille'];
 const SW = 32;
-
-function hash(x: number, y: number, s: number): number {
-  let h = (x * 374761393 + y * 668265263 + s * 2147483647) | 0;
-  h = Math.imul(h ^ (h >>> 13), 1274126177);
-  return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
-}
 
 /** Grey-scale pixel art (tinted per vertex), one 32x32 swatch per surface kind. */
 function paintSwatch(kind: Swatch, px: (x: number, y: number, v: number) => void): void {
@@ -133,72 +131,6 @@ function swatchPage(): { tex: THREE.Texture; frames: Record<Swatch, TileFrame> }
 }
 
 // --- geometry --------------------------------------------------------------------------
-
-/** Geometry batches keyed by tint so the colour can be baked into vertex colours. */
-class Batches {
-  private map = new Map<number, GeomBuilder>();
-  sky = 1;
-  get(tint: number): GeomBuilder {
-    let g = this.map.get(tint);
-    if (!g) this.map.set(tint, (g = new GeomBuilder()));
-    g.skyVis = this.sky;
-    return g;
-  }
-  build(): THREE.BufferGeometry | null {
-    const parts: THREE.BufferGeometry[] = [];
-    for (const [tint, g] of this.map) {
-      if (!g.vertexCount) continue;
-      const geo = g.build();
-      const col = geo.getAttribute('color') as THREE.BufferAttribute;
-      // Used as a plain multiplier (not sRGB-decoded): the swatches are already dark-ish
-      // and decoding would crush saturated paints to near black under banded lighting.
-      const c = new THREE.Color().setRGB(((tint >> 16) & 255) / 255, ((tint >> 8) & 255) / 255, (tint & 255) / 255, THREE.LinearSRGBColorSpace);
-      for (let i = 0; i < col.count; i++) col.setXYZ(i, col.getX(i) * c.r, col.getY(i) * c.g, col.getZ(i) * c.b);
-      parts.push(geo);
-    }
-    if (!parts.length) return null;
-    const merged = parts.length === 1 ? parts[0] : mergeGeometries(parts);
-    if (parts.length > 1) for (const p of parts) p.dispose();
-    return merged;
-  }
-}
-
-/**
- * Concatenate indexed geometries with identical attribute layouts (GeomBuilder output).
- * Hand-rolled instead of BufferGeometryUtils so no extra three/examples module is pulled
- * into the dev server's dependency pre-bundle.
- */
-function mergeGeometries(geos: THREE.BufferGeometry[]): THREE.BufferGeometry {
-  const out = new THREE.BufferGeometry();
-  const names = Object.keys(geos[0].attributes);
-  let verts = 0, idx = 0;
-  for (const g of geos) {
-    verts += g.getAttribute('position').count;
-    idx += g.getIndex()!.count;
-  }
-  for (const n of names) {
-    const size = geos[0].getAttribute(n).itemSize;
-    const arr = new Float32Array(verts * size);
-    let o = 0;
-    for (const g of geos) {
-      const a = g.getAttribute(n).array as Float32Array;
-      arr.set(a, o);
-      o += a.length;
-    }
-    out.setAttribute(n, new THREE.BufferAttribute(arr, size));
-  }
-  const index = verts > 65535 ? new Uint32Array(idx) : new Uint16Array(idx);
-  let io = 0, vo = 0;
-  for (const g of geos) {
-    const ia = g.getIndex()!.array;
-    for (let i = 0; i < ia.length; i++) index[io++] = ia[i] + vo;
-    vo += g.getAttribute('position').count;
-  }
-  out.setIndex(new THREE.BufferAttribute(index, 1));
-  out.computeBoundingSphere();
-  out.computeBoundingBox();
-  return out;
-}
 
 const DIRS = [
   [1, 0], // front (+x)
@@ -518,90 +450,312 @@ function wheel(g: GeomBuilder, x: number, h: number, zc: number, r: number, widt
 
 // --- scene management ------------------------------------------------------------------
 
+/**
+ * Which vehicle renderer draws the world's vehicles: 'model' (vehicleModel.ts: cohesive
+ * low-poly bodies, the default) or 'parts' (this file: one box per part, the v2 look).
+ * `?vehicles=parts|model`, Options -> Vehicle look, `cdda.vehicleLook()`.
+ */
+export type VehicleLook = 'model' | 'parts';
+export const VEHICLE_LOOKS: VehicleLook[] = ['model', 'parts'];
+const LOOK_KEY = 'cdda3d.vehicleLook';
+
+const WIDTH_KEY = 'cdda3d.vehicleWidth';
+
+export function initialVehicleWidth(): VehicleWidth {
+  const q = typeof location !== 'undefined' ? new URLSearchParams(location.search).get('vehiclewidth') : null;
+  if (q) {
+    if (q !== 'real' && q !== 'fill') throw new Error(`?vehiclewidth= must be real or fill, got "${q}"`);
+    return q;
+  }
+  try {
+    const s = localStorage.getItem(WIDTH_KEY);
+    if (s === 'real' || s === 'fill') return s;
+  } catch {
+    // no storage
+  }
+  return 'real';
+}
+
+export function initialVehicleLook(): VehicleLook {
+  const q = typeof location !== 'undefined' ? new URLSearchParams(location.search).get('vehicles') : null;
+  if (q) {
+    if (q !== 'model' && q !== 'parts') throw new Error(`?vehicles= must be model or parts, got "${q}"`);
+    return q;
+  }
+  try {
+    const s = localStorage.getItem(LOOK_KEY);
+    if (s === 'model' || s === 'parts') return s;
+  } catch {
+    // no storage
+  }
+  return 'model';
+}
+
+interface Skin {
+  key: string;
+  tex: THREE.DataTexture;
+  mat: THREE.MeshLambertMaterial;
+  depth: THREE.MeshDepthMaterial;
+}
+
 interface Entry {
+  /** Placed at the vehicle's position / facing every frame. */
   obj: THREE.Group;
-  body: THREE.Mesh | null;
+  /** Lean pivot (bikes on their stand); holds the meshes. */
+  lean: THREE.Group;
+  meshes: THREE.Mesh[];
   roof: THREE.Mesh | null;
-  glass: THREE.Mesh | null;
   lamps: THREE.Mesh | null;
+  tails: THREE.Mesh | null;
+  beacons: THREE.Mesh | null;
+  skin: Skin | null;
+  /** Meshes drawn with the skin (body, roof): they swap from the placeholder when it lands. */
+  skinMeshes: THREE.Mesh[];
+  /** Skin being painted by the worker. */
+  pending: { id: number; key: string } | null;
+  /** Built for the driven vehicle: separate wheel meshes that steer and spin. */
+  driven: boolean;
+  wheels: { mesh: THREE.Mesh; r: number; steer: boolean; spin: number }[];
+  bike: boolean;
   version: number;
   z: number;
+  look: VehicleLook;
+  /** Model look: driver eye above the floor level and lateral seat position (mount y units). */
+  eyeH: number | null;
+  driverZ: number | null;
+  parkedLean: number;
   /** Headlight beam: a few dynamic lights along the cone (they feed the tile light map). */
   beam: LightHandle[];
 }
+
+/** Model builds allowed per frame (ms) once one has been built: spreads pop-in over frames. */
+const BUILD_BUDGET_MS = 4;
 
 export class VehicleRenderer {
   readonly group = new THREE.Group();
   private entries = new Map<Vehicle, Entry>();
   // Faint tint: at 0.32 opacity the windscreen hazed the whole cockpit view grey.
   private glassMat = new THREE.MeshLambertMaterial({ color: 0x7ea4b8, transparent: true, opacity: 0.14, depthWrite: false, side: THREE.DoubleSide });
+  // Model glass: tinted from outside (reads as glass on a car in daylight), nearly clear from
+  // inside so the cockpit view isn't hazed.
+  private glassOut = new THREE.MeshLambertMaterial({ color: 0x3c4c5a, transparent: true, opacity: 0.62, depthWrite: false, side: THREE.FrontSide });
+  private glassIn = new THREE.MeshLambertMaterial({ color: 0x9ab4c4, transparent: true, opacity: 0.1, depthWrite: false, side: THREE.BackSide });
   private lampOn = new THREE.MeshBasicMaterial({ color: 0xfff2c8 });
   private lampOff = new THREE.MeshBasicMaterial({ color: 0x8a8a80 });
+  private tailOn = new THREE.MeshBasicMaterial({ color: 0xff3020 });
+  private tailOff = new THREE.MeshBasicMaterial({ color: 0x5a1410 });
+  private beaconMat = new THREE.MeshBasicMaterial({ vertexColors: true });
   /** One shadowless spot for the nearest vehicle with its headlights on. */
   // Range must stay over materials.ts HEADLIGHT_MIN_RANGE (that's what gives it the road
   // wrap); decay 0.5 keeps the road ~30 m out within a few bands of the road at the bumper.
   readonly headlight = new THREE.SpotLight(0xfff0d4, 0, 80, 0.5, 0.45, 0.5);
   /** Spot intensity: the road reads ~35 m ahead at night. */
   headlightIntensity = 45;
+  private lookMode: VehicleLook = initialVehicleLook();
+  /** Skin painter worker (undefined = not tried yet, null = unavailable: paint inline). */
+  private worker: Worker | null | undefined;
+  private jobId = 0;
+  /** Flat paint-coloured body materials shown until a vehicle's skin arrives. */
+  private placeholders = new Map<number, { tex: THREE.DataTexture; mat: THREE.MeshLambertMaterial; depth: THREE.MeshDepthMaterial }>();
+  /** Mesh build timings (both looks), for the bench tools: `cdda.renderer.vehicleView.buildStats`. */
+  readonly buildStats = { n: 0, totalMs: 0, maxMs: 0 };
 
   constructor(private renderer: Renderer, private game: Game, private system: VehicleSystem) {
     this.group.name = 'vehicles';
-    patchNormalOutput(this.glassMat, false);
-    patchNormalOutput(this.lampOn, false);
-    patchNormalOutput(this.lampOff, false);
+    setVehicleWidth(initialVehicleWidth());
+    for (const m of [this.glassMat, this.glassOut, this.glassIn, this.lampOn, this.lampOff, this.tailOn, this.tailOff, this.beaconMat]) patchNormalOutput(m, false);
     this.headlight.castShadow = false;
     renderer.scene.add(this.group, this.headlight, this.headlight.target);
     renderer.vehicleView = this;
     system.onRemoved.push((v) => this.drop(v));
-    renderer.beforeRender.push(() => this.update());
+    renderer.beforeRender.push((dt) => this.update(dt));
+  }
+
+  get look(): VehicleLook {
+    return this.lookMode;
+  }
+  /** Body width mode (vehicleLayout.ts VehicleWidth); every vehicle rebuilds. */
+  get width(): VehicleWidth {
+    return vehicleWidth();
+  }
+  set width(w: VehicleWidth) {
+    setVehicleWidth(w);
+    try {
+      localStorage.setItem(WIDTH_KEY, w);
+    } catch {
+      // not persisted
+    }
+    for (const v of [...this.entries.keys()]) this.drop(v);
+  }
+  /** Switch renderer; every vehicle rebuilds on the next frame. */
+  set look(l: VehicleLook) {
+    if (!VEHICLE_LOOKS.includes(l)) throw new Error(`unknown vehicle look ${l}`);
+    this.lookMode = l;
+    try {
+      localStorage.setItem(LOOK_KEY, l);
+    } catch {
+      // not persisted
+    }
+    for (const v of [...this.entries.keys()]) this.drop(v);
+  }
+
+  private skinWorker(): Worker | null {
+    if (this.worker !== undefined) return this.worker;
+    try {
+      this.worker = new Worker(new URL('./vehicleSkinWorker.ts', import.meta.url), { type: 'module' });
+      this.worker.onmessage = (ev: MessageEvent<{ id: number; width: number; height: number; data: Uint8Array }>) => this.skinArrived(ev.data);
+      this.worker.onerror = (err) => {
+        // Fail loudly, then keep working: skins get painted inline from here on.
+        console.error('[vehicles] skin worker failed; painting on the main thread', err);
+        this.worker?.terminate();
+        this.worker = null;
+        for (const e of this.entries.values()) e.pending = null;
+        for (const v of this.entries.keys()) v.version++;
+      };
+    } catch (err) {
+      console.error('[vehicles] no skin worker; painting on the main thread', err);
+      this.worker = null;
+    }
+    return this.worker;
+  }
+
+  private skinArrived(msg: { id: number; width: number; height: number; data: Uint8Array }): void {
+    for (const e of this.entries.values()) {
+      if (e.pending?.id !== msg.id) continue;
+      const skin = this.makeSkin(e.pending.key, msg.data, msg.width, msg.height);
+      e.pending = null;
+      e.skin = skin;
+      for (const m of e.skinMeshes) {
+        m.material = skin.mat;
+        m.customDepthMaterial = skin.depth;
+      }
+      return;
+    }
+    // the vehicle was rebuilt or left view meanwhile: nothing to do
+  }
+
+  private makeSkin(key: string, data: Uint8Array, w: number, h: number): Skin {
+    const tex = new THREE.DataTexture(data, w, h, THREE.RGBAFormat);
+    setupPixelTexture(tex);
+    const { mat, depth } = vehicleBodyMaterials(tex);
+    return { key, tex, mat, depth };
+  }
+
+  private placeholder(color: number): { mat: THREE.MeshLambertMaterial; depth: THREE.MeshDepthMaterial } {
+    let p = this.placeholders.get(color);
+    if (!p) {
+      const tex = new THREE.DataTexture(new Uint8Array([(color >> 16) & 255, (color >> 8) & 255, color & 255, 255]), 1, 1, THREE.RGBAFormat);
+      setupPixelTexture(tex);
+      p = { tex, ...vehicleBodyMaterials(tex) };
+      this.placeholders.set(color, p);
+    }
+    return p;
+  }
+
+  private disposeMeshes(e: Entry, keepSkin: Skin | null): void {
+    this.group.remove(e.obj);
+    for (const m of e.meshes) m.geometry.dispose();
+    if (e.skin && e.skin !== keepSkin) {
+      e.skin.tex.dispose();
+      e.skin.mat.dispose();
+      e.skin.depth.dispose();
+    }
   }
 
   private drop(v: Vehicle): void {
     const e = this.entries.get(v);
     if (!e) return;
-    this.group.remove(e.obj);
-    for (const m of [e.body, e.roof, e.glass, e.lamps]) m?.geometry.dispose();
+    this.disposeMeshes(e, null);
     for (const l of e.beam) l.remove();
     this.entries.delete(v);
   }
 
   private build(v: Vehicle, e: Entry | undefined): Entry {
-    if (e) {
-      this.group.remove(e.obj);
-      for (const m of [e.body, e.roof, e.glass, e.lamps]) m?.geometry.dispose();
-    }
     const base = v.z * LEVEL_HEIGHT;
-    const g = buildVehicleGeometry(v, base);
-    const { tex } = swatchPage();
-    const { mat, depth } = worldMaterials(tex);
     const obj = new THREE.Group();
     obj.name = `vehicle:${v.protoId}`;
-    const mk = (geo: THREE.BufferGeometry | null, m: THREE.Material, shadow: boolean) => {
+    const lean = new THREE.Group();
+    const pivot = new THREE.Group();
+    lean.add(pivot);
+    obj.add(lean);
+    const meshes: THREE.Mesh[] = [];
+    const mk = (geo: THREE.BufferGeometry | null, m: THREE.Material, shadow: THREE.MeshDepthMaterial | null) => {
       if (!geo) return null;
       const mesh = new THREE.Mesh(geo, m);
       if (shadow) {
-        mesh.customDepthMaterial = depth;
+        mesh.customDepthMaterial = shadow;
         mesh.castShadow = true;
         mesh.receiveShadow = true;
       }
-      obj.add(mesh);
+      pivot.add(mesh);
+      meshes.push(mesh);
       return mesh;
     };
     const next: Entry = {
-      obj,
-      body: mk(g.body, mat, true),
-      roof: mk(g.roof, mat, true),
-      glass: mk(g.glass, this.glassMat, false),
-      lamps: mk(g.lamps, v.lightsOn ? this.lampOn : this.lampOff, false),
-      version: v.version,
-      z: v.z,
-      beam: e?.beam ?? [],
+      obj, lean, meshes, roof: null, lamps: null, tails: null, beacons: null, skin: null, skinMeshes: [], pending: null,
+      driven: v === this.system.driving, wheels: [], bike: false,
+      version: v.version, z: v.z, look: this.lookMode, eyeH: null, driverZ: null, parkedLean: 0, beam: e?.beam ?? [],
     };
+    const t0 = performance.now();
+    const worker = this.lookMode === 'model' ? this.skinWorker() : null;
+    // A skin already painted (or being painted) for the same content is kept.
+    const haveKey = e?.skin?.key ?? e?.pending?.key;
+    const model = this.lookMode === 'model' ? buildVehicleModel(v, base, { reuseSkinKey: haveKey, deferSkin: !!worker, separateWheels: next.driven }) : null;
+    if (model) {
+      let skin: Skin | null = e?.skin && e.skin.key === model.skinKey ? e.skin : null;
+      if (!skin && model.skin) skin = this.makeSkin(model.skinKey, model.skin.data, model.skin.layout.width, model.skin.layout.height);
+      if (!skin && e?.pending && e.pending.key === model.skinKey) next.pending = e.pending;
+      if (!skin && model.skinJob && worker) {
+        next.pending = { id: ++this.jobId, key: model.skinKey };
+        worker.postMessage({ id: next.pending.id, ...model.skinJob });
+      }
+      if (e) this.disposeMeshes(e, skin);
+      next.skin = skin;
+      const parts = worldMaterials(partSwatchPage().tex);
+      const bodyMat = model.bodyUsesParts ? parts : skin ?? this.placeholder(liveryBody(model.layout, v.paint));
+      const b = mk(model.body, bodyMat.mat, bodyMat.depth);
+      next.roof = mk(model.roof, bodyMat.mat, bodyMat.depth);
+      next.skinMeshes = model.bodyUsesParts ? [] : [b, next.roof].filter((m): m is THREE.Mesh => !!m);
+      mk(model.parts, parts.mat, parts.depth);
+      if (model.glass) {
+        mk(model.glass, this.glassOut, null);
+        mk(model.glass, this.glassIn, null);
+      }
+      next.lamps = mk(model.lamps, v.lightsOn ? this.lampOn : this.lampOff, null);
+      next.tails = mk(model.tails, v.lightsOn ? this.tailOn : this.tailOff, null);
+      next.beacons = mk(model.beacons, this.beaconMat, null);
+      for (const w of model.wheels ?? []) {
+        const mesh = mk(w.geo, parts.mat, parts.depth)!;
+        mesh.position.set(w.x, w.y, w.z);
+        next.wheels.push({ mesh, r: w.r, steer: w.steer, spin: 0 });
+      }
+      next.bike = model.layout.style === 'motorcycle' || model.layout.style === 'bicycle';
+      next.eyeH = model.eyeH;
+      next.driverZ = model.driverZ;
+      next.parkedLean = model.parkedLean;
+      // lean about the ground line under the bike
+      lean.position.set(0, base, model.driverZ ?? 0);
+      pivot.position.set(0, -base, -(model.driverZ ?? 0));
+    } else {
+      if (e) this.disposeMeshes(e, null);
+      const g = buildVehicleGeometry(v, base);
+      const { tex } = swatchPage();
+      const { mat, depth } = worldMaterials(tex);
+      mk(g.body, mat, depth);
+      next.roof = mk(g.roof, mat, depth);
+      mk(g.glass, this.glassMat, null);
+      next.lamps = mk(g.lamps, v.lightsOn ? this.lampOn : this.lampOff, null);
+      next.look = 'parts';
+    }
     this.group.add(obj);
+    const ms = performance.now() - t0;
+    this.buildStats.n++;
+    this.buildStats.totalMs += ms;
+    this.buildStats.maxMs = Math.max(this.buildStats.maxMs, ms);
     return next;
   }
 
-  update(): void {
+  update(dt = 0): void {
     const p = this.game.player;
     const rig = this.renderer.rig;
     const driving = this.system.driving;
@@ -613,10 +767,12 @@ export class VehicleRenderer {
       p.pitch = 0;
     }
     this.lastDriving = driving;
-    rig.drive = driving ? this.driveView(driving) : null;
     const top = this.renderer.cameraMode === 'top';
     let spotFor: Vehicle | null = null, spotD = Infinity;
     const seen = new Set<Vehicle>();
+    const t0 = performance.now();
+    let built = 0;
+    const now = t0 / 1000;
     for (const v of this.system.list) {
       const d = Math.hypot(v.x - p.x, v.y - p.y);
       if (d > VIEW_RANGE || Math.abs(v.z - p.z) > 1) {
@@ -625,15 +781,35 @@ export class VehicleRenderer {
       }
       seen.add(v);
       let e = this.entries.get(v);
-      if (!e || e.version !== v.version || e.z !== v.z) {
-        e = this.build(v, e);
-        this.entries.set(v, e);
+      // Taking or leaving the wheel rebuilds too: the driven vehicle's wheels are separate meshes.
+      const drivenChanged = !!e && e.look === 'model' && e.driven !== (v === driving);
+      if (!e || drivenChanged || e.version !== v.version || e.z !== v.z || (e.look !== this.lookMode && this.lookMode === 'parts')) {
+        // Spread first builds over frames (a town street streams in dozens at once), but
+        // never delay the vehicle being driven or a visible change to an existing one nearby.
+        const urgent = v === driving || (e && d < 20);
+        if (urgent || !built || performance.now() - t0 < BUILD_BUDGET_MS) {
+          e = this.build(v, e);
+          this.entries.set(v, e);
+          built++;
+        }
       }
+      if (!e) continue;
       e.obj.position.set(v.x, 0, v.y);
       e.obj.rotation.y = (-v.facing * Math.PI) / 180;
+      // A parked bike leans left on its stand; ridden it stands up and leans into turns.
+      if (e.parkedLean && v !== driving && Math.abs(v.velocity) < 0.3) e.lean.rotation.x = -e.parkedLean;
+      else e.lean.rotation.x = e.bike ? Math.max(-0.45, Math.min(0.45, v.steer * Math.abs(v.velocity) * 0.12)) : 0;
+      // Front wheels follow the steering; all of them roll with the speed.
+      for (const w of e.wheels) {
+        w.spin -= (v.velocity * dt) / w.r;
+        w.mesh.rotation.set(0, w.steer ? -v.steer : 0, w.spin);
+      }
       // Top-down hides roofs (and anything above your level) so you can see inside.
       if (e.roof) e.roof.visible = !top || v.z < p.z;
       if (e.lamps) e.lamps.material = v.lightsOn ? this.lampOn : this.lampOff;
+      if (e.tails) e.tails.material = v.lightsOn ? this.tailOn : this.tailOff;
+      // Emergency beacons flash while the vehicle's lights are on.
+      if (e.beacons) e.beacons.visible = !v.lightsOn || Math.floor(now * 3 + v.uid) % 2 === 0;
       const lit = v.lightsOn && v.withFlag('CONE_LIGHT', true).length > 0;
       if (lit) {
         const pri = this.system.driving === v ? -1 : d;
@@ -656,6 +832,7 @@ export class VehicleRenderer {
       });
     }
     for (const v of [...this.entries.keys()]) if (!seen.has(v)) this.drop(v);
+    rig.drive = driving ? this.driveView(driving) : null;
 
     const s = this.headlight;
     if (spotFor) {
@@ -687,16 +864,18 @@ export class VehicleRenderer {
     const [cx, cy] = v.mountToWorld((x0 + x1) / 2, (y0 + y1) / 2);
     const length = x1 - x0 + 1, width = y1 - y0 + 1;
     const seat = v.driverSeat() ?? { mx: (x0 + x1) / 2, my: (y0 + y1) / 2 };
+    const e = this.entries.get(v);
     // Eye over the front of the seat, a little ahead of where the head would really be: the
-    // dash and bonnet then drop out of the lower edge instead of filling it.
-    const [ex, ey] = v.mountToWorld(seat.mx + EYE_FORWARD, seat.my);
+    // dash and bonnet then drop out of the lower edge instead of filling it. The model look
+    // squeezes the body's width, so the seat (and eye) sit at its drawn position.
+    const [ex, ey] = v.mountToWorld(seat.mx + EYE_FORWARD, e?.driverZ ?? seat.my);
     const base = v.z * LEVEL_HEIGHT;
     const t = this.game.map.terAt(Math.floor(cx), Math.floor(cy), v.z);
     const rough = hasFlag(t, 'ROAD') || hasFlag(t, 'FLAT') ? 0 : 1;
     const out = this.view ?? ({} as DriveView);
     Object.assign(out, {
       x: cx, y: cy, base, heading: headingFromFacing(v.facing),
-      eyeX: ex, eyeY: ey, eyeH: base + this.eyeHeight(v, length),
+      eyeX: ex, eyeY: ey, eyeH: base + (e?.eyeH ?? this.eyeHeight(v, length)),
       length, width, speed: v.velocity, rough,
     });
     this.view = out;
