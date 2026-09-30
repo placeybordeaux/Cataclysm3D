@@ -102,7 +102,7 @@ const esc = (s: string) => s.replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&
 function button(e: TitleEntryView, i: number, withDesc: boolean): string {
   const cls = ['tt-btn', `tt-${e.weight}`, e.selected ? 'sel' : '', e.enabled ? '' : 'off'].filter(Boolean).join(' ');
   const desc = withDesc && e.desc ? `<span class="tt-desc">${esc(e.desc)}</span>` : '';
-  return `<button class="${cls}" data-i="${i}" ${e.enabled ? '' : 'aria-disabled="true"'}><span class="tt-label">${esc(e.label)}</span>${desc}<kbd>${esc(e.key.toUpperCase())}</kbd></button>`;
+  return `<button class="${cls} title-entry" data-i="${i}" data-key="${esc(e.key)}" ${e.enabled ? '' : 'aria-disabled="true"'}><span class="tt-label">${esc(e.label)}</span>${desc}<kbd>${esc(e.key.toUpperCase())}</kbd></button>`;
 }
 
 /** Fill `el` with the button layout; returns the clickable buttons keyed by entry index. */

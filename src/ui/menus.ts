@@ -229,7 +229,7 @@ export function showMainMenu(ctx: UiContext, hud: Hud): Promise<void> {
         const at = Math.max(0, e.label.toLowerCase().indexOf(e.key.toLowerCase()));
         const plain = e.enabled() ? (i === sel ? 'c_white' : 'c_light_gray') : 'c_dark_gray';
         const inner = `${c(plain, e.label.slice(0, at))}${c(e.enabled() ? 'c_light_green' : 'c_dark_gray', e.label[at])}${c(plain, e.label.slice(at + 1))}`;
-        return `<span class="mm-item" data-i="${i}" style="cursor:pointer;padding:0 .6em;${i === sel ? 'background:var(--c-blue)' : ''}">[${inner}]</span>`;
+        return `<span class="mm-item title-entry" data-i="${i}" data-key="${e.key}" style="cursor:pointer;padding:0 .6em;${i === sel ? 'background:var(--c-blue)' : ''}">[${inner}]</span>`;
       }).join('');
       // While a window opened from here is up (Start, New Game), only the logo stays, at the top,
       // clear of the window (QA: the Start window covered it with the menu row peeking out).

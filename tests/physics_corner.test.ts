@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { moveWithCollision } from '../src/game/physics';
 
 const mapWith = (blocked: [number, number][]) =>
-  ({ passable: (x: number, y: number) => !blocked.some(([bx, by]) => bx === x && by === y) }) as never;
+  ({ collideShapes: () => false, shapedTile: () => false, passable: (x: number, y: number) => !blocked.some(([bx, by]) => bx === x && by === y) }) as never;
 
 /** Walk `frames` steps of (dx, dy) from (x, y). */
 function walk(map: never, x: number, y: number, dx: number, dy: number, frames: number): [number, number] {

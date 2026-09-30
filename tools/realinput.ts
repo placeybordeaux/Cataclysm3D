@@ -192,7 +192,9 @@ const scenarios: Scenario[] = [
   ['title', 'title screen → Start (quick start) → typed name → gameplay captures the mouse; first tip shows', async () => {
     let s = await state();
     check('title screen has a free cursor', !s.lock && s.captured, s);
-    const nb = await center('.mm-item[data-i="0"]');
+    // Every title layout (?title=center|side|classic) marks its entries .title-entry[data-key];
+    // 's' is Start whichever layout, and whether or not a save puts Continue first.
+    const nb = await center('.title-entry[data-key="s"]');
     await x.click(nb![0], nb![1]);
     s = await until((t) => t.panels.includes('Start'), 3000);
     check('clicking Start opens the quick start (no character creator)', s.panels.includes('Start') && !s.windows.includes('New Character'), s);
@@ -1359,7 +1361,7 @@ const scenarios: Scenario[] = [
 async function atTitle(): Promise<{ title: boolean; playing: boolean; windows: string[]; panels: string[] }> {
   const s = await state();
   return {
-    title: await js<boolean>(`!!document.querySelector('.mm-item')`),
+    title: await js<boolean>(`!!document.querySelector('.main-menu .title-entry')`),
     playing: await js<boolean>('!!cdda.game?.input.wantLock'),
     windows: s.windows,
     panels: s.panels,
