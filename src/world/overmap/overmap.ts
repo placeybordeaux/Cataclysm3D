@@ -153,18 +153,24 @@ export class Overmap {
     return info;
   }
 
-  /** Cities of every region generated so far plus the regions around (x, y). */
-  citiesNear(x: number, y: number, radiusRegions = 1): City[] {
+  /**
+   * Cities of the regions around (x, y). `generate` false: only regions that already exist
+   * (a region is ~20-50 ms of generation: bookkeeping callers must not force one inside a frame).
+   */
+  citiesNear(x: number, y: number, radiusRegions = 1, generate = true): City[] {
     const rx = Math.floor(x / REGION), ry = Math.floor(y / REGION);
     const out: City[] = [];
     for (let dy = -radiusRegions; dy <= radiusRegions; dy++)
-      for (let dx = -radiusRegions; dx <= radiusRegions; dx++) out.push(...this.region(rx + dx, ry + dy).cities);
+      for (let dx = -radiusRegions; dx <= radiusRegions; dx++) {
+        const r = generate ? this.region(rx + dx, ry + dy) : this.regions.get(`${rx + dx},${ry + dy}`);
+        if (r) out.push(...r.cities);
+      }
     return out;
   }
 
-  closestCity(x: number, y: number, radiusRegions = 1): City | undefined {
+  closestCity(x: number, y: number, radiusRegions = 1, generate = true): City | undefined {
     let best: City | undefined, bd = Infinity;
-    for (const c of this.citiesNear(x, y, radiusRegions)) {
+    for (const c of this.citiesNear(x, y, radiusRegions, generate)) {
       const d = Math.hypot(c.x - x, c.y - y);
       if (d < bd) (bd = d), (best = c);
     }

@@ -32,7 +32,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { summarize, type PerfDump, type PerfSummary } from '../src/perf/analyze';
 import { printReport } from './perf-report';
-import { PERF_PAGE } from './lib/perfRoutes';
+import { PERF_MONITOR, PERF_PAGE } from './lib/perfRoutes';
 
 const argv = process.argv.slice(2);
 const help = () => console.log(readFileSync(new URL(import.meta.url)).toString().split('\n').filter((l) => l.startsWith('//')).map((l) => l.slice(3)).join('\n'));
@@ -51,7 +51,7 @@ interface Route {
   what: string;
   /** where: 'town' (longest straight road through the nearest town), 'rural' (longest straight road
    *  outside towns near the start), 'forest' (through the nearest thick forest) */
-  kind: 'town' | 'city' | 'rural' | 'forest';
+  kind: 'town' | 'city' | 'rural' | 'forest' | 'load' | 'loaddrive' | 'teleport';
   mph: number;
   seconds: number;
 }
@@ -62,13 +62,19 @@ export const ROUTES: Record<string, Route> = {
   city60: { what: 'the same city road at 60 mph', kind: 'city', mph: 60, seconds: 25 },
   forest: { what: 'straight through thick forest at 40 mph (3D trees, flora LOD rings)', kind: 'forest', mph: 40, seconds: 20 },
   rural: { what: 'the longest straight road outside town at 60 mph', kind: 'rural', mph: 60, seconds: 25 },
+  // Loads and teleports (the user's "huge blip" after a hot reload, docs/PERF.md): time from the
+  // game being ready (load) or the jump (teleport) to the player's 3x3 shown (curtain lifts) and
+  // to nothing unbuilt in view, standing still; the longest frames before/after the curtain.
+  load: { what: 'save in the city, reload the page (a hot reload / Load), stand still until everything in view is built', kind: 'load', mph: 0, seconds: 15 },
+  loaddrive: { what: 'the same reload, then drive off at 40 mph the moment the curtain lifts', kind: 'loaddrive', mph: 40, seconds: 15 },
+  teleport: { what: 'jump from the city to Holden (~150 OMTs), stand still until everything in view is built', kind: 'teleport', mph: 0, seconds: 15 },
 };
 
 if (argv.includes('--list')) {
   for (const [k, r] of Object.entries(ROUTES)) console.log(`${k.padEnd(8)} ${r.seconds}s  ${r.what}`);
   process.exit(0);
 }
-const routeNames = opt('--routes', 'town40,town60,city40,city60,forest,rural').split(',');
+const routeNames = opt('--routes', 'town40,town60,city40,city60,forest,rural,teleport,load,loaddrive').split(',');
 for (const r of routeNames) if (!ROUTES[r]) throw new Error(`unknown route ${r} (${Object.keys(ROUTES).join(', ')})`);
 const size = opt('--size', '3440x1304').split('x').map(Number);
 if (size.length !== 2 || size.some((v) => !(v > 0))) throw new Error(`--size ${opt('--size', '')}: expected WxH`);
@@ -86,23 +92,29 @@ const baselinePath = opt('--baseline', browserKind === 'firefox' ? 'tools/perf-b
 // machine's load moves timings by +-30 %), or breaks an absolute limit regardless of baseline.
 export interface Metrics {
   /** longest continuous stretch with an unbuilt chunk in clear view (s) */
-  maxHoleS: number;
+  maxHoleS?: number;
   /** total such time (s) */
-  holeS: number;
+  holeS?: number;
   /** 10th percentile of runway while moving (s of travel before the first unbuilt chunk) */
-  runwayP10: number;
+  runwayP10?: number;
   /** frame interval p99 (ms) */
-  p99: number;
+  p99?: number;
   /** our main-loop p99 (ms) */
-  loopP99: number;
+  loopP99?: number;
   /** longest single uninterrupted meshing step (ms): the time-slicing granularity */
   maxStepMs: number;
   /** mapgen inside frames (ms per second of driving) */
   genSyncMsPerS: number;
+  /** load/teleport routes: ms from ready / the jump to the 3x3 shown, and to nothing unbuilt in view */
+  nearMs?: number;
+  fullMs?: number;
+  /** load/teleport: longest frame after the curtain lifted (until full), and behind it (ms) */
+  maxFrameMs?: number;
+  curtainFrameMs?: number;
 }
 // Absolute limits: an unbuilt chunk may be in clear view for a moment (a side street swinging
 // into the ultrawide view as you enter a city; the stand-in covers it), not for seconds.
-const LIMITS: Partial<Record<keyof Metrics, number>> = { maxHoleS: 2.5, maxStepMs: 50 };
+const LIMITS: Partial<Record<keyof Metrics, number>> = { maxHoleS: 2.5, maxStepMs: 50, nearMs: 2000, fullMs: 10000, maxFrameMs: 250 };
 const DEFAULT_TOL: Record<keyof Metrics, { rel: number; abs: number }> = {
   maxHoleS: { rel: 0.5, abs: 0.3 },
   holeS: { rel: 0.5, abs: 0.5 },
@@ -111,6 +123,10 @@ const DEFAULT_TOL: Record<keyof Metrics, { rel: number; abs: number }> = {
   loopP99: { rel: 0.35, abs: 4 },
   maxStepMs: { rel: 0.5, abs: 8 },
   genSyncMsPerS: { rel: 0.5, abs: 20 },
+  nearMs: { rel: 0.4, abs: 300 },
+  fullMs: { rel: 0.4, abs: 1500 },
+  maxFrameMs: { rel: 0.5, abs: 50 },
+  curtainFrameMs: { rel: 1, abs: 200 },
 };
 interface Baseline {
   note: string;
@@ -134,18 +150,18 @@ function metricsOf(s: PerfSummary, chunkStats: { maxStepMs: number }): Metrics {
 
 function judge(name: string, m: Metrics, base: Baseline | null): string[] {
   const fails: string[] = [];
-  for (const [k, lim] of Object.entries(LIMITS) as [keyof Metrics, number][]) if (m[k] > lim) fails.push(`${name}: ${k} ${m[k]} over the limit ${lim}`);
+  for (const [k, lim] of Object.entries(LIMITS) as [keyof Metrics, number][]) if (m[k] !== undefined && m[k]! > lim) fails.push(`${name}: ${k} ${m[k]} over the limit ${lim}`);
   const b = base?.routes[name];
   if (!b) return fails;
   for (const k of Object.keys(m) as (keyof Metrics)[]) {
     const tol = base!.tolerance[k] ?? DEFAULT_TOL[k];
-    if (b[k] === undefined) continue;
+    if (b[k] === undefined || m[k] === undefined) continue;
     if (k === 'runwayP10') {
       const floor = Math.min(b[k] * (1 - tol.rel), b[k] - tol.abs);
-      if (m[k] < floor) fails.push(`${name}: ${k} ${m[k]} s < ${floor.toFixed(2)} (baseline ${b[k]})`);
+      if (m[k]! < floor) fails.push(`${name}: ${k} ${m[k]} s < ${floor.toFixed(2)} (baseline ${b[k]})`);
     } else {
       const ceil = Math.max(b[k] * (1 + tol.rel), b[k] + tol.abs);
-      if (m[k] > ceil) fails.push(`${name}: ${k} ${m[k]} > ${ceil.toFixed(2)} (baseline ${b[k]})`);
+      if (m[k]! > ceil) fails.push(`${name}: ${k} ${m[k]} > ${ceil.toFixed(2)} (baseline ${b[k]})`);
     }
   }
   return fails;
@@ -155,6 +171,18 @@ if (argv.includes('--dry-run')) {
   for (const r of routeNames) console.log(`would drive ${r} (${ROUTES[r].what}) for ${secondsArg || ROUTES[r].seconds}s at ${size.join('x')} in ${browserKind}${params ? ` with ${params}` : ''}`);
   console.log(`compare with ${baselinePath}${argv.includes('--write-baseline') ? ' and overwrite it' : ''}`);
   process.exit(0);
+}
+
+type Mon = { ready: number | null; near: number | null; full: number | null; maxCurtain: number; maxAfter: number };
+let loadMonitor = false;
+/** Wait for the monitor to see the curtain lift ('near') or everything in view built ('full'). */
+async function waitMon(page: Page, what: 'near' | 'full', maxMs: number): Promise<Mon> {
+  const t0 = Date.now();
+  for (;;) {
+    const m = (await page.evaluate('window.__perfMon')) as Mon;
+    if (m[what] !== null || Date.now() - t0 > maxMs) return m;
+    await new Promise((r) => setTimeout(r, 100));
+  }
 }
 
 async function waitStreamed(page: Page, maxMs: number): Promise<void> {
@@ -200,14 +228,41 @@ try {
   for (const name of routeNames) {
     const r = ROUTES[name];
     const seconds = secondsArg ? Number(secondsArg) : r.seconds;
-    const route = await page.evaluate(`__perfBench.pick(${JSON.stringify(r.kind)})`);
-    await page.evaluate(`__perfBench.place(${JSON.stringify(route)})`);
-    // let the start area stream in completely, then measure from standing start at full speed
-    await waitStreamed(page, 30_000);
-    await new Promise((res) => setTimeout(res, 1500));
-    await page.evaluate(`(() => { Object.assign(cdda.renderer.chunks.stats, { maxStepMs: 0, maxStep: '', maxFrameMs: 0, maxBuildMs: 0, slowBuilds: 0 }); cdda.perf.reset(); __perfBench.go(${r.mph * MPH}); })()`);
+    const jump = r.kind === 'load' || r.kind === 'loaddrive' || r.kind === 'teleport';
+    const route = await page.evaluate(`__perfBench.pick(${JSON.stringify(jump ? (r.kind === 'teleport' ? 'town' : 'city') : r.kind)})`);
+    let mon: Mon | null = null;
+    if (jump) {
+      // start in the city, streamed in; then the jump
+      const from = await page.evaluate(`__perfBench.pick('city')`);
+      await page.evaluate(`__perfBench.place(${JSON.stringify(from)})`);
+      await waitStreamed(page, 30_000);
+      await new Promise((res) => setTimeout(res, 1500));
+      if (r.kind === 'teleport') {
+        await page.evaluate(PERF_MONITOR);
+        await page.evaluate(`(() => { cdda.perf.reset(); __perfMonStart(); __perfBench.place(${JSON.stringify(route)}); })()`);
+      } else {
+        await page.evaluate(`(async () => { await cdda.save.save(); cdda.save.queueLoad(); })()`);
+        if (!loadMonitor) {
+          await page.evaluateOnNewDocument(PERF_MONITOR);
+          loadMonitor = true;
+        }
+        await page.reload({ waitUntil: 'load' });
+        await page.waitForFunction('window.cdda?.ready || window.cddaError', { timeout: 240_000 });
+        await page.evaluate(PERF_PAGE);
+      }
+      mon = await waitMon(page, r.kind === 'loaddrive' ? 'near' : 'full', 20_000);
+      if (r.kind === 'loaddrive') await page.evaluate(`(() => { __perfBench.place(${JSON.stringify(from)}); __perfBench.go(${r.mph * MPH}); })()`);
+      else await page.evaluate(`__perfBench.stop = () => {}`);
+    } else {
+      await page.evaluate(`__perfBench.place(${JSON.stringify(route)})`);
+      // let the start area stream in completely, then measure from standing start at full speed
+      await waitStreamed(page, 30_000);
+      await new Promise((res) => setTimeout(res, 1500));
+      await page.evaluate(`(() => { Object.assign(cdda.renderer.chunks.stats, { maxStepMs: 0, maxStep: '', maxFrameMs: 0, maxBuildMs: 0, slowBuilds: 0 }); cdda.perf.reset(); __perfBench.go(${r.mph * MPH}); })()`);
+    }
     const shotsDir = opt('--shots', '');
-    if (shotsDir) {
+    if (jump && r.kind !== 'loaddrive') await new Promise((res) => setTimeout(res, 1000));
+    else if (shotsDir) {
       mkdirSync(shotsDir, { recursive: true });
       for (const k of [1, 2]) {
         await new Promise((res) => setTimeout(res, (seconds * 1000) / 3));
@@ -218,6 +273,17 @@ try {
     const out = (await page.evaluate(`(() => { __perfBench.stop(); return { dump: cdda.perf.dump(${seconds + 5}), chunks: { ...cdda.renderer.chunks.stats } }; })()`)) as { dump: PerfDump; chunks: { maxStepMs: number; maxStep: string } };
     const s = summarize(out.dump);
     const m = metricsOf(s, out.chunks);
+    if (mon) {
+      if (r.kind === 'loaddrive') mon = await page.evaluate('window.__perfMon') as Mon;
+      // standing through a load, unbuilt chunks in view are the point of the measurement
+      if (r.kind !== 'loaddrive') Object.assign(m, { maxHoleS: undefined, holeS: undefined, runwayP10: undefined, p99: undefined, loopP99: undefined });
+      Object.assign(m, {
+        nearMs: mon.near === null ? 99999 : Math.round(mon.near - mon.ready!),
+        fullMs: r.kind === 'loaddrive' ? undefined : mon.full === null ? 99999 : Math.round(mon.full - mon.ready!),
+        maxFrameMs: Math.round(mon.maxAfter), curtainFrameMs: Math.round(mon.maxCurtain),
+      });
+      console.log(`\n== ${name}: 3x3 shown ${m.nearMs} ms, all in view ${m.fullMs ?? '(driving)'} ms after ${r.kind === 'teleport' ? 'the jump' : 'ready'}; longest frame behind the curtain ${m.curtainFrameMs} ms, after it ${m.maxFrameMs} ms`);
+    }
     results[name] = { route, metrics: m, summary: s, chunks: out.chunks };
     const meta = out.dump.meta as Record<string, unknown>;
     console.log(`\n== ${name}: ${r.what} (${JSON.stringify(route)})`);
