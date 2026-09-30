@@ -208,6 +208,10 @@ Code: `src/render/surfaces.ts` (materials, painters, `SurfacePainter`), consulte
 sills/lintels/door heads, fence and gate hooks. Painted frames share the furniture atlas
 pages (no extra draw calls). `look-shots.ts --format jpg` for JPEG screenshots.
 
+Perf (1080p, RTX 5080, tileset -> painted): render 1.8 -> 2.0 ms (street), 2.3 -> 2.3 ms
+(house); triangles +6-8 % (baseboards, crown, fence parts); streaming sprint meshing
+924 -> 991 ms total, loop p99 12.4 -> 12.4 ms, longest step 2.7 -> 2.9 ms.
+
 Known gaps (surfaces): window reveals (the neighbouring wall's face into the opening) still
 show the outside material; porches count as indoors for interior finishes; wallpaper choice
 is per chunk, not per room.
