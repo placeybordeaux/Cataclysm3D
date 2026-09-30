@@ -29,6 +29,7 @@ import { aimScenarios } from './realinput_aim';
 import { qaScenarios } from './realinput_qa';
 import { galleryScenarios } from './realinput_gallery';
 import { driveScenarios } from './realinput_drive';
+import { chassisScenarios } from './realinput_chassis';
 import { stairsScenarios } from './realinput_stairs';
 
 const argv = process.argv.slice(2);
@@ -1432,6 +1433,8 @@ scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...lootScenario
 scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...screenScenarios({ page: () => page, x: () => x, js, check, shot, toGameplay, sleep }));
 // Driving collision against the drawn body (roads, then the refugee center's lot): right after the vehicle screens.
 scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...driveScenarios({ x: () => x, js, check, shot, toGameplay, sleep }));
+// Vehicles v3 chassis templates: a pickup, a box van and a bus driven through town.
+scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...chassisScenarios({ x: () => x, js, check, shot, toGameplay, sleep }));
 
 // Archery (draw, loose, why-missed, arrow recovery): last before 'death' — it leaves a bow, arrows and
 // a backpack in the inventory, which shifts the item lists the screen scenarios drag from.

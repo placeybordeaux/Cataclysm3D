@@ -586,9 +586,17 @@ export class VehicleSystem implements GameSystem, MapOverlay {
     const p = this.game.player;
     const here = this.playerOn();
     if (!here || here.v !== v) return null;
-    const doors = v.parts.filter((q) => has(q, 'OPENABLE') && !has(q, 'MULTISQUARE') && Math.max(Math.abs(q.mx - here.mx), Math.abs(q.my - here.my)) <= 1);
-    const dist = (q: { mx: number; my: number }) => Math.hypot(q.mx - here.mx, q.my - here.my);
-    doors.sort((a, b) => dist(a) - dist(b));
+    // The doors you can reach from your seat: next to it, or down the aisle (a bus driver's
+    // door is across the cab at the kerb side). Walking steps through the vehicle's own cells
+    // that don't block (BN move cost > 0), nearest first.
+    const steps = this.walkInside(v, here.mx, here.my);
+    const reach = (q: VehiclePart) => {
+      let best = Infinity;
+      for (const [dx, dy] of [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]]) best = Math.min(best, steps.get(`${q.mx + dx},${q.my + dy}`) ?? Infinity);
+      return best + Math.hypot(q.mx - here.mx, q.my - here.my) * 1e-3;
+    };
+    const doors = v.parts.filter((q) => has(q, 'OPENABLE') && !has(q, 'MULTISQUARE') && reach(q) < Infinity);
+    doors.sort((a, b) => reach(a) - reach(b));
     for (const d of doors) {
       const [dx, dy] = v.mountToWorld(d.mx, d.my);
       const tx = Math.floor(dx), ty = Math.floor(dy);
@@ -603,6 +611,23 @@ export class VehicleSystem implements GameSystem, MapOverlay {
       }
     }
     return null;
+  }
+
+  /** Steps from mount (mx, my) to every cell of `v` you can walk to inside it (4-neighbour, cells with BN move cost > 0). */
+  private walkInside(v: Vehicle, mx: number, my: number): Map<string, number> {
+    const dist = new Map<string, number>([[`${mx},${my}`, 0]]);
+    const queue: [number, number][] = [[mx, my]];
+    while (queue.length) {
+      const [x, y] = queue.shift()!;
+      const d = dist.get(`${x},${y}`)!;
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const k = `${x + dx},${y + dy}`;
+        if (dist.has(k) || !v.hasMount(x + dx, y + dy) || v.moveCostAt(x + dx, y + dy) <= 0) continue;
+        dist.set(k, d + 1);
+        queue.push([x + dx, y + dy]);
+      }
+    }
+    return dist;
   }
 
   private seatPlayer(v: Vehicle): void {

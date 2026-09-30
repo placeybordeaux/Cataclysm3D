@@ -280,6 +280,14 @@ describe('gameplay on the template', () => {
     expect(game.player.x).toBeCloseTo(wx, 9);
     expect(game.player.y).toBeCloseTo(wy, 9);
     expect(vs.playerOn()?.v).toBe(v);
+    // the bus's door is across the cab (kerb side), not next to the driver: `e` still gets you out
+    vs.releaseControls();
+    const msg = vs.climbOut(v);
+    expect(msg).toMatch(/climb out of the Bus/);
+    const b = chassisBodyRect(v)!;
+    const [lx, ly] = v.worldToMount(game.player.x, game.player.y);
+    expect(lx >= b.x0 && lx <= b.x1 && ly >= b.y0 && ly <= b.y1).toBe(false);
+    expect(vs.playerOn()).toBeNull();
   });
 
   it('stair flights (another overlay walling tiles off for walkers) stop vehicles, and spawns avoid them', () => {

@@ -6,7 +6,8 @@ import { has, MPH_PER_MS, type Vehicle, type VehiclePart } from '../game/vehicle
 import { loadVehicleData } from '../game/vehicle_data';
 import { installRefuel } from '../game/refuel';
 import { pointInBody } from '../game/vehicleShape';
-import { cellAtPoint } from '../game/chassis';
+import { cellAtPoint, chassisBodyRect, chassisOf, chassisSeats } from '../game/chassis';
+import { ChassisOverlay } from '../render/chassisDebug';
 import { composeCreatureHooks, monsterCreatureHooks, npcCreatureHooks, registerVehicleSave, VehicleSystem, type DriveMode } from '../game/vehicles';
 import { registerOption } from './options';
 import type { MonsterSystem } from '../game/monai';
@@ -454,13 +455,20 @@ export async function installVehicles(game: Game, renderer: Renderer, api?: Debu
     change: () => {
       vr.width = VEHICLE_WIDTHS[(VEHICLE_WIDTHS.indexOf(vr.width) + 1) % VEHICLE_WIDTHS.length];
     },
-    desc: "Modelled bodies only. True to life (default): cars are drawn car-shaped, narrower than the tiles they block, so you stop a little short of the paint. Fill the tiles: bodies widen to the footprint Cataclysm uses for collision; chunkier, but you touch what you see. Also ?vehiclewidth=real|fill.",
+    desc: 'Modelled bodies only. True to life (default): cars are drawn car-shaped, narrower than the tiles Cataclysm gives them. Fill the tiles: bodies widen to nearly the whole footprint; chunkier. Either way you collide with the body you see (its chassis template). Also ?vehiclewidth=real|fill.',
   });
   if (api) {
     /** Body width mode for the model look ('real' | 'fill'); no argument = current. */
     api.vehicleWidth = (w?: 'real' | 'fill') => {
       if (w) vr.width = w;
       return vr.width;
+    };
+    /** Chassis template debug overlay (body = collision outline, sockets, seats, overflow): true / false. */
+    let overlay: ChassisOverlay | null = null;
+    api.chassisOverlay = (on = true) => {
+      overlay ??= new ChassisOverlay(renderer, game);
+      overlay.setEnabled(!!on);
+      return overlay.enabled;
     };
     /** Switch the vehicle renderer ('model' | 'parts'); no argument = current. */
     api.vehicleLook = (look?: 'model' | 'parts') => {
@@ -703,6 +711,33 @@ function installVehicleDebug(api: DebugApi, game: Game, vs: VehicleSystem): void
     return vs.crashGeometry;
   };
   api.vehiclesJSON = () => vs.toJSON();
+  /**
+   * Chassis template of a vehicle (vehicles v3): template, why it was chosen, sockets by kind,
+   * seats and overflow. No uid = the one you're in / driving / nearest.
+   */
+  api.chassis = (uid?: number) => {
+    const v = uid !== undefined ? vs.list.find((q) => q.uid === uid) : vs.driving ?? vs.playerOn()?.v ?? [...vs.list].sort((a, b) => Math.hypot(a.x - p().x, a.y - p().y) - Math.hypot(b.x - p().x, b.y - p().y))[0];
+    if (!v) return null;
+    const ch = chassisOf(v);
+    const kinds: Record<string, number> = {};
+    for (const s of ch.sockets) kinds[s.kind] = (kinds[s.kind] ?? 0) + 1;
+    return {
+      uid: v.uid, proto: v.protoId, template: ch.template, why: ch.why, body: chassisBodyRect(v), sockets: kinds,
+      seats: chassisSeats(v).map((s) => ({ part: s.part.def.id, mount: [s.mx, s.my], at: [+s.x.toFixed(3), +s.y.toFixed(3)], h: +s.h.toFixed(3), driver: s.driver })),
+      overflow: ch.overflow.map((o) => `${o.part.def.id} @ ${o.part.mx},${o.part.my}: ${o.reason}`),
+    };
+  };
+  /** Templates of every vehicle in the world: { template: count }, plus the overflow total. */
+  api.chassisCensus = () => {
+    const out: Record<string, number> = {};
+    let overflow = 0;
+    for (const v of vs.list) {
+      const ch = chassisOf(v);
+      out[ch.template] = (out[ch.template] ?? 0) + 1;
+      overflow += ch.overflow.length;
+    }
+    return { templates: out, overflow, migrated: vs.migrated };
+  };
 }
 
 /** 'gasoline' -> 'Gasoline' (a clipped 'gaso' read like a typo on the dashboard). */
