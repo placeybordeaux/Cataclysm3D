@@ -654,7 +654,8 @@ function rangeDuel(seed: number, weapon: string, skill: number, dist: number): R
   if (!p.inv.wield(gun, null).ok) throw new Error(`range: can't wield ${w.gun}`);
   p.inv.wear(createItem(gd, 'backpack'), null);
   if (weapon === 'bow') p.inv.giveNew(createItem(gd, w.ammo, { count: 30 }));
-  const z = mons.sys.spawn(gd.monsters.mon_zombie, p.x, p.y - dist, 0);
+  // RANGE_MON=mon_zombie_runner etc.: another walker.
+  const z = mons.sys.spawn(gd.monsters[process.env.RANGE_MON ?? 'mon_zombie'], p.x, p.y - dist, 0);
   const combat = mons.combat;
   const aim = combat.aim;
   let t = 0, aimedFor = 0, pendingAt = -1, killT = -1, contact = false, aimSum = 0, aimN = 0;
@@ -683,6 +684,8 @@ function rangeDuel(seed: number, weapon: string, skill: number, dist: number): R
     const ready = combat.cooldown <= 0 && !combat.burst && drawn && d - z.radius <= range;
     if (ready) aimedFor += TICK;
     let fire = false;
+    // HOLD_FIRE=1: never shoot (measures how long a walker takes to reach you).
+    if (process.env.HOLD_FIRE) pendingAt = -1, aimedFor = 0;
     if (ready && pendingAt >= 0 && t >= pendingAt) {
       fire = true;
       pendingAt = -1;
@@ -847,7 +850,7 @@ function run(): Rec[] {
   if (want('range'))
     for (const weapon of (process.env.RANGED_ONLY ?? Object.keys(RANGED).join(',')).split(','))
       for (const skill of [0, 5])
-        for (let seed = s0; seed < s0 + n; seed++) emit({ scenario: 'range', preset: label, seed, ...rangeDuel(seed, weapon, skill, 20) });
+        for (let seed = s0; seed < s0 + n; seed++) emit({ scenario: 'range', preset: label, seed, ...rangeDuel(seed, weapon, skill, Number(process.env.RANGE_DIST ?? 20)) });
   for (let seed = s0; seed < s0 + n; seed++) {
     if (want('day1')) {
       const t = Date.now();

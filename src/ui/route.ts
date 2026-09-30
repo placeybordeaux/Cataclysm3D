@@ -110,8 +110,16 @@ export function planOmtRoute(cost: (x: number, y: number) => number, from: { x: 
 // ------------------------------------------------------------------ live route
 
 interface Overmapish {
-  omtAt(x: number, y: number, z: number): { type: string };
+  omtAt(x: number, y: number, z: number): { type: string; special?: unknown };
 }
+
+/**
+ * Parts of big specials (the refugee center's fenced compound, labs, farms) are walled or
+ * fenced: route round them, only entering the destination tile (use the entrance: see
+ * Overmap.specialEntrance). Playtest: the route to the
+ * refugee center's gate ran straight through its fence and main building.
+ */
+const SPECIAL_EXTRA = 4;
 
 export interface LiveRoute {
   /** OMTs from the player's to the destination's. */
@@ -132,7 +140,12 @@ export function currentRoute(game: Game, overmap: Overmapish | null): LiveRoute 
   const sig = `${px},${py}>${d.x},${d.y},${d.z}`;
   const cached = routes.get(game);
   if (cached && cached.sig === sig) return cached.route;
-  const omts = planOmtRoute((x, y) => omtCost(overmap.omtAt(x, y, 0).type), { x: px, y: py }, d);
+  const omts = planOmtRoute((x, y) => {
+    const o = overmap.omtAt(x, y, 0);
+    // Destination tile itself is exempt (a destination is usually a special's entrance).
+    const walled = !!o.special && !(x === d.x && y === d.y);
+    return omtCost(o.type) + (walled ? SPECIAL_EXTRA : 0);
+  }, { x: px, y: py }, d);
   const route = omts ? { omts, dest: d, metres: Math.max(0, omts.length - 1) * CHUNK } : null;
   routes.set(game, { sig, route });
   return route;
@@ -176,20 +189,26 @@ export function installRouteGuide(game: Game, renderer: Renderer, overmap: () =>
   const v = new THREE.Vector3();
 
   const replan = () => {
-    const mode = routeMode();
+    const driving = !!game.vehicles?.driving;
+    // Driving: ground marks a few metres ahead are useless at 40 mph, so the trail becomes a
+    // beacon further along the route (playtest: nothing showed the way while driving).
+    const mode = driving && routeMode() === 'trail' ? 'beacon' : routeMode();
     const p = game.player;
-    const route = mode === 'off' || p.dead || game.vehicles?.driving ? null : currentRoute(game, overmap());
+    const route = mode === 'off' || p.dead ? null : currentRoute(game, overmap());
     pts = [];
     beaconAt = null;
     root.dataset.metres = route ? String(route.metres) : '';
     if (!route) return;
-    const target = nextTarget(route);
+    const ahead = driving ? 4 : 2;
+    const target = nextTarget(route, ahead);
     if (mode === 'beacon') {
       beaconAt = target;
       // Walking distance: along the route from the next leg, plus the straight bit to it.
-      const rest = Math.max(0, route.omts.length - 1 - 2) * CHUNK;
+      const rest = Math.max(0, route.omts.length - 1 - ahead) * CHUNK;
       const walk = Math.hypot(target.x - p.x, target.y - p.y) + rest;
-      (beacon.lastChild as HTMLElement).textContent = `${route.dest.label} · ${Math.round(walk)} m`;
+      // Say it is the route length: the compass above shows the straight-line distance, and
+      // "Dana · 970 m" next to "Dana · 1463 m" read as a contradiction (playtest).
+      (beacon.lastChild as HTMLElement).textContent = `${route.dest.label} · ${Math.round(walk)} m ${driving ? "along the route" : "on foot"}`;
       return;
     }
     // Trail: walkable tiles toward the next leg, the first TRAIL_TILES of them, every other one.
@@ -199,6 +218,8 @@ export function installRouteGuide(game: Game, renderer: Renderer, overmap: () =>
       const [x, y] = res.tiles[i];
       if (lineOfSight(game, p.tileX, p.tileY, x, y, p.z)) pts.push({ x, y });
     }
+    // For tests and debugging (tools/realinput.ts): the tile path's first steps.
+    root.dataset.path = `${res.complete ? 'ok' : 'partial'}:${res.tiles.slice(0, 6).map(([x, y]) => `${x},${y}`).join(' ')}`;
   };
 
   const place = () => {

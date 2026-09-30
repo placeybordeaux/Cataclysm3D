@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
 import { archetypeOf, bodyShapeOf, weaponOf, ARCHETYPES, type Archetype } from '../../src/render/chars/archetype';
 import { paintStyled, personPalette } from '../../src/render/chars/styled';
-import { buildHeld, heldClass } from '../../src/render/chars/held';
+import { buildHeld, heldClass, heldVariant } from '../../src/render/chars/held';
 import { makeRig, type PoseIn } from '../../src/render/chars/rig';
 import { analyseSprite, netSize, paintPart, texelDims, type Img } from '../../src/render/chars/paint';
 import { CharLayer, type Skin } from '../../src/render/chars/charLayer';
@@ -215,6 +215,58 @@ describe('first-person held items', () => {
       expect(h.parts.length, c).toBeGreaterThan(0);
       h.parts.forEach((p, i) => expect(p.parent < i, `${c}:${p.name}`).toBe(true));
       if (h.gun) expect(h.muzzle, c).not.toBeNull();
+    }
+  });
+});
+
+describe('weapon variants', () => {
+  it('tells common weapons apart', () => {
+    const it = (typeId: string, o: Record<string, unknown> = {}) => ({ typeId, isGun: () => !!o.gun, def: o as never });
+    expect(heldVariant(it('model_10_revolver', { gun: true, weapon_category: ['REVOLVERS'] }), 'pistol')).toBe('revolver');
+    expect(heldVariant(it('m1911', { gun: true }), 'pistol')).toBe('1911');
+    expect(heldVariant(it('glock_19', { gun: true }), 'pistol')).toBe('auto');
+    expect(heldVariant(it('shotgun_d'), 'shotgun')).toBe('double');
+    expect(heldVariant(it('remington_870'), 'shotgun')).toBe('pump');
+    expect(heldVariant(it('ak47'), 'rifle')).toBe('ak');
+    expect(heldVariant(it('remington_700', { weapon_category: ['RIFLES', 'MANUAL_ACTION'] }), 'rifle')).toBe('hunting');
+    expect(heldVariant(it('m4a1'), 'rifle')).toBe('ar');
+    expect(heldVariant(it('crowbar'), 'pipe')).toBe('crowbar');
+    expect(heldVariant(it('knife_chef'), 'knife')).toBe('kitchen');
+    expect(heldVariant(it('hammer_sledge'), 'hammer')).toBe('sledge');
+    expect(heldVariant(it('hatchet'), 'axe')).toBe('hatchet');
+  });
+  it('builds every variant with valid parents', () => {
+    const pal = analyseSprite({ w: 1, h: 1, data: new Uint8Array([120, 80, 50, 255]) }).pal;
+    for (const [c, v] of [['pistol', 'revolver'], ['pistol', '1911'], ['shotgun', 'double'], ['shotgun', 'single'], ['rifle', 'ak'], ['rifle', 'hunting'], ['pipe', 'crowbar'], ['knife', 'kitchen'], ['hammer', 'sledge'], ['axe', 'hatchet'], ['axe', 'fire']] as const) {
+      const h = buildHeld(c, pal, 1000, v);
+      h.parts.forEach((p, i) => expect(p.parent < i, `${c}/${v}:${p.name}`).toBe(true));
+      if (h.gun) expect(h.muzzle).not.toBeNull();
+    }
+  });
+});
+
+describe('round 6 body plans', () => {
+  it('picks distinct plans for common bugs, fliers and zombie kinds', () => {
+    const v = (id: string) => bodyShapeOf(MON[id]).variant;
+    expect(v('mon_wasp')).toBe('wasp');
+    expect(v('mon_bee')).toBe('bee');
+    expect(v('mon_ant')).toBe('ant');
+    expect(v('mon_spider_wolf_giant')).toBe('spider');
+    expect(v('mon_mosquito_giant')).toBe('mosquito');
+    expect(v('mon_crow')).toBe('bird');
+    expect(v('mon_bat')).toBe('bat');
+    expect(v('mon_boomer')).toBe('bloated');
+    expect(v('mon_zombie_hulk')).toBe('hulk');
+    expect(v('mon_skeleton')).toBe('skeletal');
+  });
+  it('builds them all with valid parents, and hair/headgear pieces for people', () => {
+    for (const id of ['mon_wasp', 'mon_bee', 'mon_ant', 'mon_fly', 'mon_mosquito_giant', 'mon_dragonfly_giant', 'mon_crow', 'mon_bat', 'mon_boomer', 'mon_zombie_hulk', 'mon_skeleton', 'mon_zombie_acidic', 'mon_zombie_electric', 'mon_zombie_scorched']) {
+      const rig = makeRig(bodyShapeOf(MON[id]));
+      rig.parts.forEach((p, i) => expect(p.parent < i, `${id}:${p.name}`).toBe(true));
+    }
+    for (const hair of ['short', 'long', 'ponytail', 'cap', 'hat', 'helmet'] as const) {
+      const rig = makeRig({ ...bodyShapeOf({ id: 'npc', bodytype: 'human', species: ['HUMAN'] }), hair });
+      expect(rig.parts.some((p) => p.name.startsWith('head') && p.name !== 'head'), hair).toBe(true);
     }
   });
 });

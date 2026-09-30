@@ -12,6 +12,8 @@ import { charLayers, charSettings, frameKey, spriteInfo, type CharLayers } from 
 import { bodyShapeOf, weaponOf } from './chars/archetype';
 import { CreatureModel, FallingBody } from './chars/creature';
 import { makeRig, type Rig } from './chars/rig';
+import { FxMeshes } from './chars/fxMeshes';
+import { cardsOn } from './cards';
 
 // NPCs: CDDA's npc_male / npc_female body with the worn clothing and wielded item overlays
 // stacked on top (like the tileset draws characters), composited once per outfit. In 'model'
@@ -60,6 +62,33 @@ export function npcLayers(atlas: Atlas | null, n: Npc, looksLike: (id: string) =
   return ids;
 }
 
+/** Build buckets: [height scale, girth]. */
+const BUILDS: [number, number][] = [[1, 1], [0.94, 0.9], [1.05, 1.0], [0.98, 1.18], [1.04, 1.1], [0.92, 1.05]];
+/** A range of skin tones (UltiCa draws every NPC with the same body sprite). */
+const SKINS: [number, number, number][] = [[236, 200, 176], [222, 178, 146], [196, 150, 112], [168, 118, 84], [128, 86, 58], [92, 62, 44], [212, 170, 128]];
+const HAIR_COLORS: [number, number, number][] = [[30, 24, 20], [66, 44, 28], [104, 70, 40], [170, 128, 70], [200, 170, 110], [140, 60, 30], [150, 146, 140], [52, 40, 36]];
+const HAIRS_M: NonNullable<Parameters<typeof makeRig>[0]['hair']>[] = ['short', 'short', 'none', 'short', 'long', 'none'];
+const HAIRS_F: NonNullable<Parameters<typeof makeRig>[0]['hair']>[] = ['long', 'ponytail', 'long', 'short', 'ponytail', 'long'];
+
+/**
+ * How an NPC looks beyond their clothes, stable per NPC (their uid): build, skin tone, hair
+ * colour and style — or the headgear they wear (caps, hats, helmets, from worn item ids).
+ * Neighbouring uids land on different entries, so a group never looks cloned.
+ */
+export function npcLook(n: Npc): { build: number; skin: [number, number, number]; hairColor: [number, number, number]; hair: NonNullable<Parameters<typeof makeRig>[0]['hair']>; hat?: [number, number, number] } {
+  const u = n.uid;
+  const worn = n.inv.worn.map((w) => w.typeId).join(' ');
+  const head = /helmet|hardhat|kevlar_helm|motorbike/.exec(worn) ? 'helmet' : /(^|[ _])(cap|beanie|hood|toque|balaclava)/.exec(worn) ? 'cap' : /hat(\b|_)|fedora|cowboy|stetson|tophat|sombrero/.exec(worn) ? 'hat' : null;
+  const hairs = n.male !== false ? HAIRS_M : HAIRS_F;
+  return {
+    build: (u * 7 + 3) % BUILDS.length,
+    skin: SKINS[(u * 5 + 1) % SKINS.length],
+    hairColor: HAIR_COLORS[(u * 3 + 2) % HAIR_COLORS.length],
+    hair: head ?? hairs[(u * 11 + 5) % hairs.length],
+    hat: head === 'helmet' ? [70, 80, 60] : head ? ([[120, 40, 36], [40, 60, 110], [60, 60, 64], [120, 100, 70]] as [number, number, number][])[u % 4] : undefined,
+  };
+}
+
 function seedOf(uid: number): number {
   const x = Math.sin(uid * 91.345 + 12.7) * 24634.6345;
   return x - Math.floor(x);
@@ -73,6 +102,7 @@ export class NpcView implements GameSystem {
   private shots: SpriteHandle[] = [];
   private bodyCheck = 0;
   private chars: CharLayers | null = null;
+  private fx: FxMeshes | null = null;
   private rigs = new Map<string, Rig>();
 
   constructor(readonly game: Game, readonly renderer: Renderer, readonly sys: NpcSystem) {
@@ -105,21 +135,27 @@ export class NpcView implements GameSystem {
 
   private rigFor(n: Npc): Rig {
     // survivors are people: the humanoid body at BN's human volume, women a touch smaller,
-    // holding whatever they wield
+    // holding whatever they wield, in their own build and hair (npcLook)
     const male = n.male !== false;
     const weapon = weaponOf(n.inv.wielded);
-    const key = `${male ? 'm' : 'f'}:${weapon}`;
+    const look = npcLook(n);
+    const key = `${male ? 'm' : 'f'}:${weapon}:${look.build}:${look.hair}`;
     let r = this.rigs.get(key);
     if (!r) {
       const base = bodyShapeOf({ id: male ? 'npc_male' : 'npc_female', bodytype: 'human', species: ['HUMAN'], volume: 62500 });
-      r = makeRig(male ? { ...base, weapon } : { ...base, scale: 0.95, girth: 0.92, weapon });
+      const [sc, gi] = BUILDS[look.build];
+      r = makeRig({ ...base, scale: (male ? 1 : 0.95) * sc, girth: (male ? 1 : 0.92) * gi, weapon, hair: look.hair });
       this.rigs.set(key, r);
     }
     return r;
   }
 
-  private skinFor(rig: Rig, frame: TileFrame) {
-    return this.layers().store.get(rig, { key: frameKey(frame), info: () => spriteInfo(frame) });
+  private skinFor(rig: Rig, frame: TileFrame, n?: Npc) {
+    const look = n ? npcLook(n) : null;
+    return this.layers().store.get(rig, {
+      key: frameKey(frame), info: () => spriteInfo(frame),
+      opts: look ? { person: { skin: look.skin, hair: look.hairColor, bald: look.hair === 'none', hat: look.hat } } : undefined,
+    });
   }
 
   /** Composite frame for the NPC's current outfit (memoised by the layer list). */
@@ -143,7 +179,7 @@ export class NpcView implements GameSystem {
   private makeVisual(n: Npc, v: View): void {
     if (this.models) {
       const rig = this.rigFor(n);
-      v.c = new CreatureModel(this.layers().live, rig, this.skinFor(rig, v.frame), seedOf(n.uid), n.x, n.y, n.facing);
+      v.c = new CreatureModel(this.layers().live, rig, this.skinFor(rig, v.frame, n), seedOf(n.uid), n.x, n.y, n.facing);
     } else v.h = this.renderer.sprites.add({ x: n.x, y: n.y, z: n.z, frame: v.frame, height: HEIGHT });
   }
 
@@ -194,7 +230,7 @@ export class NpcView implements GameSystem {
       const p = this.game.player;
       const d = Math.hypot(n.x - p.x, n.y - p.y);
       const slide = !done && d < 6 && d > 0.01 ? 0.3 : 0;
-      b.body = new FallingBody(this.layers().dead, rig, this.skinFor(rig, b.frame), seedOf(n.uid), n.x, n.y, n.z, n.facing,
+      b.body = new FallingBody(this.layers().dead, rig, this.skinFor(rig, b.frame, n), seedOf(n.uid), n.x, n.y, n.z, n.facing,
         slide ? ((n.x - p.x) / d) * slide : 0, slide ? ((n.y - p.y) / d) * slide : 0, done);
     } else {
       const k = Math.min(1, b.t / FALL_TIME);
@@ -280,10 +316,18 @@ export class NpcView implements GameSystem {
     }
     for (const h of this.shots) h.remove();
     this.shots.length = 0;
+    this.fx ??= cardsOn() ? new FxMeshes(this.renderer) : null;
+    this.fx?.begin();
     for (const s of this.sys.shots) {
+      // 3D: a spark mesh where the bullet stopped; billboards: the glyph
+      if (this.fx) {
+        this.fx.place('spark', s.x1, s.y1, s.z, 1.2, [1, 0, 0], [255, 226, 120]);
+        continue;
+      }
       const frame = this.atlas ? toFrame(this.atlas.glyph('*', 'yellow')) : this.renderer.source.glyph('*', 'yellow');
       this.shots.push(this.renderer.sprites.add({ x: s.x1, y: s.y1, z: s.z, frame, height: 0.3, anchor: 'center', lift: 1.2 }));
     }
+    this.fx?.end();
   }
 }
 

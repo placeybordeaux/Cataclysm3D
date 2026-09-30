@@ -252,6 +252,7 @@ function world() {
 describe('missions', () => {
   it('bearing: OMTs and compass direction (y grows south)', () => {
     expect(bearing(12, 12, 0, 0).text).toBe('You are there');
+    expect(bearing(12, 12, 0, -5).text).toBe('about 120 m north');
     expect(bearing(12, 12, 3, 0).dir).toBe('east');
     expect(bearing(12, 12, 0, -5)).toMatchObject({ omts: 5, dir: 'north', arrow: '↑' });
     expect(bearing(12, 12, -2, 2).dir).toBe('south-west');

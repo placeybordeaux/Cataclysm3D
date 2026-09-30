@@ -5,7 +5,7 @@ import type { Viewmodel, ViewmodelItem, ViewmodelState } from '../viewmodel';
 import { AtlasTextureSource } from '../atlasSource';
 import { bodyShapeOf } from './archetype';
 import { CharLayer, fpMaterial, type CharInstance } from './charLayer';
-import { buildHeld, heldClass, type HeldBuild, type HeldClass } from './held';
+import { buildHeld, heldClass, heldVariant, type HeldBuild, type HeldClass } from './held';
 import { charLayers, charSettings, frameKey, spriteInfo } from './index';
 import { analyseSprite, type Palette } from './paint';
 import { newPoseOut, type PartDef, type Rig } from './rig';
@@ -205,7 +205,7 @@ export class FpView {
     }
     const cls = item ? heldClass(item as never) : null;
     this.cls = cls;
-    this.held = item && cls ? buildHeld(cls, pal!, item.def?.volume) : null;
+    this.held = item && cls ? buildHeld(cls, pal!, item.def?.volume, heldVariant(item as never, cls)) : null;
     const hr = heldRig(this.held);
     this.pivot = hr.pivot;
     this.right = add(hr.rig, `R:${item?.typeId ?? ''}`);

@@ -7,7 +7,7 @@ import { createItem } from './game/item';
 import { qualityUsages } from './game/inventory';
 import { interactionProviders, type Interaction } from './game/interact';
 import { targetTile, frontTile } from './game/targeting';
-import { hasFlag } from './world/registry';
+import { hasFlag, isDiggable } from './world/registry';
 import { DAYS_PER_SEASON, SECONDS_PER_DAY } from './core/time';
 import { registerSaveable } from './save/registry';
 import { chunkTracker } from './save/tracking';
@@ -157,7 +157,7 @@ function toolActions(game: Game, it: Item): ActionResult {
   if ((q('AXE') >= 2 || q('SAW_W') >= 2) && findLog(game)) acts.push({ label: 'Cut a log into planks', run: () => void startLumber(game) });
   if (q('DIG') >= 1 && target) {
     if (canTill(game, target.x, target.y, target.z)) acts.push({ label: 'Till the soil (dirt mound for planting)', run: () => void startTill(game, target) });
-    if (hasFlag(game.map.terAt(target.x, target.y, target.z), 'DIGGABLE') || game.map.terAt(target.x, target.y, target.z).id.startsWith('t_pit'))
+    if (isDiggable(game.map.terAt(target.x, target.y, target.z)) || game.map.terAt(target.x, target.y, target.z).id.startsWith('t_pit'))
       acts.push({ label: 'Dig a pit', run: () => void startDig(game, target) });
   }
   if (q('FISHING_ROD') >= 1 && fishingSpot(game)) acts.push({ label: 'Cast your line', run: () => void startFishing(game, it) });
