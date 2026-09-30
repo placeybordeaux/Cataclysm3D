@@ -74,9 +74,11 @@ interface Entry {
 /**
  * Why an entry needs work: never shown (a hole), content changed (an edit, an overlay, a
  * neighbour, invalidateAll), or only its LOD changed (up = entered the near ring, down = left
- * it, trees = crossed the flora middle ring). The last three are cosmetic.
+ * it, trees = crossed the flora middle ring). The last three are cosmetic. 'high' = a hole on a
+ * storey above the player's window, not overhead (a tower top across the street): real, but it
+ * waits while the street itself is behind.
  */
-type WorkClass = 'hole' | 'edit' | 'up' | 'down' | 'trees';
+type WorkClass = 'hole' | 'high' | 'edit' | 'up' | 'down' | 'trees';
 
 /** What telemetry (src/perf) may read of an entry. */
 export type ChunkEntryView = Readonly<Pick<Entry, 'cx' | 'cy' | 'z' | 'shown' | 'wantT' | 'visible' | 'job'>>;
@@ -489,22 +491,25 @@ export class ChunkManager {
     if (!inView) t += speed > 4 ? 3 : 0.75;
     // basements later still; above ground the street and storeys below are in plain view
     if (e.z < pz) t += pz > 0 && e.z >= 0 ? 0.25 : 1.5;
-    // storeys above the player's window (tower tops, a high roof: src/world/levels.ts) a second
-    // later, unless overhead (within a chunk): the bay's roof is what you look up at
-    else if (e.z > pz) t += e.z > pz + this.levelsAbove && d > CHUNK ? 1 : 0.2;
+    // storeys above the player's window (tower tops, a high roof: src/world/levels.ts) after
+    // every hole needed in the next 3 s, unless overhead (within a chunk): the bay's roof is
+    // what you look up at. Driving through a city they cost whole furnished floors; ranked
+    // with the rest (+1 s) they left the street ahead unbuilt for 3-4 s (perf city40).
+    const high = e.z > pz + this.levelsAbove && d > CHUNK;
+    if (e.z > pz) t += high ? 3 : 0.2;
     t += d * 0.002;
     // the player's own chunk and its 8 neighbours come first whatever the camera does: after
     // a teleport or a load the view stays curtained until they exist (nearChunks.ts)
     if (e.z === pz && Math.abs(e.cx - Math.floor(px / CHUNK)) <= 1 && Math.abs(e.cy - Math.floor(py / CHUNK)) <= 1) t = Math.min(t, -1 + d * 0.002);
-    const cls: WorkClass = !e.shown ? 'hole' : e.vsig !== e.builtVsig || e.builtSig === -1 ? 'edit' : e.near !== !!e.builtNear ? (e.near ? 'up' : 'down') : 'trees';
+    const cls: WorkClass = !e.shown ? (high ? 'high' : 'hole') : e.vsig !== e.builtVsig || e.builtSig === -1 ? 'edit' : e.near !== !!e.builtNear ? (e.near ? 'up' : 'down') : 'trees';
     e.cls = cls;
     if (cls === 'hole') {
       if (t < this.minHoleNeed) this.minHoleNeed = t;
       this.anyHole = true;
-    }
+    } else if (cls === 'high') this.anyHole = true;
     // finish what's started before starting a peer: half-built jobs hold their data
     const started = e.job ? -0.05 : 0;
-    if (cls === 'hole' || cls === 'edit') return t + (cls === 'edit' ? 0.1 : 0) + started;
+    if (cls === 'hole' || cls === 'high' || cls === 'edit') return t + (cls === 'edit' ? 0.1 : 0) + started;
     if (cls === 'down') return 50 + t + started;
     return 5 + t + started;
   }
@@ -513,7 +518,7 @@ export class ChunkManager {
    * Drop this frame's cosmetic work while the world isn't built: near-ring upgrades and tree
    * swaps wait until no hole is needed within 3 s; downgrades (leaving the near ring: the
    * detailed mesh is already up and only costs a little render time) wait until the player
-   * stands still with nothing unbuilt at all. Sets `behind` (boost budget) for this frame.
+   * stands still with nothing unbuilt at all; 'high' holes wait while a hole is needed within 1 s. Sets `behind` (boost budget) for this frame.
    */
   private deferCosmetic(dirty: Entry[]): void {
     const soon = this.minHoleNeed, any = this.anyHole;
@@ -524,6 +529,7 @@ export class ChunkManager {
     let n = 0;
     for (const e of dirty) {
       if ((e.cls === 'up' || e.cls === 'trees') && soon < 3) continue;
+      if (e.cls === 'high' && soon < 1) continue;
       if (e.cls === 'down' && (moving || any)) continue;
       dirty[n++] = e;
     }
