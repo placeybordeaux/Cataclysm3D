@@ -11,7 +11,7 @@
 //     npx tsx notes/blog-post/scripts/blog-shots.ts [--only id1,id2] [--gpu]
 //
 // Options: --only a,b (default: every shot), --out <dir> (default notes/blog-post/images),
-// --raw <dir> (full-size PNGs, default notes/blog-post/images/raw — git-ignored scratch),
+// --raw <dir> (full-size PNGs, default $TMPDIR/cdda3d-blog-raw — scratch, kept out of the repo),
 // --port N (default 5177), --size WxH (default 1920x1080), --gpu (ANGLE/Vulkan; without it
 // SwiftShader renders at 1-3 fps and the "full" effects are slow), --probe '<js>' (evaluate
 // after boot, print the JSON and exit: for picking viewpoints), --list, --dry-run, --help.
@@ -19,7 +19,8 @@ import { createServer } from 'vite';
 import puppeteer from 'puppeteer-core';
 import { mkdirSync, readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { resolve } from 'node:path';
+import { join, resolve } from 'node:path';
+import { tmpdir } from 'node:os';
 import { shots, type Shot } from './shots.js';
 
 const argv = process.argv.slice(2);
@@ -33,7 +34,7 @@ const opt = (n: string, d: string) => {
 };
 const only = opt('--only', '');
 const out = opt('--out', 'notes/blog-post/images');
-const raw = opt('--raw', 'notes/blog-post/images/raw');
+const raw = opt('--raw', join(tmpdir(), 'cdda3d-blog-raw'));
 const port = Number(opt('--port', '5177'));
 const size = opt('--size', '1920x1080').split('x').map(Number);
 const probe = opt('--probe', '');
@@ -59,7 +60,7 @@ const gl = gpu
   ? ['--use-angle=vulkan', '--enable-features=Vulkan', '--ignore-gpu-blocklist', '--enable-gpu']
   : ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'];
 const browser = await puppeteer.launch({ executablePath: chrome, headless: true, args: ['--no-sandbox', ...gl, `--window-size=${size[0]},${size[1]}`] });
-const viewJs = ['tools/look-views.js', 'tools/char-views.js', 'tools/vehicle-views.js'].map((f) => readFileSync(resolve(f), 'utf8')).join('\n;\n');
+const viewJs = ['tools/look-views.js', 'tools/char-views.js', 'tools/vehicle-views.js', 'notes/blog-post/scripts/tiles-view.js'].map((f) => readFileSync(resolve(f), 'utf8')).join('\n;\n');
 let failed = 0;
 try {
   const page = await browser.newPage();
@@ -84,7 +85,7 @@ try {
       if (loaded !== (s.params ?? '') || s.fresh) await boot(s.params ?? '');
       try {
         // every shot starts with the DOM overlays visible again (lookView hides them)
-        await page.evaluate(`for (const el of document.querySelectorAll('body *')) if (el.style && el.style.visibility === 'hidden') el.style.visibility = ''; window.cdda.ui?.closeAll?.()`);
+        await page.evaluate(`for (const el of document.querySelectorAll('body *')) if (el.style && el.style.visibility === 'hidden') el.style.visibility = ''; window.cdda.ui?.closeAll?.(); window.tilesHide?.()`);
         const info = await page.evaluate(`(async () => { const c = window.cdda; ${s.js} })()`);
         await new Promise((r) => setTimeout(r, s.wait ?? 600));
         const png = resolve(`${raw}/${s.id}.png`);

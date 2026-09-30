@@ -34,7 +34,7 @@ def inline(s):
     s = re.sub(r"`([^`]+)`", r"<code>\1</code>", s)
     s = re.sub(r"\*\*([^*]+)\*\*", r"<strong>\1</strong>", s)
     s = re.sub(r"(?<![*\w])\*([^*]+)\*(?!\*)", r"<em>\1</em>", s)
-    s = re.sub(r"\[([^\]]+)\]\((https?://[^)]+)\)", r'<a href="\2">\1</a>', s)
+    s = re.sub(r"\[([^\]]+)\]\(((?:https?://|images/)[^)]+)\)", r'<a href="\2">\1</a>', s)
     return s
 
 
@@ -178,14 +178,17 @@ def gallery_html():
     if not entries:
         sys.exit("images/captions.md: no '### <file>.jpg' entries found")
     out = []
+    files = {e["file"] for e in entries}
     for e in entries:
+        if "-hero" in e["file"] and e["file"].replace("-hero", "") in files:
+            continue  # the half-size twin is shown; the hero is linked from its caption
         path = os.path.join(HERE, "images", e["file"])
         if not os.path.exists(path):
             sys.exit(f"captions.md names {e['file']} but images/{e['file']} does not exist")
         caption = ""
         how = []
         for l in e["lines"]:
-            l2 = re.sub(r"^[-*]\s*", "", l)
+            l2 = re.sub(r"^- ", "", l)
             key = re.match(r"\*\*([^*]+)\*\*:?\s*(.*)", l2) or re.match(r"([A-Za-z ]+):\s+(.*)", l2)
             if key and key.group(1).strip().lower().rstrip(":") in ("caption",):
                 caption = key.group(2)
@@ -193,18 +196,21 @@ def gallery_html():
                 caption = l2
             else:
                 how.append(l2)
-        hero = "-hero" in e["file"]
+        hero = False
+        twin = e["file"].replace(".jpg", "-hero.jpg")
+        if twin in files:
+            how.insert(0, f"Full-size 1920x1080 version: [{twin}](images/{twin}).")
         out.append(f'<figure class="shot{" hero" if hero else ""}"><a href="images/{e["file"]}">'
                    f'<img src="images/{e["file"]}" alt="{html.escape(re.sub(r"[*`]", "", caption))}" loading="lazy"></a>'
                    f'<figcaption><span class="fn">{e["file"]}</span> {inline(caption)}'
                    + (f'<details><summary>How it was made</summary><p>{inline(" ".join(how))}</p></details>' if how else "")
                    + "</figcaption></figure>")
-    return len(entries), "\n".join(out)
+    return len(out), "\n".join(out)
 
 
 def bar_chart(rows, value_key, fmt, label):
     """Horizontal bars, one series. rows: [(name, value)]."""
-    w, lh, left, right = 640, 34, 190, 80
+    w, lh, left, right = 440, 30, 150, 70
     h = lh * len(rows) + 10
     mx = max(v for _, v in rows)
     parts = [f'<svg viewBox="0 0 {w} {h}" role="img" aria-label="{html.escape(label)}" class="chart">']
@@ -221,7 +227,7 @@ def bar_chart(rows, value_key, fmt, label):
 
 def growth_chart(rows):
     """Column chart of TS/JS code lines at each milestone (single series)."""
-    w, h, top, bottom, left = 640, 260, 20, 64, 48
+    w, h, top, bottom, left = 960, 300, 24, 64, 52
     mx = 120000
     n = len(rows)
     step = (w - left - 10) / n
