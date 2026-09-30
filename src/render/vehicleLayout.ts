@@ -41,6 +41,10 @@ export interface StyleParams {
   tumble: number;
   /** Visual width per grid column (m). */
   widthPerCol: number;
+  /** Visual length per grid row: BN grids run long (a car is 6 rows), so bodies are
+   * shortened around the grid's middle toward real proportions (~4.8 m x 1.8 x 1.45 for a
+   * sedan, drawn ~1.17x to match the world's scale). */
+  lengthScale: number;
   /** Nose face goes straight up into the windscreen (bus, cab-over van). */
   flatFront: boolean;
   /** Tyre sidewall added to the rim radius, and an extra scale for chunky off-roaders. */
@@ -57,24 +61,24 @@ export interface StyleParams {
 }
 
 const BASE: StyleParams = {
-  sill: 0.3, belt: 0.98, hood: 0.98, nose: 0.78, roof: 1.55, deck: 1.02, box: 0, rake: 0.95, rearRake: 0.85,
-  crown: 0.06, shoulder: 0.12, tumble: 0.14, widthPerCol: 0.64, flatFront: false, wheelScale: 1, bumper: 'black',
-  blackPillars: true, lampY: 0.7, lampW: 0.2, lampH: 0.06, interior: 0x3a3a3e,
+  sill: 0.3, belt: 0.98, hood: 0.98, nose: 0.78, roof: 1.62, deck: 1.02, box: 0, rake: 0.95, rearRake: 0.8,
+  crown: 0.06, shoulder: 0.12, tumble: 0.14, widthPerCol: 0.53, lengthScale: 0.93, flatFront: false, wheelScale: 1, bumper: 'black',
+  blackPillars: true, lampY: 0.7, lampW: 0.2, lampH: 0.06, interior: 0x2e2e32,
 };
 
 export const STYLE_PARAMS: Record<BodyStyle, StyleParams> = {
   sedan: { ...BASE },
-  hatch: { ...BASE, roof: 1.58, rake: 0.9 },
-  sports: { ...BASE, sill: 0.22, belt: 0.8, hood: 0.78, nose: 0.58, roof: 1.2, deck: 0.84, rake: 1.25, rearRake: 1.3, crown: 0.07, shoulder: 0.14, tumble: 0.2, lampY: 0.55, lampW: 0.22, lampH: 0.05 },
-  suv: { ...BASE, sill: 0.42, belt: 1.16, hood: 1.14, nose: 1.0, roof: 1.92, deck: 1.16, rake: 0.8, crown: 0.05, shoulder: 0.1, tumble: 0.1, wheelScale: 1.15, lampY: 0.9, lampW: 0.22, lampH: 0.08 },
-  pickup: { ...BASE, sill: 0.44, belt: 1.18, hood: 1.2, nose: 1.08, roof: 1.92, deck: 1.18, rake: 0.75, crown: 0.04, shoulder: 0.08, tumble: 0.08, wheelScale: 1.15, bumper: 'chrome', lampY: 0.95, lampW: 0.2, lampH: 0.09 },
-  van: { ...BASE, sill: 0.4, belt: 1.25, hood: 1.28, nose: 1.1, roof: 2.2, deck: 1.25, box: 2.6, rake: 0.55, crown: 0.03, shoulder: 0.08, tumble: 0.06, widthPerCol: 0.62, wheelScale: 1.05, lampY: 0.95, lampW: 0.18, lampH: 0.1, blackPillars: false },
-  minivan: { ...BASE, sill: 0.34, belt: 1.12, hood: 1.08, nose: 0.92, roof: 2.02, deck: 1.1, rake: 0.7, crown: 0.05, shoulder: 0.16, tumble: 0.06, lampY: 0.85, lampW: 0.18, lampH: 0.09 },
-  bus: { ...BASE, sill: 0.34, belt: 1.35, hood: 1.35, nose: 1.2, roof: 2.55, deck: 1.35, rake: 0.3, crown: 0.04, shoulder: 0.14, tumble: 0.03, widthPerCol: 0.6, flatFront: true, wheelScale: 1.1, lampY: 0.75, lampW: 0.16, lampH: 0.1, blackPillars: true },
-  truck: { ...BASE, sill: 0.5, belt: 1.5, hood: 1.55, nose: 1.4, roof: 2.45, deck: 1.1, box: 2.6, rake: 0.45, crown: 0.03, shoulder: 0.08, tumble: 0.05, widthPerCol: 0.58, wheelScale: 1.1, bumper: 'chrome', lampY: 1.0, lampW: 0.18, lampH: 0.11, blackPillars: false },
-  motorcycle: { ...BASE },
-  bicycle: { ...BASE },
-  frame: { ...BASE, blackPillars: false },
+  hatch: { ...BASE, roof: 1.64, rake: 0.9 },
+  sports: { ...BASE, sill: 0.22, belt: 0.82, hood: 0.8, nose: 0.6, roof: 1.3, widthPerCol: 0.54, lengthScale: 0.94, deck: 0.84, rake: 1.25, rearRake: 1.3, crown: 0.07, shoulder: 0.14, tumble: 0.2, lampY: 0.55, lampW: 0.22, lampH: 0.05 },
+  suv: { ...BASE, sill: 0.42, belt: 1.16, hood: 1.14, nose: 1.0, roof: 1.95, widthPerCol: 0.54, lengthScale: 0.88, deck: 1.16, rake: 0.8, crown: 0.05, shoulder: 0.1, tumble: 0.1, wheelScale: 1.15, lampY: 0.9, lampW: 0.22, lampH: 0.08 },
+  pickup: { ...BASE, sill: 0.44, belt: 1.18, hood: 1.2, nose: 1.08, roof: 1.95, widthPerCol: 0.55, lengthScale: 0.92, deck: 1.18, rake: 0.75, crown: 0.04, shoulder: 0.08, tumble: 0.08, wheelScale: 1.15, bumper: 'chrome', lampY: 0.95, lampW: 0.2, lampH: 0.09 },
+  van: { ...BASE, sill: 0.4, belt: 1.25, hood: 1.28, nose: 1.1, roof: 2.2, deck: 1.25, box: 2.6, rake: 0.55, crown: 0.03, shoulder: 0.08, tumble: 0.06, widthPerCol: 0.54, lengthScale: 0.95, wheelScale: 1.05, lampY: 0.95, lampW: 0.18, lampH: 0.1, blackPillars: false },
+  minivan: { ...BASE, sill: 0.34, belt: 1.12, hood: 1.08, nose: 0.92, roof: 2.05, lengthScale: 0.86, deck: 1.1, rake: 0.7, crown: 0.05, shoulder: 0.16, tumble: 0.06, lampY: 0.85, lampW: 0.18, lampH: 0.09 },
+  bus: { ...BASE, sill: 0.34, belt: 1.35, hood: 1.35, nose: 1.2, roof: 2.55, deck: 1.35, rake: 0.3, crown: 0.04, shoulder: 0.14, tumble: 0.03, widthPerCol: 0.53, lengthScale: 0.97, flatFront: true, wheelScale: 1.1, lampY: 0.75, lampW: 0.16, lampH: 0.1, blackPillars: true },
+  truck: { ...BASE, sill: 0.5, belt: 1.5, hood: 1.55, nose: 1.4, roof: 2.45, deck: 1.1, box: 2.6, rake: 0.45, crown: 0.03, shoulder: 0.08, tumble: 0.05, widthPerCol: 0.5, lengthScale: 0.97, wheelScale: 1.1, bumper: 'chrome', lampY: 1.0, lampW: 0.18, lampH: 0.11, blackPillars: false },
+  motorcycle: { ...BASE, lengthScale: 1 },
+  bicycle: { ...BASE, lengthScale: 1 },
+  frame: { ...BASE, blackPillars: false, lengthScale: 1 },
 };
 
 /** Map a prototype id to a style; null = decide from the grid. */
@@ -183,6 +187,8 @@ export interface Layout {
   hw: number;
   /** Mount column -> visual Z. */
   zOf: (my: number) => number;
+  /** Mount x -> visual x (the body is shortened around the grid's middle, `lengthScale`). */
+  xOf: (mx: number) => number;
   rows: RowInfo[];
   sections: Section[];
   wheels: WheelInfo[];
@@ -312,14 +318,27 @@ export function analyze(v: Vehicle, forceStyle?: BodyStyle): Layout {
     });
   }
 
+  const kx = widthMode === 'fill' ? 1 : p.lengthScale;
+  const xc = (bx0 + bx1) / 2;
+  const xOf = (mx: number) => xc + (mx - xc) * kx;
   const sections = style === 'motorcycle' || style === 'bicycle' || style === 'frame' ? [] : buildSections(rows, style, p);
+  const shieldRaw = sections.find((s) => s.kind === 'shield');
+  const doors = findDoors(rows, sections, shieldRaw ? shieldRaw.x0 : null);
+  for (const d of doors) {
+    d.x0 = xOf(d.x0);
+    d.x1 = xOf(d.x1);
+  }
+  for (const s of sections) {
+    s.x0 = xOf(s.x0);
+    s.x1 = xOf(s.x1);
+  }
   const shield = sections.find((s) => s.kind === 'shield');
   const xCowl = shield ? shield.x0 : null;
   const cabSecs = sections.filter((s) => s.kind === 'shield' || s.kind === 'cabin' || s.kind === 'rearglass');
   const cabin = cabSecs.length ? { x0: cabSecs[0].x0, x1: cabSecs[cabSecs.length - 1].x1 } : null;
 
   // Wheels: pulled in from the very ends so the bumpers overhang them like a real car's.
-  const xNose = bx1 + 0.5 - 0.04, xTail = bx0 - 0.5 + 0.04;
+  const xNose = xOf(bx1 + 0.5) - 0.04, xTail = xOf(bx0 - 0.5) + 0.04;
   const wheels: WheelInfo[] = [];
   const wheelCols = new Map<number, number[]>();
   for (const w of v.wheels) {
@@ -330,7 +349,7 @@ export function analyze(v: Vehicle, forceStyle?: BodyStyle): Layout {
   for (const w of v.wheels) {
     const r = wheelRadius(w, p.wheelScale);
     const width = Math.max(0.05, Math.min(0.5, ((w.def.wheel?.width ?? 20) / 100) * 1.1));
-    let x = w.mx;
+    let x = xOf(w.mx);
     if (style !== 'motorcycle' && style !== 'bicycle' && style !== 'frame') {
       if (w.mx === bx1) x = Math.min(x, xNose - r - 0.42);
       if (w.mx === bx0) x = Math.max(x, xTail + r + 0.42);
@@ -353,12 +372,11 @@ export function analyze(v: Vehicle, forceStyle?: BodyStyle): Layout {
     wheels.push({ part: w, x, z, r, width, side, steer });
   }
 
-  const doors = findDoors(rows, sections, xCowl);
   const broken = v.parts.filter((q) => q.hp <= 0).length;
   const hurt = v.parts.reduce((a, q) => a + (q.def.durability > 0 ? 1 - Math.max(0, q.hp) / q.def.durability : 0), 0);
   const wear = v.parts.length ? Math.min(1, (broken * 1.5 + hurt) / v.parts.length / 1.2) : 0;
 
-  return { style, livery, p, xNose, xTail, yc, hw, zOf, rows, sections, wheels, doors, xCowl, cabin, wear };
+  return { style, livery, p, xNose, xTail, yc, hw, zOf, xOf, rows, sections, wheels, doors, xCowl, cabin, wear };
 }
 
 /**
@@ -397,6 +415,12 @@ export function buildSections(rows: RowInfo[], style: BodyStyle, p: StyleParams)
       // A full-board partition without a roof ends the cab (cube van row behind the seats).
       if (r.fullBoard && !r.roof && !r.seat) {
         phase = 'after';
+      } else if (style === 'sedan' && sawSeat && !r.seat && r.roof && i < rows.length - 1) {
+        // A roofed cargo row behind the rear seats (BN's generic "car"): draw a sedan's
+        // rear window and trunk instead of a wagon roof running to the tail.
+        kinds.push('rearglass');
+        phase = 'after';
+        continue;
       } else if (r.seat || (r.roof && (style !== 'pickup' || !sawSeat))) {
         if (r.seat) sawSeat = true;
         kinds.push('cabin');

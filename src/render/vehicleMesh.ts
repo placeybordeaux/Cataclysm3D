@@ -515,6 +515,8 @@ interface Entry {
   pending: { id: number; key: string } | null;
   /** Built for the driven vehicle: separate wheel meshes that steer and spin. */
   driven: boolean;
+  /** Built at the distance LOD (no interior, no shadow casting). */
+  far: boolean;
   wheels: { mesh: THREE.Mesh; r: number; steer: boolean; spin: number }[];
   bike: boolean;
   version: number;
@@ -523,10 +525,14 @@ interface Entry {
   /** Model look: driver eye above the floor level and lateral seat position (mount y units). */
   eyeH: number | null;
   driverZ: number | null;
+  driverX: number | null;
   parkedLean: number;
   /** Headlight beam: a few dynamic lights along the cone (they feed the tile light map). */
   beam: LightHandle[];
 }
+
+/** Distance LOD thresholds (m): simplified beyond LOD_FAR, detailed again inside LOD_NEAR. */
+const LOD_FAR = 50, LOD_NEAR = 42;
 
 /** Model builds allowed per frame (ms) once one has been built: spreads pop-in over frames. */
 const BUILD_BUDGET_MS = 4;
@@ -538,7 +544,7 @@ export class VehicleRenderer {
   private glassMat = new THREE.MeshLambertMaterial({ color: 0x7ea4b8, transparent: true, opacity: 0.14, depthWrite: false, side: THREE.DoubleSide });
   // Model glass: tinted from outside (reads as glass on a car in daylight), nearly clear from
   // inside so the cockpit view isn't hazed.
-  private glassOut = new THREE.MeshLambertMaterial({ color: 0x3c4c5a, transparent: true, opacity: 0.62, depthWrite: false, side: THREE.FrontSide });
+  private glassOut = new THREE.MeshLambertMaterial({ color: 0x34424e, transparent: true, opacity: 0.72, depthWrite: false, side: THREE.FrontSide });
   private glassIn = new THREE.MeshLambertMaterial({ color: 0x9ab4c4, transparent: true, opacity: 0.1, depthWrite: false, side: THREE.BackSide });
   private lampOn = new THREE.MeshBasicMaterial({ color: 0xfff2c8 });
   private lampOff = new THREE.MeshBasicMaterial({ color: 0x8a8a80 });
@@ -674,7 +680,7 @@ export class VehicleRenderer {
     this.entries.delete(v);
   }
 
-  private build(v: Vehicle, e: Entry | undefined): Entry {
+  private build(v: Vehicle, e: Entry | undefined, far = false): Entry {
     const base = v.z * LEVEL_HEIGHT;
     const obj = new THREE.Group();
     obj.name = `vehicle:${v.protoId}`;
@@ -688,7 +694,7 @@ export class VehicleRenderer {
       const mesh = new THREE.Mesh(geo, m);
       if (shadow) {
         mesh.customDepthMaterial = shadow;
-        mesh.castShadow = true;
+        mesh.castShadow = !far;
         mesh.receiveShadow = true;
       }
       pivot.add(mesh);
@@ -697,14 +703,14 @@ export class VehicleRenderer {
     };
     const next: Entry = {
       obj, lean, meshes, roof: null, lamps: null, tails: null, beacons: null, skin: null, skinMeshes: [], pending: null,
-      driven: v === this.system.driving, wheels: [], bike: false,
-      version: v.version, z: v.z, look: this.lookMode, eyeH: null, driverZ: null, parkedLean: 0, beam: e?.beam ?? [],
+      driven: v === this.system.driving, wheels: [], bike: false, far,
+      version: v.version, z: v.z, look: this.lookMode, eyeH: null, driverZ: null, driverX: null, parkedLean: 0, beam: e?.beam ?? [],
     };
     const t0 = performance.now();
     const worker = this.lookMode === 'model' ? this.skinWorker() : null;
     // A skin already painted (or being painted) for the same content is kept.
     const haveKey = e?.skin?.key ?? e?.pending?.key;
-    const model = this.lookMode === 'model' ? buildVehicleModel(v, base, { reuseSkinKey: haveKey, deferSkin: !!worker, separateWheels: next.driven }) : null;
+    const model = this.lookMode === 'model' ? buildVehicleModel(v, base, { reuseSkinKey: haveKey, deferSkin: !!worker, separateWheels: next.driven, far }) : null;
     if (model) {
       let skin: Skin | null = e?.skin && e.skin.key === model.skinKey ? e.skin : null;
       if (!skin && model.skin) skin = this.makeSkin(model.skinKey, model.skin.data, model.skin.layout.width, model.skin.layout.height);
@@ -735,6 +741,7 @@ export class VehicleRenderer {
       }
       next.bike = model.layout.style === 'motorcycle' || model.layout.style === 'bicycle';
       next.eyeH = model.eyeH;
+      next.driverX = model.driverX ?? null;
       next.driverZ = model.driverZ;
       next.parkedLean = model.parkedLean;
       // lean about the ground line under the bike
@@ -787,12 +794,15 @@ export class VehicleRenderer {
       let e = this.entries.get(v);
       // Taking or leaving the wheel rebuilds too: the driven vehicle's wheels are separate meshes.
       const drivenChanged = !!e && e.look === 'model' && e.driven !== (v === driving);
-      if (!e || drivenChanged || e.version !== v.version || e.z !== v.z || (e.look !== this.lookMode && this.lookMode === 'parts')) {
+      // Distance LOD with hysteresis (no flip-flopping at the boundary); never the driven one.
+      const wantFar = this.lookMode === 'model' && v !== driving && d > (e?.far ? LOD_NEAR : LOD_FAR);
+      const lodChanged = !!e && e.look === 'model' && e.far !== wantFar;
+      if (!e || drivenChanged || lodChanged || e.version !== v.version || e.z !== v.z || (e.look !== this.lookMode && this.lookMode === 'parts')) {
         // Spread first builds over frames (a town street streams in dozens at once), but
         // never delay the vehicle being driven or a visible change to an existing one nearby.
         const urgent = v === driving || (e && d < 20);
         if (urgent || !built || performance.now() - t0 < BUILD_BUDGET_MS) {
-          e = this.build(v, e);
+          e = this.build(v, e, wantFar);
           this.entries.set(v, e);
           built++;
         }
@@ -872,7 +882,7 @@ export class VehicleRenderer {
     // Eye over the front of the seat, a little ahead of where the head would really be: the
     // dash and bonnet then drop out of the lower edge instead of filling it. The model look
     // squeezes the body's width, so the seat (and eye) sit at its drawn position.
-    const [ex, ey] = v.mountToWorld(seat.mx + EYE_FORWARD, e?.driverZ ?? seat.my);
+    const [ex, ey] = v.mountToWorld((e?.driverX ?? seat.mx) + EYE_FORWARD, e?.driverZ ?? seat.my);
     const base = v.z * LEVEL_HEIGHT;
     const t = this.game.map.terAt(Math.floor(cx), Math.floor(cy), v.z);
     const rough = hasFlag(t, 'ROAD') || hasFlag(t, 'FLAT') ? 0 : 1;
