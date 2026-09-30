@@ -32,7 +32,54 @@ world material (toon bands, light map, sun shadows, fill light):
 * Lumps' normals lean toward the crown's volume normal, so a crown shades as one mass (lit top,
   dark underside, stepped by the toon bands) with lumps in it.
 * 3 layout variants per family, random yaw; heights: conifers x1.35, birch x1.12, fruit x0.8.
-* No wind sway (the geometry is static world mesh); sway of <1 px at distance only flickered.
+* Wind: stepped foliage sway since round 4 (below); trunks stay still.
+
+## Round 4: close-up polish
+
+Feedback on round 3: crowns read as faceted PS1 balls with noisy texture, darker and more olive
+than the sprite greens; bushes were confetti; walking into a crown filled the screen.
+
+* **Smooth crowns**: lump normals are now 72 % the crown's sphere normal, 28 % the lump's, so
+  the crown shades as one mass through the toon bands with no facets; lumps separate by a baked
+  occlusion (vertex colour: faces toward the crown's inside and underside darker) and a
+  per-lump value/hue tint, like the v2 clumps' pixel-to-pixel variation.
+* **Ragged silhouette**: three larger leaf-mass cutout cards per lump, pushed outward from the
+  crown centre, plus a flat card under every lower lump for the underside edge.
+* **Leaf texture repainted**: overlapping scalloped leaf clusters (~7 px) in four clean steps
+  (lit upper-left edge, light body, mid mark, dark lower-right rim/gaps) instead of 3-px noise.
+* **Colour/value**: the ramp keeps the sprite's lit tone (x1.12-1.3) and the foliage material
+  adds the v2 light-through-leaves glow and backlit translucency; the toon bands do the
+  darkening.
+* **Bushes**: 5 big floret clusters (5-px rounded blobs, lit top-left) or 9 berry pairs on the
+  clean leaf base; fruit trees 6-9 fruit, blossom 9 clusters.
+* **Near fade**: leaves dissolve (screen-door on the pixel grid) between 2.0 and 0.9 m from the
+  eye; willow tongues no longer hang below ~2.5 m.
+* **Stepped wind**: foliage sways 5 cm in 4 keyframes a second (pixel-art timing; a still frame
+  between steps doesn't shimmer), fading out by 25 m. `floraWind.value` in flora.ts (0 = off).
+* Foliage has its own material (world material + those patches); trunks keep the world material.
+  Two draw calls per chunk instead of one.
+
+Standing render (full, 1080p): forest 1.5 ms / 676k tris, street 1.5 ms / 480k, far 1.6 ms /
+608k (round 3: 1.4 / 1.5 / 1.6).
+
+Walking flicker (`cdda.flickerTest`, full look): forest 0.021 (v2 clumps 0.028, round 3 0.027),
+street 0.018, far 0.017.
+
+![](screenshots/wave3/flora/round3_vs_4.jpg)
+
+## Round 5: the brightness/saturation shift
+
+After round 4 the forest looked brighter and more saturated post-merge, and I suspected
+another branch. Bisected: every `bn` first-parent merge from 84ada7e to b0dec39 renders the
+forest/street views identically (mean luma 0.200 / sat 0.054 in the forest, lighting state
+the same: clear, spring, sun 2.46, hemi 1.70, fill 1.09, exposure 1, no stray lights), and my
+round 4 pre-merge shot equals the post-merge one exactly. The shift was round 4's own leaf ramp
+(x1.12-1.3 per sRGB channel pushes a red-tinged green to yellow) plus the leaf glow: crown
+region luma 0.231 (round 3) -> 0.351, saturation 0.064 -> 0.127 (v2 clumps: 0.330 / 0.071).
+
+Fix: the lit steps lift value but take the mid tone's red/green balance and 20 % less chroma,
+the lighter ramp (x1.08-1.18), less leaf glow. Now 0.322 / 0.087: v2's brightness, green
+rather than yellow. Measured with `bin/lum.py` (mean over the top 420 rows).
 
 ## LOD without pops
 
@@ -91,11 +138,9 @@ instead of hundreds of instanced clump cards per tree). Atlas: ~17 % of the 2048
 
 ## Known gaps
 
-* Lumps are smooth-shaded low-poly: within ~2 m their facets and the 32 texel/m leaves are big,
-  and walking into a crown fills the view (v2 clumps dissolved near the eye).
+* Within ~2 m the 32 texel/m leaves are big (they dissolve from 2 m inward).
 * The middle ring -> impostor switch at ~80 m changes the crown outline a little (flat cards
   vs lumps); colours and proportions match.
 * t_fern renders as a low bush (no fronds); saplings in winter keep pale lumps.
-* No wind sway.
 * The flora page re-uploads (2048^2) when a new palette is first painted; this settles after
   the first few chunks of a new biome/season.
