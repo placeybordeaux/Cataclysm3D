@@ -1,6 +1,7 @@
 import type { GeomBuilder } from './geometry';
 import { framePixels, frameKey, type Pixels } from './framePixels';
 import type { TileFrame, TileTextureSource } from './textureSource';
+import type { Season } from './atlasIndex';
 
 // Voxel volumes from UltiCa sprites (look.ts `voxelProps`): furniture and ground items stop
 // being cardboard billboards.
@@ -18,7 +19,9 @@ import type { TileFrame, TileTextureSource } from './textureSource';
 type Geo = (f: TileFrame) => GeomBuilder;
 
 export interface VoxelProps {
-  furniture(geo: Geo, white: TileFrame, src: TileTextureSource, id: string, x: number, y: number, base: number, seed: number, yaw?: number): boolean;
+  /** `season`: furniture whose tileset art exists only per season (UltiCa's f_dandelion has no
+   *  plain tile) otherwise misses the atlas and inflates the fallback colour block. */
+  furniture(geo: Geo, white: TileFrame, src: TileTextureSource, id: string, x: number, y: number, base: number, seed: number, yaw?: number, season?: Season): boolean;
   item(geo: Geo, white: TileFrame, f: TileFrame, x: number, y: number, base: number, seed: number, k: number): boolean;
 }
 
@@ -256,8 +259,8 @@ function lyingHeight(id: string): number | null {
 }
 
 export class VoxelFactory implements VoxelProps {
-  furniture(geo: Geo, white: TileFrame, src: TileTextureSource, id: string, x: number, y: number, base: number, _seed: number, yaw = 0): boolean {
-    const f = src.furniture(id, 'sprite');
+  furniture(geo: Geo, white: TileFrame, src: TileTextureSource, id: string, x: number, y: number, base: number, _seed: number, yaw = 0, season?: Season): boolean {
+    const f = src.furniture(id, 'sprite', { season });
     const lie = lyingHeight(id);
     const m = lie !== null ? voxMesh(f, 'lie', lie) : voxMesh(f, 'stand', 6);
     if (!m) return false;
