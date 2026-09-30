@@ -2,7 +2,7 @@ import type { GeomBuilder } from '../geometry';
 import type { TileFrame, TileTextureSource } from '../textureSource';
 import { framePixels } from '../framePixels';
 import { hashString } from '../../core/rng';
-import { ModelAtlas } from './atlas';
+import { ModelAtlas, paintClock } from './atlas';
 import { archetypeFor, terrainArchetype, type Archetype } from './catalog';
 import { BACK, FRONT, LEFT, RIGHT, type Ctx } from './kit';
 import { ModelBuilder, placeModel, type ModelMesh } from './mesh';
@@ -81,8 +81,9 @@ export class ModelFactory {
    * mesher should yield mid-row: a store row of never-seen items is otherwise one 8 ms step.
    */
   yieldHint(): boolean {
-    if (this.sinceYield < 1.5) return false;
+    if (this.sinceYield + paintClock.ms < 1.5) return false;
     this.sinceYield = 0;
+    paintClock.ms = 0;
     return true;
   }
 

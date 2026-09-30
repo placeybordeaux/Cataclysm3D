@@ -13,6 +13,10 @@ const PAGE = 1024;
  *  at a frame edge read its own colour instead of a neighbour's. */
 const GUTTER = 2;
 
+/** Painting time since the chunk mesher last yielded (ModelFactory.yieldHint): first sight of
+ *  a new wall, rug or model paints its faces, which can make one mesher step expensive. */
+export const paintClock = { ms: 0 };
+
 interface Page {
   tex: THREE.DataTexture;
   px: Uint8Array;
@@ -39,6 +43,16 @@ export class ModelAtlas {
   frame(key: string, paint: () => Img): TileFrame {
     let f = this.frames.get(key);
     if (f) return f;
+    const t0 = performance.now();
+    try {
+      return (f = this.paintFrame(key, paint));
+    } finally {
+      paintClock.ms += performance.now() - t0;
+    }
+  }
+
+  private paintFrame(key: string, paint: () => Img): TileFrame {
+    let f: TileFrame;
     const img = paint();
     if (img.w < 1 || img.h < 1) throw new Error(`ModelAtlas: empty frame ${key}`);
     if (img.w + GUTTER * 2 > PAGE || img.h + GUTTER * 2 > PAGE) throw new Error(`ModelAtlas: frame ${key} too big (${img.w}x${img.h})`);
