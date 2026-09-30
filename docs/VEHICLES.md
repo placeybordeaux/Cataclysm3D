@@ -128,7 +128,27 @@ F-15.
 Screenshots (half size; `before` = the `bn` branch, `after` = phase 1): see
 `docs/screenshots/vehicles-v3/phase1/`.
 
-SCREENSHOTS_TABLE
+| | before (`bn`) | after (phase 1) |
+| --- | --- | --- |
+| bike and car rungs: bicycle, scooter, motorcycle, mini, car, sports | ![](screenshots/vehicles-v3/phase1/before_bikes-cars.jpg) | ![](screenshots/vehicles-v3/phase1/after_bikes-cars.jpg) |
+| utility: SUV, pickup, minivan, van, box truck | ![](screenshots/vehicles-v3/phase1/before_utility.jpg) | ![](screenshots/vehicles-v3/phase1/after_utility.jpg) |
+| heavy: bus, semi cab, heavy truck, trailer | ![](screenshots/vehicles-v3/phase1/before_heavy.jpg) | ![](screenshots/vehicles-v3/phase1/after_heavy.jpg) |
+| frame family: golf cart, tractor (now with all its BN parts), APC, sea scooter (was drawn as a motorcycle), JLTV | ![](screenshots/vehicles-v3/phase1/before_frames.jpg) | ![](screenshots/vehicles-v3/phase1/after_frames.jpg) |
+| a BN tanker (was an empty prototype: spawning one hung the page) | (nothing) | ![](screenshots/vehicles-v3/phase1/after_tanker.jpg) |
+
+The bodies look as in wave 3 on purpose: the templates took over the wave-3 shapes, so
+drawn = gameplay changed underneath, not the paint. `cdda.chassisOverlay(true)`: template body
+(yellow) = collision outline, sockets, seats (driver red):
+
+| | |
+| --- | --- |
+| ![](screenshots/vehicles-v3/phase1/overlay_car_pickup_van.jpg) | ![](screenshots/vehicles-v3/phase1/overlay_bus.jpg) |
+| ![](screenshots/vehicles-v3/phase1/overlay_top.jpg) | real input: the bus driven through town ![](screenshots/vehicles-v3/phase1/drive_bus.jpg) |
+| pickup ![](screenshots/vehicles-v3/phase1/drive_pickup.jpg) | cube van (box truck) ![](screenshots/vehicles-v3/phase1/drive_cube_van.jpg) |
+
+Known gaps: tankers are drawn as a flat deck (their tanks aren't modelled: per-part visuals
+are phase 5); the sea scooter / flying motorcycle now get the frame look; panels hold BN's
+side parts but nothing is drawn per socket yet.
 
 What phases 2-3 build on: `v.template` (saved, authoritative) is the adopted vehicle's body;
 sockets list what can be stripped (phase 2: `socket.parts` -> items through `moves.ts`) and
