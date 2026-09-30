@@ -1,13 +1,39 @@
-# CDDA-3D — status and handoff (end of wave 2, 2026-09-29)
+# CDDA-3D — status and handoff (end of wave 3, 2026-09-30)
 
 Branch **`bn`** is the live game (Cataclysm: Bright Nights content and rules, modern UI).
-`master` is still v1 (DDA data, curses-style UI), tagged `v1-dda`. `bn` is ~170 commits ahead;
-merge it to `master` once wave 3 settles.
+`master` is still v1 (DDA data, curses-style UI), tagged `v1-dda`. Merge `bn` → `master` once
+you're happy with wave 3.
 
-Health at handoff: `npm run typecheck` clean, `npm test` 990 passed / 24 skipped,
-`npm run build` green (66 MB `dist/`, static, deployable to Cloudflare Pages).
-Real-input suite (`tools/realinput.ts`, 33+ scenarios) last passed fully on the GPU at
-960×540 and 1920×1080.
+## Wave 3 in one screen (overnight, 2026-09-29/30)
+
+Direction from the user: stop mixing camera-facing 2D sprites with voxels — do what *Project
+Shadowglass* does (real low-poly 3D geometry, fixed-density nearest-filtered pixel textures,
+stepped lighting and animation, near/far asset versions); make every look readable at
+distance; replace hidden to-hit dice with visible skill; fix the boxy cars; adapt the source
+"like a TV adaptation of a book" for newcomers. Six parallel agents + a QA agent, ~30 merges.
+
+| Area | Doc | What changed | Switch (old behaviour stays one click away) |
+|---|---|---|---|
+| Characters | `docs/CHARACTERS.md` | Monsters, NPCs, corpses, player body = procedural low-poly rigs painted from the UltiCa sprite palette (faces, clothes, blood), stepped 10 fps animation, per-zombie quirks, 10+ body plans (humanoid variants, quadruped, bugs, birds, bats, blobs, plants, machines), far figures to 130 m. 3D first-person arms and per-weapon held models. Remaining billboards (fire, arrows, mannequins, statues, loot) made world-fixed. | Options → Creatures / First-person hands; `?chars=billboard`, `?viewmodel=sprite`, `?props=billboard` |
+| Furniture & surfaces | `docs/FURNITURE.md` | 75 modelled furniture archetypes (neighbours join up), doors, windows (broken-glass fix), ground items as shapes; procedurally painted walls/floors/ceilings/roofs at real scale; fences/gates; rooms with per-room finishes; set dressing (pictures, grime, blood, rugs, lamps, house numbers); wrecked-house clutter. | Options → Furniture / Surfaces; `?dressing=off` |
+| Vehicles | `docs/VEHICLES.md` | One modelled body per vehicle (11 styles + liveries), damage/wreck states, collision follows the drawn body, cockpit with live gauges, wipers, hands on the wheel, trunk lids, LOD. Fill up at gas pumps. | Options → Vehicle look / width; `?vehicles=parts` |
+| Readability & image | `docs/READABILITY.md` | Sky-tinted light haze instead of the grey fog wall, far ground ring to the horizon, weather-driven sky, toon-stepped form lighting with a world-fixed fill light, cutout mips (less shimmer), round sun. | Options → Distance haze / Draw distance / Form lighting |
+| Flora | `docs/FLORA.md` | Species-family 3D trees (round, willow, conifer, birch, fruit, sapling, dead) and bushes, seasonal colours, 3 LOD rings with no billboard pop, stepped wind. | Options → Trees |
+| Combat | `docs/COMBAT_FEEL.md` (Aim models, rounds 2–3) | Shots/swings go where the crosshair is. Skill = sway, recoil recovery, damage, crit/stagger; hit zones read the 3D model (head ×2); optional timing minigame; melee on model parts; visible enemy fire with near-miss cues; first-fight hints. | Options → Aim model (`sway` default, `timing`, `dice` = BN) |
+| Adaptation | `docs/ADAPTATION.md` | Principles + 69 playtest findings. Big fixes: BN weather was always a snowstorm; BN item light ignored (flashlights dark); shelter paved over on some seeds; nothing buildable on grass/dirt; fires died unburnt when time sped up. New: big-button title, crosshair activity ring, Rest window, route guide + road atlas, crafting "Almost" tab, credits screen, first beds / boil water / fire safety / freshness. | Several Options rows (listed in the doc) |
+| QA | `docs/QA_WAVE3.md` | Integrated playtest at 3440x1304 in Chromium + Firefox, every Options switch cycled, save/load, per-scenario real-input results. | — |
+
+Screenshots for every area: `docs/screenshots/wave3/<area>/` (before/after pairs; half-size JPEG).
+
+### Decisions waiting for you
+
+1. **Ammo economy under free aim.** A skill-0 pistol now needs ~3 shots per kill instead of ~5
+   (BN dice). Ammo spawns are unchanged. Lever if you want it tighter: `FEEL.aimSkillDmg0`
+   (`docs/BALANCE.md`).
+2. **Licence for this project's own code.** None in the repo; the in-game credits only claim
+   CC BY-SA for the derived content (BN data, UltiCa tileset).
+3. **Defaults you may want to flip** after playing: first-person hands (3D vs sprite; bows use
+   the 2D art), Form lighting (`toon` vs `bold`), Distance haze (`clear` vs `light`), Aim model.
 
 ## Working on it
 
@@ -54,6 +80,12 @@ Real-input suite (`tools/realinput.ts`, 33+ scenarios) last passed fully on the 
 | `docs/LOOKS.md` | Visual styles (classic/crisp/voxel/terrain/full), perf, screenshots |
 | `docs/UX_REVIEW.md` | Input/pointer-lock model, key rules |
 | `docs/QA_V2.md` | Latest full playtest: issues and statuses |
+| `docs/CHARACTERS.md` | Wave 3: 3D characters, first-person view, remaining billboards |
+| `docs/FURNITURE.md` | Wave 3: modelled furniture, painted surfaces, rooms, set dressing |
+| `docs/VEHICLES.md` | Wave 3: vehicle bodies, collision, cockpit, refuelling |
+| `docs/READABILITY.md` | Wave 3: haze, far ground, form lighting, shimmer |
+| `docs/FLORA.md` | Wave 3: 3D trees and bushes |
+| `docs/ADAPTATION.md` | Wave 3: adaptation principles, playtest findings, switches |
 | `docs/QA_WAVE3.md` | Wave-3 integration QA at 3440x1304 (Chromium + Firefox): issues, realinput per scenario, perf |
 
 ## Controls (current defaults; all rebindable in Options → Key bindings)
@@ -81,7 +113,7 @@ progression (quick start, unlock ladder, discovery tips, journal); difficulty pr
 tactical pause; visual depth ("full" look: crisp render, voxel furniture, 3D trees, roofs,
 terrain relief, grass, skyline) with time-sliced meshing.
 
-## Open backlog (starting point for wave 3)
+## Open backlog (from wave 2; see the wave-3 docs' "Known gaps" for newer items)
 
 From playtests and agent reports, roughly by value for the new-audience goal:
 
