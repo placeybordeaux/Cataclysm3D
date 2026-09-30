@@ -106,6 +106,18 @@ export interface FeelConstants {
   // --- guns
   /** Aim-down-sights field of view (deg; hip is the camera's normal 70). */
   adsFov: number;
+
+  // --- bows (rangedfeel.ts): RMB draws, aim builds at full draw, LMB looses
+  /** Shortest draw (s) whatever BN's reload cost says, so the draw reads on screen. */
+  drawMin: number;
+  /** Stamina per second spent holding a bow at full draw. */
+  drawStaminaPerSec: number;
+  /** Held at full draw longer than this (s), the arms start to shake... */
+  drawHoldSteady: number;
+  /** ...adding this much recoil (MOA) per second back onto the aim. */
+  drawShake: number;
+  /** Whirling a sling before the release (s, added to BN's reload cost). */
+  slingWhirl: number;
 }
 
 const ACCESSIBLE: FeelConstants = {
@@ -121,6 +133,7 @@ const ACCESSIBLE: FeelConstants = {
   flinchPerHp: 1.2, flinchMax: 0.35, staggerShare: 0.2, shovePerHp: 1.2, shoveMax: 0.35,
   holdInside: 0.2, surroundRange: 3.5,
   adsFov: 50,
+  drawMin: 0.45, drawStaminaPerSec: 50, drawHoldSteady: 4, drawShake: 220, slingWhirl: 0.35,
 };
 
 /** Classic: BN's own pacing where real time allows — shorter tells, tighter parries. */
@@ -131,6 +144,7 @@ const CLASSIC: FeelConstants = {
   dodgeWindow: 0.22, dodgeBonus: 3, dodgeStamina: 450,
   struggleBonus: 1, grabCooldownMul: 1, staggerBreaksGrab: false,
   staggerShare: 0.3,
+  drawStaminaPerSec: 90, drawHoldSteady: 2.5, drawShake: 400,
 };
 
 export const FEEL_PRESETS: Record<FeelDifficulty, FeelConstants> = { accessible: ACCESSIBLE, classic: CLASSIC };

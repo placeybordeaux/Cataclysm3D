@@ -1,6 +1,9 @@
 import { Rng, hashSeed } from '../core/rng';
 import type { MonsterSystem } from './monai';
 import type { Monster, MonEffect } from './monster';
+import type { ItemJSON } from './item';
+import { L, spawnItem } from './moves';
+import { loadItemSafe } from '../save/items';
 
 // Monster <-> JSON, shared by the save section (src/save/builtins.ts) and the far-monster
 // stash (monstash.ts), which keeps the same records for monsters folded out of the live list.
@@ -29,6 +32,8 @@ export interface MonsterJSON {
   wander?: [number, number, number];
   /** [x, y, seconds ago] where the player was last seen; absent = never. */
   lastSeen?: [number, number, number];
+  /** Arrows and bolts stuck in it (Monster.stuck). */
+  stuck?: ItemJSON[];
 }
 
 export function monsterToJSON(m: Monster): MonsterJSON {
@@ -49,6 +54,7 @@ export function monsterToJSON(m: Monster): MonsterJSON {
   if (sp.length) j.specials = sp;
   if (m.wanderTime > 0) j.wander = [m.wanderX, m.wanderY, m.wanderTime];
   if (Number.isFinite(m.lastSeenAge)) j.lastSeen = [m.lastSeenX, m.lastSeenY, m.lastSeenAge];
+  if (m.stuck.items.length) j.stuck = m.stuck.items.map((it) => it.toJSON());
   return j;
 }
 
@@ -80,5 +86,9 @@ export function restoreMonster(sys: MonsterSystem, j: MonsterJSON, warn: (msg: s
   for (const sp of m.specials) sp.cooldown = cds.get(String(sp.def.id)) ?? 0;
   if (j.wander) [m.wanderX, m.wanderY, m.wanderTime] = j.wander;
   if (j.lastSeen) [m.lastSeenX, m.lastSeenY, m.lastSeenAge] = j.lastSeen;
+  for (const sj of j.stuck ?? []) {
+    const it = loadItemSafe(game.data, sj, warn);
+    if (it) spawnItem(it, L.cargo(m.stuck), { force: true, quiet: true });
+  }
   return m;
 }

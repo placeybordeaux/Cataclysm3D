@@ -7,6 +7,8 @@ import { asArray, type Item } from './item';
 import { buffFlat, buffMult, currentStyle, isUnarmedWeapon, maOf, requirementsMet, triggerBuffs } from './martialarts';
 import { covers } from './inventory';
 import { defenseOf, sidestepDodgeRoll } from './combatfeel';
+import { canDraw, rollRecovery, strDrawDamageMod, strDrawDispersionMul, strDrawRangeMod, type DispersionBreakdown } from './rangedfeel';
+import { takeRound } from './moves';
 import { aimLevel, isJammed, modSum, rollMalfunction, shotSpreadMultiplier, sightDispersion, type AimLevel } from './gunmods';
 import {
   applyTechnique, blockHit, defensiveTechnique, glassShatter, handleMeleeWear, pickTechnique, techniqueMessage,
@@ -559,18 +561,30 @@ export interface DispersionSources {
   multipliers: number[];
 }
 
-/** Character::get_weapon_dispersion + recoil (total_gun_dispersion). */
-export function weaponDispersionSources(c: Character, gun: Item, recoil = c.recoil): DispersionSources {
-  const linear = [gunDispersion(gun)];
-  linear.push(Math.max((20 - c.dex) * 0.5, 0)); // ranged_dex_mod
+/**
+ * Character::get_weapon_dispersion + recoil, by source (the crosshair explains misses with the
+ * biggest one): gun + ammo, dexterity, hands, skill, recoil still to aim away, and BN's
+ * ranged::str_draw_dispersion_modifier (a bow drawn without the strength doubles it).
+ */
+export function dispersionBreakdown(c: Character, gun: Item, recoil = c.recoil): DispersionBreakdown {
   // Hand encumbrance / broken arms stand in for CDDA's manipulator limb score.
   const handEnc = (c.inv.encumbrance('hand_l') + c.inv.encumbrance('hand_r')) / 2;
-  linear.push(handEnc * 2 + c.brokenArms() * 150);
   const skill = gun.def.skill ?? 'gun';
   const avg = Math.min((c.getSkill('gun') + c.getSkill(skill)) / 2, 10);
-  linear.push(dispersionFromSkill(avg, (skill === 'archery' ? 450 : 300) / 18));
-  linear.push(recoil);
-  return { linear, multipliers: [] };
+  return {
+    weapon: gunDispersion(gun),
+    dex: Math.max((20 - c.dex) * 0.5, 0), // ranged_dex_mod
+    hands: handEnc * 2 + c.brokenArms() * 150,
+    skill: dispersionFromSkill(avg, (skill === 'archery' ? 450 : 300) / 18),
+    aim: recoil,
+    strMul: strDrawDispersionMul(gun, c),
+  };
+}
+
+/** Character::get_weapon_dispersion + recoil (total_gun_dispersion). */
+export function weaponDispersionSources(c: Character, gun: Item, recoil = c.recoil): DispersionSources {
+  const b = dispersionBreakdown(c, gun, recoil);
+  return { linear: [b.weapon, b.dex, b.hands, b.skill, b.aim], multipliers: b.strMul !== 1 ? [b.strMul] : [] };
 }
 
 export function maxDispersionMoa(src: DispersionSources): number {
@@ -654,6 +668,15 @@ export interface ShotResult {
   delayedRecoil?: number;
   /** Recoil this shot added immediately, MOA. */
   addedRecoil?: number;
+  /**
+   * The fired round as an object when it survives the shot (opts.recover and BN's
+   * dont_recover_one_in roll): unplaced — the caller puts it where it lands.
+   */
+  round?: Item;
+  /** Recoverable ammo that broke on firing (rolled against dont_recover_one_in). */
+  broke?: boolean;
+  /** Recoil before this shot (the aim the shot was taken with), MOA. */
+  aimRecoil?: number;
 }
 
 /**
@@ -663,20 +686,25 @@ export interface ShotResult {
  * `spread`/`azimuth` from the view direction and applies `damage` (or `pellets` × `shotDamage`)
  * to whatever it hits. `burst` picks the burst sound ("Brrrap!").
  */
-export function fireGun(c: Character, gun: Item, rng: Rng, opts: { burst?: boolean } = {}): ShotResult {
+export function fireGun(c: Character, gun: Item, rng: Rng, opts: { burst?: boolean; recover?: boolean } = {}): ShotResult {
   const fail = (message: string): ShotResult => {
     c.msg(message);
     return { ok: false, message, spread: 0, azimuth: 0, maxSpread: 0, damage: [], range: 0, noise: { volume: 0, sound: '' }, moves: 0, cooldownSeconds: 0 };
   };
   if (!gun.isGun()) return fail(`You can't fire your ${gun.name()}.`);
+  // ranged::gunmode_checks_common: under half the draw strength a STR_DRAW bow can't be fired.
+  if (!canDraw(gun, c)) return fail(`You don't have enough strength to fire your ${gun.baseName()}.`);
   if (isJammed(gun)) return fail(`Your ${gun.baseName()} is jammed!`);
   if (gun.ammoRemaining() <= 0) return fail(`Your ${gun.baseName()} is empty!`);
   const malfunction = rollMalfunction(gun, rng);
   if (malfunction) return fail(malfunction);
   const ammo = gun.ammoData()!;
+  const aimRecoil = c.recoil;
   const src = weaponDispersionSources(c, gun);
   const moa = rollDispersionMoa(src, rng);
-  const damage = gun.gunDamage();
+  // BN: damage (and below, range) shrink when a STR_DRAW bow is drawn without the strength.
+  const strDamage = strDrawDamageMod(gun, c);
+  const damage = gun.gunDamage().map((d) => (strDamage === 1 ? d : { ...d, amount: d.amount * strDamage }));
   const noise = gun.gunNoise(!!opts.burst);
   const pellets = Math.max(1, Number(ammo.projectile_count) || 1);
   let shotDamage: ShotResult['shotDamage'];
@@ -690,7 +718,12 @@ export function fireGun(c: Character, gun: Item, rng: Rng, opts: { burst?: boole
     }
     shotDamage = [...per.values()];
   }
-  gun.ammoConsume(1);
+  // Recoverable ammo (arrows, bolts, stones) that survives the shot leaves the gun as an object
+  // to land somewhere (BN drop_or_embed_projectile); everything else is used up.
+  let round: Item | undefined;
+  const recoverable = !!opts.recover && (Number(ammo.dont_recover_one_in) || 1) > 1;
+  if (recoverable && rollRecovery(ammo, gun, rng)) round = takeRound(gun) ?? undefined;
+  if (!round) gun.ammoConsume(1);
   const skill = gun.def.skill ?? 'gun';
   const absorb = Math.min(c.getSkill(skill), 10) / 20;
   const qty = gunRecoil(c, gun);
@@ -699,7 +732,7 @@ export function fireGun(c: Character, gun: Item, rng: Rng, opts: { burst?: boole
   // ranged.cpp: shots train the gun skill and marksmanship a little each.
   c.practice('gun', 5);
   c.practice(skill, 10);
-  const range = Math.max(0, ((ammo.range ?? 0) + (gun.def.range ?? 0) + modSum(gun, 'range_modifier')));
+  const range = Math.max(0, ((ammo.range ?? 0) + (gun.def.range ?? 0) + modSum(gun, 'range_modifier')) * strDrawRangeMod(gun, c));
   // Firing takes 100 moves for semi-autos plus action time (ranged.cpp action_time).
   const moves = 100;
   return {
@@ -719,6 +752,9 @@ export function fireGun(c: Character, gun: Item, rng: Rng, opts: { burst?: boole
     ammoEffects: asArray(ammo.effects as string[] | undefined),
     delayedRecoil: qty * absorb,
     addedRecoil: added,
+    round,
+    broke: recoverable && !round,
+    aimRecoil,
   };
 }
 

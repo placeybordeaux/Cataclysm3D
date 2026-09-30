@@ -1,9 +1,16 @@
 import { ACTION_SCALE } from '../core/time';
+import type { ItemDef } from '../data/types';
 import type { Game, GameSystem } from './game';
-import { aim, applyDelayedRecoil, applyFlatArmor, attackCooldownSeconds, fireGun, hitMessage, meleeAttack, normalRoll, pelletAngle, sizeRank, type ShotResult } from './combat';
+import { aim, applyDelayedRecoil, applyFlatArmor, attackCooldownSeconds, dispersionBreakdown, fireGun, hitMessage, meleeAttack, normalRoll, pelletAngle, sizeRank, type ShotResult } from './combat';
+import { MAX_RECOIL } from './character';
 import { currentMode } from './gunmods';
-import type { Item } from './item';
-import { L, moveItem } from './moves';
+import { asArray, type Item } from './item';
+import { L, moveItem, spawnItem } from './moves';
+import {
+  arcHeight, canDraw, drawSeconds, drawStyle, embedsIn, fliesVisibly, flightSpeed, hasMuzzleFlash, kickScale, LAUNCH_DROP, rangedClass, rangedMissReason, strNeeded,
+  type DispersionBreakdown, type DrawStyle, type RangedClass, type RangedMissKind,
+} from './rangedfeel';
+import type { Voice } from '../audio/audio';
 import { turnsToSeconds, type MonEffect, type Monster } from './monster';
 import { COMBAT_TURN, maOf, tickMartialArts, triggerBuffs } from './martialarts';
 import { techniqueMessage, type TargetInfo, type TechniqueOutcome } from './techniques';
@@ -47,9 +54,78 @@ export interface ViewModelHook {
   /** Hold the pose for hit-stop. */
   impact?(seconds: number): void;
   setGuard?(on: boolean): void;
-  /** Gun kick scaled by the round's recoil (replaces attack('fire') when present). */
-  recoil?(k: number): void;
+  /** Gun kick scaled by the round's recoil (replaces attack('fire') when present); `flash` false for bows, slings, air guns. */
+  recoil?(k: number, o?: { flash?: boolean; cls?: RangedClass }): void;
 }
+
+/** A bow being drawn or a sling being whirled (RMB, or a snap shot from LMB). */
+export interface DrawState {
+  gun: Item;
+  style: Exclude<DrawStyle, 'trigger'>;
+  /** Seconds since the draw began, and seconds to full draw. */
+  t: number;
+  full: number;
+  /** Loose as soon as fully drawn (LMB was pressed, or a snap shot). */
+  release: boolean;
+  /** Seconds held at full draw (the arms tire past FEEL.drawHoldSteady). */
+  heldFull: number;
+}
+
+/**
+ * An arrow, bolt or stone in the air. It flies straight in plan along `yaw` (the BN dispersion
+ * roll already bent it off the crosshair) at `speed` m/s on a gravity arc (rangedfeel.arcHeight),
+ * and resolves against whatever it actually reaches: a monster's circle, a wall, the ground.
+ */
+export interface Flight {
+  x0: number;
+  y0: number;
+  z: number;
+  dx: number;
+  dy: number;
+  yaw: number;
+  /** Metres flown; current position (x, y) and height above the floor (h). */
+  s: number;
+  x: number;
+  y: number;
+  h: number;
+  speed: number;
+  /** BN range (tiles): nothing is hit past it, the round only falls. */
+  range: number;
+  arc: { eye: number; slope: number; aimDist: number; speed: number };
+  cls: RangedClass;
+  gun: Item;
+  ammo: ItemDef | undefined;
+  shot: ShotResult;
+  /** The round itself when it survives (unplaced until it lands), else null (broke). */
+  round: Item | null;
+  /** What the crosshair was on at release, and how far. */
+  intended: Monster | null;
+  intendedDist: number;
+  spread: DispersionBreakdown;
+  /** Monsters that dodged it or that it flew over (it carries on past them). */
+  passed: Set<Monster>;
+  overflew: Set<Monster>;
+  /** The crosshair already said why it missed. */
+  explained: boolean;
+  done: boolean;
+}
+
+/** Where a recovered round came to rest in view (the renderer draws it stuck there until picked up). */
+export interface Landed {
+  /** The ground stack that holds it (arrows merge into one stack per tile). */
+  item: Item;
+  x: number;
+  y: number;
+  z: number;
+  /** Height of the tip above the floor, the flight's yaw, and what it went into. */
+  hgt: number;
+  yaw: number;
+  into: 'wall' | 'ground' | 'body';
+  map: Parameters<typeof L.ground>[0];
+}
+
+/** Rough standing height (m) by size, for arrows flying over small things. */
+const HEIGHT_BY_SIZE: Record<string, number> = { tiny: 0.5, small: 0.9, medium: 1.9, large: 2.6, huge: 3.6 };
 
 /** A swing in progress (feel layer). `t` counts from the click. */
 export interface SwingState {
@@ -140,8 +216,19 @@ export class PlayerCombat implements GameSystem {
   /** Side-step in progress: velocity (tiles/s) and seconds left. */
   step: { vx: number; vy: number; t: number } | null = null;
   stepCooldown = 0;
-  /** Gunfire feedback for the renderer (camera kick): the round's recoil, ~1 for a pistol. */
-  onFire: ((kick: number) => void) | null = null;
+  /** Gunfire feedback for the renderer (camera kick): the round's recoil, ~1 for a pistol (a bow's is tiny). */
+  onFire: ((kick: number, cls: RangedClass) => void) | null = null;
+  /** Shots whose powder flashed (renderer: muzzle light); bows, slings and air guns don't count. */
+  flashShots = 0;
+  lastShotClass: RangedClass | null = null;
+  /** The bow being drawn / sling being whirled. */
+  draw: DrawState | null = null;
+  /** Arrows, bolts and stones in the air (render/arrowFx.ts draws them). */
+  readonly flights: Flight[] = [];
+  /** Recovered rounds lying where they landed (render/arrowFx.ts draws them stuck there). */
+  readonly landed: Landed[] = [];
+  private whirl: Voice | null = null;
+  private ammoCache = { t: 0, gun: null as Item | null, has: false };
   private time = 0;
   private prevHeld = new Set<string>();
   private tapAt: Record<string, number> = {};
@@ -183,7 +270,9 @@ export class PlayerCombat implements GameSystem {
     def.dodgeWindow = Math.max(0, def.dodgeWindow - dt);
     this.updateStep(dt);
     if (this.hitStop <= 0) this.updateSwing(dt);
+    this.updateFlights(dt);
     if (p.dead || input.captured) {
+      if (this.draw) this.cancelDraw();
       this.setGuard(false);
       this.prevHeld.clear();
       return;
@@ -193,12 +282,21 @@ export class PlayerCombat implements GameSystem {
     const others = clicks.filter((b) => b !== 0);
     if (others.length) (input as unknown as { clicks: number[] }).clicks.push(...others);
     const gun = p.inv.wielded?.isGun() ? p.inv.wielded : null;
+    const style = gun ? drawStyle(gun) : 'trigger';
     // Holding LMB keeps swinging a melee weapon, but a gun only keeps firing when it has an
     // automatic mode; a pistol fires once per click like CDDA's one shot per `f`.
-    const held = (input.mouseButtons & 1) !== 0 && (!gun || currentMode(gun).qty > 1);
+    const held = (input.mouseButtons & 1) !== 0 && (!gun || (style === 'trigger' && currentMode(gun).qty > 1));
     this.updateBurst(dt);
-    const lmb = clicks.includes(0) || held;
     const rmb = (input.mouseButtons & 4) !== 0;
+    // Bows and slingshots are drawn (RMB), slings whirled; both loose on LMB (rangedfeel.ts).
+    if (gun && style !== 'trigger') {
+      this.setGuard(false);
+      this.detectSidestep();
+      this.updateDraw(gun, style, clicks.includes(0), rmb, dt);
+      return;
+    }
+    if (this.draw) this.cancelDraw();
+    const lmb = clicks.includes(0) || held;
     if (gun && rmb) aim(p, gun, dt * ACTION_SCALE * 100);
     // RMB with a melee weapon or bare hands: guard (lowered while a swing plays).
     this.setGuard(!gun && rmb && !this.swing && !p.effects.has('downed') && !game.movementOverride?.());
@@ -326,7 +424,11 @@ export class PlayerCombat implements GameSystem {
   attack(): void {
     if (this.attackGuard && !this.attackGuard()) return;
     const w = this.game.player.inv.wielded;
-    if (w?.isGun()) this.fire();
+    const style = w?.isGun() ? drawStyle(w) : 'trigger';
+    // A bow or sling from `f` / scripts: a snap shot, drawn (or whirled) then loosed at once.
+    if (w && style !== 'trigger') {
+      if (!this.draw && this.cooldown <= 0) this.startDraw(w, style, true);
+    } else if (w?.isGun()) this.fire();
     else this.beginSwing();
   }
 
@@ -445,7 +547,7 @@ export class PlayerCombat implements GameSystem {
    * Tell hit-feedback listeners (particles, stagger, crosshair marker) how an attack went.
    * The impact point is the near side of the target (what the camera sees get hit).
    */
-  private feedback(kind: 'melee' | 'gun' | 'throw', outcome: 'hit' | 'crit' | 'miss' | 'whiff', m: Monster | null, x: number, y: number, damage: number, hitStop = 0, reason?: string): void {
+  private feedback(kind: 'melee' | 'gun' | 'throw', outcome: 'hit' | 'crit' | 'miss' | 'whiff', m: Monster | null, x: number, y: number, damage: number, hitStop = 0, reason?: string, extra: { ranged?: RangedClass; landed?: boolean } = {}): void {
     const p = this.game.player;
     if (m) {
       const d = Math.hypot(m.x - p.x, m.y - p.y) || 1;
@@ -460,6 +562,7 @@ export class PlayerCombat implements GameSystem {
       blood: m ? this.sys.bloodType(m.type) : undefined,
       hitStop,
       reason,
+      ...extra,
     });
   }
 
@@ -554,27 +657,43 @@ export class PlayerCombat implements GameSystem {
     const game = this.game;
     const p = game.player;
     const rng = this.sys.rng;
-    const shot = fireGun(p, gun, rng, { burst });
+    const cls = rangedClass(gun);
+    const flies = fliesVisibly(cls);
+    // What made this shot wide, source by source, before the shot's own recoil lands.
+    const spread = dispersionBreakdown(p, gun);
+    const ammo = gun.ammoData() ?? null;
+    const shot = fireGun(p, gun, rng, { burst, recover: flies });
     if (!shot.ok) {
-      sfx.gunEmpty();
+      if (!canDraw(gun, p)) this.refuse(`too weak to draw this ${cls === 'bow' ? 'bow' : 'weapon'} (Str ${strNeeded(gun)} needed)`);
+      else if (gun.ammoRemaining() <= 0) this.refuse(flies ? `no ${cls === 'bow' ? 'arrows' : cls === 'crossbow' ? 'bolt loaded: press r' : 'stones'}` : 'empty: press r to reload');
+      // A dry click is a firearm thing; an empty bow is just silent.
+      if (!flies) sfx.gunEmpty();
       this.cooldown = 0.25;
       return null;
     }
     this.shots++;
-    // Kick scaled by the round's recoil (MOA added; ~150-250 for a 9 mm pistol).
-    const kick = Math.max(0.4, Math.min(2.5, (shot.addedRecoil ?? 200) / 200));
+    this.lastShotClass = cls;
+    if (hasMuzzleFlash(cls)) this.flashShots++;
+    // Kick scaled by the round's recoil (MOA added; ~150-250 for a 9 mm pistol), and by what
+    // kind of launcher it is: a bow barely moves on release.
+    const kick = Math.max(0.4, Math.min(2.5, (shot.addedRecoil ?? 200) / 200)) * kickScale(cls);
     const vm = this.viewmodel();
-    if (vm?.recoil) vm.recoil(kick);
+    if (vm?.recoil) vm.recoil(kick, { flash: hasMuzzleFlash(cls), cls });
     else vm?.attack('fire');
-    this.onFire?.(kick);
-    const ammo = gun.ammoData() ?? null;
-    sfx.gunshot(gun.typeId, undefined, { ammoType: typeof ammo?.ammo_type === 'string' ? ammo.ammo_type : undefined, loudness: shot.noise.volume });
+    this.onFire?.(kick, cls);
+    sfx.rangedShot(cls, gun.typeId, undefined, { ammoType: typeof ammo?.ammo_type === 'string' ? ammo.ammo_type : undefined, loudness: shot.noise.volume });
     // CDDA make_gun_sound_effect: silent weapons make no sound at all.
     if (shot.noise.volume > 0) this.sys.emitSound(p.x, p.y, p.z, shot.noise.volume, shot.noise.sound || 'Bang!', 'player', '');
     // Dispersion becomes a sideways offset (the vertical part of the cone can't miss a sprite
     // that already fills the crosshair's column, so only the horizontal component matters).
     const yaw = p.yaw + shot.spread * Math.cos(shot.azimuth);
     const range = Math.max(1, shot.range || 30);
+    // What the survivor meant to hit: the crosshair's creature, else the one closest to it.
+    const meant = this.rangedTarget(range * 1.6);
+    if (flies) {
+      this.launch(gun, cls, shot, ammo ?? undefined, yaw, range, meant, spread);
+      return shot;
+    }
     const hit = this.castRay(yaw, range);
     const npcHit = this.npcShot?.(yaw, Math.hypot(hit.x - p.x, hit.y - p.y), shot);
     if (npcHit) {
@@ -587,7 +706,8 @@ export class PlayerCombat implements GameSystem {
     const pointBlank = hit.hit && Math.hypot(hit.hit.x - p.x, hit.hit.y - p.y) <= 1.6;
     if (pellets <= 1 || pointBlank || !shot.shotDamage) {
       this.tracers.push({ x0: p.x, y0: p.y, x1: hit.x, y1: hit.y, z: p.z, t: 0.08 });
-      this.impact(hit, shot, shot.damage, true);
+      const why = meant && hit.hit !== meant.m ? this.hitscanMissWhy(hit, meant, range, spread, gun, cls) : undefined;
+      this.impact(hit, shot, shot.damage, true, why, cls);
       return shot;
     }
     const perMonster = new Map<Monster, { n: number; total: number }>();
@@ -605,7 +725,8 @@ export class PlayerCombat implements GameSystem {
     }
     if (!perMonster.size) {
       sfx.bulletHit('wall', { x: hit.x, y: hit.y, z: p.z });
-      game.events.emit('playerAttack', { kind: 'gun', outcome: 'whiff', x: hit.x, y: hit.y, z: p.z, damage: 0, heavy: false, blood: null });
+      const reason = meant ? this.hitscanMissWhy(hit, meant, range, spread, gun, cls) : undefined;
+      game.events.emit('playerAttack', { kind: 'gun', outcome: 'whiff', x: hit.x, y: hit.y, z: p.z, damage: 0, heavy: false, blood: null, reason, ranged: cls, landed: true });
     }
     for (const [m, e] of perMonster) {
       if (m.dead) continue;
@@ -623,13 +744,13 @@ export class PlayerCombat implements GameSystem {
   }
 
   /** A single projectile's impact: CDDA damage bands on a monster, or a wall. */
-  private impact(hit: { x: number; y: number; hit: Monster | null; missedBy: number }, shot: ShotResult, damage: ShotResult['damage'], primary: boolean): void {
+  private impact(hit: { x: number; y: number; hit: Monster | null; missedBy: number }, shot: ShotResult, damage: ShotResult['damage'], primary: boolean, why?: string, cls: RangedClass = 'firearm'): void {
     const game = this.game;
     const p = game.player;
     const rng = this.sys.rng;
     if (!hit.hit) {
       sfx.bulletHit('wall', { x: hit.x, y: hit.y, z: p.z });
-      this.game.events.emit('playerAttack', { kind: 'gun', outcome: 'whiff', x: hit.x, y: hit.y, z: p.z, damage: 0, heavy: false, blood: null });
+      this.game.events.emit('playerAttack', { kind: 'gun', outcome: 'whiff', x: hit.x, y: hit.y, z: p.z, damage: 0, heavy: false, blood: null, reason: why, ranged: cls, landed: true });
       if (primary) this.ammoEffectsAt(shot, hit.x, hit.y, null, 0);
       return;
     }
@@ -646,7 +767,7 @@ export class PlayerCombat implements GameSystem {
     );
     if (!r.hit) {
       game.message(`${m.TheName()} avoids your projectile.`);
-      this.feedback('gun', 'miss', m, m.x, m.y, 0);
+      this.feedback('gun', 'miss', m, m.x, m.y, 0, 0, 'dodged', { ranged: cls });
       if (primary) this.ammoEffectsAt(shot, hit.x, hit.y, null, 0);
       return;
     }
@@ -658,8 +779,390 @@ export class PlayerCombat implements GameSystem {
     if (r.headshot) this.game.events.emit('playerHeadshot', { target: m });
     sfx.bulletHit('flesh', m);
     this.sys.hurt(m, total, 'player');
-    this.feedback('gun', r.tag === 'Critical!' ? 'crit' : 'hit', m, m.x, m.y, total);
+    this.feedback('gun', r.tag === 'Critical!' ? 'crit' : 'hit', m, m.x, m.y, total, 0, total <= 0 ? 'no damage' : r.graze ? 'grazed' : undefined, { ranged: cls });
     if (primary) this.ammoEffectsAt(shot, m.x, m.y, m, total);
+  }
+
+  /** Why a hitscan round missed the creature it was aimed at (the crosshair line). */
+  private hitscanMissWhy(hit: { x: number; y: number; hit: Monster | null }, meant: { m: Monster; dist: number }, range: number, spread: DispersionBreakdown, gun: Item, cls: RangedClass): string | undefined {
+    const p = this.game.player;
+    if (hit.hit) return undefined; // it hit something else on the way
+    const reached = Math.hypot(hit.x - p.x, hit.y - p.y);
+    let kind: RangedMissKind = 'passed';
+    if (reached < meant.dist - meant.m.radius && reached < range - 0.2) kind = 'wall';
+    else if (range < meant.dist - meant.m.radius) kind = 'range';
+    return this.missWhy(kind, meant, range, spread, gun, cls);
+  }
+
+  private missWhy(kind: RangedMissKind, meant: { m: Monster; dist: number }, range: number, spread: DispersionBreakdown, gun: Item, cls: RangedClass): string {
+    const p = this.game.player;
+    const skill = String(gun.def.skill ?? 'gun');
+    return rangedMissReason({
+      kind, spread, distance: meant.dist, targetRadius: meant.m.radius, skill: skillName(skill), skillLevel: p.getSkill(skill),
+      style: cls === 'bow' ? 'draw' : drawStyle(gun), range, strNeeded: strNeeded(gun),
+    });
+  }
+
+  /** The survivor couldn't attack: say why at the crosshair (and once in the log). */
+  private refuse(reason: string): void {
+    this.game.events.emit('attackRefused', { reason });
+  }
+
+  /**
+   * The creature the survivor is shooting at: the one under the crosshair, else the closest to
+   * it within a few degrees (and its angular size), in sight, within `maxDist`.
+   */
+  rangedTarget(maxDist: number): { m: Monster; dist: number } | null {
+    const p = this.game.player;
+    const look = this.game.lookAt?.(maxDist);
+    const hit = look?.kind === 'creature' ? (look.creature as { monster?: Monster } | undefined)?.monster : undefined;
+    if (hit && !hit.dead && !hit.friendly) return { m: hit, dist: Math.hypot(hit.x - p.x, hit.y - p.y) };
+    let best: Monster | null = null, bestScore = Infinity, bestD = 0;
+    for (const m of this.sys.active) {
+      if (m.dead || m.friendly || m.z !== p.z) continue;
+      const d = Math.hypot(m.x - p.x, m.y - p.y);
+      if (d > maxDist || d < 0.3) continue;
+      const off = angleDiff(Math.atan2(m.x - p.x, -(m.y - p.y)), p.yaw);
+      const half = Math.atan2(m.radius, d);
+      if (off > half + 0.06) continue;
+      if (!hasLOS(this.grid, p.tileX, p.tileY, m.tileX, m.tileY, p.z)) continue;
+      const score = off - half;
+      if (score < bestScore) {
+        bestScore = score;
+        best = m;
+        bestD = d;
+      }
+    }
+    return best ? { m: best, dist: bestD } : null;
+  }
+
+  // ------------------------------------------------------------------ bows and slings: draw, loose, flight
+
+  /**
+   * RMB draws (a bow) or whirls (a sling); aim builds only at full draw while RMB is held, and
+   * costs stamina; held too long the arms shake and the aim drifts back. LMB looses — at once if
+   * fully drawn, else as soon as the draw completes (so a plain click is a snap shot). Letting go
+   * of RMB without loosing lets the string down (the arrow stays nocked).
+   */
+  private updateDraw(gun: Item, style: Exclude<DrawStyle, 'trigger'>, click: boolean, rmb: boolean, dt: number): void {
+    const p = this.game.player;
+    let d = this.draw;
+    if (d && d.gun !== gun) {
+      this.cancelDraw();
+      d = null;
+    }
+    if (!d) {
+      if ((click || rmb) && this.cooldown <= 0 && !this.burst) this.startDraw(gun, style, click);
+      return;
+    }
+    if (click) d.release = true;
+    d.t += dt;
+    if (!rmb && !d.release) {
+      this.cancelDraw();
+      return;
+    }
+    if (d.t < d.full) return;
+    d.heldFull += dt;
+    if (rmb) aim(p, gun, dt * ACTION_SCALE * 100);
+    if (style === 'draw') {
+      p.modStamina(-FEEL.drawStaminaPerSec * dt);
+      // Tired arms: past the steady window (or winded) the aim drifts back open.
+      if (d.heldFull > FEEL.drawHoldSteady || p.stamina < p.staminaMax() * 0.1) p.recoil = Math.min(MAX_RECOIL, p.recoil + FEEL.drawShake * dt);
+    }
+    if (d.release) this.loose();
+  }
+
+  /** Nock (RELOAD_AND_SHOOT takes an arrow from what you carry) and start drawing; null if you can't. */
+  startDraw(gun: Item, style: Exclude<DrawStyle, 'trigger'>, release: boolean): DrawState | null {
+    const game = this.game;
+    const p = game.player;
+    const cls = rangedClass(gun);
+    if (!canDraw(gun, p)) {
+      const need = strNeeded(gun);
+      game.message(`You don't have enough strength to draw your ${gun.baseName()} (Str ${need} needed, you have ${p.str}).`, 'c_light_red');
+      this.refuse(`too weak to draw this ${cls === 'bow' ? 'bow' : 'weapon'} (Str ${need} needed)`);
+      this.cooldown = 0.6;
+      return null;
+    }
+    if (gun.ammoRemaining() <= 0 && gun.hasFlag('RELOAD_AND_SHOOT')) {
+      const s = p.onMessage;
+      p.onMessage = null;
+      try {
+        p.inv.reload(gun);
+      } finally {
+        p.onMessage = s;
+      }
+    }
+    if (gun.ammoRemaining() <= 0) {
+      const what = asArray(gun.ammoTypes()).includes('arrow') ? 'arrows' : cls === 'sling' ? 'stones' : 'ammunition';
+      game.message(`You have no ${what} for your ${gun.baseName()}.`, 'c_light_red');
+      this.refuse(`no ${what}`);
+      this.cooldown = 0.6;
+      return null;
+    }
+    const full = drawSeconds(gun, p, FEEL.drawMin) + (style === 'whirl' ? FEEL.slingWhirl : 0);
+    this.draw = { gun, style, t: 0, full, release, heldFull: 0 };
+    if (style === 'whirl') {
+      this.whirl?.stop(0.05);
+      this.whirl = sfx.slingWhirl();
+    } else sfx.bowDraw(strNeeded(gun) >= 10);
+    return this.draw;
+  }
+
+  /** Let the string down / stop whirling without shooting. */
+  cancelDraw(): void {
+    this.draw = null;
+    this.whirl?.stop(0.08);
+    this.whirl = null;
+  }
+
+  private loose(): void {
+    this.draw = null;
+    this.whirl?.stop(0.05);
+    this.whirl = null;
+    this.fire();
+  }
+
+  /**
+   * What the viewmodel shows for a drawn/whirled weapon: draw 0..1, whether an arrow sits on the
+   * string (loaded, being drawn, or one to nock from what you carry), arm shake 0..1.
+   */
+  bowPose(): { style: DrawStyle; cls: RangedClass; draw: number; nocked: boolean; shake: number; whirl: number } | null {
+    const p = this.game.player;
+    const gun = p.inv.wielded;
+    if (!gun?.isGun()) return null;
+    const style = drawStyle(gun);
+    if (style === 'trigger') return null;
+    const d = this.draw;
+    const c = this.ammoCache;
+    if (c.gun !== gun || this.time - c.t > 0.5) {
+      c.gun = gun;
+      c.t = this.time;
+      c.has = gun.ammoRemaining() > 0 || p.inv.allItems().some((it) => it.isAmmo() && it.charges > 0 && gun.acceptsAmmo(it));
+    }
+    const nocked = !!d || gun.ammoRemaining() > 0 || (c.has && this.cooldown <= 0.12);
+    const draw = d ? Math.min(1, d.t / d.full) : 0;
+    const shake = d && d.style === 'draw' && draw >= 1 ? Math.max(0, Math.min(1, (d.heldFull - FEEL.drawHoldSteady) / 2)) : 0;
+    return { style, cls: rangedClass(gun), draw, nocked, shake, whirl: d && d.style === 'whirl' ? d.t : 0 };
+  }
+
+  /** Release a visible projectile (see Flight). */
+  private launch(gun: Item, cls: RangedClass, shot: ShotResult, ammo: ItemDef | undefined, yaw: number, range: number, meant: { m: Monster; dist: number } | null, spread: DispersionBreakdown): void {
+    const p = this.game.player;
+    const speed = flightSpeed(cls, Number(ammo?.speed) || 100);
+    const eye = p.crouching ? 1.0 : 1.6;
+    // The arc meets the crosshair where the survivor aimed: the target, else where the view ray
+    // reaches the ground or a wall, never past the range.
+    let aimDist = range;
+    if (meant) aimDist = meant.dist;
+    else {
+      const look = this.game.lookAt?.(range * 1.5);
+      if (look) aimDist = Math.hypot(look.point.x - p.x, look.point.y - p.y);
+      if (p.pitch < -0.01) aimDist = Math.min(aimDist, eye / Math.tan(-p.pitch));
+    }
+    aimDist = Math.max(1, Math.min(range, aimDist));
+    const dx = Math.sin(yaw), dy = -Math.cos(yaw);
+    const arc = { eye, slope: Math.tan(p.pitch), aimDist, speed };
+    this.flights.push({
+      x0: p.x, y0: p.y, z: p.z, dx, dy, yaw, s: 0, x: p.x, y: p.y, h: eye - LAUNCH_DROP, speed, range, arc, cls, gun, ammo, shot,
+      round: shot.round ?? null, intended: meant?.m ?? null, intendedDist: meant?.dist ?? 0, spread,
+      passed: new Set(), overflew: new Set(), explained: false, done: false,
+    });
+  }
+
+  private updateFlights(dt: number): void {
+    for (let i = this.flights.length - 1; i >= 0; i--) {
+      const f = this.flights[i];
+      this.stepFlight(f, dt);
+      if (f.done) this.flights.splice(i, 1);
+    }
+  }
+
+  private placeFlight(f: Flight, s: number): void {
+    f.s = s;
+    f.x = f.x0 + f.dx * s;
+    f.y = f.y0 + f.dy * s;
+    f.h = arcHeight(s, f.arc);
+  }
+
+  /** Advance one flight by dt: the first of a monster, a wall or the ground on the way ends (or dodges) it. */
+  stepFlight(f: Flight, dt: number): void {
+    const s0 = f.s;
+    const maxS = f.range * 1.6 + 2;
+    const s1 = Math.min(maxS, s0 + f.speed * dt);
+    let ground = s1 >= maxS ? maxS : Infinity;
+    for (let s = s0 + 0.2; s < s1 + 0.2; s += 0.2) {
+      const q = Math.min(s, s1);
+      if (arcHeight(q, f.arc) <= 0.02) {
+        ground = q;
+        break;
+      }
+    }
+    const end = Math.min(s1, ground);
+    const wall = this.wallAlong(f, s0, end);
+    let hitM: Monster | null = null, hitS = Infinity, hitPerp = 0;
+    for (const m of this.sys.active) {
+      if (m.dead || m.z !== f.z || f.passed.has(m)) continue;
+      const ox = m.x - f.x0, oy = m.y - f.y0;
+      const t = ox * f.dx + oy * f.dy;
+      if (t <= s0 || t > end || t > f.range || t >= hitS || t >= wall) continue;
+      const perp = Math.abs(ox * f.dy - oy * f.dx);
+      if (perp > m.radius) continue;
+      if (arcHeight(t, f.arc) > (HEIGHT_BY_SIZE[m.size] ?? 1.9) + 0.25) {
+        f.overflew.add(m);
+        continue;
+      }
+      hitM = m;
+      hitS = t;
+      hitPerp = perp;
+    }
+    if (hitM) {
+      this.placeFlight(f, hitS);
+      if (!this.flightHits(f, hitM, hitPerp)) f.passed.add(hitM);
+      return;
+    }
+    // Past what it was aimed at without touching it: say why now, not when it lands. (Where the
+    // target is *now* along the line: it may have stepped since the release.)
+    const it = f.intended;
+    if (it && !f.explained && !it.dead) {
+      const along = (it.x - f.x0) * f.dx + (it.y - f.y0) * f.dy;
+      if (end > along + it.radius && wall > along) {
+        const kind: RangedMissKind = along > f.range + it.radius ? 'range' : f.overflew.has(it) ? 'over' : 'passed';
+        this.explainFlight(f, kind);
+      }
+    }
+    if (wall <= end) {
+      this.placeFlight(f, Math.max(0, wall - 0.12));
+      this.flightLands(f, 'wall');
+      return;
+    }
+    if (ground <= s1) {
+      this.placeFlight(f, ground);
+      this.flightLands(f, 'ground');
+      return;
+    }
+    this.placeFlight(f, s1);
+  }
+
+  /** First blocking wall between s0 and s1 along the flight (castRay's rule), else Infinity. */
+  private wallAlong(f: Flight, s0: number, s1: number): number {
+    let tx = Math.floor(f.x0 + f.dx * s0), ty = Math.floor(f.y0 + f.dy * s0);
+    for (let s = s0; s <= s1 + 1e-6; s += 0.1) {
+      const x = Math.floor(f.x0 + f.dx * s), y = Math.floor(f.y0 + f.dy * s);
+      if (x === tx && y === ty) continue;
+      tx = x;
+      ty = y;
+      if (!this.grid.passable(x, y, f.z) && this.grid.opaque(x, y, f.z)) return s;
+    }
+    return Infinity;
+  }
+
+  private explainFlight(f: Flight, kind: RangedMissKind): void {
+    if (f.explained || !f.intended) return;
+    f.explained = true;
+    const m = f.intended;
+    const why = this.missWhy(kind, { m, dist: f.intendedDist }, f.range, f.spread, f.gun, f.cls);
+    this.game.events.emit('playerAttack', { kind: 'gun', outcome: 'miss', x: f.x, y: f.y, z: f.z, damage: 0, heavy: false, blood: null, reason: why, ranged: f.cls, target: m });
+  }
+
+  /**
+   * The round reaches monster `m` `perp` m off its centre: BN deal_projectile_attack at the
+   * arrow's speed (a slow projectile is easier to dodge). Returns false when it was dodged and
+   * flies on; true when it struck (it then embeds, drops at the monster's feet, or broke).
+   */
+  private flightHits(f: Flight, m: Monster, perp: number): boolean {
+    const game = this.game;
+    const p = game.player;
+    const rng = this.sys.rng;
+    const skill = p.getSkill(String(f.gun.def.skill ?? 'gun'));
+    const speed = (Number(f.ammo?.speed) || 100) + (Number(f.gun.def.speed) || 0);
+    const r = projectileHit(
+      { dodgeRoll: m.dodge() * 5, isCharacter: false, flags: m.type.flags },
+      { missedBy: perp / m.radius, speed, shooter: { dex: p.dex, per: p.per, skill, steadiness: Math.max(1, p.stamina) / Math.max(1, p.staminaMax()), isPlayer: true } },
+      rng,
+    );
+    m.aggroCharacter = true;
+    const name = defName(f.ammo);
+    if (!r.hit) {
+      game.message(`${m.TheName()} dodges your ${name}.`);
+      if (m === f.intended) {
+        f.explained = true;
+        this.feedback('gun', 'miss', m, m.x, m.y, 0, 0, 'dodged', { ranged: f.cls });
+      }
+      sfx.arrowFly({ x: m.x, y: m.y, z: m.z });
+      return false;
+    }
+    const units = f.shot.damage.map((d) => ({ type: d.type, amount: d.amount * r.severity, armor_penetration: d.armor_penetration, armor_multiplier: 1, multiplier: r.graze ? 1 : r.severity }));
+    const dealtUnits = applyFlatArmor(units, m.type.armor);
+    const total = Math.floor(dealtUnits.reduce((s, d) => s + d.amount, 0));
+    if (r.tag) game.message(r.tag, 'c_light_green');
+    game.message(total > 0 ? `Your ${name} hits ${m.theName()} for ${total} damage.` : `Your ${name} glances off ${m.theName()}!`);
+    if (r.headshot) game.events.emit('playerHeadshot', { target: m });
+    sfx.arrowHit('flesh', m);
+    this.sys.hurt(m, total, 'player');
+    f.explained = true;
+    this.feedback('gun', r.tag === 'Critical!' ? 'crit' : 'hit', m, m.x, m.y, total, 0, total <= 0 ? 'no damage' : r.graze ? 'grazed' : undefined, { ranged: f.cls });
+    this.ammoEffectsAt(f.shot, m.x, m.y, m, total);
+    const round = f.round;
+    f.round = null;
+    f.done = true;
+    if (!round) {
+      if (f.shot.broke) game.message(`Your ${name} breaks.`, 'c_dark_gray');
+      return true;
+    }
+    const by = (t: string) => dealtUnits.filter((d) => d.type === t).reduce((s, d) => s + d.amount, 0);
+    const fx = asArray(f.ammo?.effects as string[] | undefined);
+    if (!m.dead && embedsIn(m.size, round.volume(), { cut: by('cut'), stab: by('stab'), bash: by('bash') }, rng, fx)) {
+      const res = spawnItem(round, L.cargo(m.stuck), { force: true, quiet: true });
+      const held = res.item ?? round;
+      const list = m.stuck.hits.get(held) ?? [];
+      const side = ((m.x - f.x0) * f.dy - (m.y - f.y0) * f.dx) / m.radius;
+      list.push({ side: Math.max(-0.8, Math.min(0.8, side)), hgt: Math.max(0.25, Math.min(0.9, f.h / (HEIGHT_BY_SIZE[m.size] ?? 1.9))), yaw: f.yaw - m.facing });
+      m.stuck.hits.set(held, list);
+      game.message(`Your ${name} sticks in ${m.theName()}!`);
+    } else this.placeRound(round, m.x, m.y, f.z, 0.05, f.yaw, 'ground');
+    return true;
+  }
+
+  private flightLands(f: Flight, into: 'wall' | 'ground'): void {
+    const game = this.game;
+    f.done = true;
+    if (f.intended && !f.explained && !f.intended.dead) {
+      const along = (f.intended.x - f.x0) * f.dx + (f.intended.y - f.y0) * f.dy;
+      const short = f.s < along - f.intended.radius;
+      const kind: RangedMissKind = !short ? 'passed' : into === 'wall' ? 'wall' : f.s >= f.range - 0.5 ? 'range' : 'ground';
+      this.explainFlight(f, kind);
+    }
+    sfx.arrowHit(into, { x: f.x, y: f.y, z: f.z });
+    game.events.emit('playerAttack', { kind: 'gun', outcome: 'whiff', x: f.x, y: f.y, z: f.z, damage: 0, heavy: false, blood: null, ranged: f.cls, landed: true });
+    this.ammoEffectsAt(f.shot, f.x, f.y, null, 0);
+    const round = f.round;
+    f.round = null;
+    if (round) this.placeRound(round, f.x, f.y, f.z, into === 'wall' ? Math.max(0.1, f.h) : 0, f.yaw, into);
+    else if (f.shot.broke) game.message(`Your ${defName(f.ammo)} breaks.`, 'c_dark_gray');
+  }
+
+  /** A surviving round comes to rest on the tile at (x, y): an ordinary ground item from now on. */
+  private placeRound(round: Item, x: number, y: number, z: number, hgt: number, yaw: number, into: Landed['into']): void {
+    const map = this.game.map;
+    let tx = Math.floor(x), ty = Math.floor(y);
+    if (!this.grid.passable(tx, ty, z)) {
+      tx = Math.floor(x - Math.sin(yaw) * 0.6);
+      ty = Math.floor(y + Math.cos(yaw) * 0.6);
+    }
+    const r = spawnItem(round, L.ground(map, tx, ty, z), { force: true, quiet: true });
+    if (!r.ok) return;
+    this.landed.push({ item: r.item ?? round, x, y, z, hgt, yaw, into, map });
+    if (this.landed.length > 120) this.landed.shift();
+  }
+
+  /** Bring every round in the air down where it is now (before a save: nothing is lost mid-flight). */
+  settleFlights(): void {
+    for (const f of this.flights.splice(0)) {
+      const round = f.round;
+      f.round = null;
+      if (round) this.placeRound(round, f.x, f.y, f.z, 0, f.yaw, 'ground');
+    }
   }
 
   /**
@@ -792,6 +1295,19 @@ export class PlayerCombat implements GameSystem {
 export function isAutomatic(gun: Item): boolean {
   const modes = gun.def.modes as unknown;
   return Array.isArray(modes) && modes.some((m) => Array.isArray(m) && typeof m[2] === 'number' && m[2] > 1);
+}
+
+/** Player-facing skill names for the miss line ("archery skill too low (1)"). */
+function skillName(id: string): string {
+  return ({ gun: 'marksmanship', throw: 'throwing', smg: 'submachine gun', launcher: 'launcher' } as Record<string, string>)[id] ?? id;
+}
+
+/** A round's display name from its def (names can be plain strings or {str} objects). */
+function defName(def: ItemDef | undefined, fallback = 'arrow'): string {
+  const n = def?.name as unknown;
+  if (typeof n === 'string') return n;
+  if (n && typeof n === 'object' && typeof (n as { str?: unknown }).str === 'string') return (n as { str: string }).str;
+  return fallback;
 }
 
 function weaponSound(w: Item | null): { id?: string; skill: MeleeSkill; volumeMl?: number } {

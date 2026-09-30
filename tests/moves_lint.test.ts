@@ -46,8 +46,8 @@ const RULES: Rule[] = [
     },
   },
   {
-    what: "an NPC shop's stock or vehicle cargo edited by hand",
-    re: /\b(stock|cargo\.items|part\.items|p\.items)\.(push|splice|pop|shift|unshift)\(|\b(cargo|part)\.items\s*=[^=]/,
+    what: "an NPC shop's stock, vehicle cargo or a monster's stuck arrows edited by hand",
+    re: /\b(stock|cargo\.items|part\.items|p\.items|stuck\.items)\.(push|splice|pop|shift|unshift)\(|\b(cargo|part)\.items\s*=[^=]/,
     allowed: { 'game/npc.ts': 'a new NPC stocks its shelf (creation)' },
   },
   {
