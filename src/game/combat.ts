@@ -388,6 +388,13 @@ export interface MeleeOpts {
   reachAttack?: boolean;
   /** The target can be downed (not immobile / immune). Default true. */
   downable?: boolean;
+  /**
+   * Free aim (src/game/aimmodel.ts): the swing visibly connected, so it lands. A failed BN hit
+   * roll makes it a *glancing* blow (damage × `glancingMul`, no technique, no crit) instead of a miss.
+   */
+  autoHit?: { glancingMul: number };
+  /** Multiply the rolled damage before armor (timing: a perfect swing). */
+  damageMul?: number;
 }
 
 export interface MeleeResult {
@@ -412,6 +419,8 @@ export interface MeleeResult {
   shatter?: ShatterResult;
   /** On a miss: stumble moves the swing cost (heavy/unwieldy weapons stumble more). */
   stumble?: number;
+  /** Free aim: the BN hit roll failed but the blow connected, softly. */
+  glancing?: boolean;
 }
 
 /**
@@ -428,7 +437,8 @@ export function meleeAttack(c: Character, target: MeleeTarget, rng: Rng, targetN
   const roll = meleeHitRoll(c, weapon, rng);
   let spread = roll - target.dodge * 5 - (target.sizeMeleePenalty ?? 0);
   if (target.immobile) spread += 40;
-  const hit = spread >= 0;
+  const glancing = !!opts.autoHit && spread < 0;
+  const hit = spread >= 0 || glancing;
   let moves = attackSpeedMoves(c, weapon);
   const staminaCost = meleeStaminaCost(c, weapon);
   maOf(c).attacked = true;
@@ -452,11 +462,11 @@ export function meleeAttack(c: Character, target: MeleeTarget, rng: Rng, targetN
     triggerBuffs(c, 'onattack');
     return { hit, crit: false, hitSpread: spread, damage: [], total: 0, moves, cooldownSeconds: moves / 100 / MELEE_SCALE, staminaCost, message, technique: recovery, wear, stumble: st };
   }
-  const crit = rng.next() < critChance(c, weapon, meleeHitRoll(c, weapon, rng), target.dodge * 5);
+  const crit = !glancing && rng.next() < critChance(c, weapon, meleeHitRoll(c, weapon, rng), target.dodge * 5);
   let technique: TechniqueDef | null = null;
   let outcome: TechniqueOutcome | undefined;
   if (opts.forceTechnique) technique = opts.forceTechnique;
-  else if (opts.allowSpecial !== false && target.info)
+  else if (opts.allowSpecial !== false && target.info && !glancing)
     technique = pickTechnique(c, target.info, weapon, { crit, aoeTargets: opts.aoeTargets }, rng);
   // A force_unarmed technique (kicks) hits with the body, not the weapon.
   const useWeapon = technique?.force_unarmed ? null : weapon;
@@ -466,6 +476,8 @@ export function meleeAttack(c: Character, target: MeleeTarget, rng: Rng, targetN
     technique = null;
     multDamage(units, 0.1);
   }
+  if (glancing) multDamage(units, opts.autoHit!.glancingMul);
+  if (opts.damageMul !== undefined && opts.damageMul !== 1) multDamage(units, opts.damageMul);
   // Polearms (but not spears) do less damage to adjacent targets.
   if (useWeapon?.hasFlag('POLEARM') && (useWeapon.hasFlag('REACH_ATTACK') || useWeapon.hasFlag('REACH3')) && !opts.reachAttack) multDamage(units, 0.7);
   // Below 25% stamina damage falls linearly to half at 0.
@@ -488,16 +500,16 @@ export function meleeAttack(c: Character, target: MeleeTarget, rng: Rng, targetN
   triggerBuffs(c, 'onhit');
   const damage = applyFlatArmor(units, target.armor);
   const total = Math.floor(damage.reduce((s, d) => s + d.amount, 0));
-  meleeTrain(c, useWeapon, true, rng);
+  meleeTrain(c, useWeapon, !glancing, rng);
   if (crit) triggerBuffs(c, 'oncrit');
   // A shattered weapon is gone; otherwise it may wear from the blow.
   const wear = shatter.shattered ? undefined : handleMeleeWear(c, weapon, 1, rng);
   c.modStamina(-staminaCost);
   triggerBuffs(c, 'onattack');
-  const message = `You ${crit ? 'critically ' : ''}hit ${targetName}${total > 0 ? ` for ${total} damage` : ' but do no damage'}.`;
+  const message = `You ${crit ? 'critically ' : glancing ? 'glancingly ' : ''}hit ${targetName}${total > 0 ? ` for ${total} damage` : ' but do no damage'}.`;
   return {
     hit, crit, hitSpread: spread, damage, total, moves, cooldownSeconds: moves / 100 / MELEE_SCALE, staminaCost, message,
-    technique, outcome, wear, shatter: shatter.shattered ? shatter : undefined,
+    technique, outcome, wear, shatter: shatter.shattered ? shatter : undefined, glancing: glancing || undefined,
   };
 }
 

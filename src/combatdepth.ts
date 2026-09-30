@@ -8,6 +8,7 @@ import { L, spawnOnGround } from './game/moves';
 import { aimState, dispersionBreakdown, meleeHooks } from './game/combat';
 import { drawStyle, effectiveRange, strDrawRangeMod } from './game/rangedfeel';
 import { FEEL } from './game/combatfeel';
+import { freeAim, timingGames } from './game/aimmodel';
 import { modSum } from './game/gunmods';
 import { bodyMods } from './game/bodymods';
 import {
@@ -191,8 +192,20 @@ export function installCombatDepth(game: Game, renderer: Renderer | null, monste
           const d = combat.draw;
           const parts: string[] = [];
           // Bows: the draw comes first (aim only builds at full draw), then the aim level.
+          const free = freeAim();
           if (style !== 'trigger' && d && d.t < d.full) parts.push(`<span style="color:${cssColor('c_yellow')}">${style === 'whirl' ? 'Whirling…' : 'Drawing…'}</span>`);
-          else if (aiming || lvl !== 'Immediate' || d) parts.push(`<span style="color:${cssColor(col)}">${lvl}</span>`);
+          // Free aim: no aim levels (the reticle's weave shows how steady you are); the timing
+          // model names the breath instead.
+          else if (free) {
+            if (timingGames() && aiming && style === 'trigger') {
+              const st = combat.breath.state(combat.aimSkill(w), p.stamina / Math.max(1, p.staminaMax()));
+              const [txt, bc] = ({
+                none: ['[Shift] hold breath', 'c_light_gray'], settling: ['holding breath…', 'c_light_cyan'], perfect: ['NOW', 'c_yellow'],
+                steady: ['steady', 'c_light_cyan'], straining: ['can’t hold it!', 'c_light_red'], recovering: ['catching breath', 'c_dark_gray'],
+              } as Record<string, [string, string]>)[st];
+              parts.push(`<span style="color:${cssColor(bc)}">${txt}</span>`);
+            }
+          } else if (aiming || lvl !== 'Immediate' || d) parts.push(`<span style="color:${cssColor(col)}">${lvl}</span>`);
           if (d && d.style === 'draw' && d.t >= d.full && d.heldFull > FEEL.drawHoldSteady) parts.push(`<span style="color:${cssColor('c_light_red')}">arms shaking</span>`);
           // Distance to what's under the crosshair against the range and the distance at which
           // your current spread still lands on a body (rangedfeel.effectiveRange).
@@ -201,9 +214,9 @@ export function installCombatDepth(game: Game, renderer: Renderer | null, monste
             if (t) {
               const range = Math.max(1, gunRange(w, p));
               const eff = effectiveRange(dispersionBreakdown(p, w), t.m.radius);
-              const far = t.dist > range ? 'c_light_red' : t.dist > eff ? 'c_yellow' : 'c_light_green';
-              const effTxt = t.dist > range ? `out of range (${Math.round(range)} m)` : `likely hit ≤ ${eff >= 99 ? '99+' : Math.max(1, Math.round(eff))} m`;
-              parts.push(`<span style="color:${cssColor(far)}">${Math.round(t.dist)} m · ${effTxt}</span>`);
+              const far = t.dist > range ? 'c_light_red' : free ? 'c_light_gray' : t.dist > eff ? 'c_yellow' : 'c_light_green';
+              const effTxt = t.dist > range ? `out of range (${Math.round(range)} m)` : free ? '' : `likely hit ≤ ${eff >= 99 ? '99+' : Math.max(1, Math.round(eff))} m`;
+              parts.push(`<span style="color:${cssColor(far)}">${Math.round(t.dist)} m${effTxt ? ` · ${effTxt}` : ''}</span>`);
             }
           }
           html = parts.join(' ');
