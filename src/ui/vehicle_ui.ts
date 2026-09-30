@@ -692,6 +692,12 @@ function installVehicleDebug(api: DebugApi, game: Game, vs: VehicleSystem): void
   };
   api.examineVehicle = (dx: number, dy: number) => examineVehicle(game, p().tileX + dx, p().tileY + dy, p().z);
   api.vehicleSystem = vs;
+  /** Driving crashes against the drawn body ('body', default) or CDDA's whole tiles ('tiles'); no argument = current. */
+  api.vehicleCrashes = (mode?: 'body' | 'tiles') => {
+    if (mode !== undefined && mode !== 'body' && mode !== 'tiles') throw new Error(`vehicleCrashes: 'body' or 'tiles', not ${String(mode)}`);
+    if (mode) vs.crashGeometry = mode;
+    return vs.crashGeometry;
+  };
   api.vehiclesJSON = () => vs.toJSON();
 }
 

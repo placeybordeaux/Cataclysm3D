@@ -54,9 +54,71 @@ lighting.
   stay walkable. Being *in* a vehicle (`playerOn`), riding along when it moves, a door
   blocked by you standing in it, and run-overs all use the body: a zombie on the verge 0.4 m
   from the paint is not run over, one in the lane is. The crosshair has to reach the paint.
-  Vehicle-vs-vehicle and vehicle-vs-terrain crashes stay tile-based (CDDA's model). The
-  renderer supplies the outline (`vehicleSystem.bodyShape`); headless (tests, sim) and the
-  `parts` look keep whole tiles. Real-input check: `tools/realinput.ts --only carside`.
+  Driving crashes follow the body too (below). The renderer supplies the outline
+  (`vehicleSystem.bodyShape`); headless (tests, sim) and the `parts` look keep whole tiles.
+  Real-input check: `tools/realinput.ts --only carside`.
+
+### Driving collision (crashes follow the drawn body)
+
+Crashes used to be CDDA's whole tiles: a car's 4 x 6 grid stopped against a wall or a
+parked car with up to ~1 m of air beside the paint, and a gap that looked wide enough (the
+refugee center's crammed lot) wasn't. Now, when a vehicle has a drawn body
+(`VehicleSystem.bodyRect`), `collidePose` in `src/game/vehicles.ts` tests that body as an
+**oriented box** (`vehicleShape.ts`: `rectObb`, separating-axis tests):
+
+- **Terrain**: against every tile square the box newly overlaps (at the next pose, not at
+  the current one). *What* blocks is unchanged, BN's per-tile rules (`obstacleAt`: bashable
+  terrain / furniture that isn't flat floor, tiny things only under wheels, then impassable
+  tiles), and so is the response (`resolveCollision`: smash / bash through, part damage, stop,
+  the driver's jolt). Tiles are taken nearest the body's centre first, so a square hit lands
+  on the middle of the nose.
+- **Other vehicles**: box vs box (theirs is their drawn body, or one unit square per mount
+  when they have none: frame builds). Light ones (< 20% of the mass) are still shoved aside;
+  the shove checks the shoved vehicle's boxes against the pusher's box, terrain and other
+  vehicles.
+- **Which part takes it**: the contact point (the corners of one box inside the other, or
+  the point of the body nearest the tile) goes to the nearest mount (`nearestMount`), and
+  `collisionPart` picks armour / obstacle / frame there as before, on both vehicles.
+- **Stepping**: shaped bodies move in substeps of at most 0.25 m / 4 deg (a bicycle, the
+  thinnest thing to hit, is ~0.6 m across, so nothing is skipped at 60 mph or on a long
+  frame), and a substep that ends in a crash is **bisected** (7 halvings) so the vehicle
+  stops where the paint touches, within a few mm, not a substep short. Tiles keep 0.3 m /
+  8 deg steps.
+- **Overlapping grids**: two bodies can now sit closer than their grids, so the tile index
+  is a multimap. `at()` returns the vehicle whose body covers the tile centre (the latest
+  indexed when both or neither do), `occupantAt` / `playerOn` the one whose body you're in,
+  `moveCost` is 0 if any occupant blocks.
+- Creatures, run-overs and `playerOn` already used the body; the part that hits a creature
+  is now the mount nearest it too.
+
+| how | |
+| --- | --- |
+| `cdda.vehicleCrashes('tiles')` / `('body')` | crashes on whole tiles even in the model look (the old behaviour, for comparison); creatures keep the body. Default `body` |
+
+Headless (tests, sim) and the `parts` look have no body shape and keep whole-tile
+collision exactly as before. Cost: ~0.05 ms per driven frame vs ~0.03 ms on tiles
+(Node, a car at 40 mph weaving past parked cars).
+
+Tests: `tests/vehicleCollision.test.ts` (0.3 m past a parked car and along a wall, a
+3-tile gap the 4-tile grid can't take, head-on stop at the paint with the front damaged,
+OBB vs OBB square and at 30 deg with damage at the contact, a lane change in a 4-tile alley,
+turning into a wall stops at the corner, no tunnelling at 60 mph including a 0.25 s frame,
+a bicycle shoved at 60 mph, overlapping grids, run-overs while squeezing past; each "whole
+tiles" counterpart too). Real input: `tools/realinput.ts --only drivecollide` (W / S / V
+through xdotool): passes a parked car with 0.3 m of air (and, with `vehicleCrashes('tiles')`,
+the same pass crashes), rams a parked car and a concrete wall and checks the bumper stops
+within 3 cm, then at the refugee center (seed 1) lines up with a 2.57 m gap between a car
+and a pickup (the body is 2.20 m wide, the grid 4 m), creeps in until the nose meets the
+building beyond, and reverses back out, without a scratch on any of the three.
+
+| | |
+| --- | --- |
+| 0.3 m past a parked car (top-down, V) | ![](screenshots/wave3/vehicles/collision/pass_top.jpg) |
+| the same pass on whole tiles: stopped by air | ![](screenshots/wave3/vehicles/collision/pass_tiles_top.jpg) |
+| rammed a parked car: bumper to bumper | ![](screenshots/wave3/vehicles/collision/ram_car.jpg) |
+| rammed a concrete wall: the bumper on the wall | ![](screenshots/wave3/vehicles/collision/ram_wall.jpg) |
+| refugee center lot: in the gap between a car and a pickup | ![](screenshots/wave3/vehicles/collision/lot_top.jpg) |
+| ...from the driver's seat | ![](screenshots/wave3/vehicles/collision/lot_cockpit.jpg) |
 
 `src/render/vehicleModel.ts` builds the geometry:
 
@@ -276,12 +338,20 @@ skin reuse on door / light changes, frame fallback, proportions, parked steering
 `tests/vehicleShape.test.ts`: walking into the side stops at the paint (tile rules without a
 shape), a car turned 45 deg, walking in through an open door, closing a door from beside
 it, driving past someone on the verge, running over what's in the lane only.
+`tests/vehicleCollision.test.ts`: driving crashes against the body (see "Driving collision").
 
 ## Known gaps / ideas
 
 - Parked vehicles' wheels don't roll (only the driven one's are separate meshes).
-- The collision outline is a rectangle: you touch the bumper corners a few cm before the
-  rounded paint. Vehicle-vs-vehicle / terrain crashes are still tile-based.
+- The collision outline is a rectangle: you (and crashes) touch the bumper corners a few cm
+  before the rounded paint; mirrors poke a little past it and don't collide.
+- Driving crashes: a blocked substep stops the whole move (turn and travel together): there's
+  no sliding along a wall, so a swinging corner that touches stops the car and you back off.
+  The vehicle turns about its mount (0, 0) (the driver's seat area), not the rear axle, so
+  the tail swings out more than a real car's (unchanged, now visible to a few cm). Vehicles
+  still don't push each other (only light ones are shoved), and nobody else's moving vehicle
+  is tested against yours mid-step (each moves in its own simulate).
+- Monster pathfinding and `map.passable` still see whole vehicle tiles.
 - The LOD keeps the same skin (it's per vehicle, cheap).
 - Semi tractors and trailers are separate BN vehicles and aren't coupled.
 - Boats, aircraft and tanks use the frame fallback (tracks are drawn as big wheels).
