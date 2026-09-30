@@ -22,7 +22,7 @@ plan-first building with a queued, timed job.
 | 2 | Ram or rolling home? | Solved by the ladder: small rungs are fast, the top rung is the home. |
 | 3 | How do you get a chassis? | **Strip a vehicle down to its chassis, or build a chassis**, then build it up toward whatever model you're going for. |
 | 4 | Stock vehicles move to templates too? | **Yes.** Every BN vehicle maps onto a template, so drawn body = gameplay body everywhere. |
-| 5 | Keep BN's per-part skill/tool/lift gating, or collapse to "garage + mechanics level"? | **Open** — the answer was "yes" to an either/or; see below. |
+| 5 | Keep BN's per-part skill/tool/lift gating, or collapse to "garage + mechanics level"? | **(a) Keep BN's per-part gating** (user agreed with the recommendation); only the jack/lift maths is replaced. |
 | 6 | Timed installs or instant garage edits? | **Timed** — things take time, as elsewhere in the game. The plan is queued as one job. |
 | 7 | Walk around inside while moving? | **Simplified:** the vehicle's facilities work from where you sit (see below). |
 | 8 | Turrets, NPC crews | **Future work** (below). |
@@ -44,7 +44,7 @@ Reasons it could hurt, each with the mitigation:
 
 So: yes, with a mapping layer and a frame fallback.
 
-### Q5: gating (needs your call)
+### Q5: gating (decided: a)
 
 Two readings of "yes":
 
