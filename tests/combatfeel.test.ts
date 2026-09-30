@@ -18,6 +18,7 @@ import {
   FEEL, FEEL_PRESETS, blockAttemptChance, defenseOf, guardScoreBonus, hitStopSeconds, missReason, setFeelDifficulty, sidestepDodgeRoll,
   surroundAngles, sweptArcTarget, swingTiming, telegraphSeconds,
 } from '../src/game/combatfeel';
+import { setAimModel } from '../src/game/aimmodel';
 
 const dir = path.join(__dirname, '../public/data');
 const load = (f: string) => JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8'));
@@ -29,7 +30,10 @@ beforeAll(() => {
     monsters: load('monsters.json'), monsterGroups: load('monster_groups.json'), recipes: [], misc: load('misc.json'),
   };
 });
-afterEach(() => setFeelDifficulty('accessible'));
+afterEach(() => {
+  setFeelDifficulty('accessible');
+  setAimModel('sway');
+});
 
 class FlatGen implements ChunkGenerator {
   generate(map: GameMap, c: Chunk): void {
@@ -376,7 +380,8 @@ describe('the first fight (QA_V2: long, four grabs, misses with no visible cause
     expect(missReason({ spread: -3, dodge: 0, stumble: 60 })).toBe('off balance');
   });
 
-  it('the playerAttack event carries the reason for a miss or an out-of-reach whiff', () => {
+  it('the playerAttack event carries the reason for a miss or an out-of-reach whiff (classic dice)', () => {
+    setAimModel('dice');
     const { game, sys, combat } = world();
     tough(game);
     const reasons: string[] = [];

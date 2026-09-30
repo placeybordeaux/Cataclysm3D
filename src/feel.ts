@@ -11,6 +11,7 @@ import { getUiRoot } from './ui/framework';
 import { drawWarning, rangedClass, strDrawPenalty } from './game/rangedfeel';
 import { registerSaveable } from './save/registry';
 import { sfx } from './audio/sfx';
+import { freeAim } from './game/aimmodel';
 
 // Wiring for the combat feel layer (src/game/combatfeel.ts; rules in playercombat.ts/monai.ts,
 // visuals in render/{viewmodel,monsterView,hitFx,camera}.ts): the crosshair combat HUD, the
@@ -55,7 +56,9 @@ export function installCombatFeel(game: Game, renderer: Renderer | null, monster
       if (cls === 'bow') return;
       const per = typeof w.def.reload === 'number' ? w.def.reload : 100;
       const strMul = w.hasFlag('STR_RELOAD') ? Math.max(10 / Math.max(10, p.str), 0.25) : 1;
-      const moves = (w.takesMagazines() ? per + 100 : per * Math.max(1, loaded)) * strMul;
+      // Character::item_reload_cost: the weapon's skill speeds it, mv / (1 + min(skill × 0.1, 1)).
+      const skillDiv = 1 + Math.min(p.getSkill(String(w.def.skill ?? 'gun')) * 0.1, 1);
+      const moves = ((w.takesMagazines() ? per + 100 : per * Math.max(1, loaded)) * strMul) / skillDiv;
       const secs = Math.max(0.7, Math.min(cls === 'crossbow' ? 3.5 : 2.5, moves / 100 / ACTION_SCALE * 2));
       renderer?.viewmodel?.reload(secs, cls === 'crossbow' ? 'crank' : 'dip');
       if (cls === 'crossbow') sfx.crossbowCrank();
@@ -81,7 +84,10 @@ export function installCombatFeel(game: Game, renderer: Renderer | null, monster
 
   if (renderer) {
     // --- gun kick on the view, scaled by the round's recoil (and tiny for a bow, rangedfeel.kickScale).
-    combat.onFire = (kick) => renderer.rig.kick(0.012 * Math.min(1, kick * 2) + 0.018 * kick, (Math.random() - 0.5) * 0.01 * kick);
+    // Free aim: the kick is part of the aim state (aimmodel.AimSway) and src/aim.ts shows its view share.
+    combat.onFire = (kick) => {
+      if (!freeAim()) renderer.rig.kick(0.012 * Math.min(1, kick * 2) + 0.018 * kick, (Math.random() - 0.5) * 0.01 * kick);
+    };
     if (renderer.viewmodel) renderer.viewmodel.bowSource = () => combat.bowPose();
     // --- ADS: RMB with a gun zooms in and brings the gun to the centre (aim level is shown by
     // combatdepth's readout under the crosshair).

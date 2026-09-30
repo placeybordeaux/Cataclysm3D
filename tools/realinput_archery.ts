@@ -25,6 +25,9 @@ type Scenario = [name: string, what: string, run: () => Promise<void>];
 /** An open stretch (a clear 5-wide corridor north of the spot), the bow, arrows, a zombie `d` m north. */
 const SETUP = (d: number, first: boolean) => `(() => {
   const g = cdda.game, p = g.player, grid = g.monsters.grid;
+  // These checks are about BN's dice (aim levels, spread, why-missed lines): the Classic dice
+  // aim model. Free aim has its own suite (realinput_aim.ts).
+  cdda.setAimModel('dice');
   cdda.clearMonsters(60);
   ${first ? `cdda.giveItem('backpack', { wear: true }); cdda.giveItem('longbow', { wield: true }); cdda.giveItem('arrow_wood', { count: 20 });
   p.str_base = 10; p.resetStats(); cdda.loot.setStyle('quick');

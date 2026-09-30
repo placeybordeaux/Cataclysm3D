@@ -1,7 +1,7 @@
 import { ACTION_SCALE } from '../core/time';
 import type { ItemDef } from '../data/types';
 import type { Game, GameSystem } from './game';
-import { aim, applyDelayedRecoil, applyFlatArmor, attackCooldownSeconds, dispersionBreakdown, fireGun, hitMessage, meleeAttack, normalRoll, pelletAngle, sizeRank, type ShotResult } from './combat';
+import { aim, aimFloorMoa, applyDelayedRecoil, applyFlatArmor, attackCooldownSeconds, dispersionBreakdown, fireGun, hitMessage, meleeAttack, meleeHitRoll, normalRoll, pelletAngle, sizeRank, type ShotResult } from './combat';
 import { MAX_RECOIL } from './character';
 import { currentMode } from './gunmods';
 import { asArray, type Item } from './item';
@@ -20,6 +20,12 @@ import { sfx, type MeleeSkill } from '../audio/sfx';
 import { FEEL, arcFor, defenseOf, hitStopSeconds, missReason, sweptArcTarget, swingTiming, type SwingStyle, type SwingTiming } from './combatfeel';
 import { moveWithCollision } from './physics';
 import { projectileHit } from './projectile';
+import {
+  aimDirection, aimHooks, AimSway, BODY_HEIGHT, Breath, bowPerfect, describeHit, freeAim, hitDamageMul, rhythmWindow, swayAmplitude, timingGames, weakSpotChance,
+  type HitZone,
+} from './aimmodel';
+import { raycastTiles } from './raycast';
+import { LEVEL_HEIGHT } from '../world/coords';
 
 // The survivor's attacks in real time: LMB / `f` swings or fires, RMB aims a gun (or guards
 // with a melee weapon / bare hands), Space or a double-tapped strafe side-steps, `G` throws.
@@ -108,6 +114,26 @@ export interface Flight {
   /** The crosshair already said why it missed. */
   explained: boolean;
   done: boolean;
+  /** Free aim (aimmodel.ts): resolve by where it struck, no BN dice; timing: loosed in the window. */
+  free?: boolean;
+  perfect?: boolean;
+}
+
+/** Where a free-aim ray (the reticle's) ends: the first body it enters, a solid, the floor, or its range. */
+export interface AimHit {
+  x: number;
+  y: number;
+  /** Height above the shooter's floor (m) and horizontal distance (m) where it ended. */
+  h: number;
+  dist: number;
+  hit: Monster | null;
+  /** Plan distance from the body's axis as a share of its radius (0 = dead centre). */
+  missedBy: number;
+  /** Height of the strike on the body, 0 = feet .. 1 = top, and the zone that is. */
+  hFrac: number;
+  zone: HitZone;
+  /** What stopped it when it didn't hit a body. */
+  stop: 'wall' | 'floor' | 'range' | null;
 }
 
 /** Where a recovered round came to rest in view (the renderer draws it stuck there until picked up). */
@@ -135,6 +161,9 @@ export interface SwingState {
   arc: number;
   style: SwingStyle;
   resolved: boolean;
+  /** Free aim: the monster that visibly dodged this swing; timing: chained on the beat. */
+  dodged?: Monster | null;
+  perfect?: boolean;
 }
 
 /** How a weapon is swung on screen (and how wide its arc is). */
@@ -247,6 +276,23 @@ export class PlayerCombat implements GameSystem {
   private grid: Grid;
   private lastX = NaN;
   private lastY = NaN;
+  /**
+   * Free aim (aimmodel.ts): where the weapon points relative to the view (sway + kick). The
+   * reticle is drawn there and the shot leaves along it. `breath` is the timing model's held
+   * breath; `perfectNext` a perfect shot banked by an active reload.
+   */
+  readonly aim = new AimSway();
+  readonly breath = new Breath();
+  perfectNext = false;
+  /** Ground speed (m/s) for the sway, smoothed. */
+  private aimSpeed = 0;
+  private aimLast = { x: NaN, y: NaN };
+  /** Timing: when the next swing became ready (time), and a click banked just before it. */
+  private readyAt = -Infinity;
+  private buffered = false;
+  private wasReady = true;
+  /** The last free-aim hit's readout (tests, debug). */
+  lastHit: { zone: HitZone; mul: number; text: string; perfect: boolean } | null = null;
 
   constructor(readonly game: Game, readonly sys: MonsterSystem) {
     this.grid = sys.grid;
@@ -268,6 +314,9 @@ export class PlayerCombat implements GameSystem {
     tickMartialArts(p, dt);
     const def = defenseOf(p);
     def.dodgeWindow = Math.max(0, def.dodgeWindow - dt);
+    // Free aim: melee skill widens the parry window (aimmodel.ts; 1 in the dice model).
+    def.parryMul = freeAim() ? 1 + FEEL.aimParryPerSkill * Math.min(10, p.getSkill('melee')) : 1;
+    this.updateAim(dt);
     this.updateStep(dt);
     if (this.hitStop <= 0) this.updateSwing(dt);
     this.updateFlights(dt);
@@ -305,7 +354,158 @@ export class PlayerCombat implements GameSystem {
       p.modStamina(-FEEL.guardStaminaPerSec * dt);
     }
     this.detectSidestep();
-    if (lmb && this.cooldown <= 0 && !this.swing) this.attack();
+    const ready = this.cooldown <= 0 && !this.swing;
+    if (ready && !this.wasReady) this.readyAt = this.time;
+    this.wasReady = ready;
+    // Timing model, melee: a click just before the swing is ready is banked, and one landing in
+    // the window around the ready moment chains a perfect swing. Holding LMB repeats plainly.
+    const rhythm = timingGames() && !gun;
+    const click = clicks.includes(0);
+    if (rhythm && click && !ready && this.cooldown <= rhythmWindow(this.meleeSkill()).early) this.buffered = true;
+    if (ready && (lmb || this.buffered)) {
+      const onBeat = rhythm && (this.buffered || (click && this.time - this.readyAt <= rhythmWindow(this.meleeSkill()).late));
+      this.buffered = false;
+      this.attack();
+      if (onBeat && this.swing) this.swing.perfect = true;
+    }
+  }
+
+  /** The skill that sets the melee rhythm window: the weapon's skill and melee, averaged. */
+  private meleeSkill(): number {
+    const p = this.game.player;
+    const w = p.inv.wielded;
+    return (p.getSkill(w ? w.meleeSkill() : 'unarmed') + p.getSkill('melee')) / 2;
+  }
+
+  // ------------------------------------------------------------------ free aim (aimmodel.ts)
+
+  /** The weapon skill free aim uses: BN dispersion_from_skill's average of marksmanship and the weapon's skill. */
+  aimSkill(gun: Item | null = this.game.player.inv.wielded): number {
+    const p = this.game.player;
+    if (!gun?.isGun()) return 0;
+    return Math.min((p.getSkill('gun') + p.getSkill(String(gun.def.skill ?? 'gun'))) / 2, 10);
+  }
+
+  /** Advance the reticle sway: its size from BN's dispersion and the survivor's state (aimmodel.swayAmplitude). */
+  private updateAim(dt: number): void {
+    const game = this.game;
+    const p = game.player;
+    const gun = p.inv.wielded?.isGun() ? p.inv.wielded : null;
+    const moved = Number.isNaN(this.aimLast.x) ? 0 : Math.hypot(p.x - this.aimLast.x, p.y - this.aimLast.y);
+    this.aimLast.x = p.x;
+    this.aimLast.y = p.y;
+    this.aimSpeed += ((dt > 0 ? moved / dt : 0) - this.aimSpeed) * Math.min(1, dt * 8);
+    this.aim.active = freeAim() && !!gun && !p.dead;
+    const now = typeof performance !== 'undefined' ? performance.now() : 0;
+    if (!this.aim.active || !gun) {
+      this.breath.update(dt, false, 0, 1);
+      this.aim.update(dt, 0, 10, FEEL, now);
+      return;
+    }
+    const b = dispersionBreakdown(p, gun);
+    const skill = this.aimSkill(gun);
+    const stamina = p.stamina / Math.max(1, p.staminaMax());
+    const rmb = (game.input.mouseButtons & 4) !== 0 && !game.input.captured;
+    const style = drawStyle(gun);
+    const shift = game.input.held.has('ShiftLeft') || game.input.held.has('ShiftRight');
+    // Timing: Shift while aiming a trigger weapon holds your breath (aim.ts vetoes running meanwhile).
+    this.breath.update(dt, timingGames() && rmb && style === 'trigger' && shift, skill, stamina);
+    const d = this.draw;
+    const amp = swayAmplitude({
+      staticMoa: (b.weapon + b.dex + b.hands + b.skill) * b.strMul,
+      recoilMoa: p.recoil, floorMoa: aimFloorMoa(p, gun), skill,
+      speed: this.aimSpeed, running: p.running && this.aimSpeed > 0.5, crouching: p.crouching,
+      ads: style === 'trigger' && rmb ? 1 : 0, pain: p.pain, stamina,
+      draw: d && d.style === 'draw' ? { full: d.t >= d.full, heldFull: d.heldFull, holdSteady: FEEL.drawHoldSteady } : null,
+      breath: timingGames() ? this.breath.mul(skill, stamina) : 1,
+    });
+    this.aim.update(dt, amp, skill, FEEL, now);
+  }
+
+  /** Wall-clock ms (the HUD's clock), 0 without one. */
+  private nowMs(): number {
+    return typeof performance !== 'undefined' ? performance.now() : 0;
+  }
+
+  /**
+   * The reticle's ray (free aim): the first monster body it enters (a cylinder of the body's
+   * visible height, aimmodel.aimHooks.body), else the first solid, the floor, or `range` (m, in
+   * plan). Walls, furniture and floors come from the tile raycast; see-through tiles let rounds
+   * through, as castRay does.
+   */
+  castAim(yaw: number, pitch: number, range: number, skip?: (m: Monster) => boolean): AimHit {
+    const p = this.game.player;
+    const eye = p.crouching ? 1.0 : 1.6;
+    const hx = Math.sin(yaw), hy = -Math.cos(yaw);
+    const cp = Math.max(0.02, Math.cos(pitch));
+    const slope = Math.tan(pitch);
+    const tile = raycastTiles(this.game.map, { x: p.x, y: p.y, h: p.z * LEVEL_HEIGHT + eye }, { x: hx * cp, y: hy * cp, h: Math.sin(pitch) }, { maxDist: range / cp + 0.5, throughTransparent: true });
+    let limit = range, stop: AimHit['stop'] = 'range';
+    if (tile && tile.dist * cp < limit) {
+      limit = tile.dist * cp;
+      stop = tile.kind === 'floor' ? 'floor' : 'wall';
+    }
+    let best: Monster | null = null, bestS = limit, bestPerp = 1, bestFrac = 0;
+    for (const m of this.sys.active) {
+      if (m.dead || m.z !== p.z || skip?.(m)) continue;
+      const ox = m.x - p.x, oy = m.y - p.y;
+      const t = ox * hx + oy * hy;
+      // A little wider than the collision circle: arms and shoulders are drawn past it.
+      const R = m.radius * 1.1;
+      if (t <= 0 || t - R > bestS) continue;
+      const perp = Math.abs(ox * hy - oy * hx);
+      if (perp > R) continue;
+      const half = Math.sqrt(R * R - perp * perp);
+      const body = aimHooks.body?.(m, t) ?? { height: BODY_HEIGHT[m.size] ?? 1.7, lift: 0 };
+      // The stretch of the chord through the body's column where the ray is between its feet and top.
+      let s0 = Math.max(0.05, t - half), s1 = t + half;
+      const lo = body.lift - eye, hi = body.lift + body.height - eye;
+      if (Math.abs(slope) < 1e-9) {
+        if (lo > 0 || hi < 0) continue;
+      } else {
+        let a = lo / slope, c = hi / slope;
+        if (a > c) [a, c] = [c, a];
+        s0 = Math.max(s0, a);
+        s1 = Math.min(s1, c);
+      }
+      if (s0 > s1 || s0 >= bestS) continue;
+      best = m;
+      bestS = s0;
+      bestPerp = perp / R;
+      bestFrac = Math.max(0, Math.min(1, (eye + slope * s0 - body.lift) / body.height));
+    }
+    const s = best ? bestS : limit;
+    return {
+      x: p.x + hx * s, y: p.y + hy * s, h: eye + slope * s, dist: s, hit: best, missedBy: best ? bestPerp : 1, hFrac: bestFrac,
+      zone: best ? aimHooks.hitZone(best, bestFrac) : 'torso', stop: best ? null : stop,
+    };
+  }
+
+  /**
+   * A free-aim round lands on monster `m`: BN's damage for the round, times where it struck
+   * (head/torso/legs, graze), a weak-spot roll from skill/dex/per, a perfect-timing bonus and the
+   * skill multiplier (aimmodel.hitDamageMul) — no to-hit or dodge dice.
+   */
+  private freeHit(m: Monster, damage: ShotResult['damage'], o: { zone: HitZone; missedBy: number; perfect: boolean; name?: string; cls: RangedClass; gun: Item | null }): { total: number; dealt: { type: string; amount: number }[]; crit: boolean } {
+    const game = this.game;
+    const p = game.player;
+    const skill = this.aimSkill(o.gun);
+    const weak = this.sys.rng.next() < weakSpotChance(skill, p.dex, p.per, o.perfect ? 0.25 : 0);
+    const q = hitDamageMul({ zone: o.zone, graze: o.missedBy > 0.8, weakSpot: weak, perfect: o.perfect, skill, skillName: skillName(String(o.gun?.def.skill ?? 'gun')) });
+    const units = damage.map((d) => ({ type: d.type, amount: d.amount * q.mul, armor_penetration: d.armor_penetration, armor_multiplier: 1 }));
+    const dealt = applyFlatArmor(units, m.type.armor);
+    const total = Math.floor(dealt.reduce((a, d) => a + d.amount, 0));
+    const crit = o.zone === 'head' || weak;
+    const where = o.zone === 'head' ? ' in the head' : o.zone === 'legs' ? ' in the legs' : '';
+    const what = o.name ? `Your ${o.name} hits` : 'You hit';
+    game.message(total > 0 ? `${what} ${m.theName()}${where} for ${total} damage.` : `${o.name ? `Your ${o.name}` : 'The shot'} glances off ${m.theName()}!`, crit && total > 0 ? 'c_light_green' : undefined);
+    if (o.zone === 'head') game.events.emit('playerHeadshot', { target: m });
+    const text = describeHit(q);
+    this.lastHit = { zone: o.zone, mul: q.mul, text, perfect: o.perfect };
+    m.aggroCharacter = true;
+    this.sys.hurt(m, total, 'player', { crit, stagger: 1 + FEEL.aimStaggerPerSkill * skill });
+    this.feedback('gun', crit ? 'crit' : 'hit', m, m.x, m.y, total, 0, total <= 0 ? 'no damage' : text, { ranged: o.cls, quality: q.mul });
+    return { total, dealt, crit };
   }
 
   private setGuard(on: boolean): void {
@@ -396,11 +596,36 @@ export class PlayerCombat implements GameSystem {
     const timing = swingTiming(attackCooldownSeconds(p, w), w?.weight() ?? 0);
     this.swing = { t: 0, timing, reach, arc: arcFor(style), style, resolved: false };
     this.cooldown = timing.total;
+    if (freeAim()) this.swing.dodged = this.visibleDodge(reach, arcFor(style), timing.windup + timing.strike);
     const vm = this.viewmodel();
     // The follow-through carries past contact for up to 0.12 s, then the hands come back.
     const follow = Math.min(0.12, timing.active + timing.recovery * 0.4);
     if (vm?.swing) vm.swing({ windup: timing.windup, strike: timing.strike, follow, recovery: timing.total - timing.windup - timing.strike - follow, style });
     else vm?.attack('melee');
+  }
+
+  /**
+   * Free aim: a monster that would dodge this swing (BN: the hit roll lands but not past its
+   * dodge × 5) does it *visibly* — it hops back and aside out of the arc during the wind-up —
+   * instead of the blow silently passing through it. Plain zombies (dodge 0) never do.
+   */
+  private visibleDodge(reach: number, arc: number, contact: number): Monster | null {
+    const p = this.game.player;
+    const m = this.meleeTarget(reach, arc);
+    if (!m || m.dodge() <= 0 || m.has('IMMOBILE') || m.dashTime > 0) return null;
+    const roll = meleeHitRoll(p, p.inv.wielded, this.sys.rng);
+    if (roll < 0 || roll >= m.dodge() * 5) return null;
+    const d = Math.max(0.01, Math.hypot(m.x - p.x, m.y - p.y));
+    const ax = (m.x - p.x) / d, ay = (m.y - p.y) / d;
+    const side = this.sys.rng.oneIn(2) ? 1 : -1;
+    // Back and to the side, ~1.1 m, done before the blow lands: out of a ±40° arc at arm's length.
+    const vx = ax * 0.6 + -ay * side * 0.8, vy = ay * 0.6 + ax * side * 0.8;
+    const t = Math.max(0.08, Math.min(0.22, contact - 0.02));
+    m.dashVx = (vx * 1.1) / t;
+    m.dashVy = (vy * 1.1) / t;
+    m.dashTime = t;
+    this.game.events.emit('monsterDodge', { monster: m, x: m.x, y: m.y, z: m.z, dx: vx, dy: vy });
+    return m;
   }
 
   /** Advance the swing: from contact until the active window closes, the arc looks for a target. */
@@ -410,7 +635,8 @@ export class PlayerCombat implements GameSystem {
     s.t += dt;
     const contact = s.timing.windup + s.timing.strike;
     if (!s.resolved && s.t >= contact) {
-      const m = this.meleeTarget(s.reach, s.arc);
+      // A monster that visibly dodged this swing isn't in it any more, even if its edge still is.
+      const m = this.meleeTarget(s.reach, s.arc, s.dodged ?? undefined);
       if (m || s.t >= contact + s.timing.active) {
         s.resolved = true;
         // An NPC under the crosshair may take the blow instead (npcai decides; asks first if friendly).
@@ -439,12 +665,12 @@ export class PlayerCombat implements GameSystem {
    * raycast knows the exact sprite), else combatfeel.sweptArcTarget within `reach` and ±`arc`
    * of the aim, closest to the crosshair first, never through walls.
    */
-  meleeTarget(reach = FEEL.reach, arc = FEEL.arcSwing): Monster | null {
+  meleeTarget(reach = FEEL.reach, arc = FEEL.arcSwing, except?: Monster): Monster | null {
     const p = this.game.player;
     const look = this.game.lookAt?.(reach + 1.5);
     const hit = look?.kind === 'creature' ? (look.creature as { monster?: Monster } | undefined)?.monster : undefined;
-    if (hit && !hit.dead && Math.hypot(hit.x - p.x, hit.y - p.y) - hit.radius <= reach) return hit;
-    const near = this.sys.active.filter((m) => !m.dead && m.z === p.z);
+    if (hit && hit !== except && !hit.dead && Math.hypot(hit.x - p.x, hit.y - p.y) - hit.radius <= reach) return hit;
+    const near = this.sys.active.filter((m) => !m.dead && m.z === p.z && m !== except);
     return sweptArcTarget(p, near, reach, arc, (m) => !hasLOS(this.grid, p.tileX, p.tileY, m.tileX, m.tileY, p.z));
   }
 
@@ -480,7 +706,8 @@ export class PlayerCombat implements GameSystem {
       // arm's length can still be a step too far).
       const near = this.sys.active.filter((q) => !q.dead && q.z === p.z);
       const short = sweptArcTarget(p, near, reach + 1.2, arcFor(swingStyleOf(w)), (q) => !hasLOS(this.grid, p.tileX, p.tileY, q.tileX, q.tileY, p.z));
-      this.feedback('melee', 'whiff', null, p.x + Math.sin(p.yaw) * reach, p.y - Math.cos(p.yaw) * reach, 0, 0, short ? 'out of reach' : undefined);
+      const dodged = phased && this.swing?.dodged && !this.swing.dodged.dead ? this.swing.dodged : null;
+      this.feedback('melee', 'whiff', null, p.x + Math.sin(p.yaw) * reach, p.y - Math.cos(p.yaw) * reach, 0, 0, dodged ? `${dodged.theName()} dodged` : short ? 'out of reach' : undefined);
       return false;
     }
     const hit = this.swingAt(m, { reach, primary: true, elapsed: o.phased });
@@ -499,10 +726,16 @@ export class PlayerCombat implements GameSystem {
     const ws = weaponSound(p.inv.wielded);
     const reach = o.reach ?? FEEL.reach;
     const stamina = p.stamina;
-    const res = meleeAttack(p, { dodge: m.dodge(), armor: m.type.armor, sizeMeleePenalty: m.sizeMeleePenalty(), info: monsterTargetInfo(m) }, rng, m.theName(), {
+    // Free aim: the blow that visibly connects lands (a failed hit roll glances); dodges already
+    // happened on screen at the wind-up (visibleDodge), so none are rolled here.
+    const free = freeAim();
+    const perfect = !!(o.primary && o.elapsed !== undefined && this.swing?.perfect);
+    const res = meleeAttack(p, { dodge: free ? 0 : m.dodge(), armor: m.type.armor, sizeMeleePenalty: m.sizeMeleePenalty(), info: monsterTargetInfo(m) }, rng, m.theName(), {
       allowSpecial: o.primary,
       aoeTargets: (kind) => this.aoeVictims(kind, m, reach).length,
       downable: !m.has('IMMOBILE'),
+      autoHit: free ? { glancingMul: FEEL.aimGlancingMul } : undefined,
+      damageMul: perfect ? FEEL.aimPerfectMul : undefined,
     });
     if (o.primary) {
       // Phased: the swing clock already spent `elapsed`; CDDA's cost (stumbles, techniques)
@@ -529,7 +762,8 @@ export class PlayerCombat implements GameSystem {
     this.sys.emitSound(m.x, m.y, m.z, 8, 'Smack!', 'player', '');
     // Victims of a sweep are chosen before the blow can push the target out of the arc.
     const victims = res.outcome?.aoe ? this.aoeVictims(res.outcome.aoe, m, reach) : [];
-    this.sys.hurt(m, res.total, 'player', { crit: res.crit });
+    const wskill = p.getSkill(p.inv.wielded ? p.inv.wielded.meleeSkill() : 'unarmed');
+    this.sys.hurt(m, res.total, 'player', { crit: res.crit, stagger: free ? 1 + FEEL.aimStaggerPerSkill * (wskill + p.getSkill('melee')) / 2 + (perfect ? 0.3 : 0) : undefined });
     // Hit-stop: the hands, the swing clock and the struck monster hold for a few frames.
     let stop = 0;
     if (o.primary && o.elapsed !== undefined) {
@@ -539,7 +773,8 @@ export class PlayerCombat implements GameSystem {
       m.busy = Math.max(m.busy, stop);
     }
     // Before the technique can knock it away: the impact is where it stood when struck.
-    this.feedback('melee', res.crit ? 'crit' : 'hit', m, m.x, m.y, res.total, stop, res.total <= 0 ? 'no damage' : undefined);
+    this.feedback('melee', res.crit ? 'crit' : 'hit', m, m.x, m.y, res.total, stop, res.total <= 0 ? 'no damage' : free ? this.meleeQuality(res.glancing, res.crit, perfect, wskill) : undefined,
+      free ? { quality: res.glancing ? FEEL.aimGlancingMul : perfect ? FEEL.aimPerfectMul : res.crit ? 1.5 : 1 } : {});
     if (m.dead) triggerBuffs(p, 'onkill');
     else if (res.outcome) applyTechniqueToMonster(m, res.outcome, p.x, p.y, rng);
     if (victims.length) {
@@ -549,11 +784,21 @@ export class PlayerCombat implements GameSystem {
     return true;
   }
 
+  /** Free aim: why a connecting blow was weak or strong, for the crosshair. */
+  private meleeQuality(glancing: boolean | undefined, crit: boolean, perfect: boolean, skill: number): string | undefined {
+    const parts: string[] = [];
+    const w = this.game.player.inv.wielded;
+    if (glancing) parts.push(`glancing ×${FEEL.aimGlancingMul} (${w ? w.meleeSkill() : 'unarmed'} ${Math.floor(skill)})`);
+    if (crit) parts.push('critical');
+    if (perfect) parts.push(`on the beat ×${FEEL.aimPerfectMul}`);
+    return parts.length ? parts.join(' · ') : undefined;
+  }
+
   /**
    * Tell hit-feedback listeners (particles, stagger, crosshair marker) how an attack went.
    * The impact point is the near side of the target (what the camera sees get hit).
    */
-  private feedback(kind: 'melee' | 'gun' | 'throw', outcome: 'hit' | 'crit' | 'miss' | 'whiff', m: Monster | null, x: number, y: number, damage: number, hitStop = 0, reason?: string, extra: { ranged?: RangedClass; landed?: boolean } = {}): void {
+  private feedback(kind: 'melee' | 'gun' | 'throw', outcome: 'hit' | 'crit' | 'miss' | 'whiff', m: Monster | null, x: number, y: number, damage: number, hitStop = 0, reason?: string, extra: { ranged?: RangedClass; landed?: boolean; quality?: number } = {}): void {
     const p = this.game.player;
     if (m) {
       const d = Math.hypot(m.x - p.x, m.y - p.y) || 1;
@@ -690,10 +935,11 @@ export class PlayerCombat implements GameSystem {
     sfx.rangedShot(cls, gun.typeId, undefined, { ammoType: typeof ammo?.ammo_type === 'string' ? ammo.ammo_type : undefined, loudness: shot.noise.volume });
     // CDDA make_gun_sound_effect: silent weapons make no sound at all.
     if (shot.noise.volume > 0) this.sys.emitSound(p.x, p.y, p.z, shot.noise.volume, shot.noise.sound || 'Bang!', 'player', '');
+    const range = Math.max(1, shot.range || 30);
+    if (freeAim()) return this.fireFree(gun, cls, shot, ammo ?? undefined, range, spread);
     // Dispersion becomes a sideways offset (the vertical part of the cone can't miss a sprite
     // that already fills the crosshair's column, so only the horizontal component matters).
     const yaw = p.yaw + shot.spread * Math.cos(shot.azimuth);
-    const range = Math.max(1, shot.range || 30);
     // What the survivor meant to hit: the crosshair's creature, else the one closest to it.
     const meant = this.rangedTarget(range * 1.6);
     if (flies) {
@@ -747,6 +993,101 @@ export class PlayerCombat implements GameSystem {
       this.ammoEffectsAt(shot, m.x, m.y, m, total);
     }
     return shot;
+  }
+
+  /**
+   * Free aim (aimmodel.ts): the round leaves along the reticle the player saw — no dispersion
+   * roll — then kicks the aim by the round's recoil. Hitscan rounds resolve at once against the
+   * body the ray enters (freeHit); arrows, bolts and stones fly along it (launch). Shotgun pellets
+   * still spread around the aim point: that cone is the weapon's, not the shooter's.
+   */
+  private fireFree(gun: Item, cls: RangedClass, shot: ShotResult, ammo: ItemDef | undefined, range: number, spread: DispersionBreakdown): ShotResult {
+    const game = this.game;
+    const p = game.player;
+    const rng = this.sys.rng;
+    const off = this.aim.shotOffset(this.nowMs());
+    const dir = aimDirection(p.yaw, p.pitch, off.x, off.y);
+    this.aim.kick((shot.addedRecoil ?? 0) * kickScale(cls), rng.next() * 2 - 1);
+    // Timing: a breath held into its steady flash, or a perfect active reload banked for this shot.
+    const skill = this.aimSkill(gun);
+    const perfect = timingGames() && (this.breath.perfect(skill) || this.perfectNext);
+    this.perfectNext = false;
+    if (fliesVisibly(cls)) {
+      const meant = this.rangedTarget(range * 1.6);
+      const along = this.castAim(dir.yaw, dir.pitch, range * 1.6);
+      this.launch(gun, cls, shot, ammo, dir.yaw, range, meant, spread, { pitch: dir.pitch, aimDist: along.hit ? Math.hypot(along.hit.x - p.x, along.hit.y - p.y) : along.dist, perfect });
+      return shot;
+    }
+    const pellets = shot.pellets ?? 1;
+    const hit = this.castAim(dir.yaw, dir.pitch, range);
+    const npcHit = this.npcShot?.(dir.yaw, hit.dist, shot);
+    if (npcHit) {
+      this.tracers.push({ x0: p.x, y0: p.y, x1: npcHit.x, y1: npcHit.y, z: p.z, t: 0.08 });
+      return shot;
+    }
+    const pointBlank = hit.hit && hit.dist <= 1.6;
+    if (pellets <= 1 || pointBlank || !shot.shotDamage) {
+      this.tracers.push({ x0: p.x, y0: p.y, x1: hit.x, y1: hit.y, z: p.z, t: 0.08 });
+      if (hit.hit) {
+        const r = this.freeHit(hit.hit, shot.damage, { zone: hit.zone, missedBy: hit.missedBy, perfect, cls, gun });
+        sfx.bulletHit('flesh', hit.hit);
+        this.ammoEffectsAt(shot, hit.hit.x, hit.hit.y, hit.hit, r.total);
+      } else {
+        sfx.bulletHit('wall', { x: hit.x, y: hit.y, z: p.z });
+        game.events.emit('playerAttack', { kind: 'gun', outcome: 'whiff', x: hit.x, y: hit.y, z: p.z, damage: 0, heavy: false, blood: null, reason: this.freeMissWhy(hit, range), ranged: cls, landed: hit.stop !== 'range' });
+        this.ammoEffectsAt(shot, hit.x, hit.y, null, 0);
+      }
+      return shot;
+    }
+    // Pellets: each on its own line off the aim point (ballistics.cpp shot_spread), in any direction.
+    const perMonster = new Map<Monster, { n: number; total: number; head: number }>();
+    const q = hitDamageMul({ zone: 'torso', graze: false, weakSpot: false, perfect, skill });
+    for (let i = 0; i < pellets; i++) {
+      const a = pelletAngle(shot.shotSpreadMoa ?? 0, rng), phi = rng.next() * Math.PI * 2;
+      const d2 = aimDirection(p.yaw, p.pitch, off.x + a * Math.cos(phi), off.y + a * Math.sin(phi));
+      const h = this.castAim(d2.yaw, d2.pitch, range);
+      if (i < 12) this.tracers.push({ x0: p.x, y0: p.y, x1: h.x, y1: h.y, z: p.z, t: 0.06 });
+      if (!h.hit) continue;
+      const zoneMul = h.zone === 'head' ? FEEL.aimHeadMul : h.zone === 'legs' ? FEEL.aimLegMul : 1;
+      const units = shot.shotDamage.map((d) => ({ type: d.type, amount: d.amount * q.mul * zoneMul, armor_penetration: d.armor_penetration, armor_multiplier: 1 }));
+      const dmg = applyFlatArmor(units, h.hit.type.armor).reduce((s, d) => s + d.amount, 0);
+      const e = perMonster.get(h.hit) ?? { n: 0, total: 0, head: 0 };
+      e.n++;
+      e.total += dmg;
+      if (h.zone === 'head') e.head++;
+      perMonster.set(h.hit, e);
+    }
+    if (!perMonster.size) {
+      sfx.bulletHit('wall', { x: hit.x, y: hit.y, z: p.z });
+      game.events.emit('playerAttack', { kind: 'gun', outcome: 'whiff', x: hit.x, y: hit.y, z: p.z, damage: 0, heavy: false, blood: null, reason: this.freeMissWhy(hit, range), ranged: cls, landed: true });
+    }
+    for (const [m, e] of perMonster) {
+      if (m.dead) continue;
+      m.aggroCharacter = true;
+      const total = Math.floor(e.total);
+      const count = e.n === 1 ? 'a' : e.n <= 2 ? 'several' : e.n <= 5 ? 'many' : e.n <= 20 ? 'a large number of' : 'a huge number of';
+      game.message(`${m.TheName()} is hit by ${count} ${e.n === 1 ? 'projectile' : 'projectiles'}, ${total > 0 ? `dealing ${total} damage` : 'but they deal no damage'}.`);
+      sfx.bulletHit('flesh', m);
+      const text = [`${e.n}/${pellets} pellets`, e.head ? `${e.head} in the head` : '', describeHit({ mul: q.mul, parts: q.parts })].filter(Boolean).join(' · ');
+      this.lastHit = { zone: e.head ? 'head' : 'torso', mul: q.mul, text, perfect };
+      this.sys.hurt(m, total, 'player', { crit: e.head > 0, stagger: 1 + FEEL.aimStaggerPerSkill * skill });
+      this.feedback('gun', e.head ? 'crit' : 'hit', m, m.x, m.y, total, 0, total > 0 ? text : 'no damage', { ranged: cls, quality: q.mul });
+      this.ammoEffectsAt(shot, m.x, m.y, m, total);
+    }
+    return shot;
+  }
+
+  /**
+   * Free aim: a miss says nothing when you could see it go wide (you aimed there); only the
+   * physical reasons you might not see are named — cover in the way, out of range, into the floor.
+   */
+  private freeMissWhy(hit: AimHit, range: number): string | undefined {
+    const meant = this.rangedTarget(range * 1.6);
+    if (!meant) return undefined;
+    if (hit.stop === 'wall' && hit.dist < meant.dist - meant.m.radius) return 'blocked by cover';
+    if (hit.stop === 'floor' && hit.dist < meant.dist - meant.m.radius) return 'low: hit the ground short of it';
+    if (hit.stop === 'range' && meant.dist - meant.m.radius > range) return `fell short: out of range (${Math.round(range)} m)`;
+    return undefined;
   }
 
   /** A single projectile's impact: CDDA damage bands on a monster, or a wall. */
@@ -923,6 +1264,9 @@ export class PlayerCombat implements GameSystem {
   }
 
   private loose(): void {
+    const d = this.draw;
+    // Timing: loosed as the closing ring met the reticle (aimmodel.bowWindow).
+    if (d && timingGames() && d.style === 'draw' && d.t >= d.full && bowPerfect(d.heldFull, this.aimSkill(d.gun))) this.perfectNext = true;
     this.draw = null;
     this.whirl?.stop(0.05);
     this.whirl = null;
@@ -953,14 +1297,18 @@ export class PlayerCombat implements GameSystem {
   }
 
   /** Release a visible projectile (see Flight). */
-  private launch(gun: Item, cls: RangedClass, shot: ShotResult, ammo: ItemDef | undefined, yaw: number, range: number, meant: { m: Monster; dist: number } | null, spread: DispersionBreakdown): void {
+  private launch(
+    gun: Item, cls: RangedClass, shot: ShotResult, ammo: ItemDef | undefined, yaw: number, range: number, meant: { m: Monster; dist: number } | null, spread: DispersionBreakdown,
+    free?: { pitch: number; aimDist: number; perfect: boolean },
+  ): void {
     const p = this.game.player;
     const speed = flightSpeed(cls, Number(ammo?.speed) || 100);
     const eye = p.crouching ? 1.0 : 1.6;
     // The arc meets the crosshair where the survivor aimed: the target, else where the view ray
-    // reaches the ground or a wall, never past the range.
+    // reaches the ground or a wall, never past the range. Free aim: where the reticle's ray ends.
     let aimDist = range;
-    if (meant) aimDist = meant.dist;
+    if (free) aimDist = free.aimDist;
+    else if (meant) aimDist = meant.dist;
     else {
       const look = this.game.lookAt?.(range * 1.5);
       if (look) aimDist = Math.hypot(look.point.x - p.x, look.point.y - p.y);
@@ -968,11 +1316,11 @@ export class PlayerCombat implements GameSystem {
     }
     aimDist = Math.max(1, Math.min(range, aimDist));
     const dx = Math.sin(yaw), dy = -Math.cos(yaw);
-    const arc = { eye, slope: Math.tan(p.pitch), aimDist, speed };
+    const arc = { eye, slope: Math.tan(free ? free.pitch : p.pitch), aimDist, speed };
     this.flights.push({
       x0: p.x, y0: p.y, z: p.z, dx, dy, yaw, s: 0, x: p.x, y: p.y, h: eye - LAUNCH_DROP, speed, range, arc, cls, gun, ammo, shot,
       round: shot.round ?? null, intended: meant?.m ?? null, intendedDist: meant?.dist ?? 0, spread,
-      passed: new Set(), overflew: new Set(), explained: false, done: false,
+      passed: new Set(), overflew: new Set(), explained: false, done: false, free: !!free, perfect: free?.perfect ?? false,
     });
   }
 
@@ -1013,11 +1361,15 @@ export class PlayerCombat implements GameSystem {
       const t = ox * f.dx + oy * f.dy;
       if (t <= s0 || t > end || t > f.range || t >= hitS || t >= wall) continue;
       const perp = Math.abs(ox * f.dy - oy * f.dx);
-      if (perp > m.radius) continue;
-      if (arcHeight(t, f.arc) > (HEIGHT_BY_SIZE[m.size] ?? 1.9) + 0.25) {
+      if (perp > m.radius * (f.free ? 1.1 : 1)) continue;
+      const h = arcHeight(t, f.arc);
+      // Free aim: the body's visible column (feet to top), as the reticle ray tests it.
+      const body = f.free ? aimHooks.body?.(m, t) ?? { height: BODY_HEIGHT[m.size] ?? 1.7, lift: 0 } : null;
+      if (h > (body ? body.lift + body.height : (HEIGHT_BY_SIZE[m.size] ?? 1.9) + 0.25)) {
         f.overflew.add(m);
         continue;
       }
+      if (body && h < body.lift) continue;
       hitM = m;
       hitS = t;
       hitPerp = perp;
@@ -1066,6 +1418,9 @@ export class PlayerCombat implements GameSystem {
   private explainFlight(f: Flight, kind: RangedMissKind): void {
     if (f.explained || !f.intended) return;
     f.explained = true;
+    // Free aim: it flew where you aimed, so a plain wide miss needs no explaining; the arc's own
+    // reasons (over, short, into cover, out of range) are still worth a word.
+    if (f.free && kind === 'passed') return;
     const m = f.intended;
     const why = this.missWhy(kind, { m, dist: f.intendedDist }, f.range, f.spread, f.gun, f.cls);
     this.game.events.emit('playerAttack', { kind: 'gun', outcome: 'miss', x: f.x, y: f.y, z: f.z, damage: 0, heavy: false, blood: null, reason: why, ranged: f.cls, target: m });
@@ -1080,6 +1435,7 @@ export class PlayerCombat implements GameSystem {
     const game = this.game;
     const p = game.player;
     const rng = this.sys.rng;
+    if (f.free) return this.flightHitsFree(f, m, perp);
     const skill = p.getSkill(String(f.gun.def.skill ?? 'gun'));
     const speed = (Number(f.ammo?.speed) || 100) + (Number(f.gun.def.speed) || 0);
     const r = projectileHit(
@@ -1109,6 +1465,25 @@ export class PlayerCombat implements GameSystem {
     f.explained = true;
     this.feedback('gun', r.tag === 'Critical!' ? 'crit' : 'hit', m, m.x, m.y, total, 0, total <= 0 ? 'no damage' : r.graze ? 'grazed' : undefined, { ranged: f.cls });
     this.ammoEffectsAt(f.shot, m.x, m.y, m, total);
+    return this.flightStruck(f, m, dealtUnits);
+  }
+
+  /** Free aim: an arrow reaching a body strikes it where it arrives (height -> zone); no dice. */
+  private flightHitsFree(f: Flight, m: Monster, perp: number): boolean {
+    const body = aimHooks.body?.(m, Math.hypot(m.x - f.x0, m.y - f.y0)) ?? { height: BODY_HEIGHT[m.size] ?? 1.7, lift: 0 };
+    const hFrac = Math.max(0, Math.min(1, (f.h - body.lift) / body.height));
+    sfx.arrowHit('flesh', m);
+    const r = this.freeHit(m, f.shot.damage, { zone: aimHooks.hitZone(m, hFrac), missedBy: perp / (m.radius * 1.1), perfect: !!f.perfect, name: defName(f.ammo), cls: f.cls, gun: f.gun });
+    f.explained = true;
+    this.ammoEffectsAt(f.shot, m.x, m.y, m, r.total);
+    return this.flightStruck(f, m, r.dealt);
+  }
+
+  /** After a round strikes `m`: it breaks, sticks in the body, or drops at its feet (BN drop_or_embed_projectile). */
+  private flightStruck(f: Flight, m: Monster, dealtUnits: { type: string; amount: number }[]): boolean {
+    const game = this.game;
+    const rng = this.sys.rng;
+    const name = defName(f.ammo);
     const round = f.round;
     f.round = null;
     f.done = true;
@@ -1266,7 +1641,8 @@ export class PlayerCombat implements GameSystem {
     const range = this.throwRange(it);
     // Skill and dexterity tighten the throw (dispersion ~ ranged.cpp throwing).
     const spread = Math.max(0.01, 0.25 - p.getSkill('throw') * 0.02 - (p.dex - 8) * 0.01);
-    const yaw = p.yaw + normalRoll(this.sys.rng, 0, spread);
+    // Free aim: it goes where you look (the throw's skill shows in its range and damage).
+    const yaw = freeAim() ? p.yaw : p.yaw + normalRoll(this.sys.rng, 0, spread);
     const hit = this.castRay(yaw, range);
     this.cooldown = (100 + it.weight() / 50) / 100 / ACTION_SCALE;
     p.practice('throw', 5 + Math.floor(range / 2));

@@ -519,7 +519,7 @@ export class MonsterSystem implements GameSystem {
     return true;
   }
 
-  hurt(m: Monster, amount: number, source: 'player' | Monster | null, opts: { bleedType?: string; crit?: boolean } = {}): void {
+  hurt(m: Monster, amount: number, source: 'player' | Monster | null, opts: { bleedType?: string; crit?: boolean; stagger?: number } = {}): void {
     if (m.dead) return;
     const dmg = Math.max(0, Math.round(amount));
     m.hp -= dmg;
@@ -540,7 +540,7 @@ export class MonsterSystem implements GameSystem {
       }
       // Stagger hard hits: CDDA stuns on big bash crits via techniques; a light flinch here.
       if (dmg >= m.hpMax * 0.4 && m.rng.oneIn(3)) m.addEffect('stunned', 0.5);
-      if (source === 'player' && m.hp > 0) this.react(m, dmg, !!opts.crit);
+      if (source === 'player' && m.hp > 0) this.react(m, dmg, !!opts.crit, opts.stagger ?? 1);
     }
     if (m.hp <= 0) this.die(m, source);
   }
@@ -550,8 +550,9 @@ export class MonsterSystem implements GameSystem {
    * flinch that pauses the monster and delays its wind-up, a hard enough blow (or a crit)
    * interrupting the wind-up outright, and a short shove away from the survivor.
    */
-  private react(m: Monster, dmg: number, crit: boolean): void {
-    const share = dmg / Math.max(1, m.hpMax);
+  private react(m: Monster, dmg: number, crit: boolean, stagger = 1): void {
+    // `stagger` > 1: a skilled blow rocks the target as if it had done that much more (aimmodel.ts).
+    const share = (dmg * stagger) / Math.max(1, m.hpMax);
     const flinch = Math.min(FEEL.flinchMax, share * FEEL.flinchPerHp);
     m.flinch = Math.max(m.flinch, flinch);
     // Accessible: a staggering blow makes the grabber let go (grab escape by fighting back,
