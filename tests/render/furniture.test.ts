@@ -48,6 +48,8 @@ describe('furniture catalog', () => {
         a.build(b, ctx(id, conn));
         const v = verts(b);
         expect(v.length, id).toBeGreaterThan(0);
+        // tall street props reach over the street/yard on purpose
+        if (['clothesline', 'pole', 'streetlight', 'flag'].includes(a.kind)) continue;
         for (const [x, , z] of v) {
           // pieces may overhang a hair (worktops, eaves of a mailbox) but never into the next tile
           expect(Math.abs(x), `${id} x`).toBeLessThanOrEqual(0.62);

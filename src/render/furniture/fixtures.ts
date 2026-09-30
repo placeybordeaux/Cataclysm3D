@@ -516,6 +516,6 @@ export const fitness: Build = (b, c) => {
   b.box(-0.15, 0.4, -0.45, 0.15, 0.48, 0.3, F('leather', [40, 40, 44]), 'ny');
   legs(b, -0.15, -0.45, 0.15, 0.3, 0.4, 0.04, frame);
   for (const x of [-0.3, 0.26]) b.box(x, 0, -0.5, x + 0.04, 1.1, -0.46, frame, 'ny');
-  b.box(-0.55, 1.08, -0.5, 0.55, 1.11, -0.47, F('chrome', STEEL));
-  for (const x of [-0.55, 0.45]) b.prism(x + 0.05, -0.485, 0.95, 1.25, 0.14, 8, F('metal', [30, 30, 32]), null, null, 0.03);
+  b.box(-0.5, 1.08, -0.5, 0.5, 1.11, -0.47, F('chrome', STEEL));
+  for (const x of [-0.46, 0.42]) b.box(x, 0.96, -0.6, x + 0.04, 1.24, -0.37, F('metal', [30, 30, 32]));
 };
