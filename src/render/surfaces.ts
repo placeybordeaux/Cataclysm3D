@@ -89,7 +89,8 @@ export function floorMat(id: string): FloorMat | null {
 
 export function ceilMat(id: string): CeilMat {
   // commercial slabs (concrete / tar roofs over shops) get a drop ceiling; houses plaster
-  return /thconc|strconc|conc|flat_roof|tar|metal/.test(id) && !/shingle/.test(id) ? 'tiles' : 'plaster';
+  // (flat roofs cover houses as often as shops: plaster under them)
+  return /thconc|strconc|metal_floor/.test(id) ? 'tiles' : 'plaster';
 }
 
 // --- painting -------------------------------------------------------------------------------
@@ -199,8 +200,9 @@ export function paintInterior(m: InteriorMat, c: RGB, accent: RGB, seed: number)
   const H = (x: number, y: number, s = 0) => hash2(x, y, seed + s);
   const img = new Img(32, 32);
   for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) {
-    // drywall: nearly flat, a whisper of roller texture
-    let col = sh(c, H(x >> 1, y >> 1, 11) % 11 === 0 ? 0.975 : 1);
+    // drywall is flat: single-texel specks turn into crawling noise under the luminance
+    // bump and the dither, so only a very soft large-scale shade
+    let col = sh(c, 0.985 + ((H(x >> 3, y >> 3, 11) % 3) * 0.008));
     if (m === 'stripes' && (x % 8 === 0 || x % 8 === 1)) col = mix(col, accent, 0.35);
     if (m === 'damask' && ((x + (y >> 3) * 4) % 8 === 3) && y % 8 === 3) col = mix(col, accent, 0.5);
     if (m === 'damask' && ((x + (y >> 3) * 4) % 8 === 3) && (y % 8 === 2 || y % 8 === 4)) col = mix(col, accent, 0.25);
@@ -287,7 +289,7 @@ export function paintFloor(m: FloorMat, c: RGB, seed: number, variant: number): 
 export function paintCeiling(m: CeilMat, c: RGB): Img {
   const img = new Img(32, 32);
   for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) {
-    let col = sh(c, hash2(x >> 1, y >> 1, 31) % 13 === 0 ? 0.97 : 1);
+    let col = sh(c, 0.985 + (hash2(x >> 3, y >> 3, 31) % 3) * 0.008);
     if (m === 'tiles') {
       // 50 cm drop-ceiling tiles on a light grid, fissured
       if (x % 16 === 0 || y % 16 === 0) col = mix(c, [236, 236, 232], 0.6);

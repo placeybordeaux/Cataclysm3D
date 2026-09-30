@@ -29,7 +29,11 @@ function baseCabinet(b: ModelBuilder, c: Ctx, front: 'doors' | 'drawers' | 'mixe
   const woodish = hsv(body)[0] > 10 && hsv(body)[0] < 50 && hsv(body)[1] > 0.25;
   const K = woodish ? 'wood' : 'paint';
   const [x0, x1] = spanX(c, 0.5);
-  const z0 = -0.3, z1 = 0.28;
+  // corner of an L-shaped run: the counter in front runs along the other wall; fill the tile
+  // to its front edge (plain side, no doors facing into the other run's side)
+  const corner = !!c.connAll?.[FRONT];
+  if (corner) front = 'plain';
+  const z0 = -0.3, z1 = corner ? 0.5 : 0.28;
   b.box(x0, 0, z0, x1, 0.09, z1 - 0.06, F('dark', shade(body, 0.45)), skipConn(c) + 'ny');
   const handle: RGB = lumOf(body) > 140 ? [90, 90, 96] : BRASS;
   const deco = front === 'doors' ? doors(2, handle, true, true) : front === 'drawers' ? drawers(3, 1, handle) : front === 'mixed' ? drawers(1, 2, handle) : undefined;
@@ -41,7 +45,7 @@ function baseCabinet(b: ModelBuilder, c: Ctx, front: 'doors' | 'drawers' | 'mixe
     b.box(fx0, 0.11, z1, fx1, h - 0.215, z1 + 0.012, (f) => (f === 'pz' ? F(K, shade(body, 1.05), doors(1, handle, true, true)) : F(K, body)), 'ny');
   }
   const top = worktop(c);
-  const tx0 = c.conn[LEFT] ? -0.5 : x0 - 0.01, tx1 = c.conn[RIGHT] ? 0.5 : x1 + 0.01, tz0 = z0 - 0.01, tz1 = z1 + 0.035;
+  const tx0 = c.conn[LEFT] ? -0.5 : x0 - 0.01, tx1 = c.conn[RIGHT] ? 0.5 : x1 + 0.01, tz0 = z0 - 0.01, tz1 = corner ? 0.5 : z1 + 0.035;
   const ws = (f: string) => (f === 'py' ? F('laminate', top) : F('laminate', shade(top, 0.85)));
   if (!hole) {
     b.box(tx0, h - 0.04, tz0, tx1, h, tz1, ws, skipConn(c));
