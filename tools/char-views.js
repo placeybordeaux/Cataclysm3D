@@ -3,7 +3,7 @@
 // street viewpoint, spawns the subject(s) ahead of the camera and waits for the pose asked for.
 // Returns a short list of what is standing where. Plain JS so it can be pasted into
 // `drive.ts eval` too.
-window.charViews = ['horde_near', 'horde_mid', 'horde_far', 'horde_dusk', 'dog', 'npc', 'windup', 'critters', 'zoo', 'night', 'third', 'corpse', 'bench'];
+window.charViews = ['horde_near', 'horde_mid', 'horde_far', 'horde_road', 'horde_dusk', 'dog', 'npc', 'windup', 'critters', 'zoo', 'night', 'third', 'corpse', 'bench'];
 window.charView = async (name) => {
   const c = window.cdda;
   const wait = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -38,7 +38,7 @@ window.charView = async (name) => {
   };
   const lookAt = (f, s, pitch) => c.look((yaw0 + Math.atan2(s, f)) * 180 / Math.PI, pitch);
   if (name.startsWith('horde')) {
-    const range = name === 'horde_near' ? [4, 10] : name === 'horde_mid' ? [18, 30] : name === 'horde_dusk' ? [22, 48] : [38, 60];
+    const range = name === 'horde_near' ? [4, 10] : name === 'horde_mid' ? [18, 30] : name === 'horde_dusk' ? [22, 48] : name === 'horde_road' ? [66, 110] : [38, 60];
     const ids = ['mon_zombie', 'mon_zombie', 'mon_zombie_fat', 'mon_zombie_cop', 'mon_zombie_child', 'mon_zombie_brute', 'mon_zombie_tough', 'mon_zombie_runner', 'mon_zombie_fireman', 'mon_zombie_soldier', 'mon_zombie', 'mon_zombie_hulk'];
     // near: posed facing us; further out: hostile and shambling toward the camera
     const near = name === 'horde_near';
