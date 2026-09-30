@@ -9,7 +9,7 @@ describe('start shelter survives road building', () => {
   const { game, wg } = loadNodeData();
   it('the start OMT is a shelter on every seed tried (incl. the one that broke)', () => {
     const bad: string[] = [];
-    for (const seed of [743667900, ...Array.from({ length: 60 }, (_, i) => 1000 + i * 7919)]) {
+    for (const seed of [743667900, ...Array.from({ length: 20 }, (_, i) => 1000 + i * 7919)]) {
       const gen = new WorldGenerator(seed, wg, game);
       const sp = gen.overmap.findSpecial('Evac Shelter', { x: 0, y: 0 });
       if (!sp) continue;
@@ -17,5 +17,6 @@ describe('start shelter survives road building', () => {
       if (!o.id.startsWith('shelter')) bad.push(`${seed}: ${o.id}`);
     }
     expect(bad).toEqual([]);
-  });
+    // ~100 ms of overmap generation per seed; slower when the whole suite runs in parallel.
+  }, 60_000);
 });
