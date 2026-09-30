@@ -544,8 +544,9 @@ export function buildVehicleModel(v: Vehicle, base: number, opts: { reuseSkinKey
       }
       paneGlass(glass, pn.pts, (x, y) => P3(x, y, side * (hw - 0.03)), side);
     }
-    // open doors: a leaf swung out ~65 deg on its front hinge
+    // open doors: a leaf swung out ~65 deg on its front hinge (bus doors fold away inside)
     for (const dh of doorHoles[side]) {
+      if (L.style === 'bus') continue;
       const d = dh.d;
       const ang = 1.15;
       const hx = d.x0, cs = Math.cos(ang), sn = Math.sin(ang);
