@@ -17,6 +17,7 @@ import { Batches, hash, partSwatchPage } from './vehicleGeom';
 import { buildVehicleModel } from './vehicleModel';
 import { pointInBody } from '../game/vehicleShape';
 import { Cockpit, type HandColors } from './vehicleCockpit';
+import { makeWheelHands } from './vehicleHands';
 import { AtlasTextureSource } from './atlasSource';
 import { spriteInfo } from './chars/index';
 import { bodyRectFor, setVehicleWidth, vehicleWidth, type VehicleWidth } from './vehicleLayout';
@@ -534,6 +535,7 @@ interface Entry {
   eyeH: number | null;
   driverZ: number | null;
   driverX: number | null;
+  eyeX: number | null;
   parkedLean: number;
   /** Headlight beam: a few dynamic lights along the cone (they feed the tile light map). */
   beam: LightHandle[];
@@ -713,7 +715,7 @@ export class VehicleRenderer {
     const next: Entry = {
       obj, lean, meshes, roof: null, lamps: null, tails: null, beacons: null, skin: null, skinMeshes: [], pending: null,
       driven: v === this.system.driving, wheels: [], bike: false, far, roofY: null, cockpit: null,
-      version: v.version, z: v.z, look: this.lookMode, eyeH: null, driverZ: null, driverX: null, parkedLean: 0, beam: e?.beam ?? [],
+      version: v.version, z: v.z, look: this.lookMode, eyeH: null, driverZ: null, driverX: null, eyeX: null, parkedLean: 0, beam: e?.beam ?? [],
     };
     const t0 = performance.now();
     const worker = this.lookMode === 'model' ? this.skinWorker() : null;
@@ -750,12 +752,13 @@ export class VehicleRenderer {
       }
       next.bike = model.layout.style === 'motorcycle' || model.layout.style === 'bicycle';
       if (model.cockpit) {
-        next.cockpit = new Cockpit(model.cockpit, parts.mat, this.handColors());
+        next.cockpit = new Cockpit(model.cockpit, parts.mat, this.handColors(), makeWheelHands(this.game, this.renderer));
         pivot.add(next.cockpit.group);
       }
       next.eyeH = model.eyeH;
       next.roofY = model.layout.cabin && model.body ? model.layout.p.roof : null;
       next.driverX = model.driverX ?? null;
+      next.eyeX = model.eyeX ?? null;
       next.driverZ = model.driverZ;
       next.parkedLean = model.parkedLean;
       // lean about the ground line under the bike
@@ -828,7 +831,7 @@ export class VehicleRenderer {
       if (e.parkedLean && v !== driving && Math.abs(v.velocity) < 0.3) e.lean.rotation.x = -e.parkedLean;
       else e.lean.rotation.x = e.bike ? Math.max(-0.45, Math.min(0.45, v.steer * Math.abs(v.velocity) * 0.12)) : 0;
       // Front wheels follow the steering; all of them roll with the speed.
-      if (e.cockpit) e.cockpit.update(v, dt, fuelFraction(v));
+      if (e.cockpit) e.cockpit.update(v, dt, fuelFraction(v), this.wiping());
       for (const w of e.wheels) {
         w.spin -= (v.velocity * dt) / w.r;
         w.mesh.rotation.set(0, w.steer ? -v.steer : 0, w.spin);
@@ -894,6 +897,15 @@ export class VehicleRenderer {
     return null;
   }
 
+  /** Wipers: 0 off, 1 rain / drizzle, 2 storm (the weather you see falling). */
+  private wiping(): 0 | 1 | 2 {
+    const k = this.renderer.weather.kind;
+    if (k === 'storm') return 2;
+    if (k === 'rain') return 1;
+    const w = this.game.weather;
+    return w?.rains && w.precip !== 'none' ? (w.precip === 'heavy' ? 2 : 1) : 0;
+  }
+
   private handCache: { key: string; colors: HandColors } | null = null;
   /** Sleeve and skin colours for the hands on the wheel: from your outfit, like the on-foot arms. */
   private handColors(): HandColors {
@@ -935,7 +947,7 @@ export class VehicleRenderer {
     // Eye over the front of the seat, a little ahead of where the head would really be: the
     // dash and bonnet then drop out of the lower edge instead of filling it. The model look
     // squeezes the body's width, so the seat (and eye) sit at its drawn position.
-    const [ex, ey] = v.mountToWorld((e?.driverX ?? seat.mx) + EYE_FORWARD, e?.driverZ ?? seat.my);
+    const [ex, ey] = v.mountToWorld(e?.eyeX ?? (e?.driverX ?? seat.mx) + EYE_FORWARD, e?.driverZ ?? seat.my);
     const base = v.z * LEVEL_HEIGHT;
     const t = this.game.map.terAt(Math.floor(cx), Math.floor(cy), v.z);
     const rough = hasFlag(t, 'ROAD') || hasFlag(t, 'FLAT') ? 0 : 1;

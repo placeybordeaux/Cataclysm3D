@@ -58,6 +58,8 @@ export interface ModelBuild {
   eyeH: number;
   driverZ: number | null;
   driverX?: number;
+  /** Driven builds: the cockpit camera's eye, mount-space x (the seat's back half). */
+  eyeX?: number;
   /** Bikes lean on their stand when nobody rides them (rad, + = right side down). */
   parkedLean: number;
   /** Frame-style builds: the roof is drawn with the parts swatches, there is no skin. */
@@ -69,6 +71,11 @@ export interface ModelBuild {
 }
 
 const FULL: TileFrame = { texture: null as unknown as THREE.Texture, uv: [0, 0, 1, 1], w: 1, h: 1, ppm: 32 };
+/**
+ * The cockpit eye sits over the seat's back half (mount-space x offset from the seat), so the
+ * windscreen pillars are ~0.6 m ahead, as in a car, not at your cheek.
+ */
+export const MODEL_EYE_FORWARD = -0.05;
 /** Sky-light share inside a cabin (chunk interiors use INDOOR_SKY 0.5; a car roof is closer overhead). */
 const INTERIOR_SKY = 0.35;
 
@@ -105,7 +112,7 @@ export function buildOutline(L: Layout): { loop: OP[]; nTop: number; arches: { x
     add(xc + 0.03, p.hood);
     add(xc - p.rake, p.roof, 'glass', 'shield');
     // slim A-pillars: a tighter shoulder along the windscreen
-    pts[pts.length - 2].b = pts[pts.length - 1].b = Math.min(p.shoulder, 0.07);
+    pts[pts.length - 2].b = pts[pts.length - 1].b = Math.min(p.shoulder, 0.045);
     cur = p.roof;
     if (p.overcab && secs.some((s) => s.kind === 'box')) {
       // the bunk: out over the windscreen, rounded, then the box roof runs back from it
@@ -687,6 +694,20 @@ export function buildVehicleModel(v: Vehicle, base: number, opts: { reuseSkinKey
   }
   // The cabin is in the roof's shade: less sky light, so seats read dark through the glass.
   parts.sky = INTERIOR_SKY;
+  /** Wiper pivots at the windscreen's base, the glass's up direction and the blade length. */
+  function wiperAnchors(): CockpitAnchors['wipers'] {
+    if (!shieldQuads.length) return [];
+    const [A0] = shieldQuads[0];
+    const [, B1] = shieldQuads[shieldQuads.length - 1];
+    const lo = A0[5], hi = B1[5];
+    const gl = Math.hypot(hi[0] - lo[0], hi[1] - lo[1]);
+    const up: V3 = [(hi[0] - lo[0]) / gl, (hi[1] - lo[1]) / gl, 0];
+    const out: V3 = [up[1], -up[0], 0];
+    return [L.yc - hw * 0.42, L.yc + hw * 0.1].map((pz) => ({
+      pivot: [lo[0] + up[0] * 0.06 + out[0] * 0.02, lo[1] + up[1] * 0.06 + out[1] * 0.02, pz] as V3,
+      up, out, len: hw * 0.72,
+    }));
+  }
   // dashboard + steering wheel
   let driverZ: number | null = null;
   const dashFront = p.flatFront || L.xCowl === null ? L.xNose - 0.12 : L.xCowl - 0.02;
@@ -696,7 +717,12 @@ export function buildVehicleModel(v: Vehicle, base: number, opts: { reuseSkinKey
   const dashTop = Math.min(belt - 0.1, p.hood - 0.14, eyeH - 0.5);
   if (cab && !far) {
     const dz = hw - 0.08;
-    chamferBox(parts.get(darkenC(p.interior, 0.7)), dashFront - 0.34, base + dashTop - 0.28, L.yc - dz, dashFront, base + dashTop, L.yc + dz, 0.05, F.dark, F.dark);
+    // a moulded, grained dash (not a black void): a lighter lip along its top-rear edge
+    // catches the light, and it takes a little more sky than the cabin floor
+    parts.sky = 0.6;
+    chamferBox(parts.get(0x3c3c42), dashFront - 0.34, base + dashTop - 0.28, L.yc - dz, dashFront, base + dashTop, L.yc + dz, 0.05, F.leather, F.floor);
+    chamferBox(parts.get(0x5a5a62), dashFront - 0.36, base + dashTop - 0.03, L.yc - dz + 0.02, dashFront - 0.3, base + dashTop + 0.012, L.yc + dz - 0.02, 0.015, F.metal, F.metal);
+    parts.sky = INTERIOR_SKY;
   }
   const ctrl = v.parts.find((q) => has(q, 'CONTROLS'));
   if (ctrl && cab) driverZ = L.zOf(ctrl.my);
@@ -705,7 +731,7 @@ export function buildVehicleModel(v: Vehicle, base: number, opts: { reuseSkinKey
     // Placed from the driver's eye (the cockpit camera, vehicleMesh.ts EYE_FORWARD ahead of
     // the seat): the rim's top third and your hands on it at the bottom of the view, the
     // dials peeking over it, all under the bonnet line so the road stays clear.
-    const ex = L.xOf(ctrl.mx) + 0.15, ey = base + eyeH;
+    const ex = L.xOf(ctrl.mx) + MODEL_EYE_FORWARD, ey = base + eyeH;
     // (72 deg vertical FOV: the bottom edge is 36 deg down; the bonnet line ~14 deg)
     const wx = Math.min(dashFront - 0.5, ex + 0.42), wy = ey - 0.33;
     const tilt = 0.45, r = 0.18;
@@ -747,32 +773,29 @@ export function buildVehicleModel(v: Vehicle, base: number, opts: { reuseSkinKey
         }
       cockpit = {
         wheel: { x: wx, y: wy, z: driverZ, r, tilt },
+        wipers: wiperAnchors(),
         dials,
         elbows: [[ex - 0.12, ey - 0.62, driverZ - 0.26], [ex - 0.12, ey - 0.62, driverZ + 0.26]],
         film: fb.vertexCount ? fb.build() : null,
       };
     }
   }
-  // wipers resting on the windscreen's base, and an interior mirror under the roof
+  // wipers resting on the windscreen's base (the driven car's sweep: vehicleCockpit.ts), and
+  // an interior mirror under the roof
   if (shieldQuads.length && !far && L.xCowl !== null) {
-    const [A0] = shieldQuads[0];
     const [, B1] = shieldQuads[shieldQuads.length - 1];
-    const lo = A0[5], hi = B1[5];
-    const gl = Math.hypot(hi[0] - lo[0], hi[1] - lo[1]);
-    const upv: V3 = [(hi[0] - lo[0]) / gl, (hi[1] - lo[1]) / gl, 0];
-    const out: V3 = [upv[1], -upv[0], 0];
-    for (const pz of [L.yc - hw * 0.42, L.yc + hw * 0.1]) {
-      const piv: V3 = [lo[0] + upv[0] * 0.06 + out[0] * 0.02, lo[1] + upv[1] * 0.06 + out[1] * 0.02, pz];
-      const len = hw * 0.72, a = 0.12;
-      const tip: V3 = [piv[0] + upv[0] * len * Math.sin(a), piv[1] + upv[1] * len * Math.sin(a), pz + len * Math.cos(a)];
-      tube(parts.get(0x151517), piv, tip, 0.012, F.dark, 4);
-      chamferBox(parts.get(0x151517), piv[0] - 0.02, piv[1] - 0.02, pz - 0.02, piv[0] + 0.02, piv[1] + 0.02, pz + 0.02, 0.01, F.dark, F.dark);
+    const hi = B1[5];
+    if (!cockpit) for (const w of wiperAnchors()) {
+      const tip: V3 = [w.pivot[0] + w.up[0] * w.len * Math.sin(0.12), w.pivot[1] + w.up[1] * w.len * Math.sin(0.12), w.pivot[2] + w.len * Math.cos(0.12)];
+      tube(parts.get(0x151517), w.pivot, tip, 0.012, F.dark, 4);
+      chamferBox(parts.get(0x151517), w.pivot[0] - 0.02, w.pivot[1] - 0.02, w.pivot[2] - 0.02, w.pivot[0] + 0.02, w.pivot[1] + 0.02, w.pivot[2] + 0.02, 0.01, F.dark, F.dark);
     }
     if (cab && driverZ !== null) {
-      const mx = hi[0] - 0.14, my = hi[1] - 0.12, mz = L.yc + (driverZ - L.yc) * 0.25;
-      tube(parts.get(0x1a1a1c), [hi[0] - 0.04, hi[1] - 0.02, mz], [mx, my, mz], 0.012, F.dark, 4);
-      chamferBox(parts.get(0x1a1a1c), mx - 0.03, my - 0.04, mz - 0.13, mx + 0.01, my + 0.035, mz + 0.13, 0.02, F.dark, F.dark);
-      chamferBox(parts.get(0x8894a0), mx - 0.034, my - 0.03, mz - 0.12, mx - 0.028, my + 0.025, mz + 0.12, 0.01, F.chrome, F.chrome);
+      // small and up against the glass's top edge, just inboard of the driver
+      const mx = hi[0] - 0.08, my = hi[1] - 0.08, mz = L.yc + (driverZ - L.yc) * 0.1;
+      tube(parts.get(0x1a1a1c), [hi[0] - 0.03, hi[1] - 0.015, mz], [mx, my, mz], 0.01, F.dark, 4);
+      chamferBox(parts.get(0x1a1a1c), mx - 0.025, my - 0.03, mz - 0.1, mx + 0.008, my + 0.026, mz + 0.1, 0.015, F.dark, F.dark);
+      chamferBox(parts.get(0x8894a0), mx - 0.029, my - 0.022, mz - 0.092, mx - 0.024, my + 0.018, mz + 0.092, 0.008, F.chrome, F.chrome);
     }
   }
   // seats
@@ -845,7 +868,7 @@ export function buildVehicleModel(v: Vehicle, base: number, opts: { reuseSkinKey
 
   return {
     body: out(body), roof: out(roof), parts: merged, glass: out(glass), lamps: out(lampsG), tails: out(tailsG), beacons: out(beaconsB),
-    skin, skinJob, skinKey, layout: L, eyeH, driverZ, driverX: ctrl ? L.xOf(ctrl.mx) : undefined, parkedLean: 0, cockpit, wheels: loose.length ? loose : undefined,
+    skin, skinJob, skinKey, layout: L, eyeH, driverZ, driverX: ctrl ? L.xOf(ctrl.mx) : undefined, eyeX: ctrl ? L.xOf(ctrl.mx) + MODEL_EYE_FORWARD : undefined, parkedLean: 0, cockpit, wheels: loose.length ? loose : undefined,
   };
 }
 
