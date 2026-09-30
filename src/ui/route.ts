@@ -110,8 +110,16 @@ export function planOmtRoute(cost: (x: number, y: number) => number, from: { x: 
 // ------------------------------------------------------------------ live route
 
 interface Overmapish {
-  omtAt(x: number, y: number, z: number): { type: string };
+  omtAt(x: number, y: number, z: number): { type: string; special?: unknown };
 }
+
+/**
+ * Parts of big specials (the refugee center's fenced compound, labs, farms) are walled or
+ * fenced: route round them, only entering the destination tile (use the entrance: see
+ * Overmap.specialEntrance). Playtest: the route to the
+ * refugee center's gate ran straight through its fence and main building.
+ */
+const SPECIAL_EXTRA = 4;
 
 export interface LiveRoute {
   /** OMTs from the player's to the destination's. */
@@ -132,7 +140,12 @@ export function currentRoute(game: Game, overmap: Overmapish | null): LiveRoute 
   const sig = `${px},${py}>${d.x},${d.y},${d.z}`;
   const cached = routes.get(game);
   if (cached && cached.sig === sig) return cached.route;
-  const omts = planOmtRoute((x, y) => omtCost(overmap.omtAt(x, y, 0).type), { x: px, y: py }, d);
+  const omts = planOmtRoute((x, y) => {
+    const o = overmap.omtAt(x, y, 0);
+    // Destination tile itself is exempt (a destination is usually a special's entrance).
+    const walled = !!o.special && !(x === d.x && y === d.y);
+    return omtCost(o.type) + (walled ? SPECIAL_EXTRA : 0);
+  }, { x: px, y: py }, d);
   const route = omts ? { omts, dest: d, metres: Math.max(0, omts.length - 1) * CHUNK } : null;
   routes.set(game, { sig, route });
   return route;
@@ -199,6 +212,8 @@ export function installRouteGuide(game: Game, renderer: Renderer, overmap: () =>
       const [x, y] = res.tiles[i];
       if (lineOfSight(game, p.tileX, p.tileY, x, y, p.z)) pts.push({ x, y });
     }
+    // For tests and debugging (tools/realinput.ts): the tile path's first steps.
+    root.dataset.path = `${res.complete ? 'ok' : 'partial'}:${res.tiles.slice(0, 6).map(([x, y]) => `${x},${y}`).join(' ')}`;
   };
 
   const place = () => {

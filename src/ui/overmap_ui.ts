@@ -520,6 +520,8 @@ export function openOvermap(ctx: UiContext): Panel | null {
     openContextMenu({ x: e.clientX, y: e.clientY }, markMenu(t), { title: seen(t.x, t.y, t.z) ? omtLabel(ctx, t.x, t.y, t.z)?.name ?? 'Here' : 'Unexplored' });
   });
 
+  /** Display names for specials whose id reads badly ("evac_center"). */
+  const SPECIAL_NAMES: Record<string, string> = { evac_center: 'Refugee Center', 'Evac Shelter': 'Evac shelter' };
   function markMenu(t: { x: number; y: number; z: number }): MenuItem[] {
     const note = noteAt(game, t.x, t.y, t.z);
     const marks = mapMarks(game);
@@ -538,7 +540,16 @@ export function openOvermap(ctx: UiContext): Panel | null {
     if (note) items.push({ label: 'Remove note', danger: true, action: () => (removeNote(game, t.x, t.y, t.z), draw()) });
     items.push({ separator: true });
     if (isDest) items.push({ label: 'Clear destination', action: () => ((marks.destination = null), draw()) });
-    else items.push({ label: 'Set as destination', key: 'D', action: () => ((marks.destination = { x: t.x, y: t.y, z: t.z, label: note?.text ?? (lbl ? lbl.replace(/^./, (c) => c.toUpperCase()) : 'Destination') }), draw()) });
+    else {
+      const label = note?.text ?? (lbl ? lbl.replace(/^./, (c) => c.toUpperCase()) : 'Destination');
+      // A big special (refugee center, farm, lab entrance): go to its way in, not this tile.
+      const sp = t.z === 0 ? wg.overmap.omtAt(t.x, t.y, 0).special : undefined;
+      const gate = sp && !note ? wg.overmap.specialEntrance(sp) : null;
+      // Name the place, not the tile clicked ("field" inside the refugee center's fence).
+      const place = sp ? (SPECIAL_NAMES[sp.def] ?? sp.def.replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase())) : label;
+      if (gate && (gate.x !== t.x || gate.y !== t.y)) items.push({ label: `Set as destination: ${place} entrance`, key: 'D', action: () => ((marks.destination = { x: gate.x, y: gate.y, z: 0, label: `${place} entrance` }), draw()) });
+      else items.push({ label: 'Set as destination', key: 'D', action: () => ((marks.destination = { x: t.x, y: t.y, z: t.z, label }), draw()) });
+    }
     return items;
   }
 
