@@ -142,10 +142,14 @@ export class Game {
     if (this.input.captured && !this.input.menuWalk) return;
     if (this.movementOverride?.()) return;
     let fx = 0, fy = 0;
-    if (k.has('KeyW')) fy += 1;
-    if (k.has('KeyS')) fy -= 1;
-    if (k.has('KeyD')) fx += 1;
-    if (k.has('KeyA')) fx -= 1;
+    // A key still held from walking up when an activity started doesn't move you (it would
+    // walk you away from the fire you're lighting); press it again to move and cancel.
+    const busy = this.activities.current?.heldAtStart;
+    const down = (c: string) => k.has(c) && !busy?.has(c);
+    if (down('KeyW')) fy += 1;
+    if (down('KeyS')) fy -= 1;
+    if (down('KeyD')) fx += 1;
+    if (down('KeyA')) fx -= 1;
     p.running = k.has('ShiftLeft') || k.has('ShiftRight');
     if (fx === 0 && fy === 0) return;
     const len = Math.hypot(fx, fy);

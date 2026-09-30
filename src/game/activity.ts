@@ -34,10 +34,18 @@ export interface ActivitySpec {
   customUi?: boolean;
 }
 
+const MOVE_KEYS = ['KeyW', 'KeyA', 'KeyS', 'KeyD'];
+
 export class Activity {
   elapsed = 0;
   /** Distractions already present when the activity started (CDDA "ignore" them for this one). */
   readonly ignored = new Set<string>();
+  /**
+   * Movement keys already held when the activity started (still walking up to the fireplace
+   * as you press e): they don't cancel it until released and pressed again. Playtest: "I try
+   * to start a fire and it just says I stopped" — the held W cancelled it on the next tick.
+   */
+  readonly heldAtStart = new Set<string>();
   constructor(readonly spec: ActivitySpec) {}
   get fraction(): number {
     return Math.min(1, this.elapsed / Math.max(1, this.spec.duration));
@@ -71,6 +79,7 @@ export class ActivityManager implements GameSystem {
       return false;
     }
     this.current = new Activity(spec);
+    for (const k of MOVE_KEYS) if (this.game.input.held.has(k)) this.current.heldAtStart.add(k);
     for (const r of this.distractions()) this.current.ignored.add(r);
     this.game.clock.warp = spec.warp ?? defaultWarp(spec.duration);
     return true;
@@ -113,7 +122,8 @@ export class ActivityManager implements GameSystem {
     }
     // Movement cancels activities, like CDDA's "You stop crafting."
     const held = this.game.input.held;
-    if (!this.game.input.captured && ['KeyW', 'KeyA', 'KeyS', 'KeyD'].some((k) => held.has(k))) {
+    for (const k of a.heldAtStart) if (!held.has(k)) a.heldAtStart.delete(k);
+    if (!this.game.input.captured && MOVE_KEYS.some((k) => held.has(k) && !a.heldAtStart.has(k))) {
       return this.cancel(`You stop ${a.spec.name}.`);
     }
     a.elapsed += gameDt;
