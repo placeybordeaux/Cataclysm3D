@@ -268,10 +268,11 @@ export function paintFloor(m: FloorMat, c: RGB, seed: number, variant: number): 
         const n = H(x, y, 21) % 13;
         img.set(x, y, n === 0 ? sh(c, 1.18) : n === 1 ? sh(c, 0.88) : n === 2 ? sh(c, 1.08) : c);
       }
-      if (H(0, 0, 22) % 3 === 0) {
+      // a crack in one variant only: repeated every few tiles it read as a scribble pattern
+      if (variant === 0 && m === 'asphalt') {
         // a hairline crack
         let x = H(1, 1, 23) % 32;
-        for (let y = 0; y < 32; y++) { img.set(x, y, sh(c, 0.6)); x = (x + 32 + (H(x, y, 24) % 3) - 1) % 32; }
+        for (let y = 0; y < 32; y++) { img.set(x, y, sh(c, 0.8)); x = (x + 32 + (H(x, y, 24) % 3) - 1) % 32; }
       }
       return img;
     }
@@ -375,7 +376,7 @@ export class SurfacePainter {
       let c = q8(pal ? (m === 'carpet' || m === 'tile' || m === 'linoleum' ? pal.main : m === 'planks' ? woodTone(pal) : pal.main) : [120, 110, 100]);
       if (m === 'asphalt') c = q8(mix(c, [58, 58, 60], 0.5));
       if (m === 'tar') c = q8(mix(c, [70, 68, 66], 0.5));
-      const variants = m === 'planks' || m === 'asphalt' || m === 'concrete' ? 3 : 1;
+      const variants = m === 'planks' || m === 'concrete' ? 3 : m === 'asphalt' ? 5 : 1;
       const v = (q?.variantSeed ?? 0) % variants;
       return this.frame(`floor:${m}:${c.join(',')}:${v}`, () => paintFloor(m, c, 7, v));
     }

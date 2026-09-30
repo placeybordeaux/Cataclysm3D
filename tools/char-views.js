@@ -3,7 +3,7 @@
 // street viewpoint, spawns the subject(s) ahead of the camera and waits for the pose asked for.
 // Returns a short list of what is standing where. Plain JS so it can be pasted into
 // `drive.ts eval` too.
-window.charViews = ['horde_near', 'horde_mid', 'horde_far', 'horde_road', 'horde_dusk', 'dog', 'npc', 'windup', 'critters', 'zoo', 'night', 'third', 'corpse', 'bench', 'fp_fists', 'fp_punch', 'fp_pistol', 'fp_pistol_fire', 'fp_rifle', 'fp_rifle_ads', 'fp_shotgun', 'fp_reload', 'fp_bat', 'fp_bat_swing', 'fp_guard', 'fp_knife', 'fp_axe', 'fp_spear', 'fp_katana', 'fp_flashlight', 'fp_bow'];
+window.charViews = ['horde_near', 'horde_mid', 'horde_far', 'horde_road', 'horde_dusk', 'dog', 'npc', 'windup', 'critters', 'zoo', 'night', 'third', 'props', 'bugs', 'zombies2', 'crowd', 'fire', 'corpse', 'bench', 'fp_fists', 'fp_punch', 'fp_pistol', 'fp_pistol_fire', 'fp_rifle', 'fp_rifle_ads', 'fp_shotgun', 'fp_reload', 'fp_bat', 'fp_bat_swing', 'fp_guard', 'fp_knife', 'fp_axe', 'fp_spear', 'fp_katana', 'fp_flashlight', 'fp_bow', 'fp_revolver', 'fp_1911', 'fp_double', 'fp_ak', 'fp_hunting', 'fp_crowbar', 'fp_kitchen', 'fp_sledge'];
 window.charView = async (name) => {
   const c = window.cdda;
   const wait = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -81,6 +81,51 @@ window.charView = async (name) => {
     spawnAt('mon_zombie_cop', 7, 2, {});
     spawnAt('mon_zombie_dog', 9, 0.5, {});
     lookAt(1, 0, -12);
+  } else if (name === 'bugs') {
+    // round 6 body plans: wasp, bee, ant, spider, fly, mosquito, dragonfly, crow, bat
+    const ids = ['mon_wasp', 'mon_bee', 'mon_ant', 'mon_spider_wolf_giant', 'mon_fly', 'mon_mosquito_giant', 'mon_dragonfly_giant', 'mon_crow', 'mon_bat'];
+    ids.forEach((id, i) => spawnAt(id, 3 + Math.floor(i / 3) * 1.8, -2 + (i % 3) * 2, { friendly: true }, 90));
+    lookAt(4.5, 0, -14);
+  } else if (name === 'zombies2') {
+    const ids = ['mon_boomer', 'mon_zombie_hulk', 'mon_skeleton', 'mon_zombie_acidic', 'mon_zombie_electric', 'mon_zombie_scorched'];
+    ids.forEach((id, i) => spawnAt(id, 4 + Math.floor(i / 3) * 3, -2.5 + (i % 3) * 2.5, { friendly: true }, 170));
+    lookAt(5.5, 0, -6);
+  } else if (name === 'crowd') {
+    // NPC variety: six people from the same classes side by side
+    for (let i = 0; i < 6; i++) {
+      const [dx, dy] = at(3 + (i % 2) * 1.2, -3 + i * 1.2);
+      c.spawnNpc(i % 2 ? 'NC_SCAVENGER' : 'NC_WANDERING_SCAVENGER', dx, dy);
+    }
+    lookAt(3.6, 0, -6);
+  } else if (name === 'fire') {
+    const m = c.game.map;
+    const [fx, fy] = at(3.5, 0);
+    m.addField(Math.floor(p.x) + fx, Math.floor(p.y) + fy, p.z, 'fd_fire', 3);
+    const [gx, gy] = at(4.5, 1.5);
+    m.addField(Math.floor(p.x) + gx, Math.floor(p.y) + gy, p.z, 'fd_fire', 1);
+    c.setHour(21.5);
+    lookAt(4, 0.5, -10);
+  } else if (name === 'props') {
+    // round 5: things that used to be camera-facing billboards — a fire, loot on the floor,
+    // a mannequin and a statue, arrows stuck in the ground
+    const m = c.game.map;
+    const T = (f, s2) => { const [dx, dy] = at(f, s2); return [Math.floor(p.x) + dx, Math.floor(p.y) + dy]; };
+    const [fx, fy] = T(4, 0.5); m.addField(fx, fy, p.z, 'fd_fire', 2);
+    const [mx, my] = T(5, -2.5); m.setFurn(mx, my, p.z, 'f_mannequin');
+    const [sx, sy] = T(6.5, 3); m.setFurn(sx, sy, p.z, 'f_statue');
+    for (const [i, id] of ['can_beans', 'bat', 'knife_combat', 'water_clean', 'jacket_leather'].entries()) {
+      const [dx, dy] = at(2.5 + (i % 2), -1 + i * 0.6);
+      c.spawnItem(id, dx, dy);
+    }
+    // real arrows on a tile, registered as landed shots so ArrowFx draws them stuck in the ground
+    const [adx, ady] = at(3, 2.2);
+    c.spawnItem('arrow_wood', adx, ady, { count: 3 });
+    const ax = Math.floor(p.x) + adx, ay = Math.floor(p.y) + ady;
+    const arrow = m.itemsAt(ax, ay, p.z).find((it) => it.typeId === 'arrow_wood');
+    if (arrow && c.combat?.landed) for (let i = 0; i < 3; i++)
+      c.combat.landed.push({ item: arrow, map: m, x: ax + 0.3 + i * 0.2, y: ay + 0.4 + i * 0.1, z: p.z, yaw: yaw0 + 0.4 * i, into: 'ground', hgt: 0 });
+    c.setHour(18.5);
+    lookAt(4, 0.5, -16);
   } else if (name.startsWith('fp_')) {
     // first-person hands and held items (fpView.ts / viewmodel.ts)
     const vm = c.renderer.viewmodel;
@@ -92,6 +137,8 @@ window.charView = async (name) => {
       fp_rifle: ['m4a1'], fp_rifle_ads: ['m4a1', 'ads'], fp_shotgun: ['remington_870'], fp_reload: ['m4a1', 'reload'],
       fp_bat: ['bat'], fp_bat_swing: ['bat', 'swing'], fp_knife: ['knife_combat'], fp_axe: ['fire_ax'], fp_spear: ['spear_wood'],
       fp_katana: ['katana'], fp_flashlight: ['flashlight'], fp_bow: ['longbow', 'draw'], fp_guard: ['bat', 'guard'],
+      fp_revolver: ['model_10_revolver'], fp_1911: ['m1911'], fp_double: ['shotgun_d'], fp_ak: ['ak47'], fp_hunting: ['remington_700'],
+      fp_crowbar: ['crowbar'], fp_kitchen: ['knife_chef'], fp_sledge: ['hammer_sledge'],
     }[name];
     if (!spec) throw new Error(`unknown view ${name}`);
     const [id, act, t] = spec;

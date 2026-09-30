@@ -154,6 +154,58 @@ The full run passed 47 of 50 scenarios. `craft` failed because a search in the C
 had lost the "names first" ordering: "spear" + Enter crafted the long pointy stick. Fixed, and
 it passes on a re-run. `aim` and `aimzones` fail, and belong to the combat agent (reported).
 
+### Round 5: refugee center, a job, a small base, the car, days 2–3
+
+This was played the same way on seed 743667900. It covered:
+- walking to the refugee center with the route guide;
+- talking to a beggar and the Old Guard representative, taking the "Kill Bandits" job and opening the mission log;
+- building a barricade on grass (construction screen, ghost placement, the crosshair ring);
+- lighting a fire with a lighter;
+- looking into beds;
+- getting into a car and heading for another town with the road atlas and the driving beacon;
+- waiting until dusk, sleeping through the night outdoors, and waking on day 3.
+
+Setup calls moved the survivor between spots and handed over materials. Driving went badly: my scripted steering hit walls and parked cars, so I stopped there. That's a problem with my bot, not the game. Engine start, controls, gauges and the beacon all worked.
+
+| # | Friction | Where | Status |
+|---|---|---|---|
+| 43 | **The route to the refugee center ended at a locked back door.** A destination on a big special went to whichever tile you clicked, and the route ran through the fence and the main building. | map, route | **Fixed**: on a special with an entrance (its road connection in the data), the menu offers **Set as destination: Refugee Center entrance**. The route also stays out of other specials' tiles (walls, fences). |
+| 44 | **"6 OMT north-west"** in the mission log and the job tracker. | missions | **Fixed**: "about 140 m north-west" (`distanceText`). |
+| 45 | **"Track" only drew a ring on the map.** | missions | **Fixed**: tracking a job also makes it the map destination, so the compass, map line and route guide lead there. Untracking clears it. |
+| 46 | **"Difficulty 5" on the first job offered: kill armed bandits, on day 1.** | job card | **Fixed**: difficulty 3–4 adds "Risky: be ready for trouble"; 5 and up adds "Dangerous: expect a real fight. New survivors usually say no, or come back with a gun and friends." |
+| 47 | **No barricade, pit or grave could be built on grass or dirt.** BN decides diggability from `digging_results`; the port tested DDA's `DIGGABLE` flag, which only 2 BN terrains still have ("too hard to dig" everywhere). | `construction.ts`, `nature.ts`, `zlevels.ts` | **Fixed**: `isDiggable()` follows BN `ter_t::is_diggable` (fall damage on soft ground too). Test: `tests/diggable.test.ts`. |
+| 48 | **"It fits next to you, but something is missing."** never said what. | construction | **Fixed**: rows say "missing 10 more rocks" or "missing Fabrication skill 1 (you have 0)", the footer lists what's missing, ready and one-short stages sort first, and "site" became "soft ground (dirt or grass)" / "any open spot". |
+| 49 | **Esc out of crafting or construction landed on the pause menu.** Esc in the search field closed the screen, the game grabbed the mouse, the same Esc dropped it, and the pointer policy read that as "the player left". | `core/input.ts` | **Fixed**: Esc is timestamped in the capture phase, before any field handler stops it. You now land on the "click to resume" hint, as with every other Esc. |
+| 50 | **An empty lighter "(0/25)" looked as usable as the full one** in the Use picker. | Use picker | **Fixed**: greyed, sorted last, "Empty (0/25): it needs charges to use." |
+| 51 | **Nothing showed the way while driving** (the trail is for walking). | route guide | **Fixed**: in Trail mode, driving switches to the beacon, placed further along the route. |
+| 52 | **Two distances for the same place**: compass "Dana · 970 m", beacon "Dana · 1463 m". | route guide | **Fixed**: the beacon says "… m on foot" / "… m along the route" (the compass stays straight-line). |
+| 53 | **No idea another town exists.** CDDA fog hides everything past 15 OMTs, so "drive to another town" meant guessing. | map | **Adapted**: see "Road atlas" below. |
+| 54 | **"The weather changed to Rain! / Drizzle! / Light Drizzle! / Cloudy!"** in a row after one wait. | messages | **Adapted**: see "Weather messages" below. |
+| 55 | **Slept outdoors "Very Hungry, Very Thirsty"** and woke up worse: BN doesn't stop a rest for that. | Rest window | **Fixed**: the Rest window warns first ("You're hungry and thirsty: drink something first…"). |
+| 56 | **Beds need Fabrication 2–4**, and a new survivor has 0. "Build Makeshift Bed" is listed but can't be built. | construction | Proposal (below). |
+| 57 | **Refuelling a car isn't implemented** (no siphoning, no pumps). | vehicles | Reported to the lead (vehicle area, already in the STATUS backlog). |
+| 58 | **The refugee center parking lot is crammed** with cars and a bus, easy to wedge a car between them and the wall. | mapgen | Kept (BN layout). |
+
+#### Adaptations built this round (all behind switches)
+- **Road atlas** (Options → Map: Road atlas / Explored only (CDDA)). The map shows the names of towns within 60 OMTs (in italics until seen) and faint lines for the roads to them, as if you knew the county from a road map. Buildings stay fogged. Right-clicking an unexplored town offers it by name ("Dana (unexplored)"). Shot: `r5_road_atlas.jpg`.
+- **Weather messages** (Options → Weather messages: Changes you notice / Every change (CDDA)). You get a message when rain, a storm or snow starts or stops, not for every shade of drizzle, and none while time is sped up.
+
+#### Systems too obscure for newcomers: proposals
+Rough cost and value, cheapest first. The ones marked **built** are done; the rest are proposals.
+
+| System | Why it's obscure | Proposed adaptation | Cost |
+|---|---|---|---|
+| Map fog past 15 OMTs | You can't plan a trip to a town you don't know exists | **Built**: road atlas | small |
+| Mission distances in OMT | A unit only veterans know | **Built**: metres | tiny |
+| Diggable ground | "Too hard to dig" everywhere (a bug that looked like obscurity) | **Built**: BN rule | tiny |
+| Construction skill gates (bed = Fabrication 2–4) | The first thing you'd build is locked behind a skill you can't see how to train | **Proposal**: "Practice" stages (a crude bed at skill 0 with lower comfort), or show "Craft X or build Y to learn Fabrication" next to the gate | medium |
+| Water safety (boil river and toilet water) | Needs a pot, a fire and a recipe; the tip says "boil it" but not how | **Proposal**: an "Boil water" action on a lit fire when you carry a pot and dirty water (BN recipe under the hood), plus a Rest-window hint when thirsty | small–medium |
+| Fire spreading | Lighting sticks in a grass field works, and can burn the field | **Proposal**: when lighting a fire outside a fire container, a one-time prompt: "Fires spread. Build a fire ring (10 rocks) or use a fireplace?" | small |
+| Faction standing (Old Guard, Free Merchants) | The card says "Neutral"; how to change it is hidden | **Proposal**: show on the NPC card what raises and lowers standing (jobs, trading, stealing) | small |
+| Vehicle refuelling | Not implemented; in BN, siphoning and pumps need menu actions | **Proposal** (vehicle area): "[e] Fill up" at a gas pump with a car next to it; "Siphon fuel" on a parked car when you carry a hose and a container | medium |
+| Morale and focus | Numbers that change learning speed invisibly | **Proposal**: a "learning slowly: low morale" note on the skill-gain toast | small |
+| Food spoilage | "(old)" and "(rotten)" appear with no timeline | **Proposal**: "fresh for ~2 days" on the item card from BN rot data | small |
+
 ### Credits (round 3)
 
 Credits is on the title screen (`R`) and in the Esc menu (`c`). It says clearly that this is
@@ -212,6 +264,18 @@ Round 3:
 - `src/ui/credits.ts`, `.css`: Credits. `menus.ts` and `escmenu.ts` add the entry, and the
   classic title row highlights each entry's own shortcut letter.
 
+Round 5:
+- `src/world/overmap/overmap.ts` `specialEntrance`, `src/ui/overmap_ui.ts`: the entrance destination, the road atlas (`mapAtlasOn`, Options → Map) and town names in the map menu.
+  `src/ui/route.ts`: the route avoids other specials, the beacon while driving, and the "on foot" / "along the route" label.
+- `src/screens/logic/missions.ts` `distanceText`, and `src/screens/missions.ts`: metres, and Track sets the destination. `src/screens/dialogue.ts`: what the difficulty means.
+- `src/world/registry.ts` `isDiggable`, used by `construction.ts`, `nature.ts` and `zlevels.ts`.
+- `src/ui/craft2/construction_screen.ts`: what's missing, the site wording and the order.
+- `src/core/input.ts`: the Esc timestamp in the capture phase.
+- `src/ui2/bn/install.ts`: empty tools greyed out in the Use picker.
+- `src/game/weather.ts` `weatherMessageFilter`, and `src/ui/adaptation.ts`: Options → Weather messages.
+- `src/ui/rest_ui.ts` `restNeedsWarning`.
+- Tests: `tests/diggable.test.ts`, plus cases in `tests/adaptation.test.ts` and `tests/screens.test.ts`.
+
 Round 4:
 - `src/ui/route.ts`, `.css`: `omtCost`, `planOmtRoute` (A* over overmap tiles), `currentRoute`,
   and the Trail and Beacon displays (DOM marks on the ui2 world layer; nothing in the renderer).
@@ -232,6 +296,8 @@ Round 4:
 | Rest menus | Options → Rest menus: Modern (Rest window) / Classic (CDDA sleep y/n + wait list) | — |
 | Crafting list | Options → Crafting list: Craftable + one short (default) / Craftable only | — |
 | Route guide | Options → Route guide: Trail on the ground (default) / Beacon ahead / Off | `?route=trail\|beacon\|off` |
+| Map | Options → Map: Road atlas (default) / Explored only (CDDA) | — |
+| Weather messages | Options → Weather messages: Changes you notice (default) / Every change (CDDA) | — |
 
 Screenshots: `docs/screenshots/wave3/adaptation/`.
 
@@ -255,3 +321,10 @@ Screenshots: `docs/screenshots/wave3/adaptation/`.
 | `route_map.jpg` | Round 4: the dashed walking route on the map, "House · 72 m walk" |
 | `route_trail.jpg` | Round 4: the Trail variant, ground marks toward the house |
 | `route_beacon.jpg` | Round 4: the Beacon variant |
+| `r5_route_to_entrance.jpg` | Round 5 (960×540 JPEG, classic look): the route to the Refugee Center **entrance** |
+| `r5_job_offer.jpg`, `r5_mission_log.jpg` | Round 5: the job offer and the mission log (shot before the difficulty hint and metres were added) |
+| `r5_construction_missing.jpg` | Round 5: construction rows and the footer say what's missing |
+| `r5_barricade_building.jpg` | Round 5: building a barricade on grass, with the crosshair ring |
+| `r5_road_atlas.jpg` | Round 5: the road atlas, with Dana set as the destination |
+| `r5_beacon_driving.jpg` | Round 5: the beacon while driving |
+| `r5_rest_dead_tired.jpg` | Round 5: the Rest window at dusk, dead tired (shot before the hunger/thirst warning) |

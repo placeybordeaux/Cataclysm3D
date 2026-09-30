@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { LEVEL_HEIGHT } from '../../world/coords';
 import { addNormalOutput, patchBandedLambert } from '../materials';
-import { netSize, paintPart, texelDims, type Img, type PaintOpts, type SpriteInfo } from './paint';
+import { analyseSprite, netSize, paintPart, texelDims, type Img, type PaintOpts, type SpriteInfo } from './paint';
 import { paintStyled, personPalette } from './styled';
 import { newPoseOut, resetPose, type PoseIn, type PoseOut, type Rig } from './rig';
 
@@ -574,10 +574,11 @@ export class SkinStore {
     const dimsOf = (v: readonly [number, number, number]) => texelDims([v[0] * tpm, v[1] * tpm, v[2] * tpm]);
     const dimsKey = rig.parts.map((p) => dimsOf(p.size).join('x')).join(',');
     const styled = this.style === 'styled' && rig.shape.arch === 'humanoid';
-    const key = `${src.key}|${rig.shape.arch}|${rig.shape.zombie ? 'z' : ''}|${styled ? 'st' : 'sp'}|${dimsKey}|${src.opts?.eyes?.join(',') ?? ''}`;
+    const key = `${src.key}|${rig.shape.arch}|${rig.shape.zombie ? 'z' : ''}|${styled ? 'st' : 'sp'}|${dimsKey}|${src.opts?.eyes?.join(',') ?? ''}|${src.opts?.person ? JSON.stringify(src.opts.person) : ''}`;
     const hit = this.skins.get(key);
     if (hit) return hit;
-    const info = src.info();
+    // flat-coloured rigs (effects, held items) need no sprite: a neutral stand-in palette
+    const info = src.info() ?? (rig.parts.every((p) => p.src.color) ? neutralInfo() : null);
     const n = rig.parts.length;
     const rects = new Int32Array(n * 5);
     const nets = rig.parts.map((p) => {
@@ -610,7 +611,7 @@ export class SkinStore {
       if (!info) fillGrey(pg.img, x, y, nt.wh[0], nt.wh[1]);
       else if (styled && part.src.region) {
         const side = /R$/.test(part.name) ? 1 : /L$/.test(part.name) ? -1 : 0;
-        paintStyled(pg.img, x, y, nt.d, part.src.region, personPalette(info, rig.shape.zombie), seedOfKey(src.key), side);
+        paintStyled(pg.img, x, y, nt.d, part.src.region, { ...personPalette(info, rig.shape.zombie), ...(src.opts?.person ?? {}) }, seedOfKey(src.key), side);
       } else paintPart(pg.img, x, y, nt.d, part.src, info, src.opts);
     });
     pg.dirty = true;
@@ -630,6 +631,11 @@ function seedOfKey(k: string): number {
   let h = 2166136261;
   for (let i = 0; i < k.length; i++) h = Math.imul(h ^ k.charCodeAt(i), 16777619);
   return ((h >>> 0) % 100003) / 100003;
+}
+
+let neutral: SpriteInfo | null = null;
+function neutralInfo(): SpriteInfo {
+  return (neutral ??= analyseSprite({ w: 1, h: 1, data: new Uint8Array([128, 128, 128, 255]) }));
 }
 
 function fillGrey(img: Img, x0: number, y0: number, w: number, h: number): void {

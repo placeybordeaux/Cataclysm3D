@@ -2,7 +2,7 @@ import type { DamageUnit, ItemDef } from '../data/types';
 import { warnOnce } from '../data/warn';
 import { Character, MAX_RECOIL } from './character';
 import {
-  dispersionFromSkill, moaToRadians, rollDispersionMoa, type DispersionSources,
+  dispersionFromSkill, moaToRadians, rollDispersionMoa, selectBodyPart, type DispersionSources,
 } from './combat';
 import { ammoLoudness, asArray, defaultAmmoId } from './item';
 import { gunModes } from './gunmods';
@@ -13,6 +13,9 @@ import { GUN_PROJECTILE_SPEED, projectileHit } from './projectile';
 import { CREATURE_RADIUS } from './physics';
 import { sfx } from '../audio/sfx';
 import { flightSpeed, fliesVisibly, rangedClass } from './rangedfeel';
+import { enemyFireOf } from './enemyfire';
+import { BODY_HEIGHT } from './aimmodel';
+import { LEVEL_HEIGHT } from '../world/coords';
 
 // Monster guns (mattack_actors.cpp gun_actor): turrets, secubots, armed zombies/humans and
 // throwers. CDDA's rules: the attack needs its dialogue condition, a seen target in one of the
@@ -66,10 +69,15 @@ function shooter(sys: MonsterSystem, m: Monster, d: Record<string, any>): Charac
 }
 
 /** Ammo the actor fires: its ammo_type item, else the gun's default ammo; null for ammo-less guns. */
-function ammoFor(sys: MonsterSystem, gun: ItemDef, d: Record<string, any>): ItemDef | null {
+function ammoFor(sys: MonsterSystem, gun: ItemDef, d: Record<string, any>, m?: Monster): ItemDef | null {
   const items = sys.game.data.items;
   if (typeof d.ammo_type === 'string' && items[d.ammo_type]) return items[d.ammo_type];
-  const t = asArray(gun.ammo).filter((a) => a && a !== 'NULL')[0];
+  const types = asArray(gun.ammo).filter((a) => a && a !== 'NULL');
+  // The monster's own starting ammo when it fits the gun (a light turret carries 9mmfmj, not the
+  // 9mm default): otherwise it would "click" empty with a full belt.
+  const carried = Object.keys((m?.type.starting_ammo as Record<string, number> | undefined) ?? {}).find((id) => types.includes(String(items[id]?.ammo_type)));
+  if (carried) return items[carried];
+  const t = types[0];
   const id = t ? defaultAmmoId(sys.game.data, t) : undefined;
   return id ? items[id] ?? null : null;
 }
@@ -142,7 +150,7 @@ export function gunActor(sys: MonsterSystem, m: Monster, sa: SpecialAttackState,
     m.busy = Math.max(m.busy, turnsToSeconds((typeof d.targeting_cost === 'number' ? d.targeting_cost : 100) / 100));
     return true;
   }
-  const ammo = ammoFor(sys, gun, d);
+  const ammo = ammoFor(sys, gun, d, m);
   const needsAmmo = asArray(gun.ammo).some((a) => a && a !== 'NULL') || !!d.ammo_type;
   const ammoKey = ammo?.id ?? String(d.ammo_type ?? '');
   const have = needsAmmo ? Math.min(st.ammo[ammoKey] ?? 0, typeof d.max_ammo === 'number' ? d.max_ammo : Infinity) : Infinity;
@@ -192,28 +200,46 @@ function shootAt(sys: MonsterSystem, m: Monster, gun: ItemDef, ammo: ItemDef | n
   const aim = Math.atan2(p.x - m.x, -(p.y - m.y));
   const off = moaToRadians(moa) * Math.cos(rng.next() * Math.PI * 2);
   const yaw = aim + off;
-  const d = Math.hypot(p.x - m.x, p.y - m.y);
-  const dx = Math.sin(yaw), dy = -Math.cos(yaw);
-  if (fliesVisibly(cls)) {
-    // Resolved where it arrives: step aside while it's in the air and it misses.
-    const tx = m.x + dx * Math.min(d, range), ty = m.y + dy * Math.min(d, range);
-    sys.launchProjectile(m, tx, ty, m.z, { symbol: ammo?.symbol ?? '=', color: ammo?.color ?? 'brown' }, flightSpeed(cls, Number(ammo?.speed) || 100), () => {
-      const miss = Math.hypot(p.x - tx, p.y - ty);
-      if (p.dead || d > range || miss > CREATURE_RADIUS + 0.05) return;
-      hitSurvivor(sys, m, damageOf(gun, ammo), miss / (CREATURE_RADIUS + 0.05), noCrit, Number(ammo?.speed) || 100);
-    });
-    return;
+  void yaw;
+  // The round flies (enemyfire.ts): BN's dispersion decides the direction, the world decides
+  // what it meets — the survivor, an NPC in the way, or the wall you ducked behind.
+  const flies = fliesVisibly(cls);
+  const units = damageOf(gun, ammo);
+  enemyFireOf(sys.game).fire({
+    kind: flies ? (cls === 'sling' ? 'stone' : 'arrow') : 'bullet', speed: flies ? flightSpeed(cls, Number(ammo?.speed) || 100) : undefined,
+    x: m.x, y: m.y, h: m.z * LEVEL_HEIGHT + muzzleHeight(m), tx: p.x, ty: p.y, th: p.z * LEVEL_HEIGHT + (p.crouching ? 0.8 : 1.2),
+    yawOff: off, range, z: m.z, from: m,
+    onPlayer: (mb) => hitSurvivor(sys, m, units, mb, noCrit, flies ? Number(ammo?.speed) || 100 : GUN_PROJECTILE_SPEED),
+    onNpc: (n, mb) => roundHitsNpc(sys, n, units, mb, m),
+    onStop: (x, y, what) => {
+      if (what === 'wall') (flies ? sfx.arrowHit('wall', { x, y, z: m.z }) : sfx.bulletHit('wall', { x, y, z: m.z }));
+    },
+  });
+}
+
+/** Where a monster's shots leave from (m above its floor): about chest height for its size. */
+function muzzleHeight(m: Monster): number {
+  return (BODY_HEIGHT[m.size] ?? 1.7) * 0.72;
+}
+
+/**
+ * An enemy round that met an NPC on its way (enemyfire.ts): BN-style damage bands by how
+ * centred it struck, armor, then the NPC system's bookkeeping (death, grudges).
+ */
+export function roundHitsNpc(sys: MonsterSystem, n: unknown, units: { type: string; amount: number; armor_penetration?: number }[], missedBy: number, from: Monster): void {
+  const c = n as Character;
+  const mult = missedBy < 0.2 ? 1.5 : missedBy < 0.8 ? 1 : 0.5;
+  const bp = selectBodyPart(sys.rng);
+  const scaled = units.map((u) => ({ type: u.type, amount: u.amount * mult, armor_penetration: u.armor_penetration ?? 0, armor_multiplier: 1 }));
+  const s = c.onMessage;
+  c.onMessage = null;
+  try {
+    const r = c.takeHit(bp, c.inv.absorbHit(bp, scaled, sys.rng));
+    sfx.bulletHit('flesh', c as unknown as { x: number; y: number; z: number });
+    (sys.game as unknown as { npcs?: { afterHit(n: unknown, dmg: number, f: unknown): void } }).npcs?.afterHit(c, r.damage, { kind: 'monster', m: from });
+  } finally {
+    c.onMessage = s;
   }
-  // Perpendicular miss at the survivor's distance.
-  const along = (p.x - m.x) * dx + (p.y - m.y) * dy;
-  const perp = Math.abs((p.x - m.x) * dy - (p.y - m.y) * dx);
-  const radius = CREATURE_RADIUS + 0.05;
-  const hits = along > 0 && along <= range && perp <= radius;
-  const endT = hits ? along : Math.min(range, d + 6);
-  monsterGunHooks.tracer?.(m.x, m.y, m.x + dx * endT, m.y + dy * endT, m.z);
-  if (!hits) return;
-  const missedBy = perp / radius;
-  hitSurvivor(sys, m, damageOf(gun, ammo), missedBy, noCrit);
 }
 
 /**
@@ -244,13 +270,14 @@ function throwAt(sys: MonsterSystem, m: Monster, gun: ItemDef, ammo: ItemDef | n
   const d = Math.hypot(p.x - m.x, p.y - m.y);
   const off = moaToRadians(moa) * Math.cos(rng.next() * Math.PI * 2);
   const yaw = Math.atan2(p.x - m.x, -(p.y - m.y)) + off;
-  const tx = m.x + Math.sin(yaw) * d, ty = m.y - Math.cos(yaw) * d;
-  sys.launchProjectile(m, tx, ty, m.z, { symbol: ammo?.symbol ?? '*', color: ammo?.color ?? 'light_gray' }, 12, () => {
-    const miss = Math.hypot(p.x - tx, p.y - ty);
-    if (p.dead || miss > CREATURE_RADIUS + 0.25) return;
-    const units = damageOf(gun, ammo);
-    if (!units.length) units.push({ type: 'bash', amount: Math.min(ammo ? ammo.weight / 100 + 4 : 5, 16), armor_penetration: 0 });
-    // Thrown rocks fly slowly (BN thrown projectile speed ~ 10-20 m/s): dodging matters.
-    hitSurvivor(sys, m, units, Math.min(0.99, miss / (CREATURE_RADIUS + 0.25)), false, 15);
+  void yaw;
+  const units = damageOf(gun, ammo);
+  if (!units.length) units.push({ type: 'bash', amount: Math.min(ammo ? ammo.weight / 100 + 4 : 5, 16), armor_penetration: 0 });
+  // Thrown rocks fly slowly (BN thrown projectile speed ~ 10-20 m/s): dodging matters.
+  enemyFireOf(sys.game).fire({
+    kind: 'stone', x: m.x, y: m.y, h: m.z * LEVEL_HEIGHT + muzzleHeight(m), tx: p.x, ty: p.y, th: p.z * LEVEL_HEIGHT + 1.2,
+    yawOff: off, range: d + 4, z: m.z, from: m,
+    onPlayer: (mb) => hitSurvivor(sys, m, units, Math.min(0.99, mb), false, 15),
+    onNpc: (n, mb) => roundHitsNpc(sys, n, units, mb, m),
   });
 }

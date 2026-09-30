@@ -247,6 +247,11 @@ export function openDialoguePanel(ctx: TalkCtx, d: Dialogue, onClose?: () => voi
         def.difficulty ? chip(`Difficulty ${def.difficulty}`, def.difficulty >= 5 ? 'bad' : def.difficulty >= 3 ? 'warn' : 'good') : null,
         def.deadline !== undefined ? chip('Has a deadline', 'warn') : null,
       ),
+      // BN's "Difficulty 5" is a number only a veteran can weigh (playtest: day 1's first job was
+      // killing armed bandits). Say what it means for someone just starting.
+      def.difficulty && def.difficulty >= 3
+        ? h('div', { class: `ix-card-hint tone-${def.difficulty >= 5 ? 'bad' : 'warn'}`, text: def.difficulty >= 5 ? 'Dangerous: expect a real fight. New survivors usually say no, or come back with a gun and friends.' : 'Risky: be ready for trouble.' })
+        : '',
       h('div', { class: 'ix-card-hint', text: 'Accepted jobs go to your mission log (' + game.keys.keyFor('missions') + ').' }),
     );
   }

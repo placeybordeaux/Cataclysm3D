@@ -11,14 +11,18 @@ import type { MonsterView } from './monsterView';
 import type { Renderer } from './renderer';
 import type { SpriteHandle } from './sprites';
 import type { TileFrame } from './textureSource';
+import { cardsOn } from './cards';
+import { FxMeshes } from './chars/fxMeshes';
 
 // Visible arrows, bolts and stones (PlayerCombat.flights / .landed / Monster.stuck):
 //  - in flight: a shaft of pixels along the real 3D path (the gravity arc from rangedfeel.ts),
 //    fletching at the tail, a faint streak behind it — so you watch where the shot actually went
 //  - at rest: stuck in the ground leaning back toward the shooter, in a wall, or in a monster's
 //    body (following it as it walks) until picked up / until it dies and they fall
-// Everything is drawn as world-space billboards one or two low-res pixels thick (like hitFx's
-// tracers), re-sized every frame so an arrow stays a crisp line at any distance.
+// Arrows, bolts and stones are small meshes (chars/fxMeshes.ts: a head, a round shaft, crossed
+// fletching) that keep their orientation as you walk round them; the flight trail and streaks
+// are still pixel dots. `?props=billboard` brings back the all-dots arrows (world-space
+// billboards one or two low-res pixels thick, re-sized every frame to stay crisp).
 
 const SHAFT = [0x8a6a40, 0x7a5a34];
 const TIP = 0xb8bcc4;
@@ -40,6 +44,7 @@ export class ArrowFx {
   private clock = 0;
   private trail: (Pt & { z: number; t: number })[] = [];
   private lastPos = new WeakMap<Flight, number>();
+  private meshes: FxMeshes | null = null;
 
   constructor(private game: Game, private renderer: Renderer, private combat: PlayerCombat, private sys: MonsterSystem, private view: MonsterView | null) {
     this.makePalette();
@@ -95,6 +100,15 @@ export class ArrowFx {
     this.z = z;
     const cam = this.renderer.rig.camera.position;
     const d = Math.hypot(tip.x - cam.x, tip.y - cam.z);
+    if (cardsOn()) {
+      this.meshes ??= new FxMeshes(this.renderer);
+      this.meshes.place(kind === 'stone' ? 'stone' : len < 0.5 ? 'bolt' : 'arrow', tip.x, tip.y, z, tip.h, dir, undefined, kind === 'stone' ? 1 : len / (len < 0.5 ? 0.4 : 0.72));
+      for (let i = 1; i <= streak; i++) {
+        const f = (kind === 'stone' ? 0 : len) + i * 0.45;
+        this.dot({ x: tip.x - dir[0] * f, y: tip.y - dir[1] * f, h: tip.h - dir[2] * f }, STREAK, 1);
+      }
+      return;
+    }
     if (kind === 'stone') {
       this.dot(tip, STONE[0], 3);
       for (let i = 1; i <= streak; i++) this.dot({ x: tip.x - dir[0] * 0.5 * i, y: tip.y - dir[1] * 0.5 * i, h: tip.h - dir[2] * 0.5 * i }, STREAK, 1);
@@ -121,6 +135,7 @@ export class ArrowFx {
 
   update(dt = 1 / 60): void {
     this.used = 0;
+    this.meshes?.begin();
     const p = this.game.player;
     this.clock += dt;
     const now = this.clock;
@@ -149,6 +164,7 @@ export class ArrowFx {
     }
     for (const m of this.sys.active) if (m.stuck.items.length && !m.dead) this.stuckIn(m);
     for (let i = this.used; i < this.pool.length; i++) this.pool[i].setVisible(false);
+    this.meshes?.end();
   }
 
   /** A round that hit a wall may have been placed on the tile in front of it. */

@@ -266,13 +266,15 @@ export const aimHooks: {
    * is there and the ray misses it (between the legs, past an arm). `t` = distance along `d`.
    */
   pick: ((m: unknown, o: Vec3, d: Vec3) => { t: number; zone: HitZone; part: string } | null | undefined) | null;
+  /** As `pick`, prepared once for many rays (a melee swing's fan); undefined = no model. */
+  prepare: ((m: unknown) => ((o: Vec3, d: Vec3) => { t: number; zone: HitZone; part: string } | null) | undefined) | null;
   /**
    * The drawn camera (src/aim.ts): its position and basis (forward, right, up; unit vectors in
    * the same axes), whether it's an over-the-shoulder view, and the survivor's eye as drawn.
    * Null in tests, the sim, and top-down view: the shot then leaves the eye along the view.
    */
   view: (() => { o: Vec3; f: Vec3; r: Vec3; u: Vec3; third: boolean; eye: Vec3 } | null) | null;
-} = { hitZone: defaultHitZone, body: null, pick: null, view: null };
+} = { hitZone: defaultHitZone, body: null, pick: null, prepare: null, view: null };
 
 export interface Vec3 {
   x: number;
@@ -286,6 +288,28 @@ export function basisDirection(v: { f: Vec3; r: Vec3; u: Vec3 }, ox: number, oy:
   const d = { x: v.f.x + v.r.x * tx + v.u.x * ty, y: v.f.y + v.r.y * tx + v.u.y * ty, h: v.f.h + v.r.h * tx + v.u.h * ty };
   const n = Math.hypot(d.x, d.y, d.h) || 1;
   return { x: d.x / n, y: d.y / n, h: d.h / n };
+}
+
+/** The camera-style basis (forward, right, up) of a game yaw/pitch. */
+export function basisOf(yaw: number, pitch: number): { f: Vec3; r: Vec3; u: Vec3 } {
+  const cy = Math.cos(yaw), sy = Math.sin(yaw), cp = Math.cos(pitch), sp = Math.sin(pitch);
+  return { f: { x: sy * cp, y: -cy * cp, h: sp }, r: { x: cy, y: sy, h: 0 }, u: { x: -sy * sp, y: cy * sp, h: cp } };
+}
+
+/**
+ * The rays a melee swing sweeps, as screen offsets (x right, y up; radians) ordered by distance
+ * from the crosshair: across ±`arcHalf` in 4° steps and a band of ±16° vertically (heads, legs,
+ * small creatures). The first one that meets a body within reach decides what the swing hits.
+ */
+export function swingFan(arcHalf: number): { x: number; y: number }[] {
+  const out: { x: number; y: number }[] = [];
+  const step = (4 * Math.PI) / 180;
+  const n = Math.floor(arcHalf / step + 1e-9);
+  const xs = [];
+  for (let i = -n; i <= n; i++) xs.push(i * step);
+  if (arcHalf - n * step > 1e-6) xs.push(-arcHalf, arcHalf);
+  for (const x of xs) for (const y of [0, -8, 8, -16, 16]) out.push({ x, y: (y * Math.PI) / 180 });
+  return out.sort((a, b) => Math.hypot(a.x, a.y) - Math.hypot(b.x, b.y));
 }
 
 /** Game yaw/pitch of a direction vector. */

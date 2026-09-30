@@ -286,7 +286,10 @@ tests/               vitest unit tests (pure logic, no DOM/WebGL)
   and `vehicleFrame.ts` cover bikes and odd grids, `vehicleGeom.ts` holds shared helpers.
   VehicleRenderer keeps the parts renderer as the `parts` look. Collision follows the drawn
   body: `MapOverlay.shaped/collide` (sub-tile shapes, used by physics.ts), the vehicle system's
-  `bodyShape` hook + `bodyRect/occupantAt`, clipping in `src/game/vehicleShape.ts`.
+  `bodyShape` hook + `bodyRect/occupantAt`, clipping in `src/game/vehicleShape.ts`. The driven
+  vehicle gets `vehicleCockpit.ts` (live dials, wheel + hands, windscreen film); `rig.eyeCap`
+  keeps the on-foot eye under a car roof in a doorway. `tools/vehicle-freq.ts` ranks what
+  mapgen spawns by body style.
 ### NPCs, dialogue, trade, missions (src/game, wired by src/npcs.ts `installNpcs`)
 - Data: `public/data/npcs.json` (`npm run extract:npcs`, tools/extract/npcs.ts): npc templates,
   npc_class, talk_topic (merged like CDDA: responses append across definitions), mission_definition,
@@ -526,6 +529,8 @@ tests/               vitest unit tests (pure logic, no DOM/WebGL)
   `freeAim()`. Free aim: `combat.aim` (AimSway: sway + kick; the shot uses `shotOffset`), `castAim`,
   `freeHit`; hooks for 3D models: `aimHooks.hitZone(m, hFrac)` and `aimHooks.body(m, dist)`; events
   `monsterDodge`, `playerAttack.quality`; `rig.aimView`, `viewmodel.aimPx`, `game.runVeto`.
+  Melee picks with `combat.meleePick()` (fan of rays vs model boxes, `aimHooks.prepare`). Enemy rounds:
+  `enemyFireOf(game).fire({...})` (src/game/enemyfire.ts; monguns/npcai use it), event `nearMiss`.
 - Debug: `cdda.feel`, `cdda.setFeel(d)`, `cdda.feelState()`, `cdda.recordFrames(n, dt, each)` (frame-exact
   captures for animation timing); `tools/drive.ts seq "…"` (timed real input + screenshot bursts), `xbdown/xbup`.
 - Ranged / archery (`src/game/rangedfeel.ts`, pure): `rangedClass(item)` (firearm/bow/crossbow/sling/thrown/

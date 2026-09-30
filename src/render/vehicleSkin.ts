@@ -154,6 +154,8 @@ function liveryColors(L: SkinLayoutInfo, paint: number): { body: RGB; lower?: RG
     case 'hippie': return { body: rgb(0x3f8fa8), lower: rgb(0xe8e2cc) };
     case 'hazmat': return { body: rgb(0xe8e6de), stripe: rgb(0xd8a818) };
     case 'transit': return { body: rgb(0xdcdad2), lower: rgb(0x2c4a86), stripe: rgb(0x2c4a86) };
+    case 'motorhome': return { body: rgb(0xe4dfd0), stripe: rgb(0x7a4a2a), roof: rgb(0xe8e4d8) };
+    case 'food': return { body: rgb(0xd8d4c8), stripe: rgb(0xd07a20) };
     default: return { body: rgb(paint) };
   }
 }
@@ -173,7 +175,9 @@ export function paintSkin(L: SkinLayoutInfo, inp: SkinInput): Skin {
   const p = L.p;
   const ppm = SKIN_PPM;
   const col = liveryColors(L, inp.paint);
-  // Burnt-out wrecks: the paint is mostly gone, scorched toward rust and soot.
+  // Burnt-out wrecks: the paint is mostly gone, scorched toward rust and soot (and soot
+  // licks up from the wheel arches and window openings in `emit`).
+  const burnt = L.wear > 0.6 ? Math.min(1, (L.wear - 0.6) * 2.5) : 0;
   if (L.wear > 0.6) {
     const t = Math.min(0.75, (L.wear - 0.6) * 2.5);
     const burn = (c: RGB | undefined): RGB | undefined => (c ? lerpC(c, [70, 48, 36], t) : c);
@@ -225,6 +229,7 @@ export function paintSkin(L: SkinLayoutInfo, inp: SkinInput): Skin {
     C[2] += (c[2] - C[2]) * t;
   };
   const blood: RGB = [96, 12, 10];
+  const soot: RGB = [22, 20, 19];
   const band = 0.12 + wear * 0.3;
   // Per-paint noise offsets (the tables tile; the seed shifts where each vehicle samples).
   const oV = (seed * 29) & NM, oVy = (seed * 13) & NM, oW = (seed * 17 + 7) & NM, oWy = (seed * 7 + 3) & NM;
@@ -233,7 +238,8 @@ export function paintSkin(L: SkinLayoutInfo, inp: SkinInput): Skin {
   const column = (row: number) => {
     colDmg = inp.rowDamage.get(row) ?? 0;
     colBlood = inp.rowBlood.get(row) ?? 0;
-    colRust = Math.max(0, Math.min(1, wear * 1.1 + colDmg * 0.6 - 0.2));
+    // a burnt-out shell is scorched all over rather than patchy with rust
+    colRust = Math.max(0, Math.min(1, wear * 1.1 + colDmg * 0.6 - 0.2)) * (1 - burnt * 0.6);
   };
   /** Weather the scratch colour C (grime, rust, dents, blood), then write it at (u, v).
    * tx / ty: texel coordinates in world space (so both sides / sheets differ). */
@@ -252,6 +258,12 @@ export function paintSkin(L: SkinLayoutInfo, inp: SkinInput): Skin {
     // Dents: darker blotches on hard-hit rows.
     if (colDmg > 0.5 && VT[((iy + 37) & NM) * NT + ((ix + oV + 50) & NM)] > 1.15 - colDmg * 0.4) mulC(0.75);
     if (colBlood > 0 && VT[((iy * 2 + 99) & NM) * NT + ((ix * 2 + oW) & NM)] > 1 - Math.min(0.55, colBlood / 900)) mixC(blood, 0.8);
+    if (burnt > 0) {
+      const s = VT[((iy + 61) & NM) * NT + ((ix + oW + 17) & NM)];
+      // soot collects low (arches, sills) and at the top edges, in patches, not all over
+      const lowish = low < 0.35 ? 0.12 : 0;
+      if (s > 0.97 - burnt * 0.28 - lowish) mixC(soot, 0.45 + 0.3 * burnt);
+    }
     const o = (v * W + u) * 4;
     data[o] = C[0];
     data[o + 1] = C[1];

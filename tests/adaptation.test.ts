@@ -141,12 +141,33 @@ describe('credits', () => {
   });
 });
 
+describe('weather messages', () => {
+  it('only changes you would notice, none while time is sped up; all of them on request', async () => {
+    const { weatherMessageFilter, weatherMessages } = await import('../src/game/weather');
+    expect(weatherMessageFilter('drizzle', 'light_drizzle', false)).toBe(false);
+    expect(weatherMessageFilter('cloudy', 'rain', false)).toBe(true);
+    expect(weatherMessageFilter('cloudy', 'rain', true)).toBe(false);
+    weatherMessages.all = true;
+    expect(weatherMessageFilter('drizzle', 'light_drizzle', true)).toBe(true);
+    weatherMessages.all = false;
+  });
+});
+
 describe('day counter', () => {
   it('turns over at midnight, like the clock', () => {
     const start = 8 * 3600;
     expect(runDay(start, start)).toBe(1);
     expect(runDay(23.9 * 3600, start)).toBe(1);
     expect(runDay(86400 + 5.5 * 3600, start)).toBe(2);
+  });
+});
+
+describe('rest window needs warning', () => {
+  it('warns when very hungry or thirsty, not when merely peckish', async () => {
+    const { restNeedsWarning } = await import('../src/ui/rest_ui');
+    expect(restNeedsWarning('Hungry', 'Thirsty')).toBeNull();
+    expect(restNeedsWarning('Very Hungry', 'Very Thirsty')).toMatch(/hungry and thirsty: drink/);
+    expect(restNeedsWarning('Famished', '')).toMatch(/hungry: eat/);
   });
 });
 

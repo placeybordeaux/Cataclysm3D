@@ -46,6 +46,15 @@ export function tirednessText(sleepiness: string): { text: string; tone: 'good' 
   return { text: `${sleepiness}: you'll be out like a light. Sleep before you collapse.`, tone: 'warn' };
 }
 
+/** A heads-up before resting while hungry or thirsty, or null. */
+export function restNeedsWarning(hunger: string, thirst: string): string | null {
+  const thirsty = /Very Thirsty|Dehydrated|Parched/.test(thirst);
+  const hungry = /Very Hungry|Famished|Starving/.test(hunger);
+  if (!thirsty && !hungry) return null;
+  const what = thirsty && hungry ? 'hungry and thirsty' : thirsty ? 'thirsty' : 'hungry';
+  return `You're ${what}: ${thirsty ? 'drink' : 'eat'} something first. Hours pass while you rest, and it gets worse.`;
+}
+
 /** Wait entries with their short label ("30 minutes", "Until dawn") and, for the "until" ones, how long that is. */
 export function waitChoices(game: Game): { key: string; label: string; seconds: number; detail: string }[] {
   return WAIT_OPTIONS.map((o) => {
@@ -124,6 +133,10 @@ export function openRest(game: Game, focus: 'sleep' | 'wait'): void {
     },
   });
   if (blocked) panel.body.append(h('div', { class: 'rest-block tone-bad', text: `You can't rest now: ${blocked.replace(/^You /, 'you ')}` }));
+  // A long wait or a night's sleep doesn't stop for hunger or thirst until they're dangerous
+  // (BN): say so before, not after (playtest: slept on "Very Thirsty", woke up worse).
+  const needs = restNeedsWarning(p.hungerState(), p.thirstDescription());
+  if (needs) panel.body.append(h('div', { class: 'rest-block tone-warn', text: needs }));
   panel.body.append(...(focus === 'sleep' ? [sleepCard, waitCard] : [waitCard, sleepCard]));
   const r = panel.el.getBoundingClientRect();
   panel.moveTo(Math.round((innerWidth - r.width) / 2), Math.round((innerHeight - r.height) / 3));

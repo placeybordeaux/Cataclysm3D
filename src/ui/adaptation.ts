@@ -5,8 +5,9 @@
 //   ?climate=bn|old overrides for a session.
 
 import type { Game } from '../game/game';
-import { BN_START_CLIMATE_OFFSET_DAYS, refreshWeather, setClimateOffsetDays } from '../game/weather';
+import { BN_START_CLIMATE_OFFSET_DAYS, refreshWeather, setClimateOffsetDays, weatherMessages } from '../game/weather';
 import { registerOption } from './options';
+import { registerMapAtlasOption } from './overmap_ui';
 
 type Climate = 'bn' | 'old';
 const KEY = 'cdda3d.climate';
@@ -31,6 +32,29 @@ function apply(game: Game): void {
 
 export function installAdaptation(game: Game): void {
   apply(game);
+  registerMapAtlasOption();
+  const WM_KEY = 'cdda3d.weatherMessages';
+  const wmAll = () => {
+    try {
+      return localStorage.getItem(WM_KEY) === 'all';
+    } catch {
+      return false;
+    }
+  };
+  weatherMessages.all = wmAll();
+  registerOption({
+    name: 'Weather messages',
+    value: () => (weatherMessages.all ? 'Every change (CDDA)' : 'Changes you notice'),
+    change: () => {
+      weatherMessages.all = !weatherMessages.all;
+      try {
+        localStorage.setItem(WM_KEY, weatherMessages.all ? 'all' : 'notice');
+      } catch {
+        // not persisted
+      }
+    },
+    desc: 'Changes you notice: a message when it starts or stops raining or snowing, not for every shade of drizzle, and none while waiting or sleeping. Every change: like Cataclysm.',
+  });
   registerOption({
     name: 'Climate',
     value: () => (climate() === 'bn' ? 'Mid-spring start (BN)' : 'Early spring (old)'),

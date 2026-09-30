@@ -165,6 +165,10 @@ export const sfx = {
   arrowFly(pos: Vec3): Voice | null {
     return slowed(play('synth_whoosh', 'default', { pos, pitchJitter: 0.15, volume: 0.35, range: 12 }), 1.6);
   },
+  /** An enemy round passing close (src/game/enemyfire.ts): a quick high zip for bullets, a whoosh for arrows and stones. */
+  nearMiss(kind: string, pos: Vec3): Voice | null {
+    return slowed(play('synth_whoosh', 'default', { pos, pitchJitter: 0.1, volume: kind === 'bullet' ? 0.55 : 0.4, range: 12 }), kind === 'bullet' ? 2.6 : 1.5);
+  },
   gunEmpty(pos?: Vec3): Voice | null {
     return play('fire_gun', 'empty', { pos });
   },

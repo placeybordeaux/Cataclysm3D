@@ -20,6 +20,7 @@ import { LEVEL_HEIGHT } from '../../world/coords';
 import { hasFlag } from '../../world/registry';
 import { attachTooltip, button, h, iconEl, openPanel, palette, ui2Layers, type Panel } from '../../ui2';
 import { itemIconRef, mapIconRef, rememberedWindow, requirementSections, searchField } from './common';
+import { shortfall } from './craft_model';
 import './craft2.css';
 
 const PANEL_ID = 'craft.construct';
@@ -73,15 +74,26 @@ export function openConstructionScreen(game: Game, renderer: Renderer): Construc
   const inv = constructionInventory(game);
   const px = Math.floor(p.x), py = Math.floor(p.y);
   /** Group → can it go on some tile next to you, and can you build some stage of it. */
-  const status = new Map<string, { site: boolean; build: boolean }>();
+  // `short`: what the nearest-to-buildable fitting stage lacks, in words (docs/ADAPTATION.md:
+  // "It fits next to you, but something is missing" never said what).
+  const status = new Map<string, { site: boolean; build: boolean; short: string[] }>();
   for (const g of groups) {
     let site = false, build = false;
+    let short: string[] | null = null;
     for (const con of g.constructions) {
       const fits = [-1, 0, 1].some((dy) => [-1, 0, 1].some((dx) => (dx || dy) && siteProblem(game, con, px + dx, py + dy, p.z) === null));
       site ||= fits;
-      if (fits && canBuild(game, con, inv).ok) build = true;
+      if (!fits) continue;
+      const check = canBuild(game, con, inv);
+      if (check.ok) build = true;
+      else {
+        const why = [...shortfall(data, { ok: false, missing: check.missing, req: check.req, light: true, speed: 1 }).items];
+        for (const [sk, l] of con.required_skills ?? []) if (p.getSkill(sk) < l) why.push(`${p.skillName(sk)} skill ${l} (you have ${p.getSkill(sk)})`);
+        if (!check.light) why.push('light');
+        if (!short || why.length < short.length) short = why;
+      }
     }
-    status.set(g.id, { site, build });
+    status.set(g.id, { site, build, short: build ? [] : short ?? [] });
   }
 
   const search = searchField('Search constructions…', (v) => {
@@ -140,7 +152,9 @@ export function openConstructionScreen(game: Game, renderer: Renderer): Construc
           { class: `c2-row${st.build ? ' ok' : ''}${g.id === sel ? ' selected' : ''}`, data: { id: g.id } },
           iconEl(mapIconRef(data, res), 'row'),
           h('span', { class: 'c2-row-name', text: g.name }),
-          st.build ? h('span', { class: 'tone-good ui2-small', text: 'ready' }) : st.site ? h('span', { class: 'ui2-dim ui2-small', text: 'fits' }) : null,
+          st.build ? h('span', { class: 'tone-good ui2-small', text: 'ready' })
+          : st.site && st.short.length === 1 ? h('span', { class: 'c2-row-short', text: `missing ${st.short[0]}` })
+          : st.site ? h('span', { class: 'ui2-dim ui2-small', text: 'fits' }) : null,
         );
         el.addEventListener('click', () => select(g.id));
         el.addEventListener('dblclick', () => place());
@@ -151,7 +165,8 @@ export function openConstructionScreen(game: Game, renderer: Renderer): Construc
     if (!rows.some((g) => g.id === sel)) select(rows[0]?.id ?? null);
     else renderDetail();
   };
-  const rank = (g: ConstructionGroup) => (status.get(g.id)!.build ? 2 : status.get(g.id)!.site ? 1 : 0);
+  // Ready first, then fits-and-one-thing-short, then fits, then the rest.
+  const rank = (g: ConstructionGroup) => { const st = status.get(g.id)!; return st.build ? 3 : st.site && st.short.length === 1 ? 2 : st.site ? 1 : 0; };
   const select = (id: string | null) => {
     sel = id;
     list.querySelectorAll('.c2-row').forEach((r) => r.classList.toggle('selected', (r as HTMLElement).dataset.id === id));
@@ -169,7 +184,7 @@ export function openConstructionScreen(game: Game, renderer: Renderer): Construc
       h(
         'div',
         { class: 'c2-actions' },
-        h('span', { class: `ui2-small ${st.build ? 'tone-good' : st.site ? 'tone-warn' : 'ui2-dim'}`, text: st.build ? 'You can build this next to you.' : st.site ? 'It fits next to you, but something is missing.' : 'No spot next to you fits: walk to one and point at it.' }),
+        h('span', { class: `ui2-small ${st.build ? 'tone-good' : st.site ? 'tone-warn' : 'ui2-dim'}`, text: st.build ? 'You can build this next to you.' : st.site ? (st.short.length ? `It fits next to you. Missing: ${st.short.slice(0, 3).join(', ')}${st.short.length > 3 ? '…' : ''}.` : 'It fits next to you, but something is missing.') : 'No spot next to you fits: walk to one and point at it.' }),
         h('span', { class: 'c2-spacer' }),
         button('Place…', () => place(), { tone: 'accent', key: 'Enter', title: 'Pick the spot in the world' }),
       ),
@@ -230,7 +245,7 @@ function stageCard(game: Game, con: ConstructionDef, inv: CraftingInventory, px:
     'div',
     { class: 'c2-stage-head' },
     pre ? iconEl(mapIconRef(data, pre), 'row') : null,
-    pre ? h('span', { text: terOrFurnName(data, pre) }) : h('span', { class: 'ui2-dim', text: con.pre_special === 'check_empty' ? 'empty ground' : con.pre_special === 'check_deconstruct' ? 'furniture / terrain' : 'site' }),
+    pre ? h('span', { text: terOrFurnName(data, pre) }) : h('span', { class: 'ui2-dim', text: con.pre_special === 'check_empty' ? 'empty ground' : con.pre_special === 'check_deconstruct' ? 'furniture / terrain' : (con as { needs_diggable?: boolean }).needs_diggable ? 'soft ground (dirt or grass)' : con.pre_flags ? `ground that is ${String(con.pre_flags).toLowerCase().replace(/_/g, ' ')}` : 'any open spot' }),
     h('span', { class: 'c2-arrow', text: '→' }),
     post ? iconEl(mapIconRef(data, post), 'row') : null,
     h('span', { text: post ? terOrFurnName(data, post) : con.post_special === 'done_deconstruct' ? 'taken apart' : groupName(data, con) }),

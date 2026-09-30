@@ -24,6 +24,10 @@ import { Dialogue, type TalkWorld } from './talk';
 import { MissionSystem, type MissionHost, type MissionInstance } from './missions';
 import type { BodyPartId } from './bodyparts';
 import { BODY_PARTS } from './bodyparts';
+import { enemyFireOf } from './enemyfire';
+import { flightSpeed, fliesVisibly, rangedClass } from './rangedfeel';
+import { BODY_HEIGHT } from './aimmodel';
+import { LEVEL_HEIGHT } from '../world/coords';
 
 /** Tiles within which fights between NPCs and monsters are narrated blow by blow. */
 export const NARRATE_RANGE = 20;
@@ -782,39 +786,44 @@ export class NpcSystem implements GameSystem, TalkWorld, MissionHost {
     const ammo = gun.ammoData();
     sfx.gunshot(gun.typeId, n, { ammoType: typeof ammo?.ammo_type === 'string' ? ammo.ammo_type : undefined, loudness: shot.noise.volume });
     emitSound(this.game, { x: n.tileX, y: n.tileY, z: n.z }, shot.noise.volume, shot.noise.sound || 'Bang!', { category: 'combat', source: n, sfxId: '' });
-    const d = Math.hypot(pos.x - n.x, pos.y - n.y);
-    const miss = Math.abs(Math.tan(shot.spread * Math.cos(shot.azimuth)) * d);
-    const r = this.foeRadius(foe);
-    const aimYaw = Math.atan2(pos.x - n.x, -(pos.y - n.y)) + shot.spread * Math.cos(shot.azimuth);
-    const endX = n.x + Math.sin(aimYaw) * d, endY = n.y - Math.cos(aimYaw) * d;
-    this.shots.push({ x0: n.x, y0: n.y, x1: endX, y1: endY, z: n.z, t: 0.08 });
-    if (miss > r * 1.4) {
-      if (foe.kind === 'player') this.message(`${n.name} shoots at you and misses!`, 'c_light_red');
-      return;
-    }
-    const mult = miss < r * 0.3 ? 1.5 : miss < r ? 1 : 0.5;
-    const units = shot.damage.map((u) => ({ type: u.type, amount: u.amount * mult, armor_penetration: u.armor_penetration, armor_multiplier: 1 }));
-    if (foe.kind === 'monster') {
-      const m = foe.m;
-      const total = Math.floor(applyFlatArmor(units, m.type.armor).reduce((s, x) => s + x.amount, 0));
-      if (this.narrates(n)) this.message(`${n.name} shoots ${m.theName()}.`);
-      sfx.bulletHit('flesh', m);
-      m.aggroCharacter = true;
-      this.monsters?.hurt(m, total, null);
-      return;
-    }
-    const target = foe.kind === 'npc' ? foe.n : this.player;
-    const bp = selectBodyPart(this.rng);
-    const absorbed = target.inv.absorbHit(bp, units, this.rng);
-    const res = this.muted(target, () => target.takeHit(bp, absorbed));
-    if (foe.kind === 'player') {
-      this.message(`${n.name} shoots you in the ${BODY_PARTS[bp].name} for ${res.damage} damage!`, 'c_red');
-      this.game.events.emit('playerHurt', { amount: res.damage, bp, source: n });
-      if (res.damage > 0) sfx.playerHurt(!this.player.male);
-    } else {
-      if (this.narrates(n)) this.message(`${n.name} shoots ${foe.n.name}.`);
-      this.afterHit(foe.n, res.damage, { kind: 'npc', n });
-    }
+    // The round flies (enemyfire.ts): the NPC's BN dispersion roll sets the direction; it hits
+    // whatever it meets first — its foe, a follower or the survivor in the way, a wall.
+    const cls = rangedClass(gun);
+    const flies = fliesVisibly(cls);
+    const th = foe.kind === 'monster' ? foe.m.z * LEVEL_HEIGHT + (BODY_HEIGHT[foe.m.size] ?? 1.7) * 0.6 : n.z * LEVEL_HEIGHT + 1.2;
+    const band = (mb: number) => (mb < 0.2 ? 1.5 : mb < 0.8 ? 1 : 0.5);
+    const scaled = (mb: number) => shot.damage.map((u) => ({ type: u.type, amount: u.amount * band(mb), armor_penetration: u.armor_penetration, armor_multiplier: 1 }));
+    const round = enemyFireOf(this.game).fire({
+      kind: flies ? (cls === 'sling' ? 'stone' : 'arrow') : 'bullet', speed: flies ? flightSpeed(cls, Number(ammo?.speed) || 100) : undefined,
+      x: n.x, y: n.y, h: n.z * LEVEL_HEIGHT + 1.4, tx: pos.x, ty: pos.y, th, yawOff: shot.spread * Math.cos(shot.azimuth),
+      range: Math.max(1, shot.range || 30), z: n.z, from: n,
+      onMonster: (mm, mb) => {
+        const m = mm as Monster;
+        const total = Math.floor(applyFlatArmor(scaled(mb), m.type.armor).reduce((s, x) => s + x.amount, 0));
+        if (this.narrates(n)) this.message(`${n.name} shoots ${m.theName()}.`);
+        sfx.bulletHit('flesh', m);
+        m.aggroCharacter = true;
+        this.monsters?.hurt(m, total, null);
+      },
+      onNpc: (t, mb) => {
+        const target = t as Npc;
+        const bp = selectBodyPart(this.rng);
+        const res = this.muted(target, () => target.takeHit(bp, target.inv.absorbHit(bp, scaled(mb), this.rng)));
+        if (this.narrates(n)) this.message(`${n.name} shoots ${target.name}.`);
+        this.afterHit(target, res.damage, { kind: 'npc', n });
+      },
+      onPlayer: (mb) => {
+        const bp = selectBodyPart(this.rng);
+        const res = this.muted(this.player, () => this.player.takeHit(bp, this.player.inv.absorbHit(bp, scaled(mb), this.rng)));
+        this.message(`${n.name} shoots you in the ${BODY_PARTS[bp].name} for ${res.damage} damage!`, 'c_red');
+        this.game.events.emit('playerHurt', { amount: res.damage, bp, source: n });
+        if (res.damage > 0) sfx.playerHurt(!this.player.male);
+      },
+      onStop: () => {
+        if (foe.kind === 'player') this.message(`${n.name} shoots at you and misses!`, 'c_light_red');
+      },
+    });
+    void round;
   }
 
   /** Bookkeeping after an NPC took damage from anything: flash, death, grudges. */
@@ -953,6 +962,18 @@ export class NpcSystem implements GameSystem, TalkWorld, MissionHost {
   }
   /** Cooldown of the last NPC swing (PlayerCombat reads it through the hook wiring). */
   lastPlayerSwing = 0;
+
+  /** npcRound hook: an arrow, bolt or stone the survivor loosed struck NPC `n` (followers too: friendly fire). */
+  playerRoundHits(n: unknown, shot: ShotResult, missedBy: number, what: string): void {
+    const npc = n as Npc;
+    const mult = missedBy < 0.2 ? 2 : missedBy < 0.5 ? 1.5 : missedBy < 0.8 ? 1 : 0.5;
+    const units = shot.damage.map((u) => ({ type: u.type, amount: u.amount * mult, armor_penetration: u.armor_penetration, armor_multiplier: 1 }));
+    const bp = selectBodyPart(this.rng);
+    const r = this.muted(npc, () => npc.takeHit(bp, npc.inv.absorbHit(bp, units, this.rng)));
+    this.message(`Your ${what} hits ${npc.name} in the ${BODY_PARTS[bp].name} for ${r.damage} damage.`);
+    sfx.arrowHit('flesh', npc);
+    this.afterHit(npc, r.damage, { kind: 'player' });
+  }
 
   /** npcShot hook: first NPC on the bullet's path before `maxDist` takes the shot. */
   playerShot(yaw: number, maxDist: number, shot: ShotResult): { x: number; y: number } | null {
