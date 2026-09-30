@@ -135,6 +135,19 @@ export class ChunkManager {
   schedule: 'need' | 'distance' = 'need';
   /** 'need': budget while an unbuilt chunk is in view or about to be (catching up beats a steady frame rate). */
   boostBudgetMs = 8;
+  /**
+   * 'need': the budgets are a share of the frame interval, floored at budgetMs/boostBudgetMs.
+   * Streaming throughput is budget x frame rate, so at 12-30 fps (a big city, a slow GPU, a
+   * software-presented window) a fixed 4 ms per frame built the world 2-5x slower than at 60 Hz
+   * while the time was there: a frame that already missed vsync has room left in its slot.
+   * 0.25 of 16.7 ms is the old 4 ms; at 144 Hz the floor holds.
+   */
+  frameShare = 0.25;
+  boostShare = 0.45;
+  /** budget in force this frame (telemetry) */
+  effBudgetMs = 4;
+  private ivEma = 1000 / 60;
+  private lastUpdateT = 0;
   /** Half the camera's horizontal field of view (rad), for "in view" (the renderer keeps it current). */
   viewHalf = 1.1;
   /** Player velocity (tiles/s), smoothed from positions between updates. */
@@ -215,6 +228,15 @@ export class ChunkManager {
     const R = this.radius;
     const t0 = performance.now();
     this.trackVelocity(px, py, t0);
+    if (this.lastUpdateT) {
+      const iv = t0 - this.lastUpdateT;
+      // a hidden tab or a breakpoint is not the frame rate
+      if (iv < 250) this.ivEma += (iv - this.ivEma) * 0.05;
+    }
+    this.lastUpdateT = t0;
+    const need = this.schedule === 'need';
+    const base = need ? Math.min(16, Math.max(this.budgetMs, this.ivEma * this.frameShare)) : this.budgetMs;
+    const boost = need ? Math.min(24, Math.max(this.boostBudgetMs, this.ivEma * this.boostShare)) : this.boostBudgetMs;
     // 1. make sure desired entries exist, nearest first. Creating an entry generates map
     //    chunks (mapgen can be slow), so this shares the frame budget with meshing.
     if (this.offsetsR !== R) this.computeOffsets(R);
@@ -224,7 +246,7 @@ export class ChunkManager {
         const cx = pcx + dx, cy = pcy + dy;
         const k = key(cx, cy, z);
         if (this.entries.has(k)) continue;
-        if (!unlimited && created > 0 && performance.now() - t0 > (this.behind ? this.boostBudgetMs : this.budgetMs)) break outer;
+        if (!unlimited && created > 0 && performance.now() - t0 > (this.behind ? boost : base)) break outer;
         const deps = this.depsOf(cx, cy, z);
         if (!deps[0]) continue; // outside MIN_Z..MAX_Z
         created++;
@@ -280,7 +302,7 @@ export class ChunkManager {
       // exist the view is curtained (nearChunks.ts).
       const nearP = e.z === pz && Math.abs(e.cx - pctx) <= 1 && Math.abs(e.cy - pcty) <= 1;
       const urgent = nearP && (!e.shown || (e.builtSig !== -1 && e.chunk.version !== e.builtVer));
-      const budget = urgent ? this.urgentBudgetMs : this.behind ? this.boostBudgetMs : this.budgetMs;
+      const budget = urgent ? Math.max(this.urgentBudgetMs, boost) : this.behind ? boost : base;
       const now = performance.now();
       if (!unlimited && (built > 0 || created > 0) && now - t0 > budget) break;
       if (e.builtSig === -1 && e.z === pz && !e.job) {
@@ -318,6 +340,7 @@ export class ChunkManager {
       this.stats.maxBuildMs = Math.max(this.stats.maxBuildMs, job.ms);
       if (job.ms > 8) this.stats.slowBuilds++;
     }
+    this.effBudgetMs = this.behind ? boost : base;
     this.stats.frameMs = performance.now() - t0;
     this.stats.maxFrameMs = Math.max(this.stats.maxFrameMs, this.stats.frameMs);
     this.stats.builtThisFrame = built;

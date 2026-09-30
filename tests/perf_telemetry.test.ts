@@ -28,7 +28,7 @@ function source(player: { x: number; y: number; z: number }, unbuilt: (cx: numbe
     player: () => (refresh(), player),
     view: () => ({ fx: 1, fy: 0, hfov: Math.PI / 2 }),
     chunks: {
-      radius: R, levelsBelow: 0, levelsAbove: 1, visibleDist: 60, budgetMs: 4, boostBudgetMs: 8, behind: false,
+      radius: R, levelsBelow: 0, levelsAbove: 1, visibleDist: 60, budgetMs: 4, effBudgetMs: 4,
       stats: { entries: 0, pending: 0, builtThisFrame: 0, meshMs: 0, treeMs: 0, frameCreateMs: 0, frameMs: 0, builds: 0 },
       forEachEntry: (fn) => entries.forEach(fn),
     },

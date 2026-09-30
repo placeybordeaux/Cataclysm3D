@@ -23,8 +23,7 @@ export interface TelemetrySource {
     levelsAbove: number;
     visibleDist: number;
     budgetMs: number;
-    boostBudgetMs: number;
-    behind: boolean;
+    effBudgetMs: number;
     readonly stats: { entries: number; pending: number; builtThisFrame: number; meshMs: number; treeMs: number; frameCreateMs: number; frameMs: number; builds: number };
     forEachEntry(fn: (e: ChunkEntryView) => void): void;
   };
@@ -266,7 +265,7 @@ export class Telemetry implements ChunkProbe {
     C.pending[i] = cs.pending;
     C.entries[i] = cs.entries;
     C.prefetchQ[i] = this.src.prefetch?.stats.queue ?? NaN;
-    C.budget[i] = this.src.chunks.behind ? this.src.chunks.boostBudgetMs : this.src.chunks.budgetMs;
+    C.budget[i] = this.src.chunks.effBudgetMs;
     const g = this.src.gl;
     C.calls[i] = g ? g.calls : NaN;
     C.triangles[i] = g ? g.triangles : NaN;
