@@ -222,19 +222,28 @@ export function* buildChunkMeshSteps(
   // two-storey engine bay is open air at z+1 under a roof at z+3 and read as outdoors (full sky
   // ambient, no room). Higher levels are read only where generated: the chunk manager generates
   // every level a column has, so an ungenerated one is open air (fields don't grow five levels).
-  const coverMemo = new Map<number, boolean>();
+  // memo over the chunk and a margin (rooms scan 14 tiles out): -1 unknown, 0/1. A typed array,
+  // not a Map: skyOf runs per face and outdoors the slow path is the common one
+  const CM = 16, CW = CHUNK + 2 * CM, cx0 = chunk.cx * CHUNK - CM, cy0 = chunk.cy * CHUNK - CM;
+  const coverMemo = new Int8Array(CW * CW).fill(-1);
+  const higher: number[] = [];
+  for (let zz = z + 2; zz <= MAX_Z; zz++) higher.push(zz);
   const overhead = (tx: number, ty: number): boolean => {
     if (shapes.terrain(above.ter(tx, ty)) !== S.none) return true;
-    const k = (tx + 32768) * 65536 + (ty + 32768);
-    let c = coverMemo.get(k);
-    if (c !== undefined) return c;
-    c = false;
+    if (!higher.length) return false;
+    const mx = tx - cx0, my = ty - cy0;
+    const inMemo = mx >= 0 && my >= 0 && mx < CW && my < CW;
+    if (inMemo && coverMemo[my * CW + mx] >= 0) return coverMemo[my * CW + mx] === 1;
+    let c = false;
     const cx = chunkOf(tx), cy = chunkOf(ty), li = localOf(ty) * CHUNK + localOf(tx);
-    for (let zz = z + 2; zz <= MAX_Z && !c; zz++) {
+    for (const zz of higher) {
       if (!map.hasChunk(cx, cy, zz)) continue;
-      if (shapes.terrain(map.chunk(cx, cy, zz)!.ter[li]) !== S.none) c = true;
+      if (shapes.terrain(map.chunk(cx, cy, zz)!.ter[li]) !== S.none) {
+        c = true;
+        break;
+      }
     }
-    coverMemo.set(k, c);
+    if (inMemo) coverMemo[my * CW + mx] = c ? 1 : 0;
     return c;
   };
   // rooms (rooms.ts): interior finishes, curtains and set dressing are chosen per room; a

@@ -307,10 +307,15 @@ export class ChunkManager {
     lv.eye.y = py;
     lv.eye.z = pz;
     lv.beginFrame();
+    const driving = !unlimited && Math.hypot(this.vel.x, this.vel.y) > 8;
     outer: for (const [dx, dy] of this.offsets) {
       if (curtain && (Math.abs(dx) > 1 || Math.abs(dy) > 1)) break; // offsets are nearest first
       const cx = pcx + dx, cy = pcy + dy;
-      const [clo, chi] = lv.columnSpan(cx, cy, pz);
+      const [clo, chiAll] = lv.columnSpan(cx, cy, pz);
+      // Driving (> 8 m/s), storeys above the window (tower tops) aren't started except over the
+      // player's own column: their entries, mapgen and meshing doubled the unbuilt-street time
+      // through a city (perf city40); they fill in once you slow down.
+      const chi = driving && (dx || dy) ? Math.min(chiAll, pz + this.levelsAbove) : chiAll;
       for (let z = clo; z <= chi; z++) {
         const rz = lv.radiusAt(cx, cy, z, pz);
         // offsets are circular around the player's chunk, like computeOffsets
@@ -502,7 +507,9 @@ export class ChunkManager {
     // every hole needed in the next 3 s, unless overhead (within a chunk): the bay's roof is
     // what you look up at. Driving through a city they cost whole furnished floors; ranked
     // with the rest (+1 s) they left the street ahead unbuilt for 3-4 s (perf city40).
-    const high = e.z > pz + this.levelsAbove && d > CHUNK;
+    // (overhead = within a chunk; driving, only the column you're in: passing towers' upper
+    // floors were meshed at full priority as the car went by)
+    const high = e.z > pz + this.levelsAbove && (speed > 8 ? d > 0 : d > CHUNK);
     if (e.z > pz) t += high ? 3 : 0.2;
     t += d * 0.002;
     // the player's own chunk and its 8 neighbours come first whatever the camera does: after

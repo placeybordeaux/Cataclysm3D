@@ -146,6 +146,7 @@ export class ChunkPrefetcher {
     // the same per-column extent the renderer draws, with the prefetcher's own (wider) window
     const pol = lv ? { radius: R, below: o.below, above: o.above, mode: lv.policy.mode } : null;
     const [zLo, zHi] = lv ? lv.span(pz, pol!) : [Math.max(MIN_Z, pz - o.below), Math.min(MAX_Z, pz + o.above)];
+    const fast = Math.hypot(this.vel.x, this.vel.y) > 8;
     const addAround = (ccx: number, ccy: number, bias: number) => {
       for (let dy = -R; dy <= R; dy++)
         for (let dx = -R; dx <= R; dx++) {
@@ -153,6 +154,8 @@ export class ChunkPrefetcher {
           for (let z = zLo; z <= zHi; z++) {
             const cx = ccx + dx, cy = ccy + dy;
             if (lv && lv.radiusAt(cx, cy, z, pz, pol!) < 0) continue;
+            // driving: not tower tops above the window (the renderer doesn't start them either)
+            if (fast && z > pz + o.above) continue;
             if (this.map.hasChunk(cx, cy, z)) continue;
             // Priority: distance from the player, pulled toward the direction of travel;
             // the player's own level first, then the ones next to it.
