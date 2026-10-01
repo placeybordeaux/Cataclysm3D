@@ -24,7 +24,7 @@ export interface SkillHint {
 }
 
 /** The skill-training activities this port implements, with BN's caps (where the code calls practice()). */
-const ACTIVITIES: Record<string, { text: string; cap?: number; capText?: string }[]> = {
+const ACTIVITIES: Record<string, { text: string; cap?: number; capText?: string; score?: number }[]> = {
   melee: [{ text: 'Fight: every swing trains it, hits more than misses' }, { text: 'Misses no longer teach it past level 5', cap: 5 }],
   bashing: [{ text: 'Fight with a club, pipe or hammer' }],
   cutting: [{ text: 'Fight with a blade or an axe' }],
@@ -47,8 +47,9 @@ const ACTIVITIES: Record<string, { text: string; cap?: number; capText?: string 
   computer: [{ text: 'Use or hack a terminal' }],
   traps: [{ text: 'Set or disarm traps' }],
   fabrication: [{ text: 'Chop trees or cut logs' }],
-  electronics: [{ text: 'Install bionics (an Autodoc)' }],
-  mechanics: [{ text: 'Install bionics (an Autodoc)' }],
+  // Niche for a newcomer: after everything you know or carry.
+  electronics: [{ text: 'Install bionics (an Autodoc)', score: 40 }],
+  mechanics: [{ text: 'Install bionics (an Autodoc)', score: 40 }],
 };
 
 const MAX_LINES = 5;
@@ -135,7 +136,7 @@ export function skillHints(host: CraftHost, skill: string): SkillHint[] {
       continue;
     }
     if (a.cap !== undefined && !a.capText) continue; // a pure cap note that doesn't apply yet
-    add({ text: a.text, kind: 'do' }, 10);
+    add({ text: a.text, kind: 'do' }, a.score ?? 10);
   }
   if (bookMax >= 0 && level >= bookMax) caps.push({ text: `Your books only go to level ${bookMax}`, kind: 'cap' });
   if (!scored.length && !caps.length)

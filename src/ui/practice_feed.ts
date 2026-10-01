@@ -89,5 +89,6 @@ export function rowText(r: CueRow): string {
   if (r.blocked) return r.reason;
   if (r.levelUp) return `${r.name} reached level ${r.level}!`;
   const pct = r.share * 100;
-  return `${r.name} +${pct >= 1 ? Math.round(pct) : '<1'}% · ${Math.floor(r.progress * 100)}% to level ${r.level + 1}`;
+  const prog = r.progress > 0 && r.progress < 0.01 ? '<1' : String(Math.floor(r.progress * 100));
+  return `${r.name} +${pct >= 1 ? Math.round(pct) : '<1'}% · ${prog}% to level ${r.level + 1}`;
 }

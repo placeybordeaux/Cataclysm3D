@@ -379,6 +379,8 @@ Round 4:
 | Weather messages | Options → Weather messages: Changes you notice (default) / Every change (CDDA) | — |
 | First beds | Options → First beds: No skill needed (slower) (default) / Fabrication 1–2 (BN) | — |
 | Fire safety | Options → Fire safety: Warn outside a fire ring (default) / No warning (BN) | — |
+| Practice feedback | Options → Practice feedback: Card (default) / Line / Off | `?pcue=card\|line\|off` |
+| Practice from simple tasks | Options → Practice from simple tasks: Off (BN) (default) / On | — |
 
 Screenshots: `docs/screenshots/wave3/adaptation/`.
 
@@ -546,3 +548,139 @@ crossbow, magazines, batteries). It also covers example order, every failure mod
 and the memory's scan / save / load / stale pile. Real input: `tools/realinput.ts --only
 reloadhelp` (a flashlight with no battery, `r`, look at a pile of light batteries, `r` again, hover
 the hotbar slot). Screenshots: `docs/screenshots/wave3/reload-help/`.
+
+## Seeing skill practice: "is disassembling toasters upskilling me?"
+
+User report: "when I start a disassembly from the inventory screen it doesn't drop me into the
+actual disassembly straight away. Also disassembling a toaster & other electronics don't seem to be
+upskilling my electronics, is that correct? It's maybe a little unclear when you are actually
+upskilling stuff (or which activities do that)".
+
+**The toaster is BN-correct.** `crafting.cpp complete_disassemble`: "disassembly only nets a bit of
+practice", `practice(skill_used, difficulty × 2, difficulty)`. The toaster uncraft
+(`data/json/uncraft/generic.json`) is Electronics with no difficulty, so it gives 0 practice. Of the
+130 Electronics uncrafts, most are difficulty 0 too (laptop, TV, microwave, phones). The ones that
+teach include the curling iron (1), RAM and processor boards (1), the polisher (2), the heavy-duty
+flashlight (3), and the reversible craft recipes for the parts a toaster gives you: the power
+converter and the heating element (difficulty 1, which need a soldering iron). The rule stays BN's.
+What changed is that you can now see it.
+
+**The flow bug.** Choosing an item action that starts an activity (Disassemble, Read, Continue
+crafting) did start the activity, but the inventory stayed open. Under the default "time is paused
+while the inventory is open", the work sat frozen until you closed the window yourself. Now those
+actions close every window, re-capture the mouse (the click counts as the gesture) and the work runs
+at once with the crosshair ring (`BnHooks.activityStarted`, `src/ui2/bn/install.ts`). BN asks
+"Really disassemble?" with the yield list. Here the menu label already shows the yield
+("Disassemble (2 copper wire, 1 power converter, …)"), so the click is the confirmation. Stacks get
+**"Disassemble all N"** (identical items in one place, or every batch of a charges stack). They are
+queued one after another like BN's `disassemble_activity_actor` target list, and the queue stops at
+the first one that is gone or can't be done.
+
+### What you see now
+
+- **A practice cue by the needs** (Options → Practice feedback: **Card** (default) / Line / Off;
+  `?pcue=card|line|off`). Each time something trains a skill, or a task you chose trains nothing,
+  a small card shows the source and one row per skill:
+  - "Disassembling the toaster · Electronics: no practice, too simple to learn from"
+  - "Disassembling the curling iron · ▲ Electronics +2% · 2% to level 1", with a thin bar toward
+    the next level
+  - "…you're past what this teaches (level N)" (the BN cap), "…your focus is too low", "Electronics
+    reached level 1!"
+  
+  It doesn't spam. A fight's swings fold into one "Fighting" card. A "no practice" row only shows
+  for an action you chose (a named source), never for every zombie swing. A gain in the same card
+  replaces a rolled-down step. At most two cards show, and each fades 4.5 s after its last update
+  (6.5 s for "no practice"). The **Line** variant is a single line under the crosshair. A
+  **level-up** is also a toast ("Electronics is now level 1"). Hovering a cue row (cursor free)
+  shows how to reach the next level.
+- **Previews before acting**, using the same formulas the actions use:
+  - item right-click menus get a second line under Disassemble / Read: "Too simple to train
+    Electronics (difficulty 0)" (dim) or "Trains Electronics up to level 2 (+2% of level 1 each
+    time)" (green)
+  - crafting cards: "Trains Fabrication up to level 3 (+31% of level 1 per craft)", plus sub-skills
+  - construction stage cards: "… when built"
+  - the item info card has a "Trains" block: fighting with it (BN `melee_train`: the weapon's
+    bash/cut/stab share and Melee), shooting it (the gun skill and Marksmanship, every shot),
+    reading it, disassembling it
+  - the classic `(` and `R` menus' detail panes
+- **Character sheet (`@` → Skills)**: focus as "learning at N% speed", "Recently trained: Electronics
+  (disassembling the curling iron), …", trained skills highlighted, and per skill a tooltip with
+  progress, "Recently trained by: …" (the last 4 sources) and **"How to reach Electronics 1"**.
+
+### "How to reach level N+1" (`src/game/skill_hints.ts`)
+
+3–5 lines, nearest first, built from data. Every claim uses the action's own rule, so it never
+suggests something that won't train you:
+1. Things you can do **now**: known recipes whose cap still covers your level (difficulty level+1
+   first, since harder teaches more and one above your level is still makeable), items you carry or
+   stand next to that teach when taken apart, constructions you're skilled enough for, books you
+   have that still teach you.
+2. Ones you know but **lack something** for ("… when you have the parts", "… with the right
+   tools"). For example, after the toaster: "Disassemble the power converter (Electronics 1) with
+   the right tools".
+3. **Activities** that train it in BN and in this port: fighting, shooting, dodging, swimming,
+   driving, first aid, butchering and fires, conversation and trading, terminals, traps, chopping
+   trees.
+4. One **cap** line when something blocks you: "Starting fires no longer teaches it past level 5",
+   "Misses no longer teach it past level 5", "Your books only go to level 3".
+
+Books are the ones you carry or have within reach (`readableBooks`). The seen-items memory
+(`seenitems.ts`) only keeps reload items, so books seen elsewhere aren't remembered yet.
+
+### Formulas (BN, checked in the C++)
+
+| Source | practice(skill, amount, cap) | Where |
+|---|---|---|
+| Disassembly | `difficulty × 2`, cap `difficulty` | `crafting.cpp` complete_disassemble |
+| Crafting (every 5 %, 20×) | `roll_remainder((difficulty × 15 + 10) × batch_mult / 20)`, cap `difficulty × 1.25`. `batch_mult = batch + base_moves / 30000`. Sub-skills get half of `(their level × 15 + 10)` | `crafting.cpp` craft_skill_gain |
+| Construction | `(10 + 15 × level) × (1 + time / 10 min)`, cap `level × 1.25` | `construction.cpp` award_xp |
+| Reading (per chapter) | `(level+1) × rng(min_ex, max_ex)`, focus-adjusted, up to the book's `max_level` (bypasses `practice`, as `readBook`) | `avatar.cpp` do_read |
+| Driving (new here) | every turn at the controls of a moving vehicle, 1 in 8: `1 + mass/400 kg + |v|/3200 vmiph` | `character_turn.cpp` |
+| Melee, guns, dodge, first aid, survival, speech… | unchanged call sites; reported through `Character.practice` | |
+
+`Character.practice` applies focus: `amount × (focus + 5 × (Int − 8) ± 15 for Fast/Slow
+Learner) / 100`, with the remainder rolled. A level takes `100 × (level+1)²`, and the cap blocks
+when `level > cap`, so a cap-N task can take you to N+1. A blocked call doesn't drain focus. The
+previews show the expected share per action at your current effective focus.
+
+### Adaptation switch: "Practice from simple tasks" (default **off** = BN)
+
+Options → Practice from simple tasks: **Off (BN)** / On. With it on, a difficulty-0 disassembly
+gives a token amount: half what crafting a difficulty-0 recipe of the same length teaches,
+`5 × (1 + time / 300 s)`, with cap 0, so it stops at level 1. A 10-minute toaster gives 15, about
+seven toasters to Electronics 1. The menu marks it "· simple-task practice". Difficulty-0 *crafts*
+already train to level 1 in BN, so the switch only touches uncrafts. The user agreed to keep it off
+by default.
+
+### Plumbing
+
+`src/game/practice.ts`: every `Character.practice` outcome (and reading's direct `train`) emits a
+`PracticeEvent` (skill, source, requested, gained, cap, level and progress before and after,
+level-up, `blocked: no_amount | cap | focus | max | asleep`). Callers name the source with
+`withPracticeSource('Disassembling the toaster', …)`: disassembly, crafting, construction, reading
+and driving do. Everything else falls back to the running activity's name ("butchering the
+zombie"), or "Fighting" / "Shooting" / … by skill. The UI is `src/ui/practice_feed.ts` (pure
+folding) and `src/ui/practice_cue.ts` (drawing, options, `cdda.practice.cue()` / `.hints(skill)` /
+`.setMode()`). `src/game/practice_info.ts` builds the item info lines. The crafting step that
+rolls 0 is skipped rather than reported (BN's `practice(…, 0)` does nothing either). Reporting it
+flashed "too simple" in the middle of a craft that does teach.
+
+Tests: `tests/practice.test.ts` checks the toaster (0 practice, the event says why), the curling
+iron (gain = the preview), the cap, the switch, a full craft's total against its preview, the
+construction, reading, combat, ambient and driving sources, the feed's folding and expiry, the
+hints (what's suggested, what's never suggested, caps, the 5-line limit), and the inventory action
+starting the activity and closing the screens, plus "Disassemble all". Real input:
+`tools/realinput.ts --only skills` (a toaster from the inventory starts at once and the cue says
+no practice and why; a curling iron shows the gain; `@` → Skills shows the hover hints; a level-up
+toast; the Line variant). Screenshots (half-size JPEG): `docs/screenshots/wave3/skills/`.
+
+| Screenshot (`docs/screenshots/wave3/skills/`, 1280×720 GPU, half-size JPEG) | Shows |
+|---|---|
+| `toaster_menu_preview.jpg` | Right-click a toaster: "Disassemble (…)", with "Too simple to train Electronics (difficulty 0)" under it |
+| `toaster_started_at_once.jpg` | One click later: inventory closed, mouse captured, the ring and "Disassembling the toaster" running |
+| `toaster_cue_no_practice.jpg` | The cue by the needs: "Disassembling the toaster · Electronics: no practice, too simple to learn from" |
+| `curling_iron_menu_trains.jpg` | A curling iron (difficulty 1): "Trains Electronics up to level 2 (+2% of level 1 each time)" |
+| `curling_iron_cue_gain.jpg` | Its cue: "▲ Electronics +2% · 2% to level 1" above the toaster's card |
+| `charsheet_how_to_level.jpg` | `@` → Skills: focus, recently trained, and the Electronics tooltip with "How to reach Electronics 1" |
+| `levelup_toast.jpg` | Level-up: "Electronics is now level 1 · From disassembling the curling iron", and the cue row |
+| `cue_line_variant.jpg` | Options → Practice feedback: Line, one line under the crosshair |

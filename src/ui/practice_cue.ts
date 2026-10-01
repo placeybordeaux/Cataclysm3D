@@ -122,6 +122,11 @@ export function installPractice(game: Game, api?: DebugApi): { feed: PracticeFee
       /** The cue as text: [title, ...rows] per card. */
       cue: () => feed.cards.map((c) => [c.title, ...c.rows.map(rowText)]),
       mode: () => mode,
+      /** Setup for screenshots (players use Options > Practice feedback). */
+      setMode: (m: CueMode) => {
+        if (!MODES.includes(m)) throw new Error(`practice.setMode(${m}): expected one of ${MODES.join(', ')}`);
+        mode = m;
+      },
       hints: (skill: string) => skillHints(game, skill).map((x) => x.text),
       settings: () => ({ ...practiceSettings }),
     };
