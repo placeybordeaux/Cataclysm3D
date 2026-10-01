@@ -25,6 +25,7 @@
 //   --detail           time the mesher by kind (furniture models, surfaces, dressing, rooms); costs time itself
 //   --gpu-timer        GPU ms per frame (EXT_disjoint_timer_query; Chromium only)
 //   --json             print raw results
+//   --no-drawn         skip the "world is drawn" gate (tools/lib/worldDrawn.ts) that runs first
 //   --dry-run          print what would run
 // Exit code 1 when a route breaks a budget.
 import { createServer } from 'vite';
@@ -34,6 +35,7 @@ import { join, resolve } from 'node:path';
 import { summarize, type PerfDump, type PerfSummary } from '../src/perf/analyze';
 import { printReport } from './perf-report';
 import { PERF_MONITOR, PERF_PAGE } from './lib/perfRoutes';
+import { WORLD_DRAWN_MIN, worldDrawn } from './lib/worldDrawn';
 
 const argv = process.argv.slice(2);
 const help = () => console.log(readFileSync(new URL(import.meta.url)).toString().split('\n').filter((l) => l.startsWith('//')).map((l) => l.slice(3)).join('\n'));
@@ -87,6 +89,7 @@ if (argv.includes('--list')) {
   process.exit(0);
 }
 const routeNames = opt('--routes', 'town40,town60,city40,city60,forest,rural,citystand,teleport,load,loaddrive').split(',');
+// "the world is drawn" gate (tools/lib/worldDrawn.ts) runs first unless --no-drawn
 for (const r of routeNames) if (!ROUTES[r]) throw new Error(`unknown route ${r} (${Object.keys(ROUTES).join(', ')})`);
 const size = opt('--size', '3440x1304').split('x').map(Number);
 if (size.length !== 2 || size.some((v) => !(v > 0))) throw new Error(`--size ${opt('--size', '')}: expected WxH`);
@@ -240,6 +243,26 @@ try {
   const err = await page.evaluate('window.cddaError');
   if (err) throw new Error(String(err));
   await page.evaluate(PERF_PAGE);
+  if (!argv.includes('--no-drawn')) {
+    // The world must actually be drawn before any timing means anything (a shader/texture
+    // binding error once made every lit draw fail with all checks green): fresh load, then the
+    // flashlight on and off, every shadow mode, default look.
+    const from = await page.evaluate(`__perfBench.pick('town')`);
+    await page.evaluate(`(() => { __perfBench.place(${JSON.stringify(from)}); cdda.exitVehicle(); })()`);
+    await waitStreamed(page, 30_000);
+    const checks: [string, string][] = [['fresh load', ''], ['flashlight on', 'cdda.flashlight(true)'], ['flashlight off', 'cdda.flashlight(false)']];
+    const modes = (await page.evaluate(`cdda.shadows ? ['legacy', 'stable', 'cascades', 'smooth'] : []`)) as string[];
+    for (const m of modes) checks.push([`shadows ${m}`, `cdda.setShadows(${JSON.stringify(m)})`], [`shadows ${m} + flashlight`, 'cdda.flashlight(true)'], [`shadows ${m}, flashlight off`, 'cdda.flashlight(false)']);
+    const line: string[] = [];
+    for (const [label, js] of checks) {
+      if (js) await page.evaluate(js);
+      await new Promise((res) => setTimeout(res, 300));
+      const d = await worldDrawn(page);
+      line.push(`${label} ${Math.round(d.changed * 100)}%`);
+      if (!d.ok) failures.push(`world not drawn: ${label} (hiding the chunks changed ${Math.round(d.changed * 100)}% of the image, need ${WORLD_DRAWN_MIN * 100}%)`);
+    }
+    console.log(`\n== drawn: ${line.join(', ')}`);
+  }
   if (argv.includes('--detail')) await page.evaluate('cdda.perf.detail(true)');
   if (argv.includes('--gpu-timer')) await page.evaluate('cdda.perf.gpu(true)');
   for (const name of routeNames) {

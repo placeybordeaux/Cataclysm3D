@@ -221,6 +221,8 @@ export class LightManager {
   }
   /** set by lights.update: a sun-shadow map must be redrawn this frame */
   shadowDue = false;
+  /** the renderer's shadow-map type (renderer.ts keeps it current): the flashlight's map must match it */
+  shadowMapType: THREE.ShadowMapType = THREE.BasicShadowMap;
   readonly hemi = new THREE.HemisphereLight(0xffffff, 0x444444, 1);
   /** Shadowless fill from the side opposite the sun (look.ts `fill`): a light pointing at
    *  the camera flattens forms unless a second light keeps their shape. Always present
@@ -371,7 +373,26 @@ export class LightManager {
     // Flashlight: held low and to the right so its shadows are visible from the eye.
     const fl = this.flashlight;
     fl.intensity = this.flashlightOn ? 14 : 0;
-    fl.castShadow = this.flashlightOn;
+    // castShadow stays on: toggling it changes the spot-shadow count every material is compiled
+    // for, so the first switch recompiled every shader (a 0.8-1 s freeze, docs/PERF.md). Off,
+    // its map is not redrawn — but it must always exist and match the renderer's shadow type:
+    // the PCF programs declare it as a sampler2DShadow, and a depth texture without a compare
+    // function there (a map drawn under BasicShadowMap before the look switched to PCF, or
+    // three's empty fallback, which it only sets up for single samplers, not the spotShadowMap
+    // array) makes every lit draw fail with GL_INVALID_OPERATION: an empty world. three only
+    // re-creates maps it renders, so a missing or stale map is dropped and rendered once now.
+    fl.castShadow = true;
+    fl.shadow.autoUpdate = this.flashlightOn;
+    if (!this.flashlightOn) {
+      const dt = fl.shadow.map?.depthTexture;
+      const wantCompare = this.shadowMapType === THREE.PCFShadowMap;
+      if (!dt || (dt.compareFunction !== null) !== wantCompare) {
+        fl.shadow.map?.dispose();
+        fl.shadow.map = null;
+        fl.shadow.needsUpdate = true;
+        this.shadowDue = true;
+      }
+    }
     if (this.beam) {
       fl.position.copy(this.beam.origin);
       fl.target.position.copy(this.beam.origin).addScaledVector(this.beam.dir, 10);

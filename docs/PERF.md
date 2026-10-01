@@ -227,6 +227,24 @@ or a long Firefox GC. Two things that *could* cause such a burst were found and 
   `castShadow`, which changes the shadow-light count every material is compiled for. 767 ms
   (Chromium) / 984 ms (Firefox) frame on the first switch. Now it always casts, and its map is
   simply not redrawn while off: no frame over 50 ms with 4 toggles (`citystand` route).
+  The first version of this fix (always cast, map simply not redrawn while off) **broke
+  rendering on a fresh load** and was reverted on `bn`: the flashlight's map had been drawn
+  under BasicShadowMap in the first frames, the look then switched to PCF, and three only
+  re-creates the maps it renders, so the PCF programs' `sampler2DShadow` got a depth texture
+  without a compare function: `GL_INVALID_OPERATION: Mismatch between texture format and
+  sampler type` on every lit draw (sky, far ground ring and stand-ins still drew). Dropping
+  the map while off is not enough either: three's empty fallback is only set up as a shadow
+  texture for single samplers, not for the `spotShadowMap` array (the `smooth` mode then broke
+  the same way). The fix that holds: while off, whenever the map is missing or its compare mode
+  doesn't match the renderer's shadow type (`lights.shadowMapType`), it is dropped and rendered
+  once (`needsUpdate`), so a correct map always exists.
+* **"The world is drawn" guard** (`tools/lib/worldDrawn.ts`): screenshot the view, hide the
+  chunk meshes and merged batches, screenshot again; a drawn world changes 40-90 % of the
+  pixels, a blank one ~1 %, threshold 15 %. Runs first in every `npm run perf` (fresh load,
+  flashlight on/off, every shadow mode with and without the flashlight; `--no-drawn` skips it)
+  and as the real-input scenario `worlddrawn` (F key, right after `move` in the smoke order).
+  It fails on the broken version (fresh load 1 %) and passes on the fix (50-58 %) in Chromium
+  and Firefox.
 * The telemetry now records `programs` (shader programs compiled so far): a compile shows in
   the report ("N shader compiles", per worst frame), so the next dump will say if it was one.
 

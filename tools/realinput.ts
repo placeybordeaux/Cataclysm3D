@@ -30,6 +30,7 @@ import { qaScenarios } from './realinput_qa';
 import { galleryScenarios } from './realinput_gallery';
 import { driveScenarios } from './realinput_drive';
 import { perfScenarios } from './realinput_perf';
+import { drawnScenarios } from './realinput_drawn';
 import { chassisScenarios } from './realinput_chassis';
 import { stairsScenarios } from './realinput_stairs';
 import { grabScenarios } from './realinput_grab';
@@ -1504,6 +1505,9 @@ scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...lootScenario
 scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...screenScenarios({ page: () => page, x: () => x, js, check, shot, toGameplay, sleep }));
 // Driving collision against the drawn body (roads, then the refugee center's lot): right after the vehicle screens.
 scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...driveScenarios({ x: () => x, js, check, shot, toGameplay, sleep }));
+// The world is drawn at the default look/shadows, flashlight on and off (docs/PERF.md): early,
+// right after the basic movement scenarios, so a blank world fails the smoke run.
+scenarios.splice(scenarios.findIndex(([n]) => n === 'move') + 1, 0, ...drawnScenarios({ page: () => page, x: () => x, js, check, shot, toGameplay, sleep }));
 // Streaming while driving through town (docs/PERF.md): real W / C / F3 / Shift+F3.
 scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...perfScenarios({ x: () => x, js, check, shot, toGameplay, sleep }));
 // Vehicles v3 chassis templates: a pickup, a box van and a bus driven through town.
