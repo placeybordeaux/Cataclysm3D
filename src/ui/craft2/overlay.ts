@@ -10,7 +10,7 @@ import type { Item } from '../../game/item';
 import type { Renderer } from '../../render/renderer';
 import { craftState } from '../../game/crafting';
 import { unfinishedState } from '../../game/construction';
-import { bookData, reading, skillProgress } from '../../game/reading';
+import { bookData, chaptersToLevel, reading, skillProgress, type ReadMode } from '../../game/reading';
 import { cddaText } from '../../game/units';
 import { LEVEL_HEIGHT } from '../../world/coords';
 import { fmtDuration, h, iconEl, palette, progressBar, startProgress, ui2Layers, type ProgressHandle } from '../../ui2';
@@ -130,6 +130,13 @@ function line(label: string): { el: HTMLElement; value: HTMLElement } {
   return { el: h('div', { class: 'c2-read-line' }, h('span', { class: 'ui2-dim', text: label }), value), value };
 }
 
+/** The reading card's subtitle for each "Read …" choice. */
+export function readModeText(mode: ReadMode, maxLevel?: number): string {
+  if (mode === 'until_level') return 'Reading until you gain a level';
+  if (mode === 'until_done') return `Reading until done${maxLevel ? ` (level ${maxLevel})` : ''}`;
+  return 'Reading one chapter';
+}
+
 function renderRead(game: Game, card: HTMLElement, frac: number, left: number): void {
   const st = reading.current!;
   const b = bookData(st.book);
@@ -142,7 +149,7 @@ function renderRead(game: Game, card: HTMLElement, frac: number, left: number): 
     const sl = line(b?.skill ? game.player.skillName(b.skill) : '');
     const lines = h('div', { class: 'ui2-small ui2-dim' });
     card.replaceChildren(
-      ...[h('div', { class: 'c2-read-head' }, iconEl(itemIconRef(game.data, st.book.typeId), 'grid'), h('div', null, h('div', { class: 'c2-read-title', text: cddaText(st.book.def.name) }), h('div', { class: 'ui2-small ui2-dim', text: st.mode === 'until_level' ? 'Reading until you gain a level' : 'Reading one chapter' }))),
+      ...[h('div', { class: 'c2-read-head' }, iconEl(itemIconRef(game.data, st.book.typeId), 'grid'), h('div', null, h('div', { class: 'c2-read-title', text: cddaText(st.book.def.name) }), h('div', { class: 'ui2-small ui2-dim', text: readModeText(st.mode, b?.level) }))),
       cl.el,
       chapter.el,
       b?.skill ? sl.el : null,
@@ -161,6 +168,10 @@ function renderRead(game: Game, card: HTMLElement, frac: number, left: number): 
     ui.skill.set(pct);
     ui.skillText.textContent = lvl >= b.level ? `level ${lvl} (all this book teaches)` : `level ${lvl} → ${lvl + 1}: ${Math.floor(pct * 100)}%`;
   }
-  const text = `${st.sessions} chapter${st.sessions === 1 ? '' : 's'} read${b?.skill ? ` · teaches up to level ${b.level}` : ''}`;
+  // "~3 chapters to level 2": how far the session goes, so a newcomer knows whether to sit
+  // through it (or fast-forward it) before starting.
+  const est = chaptersToLevel(game.player, st.book);
+  const ahead = !est ? '' : st.mode === 'until_done' && est.maxLevel > est.nextLevel ? ` · ~${est.done} more to level ${est.maxLevel}` : ` · ~${est.next} more to level ${est.nextLevel}`;
+  const text = `${st.sessions} chapter${st.sessions === 1 ? '' : 's'} read${ahead}${b?.skill ? ` · teaches up to level ${b.level}` : ''}`;
   if (ui.lines.textContent !== text) ui.lines.textContent = text;
 }

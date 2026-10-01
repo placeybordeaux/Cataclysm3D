@@ -7,8 +7,9 @@ import { makeRig, type PoseIn } from '../../src/render/chars/rig';
 import { analyseSprite, netSize, paintPart, texelDims, type Img } from '../../src/render/chars/paint';
 import { CharLayer, type Skin } from '../../src/render/chars/charLayer';
 import monsters from '../../public/data/monsters.json';
+import { bodyHeightOf } from '../../src/game/aimmodel';
 
-type Mon = { id: string; bodytype?: string; species?: string[]; flags?: string[]; symbol?: string; volume?: number };
+type Mon = { id: string; bodytype?: string; species?: string[]; flags?: string[]; symbol?: string; volume?: number; name?: unknown; description?: string };
 const MON = monsters as unknown as Record<string, Mon>;
 
 const idle: PoseIn = { t: 0, phase: 0, gait: 0, windup: null, windKind: 'melee', strike: 0, down: 0, flinch: 0, dead: false, seed: 0.3 };
@@ -108,6 +109,49 @@ describe('procedural rigs', () => {
     const rest = bounds(MON.mon_zombie).box;
     const wind = bounds(MON.mon_zombie, { windup: 1, windKind: 'heavy' }).box;
     expect(wind.max.y).toBeGreaterThan(rest.max.y + 0.15);
+  });
+});
+
+describe('crawlers (game/crawl.ts)', () => {
+  it('reads crawling from the BN data, not from a walker', () => {
+    expect(bodyShapeOf(MON.mon_zombie_crawler).crawl).toBe('drag');
+    expect(bodyShapeOf(MON.mon_crawler).crawl).toBe('drag');
+    expect(bodyShapeOf(MON.mon_zombie_crawler_pupa).crawl).toBe('legless');
+    expect(bodyShapeOf(MON.mon_zombie_creepy).crawl).toBe('fours');
+    for (const id of ['mon_zombie', 'mon_zombie_child', 'mon_zombie_gasbag_crawler', 'mon_sludge_crawler', 'mon_zombie_thorny']) expect(bodyShapeOf(MON[id]).crawl, id).toBeUndefined();
+  });
+  it('lies low on the floor, never through it, crawling or not, and is as tall as it says', () => {
+    for (const id of ['mon_zombie_crawler', 'mon_crawler', 'mon_zombie_crawler_pupa', 'mon_zombie_creepy']) {
+      for (const pose of [{}, { gait: 1, phase: 0.25 }, { gait: 1, phase: 0.625 }, { windup: 1 }] as Partial<PoseIn>[]) {
+        const { box, rig } = bounds(MON[id], pose);
+        expect(box.min.y, `${id} ${JSON.stringify(pose)}`).toBeGreaterThan(-0.06);
+        expect(rig.height, id).toBeLessThan(0.8);
+        // rearing up to bite stands taller for a moment
+        expect(box.max.y, id).toBeLessThan(rig.height + (pose.windup ? 0.3 : 0.08));
+        if (!pose.windup) expect(Math.abs(box.max.y - rig.height), id).toBeLessThan(0.08);
+      }
+    }
+    // the dragging crawler is long, not tall: the legs trail behind
+    const { box } = bounds(MON.mon_zombie_crawler);
+    expect(box.max.z - box.min.z).toBeGreaterThan(1.6);
+    // the half-corpse has no legs to trail (scaled to nothing)
+    const rig = makeRig(bodyShapeOf(MON.mon_zombie_crawler_pupa));
+    const inst = new CharLayer(false).add(rig, { page: 0, rects: new Int32Array(rig.parts.length * 5), refs: 0 });
+    inst.setPose(idle);
+    inst.build(null);
+    for (const name of ['thighR', 'shinL', 'footR']) {
+      const i = rig.parts.findIndex((q) => q.name === name);
+      // the box's axes (the matrix's 3x3) are all zero
+      expect(Math.max(...Array.from(inst.mats.subarray(i * 16, i * 16 + 12)).map(Math.abs)), name).toBeLessThan(1e-6);
+    }
+  });
+  it('crawls: the arms move through a stroke (not the walk cycle) while the legs drag', () => {
+    const a = bounds(MON.mon_zombie_crawler, { gait: 1, phase: 0 }).box, b = bounds(MON.mon_zombie_crawler, { gait: 1, phase: 0.3 }).box;
+    expect(a.equals(b)).toBe(false);
+  });
+  it("the game's body column (no model drawn) is a crawler's height too", () => {
+    expect(bodyHeightOf({ size: 'medium', type: MON.mon_zombie_crawler })).toBeLessThan(0.6);
+    expect(bodyHeightOf({ size: 'medium', type: MON.mon_zombie })).toBe(1.7);
   });
 });
 

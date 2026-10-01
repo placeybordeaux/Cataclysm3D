@@ -36,6 +36,9 @@ export function readAction(game: CraftHost, it: Item, _loc?: Loc): ItemAction[] 
       run: () => ok(startReading(game, it, trains ? 'until_level' : 'once')),
     },
   ];
+  // Several levels still to gain: "until done" saves choosing "until you level up" again after each one.
+  if (trains && b.level - game.player.getSkill(b.skill!) > 1)
+    out.push({ id: 'read_done', label: `Read until done (to level ${Math.min(10, b.level)})`, moves, disabled: why, run: () => ok(startReading(game, it, 'until_done')) });
   if (trains) out.push({ id: 'read_once', label: 'Read one chapter', moves, disabled: why, run: () => ok(startReading(game, it, 'once')) });
   return out;
 }

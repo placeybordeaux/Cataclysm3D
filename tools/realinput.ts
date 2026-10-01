@@ -36,6 +36,7 @@ import { grabScenarios } from './realinput_grab';
 import { curtainsScenarios } from './realinput_curtains';
 import { reloadScenarios } from './realinput_reload';
 import { skillsScenarios } from './realinput_skills';
+import { timewarpScenarios } from './realinput_timewarp';
 
 const argv = process.argv.slice(2);
 const opt = (n: string, d: string) => (argv.includes(n) ? argv[argv.indexOf(n) + 1] : d);
@@ -1526,6 +1527,8 @@ scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...curtainsScen
 scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...reloadScenarios({ x: () => x, js, check, shot, toGameplay, sleep }));
 // Skills feedback (src/ui/practice_cue.ts): disassemble from the inventory, the practice cue, @ hints.
 scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...skillsScenarios({ x: () => x, js, check, shot, toGameplay, sleep }));
+// Fast-forward (reading, the Rest window's Fast pick, the cap measurement).
+scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...timewarpScenarios({ x: () => x, js, check, shot, toGameplay, sleep }));
 
 if (argv.includes('--list') || argv.includes('--dry-run')) {
   for (const [n, what] of scenarios) console.log(`${only && !only.has(n) ? '  (skip)' : '  run   '} ${n.padEnd(11)} ${what}`);

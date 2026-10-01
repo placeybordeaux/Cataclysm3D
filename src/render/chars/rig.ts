@@ -14,6 +14,7 @@
 // or a flat palette role for thin bits (insect legs, wings).
 
 import type { BodyShape, Weapon } from './archetype';
+import { CRAWL_HEIGHT, type CrawlPlan } from '../../game/crawl';
 import { ridePose, type HumanDims, type RideIn } from './ridePose';
 
 export type Proj = 'front' | 'side';
@@ -279,7 +280,8 @@ function humanoid(sh: BodyShape): Rig {
       break;
   }
   const s = sh.scale;
-  const height = (hipY + 0.06 + 0.49 + headH) * s;
+  const crawl = sh.crawl ?? null;
+  const height = (hipY + 0.06 + 0.49 + headH) * s * (crawl ? CRAWL_HEIGHT[crawl] : 1);
   const zombie = sh.zombie;
   // (hand centre: the fist's box is centred hand/2 - 0.01 past the wrist)
   const dims: HumanDims = {
@@ -287,9 +289,16 @@ function humanoid(sh: BodyShape): Rig {
     upperArm: (upperArm - 0.04) * s, foreArm: (foreArm + hand / 2 - 0.01) * s, thigh: thigh * s, shin: shin * s,
   };
   return {
-    shape: sh, parts: scaleParts(parts, s), height, hover: sh.flies ? 0.6 * s : 0, lie: { angle: Math.PI / 2, lift: torsoD * 0.5 * s, side: false }, dims,
+    shape: sh, parts: scaleParts(parts, s), height, hover: sh.flies ? 0.6 * s : 0, dims,
+    // a crawler is already on the ground: downed or dead, it slumps a little onto its side
+    // (its pose is the prone body) instead of toppling a standing one
+    lie: crawl ? { angle: 0.3, lift: 0, side: true } : { angle: Math.PI / 2, lift: torsoD * 0.5 * s, side: false },
     pose(p, o) {
       const H = HUM;
+      if (crawl && !p.ride) {
+        crawlPose(crawl, p, o, s, hipY, weaponI);
+        return;
+      }
       if (p.ride) {
         ridePose(p.ride, dims, H, o.rot);
         // both hands are on the controls: the weapon is stowed (not drawn) while riding
@@ -430,6 +439,145 @@ function humanoid(sh: BodyShape): Rig {
       }
     },
   };
+}
+
+// ------------------------------------------------------------------ crawling humanoids
+
+/**
+ * A humanoid that crawls (archetype.ts `crawl`, from game/crawl.ts). Same parts as the walker
+ * (so the sprite-painted skin still fits), posed prone: the hips pitch the whole body forward,
+ * which lays the torso along the ground with the legs trailing behind; the root drops so the
+ * belly is just off the floor and moves back so the body is centred on the creature's tile.
+ *
+ *  - 'drag': arms reach forward in turn, plant the forearm, and pull the body up to it (a
+ *    surge and a roll per stroke); the legs drag limp.
+ *  - 'legless': the same with no legs (the half-corpse pupa).
+ *  - 'fours': on hands and knees, diagonal limbs together like a trot (the creepy crawler).
+ *
+ * Rotations: +x on a hanging limb swings it forward; in the pitched torso "forward" is down,
+ * so an arm at +θ (θ = the hip pitch) hangs straight down and at ~2.9 lies along the ground
+ * ahead (docs/MONSTER_PLACEMENT.md "Crawlers").
+ */
+function crawlPose(plan: CrawlPlan, p: PoseIn, o: PoseOut, s: number, hipY: number, weaponI: number): void {
+  const H = HUM;
+  const fours = plan === 'fours';
+  // body pitch: drag/legless nearly flat with the chest a little raised; fours a level back
+  const th = fours ? 1.25 : 1.36;
+  // hip joint height off the floor (m, before scale): fours on the knees, else at belly height
+  const hipH = fours ? 0.47 : 0.17;
+  const ph = p.phase * TAU;
+  // slow movers still crawl visibly: a crawler's 0.3 m/s is a full stroke, not a 0.2 gait
+  const move = Math.min(1, p.gait * 3);
+  const idle = sin(p.t * 1.3 + p.seed * TAU);
+  setRot(o, H.hips, -th);
+  o.pos[1] -= (hipY - hipH) * s;
+  // centre the torso (not the hips) over the creature's spot
+  o.pos[2] += (fours ? 0.15 : 0.32) * s;
+  // head up to look ahead (it is on the pitched torso)
+  setRot(o, H.head, th * (fours ? 0.75 : 0.85) + 0.08 * idle, 0.15 * sin(p.t * 0.7 + p.seed * 5), (quirk(p.seed, 2) - 0.5) * 0.4);
+  setRot(o, H.neck, 0.2);
+  if (plan === 'legless') for (const i of [H.thighR, H.shinR, H.footR, H.thighL, H.shinL, H.footL]) o.scl.fill(0, i * 3, i * 3 + 3);
+  if (weaponI >= 0) o.scl.fill(0, weaponI * 3, weaponI * 3 + 3);
+
+  if (p.dead) {
+    // flat on its face (no chest raised), arms flung forward and out, head turned aside
+    setRot(o, H.hips, -(Math.PI / 2 - th));
+    o.pos[1] -= (fours ? 0.33 : 0.03) * s;
+    setRot(o, H.head, -0.7, 0.9 * (p.seed - 0.5) * 2, 0);
+    setRot(o, H.uArmR, 2.95, 0, 0.6);
+    setRot(o, H.uArmL, 2.85, 0, -0.7);
+    setRot(o, H.fArmR, 0.1);
+    setRot(o, H.fArmL, 0.05);
+    setRot(o, H.thighR, 0, 0, 0.12);
+    setRot(o, H.thighL, 0, 0, -0.1);
+    setRot(o, H.footR, -1.45);
+    setRot(o, H.footL, -1.45);
+    return;
+  }
+
+  if (fours) {
+    // hands and knees: arms and thighs straight down (+θ), shins folded back along the floor;
+    // diagonal pairs swing together
+    const a = 0.35 * move;
+    setRot(o, H.uArmR, th + sin(ph) * a, 0, -0.05);
+    setRot(o, H.uArmL, th - sin(ph) * a, 0, 0.05);
+    setRot(o, H.fArmR, 0.1 + Math.max(0, cos(ph)) * 0.4 * move);
+    setRot(o, H.fArmL, 0.1 + Math.max(0, -cos(ph)) * 0.4 * move);
+    setRot(o, H.thighR, th - sin(ph) * a, 0, 0.06);
+    setRot(o, H.thighL, th + sin(ph) * a, 0, -0.06);
+    // (shins stay level with the floor as the thighs swing: knees slide, shins don't dig in)
+    setRot(o, H.shinR, -Math.PI / 2 - 0.05 + sin(ph) * a);
+    setRot(o, H.shinL, -Math.PI / 2 - 0.05 - sin(ph) * a);
+    // toes back along the shins, flat on the floor
+    setRot(o, H.footR, -1.45);
+    setRot(o, H.footL, -1.45);
+    // a scuttle: hips sway, a jerky bob
+    setRot(o, H.torso, 0, 0, sin(ph) * 0.08 * move);
+    o.pos[1] += Math.abs(sin(ph)) * 0.025 * move * s;
+  } else {
+    // two strokes per cycle, one per arm. Each: reach (forearm lifted, arm swinging forward),
+    // plant, pull (upper arm sweeps back under the chest while the forearm stays flat, the
+    // body surging forward and rolling toward the pulling arm)
+    for (const [ua, fa, off, side] of [[H.uArmR, H.fArmR, 0, 1], [H.uArmL, H.fArmL, Math.PI, -1]] as const) {
+      const u = ((ph + off) / TAU) % 1;
+      // 0..0.6 pull: alpha 2.7 -> 2.1; 0.6..1 reach: back to 2.7 with the forearm raised
+      const pull = u < 0.6;
+      const k = pull ? u / 0.6 : (u - 0.6) / 0.4;
+      const restA = 2.45 + 0.1 * sin(p.t * 0.9 + p.seed * 4 + off);
+      const alpha = move > 0 ? restA + move * (pull ? 0.25 - 0.6 * k : -0.35 + 0.6 * k) : restA;
+      // forearm flat on the floor (alpha + beta ~ 3.05: a touch down, hands on the floor)
+      // while pulling; lifted while reaching
+      const lift = !pull ? sin(k * Math.PI) * 0.6 * move : 0;
+      setRot(o, ua, alpha, 0, -0.18 * side);
+      setRot(o, fa, 3.05 - alpha + lift);
+      setRot(o, ua === H.uArmR ? H.handR : H.handL, -0.4);
+    }
+    // surge forward twice per cycle (one per stroke) and roll toward the pulling side
+    o.pos[2] -= (Math.abs(sin(ph)) - 0.5) * 0.06 * move * s;
+    o.lean[2] += sin(ph) * 0.07 * move + 0.02 * idle;
+    // the legs drag: limp, splayed a little, twitching with the pulls; toes trail down
+    if (plan === 'drag') {
+      const tw = sin(ph * 2) * 0.05 * move;
+      setRot(o, H.thighR, -0.06 + tw, 0, 0.12 + 0.05 * quirk(p.seed, 4));
+      setRot(o, H.thighL, -0.08 - tw, 0, -0.1);
+      setRot(o, H.shinR, -0.1);
+      setRot(o, H.shinL, -0.1 - 0.2 * quirk(p.seed, 3));
+      setRot(o, H.footR, -1.45);
+      setRot(o, H.footL, -1.45);
+    }
+  }
+  if (p.windup !== null) {
+    // rear up on the arms, head back, ready to lunge and bite
+    const u = ease(p.windup);
+    setRot(o, H.hips, 0.35 * u);
+    // (the legs stay on the floor: undo the hip rotation on them)
+    setRot(o, H.thighR, -0.35 * u);
+    setRot(o, H.thighL, -0.35 * u);
+    setRot(o, H.uArmR, -0.5 * u);
+    setRot(o, H.uArmL, -0.5 * u);
+    setRot(o, H.head, -0.3 * u);
+    o.pos[2] += 0.08 * u * s;
+  }
+  if (p.strike > 0) {
+    // the lunge: chest thrown forward and down, both hands grabbing ahead
+    const k = p.strike;
+    setRot(o, H.uArmR, 0.3 * k);
+    setRot(o, H.uArmL, 0.3 * k);
+    setRot(o, H.hips, -0.1 * k);
+    o.pos[2] -= 0.2 * k * s;
+  }
+  if (p.flinch > 0) {
+    setRot(o, H.head, -0.4 * p.flinch, 0, 0.3 * p.flinch * (p.seed > 0.5 ? 1 : -1));
+    o.lean[2] += 0.15 * p.flinch;
+  }
+  if (p.down > 0) {
+    // knocked flat: arms out, face on the floor
+    const d = p.down;
+    setRot(o, H.hips, 0.15 * d);
+    setRot(o, H.uArmR, 0.2 * d, 0, 0.5 * d);
+    setRot(o, H.uArmL, 0.2 * d, 0, -0.5 * d);
+    setRot(o, H.head, -0.5 * d);
+  }
 }
 
 // ------------------------------------------------------------------ four-legged animals
