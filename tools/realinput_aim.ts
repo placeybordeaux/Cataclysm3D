@@ -325,6 +325,38 @@ export function aimScenarios(c: AimCtx): Scenario[] {
       const dodged = await js<number>('window.__dodged');
       check('a dodge is a visible hop on the model (it springs up and leans away)', dodged > 0 && peak > 0.1, { dodged, peak });
     }],
+    ['crawlzones', 'crawling zombie (game/crawl.ts): shots at its drawn head are headshots; a shot at standing chest height over it misses', async () => {
+      await c.toGameplay();
+      const shootAt = async (pt: string, n: number) => {
+        const out: { zone: string; hit: boolean }[] = [];
+        for (let i = 0; i < n; i++) {
+          await js(AIM_POINT(pt));
+          await x().buttonDown(3);
+          await sleep(700);
+          await js(AIM_POINT(pt));
+          const hp0 = await js<number>('window.__m.hp');
+          await x().clickHere(1);
+          await sleep(250);
+          const hit = (await js<number>('window.__m.hp')) < hp0;
+          out.push({ zone: hit ? (await js<{ zone: string } | null>('cdda.aimState().lastHit'))?.zone ?? 'none' : 'miss', hit });
+          await js('cdda.combat.lastHit = null');
+          await x().buttonUp(3);
+          await sleep(500);
+        }
+        return out;
+      };
+      await js(SETUP('rifle', 10, 7, 'sway', 'mon_zombie_crawler'));
+      await sleep(600);
+      // (height above its level's floor; the street's relief is a few cm)
+      const headH = await js<number | null>(`(() => { const h = cdda.modelPart(window.__uid, 'head'); return h ? h.h - window.__m.z * 2.6 : null; })()`);
+      check('the crawler\'s drawn head is near the floor (< 0.7 m)', headH !== null && headH < 0.7, headH);
+      const hHead = await shootAt(`cdda.modelPart(window.__uid, 'head')`, 3);
+      check('crawler: shots at the drawn head are headshots', hHead.every((z) => z.zone === 'head'), hHead);
+      await shot('zones_crawler_head');
+      // where a standing zombie's chest would be: over its back
+      const over = await shootAt(`(() => { const m = window.__m; return { x: m.x, y: m.y, h: m.z * 2.6 + 1.1 }; })()`, 3);
+      check('crawler: a shot at standing chest height passes over it', over.every((z) => !z.hit), over);
+    }],
     ['aimwide', 'free aim HUD at the ultrawide size (run with --size 3440x1304): crosshair, weave circle, readout, timing marks', async () => {
       await c.toGameplay();
       await js(SETUP('pistol', 0, 12, 'timing'));

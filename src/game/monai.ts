@@ -18,6 +18,7 @@ import type { Character } from './character';
 import { BODY_PARTS } from './bodyparts';
 import { createItem, fromSpawned, type Item } from './item';
 import { consumeItem, L, moveItem, spawnOnGround } from './moves';
+import { flies, floorKnown, standingSpot, standKnown } from './standing';
 import type { BodyPartId } from './bodyparts';
 import { sfx } from '../audio/sfx';
 import { overflowDamage, runDeathFunctions } from './mondeath';
@@ -189,6 +190,15 @@ export class MonsterSystem implements GameSystem {
   // ------------------------------------------------------------------ population
 
   spawn(def: MonsterDef, x: number, y: number, z: number, opts: { friendly?: boolean; name?: string; rng?: Rng } = {}): Monster {
+    // Every placement path ends here, so this is where "never on a tile it can't stand on" is
+    // made true (standing.ts). Only generated chunks are read: a monster restored into a column
+    // nobody has generated yet is settled by settleDormant once its chunk exists.
+    const tx = Math.floor(x), ty = Math.floor(y);
+    if (standKnown(this.game.map, def, tx, ty, z) === false) {
+      const s = standingSpot(this.game.map, def, tx, ty, z, { loadedOnly: true });
+      if (s) [x, y, z] = [s.x + (x - tx), s.y + (y - ty), s.z];
+      else warnOnce('unsupported-spawn', def.id, `[monsters] ${def.id} placed at ${tx},${ty},${z} with nowhere to stand (no floor below either)`);
+    }
     const rng = opts.rng ?? new Rng(hashSeed(this.game.seed, Math.floor(x * 16), Math.floor(y * 16), z, this.all.length));
     const m = new Monster(this.game.data, def, x, y, z, rng);
     if (opts.friendly) m.friendly = true;
@@ -761,6 +771,7 @@ export class MonsterSystem implements GameSystem {
     if (this.dormantTimer <= 0) {
       this.dormantTimer = 1;
       this.driftDormant(1);
+      this.settleDormant();
     }
     this.stash.update(dt);
     this.fieldTimer -= dt;
@@ -1374,10 +1385,53 @@ export class MonsterSystem implements GameSystem {
       const d = Math.hypot(dx, dy);
       if (d < 1) continue;
       const step = Math.min(d, (m.type.speed / 100) * ACTION_SCALE * 0.5 * BALANCE.monsterSpeed * dt);
-      m.x += (dx / d) * step;
-      m.y += (dy / d) * step;
+      const nx = m.x + (dx / d) * step, ny = m.y + (dy / d) * step;
+      // Drift ignores walls but not the edge of a floor: walking straight at a gunshot from a
+      // tower's fifth storey would otherwise step out over the street and hang there (dormant
+      // monsters don't fall). It stops at the edge, like a horde stuck against a building.
+      if (!flies(m.type) && floorKnown(this.game.map, Math.floor(nx), Math.floor(ny), m.z) === false) {
+        m.wanderTime = 0;
+        continue;
+      }
+      m.x = nx;
+      m.y = ny;
     }
   }
+
+  /** Last tile key each dormant monster was checked for support on (settleDormant). */
+  private supportChecked = new WeakMap<Monster, number>();
+
+  /**
+   * Dormant monsters on a tile they can't stand on (restored from a stash or a save made before
+   * placement was checked, or whose chunk wasn't generated when they were placed) settle where
+   * standing.ts says, without a fall: it fixes a placement, it isn't an event. Active ones fall
+   * for real (applyGravity). Only generated chunks are read, and each monster is re-checked
+   * only when its tile changes.
+   */
+  settleDormant(): number {
+    const map = this.game.map;
+    let moved = 0;
+    for (const m of this.all) {
+      if (!m.dormant || m.dead) continue;
+      const tx = m.tileX, ty = m.tileY;
+      const key = (((tx & 0xffff) << 16) | (ty & 0xffff)) * 32 + (m.z - MIN_Z);
+      if (this.supportChecked.get(m) === key) continue;
+      const ok = standKnown(map, m.type, tx, ty, m.z);
+      if (ok === null) continue; // not generated yet: ask again later
+      this.supportChecked.set(m, key);
+      if (ok) continue;
+      const s = standingSpot(map, m.type, tx, ty, m.z, { loadedOnly: true });
+      if (!s) continue;
+      m.x = s.x + (m.x - tx);
+      m.y = s.y + (m.y - ty);
+      m.z = s.z;
+      moved++;
+    }
+    this.settled += moved;
+    return moved;
+  }
+  /** Monsters settled by settleDormant so far (debug/telemetry). */
+  settled = 0;
 
   /** Fire under a monster burns it once per turn (fields.ts fieldDamageAt, CDDA monster::process_effects). */
   private fieldDamage(): void {

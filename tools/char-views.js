@@ -3,7 +3,7 @@
 // street viewpoint, spawns the subject(s) ahead of the camera and waits for the pose asked for.
 // Returns a short list of what is standing where. Plain JS so it can be pasted into
 // `drive.ts eval` too.
-window.charViews = ['horde_near', 'horde_mid', 'horde_far', 'horde_road', 'horde_dusk', 'dog', 'npc', 'windup', 'critters', 'zoo', 'night', 'third', 'props', 'bugs', 'zombies2', 'crowd', 'fire', 'corpse', 'bench', 'fp_fists', 'fp_punch', 'fp_pistol', 'fp_pistol_fire', 'fp_rifle', 'fp_rifle_ads', 'fp_shotgun', 'fp_reload', 'fp_bat', 'fp_bat_swing', 'fp_guard', 'fp_knife', 'fp_axe', 'fp_spear', 'fp_katana', 'fp_flashlight', 'fp_bow', 'fp_revolver', 'fp_1911', 'fp_double', 'fp_ak', 'fp_hunting', 'fp_crowbar', 'fp_kitchen', 'fp_sledge'];
+window.charViews = ['horde_near', 'horde_mid', 'horde_far', 'horde_road', 'horde_dusk', 'dog', 'npc', 'windup', 'critters', 'zoo', 'night', 'third', 'props', 'bugs', 'zombies2', 'crawlers', 'crawl_move', 'crowd', 'fire', 'corpse', 'bench', 'fp_fists', 'fp_punch', 'fp_pistol', 'fp_pistol_fire', 'fp_rifle', 'fp_rifle_ads', 'fp_shotgun', 'fp_reload', 'fp_bat', 'fp_bat_swing', 'fp_guard', 'fp_knife', 'fp_axe', 'fp_spear', 'fp_katana', 'fp_flashlight', 'fp_bow', 'fp_revolver', 'fp_1911', 'fp_double', 'fp_ak', 'fp_hunting', 'fp_crowbar', 'fp_kitchen', 'fp_sledge'];
 window.charView = async (name) => {
   const c = window.cdda;
   const wait = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -90,6 +90,23 @@ window.charView = async (name) => {
     const ids = ['mon_boomer', 'mon_zombie_hulk', 'mon_skeleton', 'mon_zombie_acidic', 'mon_zombie_electric', 'mon_zombie_scorched'];
     ids.forEach((id, i) => spawnAt(id, 4 + Math.floor(i / 3) * 3, -2.5 + (i % 3) * 2.5, { friendly: true }, 170));
     lookAt(5.5, 0, -6);
+  } else if (name === 'crawlers') {
+    // game/crawl.ts: crawling bodies (broadside, head-on), with a walker for scale
+    spawnAt('mon_zombie_crawler', 3.5, -1.2, { friendly: true }, 90);
+    spawnAt('mon_zombie_crawler', 5, 1.4, { friendly: true }, 160);
+    spawnAt('mon_zombie_creepy', 3, 2.6, { friendly: true }, 120);
+    spawnAt('mon_zombie_crawler_pupa', 6.5, -2.6, { friendly: true }, 200);
+    spawnAt('mon_crawler', 7, 3.5, { friendly: true }, 240);
+    spawnAt('mon_zombie', 7.5, -0.2, { friendly: true }, 180);
+    lookAt(5, 0.5, -14);
+  } else if (name === 'crawl_move') {
+    // a hostile crawler dragging itself toward the camera (caught mid-stroke)
+    spawnAt('mon_zombie_crawler', 4.5, 0.8);
+    spawnAt('mon_zombie_creepy', 6, -1.5);
+    lookAt(4.5, 0, -16);
+    c.settle();
+    await wait(2200);
+    return name;
   } else if (name === 'crowd') {
     // NPC variety: six people from the same classes side by side
     for (let i = 0; i < 6; i++) {
