@@ -18,6 +18,8 @@ import { cardsOn } from './cards';
 import { cddaColor } from './atlasIndex';
 import type { MonsterDef } from '../data/types';
 import { liftOf } from '../game/stairwalk';
+import { flies, floorKnown } from '../game/standing';
+import { warnOnce } from '../data/warn';
 
 // Billboards for monsters, their corpses and projectiles (blood/bile/acid decals are drawn by
 // render/worldFx.ts from the map fields the monster system adds). Runs as a
@@ -660,6 +662,12 @@ export class MonsterView implements GameSystem {
       // through a window): skipping them saved ~0.4 ms/frame in a city (docs/PERF.md)
       if (m.z !== p.z && this.renderer.chunks.covered(Math.floor(m.x), Math.floor(m.y), m.z)) continue;
       if (Math.hypot(m.x - p.x, m.y - p.y) > range) continue;
+      // never a figure hanging in the air: placement keeps monsters on floors (standing.ts) and
+      // monai settles strays within a second, so one seen here is a bug to report, not draw
+      if (!flies(m.type) && floorKnown(this.game.map, m.tileX, m.tileY, m.z) === false) {
+        warnOnce('unsupported-monster', m.type.id, `[monsters] ${m.type.id} at ${m.tileX},${m.tileY},${m.z} stands on no floor (dormant=${m.dormant})`);
+        continue;
+      }
       this.far.push(m);
       this.farSet.add(m);
     }

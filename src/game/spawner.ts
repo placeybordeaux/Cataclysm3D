@@ -5,6 +5,7 @@ import { pickFromMonsterGroup, type MonsterGroupContext, type MonsterSpawn } fro
 import { warnOnce } from '../data/warn';
 import { dormantBase, type MonsterSystem } from './monai';
 import { chunkTracker } from '../save/tracking';
+import { canStandAt, standingSpot } from './standing';
 
 // Turns mapgen spawn requests (Chunk.spawns) into monsters, plus CDDA's overmap-level city
 // hordes (overmap::place_mongroups). Chunks generate lazily, so everything is keyed off the
@@ -68,6 +69,9 @@ const CITY_HORDE_SMALL_CHANCE = 16;
 const CITY_HORDE_SPREAD = 1.5;
 const CITY_HORDE_SCALAR = 80;
 const MON_RADIUS = 3;
+
+/** Spot picking before the monster type is known: walkers' rule (BN allow_on_terrain). */
+const WALKER = { flags: [] as string[] };
 
 interface CityHorde {
   /** omt key -> number of submaps (quarter-OMTs) eligible for horde placement */
@@ -243,7 +247,9 @@ export class Spawner {
     for (let tries = 10; tries > 0; tries--) {
       x = rng.int(Math.min(area[0], area[2]), Math.max(area[0], area[2]));
       y = rng.int(Math.min(area[1], area[3]), Math.max(area[1], area[3]));
-      if (this.inChunk(c, x, y) && map.passable(x, y, c.z)) break;
+      // BN spawn_monsters_submap_group's allow_on_terrain: passable && has_floor (open air
+      // beside a tower's upper storey is passable)
+      if (this.inChunk(c, x, y) && canStandAt(map, WALKER, x, y, c.z)) break;
     }
     return [x, y];
   }
@@ -268,7 +274,7 @@ export class Spawner {
         }
         for (let n = 0; n < s.count; n++) {
           const tx = x + (n ? rng.int(-1, 1) : 0), ty = y + (n ? rng.int(-1, 1) : 0);
-          if (!this.inChunk(c, tx, ty) || !map.passable(tx, ty, c.z)) continue;
+          if (!this.inChunk(c, tx, ty) || !canStandAt(map, WALKER, tx, ty, c.z)) continue;
           if (this.opts.dormantSafe && p.z === c.z && Math.hypot(tx + 0.5 - p.x, ty + 0.5 - p.y) < this.opts.safeRadius) continue;
           if (this.baselineChunk === c && this.cleanBeforeCorpses === null) {
             const tracker = chunkTracker(this.sys.game);
@@ -285,23 +291,36 @@ export class Spawner {
         continue;
       }
       for (let n = 0; n < s.count; n++) {
-        let tx = x, ty = y;
+        let tx = x, ty = y, tz = c.z;
+        let found = false;
         for (let tries = 0; tries < 12; tries++) {
           const rad = 1 + Math.floor(tries / 4);
           const cx = tries === 0 ? x : x + rng.int(-rad, rad), cy = tries === 0 ? y : y + rng.int(-rad, rad);
-          if (this.inChunk(c, cx, cy) && map.passable(cx, cy, c.z) && !this.occupied(cx, cy, c.z)) {
+          if (this.inChunk(c, cx, cy) && canStandAt(map, def, cx, cy, c.z) && !this.occupied(cx, cy, c.z)) {
             tx = cx;
             ty = cy;
+            found = true;
             break;
           }
         }
-        if (!this.inChunk(c, tx, ty) || !map.passable(tx, ty, c.z)) continue;
+        if (!found) {
+          // the pack's point and its neighbourhood are all air or wall (a static spawn rolled
+          // beside a tower's upper storey): the nearest floor of this OMT, else straight down.
+          // Only generated levels: this runs inside chunk generation.
+          const cx = Math.min(Math.max(x, c.cx * CHUNK), c.cx * CHUNK + CHUNK - 1), cy = Math.min(Math.max(y, c.cy * CHUNK), c.cy * CHUNK + CHUNK - 1);
+          const spot = standingSpot(map, def, cx, cy, c.z, { loadedOnly: true, occupied: (a, b, z) => this.occupied(a, b, z) });
+          if (!spot) {
+            warnOnce('unsupported-spawn', def.id, `[spawner] no tile ${def.id} can stand on near ${cx},${cy},${c.z}: skipped`);
+            continue;
+          }
+          [tx, ty, tz] = [spot.x, spot.y, spot.z];
+        }
         const hostile = def.aggression > 0 && !r?.friendly;
-        if (hostile && p.z === c.z && Math.hypot(tx + 0.5 - p.x, ty + 0.5 - p.y) < this.opts.safeRadius) continue;
-        const m = this.sys.spawn(def, tx + 0.3 + rng.next() * 0.4, ty + 0.3 + rng.next() * 0.4, c.z, {
+        if (hostile && p.z === tz && Math.hypot(tx + 0.5 - p.x, ty + 0.5 - p.y) < this.opts.safeRadius) continue;
+        const m = this.sys.spawn(def, tx + 0.3 + rng.next() * 0.4, ty + 0.3 + rng.next() * 0.4, tz, {
           friendly: r?.friendly,
           name: r?.name,
-          rng: new Rng(hashSeed(this.sys.game.seed, tx, ty, c.z, this.stats.monsters)),
+          rng: new Rng(hashSeed(this.sys.game.seed, tx, ty, tz, this.stats.monsters)),
         });
         if (horde) m.horde = true;
         this.stats.monsters++;
