@@ -18,7 +18,7 @@ import type { DebugApi } from '../debug';
 import { loadVehicleData } from '../game/vehicle_data';
 import { ReadQuizController } from '../game/readquiz/controller';
 import { setQuizVehicles } from '../game/readquiz/questions';
-import { READING_GAMES, type ReadingGame } from '../game/readquiz/session';
+import { READING_GAMES, TUNING, type ReadingGame } from '../game/readquiz/session';
 import { bookData } from '../game/reading';
 import { cddaText } from '../game/units';
 import { h, ui2Layers } from '../ui2';
@@ -49,6 +49,22 @@ const DIGITS: Record<string, number> = { Digit1: 0, Digit2: 1, Digit3: 2, Digit4
 const MOVE = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD']);
 
 let registered = false;
+
+/** Width of one character of the strip's font, px (measured once per font size). */
+const glyphCache = new Map<string, number>();
+function glyphWidth(strip: HTMLElement): number {
+  const fs = getComputedStyle(strip).fontSize;
+  let w = glyphCache.get(fs);
+  if (w === undefined) {
+    const probe = h('span', { class: 'rq-word', text: 'x'.repeat(20) });
+    probe.style.visibility = 'hidden';
+    strip.appendChild(probe);
+    w = probe.getBoundingClientRect().width / 20 || 8;
+    probe.remove();
+    if (w > 0) glyphCache.set(fs, w);
+  }
+  return w;
+}
 
 export function installReadQuiz(game: Game, renderer?: Renderer, api?: DebugApi): ReadQuizController {
   if (!registered) {
@@ -236,7 +252,14 @@ export function installReadQuiz(game: Game, renderer?: Renderer, api?: DebugApi)
       );
       lastKey = 'skim';
     }
-    const charW = strip.clientWidth / s.width;
+    // Positions are in characters; the pixel font is monospaced, so one measured glyph sizes
+    // the strip (how many characters it shows) and the lens.
+    const charW = glyphWidth(strip);
+    const fit = Math.max(20, Math.floor(strip.clientWidth / charW));
+    if (fit !== s.width) s.width = fit;
+    const lens = strip.querySelector<HTMLElement>('.rq-lens')!;
+    lens.style.width = `${Math.round(2 * TUNING.skimLens * charW)}px`;
+    lens.style.left = `${Math.round((s.width / 2 - TUNING.skimLens) * charW)}px`;
     const seen = new Set<object>();
     s.words.forEach((w, i) => {
       seen.add(w);

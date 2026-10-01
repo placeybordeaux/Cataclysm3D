@@ -198,8 +198,8 @@ export class SkimSession {
     bookId: string,
     private rng: Rng,
     readonly terms: string[] = skimTerms(data, bookId, rng),
-    /** Characters visible in the strip; the lens is in the middle. */
-    readonly width = 44,
+    /** Characters visible in the strip; the lens is in the middle (the UI sets it from the font). */
+    public width = 44,
   ) {
     if (!terms.length) throw new Error(`SkimSession: no key terms for ${bookId}`);
     const tier = tierFor(data.items[bookId]);

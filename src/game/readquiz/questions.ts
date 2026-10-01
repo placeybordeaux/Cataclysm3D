@@ -117,7 +117,7 @@ function eligible(id: string, d: ItemDef): boolean {
   const n = cddaText(d.name);
   if (!n || /debug|fake|placeholder/i.test(n) || /debug|^fake_/i.test(id)) return false;
   // "radio (off)", "quarterstaff (retracted)": a state of a thing reads oddly as an answer.
-  if (STATE_SUFFIX.test(n)) return false;
+  if (STATE_SUFFIX.test(n) || /^inactive /i.test(n)) return false;
   return true;
 }
 
@@ -662,7 +662,8 @@ const needsPower: Template = (ctx) => {
   const { data } = ctx;
   const powered = (d: ItemDef | undefined) => !!d && (asArray(d.ammo as string | string[] | undefined).includes('battery') || (magazinesOf(d).battery ?? []).length > 0 || flags(d).includes('USE_UPS'));
   const rule = (id: string) => powered(data.items[id]);
-  const right = pickItem(ctx, itemsIn(ctx, ['electronics', 'tools'], (id) => rule(id)));
+  // The answer takes batteries itself (not a UPS-powered suit: true, but not what the question means).
+  const right = pickItem(ctx, itemsIn(ctx, ['electronics', 'tools'], (id, d) => rule(id) && !flags(d).includes('USE_UPS')));
   if (!right) return null;
   const pool = itemsIn(ctx, ['electronics', 'tools', 'tools_workshop'], (_id, d) => d.type === 'TOOL' && !powered(d) && !asArray(d.ammo as string | string[] | undefined).length);
   return assemble(ctx, 'needs_power', 'item', 'Which of these runs on batteries?', right, pool, rule, `${cap(itemName(data, right))} needs battery charge.`);
@@ -868,8 +869,10 @@ const materialOf: Template = (ctx) => {
   if (keysNamed(data, 'item', itemName(data, it)).some((o) => mname(materials(data.items[o])[0] ?? '') !== pn)) return null;
   const allNames = new Set(mats.map(mname));
   const rule = (m: string) => mname(m) === pn;
-  // Any of its other materials would be half right: never offer them.
-  const pool2 = Object.keys(data.misc.material ?? {}).filter((m) => !allNames.has(mname(m)) && !/^null$|^hflesh|^veggy|^flesh/.test(m));
+  // Any of its other materials would be half right: never offer them. Food materials ("ice
+  // cream", "tomato") only as distractors for food: a cutlass made of dairy isn't a real doubt.
+  const food = data.items[it].type === 'COMESTIBLE';
+  const pool2 = Object.keys(data.misc.material ?? {}).filter((m) => !allNames.has(mname(m)) && !/^null$|^hflesh|^veggy|^flesh/.test(m) && (food || !data.misc.material[m].edible));
   return assemble(ctx, 'material_of', 'material', `What is ${itemName(data, it)} mostly made of?`, primary, pool2, rule,
     `${cap(itemName(data, it))} is ${mats.map(mname).join(' and ')}.`);
 };

@@ -1,7 +1,8 @@
-/* The reading minigame card (src/ui/readquiz.ts): to the right of the crosshair, clear of the
-   activity ring, the fast-forward line under it and the reading card at the bottom. */
+/* The reading minigame card (src/ui/readquiz.ts). */
 #ui2 .rq-card {
-  position: absolute; left: calc(50% + 72px); top: 50%; transform: translateY(-50%);
+  /* Up and right of the crosshair, growing upwards into the sky: the reading card fills the
+     bottom of the screen and the fast-forward line sits just under the ring. */
+  position: absolute; left: calc(50% + 72px); bottom: calc(50% - 28px);
   width: calc(var(--fs) * 21); max-width: calc(50% - 88px);
   border: var(--b3) solid transparent; border-image: var(--skin-panel); background: var(--p-bg);
   padding: calc(var(--u) * 3); display: flex; flex-direction: column; gap: calc(var(--u) * 2);
@@ -41,7 +42,7 @@
   border: var(--u) solid var(--p-bg-raised);
 }
 #ui2 .rq-lens {
-  position: absolute; top: 0; bottom: 0; left: calc(50% - var(--fs) * 2.4); width: calc(var(--fs) * 4.8);
+  position: absolute; top: 0; bottom: 0; /* left and width: set from the measured glyph (readquiz.ts) */
   border-left: var(--u) solid var(--p-accent); border-right: var(--u) solid var(--p-accent); background: rgba(232, 192, 112, 0.08);
 }
 #ui2 .rq-word {
