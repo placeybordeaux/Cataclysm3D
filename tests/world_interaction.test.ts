@@ -21,7 +21,7 @@ import { BN_START_CLIMATE_OFFSET_DAYS, climateSeconds, evalWeatherCondition, for
 import { comfortAt, goToSleep, installRest, waitFor } from '../src/game/rest';
 import { BODYTEMP } from '../src/game/character';
 import { installTraps, setTrap, triggerTrap } from '../src/game/traps';
-import { playerLightState, toggleLight } from '../src/game/lightitems';
+import { canPowerOn, playerLightState, toggleLight } from '../src/game/lightitems';
 import { targetTile } from '../src/game/targeting';
 
 const dir = path.join(__dirname, '../public/data');
@@ -507,6 +507,21 @@ describe('traps & light items', () => {
     expect(lightAt(game, 9, 16, 0)).toBeGreaterThan(before + 100);
     expect(toggleLight(game)).toBe(true);
     expect(game.player.inv.wielded!.typeId).toBe('flashlight');
+  });
+
+  it('flashlight: with a dead one and a working one, F switches on the working one', () => {
+    const { game } = makeGame();
+    game.player.inv.wear(createItem(data, 'backpack'), null);
+    const dead = createItem(data, 'flashlight'); // battery out
+    game.player.inv.wield(dead, null);
+    const good = createItem(data, 'flashlight', { ammo: 'default' });
+    expect(game.player.inv.giveNew(good)).not.toBeNull();
+    expect(canPowerOn(dead)).toBe(false);
+    expect(canPowerOn(good)).toBe(true);
+    expect(toggleLight(game)).toBe(true);
+    expect(playerLightState(game).on).toBe(true);
+    expect(good.typeId).toBe('flashlight_on');
+    expect(dead.typeId).toBe('flashlight');
   });
 
   it("lightAt prefers the renderer's exact light map, adding only the survivor's beam", () => {

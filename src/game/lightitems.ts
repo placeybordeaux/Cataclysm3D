@@ -45,11 +45,24 @@ export function playerLightState(game: Game): { on: boolean; lum: number; direct
   return { on: lum > 0, lum, directional, item: best };
 }
 
+/**
+ * Whether switching the item on can work right now: it needs no charge, or its battery /
+ * magazine still holds some. Used to skip a dead flashlight when a working one is carried
+ * (user report: with two flashlights, `F` and the hotbar kept picking the dead one).
+ */
+export function canPowerOn(it: Item): boolean {
+  // A battery flashlight with its battery out still has ammo types: it needs charge.
+  const needsCharge = it.ammoTypes().length > 0 || it.ammoCapacity() > 0 || !!it.magazine;
+  return !needsCharge || it.ammoRemaining() > 0;
+}
+
 /** `F`: toggle the best light item via its transform use_action. */
 export function toggleLight(game: Game): boolean {
   const items = lightItems(game);
   const lit = items.find((it) => itemLight(it) > 0);
-  const target = lit ?? items[0];
+  // Off: the brightest one that can actually switch on; only if none can, the brightest, so
+  // the failure message (reload help) explains what it takes.
+  const target = lit ?? items.find(canPowerOn) ?? items[0];
   if (!target) {
     // Say where to get one: a newcomer in the dark doesn't know flashlights are loot.
     game.message("You don't have a light source.  Flashlights turn up in lockers, drawers and cars; a fire lights a room too.", 'c_light_gray');
