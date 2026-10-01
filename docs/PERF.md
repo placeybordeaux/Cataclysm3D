@@ -360,7 +360,8 @@ air), so the bay was lit and ambient-shaded as outdoors. Same bug class as the r
   anything: top = highest non-open-air OMT + 1 (mapgen writes a building's roof into the level
   above its top floor), raised by any generated non-empty chunk above that (a player-built floor;
   re-read every 30 frames). `radiusAt(cx, cy, z, pz)`: the player's window [pz-1, pz+2] at full
-  radius; on the surface or above, every level from the ground up to the column's top; underground
+  radius; on the surface or above, every level from the ground up to the column's top (R - 2
+  above the window: far tower tops are deep in the haze); underground
   only the window (rock hides the rest: no surface through the ground). `drawn(x, y, z)` = is that
   level of that column drawn for the current eye. `roofAbove(map, x, y, z)` = anything overhead at
   any height (the sky-light test). `?levels=window` / `cdda.drawLevels('window')` = the old rule.
@@ -368,7 +369,9 @@ air), so the bay was lit and ambient-shaded as outdoors. Same bug class as the r
   * `chunkManager.ts`: entry creation iterates each column's span; eviction/visibility by
     `radiusAt`; `covered()` = `roofAbove`. Scheduling keeps near-first: storeys above the window
     that aren't overhead (tower tops across the street) are a new `'high'` class, ranked +3 s and
-    deferred while a street hole is needed within 1 s; the bay's own roof (within a chunk) is not.
+    deferred while a hole is needed within 3 s; the bay's own roof (within a chunk) is not.
+    Driving (> 8 m/s) they aren't started at all except over your own column (renderer and
+    prefetcher): they fill in when you slow down.
   * `prefetch.ts`: the same per-column extent with its own wider window.
   * `perf/telemetry.ts`: wanted = levels the column draws; holes = the levels in front of the eye
     (player's, the one above, the ground under a rooftop), so budgets stay comparable.
@@ -406,28 +409,27 @@ air), so the bay was lit and ambient-shaded as outdoors. Same bug class as the r
 
 | where | loop p50 / p99 (ms) | draw ms | draw calls | triangles | entries |
 | --- | --- | --- | --- | --- | --- |
-| fire station bay, before | 7.3 / 18.2 | 4.5 | 1182 | 2.09 M | 900 |
-| fire station bay, after | 8.7 / 19.3 | 5.2 | 1529 | 2.71 M | 975 (+75: only tall columns get z3-5) |
-| office tower roof z3, before | 3.7 / 11.8 | 1.8 | 206 | 0.22 M | 1125 |
-| office tower roof z3, after | 9.5 / 16.6 | 5.5 | 1056 | 1.21 M | 1350 |
-| hotel tower roof z5, before | 2.7 / 12.2 | 1.2 | 154 | 0.22 M | 450 |
-| hotel tower roof z5, after | 10.6 / 17.2 | 5.4 | 1190 | 2.04 M | 1028 |
+| fire station bay, before | 6.8 / 16.8 | 4.2 | 995 | 1.64 M | 900 |
+| fire station bay, after | 7.9 / 18.5 | 4.9 | 1429 | 2.60 M | 956 (only tall columns get z3-5) |
+| office tower roof z3, before | 3.6 / 11.2 | 1.9 | 206 | 0.20 M | 1125 |
+| office tower roof z3, after | 8.8 / 15.4 | 5.5 | 1369 | 1.70 M | 1350 |
+| hotel tower roof z5, before | 2.9 / 12.0 | 1.3 | 112 | 0.18 M | 450 |
+| hotel tower roof z5, after | 8.6 / 15.5 | 5.3 | 1186 | 1.87 M | 1028 |
 
   On a roof the new cost is the city you now see (before: nothing below the window).
 
-  **Street level** (`npm run perf`): towns, forest, rural, teleport, load and loaddrive are
-  unchanged. **city40 is measurably worse and flaky under this machine's load (~4, other agents'
-  GPU jobs)**: in town40-then-city40 sequences, unbuilt-in-view total was window 0-3.5 s vs
-  world 0.4-11 s (10 A/B pairs; single isolated city40 runs overlap: window 0-3.97, world
-  0.22-7.42). Frame work +1.5-2.4 ms/frame mean in the city. A CPU profile diff puts it in:
-  more 3D characters drawn (dormant figures on storeys that are now drawn: ~0.4 ms/frame), tower
-  top meshing (~7 ms/s), the stairs index for the new levels, and level lookups (columnSpan,
-  drawn, roofAbove, chunkKey: ~0.2 ms/frame). Mitigations in place: storeys above the window go
-  to R - 2 only, are a deferred `'high'` class while the street is behind, and `roofAbove` checks
-  the level above first. Both modes break the city40 hole budget on some runs here; world mode
-  more often. Next steps if the lead wants the budget firm: hide dormant far figures on other
-  levels when they stand under cover (they are behind walls), and far-tower shells (no interior
-  for levels above the window).
+  **Street level** (`npm run perf`, final run: PASS, sky-leak PASS): towns, forest, rural,
+  teleport, load and loaddrive unchanged. The city was the hard case: with tower tops built like
+  any level, town40-then-city40 sequences had the street unbuilt in view for 4-11 s vs 0-3.5 s
+  with the old window (this shared machine, load ~4, is noisy: single runs of either overlap).
+  A/B with tower tops disabled matched the old window, and a CPU profile diff showed meshing
+  passing towers' upper floors next to the road, more 3D characters (figures on storeys that are
+  now drawn) and the mesher's new overhead test. Fixed by: tower tops only to R - 2, the
+  deferred `'high'` class, not starting them while driving except over your own column (renderer
+  and prefetcher), dormant far figures skipped when indoors on another level, and a typed-array
+  memo for the mesher's overhead test. After: city40 0-0.12 s in the full suite, 0-4.7 s in
+  sequences vs the window's 0-1.7 s; loop p99 unchanged (37-40 ms both). Still a bit more work
+  in a city than before; far-tower shells (no interiors above the window) would be the next win.
 
 ## Not done / next
 
