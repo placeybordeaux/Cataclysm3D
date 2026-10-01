@@ -14,6 +14,7 @@ import { constructionWorldMenu, craftingItemActions } from './craft2/actions';
 import { constructionScreen, currentPlacement, openConstructionScreen, startPlacement } from './craft2/construction_screen';
 import { craftingScreen, openCraftingScreen } from './craft2/crafting_screen';
 import { installCraftOverlay } from './craft2/overlay';
+import { installReadQuiz } from './readquiz';
 import { openConstructionMenu } from './construction';
 import { openCraftingMenu } from './crafting';
 import { openDisassembleMenu, openReadMenu } from './craft_menus';
@@ -42,6 +43,7 @@ export function installCrafting(game: Game, api?: DebugApi, renderer?: Renderer)
   itemActionProviders.push((who, it, loc) => (who === game.player ? craftingItemActions(game, it, loc) : []));
   if (renderer) {
     installCraftOverlay(game, renderer);
+    installReadQuiz(game, renderer, api);
     worldContextProviders.push((t) => constructionWorldMenu(game, t, () => void openConstructionScreen(game, renderer)));
   }
   if (api) installCraftingDebug(game, api, renderer);

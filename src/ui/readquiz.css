@@ -1,0 +1,55 @@
+/* The reading minigame card (src/ui/readquiz.ts): to the right of the crosshair, clear of the
+   activity ring, the fast-forward line under it and the reading card at the bottom. */
+#ui2 .rq-card {
+  position: absolute; left: calc(50% + 72px); top: 50%; transform: translateY(-50%);
+  width: calc(var(--fs) * 21); max-width: calc(50% - 88px);
+  border: var(--b3) solid transparent; border-image: var(--skin-panel); background: var(--p-bg);
+  padding: calc(var(--u) * 3); display: flex; flex-direction: column; gap: calc(var(--u) * 2);
+}
+#ui2 .rq-card.engaged { box-shadow: 0 0 0 var(--u) var(--p-accent); }
+#ui2 .rq-head { display: flex; justify-content: space-between; align-items: baseline; gap: calc(var(--u) * 3); font-size: var(--fs-s); }
+#ui2 .rq-label { color: var(--p-accent); text-transform: uppercase; letter-spacing: 0.06em; }
+#ui2 .rq-hint { color: var(--p-text-dim); white-space: nowrap; }
+#ui2 .rq-prompt { color: var(--p-text-bright); }
+#ui2 .rq-opts { display: flex; flex-direction: column; gap: var(--u); }
+#ui2 .rq-opt {
+  display: flex; align-items: center; gap: calc(var(--u) * 3); text-align: left; cursor: pointer;
+  padding: var(--u) calc(var(--u) * 2); background: var(--p-bg-deep); border: var(--u) solid var(--p-bg-raised); color: var(--p-text);
+}
+#ui2 .rq-opt:hover { background: var(--p-bg-hover); color: var(--p-text-bright); }
+/* A keycap, so the digit reads as a key (and never as l or I). */
+#ui2 .rq-key {
+  flex: none; min-width: calc(var(--fs) * 1.1); text-align: center; font-size: var(--fs-s); color: var(--p-accent);
+  border: var(--u) solid var(--p-accent-dim); background: var(--p-bg-raised); padding: 0 var(--u);
+}
+#ui2 .rq-opt-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#ui2 .rq-opt.rq-right { border-color: var(--p-good); color: var(--p-good); }
+#ui2 .rq-opt.rq-right .rq-key { border-color: var(--p-good); color: var(--p-good); }
+#ui2 .rq-opt.rq-wrong { border-color: var(--p-bad); color: var(--p-bad); text-decoration: line-through; }
+#ui2 .rq-opt.rq-dim { opacity: 0.45; }
+#ui2 .rq-card[data-phase='right'] .rq-opt, #ui2 .rq-card[data-phase='wrong'] .rq-opt { cursor: default; }
+#ui2 .rq-gain { color: var(--p-good); font-size: var(--fs-s); }
+#ui2 .rq-gain:empty { display: none; }
+#ui2 .rq-miss { color: var(--p-warn); font-size: var(--fs-s); }
+#ui2 .rq-explain { color: var(--p-text); font-size: var(--fs-s); }
+#ui2 .rq-foot { color: var(--p-text-dim); font-size: var(--fs-s); }
+#ui2 .rq-card[data-phase='offer'] .rq-opt.rq-pick { border-color: var(--p-accent-dim); }
+
+/* Skim: a strip of drifting words with the lens in the middle. */
+#ui2 .rq-strip {
+  position: relative; height: calc(var(--fs) * 1.8); overflow: hidden; background: var(--p-bg-deep);
+  border: var(--u) solid var(--p-bg-raised);
+}
+#ui2 .rq-lens {
+  position: absolute; top: 0; bottom: 0; left: calc(50% - var(--fs) * 2.4); width: calc(var(--fs) * 4.8);
+  border-left: var(--u) solid var(--p-accent); border-right: var(--u) solid var(--p-accent); background: rgba(232, 192, 112, 0.08);
+}
+#ui2 .rq-word {
+  position: absolute; left: 0; top: 50%; margin-top: calc(var(--fs) * -0.6); white-space: nowrap; color: var(--p-text-dim);
+  cursor: pointer; will-change: transform;
+}
+#ui2 .rq-word.rq-term { color: var(--p-text-bright); text-decoration: underline; text-decoration-color: var(--p-accent); }
+#ui2 .rq-word.rq-hit { color: var(--p-good); text-decoration: none; }
+#ui2 .rq-word.rq-wrong { color: var(--p-bad); text-decoration: line-through; }
+#ui2 .rq-strip.rq-cool .rq-word { opacity: 0.35; }
+#ui2 .rq-skim-gain.rq-miss { color: var(--p-warn); }
