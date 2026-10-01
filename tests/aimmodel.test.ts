@@ -12,7 +12,7 @@ import { L, spawnItem } from '../src/game/moves';
 import { defenseOf, FEEL, guardScoreBonus, setFeelDifficulty } from '../src/game/combatfeel';
 import {
   aimDirection, aimHooks, AimSway, bowPerfect, bowWindow, Breath, defaultHitZone, describeHit, freeAim, hitDamageMul, offsetToPixels, reloadBand,
-  setAimModel, skillDamageMul, swayAmplitude, timingGames, weakSpotChance, type SwayInputs,
+  setAimModel, skillDamageMul, swayAmplitude, timingGames, weakSpotChance, reticleVisible, RETICLE_AFTER_SHOT, type SwayInputs,
 } from '../src/game/aimmodel';
 import type { Monster } from '../src/game/monster';
 
@@ -393,5 +393,56 @@ describe('free aim melee: a blow that connects lands', () => {
       if (combat.cooldown <= 0 && !combat.swing) break;
     }
     expect(combat.swing?.perfect).toBe(true);
+  });
+});
+
+describe('the weaving reticle shows only while aiming or just after a shot', () => {
+  it('reticleVisible: aiming, drawing, or within RETICLE_AFTER_SHOT of a shot', () => {
+    expect(reticleVisible({ aiming: false, drawing: false, sinceShot: Infinity })).toBe(false);
+    expect(reticleVisible({ aiming: true, drawing: false, sinceShot: Infinity })).toBe(true);
+    expect(reticleVisible({ aiming: false, drawing: true, sinceShot: Infinity })).toBe(true);
+    expect(reticleVisible({ aiming: false, drawing: false, sinceShot: RETICLE_AFTER_SHOT - 0.1 })).toBe(true);
+    expect(reticleVisible({ aiming: false, drawing: false, sinceShot: RETICLE_AFTER_SHOT + 0.1 })).toBe(false);
+  });
+
+  it('a pistol at rest: hidden; RMB shows it; a hip shot shows it for a moment (and still uses the weave)', () => {
+    const { game, sys, combat, input } = world();
+    pistol(game);
+    target(sys, game, 10);
+    step(game, 0.2);
+    expect(combat.aim.active).toBe(true);
+    expect(combat.reticleShown()).toBe(false);
+    input.mouseButtons = 4;
+    step(game, 0.1);
+    expect(combat.reticleShown()).toBe(true);
+    input.mouseButtons = 0;
+    step(game, 0.1);
+    expect(combat.reticleShown()).toBe(false);
+    // Hip shot along a hidden weave far off the body: it misses (the weave is real, just not drawn).
+    combat.aim.markShown(0.08, 0, performance.now());
+    let hit = false;
+    game.events.on('playerAttack', (e) => (hit ||= e.outcome === 'hit' || e.outcome === 'crit'));
+    combat.cooldown = 0;
+    combat.fire();
+    expect(hit).toBe(false);
+    expect(combat.reticleShown()).toBe(true);
+    step(game, RETICLE_AFTER_SHOT + 0.2);
+    expect(combat.reticleShown()).toBe(false);
+  });
+
+  it('a bow: only while drawing', () => {
+    const { game, combat } = world();
+    game.player.str_base = 12;
+    game.player.resetStats();
+    game.player.inv.wear(createItem(data, 'backpack'), null);
+    const bow = createItem(data, 'longbow');
+    game.player.inv.wield(bow, null);
+    game.player.inv.giveNew(createItem(data, 'arrow_wood', { count: 5 }));
+    step(game, 0.1);
+    expect(combat.reticleShown()).toBe(false);
+    combat.startDraw(bow, 'draw', false);
+    expect(combat.reticleShown()).toBe(true);
+    combat.cancelDraw();
+    expect(combat.reticleShown()).toBe(false);
   });
 });

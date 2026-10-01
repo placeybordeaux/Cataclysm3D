@@ -7,6 +7,8 @@
 // symbol decide. Size comes from BN `volume` (ml; mtype volume is units::volume, loaded in
 // monstergenerator.cpp with the "ml"/"L" string form our extractor normalises to ml).
 
+import { crawlPlanOf, type CrawlPlan } from '../../game/crawl';
+
 export type Archetype = 'humanoid' | 'quadruped' | 'critter' | 'insect' | 'flyer' | 'blob' | 'serpent' | 'plant' | 'machine' | 'lump';
 
 export const ARCHETYPES: readonly Archetype[] = ['humanoid', 'quadruped', 'critter', 'insect', 'flyer', 'blob', 'serpent', 'plant', 'machine', 'lump'];
@@ -37,6 +39,11 @@ export interface BodyShape {
    * 'bat'; humanoids a feature: 'bloated' | 'hulk' | 'skeletal' | 'acid' | 'shocker' | 'charred'.
    */
   variant?: string;
+  /**
+   * Humanoids that crawl instead of walking (game/crawl.ts: the crawling zombie, the pupating
+   * half-corpse, the creepy crawler): a prone body plan and a crawl cycle (rig.ts crawlPose).
+   */
+  crawl?: CrawlPlan;
   /** humanoids: hair style / headgear piece (NPC variety) */
   hair?: 'none' | 'short' | 'long' | 'ponytail' | 'cap' | 'hat' | 'helmet';
 }
@@ -51,6 +58,8 @@ export interface MonsterLike {
   symbol?: string;
   /** ml */
   volume?: number;
+  name?: unknown;
+  description?: string;
 }
 
 /** Reference volumes (ml) the archetype meshes are built at. */
@@ -141,7 +150,8 @@ export function bodyShapeOf(m: MonsterLike): BodyShape {
       : /skeleton|skeletal|withered|shriveled/.test(id) ? 'skeletal' : /acid|spitter|corrosive/.test(id) ? 'acid'
       : /shock|electric|static/.test(id) ? 'shocker' : /scorched|charred|burnt/.test(id) ? 'charred' : '';
   }
-  return { arch, scale, girth, legs, head, zombie, legCount, flies: fliesFlag, wings, variant };
+  const crawl = arch === 'humanoid' ? crawlPlanOf(m) : null;
+  return { arch, scale, girth, legs, head, zombie, legCount, flies: fliesFlag, wings, variant, ...(crawl ? { crawl } : {}) };
 }
 
 /**

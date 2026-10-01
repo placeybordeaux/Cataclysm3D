@@ -96,6 +96,14 @@ export class CameraRig {
   /** Point the lights/shadows should centre on (player feet in top mode, eye otherwise). */
   readonly focus = new THREE.Vector3();
   /**
+   * Third-person / top-down: where a hand-held flashlight starts and points. The light used to
+   * ride the camera, which in the top view sits tens of metres up, so the beam never reached
+   * the ground (user report). null in first person, where the camera is the eye.
+   */
+  beam: { origin: THREE.Vector3; dir: THREE.Vector3 } | null = null;
+  private readonly beamOrigin = new THREE.Vector3();
+  private readonly beamDir = new THREE.Vector3();
+  /**
    * First person: quantize yaw/pitch to the angle of one low-res pixel, so a slow turn
    * scrolls the image in whole-pixel steps (exact at the screen centre) instead of
    * resampling every texel at a new sub-pixel phase each frame.
@@ -155,6 +163,15 @@ export class CameraRig {
     this.subPixel.set(0, 0);
 
     const fwdX = Math.sin(p.yaw), fwdZ = -Math.cos(p.yaw);
+    if (this.mode === 'first') this.beam = null;
+    else {
+      // From the survivor's right hand, along where they face; pitch clamped so it lights the
+      // ground ahead even when the top view leaves the look pitch level.
+      const pitch = Math.max(-0.6, Math.min(0.15, p.pitch - 0.12));
+      this.beamOrigin.set(p.x - fwdZ * 0.22 + fwdX * 0.2, base + eyeH - 0.35, p.y + fwdX * 0.22 + fwdZ * 0.2);
+      this.beamDir.set(fwdX * Math.cos(pitch), Math.sin(pitch), fwdZ * Math.cos(pitch));
+      this.beam = { origin: this.beamOrigin, dir: this.beamDir };
+    }
     if (this.mode === 'first') {
       cam.fov = fovFirst;
       const bobY = Math.abs(Math.sin(this.bobPhase)) * this.bobAmp * 1.6 - this.bobAmp * 0.8;
