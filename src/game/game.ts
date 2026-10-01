@@ -97,6 +97,14 @@ export class Game {
   /** Current weather (src/game/weather.ts); null until installWeather runs. Read by HUD/sound/vision. */
   weather: WeatherState | null = null;
   private acc = 0;
+  /**
+   * Fast-forward (src/game/timewarp.ts): simulation ticks per TICK of real time. It runs more
+   * ticks of the same size, never a bigger dt, so every per-tick check (activity interrupts,
+   * monster AI, fields, needs) runs exactly as it does at 1, only more of them per real second.
+   */
+  simSpeed = 1;
+  /** Last frame's simulation cost (ms) and ticks run, for the fast-forward governor. */
+  readonly simCost = { ms: 0, ticks: 0 };
   mouseSensitivity = 0.0025;
 
   constructor(readonly data: GameData, readonly seed: number, readonly input: Input) {
@@ -131,11 +139,25 @@ export class Game {
       p.pitch = Math.max(-1.5, Math.min(1.5, p.pitch - my * this.mouseSensitivity));
     }
     if (this.paused || this.lockPaused || this.tacticalPause || (this.pauseInMenus && this.input.captured && !this.input.captureTimeFlows)) return;
-    this.acc = Math.min(this.acc + realDt, 0.25);
+    let speed = this.simSpeed;
+    // Debt allowed: a quarter second at 1 (as before), two frames' worth when fast-forwarding,
+    // so a hitch can't queue seconds of ticks into one frame.
+    this.acc = Math.min(this.acc + realDt * speed, Math.max(0.25, 2 * realDt * speed));
+    const t0 = performance.now();
+    let n = 0;
     while (this.acc >= TICK) {
       this.tick(TICK);
+      n++;
       this.acc -= TICK;
+      if (this.simSpeed !== speed) {
+        // Dropped out of fast-forward mid-frame (a zombie came into view): what is left of this
+        // frame's real time runs at the new speed, not the old one.
+        this.acc *= this.simSpeed / speed;
+        speed = this.simSpeed;
+      }
     }
+    this.simCost.ms = performance.now() - t0;
+    this.simCost.ticks = n;
   }
 
   tick(dt: number): void {

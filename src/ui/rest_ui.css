@@ -4,3 +4,6 @@
 #ui2 .rest-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(calc(var(--fs) * 12), 1fr)); gap: calc(var(--u) * 2); }
 #ui2 .rest-grid .ui2-btn { justify-content: space-between; }
 #ui2 .rest-block { padding: var(--u) calc(var(--u) * 3); border: var(--b3) solid transparent; border-image: var(--skin-inset-bad); }
+/* Fast-forward pick (src/game/timewarp.ts): the wait or night starts at this speed. */
+#ui2 .rest-fast-row { display: flex; align-items: center; gap: calc(var(--u) * 3); }
+#ui2 .rest-fast-on { color: var(--p-accent); }
