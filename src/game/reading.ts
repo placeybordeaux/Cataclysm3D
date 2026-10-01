@@ -182,6 +182,38 @@ function train(c: Character, skill: string, amount: number): boolean {
   return false;
 }
 
+/**
+ * The read quiz's practice bonus (src/game/readquiz/): `amount` exercise points (BN units,
+ * ×100 inside) in the book's skill. Within the book's caps — nothing once the skill reaches
+ * the book's max level (or 10) — and never a level-up by itself: it stops just short, so the
+ * level still comes at the end of a chapter as BN's readBook does it. Returns points added.
+ */
+export function readingPractice(c: Character, it: Item, amount: number): number {
+  const b = bookData(it);
+  if (!b?.skill || !(amount > 0)) return 0;
+  const lvl = c.getSkill(b.skill);
+  if (lvl >= b.level || lvl >= 10) return 0;
+  const sk = (c.skills[b.skill] ??= { level: 0, exercise: 0 });
+  const room = Math.max(0, 10000 * (sk.level + 1) ** 2 - 1 - sk.exercise);
+  const add = Math.min(amount * 100, room);
+  sk.exercise += add;
+  return add / 100;
+}
+
+/**
+ * The read quiz's "progress jump": skip `gameSeconds` of the chapter being read now. Game
+ * time, not the clock, so it's the same jump at any fast-forward speed. Never past the end:
+ * the chapter still finishes through ActivityManager.update (rewards, the next chapter,
+ * interrupts) on the next tick. Returns the seconds actually skipped (0 when not reading).
+ */
+export function skipReading(host: Pick<CraftHost, 'activities'>, gameSeconds: number): number {
+  const a = host.activities.current;
+  if (!a || a.spec.kind !== 'read' || !(gameSeconds > 0)) return 0;
+  const skip = Math.min(gameSeconds, Math.max(0, a.spec.duration - a.elapsed));
+  a.elapsed += skip;
+  return skip;
+}
+
 /** Exercise towards the next level of `skill`, 0..1 (the reading UI's bar). */
 export function skillProgress(c: Character, skill: string): number {
   const sk = c.skills[skill];
