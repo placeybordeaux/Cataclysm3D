@@ -10,6 +10,7 @@ import { asArray, countByCharges, createItem, inNewContainer, Item } from './ite
 import { consumeItem, L, locate, moveItem, spawnItem, spawnSome, transaction, type Loc } from './moves';
 import { consumeRequirements, evaluateRequirements, itemDisplayName, type RequirementEval } from './requirements';
 import { cddaText } from './units';
+import { withPracticeSource } from './practice';
 
 // Crafting after Cataclysm: Bright Nights (crafting.cpp, recipe.cpp, craft_command.cpp):
 //  - which recipes you know: learned (books, profession, disassembly, crafting from a book) or
@@ -684,13 +685,18 @@ export function continueCraft(host: CraftHost, craft: Item, opts: { instant?: bo
     if (!r.skill_used) return void (state.practiced = Math.max(state.practiced, steps));
     const batchMult = batch + (craftTime(c, r, batch, 1) * 100) / 30000;
     const cap = Math.floor(r.difficulty * 1.25);
-    for (; state.practiced < steps; state.practiced++) {
-      c.practice(r.skill_used, c.rollRemainder(((r.difficulty * 15 + 10) * batchMult) / 20), cap);
-      for (const [s, l] of r.skills_required ?? []) {
-        if (s === r.skill_used || c.data.misc.skill?.[s]?.tags?.includes('combat_skill')) continue;
-        c.practice(s, Math.floor(c.rollRemainder(((c.getSkill(s) * 15 + 10) * batchMult) / 20) / 2), Math.floor(l * 1.25));
+    // A step whose roll_remainder came out 0 is skipped (practice(…, 0) does nothing in BN
+    // either): reporting it would flash "too simple" in the middle of a craft that does teach.
+    const practice = (s: string, amount: number, cap: number) => amount > 0 && c.practice(s, amount, cap);
+    withPracticeSource(`Crafting ${name}`, () => {
+      for (; state.practiced < steps; state.practiced++) {
+        practice(r.skill_used!, c.rollRemainder(((r.difficulty * 15 + 10) * batchMult) / 20), cap);
+        for (const [s, l] of r.skills_required ?? []) {
+          if (s === r.skill_used || c.data.misc.skill?.[s]?.tags?.includes('combat_skill')) continue;
+          practice(s, Math.floor(c.rollRemainder(((c.getSkill(s) * 15 + 10) * batchMult) / 20) / 2), Math.floor(l * 1.25));
+        }
       }
-    }
+    });
   };
 
   const finish = () => {

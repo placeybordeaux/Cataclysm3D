@@ -2,6 +2,7 @@ import type { Character } from './character';
 import type { Item } from './item';
 import { bookRecipeIndex, fineVisionMod, FINE_VISION_THRESHOLD, learnRecipe, recipeName, type CraftHost } from './crafting';
 import { cddaText } from './units';
+import { emitPractice, withPracticeSource } from './practice';
 
 // Reading after Bright Nights (avatar.cpp read / do_read / time_to_read, skill.cpp readBook):
 // the first time you open a book you learn what's in it at once (skim); each session
@@ -171,15 +172,19 @@ export function chaptersToLevel(c: Character, it: Item): { next: number; done: n
 }
 
 /** BN SkillLevel::train (exercise stored ×100: a level takes 10000 × (level+1)²). */
-function train(c: Character, skill: string, amount: number): boolean {
+function train(c: Character, skill: string, amount: number, cap: number): boolean {
   const sk = (c.skills[skill] ??= { level: 0, exercise: 0 });
+  const before = { level: sk.level, progress: skillProgress(c, skill) };
   sk.exercise += amount * 100;
+  let leveled = false;
   if (sk.exercise >= 10000 * (sk.level + 1) ** 2) {
     sk.exercise = 0;
     sk.level++;
-    return true;
+    leveled = true;
   }
-  return false;
+  // Reading bypasses Character.practice (BN readBook), so it reports to the practice cue itself.
+  emitPractice({ who: c, skill, requested: amount, gained: amount, cap, levelBefore: before.level, level: sk.level, progressBefore: before.progress, progress: skillProgress(c, skill), levelUp: leveled, blocked: null, via: 'book' });
+  return leveled;
 }
 
 /**
@@ -231,7 +236,7 @@ export function trainFromBook(c: Character, it: Item, host?: CraftHost): boolean
   const lvl = c.getSkill(b.skill);
   if (lvl >= b.level || lvl >= 10) return false;
   const [minEx, maxEx] = sessionExRange(c, b, lvl, (a) => adjustForFocus(c, a));
-  const leveled = train(c, b.skill, (lvl + 1) * c.rng.int(minEx, maxEx));
+  const leveled = withPracticeSource(`Reading ${cddaText(it.def.name)}`, () => train(c, b.skill!, (lvl + 1) * c.rng.int(minEx, maxEx), b.level - 1));
   const say = (t: string, col?: string) => (host ? host.message(t, col) : c.msg(t, col));
   if (leveled) say(`You increase ${c.skillName(b.skill)} to level ${lvl + 1}.`, 'c_light_green');
   else say(`You learn a little about ${c.skillName(b.skill)}!  (${Math.floor(skillProgress(c, b.skill) * 100)}%)`, 'c_cyan');

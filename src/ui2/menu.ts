@@ -24,6 +24,9 @@ export type MenuItem =
       danger?: boolean;
       /** The action left/double-click does: shown bold. */
       primary?: boolean;
+      /** A small second line (what it trains: "Trains Electronics up to level 3"), when not disabled. */
+      note?: string;
+      noteTone?: 'good' | 'warn' | 'dim';
       submenu?: MenuItem[] | (() => MenuItem[]);
       action?: () => void;
     }
@@ -138,7 +141,7 @@ function buildLevel(items: MenuItem[], parent: Level | null, anchor: Rect, side:
       'div',
       { class: `ui2-menu-row${m.disabled ? ' disabled' : ''}${m.danger ? ' danger' : ''}${m.primary ? ' primary' : ''}`, attrs: { role: 'menuitem' } },
       m.icon ? iconEl(m.icon, 'row') : h('span', { class: 'ui2-menu-noicon' }),
-      h('span', { class: 'ui2-menu-label' }, h('span', { text: m.label }), reason ? h('span', { class: 'ui2-menu-reason', text: reason }) : null),
+      h('span', { class: 'ui2-menu-label' }, h('span', { text: m.label }), reason ? h('span', { class: 'ui2-menu-reason', text: reason }) : m.note ? h('span', { class: `ui2-menu-note tone-${m.noteTone ?? 'dim'}`, text: m.note }) : null),
       h('span', { class: 'ui2-menu-time', text: m.time !== undefined ? fmtDuration(m.time) : '' }),
       h('span', { class: 'ui2-menu-key', text: m.key ?? '' }),
       h('span', { class: 'ui2-menu-arrow', text: m.submenu ? '▸' : '' }),

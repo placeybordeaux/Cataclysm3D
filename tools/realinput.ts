@@ -35,6 +35,7 @@ import { stairsScenarios } from './realinput_stairs';
 import { grabScenarios } from './realinput_grab';
 import { curtainsScenarios } from './realinput_curtains';
 import { reloadScenarios } from './realinput_reload';
+import { skillsScenarios } from './realinput_skills';
 import { timewarpScenarios } from './realinput_timewarp';
 import { readquizScenarios } from './realinput_readquiz';
 
@@ -1525,6 +1526,8 @@ scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...grabScenario
 scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...curtainsScenarios({ x: () => x, js, check, shot, toGameplay, sleep }));
 // Reload help (src/game/reloadhelp.ts): a battery-less flashlight says what it takes and where you saw some.
 scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...reloadScenarios({ x: () => x, js, check, shot, toGameplay, sleep }));
+// Skills feedback (src/ui/practice_cue.ts): disassemble from the inventory, the practice cue, @ hints.
+scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...skillsScenarios({ x: () => x, js, check, shot, toGameplay, sleep }));
 // Fast-forward (reading, the Rest window's Fast pick, the cap measurement).
 scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...timewarpScenarios({ x: () => x, js, check, shot, toGameplay, sleep }));
 scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...readquizScenarios({ x: () => x, js, check, shot, toGameplay, sleep }));

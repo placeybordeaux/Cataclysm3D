@@ -8,6 +8,7 @@ import { createItem, fromSpawned, Item } from './item';
 import { consumeItem, L, moveItem, spawnOnGround, transaction } from './moves';
 import { consumeRequirements, evaluateRequirements, type RequirementEval } from './requirements';
 import { cddaText } from './units';
+import { constructionPractice, withPracticeSource } from './practice';
 
 // Construction after Bright Nights (construction.cpp): build / dig / board up / deconstruct on
 // a tile next to you. Constructions come from misc.construction (requirements expanded by the
@@ -348,7 +349,9 @@ function applyPost(host: CraftHost, con: ConstructionDef, x: number, y: number, 
 
 /** Practice from complete_construction: (10 + 15 × level) × (1 + time / 10 minutes). */
 function awardXp(host: CraftHost, con: ConstructionDef): void {
-  for (const [s, l] of con.required_skills ?? []) host.player.practice(s, Math.floor((10 + 15 * l) * (1 + con.time / 600)), Math.floor(l * 1.25));
+  withPracticeSource(`Building: ${groupName(host.data, con)}`, () => {
+    for (const { skill, amount, cap } of constructionPractice(con)) host.player.practice(skill, amount, cap);
+  });
 }
 
 export interface BuildOptions {
