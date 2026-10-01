@@ -7,6 +7,7 @@ import { framePixels, frameKey } from './framePixels';
 import { GeomBuilder, type V3 } from './geometry';
 import type { GroundField } from './ground';
 import { shared, worldMaterials } from './materials';
+import { shadowUniforms } from './shadows';
 import { leafGlow, leafSun } from './trees';
 import { Img } from './pixelArt';
 import type { TileFrame } from './textureSource';
@@ -728,10 +729,16 @@ function foliageMaterial(tex: THREE.Texture): THREE.MeshLambertMaterial {
   const m = new THREE.MeshLambertMaterial({ map: tex, vertexColors: true, alphaTest: 0.5, side: THREE.FrontSide });
   m.onBeforeCompile = (sh, r) => {
     base.onBeforeCompile(sh, r);
-    Object.assign(sh.uniforms, { uTime: shared.uTime, uSway: floraWind, uLeafGlow: leafGlow, uSunW: leafSun.dir, uSunC: leafSun.color });
+    Object.assign(sh.uniforms, { uTime: shared.uTime, uSway: floraWind, uLeafGlow: leafGlow, uSunW: leafSun.dir, uSunC: leafSun.color, uSwayLock: shadowUniforms.uSwayLock });
     const anchor = 'vSkyVis = skyVis;';
     if (!sh.vertexShader.includes(anchor)) throw new Error('flora: world vertex anchor missing');
-    sh.vertexShader = 'uniform float uTime;\nuniform float uSway;\nuniform vec3 uSunW;\nvarying float vFolDist;\nvarying float vFolTrans;\n' + sh.vertexShader.replace(anchor, `${anchor}
+    // uSwayLock (shadows.ts): the sway moves only the drawn position (after project_vertex),
+    // so shadow lookups and the light map keep reading the leaf at rest: the leaf carries its
+    // shadow with it instead of sliding through a map drawn without wind
+    if (!sh.vertexShader.includes('#include <project_vertex>')) throw new Error('flora: project_vertex missing');
+    sh.vertexShader = 'uniform float uTime;\nuniform float uSway;\nuniform float uSwayLock;\nuniform vec3 uSunW;\nvarying float vFolDist;\nvarying float vFolTrans;\nvec2 gFolSway = vec2(0.0);\n' + sh.vertexShader
+      .replace('#include <project_vertex>', '#include <project_vertex>\nif (uSwayLock > 0.5) { mvPosition.xyz += (viewMatrix * vec4(gFolSway.x, 0.0, gFolSway.y, 0.0)).xyz; gl_Position = projectionMatrix * mvPosition; }')
+      .replace(anchor, `${anchor}
 {
   vec3 fw = (modelMatrix * vec4(transformed, 1.0)).xyz;
   vFolDist = length(fw - cameraPosition);
@@ -739,7 +746,7 @@ function foliageMaterial(tex: THREE.Texture): THREE.MeshLambertMaterial {
   float st = floor(uTime * 4.0) * 0.25;
   float ph = fw.x * 0.31 + fw.z * 0.23 + fw.y * 0.4;
   vec2 sw = vec2(sin(st * 1.7 + ph), cos(st * 1.3 + ph * 1.3)) * uSway * (1.0 - smoothstep(12.0, 25.0, vFolDist));
-  transformed.xz += sw;
+  if (uSwayLock > 0.5) gFolSway = sw; else transformed.xz += sw;
 }`);
     sh.fragmentShader = 'uniform float uLeafGlow;\nuniform vec3 uSunC;\nvarying float vFolDist;\nvarying float vFolTrans;\n' + sh.fragmentShader
       .replace('#include <alphatest_fragment>', `#include <alphatest_fragment>

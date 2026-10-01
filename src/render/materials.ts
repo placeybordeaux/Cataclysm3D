@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { lmUniforms } from './lightmap';
+import { shadowUniforms } from './shadows';
 
 // Every material drawn into the low-res scene target is a built-in three.js material with
 // a few shader patches, so we keep three's lights/shadows machinery:
@@ -170,6 +171,81 @@ void RE_IndirectDiffuse_Lambert( const in vec3 irradiance, const in vec3 geometr
   }
 }`;
 
+// Sun-shadow rig (shadows.ts). Several shadow-casting directional lights can carry the sun
+// (two sun steps x one or two cascades); every fragment takes exactly one of them, so the
+// sun is counted once. Index = set * cascades + cascade (three puts shadow casters first, in
+// scene order). The pick is dithered per shadow-map texel offset by the map's snapped centre,
+// i.e. per fixed patch of the world, so the step dissolve and the cascade seam stand still on
+// surfaces instead of crawling with the camera.
+const RIG_PARS = /* glsl */ `
+uniform vec4 uRig;
+uniform vec4 uRigFilter;
+uniform vec4 uRigCell;
+uniform float uShadowView;
+float gSunShadow = 1.0;
+float rigHash(vec2 p) {
+  vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+  p3 += dot(p3, p3.yzx + 33.33);
+  return fract((p3.x + p3.y) * p3.z);
+}
+#if defined( USE_SHADOWMAP ) && NUM_DIR_LIGHT_SHADOWS > 1
+float rigInside(vec4 c) { vec2 uv = c.xy / c.w; vec2 d = min(uv, 1.0 - uv); return min(d.x, d.y); }
+float rigCell(vec4 c, vec2 size, vec2 origin) { return rigHash(floor(c.xy / c.w * size) + origin); }
+#endif
+float rigWeight(int idx) {
+#if defined( USE_SHADOWMAP ) && NUM_DIR_LIGHT_SHADOWS > 1
+  int cascades = int(uRig.x + 0.5);
+  int rs = 0;
+  if (uRig.z >= 1.0) rs = 1;
+  else if (uRig.z > 0.0) rs = rigCell(vDirectionalShadowCoord[0], directionalLightShadows[0].shadowMapSize, uRigCell.xy) < uRig.z ? 1 : 0;
+  int pick = rs * cascades;
+  #if NUM_DIR_LIGHT_SHADOWS > 3
+  if (cascades == 2) {
+    vec4 nc = rs == 0 ? vDirectionalShadowCoord[0] : vDirectionalShadowCoord[2];
+    vec2 org = rs == 0 ? uRigCell.xy : uRigCell.zw;
+    float t = rigInside(nc);
+    if (t < uRig.w * (0.2 + 0.8 * rigCell(nc, directionalLightShadows[0].shadowMapSize, org))) pick += 1;
+  }
+  #endif
+  return idx == pick ? 1.0 : 0.0;
+#else
+  return 1.0;
+#endif
+}
+#if defined( USE_SHADOWMAP ) && NUM_DIR_LIGHT_SHADOWS > 0
+#if defined( SHADOWMAP_TYPE_PCF )
+// 'smooth' filter: a 3x3 tent of hardware-bilinear compares (a smooth function of position
+// over ~4 texels), cut at 50%: the edge follows the filtered contour (straight and diagonal
+// runs, rounded corners) instead of the texel staircase, and notches thinner than the tent
+// fill in. The taps sit on a fixed grid (no per-pixel rotation), so it holds still.
+float rigShadow( sampler2DShadow shadowMap, vec2 shadowMapSize, float shadowIntensity, float shadowBias, float shadowRadius, vec4 shadowCoord ) {
+  if (uRigFilter.x < 0.5) return getShadow( shadowMap, shadowMapSize, shadowIntensity, shadowBias, shadowRadius, shadowCoord );
+  shadowCoord.xyz /= shadowCoord.w;
+  shadowCoord.z += shadowBias;
+  if (shadowCoord.x < 0.0 || shadowCoord.x > 1.0 || shadowCoord.y < 0.0 || shadowCoord.y > 1.0 || shadowCoord.z > 1.0) return 1.0;
+  vec2 o = uRigFilter.y / shadowMapSize;
+  float s = 0.0;
+  for (int y = -1; y <= 1; y++)
+    for (int x = -1; x <= 1; x++)
+      s += texture( shadowMap, vec3( shadowCoord.xy + vec2(float(x), float(y)) * o, shadowCoord.z ) ) * (x == 0 ? 2.0 : 1.0) * (y == 0 ? 2.0 : 1.0);
+  s = smoothstep(0.5 - uRigFilter.z, 0.5 + uRigFilter.z, s / 16.0);
+  return mix( 1.0, s, shadowIntensity );
+}
+#else
+float rigShadow( sampler2D shadowMap, vec2 shadowMapSize, float shadowIntensity, float shadowBias, float shadowRadius, vec4 shadowCoord ) {
+  return getShadow( shadowMap, shadowMapSize, shadowIntensity, shadowBias, shadowRadius, shadowCoord );
+}
+#endif
+#endif
+`;
+const DIR_SHADOW_LINE = 'directLight.color *= ( directLight.visible && receiveShadow ) ? getShadow( directionalShadowMap[ i ], directionalLightShadow.shadowMapSize, directionalLightShadow.shadowIntensity, directionalLightShadow.shadowBias, directionalLightShadow.shadowRadius, vDirectionalShadowCoord[ i ] ) : 1.0;';
+const DIR_SHADOW_RIG = /* glsl */ `if ( rigWeight( UNROLLED_LOOP_INDEX ) < 0.5 ) { directLight.color = vec3( 0.0 ); directLight.visible = false; }
+		else { float rigS = receiveShadow ? rigShadow( directionalShadowMap[ i ], directionalLightShadow.shadowMapSize, directionalLightShadow.shadowIntensity, directionalLightShadow.shadowBias, directionalLightShadow.shadowRadius, vDirectionalShadowCoord[ i ] ) : 1.0; directLight.color *= rigS; gSunShadow = rigS; }`;
+function replaceOnce(src: string, find: string, by: string): string {
+  if (src.split(find).length !== 2) throw new Error(`materials: expected exactly one ${find.slice(0, 60)}...`);
+  return src.replace(find, () => by);
+}
+
 function patchChunk(src: string, find: string, add: string): string {
   if (!src.includes(find)) throw new Error(`materials: patch point not found: ${find}`);
   return src.replace(find, `${find}\n\t\t${add}`);
@@ -180,14 +256,14 @@ function patchChunk(src: string, find: string, add: string): string {
 // by retroreflection and adapted eyes; the wrap stands in for both. Surfaces facing away
 // from the lamp stay unlit.
 export const HEADLIGHT_MIN_RANGE = 50;
-const LIGHTS_BEGIN = patchChunk(
+const LIGHTS_BEGIN = replaceOnce(patchChunk(
   patchChunk(
     patchChunk(THREE.ShaderChunk.lights_fragment_begin, 'getDirectionalLightInfo( directionalLight, directLight );', 'directLight.color *= lmSunGate(); gBandDither = 0.0;'),
     'getPointLightInfo( pointLight, geometryPosition, directLight );', 'directLight.color *= lmPointGate(); gBandDither = uPointDither;',
   ),
   'getSpotLightInfo( spotLight, geometryPosition, directLight );',
   `gBandDither = 0.0; if ( spotLight.distance > ${HEADLIGHT_MIN_RANGE.toFixed(1)} && dot( geometryNormal, directLight.direction ) > 0.0 ) directLight.direction = normalize( directLight.direction + geometryNormal * 0.9 );`,
-);
+), DIR_SHADOW_LINE, DIR_SHADOW_RIG);
 
 /** How a banded-Lambert material gets its light-map sample. */
 type LmMode = 'world' | 'sprite' | 'none';
@@ -200,7 +276,9 @@ export function patchBandedLambert(shader: Shader, lm: LmMode = 'none'): void {
   shader.uniforms.uRimColor = shared.uRimColor;
   const assign = lm === 'world' ? 'gLm = lmSample(vLmPos);\n' : lm === 'sprite' ? 'gLm = vLmS;\n' : '';
   if (lm !== 'none') Object.assign(shader.uniforms, lmUniforms);
-  shader.fragmentShader = shader.fragmentShader
+  Object.assign(shader.uniforms, shadowUniforms);
+  shader.fragmentShader = replaceOnce(replaceOnce(shader.fragmentShader, '#include <shadowmap_pars_fragment>', '#include <shadowmap_pars_fragment>\n' + RIG_PARS),
+    '#include <opaque_fragment>', '#include <opaque_fragment>\nif (uShadowView > 0.5) gl_FragColor = vec4(vec3(0.5 + 0.5 * gSunShadow), 1.0);')
     .replace(
       '#include <lights_lambert_pars_fragment>',
       (lm === 'world' ? LM_FUNCS + 'varying vec3 vLmPos;\n' : lm === 'sprite' ? 'varying vec4 vLmS;\n' : '') +

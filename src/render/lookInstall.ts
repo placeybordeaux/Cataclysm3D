@@ -12,6 +12,7 @@ import { setCutoutMips } from './cutoutMips';
 import { installNearCurtain } from './nearChunks';
 import { FLORA_DESC, FLORA_NAMES, flora, floraAtlas, floraTiming, isFloraName, setFlora } from './flora';
 import { FORM_NAMES, FORMS, form, isFormName, setForm } from './formLight';
+import { installShadows } from './shadowInstall';
 
 // Wires the visual styles (look.ts) into the game: the Options entry, the automation API
 // and the per-look scene layers that need game/world access (skyline from the overmap).
@@ -156,6 +157,7 @@ export function installLooks(game: Game, renderer: Renderer, worldgen: WorldGene
     return haze.s;
   };
   a.voxelStats = voxelStats;
+  installShadows(game, renderer, api);
   installFurniture(renderer, api);
   installSurfaces(renderer, api, game);
   a.setLook = (name: string) => {
