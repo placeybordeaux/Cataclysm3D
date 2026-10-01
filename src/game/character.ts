@@ -11,6 +11,7 @@ import { focusEquilibrium, Morale, type MoralePoint } from './morale';
 import { cddaText } from './units';
 import { buffFlat } from './martialarts';
 import { NEUTRAL_SURVIVOR, type SurvivorBalance } from './balance';
+import { emitPractice, type PracticeBlock } from './practice';
 
 // The survivor model (Cataclysm: Bright Nights Character/avatar, simplified). Everything is
 // driven by update(gameDt) in game-clock seconds; BN rates are per game second ("turn"), so they
@@ -518,9 +519,19 @@ export class Character {
    * remainder as a percent chance). Returns true on level-up.
    */
   practice(id: string, amount: number, cap = 10): boolean {
-    if (amount <= 0 || this.isAsleep()) return false;
+    // Every outcome is reported (src/game/practice.ts), including the ones that train nothing:
+    // the HUD tells the player why a toaster taught them nothing.
+    const lvl0 = this.skills[id]?.level ?? 0;
+    const frac0 = this.skills[id] ? this.skills[id].exercise / (10000 * (lvl0 + 1) ** 2) : 0;
+    const report = (blocked: PracticeBlock | null, gained = 0, levelUp = false) => {
+      const sk = this.skills[id];
+      const level = sk?.level ?? 0;
+      emitPractice({ who: this, skill: id, requested: amount, gained, cap, levelBefore: lvl0, level, progressBefore: frac0, progress: sk ? sk.exercise / (10000 * (level + 1) ** 2) : 0, levelUp, blocked, via: 'practice' });
+    };
+    if (this.isAsleep()) return report('asleep'), false;
+    if (amount <= 0) return report('no_amount'), false;
     const sk = (this.skills[id] ??= { level: 0, exercise: 0 });
-    if (sk.level >= 10) return false;
+    if (sk.level >= 10) return report('max'), false;
     amount = Math.round(this.byEnchant(amount, `SKILL_EXP_${id.toUpperCase()}`));
     let focus = this.focus + this.enchantBonus('EFFECTIVE_FOCUS', this.focus);
     if (this.hasTrait('FASTLEARNER')) focus += 15;
@@ -534,7 +545,8 @@ export class Character {
       this.msg(`You're learning slowly: your low morale (${mood}) makes it hard to focus. Something tasty, warmth, rest or a good book helps.`, 'c_yellow');
     }
     amount = this.rollRemainder((amount * focus) / 100);
-    if (amount <= 0 || sk.level > cap) return false;
+    if (amount > 0 && sk.level > cap) return report('cap'), false;
+    if (amount <= 0) return report('focus'), false;
     sk.exercise += amount * 100;
     let leveled = false;
     if (sk.exercise >= 10000 * (sk.level + 1) ** 2) {
@@ -547,6 +559,7 @@ export class Character {
     this.focus -= Math.trunc(drop / 100);
     if (this.rng.int(1, 100) <= drop % 100) this.focus--;
     this.focus = Math.max(0, this.focus);
+    report(null, amount, leveled);
     return leveled;
   }
   skillName(id: string): string {

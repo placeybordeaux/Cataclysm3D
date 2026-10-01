@@ -10,7 +10,8 @@ import type { Loc } from '../../game/moves';
 import type { ItemAction } from '../../game/inventory_view';
 import { abandonCraft, cantContinue, continueCraft, craftState, recipeName, type CraftHost } from '../../game/crafting';
 import { cancelConstruction, constructionGroups, canBuild, constructionInventory, continueConstruction, siteProblem, stageFor, startConstruction, unfinishedAt, unfinishedState } from '../../game/construction';
-import { canDisassemble, startDisassembly, uncraftRecipe, yieldText } from '../../game/disassembly';
+import { canDisassemble, disassemblyStack, startDisassembly, uncraftRecipe, yieldText } from '../../game/disassembly';
+import { previewBook, previewDisassembly, type PracticePreview } from '../../game/practice';
 import { bookData, bookMastery, cantRead, nothingToLearn, startReading, timeToRead } from '../../game/reading';
 import { fineVisionMod } from '../../game/crafting';
 import type { MenuItem, WorldTarget } from '../../ui2';
@@ -31,6 +32,7 @@ export function readAction(game: CraftHost, it: Item, _loc?: Loc): ItemAction[] 
       moves,
       disabled: why,
       primary: true,
+      ...(game.player.identifiedBooks.has(it.typeId) ? practiceNote(previewBook(game.player, b)) : {}),
       run: () => ok(startReading(game, it, trains ? 'until_level' : 'once')),
     },
   ];
@@ -38,21 +40,43 @@ export function readAction(game: CraftHost, it: Item, _loc?: Loc): ItemAction[] 
   return out;
 }
 
-/** "Disassemble" with its time and yield, greyed with the reason when you can't. */
+/** The practice preview as a menu note: green when it trains, dim when it doesn't. */
+export function practiceNote(pv: PracticePreview | null): Pick<ItemAction, 'note' | 'noteTone'> {
+  if (!pv) return {};
+  return { note: pv.text, noteTone: pv.verdict === 'trains' ? 'good' : 'dim' };
+}
+
+/**
+ * "Disassemble" with its time, yield and what it trains, greyed with the reason when you can't;
+ * plus "Disassemble all N" for a stack (BN disassembles a charges stack in batches and queues
+ * several targets in one activity). Clicking is the confirmation: the yield BN's "Really
+ * disassemble?" query lists is already in the label.
+ */
 export function disassembleAction(game: CraftHost, it: Item, _loc?: Loc): ItemAction[] {
   if (craftState(game.data, it) || unfinishedState(game.data, it)) return [];
   const r = uncraftRecipe(game.data, it.typeId);
   if (!r) return [];
   const ch = canDisassemble(game, it);
-  return [
+  const note = practiceNote(previewDisassembly(game.player, r));
+  const out: ItemAction[] = [
     {
       id: 'disassemble',
       label: `Disassemble (${yieldText(game.data, r) || 'nothing recoverable'})`,
       moves: Math.max(1, r.time) * 100,
       disabled: ch.ok ? undefined : ch.missing[0],
+      ...note,
       run: () => ok(startDisassembly(game, it)),
     },
   ];
+  const more = ch.ok ? disassemblyStack(game, it) : [];
+  if (more.length)
+    out.push({
+      id: 'disassemble_all',
+      label: `Disassemble all ${more.length + 1}${it.countByCharges ? ' batches' : ''}`,
+      moves: Math.max(1, r.time) * 100 * (more.length + 1),
+      run: () => ok(startDisassembly(game, it, { then: more })),
+    });
+  return out;
 }
 
 /** An in-progress craft: continue it, or take it apart for the components. An unfinished construction: continue or cancel. */

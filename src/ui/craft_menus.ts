@@ -5,6 +5,7 @@ import type { Item } from '../game/item';
 import { bookData, bookMastery, cantRead, readableBooks, startReading, timeToRead } from '../game/reading';
 import { itemDisplayName, requirementLines } from '../game/requirements';
 import { cddaText } from '../game/units';
+import { previewBook, previewDisassembly } from '../game/practice';
 import { c, colorize, openMenu } from './framework';
 import type { Game } from '../game/game';
 import './crafting.css';
@@ -40,6 +41,8 @@ export function openReadMenu(game: CraftHost): void {
               lines.push(`Can bring your <color_cyan>${p.skillName(d.skill)}</color> skill to <color_cyan>${d.level}</color>.`);
               if (d.req) lines.push(`Requires <color_cyan>${p.skillName(d.skill)} ${d.req}</color> to understand.`);
               lines.push(`Your skill: <color_cyan>${p.getSkill(d.skill)}</color> (${m.replace('_', ' ')})`);
+              const pv = previewBook(p, d);
+              if (pv) lines.push(`<color_${pv.verdict === 'trains' ? 'light_green' : 'dark_gray'}>${pv.text}</color>`);
             }
             if (d.intel) lines.push(`Requires intelligence of <color_cyan>${d.intel}</color> to easily read.`);
             if (d.fun) lines.push(`Reading this book affects your morale by <color_${d.fun > 0 ? 'green' : 'red'}>${d.fun}</color>.`);
@@ -79,6 +82,8 @@ export function openDisassembleMenu(game: CraftHost): void {
           lines.push(...requirementLines(ch.req).filter((l) => !l.includes('Components required')));
           lines.push('<color_white>Yields:</color>');
           for (const y of disassemblyYield(data, r)) lines.push(`> ${y.count} ${itemDisplayName(data, y.id, y.count)}`);
+          const pv = previewDisassembly(game.player, r);
+          if (pv) lines.push('', `<color_${pv.verdict === 'trains' ? 'light_green' : 'dark_gray'}>${pv.text}</color>`);
           if (!ch.ok) lines.push('', `<color_red>${ch.missing.join('\n')}</color>`);
           return colorize(lines.join('\n'));
         },

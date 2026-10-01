@@ -99,6 +99,13 @@ export function installBnInventory(game: Game, ctx: UiContext, api: DebugApi, ca
     askCount: (item, verb) => countPrompt({ title: `${verb} how many?`, subtitle: item.name, max: item.count, initial: Math.max(1, Math.floor(item.count / 2)), icon: item.icon, ok: verb }),
     extraActions: (it, loc) => legacyExtras(ctx, it, loc),
     perform: (label, moves, fn) => perform(label, moves, fn),
+    // Playtest: "when I start a disassembly from the inventory screen it doesn't drop me into
+    // the actual disassembly straight away" — the activity started but sat frozen under the
+    // inventory's pause until you closed it. Close every window (the click is a valid gesture
+    // to re-capture the mouse) so the work runs at the crosshair at once.
+    activityStarted: () => {
+      if (game.activities.current) closeGroup();
+    },
   });
   const env: ListEnv = { model, perform };
 
