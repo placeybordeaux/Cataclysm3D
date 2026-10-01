@@ -1,6 +1,6 @@
 {
   "note": "tools/perf-bench.ts budgets: a route fails when a metric is worse than this by more than the tolerance (relative and absolute). Re-record with --write-baseline after an intended change; see docs/PERF.md.",
-  "date": "2026-09-30",
+  "date": "2026-10-01",
   "size": "3440x1304",
   "tolerance": {
     "maxHoleS": {
@@ -43,13 +43,13 @@
       "genSyncMsPerS": 0.2
     },
     "city40": {
-      "maxHoleS": 1.77,
-      "holeS": 1.77,
-      "runwayP10": 8.6,
-      "p99": 50.2,
-      "loopP99": 38,
-      "maxStepMs": 18,
-      "genSyncMsPerS": 14.7
+      "maxHoleS": 0,
+      "holeS": 0,
+      "runwayP10": 9.76,
+      "p99": 34.14,
+      "loopP99": 32,
+      "maxStepMs": 16,
+      "genSyncMsPerS": 9.7
     },
     "teleport": {
       "maxStepMs": 30,
@@ -78,6 +78,15 @@
       "nearMs": 550,
       "maxFrameMs": 283,
       "curtainFrameMs": 266
+    },
+    "citystand": {
+      "p99": 50.18,
+      "loopP99": 36,
+      "maxStepMs": 19,
+      "genSyncMsPerS": 0,
+      "maxFrameMs": 50,
+      "drawMs": 6.53,
+      "calls": 505
     }
   }
 }

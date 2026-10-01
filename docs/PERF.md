@@ -211,6 +211,61 @@ after; most likely a major GC — Firefox has no headless profiler here to confi
 the moment the curtain lifts still outruns streaming for a few seconds in a dense city
 (stand-ins show there); the frames stay smooth, which was the ask.
 
+## Draw cost and the "burst" (round 3: the user's second dump)
+
+Dump: Firefox, 3198x1304, standing and walking on a roof (z 1) in a city of seed 443226190.
+Streaming was fine (no holes, runway 11 s+); `draw` was 9.45 ms/frame (1037 of 2950 frames
+missed a refresh), and at 356.8-358.6 s a burst of 80-194 ms frames.
+
+**The burst** had no builds, no mapgen, no new geometry or textures, and the same draw calls as
+before it. What changed is that sim, draw and the delay before our callback all grew together,
+by the same 2-5x, for ~7 s (353-360 s: frame interval 15 → 28 ms). Our workload didn't change,
+so the browser was being starved: another process on the machine (several heavy jobs share it)
+or a long Firefox GC. Two things that *could* cause such a burst were found and fixed anyway:
+
+* **The first flashlight use recompiled every shader**: lights.ts toggled the flashlight's
+  `castShadow`, which changes the shadow-light count every material is compiled for. 767 ms
+  (Chromium) / 984 ms (Firefox) frame on the first switch. Now it always casts, and its map is
+  simply not redrawn while off: no frame over 50 ms with 4 toggles (`citystand` route).
+* The telemetry now records `programs` (shader programs compiled so far): a compile shows in
+  the report ("N shader compiles", per worst frame), so the next dump will say if it was one.
+
+**The baseline draw cost** is draw calls: Firefox spends ~7-8 µs of CPU per WebGL draw call.
+At the user's spot (radius 8, many levels built above ground since `levels.ts`) the main pass
+was ~935 calls (each chunk is one mesh per texture page, ~5 per chunk; the ground level seen
+from the roof alone was 420), and every far-shadow-map redraw (5 Hz) added ~1000 more (the
+`calls` column alternates 1400 / 2500 in the dump). `tools/lib/drawProbe.ts` (`__drawCensus()`)
+attributes every call of a frame to pass, level and page.
+
+**Fixes:**
+
+* **Far chunks merged** (`src/render/chunkBatch.ts`, default on; `?batch=0`,
+  `cdda.chunkBatch(false)`): every chunk outside the player's 3x3 is merged with the others of
+  its 3x3-column block, all levels together, one mesh per material. Merges happen in slices (a
+  source mesh at a time, 2 ms a frame) and only while the player moves under 3 m/s and nothing
+  is streaming; a block is undone the moment a member is rebuilt, hidden or comes within one
+  chunk (a visibility flip: the sources keep their GPU buffers, at the price of the merged far
+  geometry sitting in GPU memory twice), and late members join at most every 4 s.
+* **Shadow maps redraw one per frame** when they are only due on their timer (shadows.ts): the
+  near and far maps no longer land on the same frame.
+
+At the user's spot (3198x1304, all four shadow maps forced into one frame for the count):
+
+| | main-pass calls | shadow calls | Firefox draw ms/frame | Chromium draw ms/frame |
+| --- | --- | --- | --- | --- |
+| before | 936 | 2103 | 7.5 | 5.5 |
+| after | 305 | 788 | 4.0 | 2.9 |
+
+`citystand` route (seed 1 city centre, 3440x1304, 12 s standing with 4 flashlight toggles):
+Firefox draw 11.5 → **6.5 ms/frame**, 1377 → **498 calls**; Chromium 6.9 → 4.1 ms, 1354 → 515.
+Driving routes are unchanged (merging pauses while you drive; city40/city60 loop p99 within
+noise of `?batch=0`).
+
+Not done: per-chunk page merging (one texture array instead of ~10 atlas pages would make every
+chunk one draw call, the player's 3x3 included); skipping flat ground pages as shadow casters
+(floors at street level shade nothing, but pages mix floors and walls); monster AI/actualize
+cost with ~920 loaded monsters (the placement bug is another agent's).
+
 ## Benchmarks and budgets
 
 ### `npm run perf` (GPU, pass/fail)
@@ -235,7 +290,8 @@ chunks:
 The baseline was recorded with the machine at load ~15 (other agents' jobs), so its timing
 metrics are pessimistic; the streaming metrics (holes, runway) barely move with load.
 
-Plus `teleport`, `load` and `loaddrive` (above): ms from ready / the jump to the player's 3x3
+Plus `citystand` (round 3: mean draw ms and calls standing in the city, longest frame with
+the flashlight toggled; frame limit 150 ms), and `teleport`, `load` and `loaddrive` (above): ms from ready / the jump to the player's 3x3
 shown and to nothing unbuilt in view, the longest frame behind and after the curtain; limits
 3x3 ≤ 2 s, all in view ≤ 10 s, frame after the curtain ≤ 250 ms (loaddrive 350, holes 8 s).
 `--profile DIR` writes a Chromium CPU profile per route.
