@@ -81,6 +81,22 @@ Three models, switchable at any time: **Options → Aim model**, `?aim=sway|timi
   `PlayerCombat.reticleShown`). Otherwise a plain crosshair sits at the centre and the gun rests
   still — but the weave keeps running underneath, so a hip shot goes where it really points (no
   extra hip penalty: BN's unaimed recoil already makes hip shots wild). Real input: `--only aimreticle`.
+- **Top view** (user: "How exactly is shooting supposed to work in overhead view?"): twin-stick
+  style. The mouse turns the survivor; the aim is the facing (`PlayerCombat.topAim`, used by
+  `aimRay` whenever `aimHooks.topView()` says the camera is top-down). Height can't be seen from
+  above, so it is chosen: a level probe at chest height finds the first body along the facing
+  (`castAim`), and the shot is pitched to its centre mass (55 % of its height) — or to its head
+  (88 %) while aiming with RMB, the careful shot; with nothing on the line the shot is level.
+  The weave turns the facing sideways only. Drawn in the world (`src/render/topAimFx.ts`): while
+  aiming or just after a shot, a dotted line from the survivor to where the shot lands (red when
+  it meets a body) and a gold ring around that body; at rest only a short dim facing tick (same
+  rule as the first-person reticle). Melee swings along the facing (the camera's ray is ignored
+  in top view; the swept arc around the facing decides). **Options → Top-view aim assist** (off by
+  default): when the line meets nothing, a hostile within 12° of the facing is aimed at. Tests:
+  `tests/topaim.test.ts`, real input `--only aimtop` (turn onto a zombie at 10 m with the mouse:
+  the line is on it and an aimed shot is a headshot; facing nothing: level, a miss; a swing hits
+  what's in front). Gap: the top camera frames ~8 m ahead, so a 10 m target's ring is just
+  off-screen at the top; the line still points at it.
 - **The overlay** (`aimHud.ts`): a faint dot where the mouse looks; while aiming, a dashed circle
   of the current weave size, green/yellow/red by whether it fits the body under the view centre
   (replaces the BN spread circle). **Options → Aim trail** adds a fading trail of the reticle's

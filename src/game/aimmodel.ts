@@ -289,7 +289,27 @@ export const aimHooks: {
    * Null in tests, the sim, and top-down view: the shot then leaves the eye along the view.
    */
   view: (() => { o: Vec3; f: Vec3; r: Vec3; u: Vec3; third: boolean; eye: Vec3 } | null) | null;
-} = { hitZone: defaultHitZone, body: null, pick: null, prepare: null, view: null };
+  /**
+   * Top-down view (src/aim.ts): the survivor's eye as drawn, or null when the camera isn't
+   * top-down. Then shots are aimed along the facing (PlayerCombat.topAim), not through a screen point.
+   */
+  topView: (() => { eye: Vec3 } | null) | null;
+} = { hitZone: defaultHitZone, body: null, pick: null, prepare: null, view: null, topView: null };
+
+/** Player-facing aim switches (Options): the top-view assist snaps to the nearest hostile in a cone. */
+export const aimSettings = { topAssist: false };
+
+/** Half-angle (rad) of the top-view assist cone. */
+export const TOP_ASSIST_CONE = (12 * Math.PI) / 180;
+
+/**
+ * Top-view auto-pitch: how high on a body the shot aims (share of its height). From above the
+ * screen can't show height, so the game picks it: centre mass at the hip, the head while aiming
+ * (RMB) — the aimed shot is the careful one; the weave still has to be on the narrow head.
+ */
+export function topAimHeight(bodyHeight: number, aiming: boolean): number {
+  return bodyHeight * (aiming ? 0.88 : 0.55);
+}
 
 export interface Vec3 {
   x: number;

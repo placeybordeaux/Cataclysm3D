@@ -596,6 +596,62 @@ export function aimScenarios(c: AimCtx): Scenario[] {
       await x().key('v');
       await x().key('v');
     }],
+    ['aimtop', 'top-down view: the mouse turns the facing, the aim line and ring sit on the zombie, the shot hits; at nothing the shot is level; melee swings along the facing', async () => {
+      await c.toGameplay();
+      await js(SETUP('pistol', 5, 10, 'sway'));
+      await sleep(400);
+      for (let i = 0; i < 3 && (await js<string>('cdda.renderer.cameraMode')) !== 'top'; i++) {
+        await x().key('v');
+        await sleep(300);
+      }
+      check('V reaches the top-down view', (await js<string>('cdda.renderer.cameraMode')) === 'top');
+      // Face 0.35 rad right of the zombie (setup), then turn onto it with the mouse.
+      await js(`(() => { const m = window.__m, p = cdda.game.player; p.yaw = Math.atan2(m.x - p.x, -(m.y - p.y)) + 0.35; })()`);
+      await sleep(300);
+      const off = await js<{ target: number | null } | null>('cdda.topAim()');
+      check('facing away: the line meets nothing', off?.target !== (await js<number>('window.__uid')), off);
+      const sens = await js<number>('cdda.game.mouseSensitivity');
+      await x().move(Math.round(-0.35 / sens), 0, 12);
+      await sleep(300);
+      const on = await js<{ target: number | null; shown: boolean } | null>('cdda.topAim()');
+      check('turning with the mouse puts the line on the zombie', on?.target === (await js<number>('window.__uid')), on);
+      await x().buttonDown(3);
+      await sleep(600);
+      const aimed = await js<{ target: number | null; shown: boolean } | null>('cdda.topAim()');
+      check('aiming (RMB) shows the full line and the ring', !!aimed?.shown && aimed.target === (await js<number>('window.__uid')), aimed);
+      await shot('top_aim_line');
+      const hp0 = await js<number>('window.__m.hp');
+      await x().clickHere(1);
+      await sleep(300);
+      const hit = await js<{ zone: string } | null>('cdda.aimState().lastHit');
+      check('the shot hits the zombie under the line (aimed: the head)', (await js<number>('window.__m.hp')) < hp0 && hit?.zone === 'head', hit);
+      await x().buttonUp(3);
+      await sleep(300);
+      // Turn well away: nothing on the line; the shot is level and hits nothing.
+      await x().move(Math.round(1.3 / sens), 0, 12);
+      await sleep(3000);
+      const away = await js<{ target: number | null; pitch: number; shown: boolean } | null>('cdda.topAim()');
+      check('at rest, facing nothing: a quiet facing tick, no weave, level', !!away && away.target === null && away.pitch === 0 && !away.shown, away);
+      await shot('top_rest');
+      const hp1 = await js<number>('window.__m.hp');
+      await js('cdda.combat.lastHit = null');
+      await x().clickHere(1);
+      await sleep(300);
+      check('a shot at nothing misses', (await js<number>('window.__m.hp')) === hp1);
+      // Melee along the facing.
+      await js(SETUP('bat', 0, 1.0, 'sway'));
+      await sleep(3000);
+      await js(`(() => { const m = window.__m, p = cdda.game.player; p.yaw = Math.atan2(m.x - p.x, -(m.y - p.y)); })()`);
+      await js(`window.__mh = 0; window.__mhOn || (window.__mhOn = cdda.game.events.on('playerAttack', (e) => e.kind === 'melee' && (e.outcome === 'hit' || e.outcome === 'crit') && window.__mh++))`);
+      await x().clickHere(1);
+      await sleep(900);
+      check('top view: a swing hits what is in front of the facing', (await js<number>('window.__mh')) > 0);
+      await shot('top_melee');
+      for (let i = 0; i < 3 && (await js<string>('cdda.renderer.cameraMode')) !== 'first'; i++) {
+        await x().key('v');
+        await sleep(300);
+      }
+    }],
     ['aimtiming', 'timing model by real input: hold breath with Shift while aiming (flash), active reload, bow release ring, melee beat', async () => {
       await c.toGameplay();
       // Screenshots need ~0.4 s, longer than a timing window: they're taken in a second pass with

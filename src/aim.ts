@@ -4,7 +4,7 @@ import type { DebugApi } from './debug';
 import type { MonstersHandle } from './monsters';
 import { FEEL } from './game/combatfeel';
 import {
-  AIM_MODELS, aimModel, bowWindow, Breath, freeAim, isAimModel, offsetToPixels, reloadBand, rhythmWindow, setAimModel, timingGames, type AimModelId,
+  AIM_MODELS, aimModel, aimSettings, bowWindow, Breath, freeAim, isAimModel, offsetToPixels, reloadBand, rhythmWindow, setAimModel, timingGames, type AimModelId,
 } from './game/aimmodel';
 import { drawStyle, rangedClass } from './game/rangedfeel';
 import { getUiRoot } from './ui/framework';
@@ -16,6 +16,7 @@ import { pickModel, prepareModel } from './render/aimPick';
 import { EnemyFireFx } from './render/enemyFireFx';
 import { enemyFireOf } from './game/enemyfire';
 import { CombatHints } from './ui/combatHints';
+import { TopAimFx } from './render/topAimFx';
 import { LEVEL_HEIGHT } from './world/coords';
 import type { Monster } from './game/monster';
 
@@ -30,6 +31,7 @@ import type { Monster } from './game/monster';
 
 const STORAGE_KEY = 'cdda3d.aimModel';
 const TRAIL_KEY = 'cdda3d.aimTrail';
+const ASSIST_KEY = 'cdda3d.topAssist';
 
 function storedModel(): AimModelId | null {
   try {
@@ -182,6 +184,27 @@ function installPresenter(game: Game, renderer: Renderer, monsters: MonstersHand
     desc: 'Free aim: a faint trail behind the crosshair showing how it has been weaving over the last second (helps you time shots).',
   });
   installModelHooks(game, renderer, monsters, api);
+  // Top-down view: the aim line and ring in the world (src/render/topAimFx.ts).
+  const topFx = new TopAimFx(game, renderer, combat);
+  if (api) api.topAim = () => topFx.last;
+  try {
+    aimSettings.topAssist = localStorage.getItem(ASSIST_KEY) === '1';
+  } catch {
+    // default off
+  }
+  registerOption({
+    name: 'Top-view aim assist',
+    value: () => (aimSettings.topAssist ? 'on' : 'off'),
+    change: () => {
+      aimSettings.topAssist = !aimSettings.topAssist;
+      try {
+        localStorage.setItem(ASSIST_KEY, aimSettings.topAssist ? '1' : '0');
+      } catch {
+        // not persisted
+      }
+    },
+    desc: 'Top-down view only: when your facing line meets nothing, shots go to the nearest hostile within 12° of it. Off by default (you aim by turning).',
+  });
   // First-fight onboarding: short crosshair lines the first few times (src/ui/combatHints.ts).
   const hints = new CombatHints(game, combat, root);
   if (api) api.combatHints = hints;
@@ -221,6 +244,8 @@ function installPresenter(game: Game, renderer: Renderer, monsters: MonstersHand
       rel = { x: off.x - vk.x, y: off.y - vk.y };
       aim.markShown(off.x, off.y, now, rel.x, rel.y);
     } else aim.shown = null;
+    // (top-down: the line in the world is the reticle, and it records what it draws)
+    topFx.frame(game.paused || game.tacticalPause ? 0 : Math.max(0, Math.min(0.05, (now - aim.tickAt) / 1000)), now);
     renderer.rig.aimView.x = vk.x;
     renderer.rig.aimView.y = vk.y;
     const fov = renderer.rig.camera.fov;
@@ -306,6 +331,11 @@ function installModelHooks(game: Game, renderer: Renderer, monsters: MonstersHan
   const e = cam.matrixWorld.elements;
   // three.js (x, y up, z) -> game (x, y = z, h = y)
   const v3 = (x: number, y: number, z: number): Vec3 => ({ x, y: z, h: y });
+  aimHooks.topView = () => {
+    if (renderer.cameraMode !== 'top' || renderer.rig.drive) return null;
+    const eyeH = (p.crouching ? 1.0 : 1.6) + renderer.rig.eyeOffset + (renderer.groundAt?.(p.x, p.y, p.z) ?? 0);
+    return { eye: { x: p.x, y: p.y, h: p.z * LEVEL_HEIGHT + eyeH } };
+  };
   aimHooks.view = () => {
     const mode = renderer.cameraMode;
     if (mode === 'top') return null;
