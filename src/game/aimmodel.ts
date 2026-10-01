@@ -1,3 +1,4 @@
+import { CRAWL_HEIGHT, crawlPlanOf, type CrawlPlan, type CrawlerLike } from './crawl';
 import { FEEL, type FeelConstants } from './combatfeel';
 
 // How the survivor's skill shows up when they aim (the user: "making a player miss their shot
@@ -341,6 +342,19 @@ export function zoneOfPart(name: string, noHead = false): HitZone {
 
 /** Standing height (m) by size when no renderer says otherwise (matches monsterView's glyph heights). */
 export const BODY_HEIGHT: Record<string, number> = { tiny: 0.45, small: 0.8, medium: 1.7, large: 2.3, huge: 3.2 };
+
+const crawlCache = new WeakMap<object, CrawlPlan | null>();
+/**
+ * Height (m) of a monster's body column when no renderer says otherwise: BODY_HEIGHT by size,
+ * lowered for crawlers (game/crawl.ts) so a shot over a crawling zombie's back misses it here
+ * exactly as it does against the drawn model.
+ */
+export function bodyHeightOf(m: { size: string; type: CrawlerLike }): number {
+  const h = BODY_HEIGHT[m.size] ?? 1.7;
+  let c = crawlCache.get(m.type);
+  if (c === undefined) crawlCache.set(m.type, (c = crawlPlanOf(m.type)));
+  return c ? h * CRAWL_HEIGHT[c] : h;
+}
 
 /** Damage multiplier from the weapon skill: skill 0 lands every visible hit, but softer. */
 export function skillDamageMul(skill: number, f: FeelConstants = FEEL): number {

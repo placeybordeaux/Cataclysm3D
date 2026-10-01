@@ -18,6 +18,7 @@ import { closeGroup, openPanel } from '../ui2/window';
 import { button } from '../ui2/widgets';
 import { registerOption } from './options';
 import { sleepSpotText } from './tips_adapted';
+import { nextSpeed, timeWarp } from '../game/timewarp';
 import './rest_ui.css';
 
 type Style = 'modern' | 'classic';
@@ -69,6 +70,16 @@ export function waitChoices(game: Game): { key: string; label: string; seconds: 
 const GROUP = 'rest';
 
 /**
+ * The Rest window's fast-forward pick: the wait or sleep starts at this speed (the same steps as
+ * the fast-forward key during it). Remembered for the session: a player who sleeps at ×8 once
+ * wants it the next night too.
+ */
+let restSpeed = 1;
+export function restFastSpeed(): number {
+  return restSpeed;
+}
+
+/**
  * Lie down, switching your flashlight off first. Playtest: the phone's flashlight app, left on
  * from walking around in the dark, ran the battery flat overnight and the survivor woke up in
  * the dark with a dead phone. CDDA leaves it to you; this says what it did so it isn't magic.
@@ -92,7 +103,18 @@ export function openRest(game: Game, focus: 'sleep' | 'wait'): void {
   const run = (fn: () => void) => {
     panel.close();
     fn();
+    if (restSpeed > 1) timeWarp(game).arm(restSpeed);
   };
+  const ffKey = game.keys.label('fast_forward');
+  const speedText = () => (restSpeed > 1 ? `Fast: ×${restSpeed}` : 'Fast: off');
+  const cycleSpeed = () => {
+    restSpeed = nextSpeed(restSpeed);
+    speedBtn.querySelector('span')!.textContent = speedText();
+    speedBtn.classList.toggle('rest-fast-on', restSpeed > 1);
+  };
+  const speedBtn = button(speedText(), cycleSpeed, { small: true, key: ffKey, title: `Run the wait or the night faster: ×1, ×2, ×4, ×8, ×16. Anything dangerous drops it back to ×1.` });
+  speedBtn.classList.add('rest-fast');
+  speedBtn.classList.toggle('rest-fast-on', restSpeed > 1);
   const sleepBtn = button('Sleep here', () => run(() => sleepHere(game)), {
     key: 'Y', tone: 'accent', disabled: blocked ?? (ci.comfort <= -999 ? "You can't sleep here." : undefined),
   });
@@ -112,12 +134,16 @@ export function openRest(game: Game, focus: 'sleep' | 'wait'): void {
   const panel = openPanel({
     id: 'rest', title: 'Rest', group: GROUP, pauses: true,
     width: 'min(calc(var(--fs) * 40), 94vw)',
-    footer: `Y sleep · the key on a button waits · ${closeKeyLabel() || 'Bksp'} close`,
+    footer: `Y sleep · the key on a button waits · ${ffKey} faster · ${closeKeyLabel() || 'Bksp'} close`,
     onKey: (e) => {
       if (e.repeat) return false;
       const k = e.key.toLowerCase();
       if (game.keys.keysFor('sleep').includes(e.key) || game.keys.keysFor('wait').includes(e.key) || e.key === 'Backspace') {
         panel.close();
+        return true;
+      }
+      if (game.keys.keysFor('fast_forward').includes(e.key)) {
+        cycleSpeed();
         return true;
       }
       if (blocked) return false;
@@ -139,6 +165,7 @@ export function openRest(game: Game, focus: 'sleep' | 'wait'): void {
   const needs = restNeedsWarning(p.hungerState(), p.thirstDescription());
   if (needs) panel.body.append(h('div', { class: 'rest-block tone-warn', text: needs }));
   panel.body.append(...(focus === 'sleep' ? [sleepCard, waitCard] : [waitCard, sleepCard]));
+  panel.body.append(h('div', { class: 'rest-fast-row' }, speedBtn, h('span', { class: 'ui2-dim ui2-small', text: `${ffKey} while resting changes it too. Danger drops it back to ×1.` })));
   const r = panel.el.getBoundingClientRect();
   panel.moveTo(Math.round((innerWidth - r.width) / 2), Math.round((innerHeight - r.height) / 3));
   (focus === 'sleep' ? sleepBtn : waitBtns[3] ?? waitBtns[0])?.focus();

@@ -21,7 +21,7 @@ import { FEEL, arcFor, defenseOf, hitStopSeconds, missReason, sweptArcTarget, sw
 import { moveWithCollision, CREATURE_RADIUS } from './physics';
 import { projectileHit } from './projectile';
 import {
-  aimDirection, aimHooks, AimSway, reticleVisible, basisDirection, basisOf, swingFan, yawPitch, type Vec3, BODY_HEIGHT, Breath, bowPerfect, describeHit, freeAim, hitDamageMul, rhythmWindow, swayAmplitude, timingGames, weakSpotChance,
+  aimDirection, aimHooks, AimSway, reticleVisible, basisDirection, basisOf, swingFan, yawPitch, type Vec3, bodyHeightOf, Breath, bowPerfect, describeHit, freeAim, hitDamageMul, rhythmWindow, swayAmplitude, timingGames, weakSpotChance,
   type HitZone,
 } from './aimmodel';
 import { raycastTiles } from './raycast';
@@ -516,7 +516,7 @@ export class PlayerCombat implements GameSystem {
       }
       if (perp > R) continue;
       const half = Math.sqrt(R * R - perp * perp);
-      const body = aimHooks.body?.(m, t) ?? { height: BODY_HEIGHT[m.size] ?? 1.7, lift: 0 };
+      const body = aimHooks.body?.(m, t) ?? { height: bodyHeightOf(m), lift: 0 };
       // The stretch of the chord through the body's column where the ray is between its feet and top.
       let s0 = Math.max(0.05, t - half), s1 = t + half;
       const foot = m.z * LEVEL_HEIGHT + body.lift;
@@ -1529,7 +1529,7 @@ export class PlayerCombat implements GameSystem {
       if (perp > m.radius * (f.free ? 1.1 : 1)) continue;
       const h = arcHeight(t, f.arc);
       // Free aim: the body's visible column (feet to top), as the reticle ray tests it.
-      const body = f.free ? aimHooks.body?.(m, t) ?? { height: BODY_HEIGHT[m.size] ?? 1.7, lift: 0 } : null;
+      const body = f.free ? aimHooks.body?.(m, t) ?? { height: bodyHeightOf(m), lift: 0 } : null;
       if (h > (body ? body.lift + body.height : (HEIGHT_BY_SIZE[m.size] ?? 1.9) + 0.25)) {
         f.overflew.add(m);
         continue;
@@ -1666,7 +1666,7 @@ export class PlayerCombat implements GameSystem {
 
   /** Free aim: an arrow reaching a body strikes it where it arrives (height -> zone); no dice. */
   private flightHitsFree(f: Flight, m: Monster, perp: number, zone?: HitZone): boolean {
-    const body = aimHooks.body?.(m, Math.hypot(m.x - f.x0, m.y - f.y0)) ?? { height: BODY_HEIGHT[m.size] ?? 1.7, lift: 0 };
+    const body = aimHooks.body?.(m, Math.hypot(m.x - f.x0, m.y - f.y0)) ?? { height: bodyHeightOf(m), lift: 0 };
     const hFrac = Math.max(0, Math.min(1, (f.h - body.lift) / body.height));
     sfx.arrowHit('flesh', m);
     const r = this.freeHit(m, f.shot.damage, { zone: zone ?? aimHooks.hitZone(m, hFrac), missedBy: perp / (m.radius * 1.1), perfect: !!f.perfect, name: defName(f.ammo), cls: f.cls, gun: f.gun });

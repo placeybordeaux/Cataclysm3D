@@ -68,6 +68,8 @@ export class ActivityManager implements GameSystem {
    * at night stops when the cold turns dangerous instead of running on until you die.
    */
   readonly distractionChecks: (() => string | null)[] = [];
+  /** Told when an activity is cancelled or interrupted, with the reason (fast-forward drops to ×1). */
+  readonly cancelHooks: ((a: Activity, reason: string) => void)[] = [];
 
   constructor(private game: Game) {}
 
@@ -91,6 +93,7 @@ export class ActivityManager implements GameSystem {
     this.current = null;
     this.game.clock.warp = 1;
     this.game.message(reason, 'c_yellow');
+    for (const h of this.cancelHooks) h(a, reason);
     a.spec.onCancel?.(a.fraction, reason);
   }
 

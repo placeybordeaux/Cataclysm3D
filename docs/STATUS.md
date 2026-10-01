@@ -96,6 +96,7 @@ Screenshots for every area: `docs/screenshots/wave3/<area>/` (before/after pairs
 | `docs/READABILITY.md` | Wave 3: haze, far ground, form lighting, shimmer |
 | `docs/FLORA.md` | Wave 3: 3D trees and bushes |
 | `docs/ADAPTATION.md` | Wave 3: adaptation principles, playtest findings, switches |
+| `docs/MONSTER_PLACEMENT.md` | Wave 3: monsters only where they can stand (standing.ts), crawling bodies |
 | `docs/GALLERY.md` | Style gallery (`/?gallery`): every wave-3 switch on fixed scenes, live / A/B / Matrix compare, copy as defaults |
 | `docs/QA_WAVE3.md` | Wave-3 integration QA at 3440x1304 (Chromium + Firefox): issues, realinput per scenario, perf |
 | `docs/PERF.md` | Performance: F3 overlay / Shift+F3 dump, `tools/perf-report.ts`, streaming fixes (build order by need, stand-ins), `npm run perf` budgets |
@@ -109,7 +110,9 @@ crosshair: wheel select, `e` take, `r` take all · `g` pick up / Area loot · `1
 `` ` `` tactical pause · `&` craft · `*` construct · `@` character · `m` map · `J` journal ·
 `M` missions · `C` chat · `p` bionics · `[` mutations · `_` martial arts · `)` achievements ·
 `F` flashlight · `r` reload · `b` fire mode · `X` smash (or just hit things) · `G` grab / let go
-(walk to push or pull furniture and carts) · `t` throw · `F5` save ·
+(walk to push or pull furniture and carts) · `t` throw · `R` read · `l` wait · `$` sleep ·
+`+` fast-forward a timed action (reading, crafting, waiting, sleeping: ×1 → ×2 → ×4 → ×8 → ×16,
+danger drops it to ×1; docs/BALANCE.md "Fast-forward") · `F5` save ·
 `F11` fullscreen · `?` help · Esc pause menu · **Space closes any menu** (so does the key that
 opened it; rebindable as `close_menu`) and keeps the mouse captured.
 

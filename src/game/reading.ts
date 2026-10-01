@@ -7,8 +7,9 @@ import { cddaText } from './units';
 // the first time you open a book you learn what's in it at once (skim); each session
 // ("chapter") then gives the book's fun as morale, memorises every recipe in it your skill can
 // follow, and trains its skill up to max_level. "Read until you gain a level" keeps going
-// session after session; "read once" stops after one. Martial-arts manuals train through
-// readHooks (src/game/martialarts.ts).
+// session after session; "read once" stops after one. "Read until done" (ours, not BN: the same
+// as choosing "until you gain a level" again after each level) keeps going until the book has
+// nothing left to teach you. Martial-arts manuals train through readHooks (src/game/martialarts.ts).
 
 export interface BookData {
   skill?: string;
@@ -116,11 +117,57 @@ export function identifyLines(c: Character, it: Item): string[] {
 
 /** Character::adjust_for_focus. */
 function adjustForFocus(c: Character, amount: number): number {
+  return c.rollRemainder((amount * effectiveFocus(c)) / 100);
+}
+
+function effectiveFocus(c: Character): number {
   let focus = c.focus + c.enchantBonus('EFFECTIVE_FOCUS', c.focus);
   if (c.hasTrait('FASTLEARNER')) focus += 15;
   if (c.hasTrait('SLOWLEARNER')) focus -= 15;
   focus += (c.int - 8) * 5;
-  return c.rollRemainder((amount * focus) / 100);
+  return focus;
+}
+
+/**
+ * trainFromBook's min/max experience for one session at skill `lvl`, before the random roll.
+ * `adjust` is adjustForFocus (rolling) or its expectation (the estimate below).
+ */
+function sessionExRange(c: Character, b: BookData, lvl: number, adjust: (amount: number) => number): [number, number] {
+  const minutes = b.time / 60;
+  let minEx = adjust(Math.max(1, Math.floor(minutes / 10 + c.int / 4)));
+  let maxEx = adjust(Math.floor(minutes / 5 + c.int / 2 - lvl));
+  maxEx = Math.max(minEx, Math.min(10, Math.max(2, maxEx)));
+  minEx = Math.max(1, minEx * (lvl + 1));
+  maxEx = Math.max(minEx, maxEx * (lvl + 1));
+  return [minEx, maxEx];
+}
+
+/**
+ * About how many more chapters until the next level (and until the book's max level), at the
+ * reader's focus right now: the reading card's "~3 chapters to level 2". An estimate: focus
+ * drifts while you read and each chapter's experience is a roll. null when the book doesn't
+ * train you any further.
+ */
+export function chaptersToLevel(c: Character, it: Item): { next: number; done: number; nextLevel: number; maxLevel: number } | null {
+  const b = bookData(it);
+  if (!b?.skill) return null;
+  const lvl0 = c.getSkill(b.skill);
+  const top = Math.min(b.level, 10);
+  if (lvl0 >= top) return null;
+  const expect = (amount: number) => (amount * effectiveFocus(c)) / 100;
+  let exercise = c.skills[b.skill]?.exercise ?? 0;
+  let next = 0, done = 0;
+  for (let lvl = lvl0; lvl < top; lvl++) {
+    const [lo, hi] = sessionExRange(c, b, lvl, expect);
+    // train(): (lvl+1) × roll(min..max), stored ×100
+    const perSession = Math.max(1, (lvl + 1) * ((lo + hi) / 2) * 100);
+    const need = 10000 * (lvl + 1) ** 2 - exercise;
+    const n = Math.max(1, Math.ceil(need / perSession));
+    if (lvl === lvl0) next = n;
+    done += n;
+    exercise = 0;
+  }
+  return { next, done, nextLevel: lvl0 + 1, maxLevel: top };
 }
 
 /** BN SkillLevel::train (exercise stored ×100: a level takes 10000 × (level+1)²). */
@@ -151,12 +198,7 @@ export function trainFromBook(c: Character, it: Item, host?: CraftHost): boolean
   if (!b.skill) return false;
   const lvl = c.getSkill(b.skill);
   if (lvl >= b.level || lvl >= 10) return false;
-  const minutes = b.time / 60;
-  let minEx = adjustForFocus(c, Math.max(1, Math.floor(minutes / 10 + c.int / 4)));
-  let maxEx = adjustForFocus(c, Math.floor(minutes / 5 + c.int / 2 - lvl));
-  maxEx = Math.max(minEx, Math.min(10, Math.max(2, maxEx)));
-  minEx = Math.max(1, minEx * (lvl + 1));
-  maxEx = Math.max(minEx, maxEx * (lvl + 1));
+  const [minEx, maxEx] = sessionExRange(c, b, lvl, (a) => adjustForFocus(c, a));
   const leveled = train(c, b.skill, (lvl + 1) * c.rng.int(minEx, maxEx));
   const say = (t: string, col?: string) => (host ? host.message(t, col) : c.msg(t, col));
   if (leveled) say(`You increase ${c.skillName(b.skill)} to level ${lvl + 1}.`, 'c_light_green');
@@ -179,7 +221,7 @@ export function learnBookRecipes(c: Character, it: Item, host?: CraftHost): stri
 /** Called after each full read session of a book (martial-arts manuals teach their style). */
 export const readHooks: ((c: Character, it: Item, host: CraftHost) => void)[] = [];
 
-export type ReadMode = 'until_level' | 'once';
+export type ReadMode = 'until_level' | 'until_done' | 'once';
 
 /** do_read: one session. Returns whether to keep reading (until-level mode, no level yet). */
 function finishSession(host: CraftHost, it: Item, mode: ReadMode): boolean {
@@ -192,6 +234,7 @@ function finishSession(host: CraftHost, it: Item, mode: ReadMode): boolean {
   if (b.skill && c.getSkill(b.skill) < b.level && c.getSkill(b.skill) < 10) {
     const leveled = trainFromBook(c, it, host);
     if (!leveled && mode === 'until_level') keepGoing = true;
+    if (mode === 'until_done' && c.getSkill(b.skill) < b.level && c.getSkill(b.skill) < 10) keepGoing = true;
     if (c.getSkill(b.skill) >= b.level && !teachableRecipes(c, it).length) host.message(`You can no longer learn from ${cddaText(it.def.name)}.`);
   } else if (b.skill && !teachableRecipes(c, it).length) host.message(`You can no longer learn from ${cddaText(it.def.name)}.`);
   return keepGoing;
