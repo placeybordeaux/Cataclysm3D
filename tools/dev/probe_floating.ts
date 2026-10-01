@@ -93,8 +93,9 @@ if (argv.includes('--bench')) {
   // settleDormant cost: first pass checks everyone, later passes only monsters whose tile changed
   for (const m of sys.all) m.dormant = true;
   let t = performance.now();
-  sys.settleDormant();
+  const moved = sys.settleDormant();
   const first = performance.now() - t;
+  console.log(`first settle pass moved ${moved}`);
   t = performance.now();
   for (let i = 0; i < 100; i++) sys.settleDormant();
   console.log(`settleDormant over ${sys.all.length}: first ${first.toFixed(2)} ms, then ${((performance.now() - t) / 100).toFixed(3)} ms/pass (once a second)`);
