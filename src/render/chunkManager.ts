@@ -4,6 +4,7 @@ import { CHUNK } from '../world/coords';
 import { buildChunkMeshSteps, ShapeTable, type ChunkMeshData, type MeshExtras } from './chunkMesh';
 import type { TreeSpec } from './trees';
 import { stepUntil } from './steps';
+import { markBatchable } from './chunkBatch';
 import { frameStats } from '../perfDebug';
 import { puddleMaterial } from './props';
 import { worldMaterials } from './materials';
@@ -694,6 +695,7 @@ export class ChunkManager {
       mesh.castShadow = true;
       mesh.receiveShadow = true;
       mesh.matrixAutoUpdate = false;
+      markBatchable(mesh); // far chunks' page meshes are merged per block (chunkBatch.ts)
       g.add(mesh);
     }
     if (data.puddles && data.puddles.vertexCount) {

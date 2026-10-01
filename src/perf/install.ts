@@ -14,6 +14,7 @@ import { Telemetry, type MeshKind } from './telemetry';
 import { PerfOverlay } from './overlay';
 import { ringToFrames, summarize, type PerfDump } from './analyze';
 import { installPlaceholders } from '../render/placeholders';
+import { installChunkBatch } from '../render/chunkBatch';
 
 // Wires the telemetry (telemetry.ts) into the running game and gives the player and us ways
 // to use it (docs/PERF.md):
@@ -41,7 +42,7 @@ export function installPerf(game: Game, renderer: Renderer, api: DebugApi, prefe
   const params = new URLSearchParams(location.search);
   const chunks = renderer.chunks;
   const three = renderer.three;
-  const glInfo = { calls: 0, triangles: 0, geometries: 0, textures: 0 };
+  const glInfo = { calls: 0, triangles: 0, geometries: 0, textures: 0, programs: 0 };
   const tel = new Telemetry({
     player: () => game.player,
     view: () => {
@@ -165,7 +166,7 @@ export function installPerf(game: Game, renderer: Renderer, api: DebugApi, prefe
   // ---- overlay
   const hint = () => `${game.keys.label('perf_overlay')} hide · Shift+${game.keys.label('perf_overlay')} save last 60 s${lastDump ? `  (saved ${lastDump})` : ''}`;
   let lastDump = '';
-  const overlay = new PerfOverlay(tel, hint, () => [`stand-ins ${placeholders.enabled ? placeholders.stats.shown : 'off'}   schedule ${chunks.schedule}   prefetch ${prefetch ? `${prefetch.stats.prefetched} idle / ${prefetch.stats.sync} in frame` : 'off'}`]);
+  const overlay = new PerfOverlay(tel, hint, () => [`stand-ins ${placeholders.enabled ? placeholders.stats.shown : 'off'}   batches ${batcher.enabled ? `${batcher.stats.batches} (${batcher.stats.hidden} meshes -> ${batcher.stats.merged})` : 'off'}   schedule ${chunks.schedule}   prefetch ${prefetch ? `${prefetch.stats.prefetched} idle / ${prefetch.stats.sync} in frame` : 'off'}`]);
   const show = (on: boolean) => {
     overlay.show(on);
     setDetail(on);
@@ -179,6 +180,7 @@ export function installPerf(game: Game, renderer: Renderer, api: DebugApi, prefe
     glInfo.triangles = info.render.triangles;
     glInfo.geometries = info.memory.geometries;
     glInfo.textures = info.memory.textures;
+    glInfo.programs = info.programs?.length ?? 0;
     if (inflight.length) pollGpu();
     tel.sample(workMs, now, loopMs, sec);
     overlay.update(now);
@@ -277,6 +279,9 @@ export function installPerf(game: Game, renderer: Renderer, api: DebugApi, prefe
 
   // ---- stand-ins for unbuilt chunks (render/placeholders.ts)
   const placeholders = installPlaceholders(renderer, () => game.player, api as unknown as Record<string, unknown>);
+
+  // ---- far chunks merged per block: fewer draw calls (render/chunkBatch.ts)
+  const batcher = installChunkBatch(renderer, () => game.player, api as unknown as Record<string, unknown>);
 
   // ---- streaming schedule (chunkManager.ts): 'need' (default) or 'distance' (wave 3), for A/B
   const sched = params.get('stream');

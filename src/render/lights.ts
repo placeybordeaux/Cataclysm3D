@@ -369,7 +369,11 @@ export class LightManager {
     // Flashlight: held low and to the right so its shadows are visible from the eye.
     const fl = this.flashlight;
     fl.intensity = this.flashlightOn ? 14 : 0;
-    fl.castShadow = this.flashlightOn;
+    // castShadow stays on: toggling it changes the shadow-light count every material is
+    // compiled for, so the first flashlight switch recompiled every shader (a 0.8-1 s freeze,
+    // docs/PERF.md). Off, its shadow map just isn't redrawn (intensity 0 hides it).
+    fl.castShadow = true;
+    fl.shadow.autoUpdate = this.flashlightOn;
     cam.updateMatrixWorld();
     fl.position.set(0.22, -0.28, 0.05).applyMatrix4(cam.matrixWorld);
     fl.target.position.set(0, 0, -10).applyMatrix4(cam.matrixWorld);
