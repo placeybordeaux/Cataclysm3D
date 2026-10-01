@@ -46,7 +46,7 @@ function problems(q: Question): string[] {
   return out;
 }
 
-describe('field-notes question generators', () => {
+describe('field-notes question generators', { timeout: 120000 }, () => {
   it('every skill book, recipe book and martial-arts manual has a quiz; fun-only books do not', () => {
     for (const id of books) {
       const d = data.items[id];

@@ -23,7 +23,7 @@ import { itemDisplayName, qualityName } from '../requirements';
 import { cddaText } from '../units';
 
 /** What an option's key names: an item id, a material id, a vehicle fuel id… */
-export type Domain = 'item' | 'material' | 'fuel' | 'technique' | 'part' | 'recipe';
+export type Domain = 'item' | 'material' | 'fuel' | 'technique' | 'style' | 'part' | 'recipe';
 
 export type TemplateId =
   | 'recipe_uses'
@@ -42,6 +42,8 @@ export type TemplateId =
   | 'weapon_class'
   | 'damage_most'
   | 'ma_technique'
+  | 'ma_style'
+  | 'ma_weapon'
   | 'price_most'
   | 'encumbrance_most'
   | 'swim_gear'
@@ -97,6 +99,16 @@ const indexCache = new WeakMap<GameData, Index>();
 
 const HIDDEN_CATEGORIES = new Set(['bionics', 'artifacts', 'mutagen', 'maps', 'books']);
 
+/**
+ * What an option calls an item: BN's name minus " (off)" — the switched-off tool *is* the
+ * flashlight you carry (its "(on)" twin is a separate, ineligible item).
+ */
+export function itemName(data: GameData, id: string): string {
+  return itemDisplayName(data, id).replace(/ \(off\)$/, '');
+}
+
+const STATE_SUFFIX = /\((on|active|inactive|retracted|extended|deployed|folded|unfolded|open|closed|armed|unarmed|charged|empty|full)\)$/i;
+
 function eligible(id: string, d: ItemDef): boolean {
   if (d.flags?.includes('PSEUDO') || d.flags?.includes('NO_SPAWN')) return false;
   // "flashlight (on)" and friends are states of another item, not things you find.
@@ -104,6 +116,8 @@ function eligible(id: string, d: ItemDef): boolean {
   if (HIDDEN_CATEGORIES.has(d.category as string)) return false;
   const n = cddaText(d.name);
   if (!n || /debug|fake|placeholder/i.test(n) || /debug|^fake_/i.test(id)) return false;
+  // "radio (off)", "quarterstaff (retracted)": a state of a thing reads oddly as an answer.
+  if (STATE_SUFFIX.test(n)) return false;
   return true;
 }
 
@@ -115,7 +129,7 @@ function index(data: GameData): Index {
   const items: string[] = [];
   // Every item's name, eligible or not: an ineligible item sharing a name still makes it ambiguous.
   for (const [id, d] of Object.entries(data.items)) {
-    const n = itemDisplayName(data, id).toLowerCase();
+    const n = itemName(data, id).toLowerCase();
     (byName.get(n) ?? byName.set(n, []).get(n)!).push(id);
     if (!eligible(id, d)) continue;
     items.push(id);
@@ -131,33 +145,67 @@ function index(data: GameData): Index {
 export function domainName(data: GameData, domain: Domain, key: string): string {
   switch (domain) {
     case 'item':
-      return itemDisplayName(data, key);
+      return itemName(data, key);
     case 'material':
       return cddaText(data.misc.material?.[key]?.name) || key;
     case 'fuel':
       return fuelName(data, key);
     case 'technique':
       return cddaText(data.misc.technique?.[key]?.name) || key;
+    case 'style':
+      return cddaText(data.misc.martial_art?.[key]?.name) || key;
     case 'part':
       return cddaText(vehicleParts(data)[key]?.name) || key;
     case 'recipe': {
-      const r = data.recipes.find((x) => x.id === key);
+      const r = recipeById(data).get(key);
       return r ? recipeName(data, r) : key;
     }
   }
 }
 
+const recipeIdCache = new WeakMap<GameData, Map<string, RecipeDef>>();
+function recipeById(data: GameData): Map<string, RecipeDef> {
+  let m = recipeIdCache.get(data);
+  if (!m) recipeIdCache.set(data, (m = new Map(data.recipes.filter((r) => r.type === 'recipe').map((r) => [r.id, r]))));
+  return m;
+}
+
+/** domain → lower-case name → keys; built on first use (vehicles may arrive later: not cached empty). */
+const nameCache = new WeakMap<GameData, Map<Domain, Map<string, string[]>>>();
+function domainKeys(data: GameData, domain: Domain): string[] {
+  switch (domain) {
+    case 'item':
+      return Object.keys(data.items);
+    case 'material':
+      return Object.keys(data.misc.material ?? {});
+    case 'fuel':
+      return Object.keys(fuels(data));
+    case 'technique':
+      return Object.keys(data.misc.technique ?? {});
+    case 'style':
+      return Object.keys(data.misc.martial_art ?? {});
+    case 'part':
+      return Object.keys(vehicleParts(data));
+    case 'recipe':
+      return [...recipeById(data).keys()];
+  }
+}
+
 /** Every key in `domain` with this display name (case-insensitive): what a player could mean by it. */
 export function keysNamed(data: GameData, domain: Domain, name: string): string[] {
-  const n = name.toLowerCase();
-  if (domain === 'item') return index(data).byName.get(n) ?? [];
-  const all: string[] =
-    domain === 'material' ? Object.keys(data.misc.material ?? {})
-    : domain === 'fuel' ? Object.keys(fuels(data))
-    : domain === 'technique' ? Object.keys(data.misc.technique ?? {})
-    : domain === 'part' ? Object.keys(vehicleParts(data))
-    : data.recipes.filter((r) => r.type === 'recipe').map((r) => r.id);
-  return all.filter((k) => domainName(data, domain, k).toLowerCase() === n);
+  let per = nameCache.get(data);
+  if (!per) nameCache.set(data, (per = new Map()));
+  let m = per.get(domain);
+  if (!m) {
+    m = new Map();
+    const keys = domainKeys(data, domain);
+    for (const k of keys) {
+      const n = domainName(data, domain, k).toLowerCase();
+      (m.get(n) ?? m.set(n, []).get(n)!).push(k);
+    }
+    if (keys.length) per.set(domain, m);
+  }
+  return m.get(name.toLowerCase()) ?? [];
 }
 
 /**
@@ -172,6 +220,12 @@ export function nameVerdict(data: GameData, domain: Domain, key: string, rule: (
 }
 
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+/** "a flashlight", "an electric soldering iron" (names starting "pair of …" read fine with "a"). */
+const an = (s: string) => {
+  // Acronyms are spelled out: "an RC car", "a UPS".
+  const vowel = /^[A-Z]{2}/.test(s) ? /^[AEFHILMNORSX]/.test(s) : /^[aeiou]/i.test(s) && !/^(one|uni|use|eu)/i.test(s);
+  return vowel ? `an ${s}` : `a ${s}`;
+};
 
 // ------------------------------------------------------------------ data helpers
 
@@ -192,7 +246,7 @@ function fuels(data: GameData): Record<string, Fuel> {
   return vehicleFiles.get(data)?.fuels ?? {};
 }
 function fuelName(data: GameData, id: string): string {
-  return fuels(data)[id]?.name ?? itemDisplayName(data, id);
+  return fuels(data)[id]?.name ?? itemName(data, id);
 }
 
 const qualityLevel = (d: ItemDef | undefined, q: string): number => {
@@ -322,6 +376,11 @@ function itemsIn(ctx: Ctx, cats: readonly string[], extra?: (id: string, d: Item
   return out;
 }
 
+/** Where a "which tool…" answer comes from: tools first (a broadsword *can* cut vegetables, but…). */
+function toolAnswer(ctx: Ctx, rule: (id: string) => boolean): string | null {
+  return pickItem(ctx, itemsIn(ctx, TOOL_CATS.filter((c) => c !== 'weapons'), (id) => rule(id))) ?? pickItem(ctx, itemsIn(ctx, ['weapons'], (id) => rule(id)));
+}
+
 const TOOL_CATS = ['tools', 'tools_cooking', 'tools_workshop', 'tools_farming', 'tools_chemistry', 'tools_entry', 'weapons', 'electronics'];
 
 /** "Which of these is better at X?" over numeric `value`: a clear winner by the tier's margin. */
@@ -343,7 +402,7 @@ function compareMost(
     const seen = new Set<string>();
     for (let t = 0; picked.length < tier.options && t < 60; t++) {
       const id = pickItem(ctx, cands)!;
-      const n = itemDisplayName(ctx.data, id).toLowerCase();
+      const n = itemName(ctx.data, id).toLowerCase();
       if (seen.has(n)) continue;
       seen.add(n);
       picked.push(id);
@@ -406,7 +465,7 @@ const recipeUses: Template = (ctx) => {
   const cat = String(data.items[right].category ?? '');
   const pool = itemsIn(ctx, [cat]);
   const name = recipeName(data, r);
-  const rightName = itemDisplayName(data, right);
+  const rightName = itemName(data, right);
   return assemble(ctx, 'recipe_uses', 'item', `Which of these goes into making ${name}?`, right, pool, rule,
     isComp ? `${cap(name)} is made with ${rightName}.` : `You need ${rightName} as a tool for ${name}.`);
 };
@@ -419,12 +478,12 @@ const recipeQuality: Template = (ctx) => {
   const q = rng.pick(rng.pick((r.qualities ?? []).filter((g) => g.length)));
   const qn = qualityName(data, q.id);
   const rule = (id: string) => qualityLevel(data.items[id], q.id) >= q.level;
-  const right = pickItem(ctx, itemsIn(ctx, TOOL_CATS, (id) => rule(id)));
+  const right = toolAnswer(ctx, rule);
   if (!right) return null;
   const pool = itemsIn(ctx, TOOL_CATS, (_id, d) => qualityLevel(d, q.id) === 0);
   const name = recipeName(data, r);
   return assemble(ctx, 'recipe_quality', 'item', `Making ${name} takes a tool for ${qn}. Which of these will do?`, right, pool, rule,
-    `${cap(itemDisplayName(data, right))}: ${qn} ${qualityLevel(data.items[right], q.id)} (needs ${q.level}).`);
+    `${cap(itemName(data, right))}: ${qn} ${qualityLevel(data.items[right], q.id)} (needs ${q.level}).`);
 };
 
 const bookMakes: Template = (ctx) => {
@@ -432,7 +491,7 @@ const bookMakes: Template = (ctx) => {
   if (ctx.recipes.length < 1) return null;
   const taughtResults = new Set(ctx.recipes.map((r) => r.result));
   const taughtNames = new Set(ctx.recipes.map((r) => recipeName(data, r).toLowerCase()));
-  const rule = (id: string) => taughtResults.has(id) || taughtNames.has(itemDisplayName(data, id).toLowerCase());
+  const rule = (id: string) => taughtResults.has(id) || taughtNames.has(itemName(data, id).toLowerCase());
   const r = rng.pick(ctx.recipes);
   const right = r.result;
   if (!index(data).itemSet.has(right)) return null;
@@ -461,7 +520,7 @@ const recipeHardest: Template = (ctx) => {
     if (best.lo < restMax + 2) continue;
     const thr = restMax + 1;
     const rule = (id: string) => {
-      const r = data.recipes.find((x) => x.id === id);
+      const r = recipeById(data).get(id);
       return !!r && Math.min(...sameNameRecipes(data, r).map((x) => x.difficulty)) >= thr;
     };
     const q = assemble(ctx, 'recipe_hardest', 'recipe', 'Which of these takes the most skill to make?', best.id, picked.slice(1).map((p) => p.id), rule,
@@ -495,11 +554,11 @@ const qualityItem: Template = (ctx) => {
   const q = rng.weighted(qs);
   const qn = qualityName(data, q);
   const rule = (id: string) => qualityLevel(data.items[id], q) >= 1;
-  const right = pickItem(ctx, itemsIn(ctx, TOOL_CATS, (id) => rule(id)));
+  const right = toolAnswer(ctx, rule);
   if (!right) return null;
   const pool = itemsIn(ctx, TOOL_CATS, (_id, d) => qualityLevel(d, q) === 0);
   return assemble(ctx, 'quality_item', 'item', `Which of these is a tool for ${qn}?`, right, pool, rule,
-    `${cap(itemDisplayName(data, right))}: ${qn} ${qualityLevel(data.items[right], q)}.`);
+    `${cap(itemName(data, right))}: ${qn} ${qualityLevel(data.items[right], q)}.`);
 };
 
 const FOOD_CATS = ['food', 'cooking_ingredients'];
@@ -507,7 +566,7 @@ const days = (s: number) => (s >= 86400 ? `${Math.round((s / 86400) * 10) / 10} 
 
 const spoilsFirst: Template = (ctx) =>
   compareMost(ctx, 'spoils_first', itemsIn(ctx, FOOD_CATS), (id) => spoils(ctx.data.items[id]), 'Which of these goes bad first?',
-    (id, v) => `${cap(itemDisplayName(ctx.data, id))} spoils in about ${days(v)}.`, true);
+    (id, v) => `${cap(itemName(ctx.data, id))} spoils in about ${days(v)}.`, true);
 
 const neverSpoils: Template = (ctx) => {
   const { data } = ctx;
@@ -520,7 +579,7 @@ const neverSpoils: Template = (ctx) => {
   if (!right) return null;
   const pool = itemsIn(ctx, FOOD_CATS, (_id, d) => comestible(d) && spoils(d) > 0);
   return assemble(ctx, 'never_spoils', 'item', 'Which of these keeps without spoiling?', right, pool, rule,
-    `${cap(itemDisplayName(data, right))} never goes bad; the others rot.`);
+    `${cap(itemName(data, right))} never goes bad; the others rot.`);
 };
 
 const HEALS: { key: 'bleed' | 'disinfectant_power' | 'bandages_power'; prompt: string; says: string }[] = [
@@ -535,7 +594,7 @@ const heal: Template = (ctx) => {
   const right = pickItem(ctx, itemsIn(ctx, ['drugs', 'scrap_fabric'], (id) => rule(id)));
   if (!right) return null;
   const pool = itemsIn(ctx, ['drugs'], (id) => !rule(id));
-  return assemble(ctx, 'heal', 'item', h.prompt, right, pool, rule, `${cap(itemDisplayName(data, right))} ${h.says}.`);
+  return assemble(ctx, 'heal', 'item', h.prompt, right, pool, rule, `${cap(itemName(data, right))} ${h.says}.`);
 };
 
 const GUN_SKILLS = new Set(['gun', 'pistol', 'rifle', 'shotgun', 'smg', 'launcher', 'archery']);
@@ -553,7 +612,7 @@ const gunAmmo: Template = (ctx) => {
   const right = pickItem(ctx, itemsIn(ctx, ['ammo'], (id) => rule(id)));
   if (!right) return null;
   const pool = itemsIn(ctx, ['ammo'], (id, d) => d.type === 'AMMO' && !rule(id));
-  const gn = itemDisplayName(data, gun);
+  const gn = itemName(data, gun);
   const types = [...takes].map((t) => cddaText(data.misc.ammunition_type?.[t]?.name) || t).join(' or ');
   return assemble(ctx, 'gun_ammo', 'item', `What does the ${gn} fire?`, right, pool, rule, `The ${gn} takes ${types}.`);
 };
@@ -567,8 +626,8 @@ const gunMagazine: Template = (ctx) => {
   const right = pickItem(ctx, [...fits].filter((id) => index(data).itemSet.has(id) && familiarOk(ctx, id)));
   if (!right) return null;
   const pool = itemsIn(ctx, ['magazines'], (id, d) => !fits.has(id) && !ammoTypesOf(d).includes('battery'));
-  const gn = itemDisplayName(data, gun);
-  return assemble(ctx, 'gun_magazine', 'item', `Which magazine fits the ${gn}?`, right, pool, rule, `The ${gn} loads ${itemDisplayName(data, right)}.`);
+  const gn = itemName(data, gun);
+  return assemble(ctx, 'gun_magazine', 'item', `Which magazine fits the ${gn}?`, right, pool, rule, `The ${gn} loads ${itemName(data, right)}.`);
 };
 
 const gunSkill: Template = (ctx) => {
@@ -581,7 +640,7 @@ const gunSkill: Template = (ctx) => {
   if (!right) return null;
   const pool = itemsIn(ctx, ['guns', 'weapons'], (_id, d) => d.type === 'GUN' && !!d.skill && d.skill !== s);
   return assemble(ctx, 'gun_skill', 'item', `Which of these do you shoot with the ${sn} skill?`, right, pool, rule,
-    `${cap(itemDisplayName(data, right))} is a ${sn.toLowerCase()} weapon.`);
+    `${cap(itemName(data, right))} is a ${sn.toLowerCase()} weapon.`);
 };
 
 const batteryFits: Template = (ctx) => {
@@ -595,8 +654,8 @@ const batteryFits: Template = (ctx) => {
   const right = pickItem(ctx, [...fits].filter((id) => index(data).itemSet.has(id)));
   if (!right) return null;
   const pool = index(data).items.filter((id) => data.items[id].type === 'MAGAZINE' && ammoTypesOf(data.items[id]).includes('battery') && !fits.has(id));
-  const tn = itemDisplayName(data, tool);
-  return assemble(ctx, 'battery_fits', 'item', `Which battery fits a ${tn}?`, right, pool, rule, `A ${tn} takes ${[...fits].map((f) => itemDisplayName(data, f)).slice(0, 3).join(' or ')}.`);
+  const tn = itemName(data, tool);
+  return assemble(ctx, 'battery_fits', 'item', `Which battery fits ${an(tn)}?`, right, pool, rule, `${cap(an(tn))} takes ${[...fits].map((f) => itemName(data, f)).slice(0, 3).join(' or ')}.`);
 };
 
 const needsPower: Template = (ctx) => {
@@ -606,7 +665,7 @@ const needsPower: Template = (ctx) => {
   const right = pickItem(ctx, itemsIn(ctx, ['electronics', 'tools'], (id) => rule(id)));
   if (!right) return null;
   const pool = itemsIn(ctx, ['electronics', 'tools', 'tools_workshop'], (_id, d) => d.type === 'TOOL' && !powered(d) && !asArray(d.ammo as string | string[] | undefined).length);
-  return assemble(ctx, 'needs_power', 'item', 'Which of these runs on batteries?', right, pool, rule, `${cap(itemDisplayName(data, right))} needs battery charge.`);
+  return assemble(ctx, 'needs_power', 'item', 'Which of these runs on batteries?', right, pool, rule, `${cap(itemName(data, right))} needs battery charge.`);
 };
 
 const WEAPON_CLASSES: Record<string, string[]> = {
@@ -636,7 +695,7 @@ const weaponClass: Template = (ctx) => {
   if (!right) return null;
   const isGun = data.items[right].type === 'GUN';
   const pool = itemsIn(ctx, ['weapons', 'guns'], (_id, d) => !has(d) && asArray(d.weapon_category as string | string[] | undefined).length > 0 && (d.type === 'GUN') === isGun);
-  return assemble(ctx, 'weapon_class', 'item', `Which of these is one of the ${cn}?`, right, pool, rule, `${cap(itemDisplayName(data, right))} counts as ${cn.toLowerCase()} (techniques for that class work with it).`);
+  return assemble(ctx, 'weapon_class', 'item', `Which of these is one of the ${cn}?`, right, pool, rule, `${cap(itemName(data, right))} counts as ${cn.toLowerCase()} (techniques for that class work with it).`);
 };
 
 const DAMAGE: Record<string, string[]> = { bashing: ['bash'], cutting: ['cut'], stabbing: ['stab'], melee: ['bash', 'cut', 'stab'], unarmed: ['bash'], throw: ['bash', 'stab'] };
@@ -647,13 +706,17 @@ const damageMost: Template = (ctx) => {
   const t = ctx.rng.pick(kinds);
   const pool = itemsIn(ctx, ['weapons', 'tools'], (_id, d) => d.type !== 'GUN');
   return compareMost(ctx, 'damage_most', pool, (id) => meleeDamage(ctx.data.items[id], t), `Which of these does the most ${DAMAGE_WORD[t]} damage in melee?`,
-    (id, v) => `${cap(itemDisplayName(ctx.data, id))}: ${v} ${DAMAGE_WORD[t]}.`);
+    (id, v) => `${cap(itemName(ctx.data, id))}: ${v} ${DAMAGE_WORD[t]}.`);
 };
 
 type Style = { id: string; name: unknown; techniques?: string[] };
+/** Martial arts with techniques, minus the debug style. */
+function realStyles(data: GameData): Style[] {
+  return Object.values((data.misc.martial_art ?? {}) as Record<string, Style>).filter((s) => !/debug/i.test(s.id + cddaText(s.name)) && (s.techniques ?? []).some((t) => data.misc.technique?.[t]));
+}
 const maTechnique: Template = (ctx) => {
   const { data, rng } = ctx;
-  const styles = Object.values((data.misc.martial_art ?? {}) as Record<string, Style>).filter((s) => (s.techniques ?? []).some((t) => data.misc.technique?.[t]));
+  const styles = realStyles(data);
   const own = ctx.book.martial_art as string | undefined;
   const style = own ? styles.find((s) => s.id === own) : rng.pick(styles);
   if (!style) return null;
@@ -666,13 +729,42 @@ const maTechnique: Template = (ctx) => {
   return assemble(ctx, 'ma_technique', 'technique', `Which of these is a ${sn} technique?`, right, pool, rule, `${cap(domainName(data, 'technique', right))} is taught by ${sn}.`);
 };
 
+const maStyle: Template = (ctx) => {
+  const { data, rng } = ctx;
+  const own = ctx.book.martial_art as string | undefined;
+  const styles = realStyles(data);
+  const style = own ? styles.find((s) => s.id === own) : rng.pick(styles);
+  if (!style) return null;
+  const tech = rng.pick((style.techniques ?? []).filter((t) => data.misc.technique?.[t]));
+  const tn = domainName(data, 'technique', tech).toLowerCase();
+  // Right: any style teaching a technique of that name (several share "Disarm", "Feint"…).
+  const rule = (k: string) => (((data.misc.martial_art?.[k] as Style | undefined)?.techniques ?? []).some((t) => data.misc.technique?.[t] && domainName(data, 'technique', t).toLowerCase() === tn));
+  return assemble(ctx, 'ma_style', 'style', `Which martial art teaches ${cap(tn)}?`, style.id, styles.map((s) => s.id), rule, `${cap(tn)} is a ${cddaText(style.name)} technique.`);
+};
+
+const maWeapon: Template = (ctx) => {
+  const { data, rng } = ctx;
+  const own = ctx.book.martial_art as string | undefined;
+  const styles = Object.values((data.misc.martial_art ?? {}) as Record<string, Style & { weapon_category?: string[] }>).filter((s) => (s.weapon_category ?? []).length);
+  const style = own ? styles.find((s) => s.id === own) : rng.pick(styles);
+  if (!style) return null;
+  const cats = new Set(style.weapon_category);
+  const rule = (id: string) => asArray(data.items[id]?.weapon_category as string | string[] | undefined).some((c) => cats.has(c));
+  const right = pickItem(ctx, itemsIn(ctx, ['weapons', 'tools'], (id) => rule(id)));
+  if (!right) return null;
+  const pool = itemsIn(ctx, ['weapons'], (id, d) => !rule(id) && asArray(d.weapon_category as string | string[] | undefined).length > 0 && d.type !== 'GUN');
+  const sn = cddaText(style.name);
+  return assemble(ctx, 'ma_weapon', 'item', `Which of these weapons can you fight with in ${sn}?`, right, pool, rule,
+    `${sn} works with ${[...cats].map((c) => cddaText(data.misc.weapon_category?.[c]?.name).toLowerCase()).join(' and ')}.`);
+};
+
 const priceMost: Template = (ctx) =>
   compareMost(ctx, 'price_most', itemsIn(ctx, ['valuables', 'tools', 'electronics', 'drugs', 'ammo', 'food', 'clothing']), (id) => Number(ctx.data.items[id].price_postapoc ?? 0),
-    'Which of these would a trader value most these days?', (id, v) => `${cap(itemDisplayName(ctx.data, id))} trades for about $${Math.round(v / 100)}.`);
+    'Which of these would a trader value most these days?', (id, v) => `${cap(itemName(ctx.data, id))} trades for about $${Math.round(v / 100)}.`);
 
 const encumbranceMost: Template = (ctx) =>
   compareMost(ctx, 'encumbrance_most', itemsIn(ctx, ['clothing']), (id) => encumbrance(ctx.data.items[id]), 'Which of these hampers your movement most when worn?',
-    (id, v) => `${cap(itemDisplayName(ctx.data, id))}: encumbrance ${v}.`);
+    (id, v) => `${cap(itemName(ctx.data, id))}: encumbrance ${v}.`);
 
 const SWIM: { flag: string; prompt: string; says: string }[] = [
   { flag: 'FIN', prompt: 'Which of these makes you swim faster?', says: 'speeds up swimming' },
@@ -686,7 +778,7 @@ const swimGear: Template = (ctx) => {
   const rule = (id: string) => flags(data.items[id]).includes(s.flag);
   const right = pickItem(ctx, index(data).items.filter((id) => rule(id) && data.items[id].category === 'clothing'));
   if (!right) return null;
-  return assemble(ctx, 'swim_gear', 'item', s.prompt, right, itemsIn(ctx, ['clothing']), rule, `${cap(itemDisplayName(data, right))} ${s.says}.`);
+  return assemble(ctx, 'swim_gear', 'item', s.prompt, right, itemsIn(ctx, ['clothing']), rule, `${cap(itemName(data, right))} ${s.says}.`);
 };
 
 const throwing: Template = (ctx) => {
@@ -696,7 +788,7 @@ const throwing: Template = (ctx) => {
   const right = pickItem(ctx, itemsIn(ctx, ['weapons', 'rocks', 'other'], (id) => rule(id)));
   if (!right) return null;
   const pool = itemsIn(ctx, ['weapons', 'tools'], (id, d) => !rule(id) && d.type !== 'GUN');
-  return assemble(ctx, 'throwing', 'item', 'Which of these is made for throwing?', right, pool, rule, `${cap(itemDisplayName(data, right))} is a good throw.`);
+  return assemble(ctx, 'throwing', 'item', 'Which of these is made for throwing?', right, pool, rule, `${cap(itemName(data, right))} is a good throw.`);
 };
 
 const engineFuel: Template = (ctx) => {
@@ -710,7 +802,7 @@ const engineFuel: Template = (ctx) => {
   const burns = new Set(same.map((x) => x.fuel_type!));
   const rule = (f: string) => burns.has(f);
   const used = [...new Set(engines.map((x) => x.fuel_type!))];
-  return assemble(ctx, 'engine_fuel', 'fuel', `What does a ${en} run on?`, e.fuel_type!, used, rule, `A ${en} burns ${fuelName(data, e.fuel_type!)}.`);
+  return assemble(ctx, 'engine_fuel', 'fuel', `What does ${an(en)} run on?`, e.fuel_type!, used, rule, `${cap(an(en))} burns ${fuelName(data, e.fuel_type!)}.`);
 };
 
 // BN vehicle.cpp: a vehicle drives with an engine fed from a tank or battery, controls to steer
@@ -773,13 +865,13 @@ const materialOf: Template = (ctx) => {
   const mname = (m: string) => domainName(data, 'material', m).toLowerCase();
   const pn = mname(primary);
   // Everything that shares the item's name must agree on what it's mostly made of.
-  if (keysNamed(data, 'item', itemDisplayName(data, it)).some((o) => mname(materials(data.items[o])[0] ?? '') !== pn)) return null;
+  if (keysNamed(data, 'item', itemName(data, it)).some((o) => mname(materials(data.items[o])[0] ?? '') !== pn)) return null;
   const allNames = new Set(mats.map(mname));
   const rule = (m: string) => mname(m) === pn;
   // Any of its other materials would be half right: never offer them.
   const pool2 = Object.keys(data.misc.material ?? {}).filter((m) => !allNames.has(mname(m)) && !/^null$|^hflesh|^veggy|^flesh/.test(m));
-  return assemble(ctx, 'material_of', 'material', `What is ${itemDisplayName(data, it)} mostly made of?`, primary, pool2, rule,
-    `${cap(itemDisplayName(data, it))} is ${mats.map(mname).join(' and ')}.`);
+  return assemble(ctx, 'material_of', 'material', `What is ${itemName(data, it)} mostly made of?`, primary, pool2, rule,
+    `${cap(itemName(data, it))} is ${mats.map(mname).join(' and ')}.`);
 };
 
 const madeOf: Template = (ctx) => {
@@ -791,7 +883,7 @@ const madeOf: Template = (ctx) => {
   const m = rng.pick(materials(data.items[seed]));
   const mn = domainName(data, 'material', m).toLowerCase();
   const rule = (id: string) => materials(data.items[id]).some((x) => domainName(data, 'material', x).toLowerCase() === mn);
-  return assemble(ctx, 'made_of', 'item', `Which of these is made of ${mn}?`, seed, pool, rule, `${cap(itemDisplayName(data, seed))} is made of ${materials(data.items[seed]).map((x) => domainName(data, 'material', x).toLowerCase()).join(' and ')}.`);
+  return assemble(ctx, 'made_of', 'item', `Which of these is made of ${mn}?`, seed, pool, rule, `${cap(itemName(data, seed))} is made of ${materials(data.items[seed]).map((x) => domainName(data, 'material', x).toLowerCase()).join(' and ')}.`);
 };
 
 const TEMPLATES: Record<TemplateId, Template> = {
@@ -811,6 +903,8 @@ const TEMPLATES: Record<TemplateId, Template> = {
   weapon_class: weaponClass,
   damage_most: damageMost,
   ma_technique: maTechnique,
+  ma_style: maStyle,
+  ma_weapon: maWeapon,
   price_most: priceMost,
   encumbrance_most: encumbranceMost,
   swim_gear: swimGear,
@@ -852,6 +946,11 @@ const SKILL_TEMPLATES: Record<string, [TemplateId, number][]> = {
   archery: [['gun_ammo', 3], ['gun_skill', 2], ['weapon_class', 1]],
 };
 
+/** The skill whose templates a book borrows: its own, or melee for a martial-arts manual. */
+function topicOf(def: ItemDef): string | undefined {
+  return (def.skill as string | undefined) || (def.martial_art ? 'melee' : undefined);
+}
+
 /** The weighted templates this book draws from: its recipes first, then its skill's. */
 export function bookTemplates(data: GameData, bookId: string): [TemplateId, number][] {
   const def = data.items[bookId];
@@ -863,9 +962,11 @@ export function bookTemplates(data: GameData, bookId: string): [TemplateId, numb
     if ((bookRecipeIndex(data).get(bookId) ?? []).some((b) => (b.recipe.qualities ?? []).some((g) => g.length))) out.push(['recipe_quality', 2]);
     if (nRec >= 4) out.push(['recipe_hardest', 1]);
   }
-  if (def.martial_art) out.push(['ma_technique', 5]);
-  const skill = def.skill as string | undefined;
-  for (const t of SKILL_TEMPLATES[skill ?? ''] ?? []) out.push(t);
+  if (def.martial_art) {
+    out.push(['ma_technique', 4], ['ma_style', 3]);
+    if ((data.misc.martial_art?.[def.martial_art as string]?.weapon_category ?? []).length) out.push(['ma_weapon', 3]);
+  }
+  for (const t of SKILL_TEMPLATES[topicOf(def) ?? ''] ?? []) out.push(t);
   return out;
 }
 
@@ -881,7 +982,7 @@ export function makeCtx(data: GameData, bookId: string, rng: Rng): Ctx {
     data,
     book,
     bookId,
-    skill: (book.skill as string | undefined) || undefined,
+    skill: topicOf(book),
     tier: tierFor(book),
     rng,
     recipes: (bookRecipeIndex(data).get(bookId) ?? []).map((b) => b.recipe).filter((r) => !r.never_learn),
