@@ -156,6 +156,22 @@ describe('guns, magazines and ammo', () => {
     expect(ammoRoom(b, createItem(data, 'shot_00')).room).toBe(0);
   });
 
+  it('magazine_compatible expands reloads_like one level (BN item_factory.cpp finalize_post): a soldering iron listing only light_minus_battery_cell/light_battery_cell also takes every cell that reloads like them', () => {
+    const iron = createItem(data, 'soldering_iron');
+    const compat = iron.magazineCompatible();
+    for (const id of [
+      'light_minus_battery_cell', 'light_battery_cell', // explicitly listed
+      'light_plus_battery_cell', 'light_disposable_cell', 'light_atomic_battery_cell', // reloads_like light_battery_cell
+      'light_minus_disposable_cell', 'light_minus_atomic_battery_cell', // reloads_like light_minus_battery_cell
+    ]) {
+      expect(compat).toContain(id);
+    }
+    // medium cells are a different magazine family entirely: not pulled in by the expansion
+    expect(compat).not.toContain('medium_battery_cell');
+    expect(iron.acceptsMagazine(createItem(data, 'light_plus_battery_cell'))).toBe(true);
+    expect(iron.acceptsMagazine(createItem(data, 'medium_battery_cell'))).toBe(false);
+  });
+
   it('holsters take what holster_actor::can_holster allows', () => {
     const h = createItem(data, 'holster');
     expect(holsterRefusal(h, createItem(data, 'glock_19'))).toBeNull();

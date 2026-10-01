@@ -25,6 +25,9 @@ export const FIXTURE_ITEMS = [
   'glock_19', 'glockmag', 'glockbigmag', '9mm', 'sw_619', '38_special', '38_speedloader', '357mag_fmj', 'remington_870', 'shot_00',
   // tools and odds
   'pipe', 'crowbar', 'knife_combat', 'flashlight', 'flashlight_on', 'light_battery_cell', 'light_disposable_cell', 'battery', 'lighter', 'chem_butane', 'rock', 'rag', 'gasoline',
+  // soldering iron + the light battery family (magazines_like / reloads_like expansion, see tools/extract/index.ts)
+  'soldering_iron', 'light_minus_battery_cell', 'light_plus_battery_cell', 'light_atomic_battery_cell',
+  'light_minus_disposable_cell', 'light_minus_atomic_battery_cell', 'medium_battery_cell',
 ];
 
 const items: ItemDef[] = FIXTURE_ITEMS.map((id) => {

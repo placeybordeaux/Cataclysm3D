@@ -147,6 +147,37 @@ export function extract(cddaDir: string, log: (m: string) => void = console.log)
     if (!at?.default) throw new Error(`magazine ${it.id}: no default_ammo and ammo type ${it.magazine.ammo_type[0]} has no default`);
     it.magazine.default_ammo = at.default;
   }
+  // finalize_post (item_factory.cpp ~2542 load_slot + ~665-712 finalize_post): a magazine with
+  // "reloads_like": X registers itself into magazines_like[X] when its own islot_magazine loads;
+  // every item's `magazines[ammotype]` list then also accepts magazines_like[mag] for each mag it
+  // ORIGINALLY listed (one level only, not transitive: BN iterates a copy of the original set
+  // while inserting into the real one, so a listed mag's own "reloads_like" variants never chain
+  // further). e.g. soldering_iron lists [light_minus_battery_cell, light_battery_cell]; this adds
+  // light_minus_{atomic,disposable}_cell (reloads_like light_minus_battery_cell) and
+  // light_{plus,atomic,disposable}_cell (reloads_like light_battery_cell). `magazine_default` is
+  // untouched (BN only expands `magazines`). BN also expands gunmod `magazine_adaptor` the same
+  // way; the port doesn't model magazine_adaptor, so there's nothing to expand there yet.
+  const magazinesLike = new Map<string, string[]>();
+  for (const it of Object.values(items)) {
+    const src = it.magazine?.reloads_like;
+    if (!src) continue;
+    (magazinesLike.get(src) ?? magazinesLike.set(src, []).get(src)!).push(it.id);
+  }
+  if (magazinesLike.size) {
+    for (const it of Object.values(items)) {
+      if (!it.magazines) continue;
+      for (const [ammotype, mags] of Object.entries(it.magazines)) {
+        // only ids this item's own JSON didn't already name count as "added" (reloadhelp's
+        // "Takes:" line names the declared ones, e.g. soldering_iron's light / ultra-light split,
+        // not every disposable/plutonium variant that rides along for compatibility)
+        const added = [...new Set(mags.flatMap((m) => magazinesLike.get(m) ?? []))].filter((id) => !mags.includes(id));
+        if (added.length) {
+          it.magazines[ammotype] = [...mags, ...added];
+          ((it.magazines_added ??= {})[ammotype] = added);
+        }
+      }
+    }
+  }
 
   const itemGroups = mergeItemGroups((raw.get('item_group') ?? []).map(prepareObject));
   // built into the C++ (Item_factory::init), referenced by JSON

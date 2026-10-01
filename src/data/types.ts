@@ -473,8 +473,15 @@ export interface ItemDef extends Glyph {
   clip_size?: number;
   /** GUN: moves to reload */
   reload?: number;
-  /** ammo type -> compatible magazine item ids */
+  /**
+   * ammo type -> compatible magazine item ids, already expanded with BN's `magazines_like`
+   * aliasing (tools/extract/index.ts finalize_post: a listed magazine's `reloads_like` siblings
+   * are folded in too, one level). The ids a listed magazine's "reloads_like" pulled in, rather
+   * than ones this item's own JSON named, are also recorded in `magazines_added`.
+   */
   magazines?: Record<string, string[]>;
+  /** ammo type -> ids `magazines[ammotype]` gained from `magazines_like`, not named in this item's own JSON (reloadhelp's "Takes:" line names the rest, not these). */
+  magazines_added?: Record<string, string[]>;
   /** ammo type -> default magazine (the first listed) */
   magazine_default?: Record<string, string>;
   /** ml of an inserted magazine's volume that disappears into the item (item::volume) */

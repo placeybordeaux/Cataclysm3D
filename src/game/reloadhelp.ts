@@ -189,6 +189,21 @@ function listNames(data: GameData, ids: string[], noun: string): string {
   return `${sorted.slice(0, 2).map((id) => aAn(defName(data, id))).join(', ')} or ${sorted.length - 2} other ${noun}`;
 }
 
+/**
+ * `ids` restricted to what `def`'s own JSON names, dropping ids BN's `magazines_like` expansion
+ * added for compatibility only (tools/extract/index.ts finalize_post, `def.magazines_added`): the
+ * "Takes:" line should still read "a light battery or an ultra-light battery" for the soldering
+ * iron, not "… or 5 other magazines" now that every disposable/rechargeable/plutonium size variant
+ * is also an accepted magazine. The full set (with the exact variant you're holding) still shows in
+ * "you saw" / "the usual kind". Falls back to the full set if that would leave nothing (shouldn't
+ * happen: every added id came from one of the originals).
+ */
+function declaredMagazines(def: ItemDef, ids: string[]): string[] {
+  const added = new Set(Object.values(def.magazines_added ?? {}).flat());
+  const kept = ids.filter((id) => !added.has(id));
+  return kept.length ? kept : ids;
+}
+
 /** The item's name for prose: "flashlight", not "flashlight (off)" (BN puts the state in the name). */
 export function plainName(it: Item): string {
   return it.baseName().replace(/ \((off|on|active|covered)\)$/, '');
@@ -205,7 +220,7 @@ export function takesPhrase(it: Item): string | null {
   switch (n.kind) {
     case 'magazine': {
       const battery = n.ammoTypes.includes('battery');
-      return `${listNames(data, n.ids, 'magazines')}${battery ? '' : ` (${orList(tn)})`}`;
+      return `${listNames(data, declaredMagazines(it.def, n.ids), 'magazines')}${battery ? '' : ` (${orList(tn)})`}`;
     }
     case 'ammo': {
       const phrase = orList(tn);
@@ -237,7 +252,8 @@ export function takesLine(it: Item): string | null {
 function upsBatteryNote(data: GameData): string {
   const ups = data.items.UPS_off;
   const mags = ups?.magazines?.battery;
-  return mags?.length ? `A UPS takes ${orList(byCommon(data, mags).map((id) => aAn(defName(data, id))))}.` : '';
+  if (!mags?.length) return '';
+  return `A UPS takes ${orList(byCommon(data, declaredMagazines(ups, mags)).map((id) => aAn(defName(data, id))))}.`;
 }
 
 // ------------------------------------------------------------------ examples
@@ -349,11 +365,15 @@ export function explainNoReload(target: Item, carried: readonly Item[], hints: R
   const need = reloadNeeds(target);
   const name = plainName(target);
   const takes = takesPhrase(target);
-  const ex = (ids: string[]) => {
+  // What `takes` named (declaredMagazines): BN's magazines_like expansion can make `need.ids`
+  // much longer than what the item's own JSON lists (every battery size variant vs. the one or
+  // two the tool actually calls out), so examples keyed off the full set still need their own ids.
+  const declared = declaredMagazines(target.def, need.ids);
+  const ex = (ids: string[], alreadyNamed = false) => {
     const picked = pickExamples(data, ids, hints);
     // The takes phrase already names every magazine when there are ≤ 3: repeating them as "the
     // usual kinds" says nothing, so only the commonest is pointed out (unless you saw one).
-    if (need.kind === 'magazine' && ids === need.ids && ids.length <= 3 && !picked.some((e) => e.via === 'seen')) {
+    if (need.kind === 'magazine' && alreadyNamed && ids.length <= 3 && !picked.some((e) => e.via === 'seen')) {
       return ids.length > 1 && picked[0]?.via === 'common' ? `The ${defName(data, picked[0].id)} is the most common.` : '';
     }
     return examplesSentence(data, picked, hints);
@@ -394,12 +414,12 @@ export function explainNoReload(target: Item, carried: readonly Item[], hints: R
       const wrong = carried.filter((c) => c !== target && c.isMagazine() && !target.acceptsMagazine(c) && !c.hasFlag('SPEEDLOADER') && c.ammoTypes().some((t) => need.ammoTypes.includes(t)));
       if (!compat.length && wrong.length) {
         const w = wrong[0];
-        return join(`Your ${w.baseName()} doesn't fit: the ${name} takes ${takes}.`, ex(need.ids));
+        return join(`Your ${w.baseName()} doesn't fit: the ${name} takes ${takes}.`, ex(declared, true));
       }
       if (!compat.length && fill.length) {
-        return join(`You have ${fill[0].baseName(2)}, but the ${name} loads from a magazine: it takes ${takes}.`, ex(need.ids));
+        return join(`You have ${fill[0].baseName(2)}, but the ${name} loads from a magazine: it takes ${takes}.`, ex(declared, true));
       }
-      return join(`Your ${name} takes ${takes}. You have none.`, ex(need.ids));
+      return join(`Your ${name} takes ${takes}. You have none.`, ex(declared, true));
     }
     case 'ammo': {
       if (target.isMagazine() && need.ammoTypes.includes('battery')) {

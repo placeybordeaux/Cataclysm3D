@@ -82,7 +82,12 @@ describe('example selection: recently seen > common > any', () => {
 
   it('nothing seen: the most common first', () => {
     const ex = pickExamples(data, ids, null);
-    expect(ex.map((e) => [e.id, e.via])).toEqual([['light_disposable_cell', 'common'], ['light_battery_cell', 'common']]);
+    // flashlight's magazine_compatible now also includes the ultra-light/high-capacity/plutonium
+    // cells that reload like light_disposable_cell/light_battery_cell (magazines_like expansion,
+    // tools/extract/index.ts finalize_post), so the default top-3 picks up one more common id.
+    expect(ex.map((e) => [e.id, e.via])).toEqual([
+      ['light_disposable_cell', 'common'], ['light_plus_battery_cell', 'common'], ['light_battery_cell', 'common'],
+    ]);
   });
 
   it('a recently seen one comes first, with where it was', () => {
@@ -101,7 +106,11 @@ describe('example selection: recently seen > common > any', () => {
     const h = hintsWith(seen);
     expect(pickExamples(data, ids, h)[0].id).toBe('light_battery_cell');
     h.stillThere = (s) => s.id !== 'light_battery_cell';
-    expect(pickExamples(data, ids, h).map((e) => [e.id, e.via])).toEqual([['light_disposable_cell', 'seen'], ['light_battery_cell', 'common']]);
+    // see the comment in 'nothing seen: the most common first': the common fallback now has one
+    // more id to offer once light_battery_cell's sighting is excluded.
+    expect(pickExamples(data, ids, h).map((e) => [e.id, e.via])).toEqual([
+      ['light_disposable_cell', 'seen'], ['light_plus_battery_cell', 'common'], ['light_battery_cell', 'common'],
+    ]);
   });
 
   it('items that never spawn still come up, last', () => {
