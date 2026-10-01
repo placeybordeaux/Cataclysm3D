@@ -371,11 +371,7 @@ export class LightManager {
     // Flashlight: held low and to the right so its shadows are visible from the eye.
     const fl = this.flashlight;
     fl.intensity = this.flashlightOn ? 14 : 0;
-    // castShadow stays on: toggling it changes the shadow-light count every material is
-    // compiled for, so the first flashlight switch recompiled every shader (a 0.8-1 s freeze,
-    // docs/PERF.md). Off, its shadow map just isn't redrawn (intensity 0 hides it).
-    fl.castShadow = true;
-    fl.shadow.autoUpdate = this.flashlightOn;
+    fl.castShadow = this.flashlightOn;
     if (this.beam) {
       fl.position.copy(this.beam.origin);
       fl.target.position.copy(this.beam.origin).addScaledVector(this.beam.dir, 10);
