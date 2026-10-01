@@ -111,7 +111,8 @@ crosshair: wheel select, `e` take, `r` take all · `g` pick up / Area loot · `1
 `F` flashlight · `r` reload · `b` fire mode · `X` smash (or just hit things) · `G` grab / let go
 (walk to push or pull furniture and carts) · `t` throw · `R` read · `l` wait · `$` sleep ·
 `+` fast-forward a timed action (reading, crafting, waiting, sleeping: ×1 → ×2 → ×4 → ×8 → ×16,
-danger drops it to ×1; docs/BALANCE.md "Fast-forward") · `F5` save ·
+danger drops it to ×1; docs/BALANCE.md "Fast-forward") · while reading, `1`–`4` (or a click)
+answer the field-notes questions (Options → Reading; docs/ADAPTATION.md "Reading: field notes") · `F5` save ·
 `F11` fullscreen · `?` help · Esc pause menu · **Space closes any menu** (so does the key that
 opened it; rebindable as `close_menu`) and keeps the mouse captured.
 

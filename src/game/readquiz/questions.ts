@@ -562,7 +562,8 @@ const qualityItem: Template = (ctx) => {
 };
 
 const FOOD_CATS = ['food', 'cooking_ingredients'];
-const days = (s: number) => (s >= 86400 ? `${Math.round((s / 86400) * 10) / 10} days` : `${Math.round(s / 3600)} hours`);
+const plural = (n: number, unit: string) => `${n} ${unit}${n === 1 ? '' : 's'}`;
+const days = (s: number) => (s >= 86400 ? plural(Math.round((s / 86400) * 10) / 10, 'day') : plural(Math.round(s / 3600), 'hour'));
 
 const spoilsFirst: Template = (ctx) =>
   compareMost(ctx, 'spoils_first', itemsIn(ctx, FOOD_CATS), (id) => spoils(ctx.data.items[id]), 'Which of these goes bad first?',
