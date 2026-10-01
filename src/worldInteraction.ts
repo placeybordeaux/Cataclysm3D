@@ -18,6 +18,7 @@ import { lightAt, playerCanSee, naturalLight, sunAltitude, tooDarkReason } from 
 import { installWorldFx } from './render/worldFx';
 import { openMenu, openWindow, colorize, c } from './ui/framework';
 import { worldContextProviders } from './ui2/world';
+import { installTimeWarp } from './game/timewarp';
 
 // Wires the world-interaction systems (sound, vision, examine, bashing, z-levels, fields,
 // wait/sleep, weather, light items, traps) into the game, keys, UI and window.cdda.
@@ -29,6 +30,8 @@ export function installWorldInteraction(game: Game, renderer: Renderer, api: Deb
   installFields(game);
   installZLevels(game);
   installRest(game);
+  // After installRest: fast-forward for timed activities (src/game/timewarp.ts).
+  installTimeWarp(game);
   installTraps(game);
   installWorldFx(game, renderer);
 

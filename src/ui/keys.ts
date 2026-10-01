@@ -64,6 +64,9 @@ export const DEFAULT_BINDINGS: Record<string, string[]> = {
   // nothing happened. `|` still works.
   wait: ['l', '|'],
   sleep: ['$'],
+  // fast-forward a timed activity (src/ui/timewarp_ui.ts): ×1 → ×2 → ×4 → ×8 → ×16; `=` is the
+  // same key without Shift on US layouts
+  fast_forward: ['+', '='],
   help: ['?'],
   menu: ['Escape'],
   save: ['F5'], // quicksave (Shift+S is run-backward)

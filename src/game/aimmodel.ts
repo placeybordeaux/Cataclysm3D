@@ -1,3 +1,4 @@
+import { CRAWL_HEIGHT, crawlPlanOf, type CrawlPlan, type CrawlerLike } from './crawl';
 import { FEEL, type FeelConstants } from './combatfeel';
 
 // How the survivor's skill shows up when they aim (the user: "making a player miss their shot
@@ -52,6 +53,20 @@ export function freeAim(m: AimModelId = model): boolean {
 /** The optional timing games are on. */
 export function timingGames(m: AimModelId = model): boolean {
   return m === 'timing';
+}
+
+/** Seconds the weaving reticle stays up after a shot, so follow-up shots read. */
+export const RETICLE_AFTER_SHOT = 2.5;
+
+/**
+ * Whether the weaving reticle (and its overlay) is shown (user: "having the bow out all of the
+ * time makes the little aiming minigame play constantly … I'd just hide the weaving icon if you
+ * haven't fired for a while and aren't in the aiming mode"): while aiming a gun (RMB), while
+ * drawing a bow or sling, and for RETICLE_AFTER_SHOT s after a shot. The rest of the time a plain
+ * crosshair sits at the centre — but a hip shot still goes where the hidden weave is.
+ */
+export function reticleVisible(o: { aiming: boolean; drawing: boolean; sinceShot: number }): boolean {
+  return o.aiming || o.drawing || o.sinceShot < RETICLE_AFTER_SHOT;
 }
 
 // ------------------------------------------------------------------ sway amplitude
@@ -274,7 +289,27 @@ export const aimHooks: {
    * Null in tests, the sim, and top-down view: the shot then leaves the eye along the view.
    */
   view: (() => { o: Vec3; f: Vec3; r: Vec3; u: Vec3; third: boolean; eye: Vec3 } | null) | null;
-} = { hitZone: defaultHitZone, body: null, pick: null, prepare: null, view: null };
+  /**
+   * Top-down view (src/aim.ts): the survivor's eye as drawn, or null when the camera isn't
+   * top-down. Then shots are aimed along the facing (PlayerCombat.topAim), not through a screen point.
+   */
+  topView: (() => { eye: Vec3 } | null) | null;
+} = { hitZone: defaultHitZone, body: null, pick: null, prepare: null, view: null, topView: null };
+
+/** Player-facing aim switches (Options): the top-view assist snaps to the nearest hostile in a cone. */
+export const aimSettings = { topAssist: false };
+
+/** Half-angle (rad) of the top-view assist cone. */
+export const TOP_ASSIST_CONE = (12 * Math.PI) / 180;
+
+/**
+ * Top-view auto-pitch: how high on a body the shot aims (share of its height). From above the
+ * screen can't show height, so the game picks it: centre mass at the hip, the head while aiming
+ * (RMB) — the aimed shot is the careful one; the weave still has to be on the narrow head.
+ */
+export function topAimHeight(bodyHeight: number, aiming: boolean): number {
+  return bodyHeight * (aiming ? 0.88 : 0.55);
+}
 
 export interface Vec3 {
   x: number;
@@ -327,6 +362,19 @@ export function zoneOfPart(name: string, noHead = false): HitZone {
 
 /** Standing height (m) by size when no renderer says otherwise (matches monsterView's glyph heights). */
 export const BODY_HEIGHT: Record<string, number> = { tiny: 0.45, small: 0.8, medium: 1.7, large: 2.3, huge: 3.2 };
+
+const crawlCache = new WeakMap<object, CrawlPlan | null>();
+/**
+ * Height (m) of a monster's body column when no renderer says otherwise: BODY_HEIGHT by size,
+ * lowered for crawlers (game/crawl.ts) so a shot over a crawling zombie's back misses it here
+ * exactly as it does against the drawn model.
+ */
+export function bodyHeightOf(m: { size: string; type: CrawlerLike }): number {
+  const h = BODY_HEIGHT[m.size] ?? 1.7;
+  let c = crawlCache.get(m.type);
+  if (c === undefined) crawlCache.set(m.type, (c = crawlPlanOf(m.type)));
+  return c ? h * CRAWL_HEIGHT[c] : h;
+}
 
 /** Damage multiplier from the weapon skill: skill 0 lands every visible hit, but softer. */
 export function skillDamageMul(skill: number, f: FeelConstants = FEEL): number {

@@ -4,6 +4,7 @@
 // screen on that place, the hotbar (live in gameplay: 1…0 use what's bound), timed actions
 // and the liquid menu. Options > "Inventory screens" switches back to the v1 lists.
 
+import { canPowerOn } from '../../game/lightitems';
 import { adaptEatRows } from './eat_rows';
 import type { Game } from '../../game/game';
 import type { UiContext } from '../../ui/context';
@@ -99,6 +100,13 @@ export function installBnInventory(game: Game, ctx: UiContext, api: DebugApi, ca
     askCount: (item, verb) => countPrompt({ title: `${verb} how many?`, subtitle: item.name, max: item.count, initial: Math.max(1, Math.floor(item.count / 2)), icon: item.icon, ok: verb }),
     extraActions: (it, loc) => legacyExtras(ctx, it, loc),
     perform: (label, moves, fn) => perform(label, moves, fn),
+    // Playtest: "when I start a disassembly from the inventory screen it doesn't drop me into
+    // the actual disassembly straight away" — the activity started but sat frozen under the
+    // inventory's pause until you closed it. Close every window (the click is a valid gesture
+    // to re-capture the mouse) so the work runs at the crosshair at once.
+    activityStarted: () => {
+      if (game.activities.current) closeGroup();
+    },
   });
   const env: ListEnv = { model, perform };
 
@@ -132,8 +140,15 @@ export function installBnInventory(game: Game, ctx: UiContext, api: DebugApi, ca
     resolve: (typeId, b) => carriedOf(typeId, b?.ref)?.view ?? null,
     use: (b, item, slot) => {
       model.refresh();
-      const found = carriedOf(b.typeId, b.ref);
+      let found = carriedOf(b.typeId, b.ref);
       if (!item || !found) return void game.message(`You have no ${b.name} left.`, 'c_light_gray');
+      // The bound one is dead but another of the same kind works (two flashlights, one
+      // flat): use the working one rather than failing.
+      const bound = model.entry(found.view.id)?.items[0];
+      if (bound && !canPowerOn(bound)) {
+        const alt = [...model.all()].find((a) => model.onBody(a.loc) && a.view.typeId === found!.view.typeId && a.view.id !== found!.view.id && canPowerOn(a.item));
+        if (alt) found = { view: alt.view, loc: alt.loc };
+      }
       const real = model.entry(found.view.id);
       if (!real) return;
       if (found.loc === 'hands') {

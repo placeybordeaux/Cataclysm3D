@@ -239,6 +239,9 @@ body.ui2-dragging, body.ui2-dragging * { cursor: grabbing !important; }
 #ui2 .ui2-menu-noicon { width: 0; }
 #ui2 .ui2-menu-label { display: flex; flex-direction: column; min-width: 0; }
 #ui2 .ui2-menu-reason { font-size: var(--fs-s); color: var(--p-bad); }
+#ui2 .ui2-menu-note { font-size: var(--fs-s); color: var(--p-text-dim); }
+#ui2 .ui2-menu-note.tone-good { color: var(--p-good); }
+#ui2 .ui2-menu-note.tone-warn { color: var(--p-warn); }
 #ui2 .ui2-menu-time { font-size: var(--fs-s); color: var(--p-text-dim); text-align: right; }
 #ui2 .ui2-menu-key { font-size: var(--fs-s); color: var(--p-accent); min-width: 1ch; }
 #ui2 .ui2-menu-arrow { color: var(--p-text-dim); min-width: 1ch; }

@@ -4,6 +4,7 @@ import type { CraftingInventory } from './crafting_inv';
 import { createItem, countByCharges, inNewContainer, Item } from './item';
 import { consumeItem, L, locate, unloadItem, type Loc } from './moves';
 import { consumeRequirements, evaluateRequirements, itemDisplayName, type RequirementEval } from './requirements';
+import { disassemblyPractice, withPracticeSource } from './practice';
 
 // Disassembly after Bright Nights (crafting.cpp can_disassemble / complete_disassemble,
 // recipe_dictionary.cpp): an item comes apart if misc.uncraft has a recipe for it, a recipe that
@@ -162,7 +163,10 @@ export function finishDisassembly(host: CraftHost, it: Item, r: RecipeDef): Item
   const skill = r.skill_used ?? '';
   const skillDice = 2 + c.getSkill(skill) * 4, skillSides = 16 + c.int;
   const diffDice = r.difficulty ?? 0;
-  if (skill) c.practice(skill, diffDice * 2, diffDice);
+  // "disassembly only nets a bit of practice": difficulty × 2, capped at the difficulty — so a
+  // difficulty-0 uncraft (a toaster) teaches nothing in BN (practiceSettings.simpleTasks adapts it).
+  const pr = disassemblyPractice(r);
+  if (pr) withPracticeSource(`Disassembling the ${it.baseName()}`, () => c.practice(pr.skill, pr.amount, pr.cap));
   const dmgChance = Math.min(1, Math.pow(0.8, it.damageLevel()));
   const out: Item[] = [];
   for (const { id, count } of disassemblyYield(data, r)) {
@@ -212,8 +216,13 @@ export function finishDisassembly(host: CraftHost, it: Item, r: RecipeDef): Item
 /** Called after a disassembly finishes (UI refresh). */
 export const disassembledHooks: ((itemId: string) => void)[] = [];
 
-/** Start disassembling `it`: an activity of the uncraft recipe's time. */
-export function startDisassembly(host: CraftHost, it: Item, opts: { instant?: boolean } = {}): boolean {
+/**
+ * Start disassembling `it`: an activity of the uncraft recipe's time. `then` queues more after it
+ * (BN disassemble_activity_actor's target list: "Disassemble all" of a stack, or more batches of
+ * a charges stack — the same item again per extra batch). Each is re-checked when its turn
+ * comes; the queue stops at the first one that is gone or can't be done.
+ */
+export function startDisassembly(host: CraftHost, it: Item, opts: { instant?: boolean; then?: Item[] } = {}): boolean {
   if (craftState(host.data, it)) return abandonCraft(host, it);
   const r = uncraftRecipe(host.data, it.typeId);
   const check = canDisassemble(host, it);
@@ -221,16 +230,38 @@ export function startDisassembly(host: CraftHost, it: Item, opts: { instant?: bo
     host.message(check.missing.join(' ') || 'You cannot disassemble this.', 'c_light_red');
     return false;
   }
+  const rest = opts.then ?? [];
   const done = () => {
     const out = finishDisassembly(host, it, r);
     if (!out) return host.message(`The ${it.baseName()} is gone.`, 'c_light_red');
     for (const h of disassembledHooks) h(it.typeId);
+    const [next, ...more] = rest;
+    if (!next || !whereIs(host, next) || !canDisassemble(host, next).ok) return;
+    startDisassembly(host, next, { instant: opts.instant, then: more });
   };
   if (opts.instant) {
     done();
     return true;
   }
-  return host.activities.start({ name: `disassembling the ${it.baseName()}`, kind: 'disassemble', target: it, customUi: true, duration: check.time, onComplete: done });
+  const left = rest.length ? ` (${rest.length} more after this)` : '';
+  return host.activities.start({ name: `disassembling the ${it.baseName()}${left}`, kind: 'disassemble', target: it, customUi: true, duration: check.time, onComplete: done });
+}
+
+/**
+ * The rest of the stack `it` is in, for "Disassemble all": identical items lying in the same place
+ * (what the inventory shows as one row), or — for a charges stack — the same item once per extra
+ * batch it holds.
+ */
+export function disassemblyStack(host: CraftHost, it: Item): Item[] {
+  const r = uncraftRecipe(host.data, it.typeId);
+  if (!r || craftState(host.data, it)) return [];
+  if (it.countByCharges) return Array<Item>(Math.max(0, Math.floor(it.charges / disassemblyBatch(r)) - 1)).fill(it);
+  const loc = whereIs(host, it);
+  if (!loc) return [];
+  const peers: readonly Item[] =
+    loc.kind === 'ground' ? (host.map.itemsAt(loc.x, loc.y, loc.z).filter((o) => o instanceof Item) as Item[]) : loc.kind === 'in' ? loc.host.contents : loc.kind === 'inv' ? host.player.inv.carried() : [];
+  if (it.hasContents()) return [];
+  return peers.filter((o) => o !== it && o.typeId === it.typeId && !o.hasContents() && o.stacksWith(it));
 }
 
 /** Display names of what `r` yields ("2 sticks, 1 rag"). */

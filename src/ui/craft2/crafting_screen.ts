@@ -17,6 +17,7 @@ import {
 import type { AltEval } from '../../game/requirements';
 import { itemDisplayName, qualityName } from '../../game/requirements';
 import { cddaText } from '../../game/units';
+import { previewCraft } from '../../game/practice';
 import { newRecipes } from '../../progression/discovery';
 import { attachTooltip, button, closeKeyLabel, h, iconEl, itemTooltip, isCloseKey, openPanel, type Panel } from '../../ui2';
 import { defView, itemIconRef, rememberedWindow, requirementSections, searchField, storedList } from './common';
@@ -290,6 +291,8 @@ export function openCraftingScreen(game: CraftHost): CraftingScreen {
       fact('Skill', `${player.skillName(r.skill_used)} ${r.difficulty} (you ${have})`, have >= r.difficulty ? 'tone-good' : 'tone-warn');
     }
     for (const [s, l] of r.skills_required ?? []) fact('Also', `${player.skillName(s)} ${l} (you ${player.getSkill(s)})`, player.getSkill(s) >= l ? 'tone-good' : 'tone-warn');
+    // What making it teaches (the same formula the craft applies: src/game/practice.ts).
+    for (const pv of previewCraft(player, r, batch, craftTime(player, r, batch, 1) * 100)) fact('Trains', pv.text, pv.verdict === 'trains' ? 'tone-good' : 'ui2-dim');
     const light = lightSpeedMultiplier(game, r);
     const secs = craftTime(player, r, batch, ch.speed || 1);
     fact('Time', formatDuration(secs), '');

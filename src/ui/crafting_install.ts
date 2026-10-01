@@ -14,10 +14,12 @@ import { constructionWorldMenu, craftingItemActions } from './craft2/actions';
 import { constructionScreen, currentPlacement, openConstructionScreen, startPlacement } from './craft2/construction_screen';
 import { craftingScreen, openCraftingScreen } from './craft2/crafting_screen';
 import { installCraftOverlay } from './craft2/overlay';
+import { installReadQuiz } from './readquiz';
 import { openConstructionMenu } from './construction';
 import { openCraftingMenu } from './crafting';
 import { openDisassembleMenu, openReadMenu } from './craft_menus';
 import { constructionGroups } from '../game/construction';
+import { installPractice } from './practice_cue';
 
 // Wires crafting, construction, disassembly, reading and fire-starting into the game: key
 // actions (& * ( R) open the ui2 screens (src/ui/craft2), right-click item actions (read,
@@ -42,9 +44,12 @@ export function installCrafting(game: Game, api?: DebugApi, renderer?: Renderer)
   itemActionProviders.push((who, it, loc) => (who === game.player ? craftingItemActions(game, it, loc) : []));
   if (renderer) {
     installCraftOverlay(game, renderer);
+    installReadQuiz(game, renderer, api);
     worldContextProviders.push((t) => constructionWorldMenu(game, t, () => void openConstructionScreen(game, renderer)));
   }
   if (api) installCraftingDebug(game, api, renderer);
+  // Skill practice made visible: HUD cue, level-up toasts, options (src/ui/practice_cue.ts).
+  installPractice(game, api);
 }
 
 function installCraftingDebug(game: Game, api: DebugApi, renderer?: Renderer): void {

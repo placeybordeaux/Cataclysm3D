@@ -48,6 +48,11 @@ export interface BnHooks {
   extraActions?(it: Item, loc: Loc): MenuItem[];
   /** Run an action that takes `moves` BN moves: now (paused) or after a progress bar. */
   perform?(label: string, moves: number, fn: () => void): void;
+  /**
+   * An item action that starts a timed activity (read, disassemble, continue a craft) just ran.
+   * The screens close so the work actually runs — under the inventory's pause it sat frozen.
+   */
+  activityStarted?(): void;
 }
 
 interface Entry {
@@ -637,7 +642,7 @@ export class BnInventoryModel implements InventoryModel {
       // disassembling, continuing a craft) start activities that warp game time themselves, so
       // they run at once and show their game time.
       const quick = QUICK.has(a.id);
-      out.push({ label: a.label, key: keys[a.id], time: quick ? secs(a.moves) : a.moves / 100, primary: !!a.primary && !a.disabled, disabled: a.disabled ?? false, danger: false, action: quick ? this.runAction(a, it) : () => { const r = a.run(); if (!r.ok && r.msg) this.hooks.notify?.(r.msg, 'bad'); this.refresh(true); } });
+      out.push({ label: a.label, key: keys[a.id], time: quick ? secs(a.moves) : a.moves / 100, primary: !!a.primary && !a.disabled, disabled: a.disabled ?? false, danger: false, note: a.note, noteTone: a.noteTone, action: quick ? this.runAction(a, it) : () => { const r = a.run(); if (!r.ok && r.msg) this.hooks.notify?.(r.msg, 'bad'); this.refresh(true); if (r.ok) this.hooks.activityStarted?.(); } });
     }
     // Hands: double-click puts it away.
     if (loc.kind === 'hands' && !out.some((m) => 'primary' in m && m.primary)) {

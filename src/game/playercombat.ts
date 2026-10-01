@@ -21,7 +21,7 @@ import { FEEL, arcFor, defenseOf, hitStopSeconds, missReason, sweptArcTarget, sw
 import { moveWithCollision, CREATURE_RADIUS } from './physics';
 import { projectileHit } from './projectile';
 import {
-  aimDirection, aimHooks, AimSway, basisDirection, basisOf, swingFan, yawPitch, type Vec3, BODY_HEIGHT, Breath, bowPerfect, describeHit, freeAim, hitDamageMul, rhythmWindow, swayAmplitude, timingGames, weakSpotChance,
+  aimDirection, aimHooks, aimSettings, AimSway, reticleVisible, topAimHeight, TOP_ASSIST_CONE, basisDirection, basisOf, swingFan, yawPitch, type Vec3, bodyHeightOf, Breath, bowPerfect, describeHit, freeAim, hitDamageMul, rhythmWindow, swayAmplitude, timingGames, weakSpotChance,
   type HitZone,
 } from './aimmodel';
 import { raycastTiles } from './raycast';
@@ -294,6 +294,21 @@ export class PlayerCombat implements GameSystem {
   private readyAt = -Infinity;
   private buffered = false;
   private wasReady = true;
+  /** When the last round left (combat clock, s): the reticle shows for a moment after a shot. */
+  lastShotAt = -Infinity;
+
+  /**
+   * Is the weaving reticle up (aimmodel.reticleVisible)? Free aim with a ranged weapon only: RMB
+   * held with a trigger weapon, a bow/sling being drawn or whirled, or just after a shot.
+   */
+  reticleShown(): boolean {
+    const game = this.game;
+    const gun = game.player.inv.wielded?.isGun() ? game.player.inv.wielded : null;
+    if (!this.aim.active || !gun) return false;
+    const rmb = (game.input.mouseButtons & 4) !== 0 && !game.input.captured;
+    return reticleVisible({ aiming: rmb && drawStyle(gun) === 'trigger', drawing: !!this.draw, sinceShot: this.time - this.lastShotAt });
+  }
+
   /** The last free-aim hit's readout (tests, debug). */
   lastHit: { zone: HitZone; mul: number; text: string; perfect: boolean } | null = null;
 
@@ -445,6 +460,11 @@ export class PlayerCombat implements GameSystem {
    */
   aimRay(off: { x: number; y: number; rx: number; ry: number }, range: number): { o: Vec3; yaw: number; pitch: number } {
     const p = this.game.player;
+    const top = aimHooks.topView?.() ?? null;
+    if (top) {
+      const t = this.topAim(off.x, range, top.eye);
+      return { o: t.o, yaw: t.yaw, pitch: t.pitch };
+    }
     const v = aimHooks.view?.() ?? null;
     if (!v) return { o: this.eye(), ...aimDirection(p.yaw, p.pitch, off.x, off.y) };
     const cam = yawPitch(basisDirection(v, off.rx, off.ry));
@@ -453,6 +473,40 @@ export class PlayerCombat implements GameSystem {
     const d = { x: far.x - v.eye.x, y: far.y - v.eye.y, h: far.hAbs - v.eye.h };
     if (Math.hypot(d.x, d.y, d.h) < 0.6) return { o: v.eye, ...cam };
     return { o: v.eye, ...yawPitch(d) };
+  }
+
+  /**
+   * Top-down aim (twin-stick style): the mouse turns the survivor, the shot goes along the facing
+   * plus the sideways weave (`swayX`, rad). Height can't be seen from above, so it is chosen: the
+   * first body along the facing (a level probe at chest height, castAim) is aimed at centre mass,
+   * or at the head while aiming (RMB; aimmodel.topAimHeight); with nothing there the shot is level.
+   * With the assist on (aimSettings.topAssist) a hostile within TOP_ASSIST_CONE of the facing is
+   * aimed at when the line itself meets nothing.
+   */
+  topAim(swayX: number, range: number, eye: Vec3 = this.eye()): { o: Vec3; yaw: number; pitch: number; target: Monster | null; head: boolean } {
+    const p = this.game.player;
+    let yaw = p.yaw + swayX;
+    const floor = p.z * LEVEL_HEIGHT;
+    const probe = this.castAim(yaw, 0, range, undefined, { x: p.x, y: p.y, h: floor + 1.2 });
+    let m = probe.hit;
+    if (!m && aimSettings.topAssist) {
+      let best = TOP_ASSIST_CONE;
+      for (const q of this.sys.active) {
+        if (q.dead || q.friendly || q.z !== p.z || q.attitude() !== 'attack') continue;
+        const d = Math.hypot(q.x - p.x, q.y - p.y);
+        if (d > range || d < 0.3) continue;
+        const off = Math.abs(Math.atan2(Math.sin(Math.atan2(q.x - p.x, -(q.y - p.y)) - p.yaw), Math.cos(Math.atan2(q.x - p.x, -(q.y - p.y)) - p.yaw)));
+        if (off > best || !hasLOS(this.grid, p.tileX, p.tileY, q.tileX, q.tileY, p.z)) continue;
+        best = off;
+        m = q;
+      }
+      if (m) yaw = Math.atan2(m.x - p.x, -(m.y - p.y)) + swayX;
+    }
+    if (!m) return { o: eye, yaw, pitch: 0, target: null, head: false };
+    const head = (this.game.input.mouseButtons & 4) !== 0 && !this.game.input.captured;
+    const along = Math.max(0.3, (m.x - eye.x) * Math.sin(yaw) - (m.y - eye.y) * Math.cos(yaw));
+    const th = m.z * LEVEL_HEIGHT + topAimHeight(bodyHeightOf(m), head);
+    return { o: eye, yaw, pitch: Math.atan2(th - eye.h, along), target: m, head };
   }
 
   /**
@@ -501,7 +555,7 @@ export class PlayerCombat implements GameSystem {
       }
       if (perp > R) continue;
       const half = Math.sqrt(R * R - perp * perp);
-      const body = aimHooks.body?.(m, t) ?? { height: BODY_HEIGHT[m.size] ?? 1.7, lift: 0 };
+      const body = aimHooks.body?.(m, t) ?? { height: bodyHeightOf(m), lift: 0 };
       // The stretch of the chord through the body's column where the ray is between its feet and top.
       let s0 = Math.max(0.05, t - half), s1 = t + half;
       const foot = m.z * LEVEL_HEIGHT + body.lift;
@@ -757,7 +811,8 @@ export class PlayerCombat implements GameSystem {
         }
       }
     }
-    const look = this.game.lookAt?.(reach + 1.5);
+    // Top-down: the camera looks at the ground around you, not along the swing: the facing decides.
+    const look = aimHooks.topView?.() ? null : this.game.lookAt?.(reach + 1.5);
     const hit = look?.kind === 'creature' ? (look.creature as { monster?: Monster } | undefined)?.monster : undefined;
     if (hit && hit !== except && !hit.dead && Math.hypot(hit.x - p.x, hit.y - p.y) - hit.radius <= reach) return { m: hit, zone: 'torso' };
     const near = this.sys.active.filter((m) => !m.dead && m.z === p.z && m !== except);
@@ -1047,6 +1102,7 @@ export class PlayerCombat implements GameSystem {
       return null;
     }
     this.shots++;
+    this.lastShotAt = this.time;
     this.lastShotClass = cls;
     if (hasMuzzleFlash(cls)) this.flashShots++;
     // Kick scaled by the round's recoil (MOA added; ~150-250 for a 9 mm pistol), and by what
@@ -1286,7 +1342,7 @@ export class PlayerCombat implements GameSystem {
    */
   rangedTarget(maxDist: number): { m: Monster; dist: number } | null {
     const p = this.game.player;
-    const look = this.game.lookAt?.(maxDist);
+    const look = aimHooks.topView?.() ? null : this.game.lookAt?.(maxDist);
     const hit = look?.kind === 'creature' ? (look.creature as { monster?: Monster } | undefined)?.monster : undefined;
     if (hit && !hit.dead && !hit.friendly) return { m: hit, dist: Math.hypot(hit.x - p.x, hit.y - p.y) };
     let best: Monster | null = null, bestScore = Infinity, bestD = 0;
@@ -1513,7 +1569,7 @@ export class PlayerCombat implements GameSystem {
       if (perp > m.radius * (f.free ? 1.1 : 1)) continue;
       const h = arcHeight(t, f.arc);
       // Free aim: the body's visible column (feet to top), as the reticle ray tests it.
-      const body = f.free ? aimHooks.body?.(m, t) ?? { height: BODY_HEIGHT[m.size] ?? 1.7, lift: 0 } : null;
+      const body = f.free ? aimHooks.body?.(m, t) ?? { height: bodyHeightOf(m), lift: 0 } : null;
       if (h > (body ? body.lift + body.height : (HEIGHT_BY_SIZE[m.size] ?? 1.9) + 0.25)) {
         f.overflew.add(m);
         continue;
@@ -1650,7 +1706,7 @@ export class PlayerCombat implements GameSystem {
 
   /** Free aim: an arrow reaching a body strikes it where it arrives (height -> zone); no dice. */
   private flightHitsFree(f: Flight, m: Monster, perp: number, zone?: HitZone): boolean {
-    const body = aimHooks.body?.(m, Math.hypot(m.x - f.x0, m.y - f.y0)) ?? { height: BODY_HEIGHT[m.size] ?? 1.7, lift: 0 };
+    const body = aimHooks.body?.(m, Math.hypot(m.x - f.x0, m.y - f.y0)) ?? { height: bodyHeightOf(m), lift: 0 };
     const hFrac = Math.max(0, Math.min(1, (f.h - body.lift) / body.height));
     sfx.arrowHit('flesh', m);
     const r = this.freeHit(m, f.shot.damage, { zone: zone ?? aimHooks.hitZone(m, hFrac), missedBy: perp / (m.radius * 1.1), perfect: !!f.perfect, name: defName(f.ammo), cls: f.cls, gun: f.gun });

@@ -8,6 +8,8 @@ import { openScreen, meter } from './screen2';
 import { partTone } from './hud_logic';
 import { paintBody, PART_BOX, BODY_W, BODY_H, type BodyKey } from './pixelart';
 import { partNotes } from './hud_modern';
+import { effectiveFocus, recentPractice } from '../game/practice';
+import { hintsTip } from './practice_cue';
 
 // The '@' character screen on ui2: a paper doll with HP / armour / encumbrance / warmth per
 // body part (hover a row or the figure), stats with what they do, skills with progress bars
@@ -231,6 +233,21 @@ export function openCharacterSheet(ctx: UiContext): Panel {
     for (const d of defs.filter((x) => !/none$/.test(x.display_category ?? 'none'))) cats.set(d.display_category ?? 'other', [...(cats.get(d.display_category ?? 'other') ?? []), d]);
     const out = h('div', { class: 'cs-skills' });
     const catName = (c: string) => c.replace(/^display_/, '').replace(/^./, (x) => x.toUpperCase());
+    // Focus scales every practice (BN adjust_for_focus); say what it means right now, and what
+    // trained what lately, so "is this upskilling me?" has an answer without hovering.
+    const focus = Math.round(effectiveFocus(p));
+    const recentAll = defs
+      .flatMap((d) => recentPractice(p, d.id).slice(0, 1).map((r) => ({ name: cddaText(d.name as string) || d.id, ...r })))
+      .sort((a, b) => b.turn - a.turn)
+      .slice(0, 3);
+    out.append(
+      h('div', { class: 'cs-kvs' },
+        kv('Focus', `${Math.round(p.focus)} · learning at ${Math.max(0, focus)}% speed`, focus < 60 ? 'warn' : focus >= 100 ? 'good' : 'text'),
+      ),
+      recentAll.length
+        ? h('div', { class: 'ui2-small ui2-dim', text: `Recently trained: ${recentAll.map((r) => `${r.name} (${r.source.charAt(0).toLowerCase()}${r.source.slice(1)})`).join(', ')}` })
+        : h('div', { class: 'ui2-small ui2-dim', text: 'Doing things trains skills: crafting, taking things apart, building, reading, fighting. Hover a skill to see how to raise it.' }),
+    );
     for (const [cat, list] of [...cats].sort((a, b) => a[0].localeCompare(b[0]))) {
       out.append(h('div', { class: 'ui2-section', text: catName(cat) }));
       const grid = h('div', { class: 'cs-skillgrid' });
@@ -239,7 +256,8 @@ export function openCharacterSheet(ctx: UiContext): Panel {
         const lvl = sk?.level ?? 0;
         const frac = sk ? sk.exercise / (10000 * (lvl + 1) ** 2) : 0;
         const name = cddaText(s.name as string) || s.id;
-        const row = h('div', { class: `cs-skill${lvl ? '' : ' zero'}` },
+        const recent = recentPractice(p, s.id);
+        const row = h('div', { class: `cs-skill${lvl ? '' : ' zero'}${recent.length ? ' recent' : ''}`, data: { skill: s.id } },
           h('span', { class: 'cs-skill-name', text: name }),
           h('span', { class: 'cs-skill-lvl', text: String(lvl) }),
           meter(frac, lvl ? 'good' : 'accent', `${Math.floor(frac * 100)}%`),
@@ -248,7 +266,9 @@ export function openCharacterSheet(ctx: UiContext): Panel {
           h('div', { class: 'tone-accent', text: `${name} ${lvl}` }),
           SKILL_USE[s.id] ? h('div', { class: 'ui2-small', text: SKILL_USE[s.id] }) : null,
           s.description ? h('div', { class: 'ui2-small ui2-dim', text: cddaText(s.description as string) }) : null,
-          h('div', { class: 'ui2-small ui2-dim', text: `${Math.floor(frac * 100)}% of the way to level ${lvl + 1}. Practise by doing; books teach the first levels.` }),
+          h('div', { class: 'ui2-small ui2-dim', text: `${Math.floor(frac * 100)}% of the way to level ${lvl + 1}.` }),
+          recent.length ? h('div', { class: 'ui2-small', text: `Recently trained by: ${recent.map((r) => r.source).join(', ')}` }) : null,
+          hintsTip(game, s.id, true),
         ));
         grid.append(row);
       }

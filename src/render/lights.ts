@@ -229,6 +229,8 @@ export class LightManager {
   fillK = 0;
   readonly flashlight = new THREE.SpotLight(0xfff2d8, 0, 22, 0.42, 0.35, 1.2);
   flashlightOn = false;
+  /** Beam from the body instead of the camera (third-person / top views; camera.ts `beam`). */
+  beam: { origin: THREE.Vector3; dir: THREE.Vector3 } | null = null;
   /** Global multiplier for point/spot intensities (tuning). */
   pointScale = 6;
   private pool: THREE.PointLight[] = [];
@@ -374,9 +376,14 @@ export class LightManager {
     // docs/PERF.md). Off, its shadow map just isn't redrawn (intensity 0 hides it).
     fl.castShadow = true;
     fl.shadow.autoUpdate = this.flashlightOn;
-    cam.updateMatrixWorld();
-    fl.position.set(0.22, -0.28, 0.05).applyMatrix4(cam.matrixWorld);
-    fl.target.position.set(0, 0, -10).applyMatrix4(cam.matrixWorld);
+    if (this.beam) {
+      fl.position.copy(this.beam.origin);
+      fl.target.position.copy(this.beam.origin).addScaledVector(this.beam.dir, 10);
+    } else {
+      cam.updateMatrixWorld();
+      fl.position.set(0.22, -0.28, 0.05).applyMatrix4(cam.matrixWorld);
+      fl.target.position.set(0, 0, -10).applyMatrix4(cam.matrixWorld);
+    }
     fl.target.updateMatrixWorld();
   }
 }

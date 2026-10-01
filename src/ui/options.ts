@@ -58,7 +58,8 @@ export function applyStoredOptions(ctx: UiContext): void {
     ctx.renderer.resize();
   }
   if (o.grade && !params.get('grade')) pipe.options.grade = o.grade;
-  if (o.camera && CAMERA_MODES.includes(o.camera) && !params.get('cam')) ctx.renderer.setCameraMode(o.camera);
+  // The camera is not restored at boot: a stored 'third' kept loading the player into the
+  // over-the-shoulder view (user report). First person is the game; V / this row switch per session.
 }
 
 export interface Opt {
@@ -144,9 +145,8 @@ export function openOptions(ctx: UiContext): Panel {
     value: () => renderer.cameraMode,
     change: (d) => {
       renderer.setCameraMode(cycle(CAMERA_MODES, renderer.cameraMode, d));
-      store({ camera: renderer.cameraMode });
     },
-    desc: 'First person, over the shoulder, or CDDA-style top-down (also V in game).',
+    desc: 'First person, over the shoulder, or CDDA-style top-down (also V in game). Every game starts in first person.',
   });
   opts.push(...extraOptions);
   const audio = getAudioEngine();

@@ -358,13 +358,16 @@ export function verdict(who: Character, it: Item, from: Loc, to: Loc, count?: nu
 
 export interface ItemAction {
   id: 'wield' | 'unwield' | 'wear' | 'takeoff' | 'eat' | 'drink' | 'activate' | 'read' | 'reload' | 'unload' | 'drop' | 'pickup' | 'open'
-    | 'read_once' | 'disassemble' | 'craft_continue' | 'craft_abandon';
+    | 'read_once' | 'read_done' | 'disassemble' | 'disassemble_all' | 'craft_continue' | 'craft_abandon';
   label: string;
   /** BN moves (100 = 1 s of game time); the UI shows it as time. */
   moves: number;
   /** Why it can't be done now (the action stays visible, greyed). */
   disabled?: string;
   primary?: boolean;
+  /** A second line for menus: what it trains (src/game/practice.ts previews). */
+  note?: string;
+  noteTone?: 'good' | 'warn' | 'dim';
   /** Run it. Returns the Inventory action result. */
   run(): { ok: boolean; msg: string };
 }

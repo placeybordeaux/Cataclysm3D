@@ -1,0 +1,26 @@
+/* Skill practice cue (src/ui/practice_cue.ts). Lives in hud_modern's left column above the
+   effects/needs, or floats bottom-left when that column isn't there. */
+#ui2 .pcue { display: flex; flex-direction: column; gap: calc(var(--u) * 2); align-items: flex-start; pointer-events: none; }
+#ui2 .pcue:empty { display: none; }
+#ui2 .pcue.pcue-float { position: absolute; left: calc(var(--hud-x, 0px) + var(--u) * 6); bottom: calc(var(--fs) * 12); }
+#ui2 .pcue.pcue-line { position: absolute; left: 50%; top: calc(50% + var(--fs) * 9); transform: translateX(-50%); align-items: center; }
+#ui2 .pcue-card { display: flex; flex-direction: column; gap: var(--u); max-width: min(calc(var(--fs) * 24), 40vw); animation: pcue-in .18s steps(3) both; }
+#ui2 .pcue-title { font-size: var(--fs-s); color: var(--p-text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#ui2 .pcue-row { display: grid; grid-template-columns: auto 1fr; column-gap: calc(var(--u) * 2); align-items: center; font-size: var(--fs-s); color: var(--p-text-bright); }
+#ui2 .pcue-row.blocked { color: var(--p-text-dim); }
+#ui2 .pcue-row.up { color: var(--p-good); }
+/* A pixel up-arrow drawn with borders (no font glyph): green when it trains, a dim bar when not. */
+#ui2 .pcue-arrow { width: 0; height: 0; border-left: calc(var(--fs-s) * .35) solid transparent; border-right: calc(var(--fs-s) * .35) solid transparent; border-bottom: calc(var(--fs-s) * .5) solid var(--p-good); }
+#ui2 .pcue-row.blocked .pcue-arrow { border: 0; width: calc(var(--fs-s) * .7); height: calc(var(--fs-s) * .15); background: var(--p-text-dim); }
+#ui2 .pcue-pip { grid-column: 2; display: block; height: calc(var(--u) * 2); background: rgba(255, 255, 255, .14); margin-top: calc(var(--u) * .5); }
+#ui2 .pcue-pip-fill { display: block; height: 100%; background: var(--p-good); transition: width .3s steps(4); }
+#ui2 .pcue-lineel { font-size: var(--fs-s); color: var(--p-text-bright); background: rgba(9, 10, 15, .62); padding: 0 calc(var(--u) * 3); text-shadow: var(--u) var(--u) 0 #000; }
+#ui2 .pcue-lineel.blocked { color: var(--p-text); }
+#ui2 .pcue-lineel .pcue-title { display: inline; }
+#ui2 .pcue-tip .pcue-hint.now { color: var(--p-good); }
+#ui2 .pcue-tip .pcue-hint.known { color: var(--p-text); }
+#ui2 .pcue-tip .pcue-hint.do { color: var(--p-info); }
+#ui2 .pcue-tip .pcue-hint.cap { color: var(--p-warn); }
+body.ui2-cursor-free #ui2 .pcue-row { pointer-events: auto; }
+@keyframes pcue-in { from { opacity: 0; translate: 0 calc(var(--u) * 2); } to { opacity: 1; translate: 0 0; } }
+#ui2 .pcue-tip.nested { margin-top: calc(var(--u) * 3); padding-top: calc(var(--u) * 2); border-top: var(--u) solid rgba(255, 255, 255, .1); }

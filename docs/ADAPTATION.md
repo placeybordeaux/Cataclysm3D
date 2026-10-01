@@ -379,6 +379,9 @@ Round 4:
 | Weather messages | Options → Weather messages: Changes you notice (default) / Every change (CDDA) | — |
 | First beds | Options → First beds: No skill needed (slower) (default) / Fabrication 1–2 (BN) | — |
 | Fire safety | Options → Fire safety: Warn outside a fire ring (default) / No warning (BN) | — |
+| Reading minigame | Options → Reading: Field notes (default) / Skim / Off (plain BN reading) | `?reading=quiz\|skim\|off` |
+| Practice feedback | Options → Practice feedback: Card (default) / Line / Off | `?pcue=card\|line\|off` |
+| Practice from simple tasks | Options → Practice from simple tasks: Off (BN) (default) / On | — |
 
 Screenshots: `docs/screenshots/wave3/adaptation/`.
 
@@ -546,3 +549,320 @@ crossbow, magazines, batteries). It also covers example order, every failure mod
 and the memory's scan / save / load / stale pile. Real input: `tools/realinput.ts --only
 reloadhelp` (a flashlight with no battery, `r`, look at a pile of light batteries, `r` again, hover
 the hotbar slot). Screenshots: `docs/screenshots/wave3/reload-help/`.
+
+## Reading: field notes (the reading minigame)
+
+In BN, reading a skill book means picking "read", then waiting. Here a chapter is 2–8 real
+seconds, and leveling a skill from a book takes about 20 chapters, so 1–3 minutes of watching a
+bar. Now reading is also an **optional, light minigame** (in the spirit of Skyrim's lockpicking)
+that **teaches Cataclysm** as you go. "Field notes" questions come from the game's own data, so
+they're always correct and nobody has to write them by hand.
+
+**The loop.** While you read, a small card shows up up-and-right of the crosshair with a question
+about what the book teaches and 3–4 answers. Click the right one (or press 1–4): "Right!", and
+the chapter jumps forward ("+3 min of reading · +practice"). Miss: the card marks your pick (red,
+struck out) and the right answer (green), says why ("You need an acetylene torch as a tool for a
+charcoal smoker."), and the next question waits about 5 s. Reading goes on underneath either
+way, so ignoring the card costs nothing. No skill loss, no book damage.
+
+| Screenshot (1600×900, GPU, half-size JPEG) | Shows |
+|---|---|
+| `docs/screenshots/wave3/reading/1_question.jpg` | A cookbook question by the crosshair; the reading card below |
+| `…/2_right.jpg` | Right answer: "+3 min of reading · +practice", the chapter bar jumped |
+| `…/3_wrong.jpg` | Wrong answer: the pick struck out, the right one green, why, "Next note in 5 s" |
+| `…/4_mouse.jpg` | After a left click: the card has the cursor (gold outline), hovering an answer |
+| `…/5_zombie.jpg` | A zombie in view: the reading stops and the card goes with it |
+| `…/6_skim.jpg`, `…/7_skim_hit.jpg`, `…/7b_skim_miss.jpg` | The Skim variant: terms drift through the lens; a catch; filler grabbed |
+| `…/8_known.jpg` | "You know everything Cooking on a Budget teaches. Skim it?" |
+
+### Variants (Options → Reading, `?reading=`)
+
+1. **Field notes** (`quiz`, default): as above.
+2. **Skim** (`skim`): a strip of text drifts right to left through a lens. The key terms are the
+   book's recipe names and the answers to its questions, underlined among filler (common words
+   and words from the book's description). Press 1 while a key term is in the lens, or click one
+   anywhere in the strip: "+2 min of reading". Grab filler and "Lost your place…": the strip greys
+   out for 3 s. It's a timing game rather than a knowledge game, but you still see the book's
+   vocabulary (the recipes it holds) go past.
+3. **Off** (`off`): plain BN reading, as before.
+
+### What gets asked: templates by skill
+
+Every book draws from weighted templates: its **recipes** first (any book with `book_learn`
+entries), then its **skill's** own. Martial-arts manuals use their style plus the melee templates.
+
+| Template | Skills | Example (real output) |
+|---|---|---|
+| `recipe_uses` | any book with recipes | "Which of these goes into making liver & onions?" Grapes · **Onion** · Spaghetti marinara · … |
+| `recipe_quality` | recipes with tool qualities | "Making condensed milk takes a tool for food cooking. Which of these will do?" Kris · Electric polisher · **Cast-iron pot** ("food cooking 3, needs 3") |
+| `book_makes` | recipes | "Which of these does Bon Appetit show you how to make?" Agar · **Condensed milk** · Pork stick |
+| `recipe_hardest` | books with ≥4 recipes | "Which of these takes the most skill to make?" Makeshift stethoscope · **Antiseptic** · Rehydration drink · Saline solution |
+| `quality_item` | cooking, survival, traps, fabrication, tailor, mechanics, driving, electronics, computer, first aid | "Which of these is a tool for jacking?" Folding knife · RM42 fighting knife · **Scissor jack** · Nail bomb |
+| `spoils_first` | cooking, survival | "Which of these goes bad first?" Raw potato · **Cake** ("about 2.2 days") · Chili pepper |
+| `never_spoils` | cooking | "Which of these keeps without spoiling?" |
+| `heal` | first aid, survival | "Which of these stops bleeding?" / "…disinfects a wound?" Antiseptic · GHB · Weak mixed alcohol · Inhaler |
+| `battery_fits` | electronics, computer, mechanics | "Which battery fits a flashlight?" **Light battery** · Medium battery · … (the same `magazines` well the reload helper reads) |
+| `needs_power` | electronics, computer | "Which of these runs on batteries?" |
+| `engine_fuel` | mechanics, driving | "What does a large 1-cylinder engine run on?" Diesel · Coal · **Gasoline** · Battery |
+| `car_needs` | mechanics, driving | "Besides an engine, which of these does a car need to drive?" Windshield · **Drive by wire controls** · Cargo rack · … |
+| `gun_ammo` | gun, pistol, rifle, shotgun, smg, launcher, archery | "What does the Remington 1100 competition fire?" Wooden small game bolt · **Shotgun slug** · 5.56 tracer · Signal flare |
+| `gun_magazine` | guns | "Which magazine fits the Glock 19?" |
+| `gun_skill` | pistol, rifle, shotgun, smg, launcher, archery | "Which of these do you shoot with the Shotguns skill?" **Remington 870 Wingmaster** · Glock 17 · … |
+| `weapon_class` | bashing, cutting, stabbing, melee, unarmed, guns | "Which of these is one of the Two-handed Axes?" Forked spear · … · **Battle axe** |
+| `damage_most` | bashing, cutting, stabbing, melee, unarmed, throw | "Which of these does the most cutting damage in melee?" Throwing knife · **Nodachi** (47) · Bullwhip |
+| `ma_technique`, `ma_style`, `ma_weapon` | martial-arts manuals, unarmed, melee | "Which of these is a Karate technique?" / "Which martial art teaches Knifehand strike?" / "Which of these weapons can you fight with in Barbaran Montante?" |
+| `price_most` | barter, speech | "Which of these would a trader value most these days?" (`price_postapoc`) |
+| `encumbrance_most` | dodge, swimming, tailor | "Which of these hampers your movement most when worn?" |
+| `swim_gear` | swimming | "Which of these keeps you afloat?" **Flotation vest** · Zentai · Loincloth · … (FIN / FLOTATION / SWIM_GOGGLES / WATERPROOF) |
+| `throwing` | throw, traps | "Which of these is made for throwing?" (BN `NPC_THROWN`) |
+| `material_of`, `made_of` | most skills, as a fallback | "What is hunting cap mostly made of?" **Wool** · … / "Which of these is made of rubber?" |
+
+Difficulty follows the book's level (`max(required_level, max_level)`). Beginner books (≤2) get
+3 options, items that actually spawn (BN item-group weights), and comparisons won by at least
+2.5×. Mid books (≤5) get 4 options and a 1.8× margin. Advanced books get 4 options, any item,
+and a 1.35× margin.
+
+**Always correct.** Each question carries its rule (option → right or wrong), checked over the
+real data:
+
+- exactly one option passes the rule;
+- the player sees *names*, and BN reuses names, so an option is only offered when **every** item
+  (material, technique, part…) of that name agrees with the rule;
+- recipes are judged together with every recipe of the same display name (you can't tell the
+  variants apart);
+- `cooks_like` stand-ins count as ingredients;
+- comparisons need the margin above.
+
+`tests/readquiz.test.ts` runs every template over every quiz book in BN (233 books: 200 skill
+books, 32 martial-arts manuals, 1 recipe-only book). It re-checks all of the above independently
+(each option's name resolved back to every thing that bears it), and requires ≥8 distinct sound
+questions per book. Fun-only books (novels, holy books, comics: 83) have no quiz and read exactly
+as before. `tools/readquiz-dump.ts <book ids> [--all] [--template id]` prints samples.
+
+### Rewards and tuning (`src/game/readquiz/session.ts` TUNING)
+
+| | Value | Why |
+|---|---|---|
+| First question | 1.5 s after you start | settle in first |
+| Right answer | skips the reading that would take **2.5 real s at ×1**, at most 60% of a chapter; next question 1.1 s later | the chapter's own clock warp converts it to game minutes ("+3 min"), so it's the same feel for a 5-minute magazine and an hour-long textbook |
+| Practice | +1 × (level+1) BN exercise points per right answer | inside BN's caps: nothing once the skill reaches the book's max level, and never a level-up by itself (stops one point short; the level comes at a chapter's end, as BN's `readBook` does it) |
+| Wrong answer | right answer shown 2.6 s, next question 5 s after the miss | you learned it; a short pause, no penalty |
+| Skim hit / miss | 2.5 s of reading / 3 s blanked strip | |
+
+Measured over whole "read until you gain a level" runs, three seeds each
+(`tests/readquiz_game.test.ts`, simulated players):
+
+| Book | Plain | Good quiz (right, ~2 s per question) | Careless (1 s, half wrong) | Good skimmer |
+|---|---|---|---|---|
+| Bon Appetit (cooking 0→1) | 133 s | 71 s (**1.9×**) | 97 s (1.4×) | 98 s (1.4×) |
+| The Big Book of First Aid (0→1) | 125 s | 65 s (**1.9×**) | 91 s (1.4×) | 86 s (1.5×) |
+| survival textbook (3→4) | 139 s | 76 s (**1.8×**) | 104 s (1.3×) | 91 s (1.5×) |
+
+So a good player reads about twice as fast, not instantly. The test fails outside 1.6–2.6×.
+
+### "You know this. Skim it?"
+
+When your skill is already at the book's max level, or a recipe-only book's recipes are all
+memorised, the card asks first: **[1] Skim it (done in a moment)** or **[2] Read it anyway**.
+Skimming ends the chapter at once and resolves it as BN would:
+
+- the recipes your skill can follow are memorised;
+- the book's morale applies;
+- no skill is gained, since you're past what the book teaches;
+- the run stops ("You finish reading.").
+
+### Input and mouse-look
+
+Reading is a stand-still job, but it shouldn't take the mouse away:
+
+- **Number keys 1–4** answer while a question is up and no menu is open. At any other time they
+  do what they always do (the hotbar). Skim: 1 grabs.
+- **The mouse** stays mouse-look until you engage. A left click while a question is up never
+  attacks: it frees the cursor and the card takes the clicks (gold outline, "click an answer").
+  Clicking an answer, clicking off the card, or pressing a movement key gives mouse-look back
+  straight away, with no extra click. Without pointer lock (the free-cursor menu option, or
+  automation) the buttons are simply clickable.
+- **Moving** still stops reading, engaged or not. Interrupts (a hostile in view, getting hurt,
+  dangerous cold) end the reading, and the card goes with it.
+- The card never advertises Esc. The keys are drawn as keycaps, so the 1 never reads as an l
+  in the pixel font.
+
+### Fast-forward (×2–×16, `src/game/timewarp.ts`)
+
+**The quiz pauses above ×1.** At ×2 and up, no new questions appear. A question already up hides
+and waits ("Field notes wait while time runs fast."), and its timers stop. Back at ×1 it's there
+again. The jump itself is game time (`skipReading`), so it would work at any speed. The reason
+for pausing is attention: fast-forward means "get this over with". The quiz is the *other* way
+through a book faster: a good quiz player is roughly ×2 fast-forward, earned. Dropping to ×1
+when a question appears would fight the player's choice. The game's own pauses (tactical pause,
+a menu that stops time) also freeze the timers, so a cooldown can't be waited out for free. A
+question already on screen can still be answered then.
+
+### Code, tests, gaps
+
+- `src/game/readquiz/questions.ts`: the generators, pure (GameData + book + Rng → Question).
+  Vehicle questions need vehicles.json, which the UI hands over (`setQuizVehicles`) once loaded.
+- `src/game/readquiz/session.ts`: the quiz and skim state machines, real time, no DOM. TUNING
+  lives here.
+- `src/game/readquiz/controller.ts`: one session per reading run, across chapters. Rewards,
+  the skim offer, freezing.
+- `src/ui/readquiz.ts` / `.css`: the card, Options → Reading, keys, click-to-engage, and
+  `cdda.readquiz.state()` for QA.
+- Hooks in `src/game/reading.ts` (additive): `skipReading(host, gameSeconds)` is the progress
+  jump (never past a chapter's end, so the chapter still completes through the activity), and
+  `readingPractice(c, book, points)`.
+- Tests: `tests/readquiz.test.ts` (generators over every book), `tests/readquiz_game.test.ts`
+  (right/wrong/cooldown, practice caps, no skipping past a chapter, the offer, interrupts,
+  fast-forward and pause freezing, skim hits/misses/clicks, the ×2 tuning).
+- Real input: `tools/realinput.ts --only readquiz,readskim,readknown --gpu`. These open a
+  cookbook with R, answer right with the number key (the chapter jumps), answer wrong (marked,
+  about 5 s cooldown), click an answer with the mouse after engaging, then a zombie interrupts.
+  They also play the Skim variant (catch and miss) and the "Skim it?" offer.
+
+Gaps:
+
+- Questions are generated, so some are odd but true. A "tool for cutting" might be a replica
+  sword when no kitchen knife was drawn. Distractors are plausible, never curated.
+- A few templates lean on data flags whose meaning a player can't check in-game yet (`NPC_THROWN`
+  for "made for throwing").
+- `car_needs` encodes BN's driving rule (controls, wheels, a tank) by hand. Every other template
+  reads data only.
+- No streak bonus and no sound yet. The card doesn't scale its text beyond the ui2 font size
+  setting.
+- The skim variant's filler is generic; it could use the book's own snippets.
+
+## Seeing skill practice: "is disassembling toasters upskilling me?"
+
+User report: "when I start a disassembly from the inventory screen it doesn't drop me into the
+actual disassembly straight away. Also disassembling a toaster & other electronics don't seem to be
+upskilling my electronics, is that correct? It's maybe a little unclear when you are actually
+upskilling stuff (or which activities do that)".
+
+**The toaster is BN-correct.** `crafting.cpp complete_disassemble`: "disassembly only nets a bit of
+practice", `practice(skill_used, difficulty × 2, difficulty)`. The toaster uncraft
+(`data/json/uncraft/generic.json`) is Electronics with no difficulty, so it gives 0 practice. Of the
+130 Electronics uncrafts, most are difficulty 0 too (laptop, TV, microwave, phones). The ones that
+teach include the curling iron (1), RAM and processor boards (1), the polisher (2), the heavy-duty
+flashlight (3), and the reversible craft recipes for the parts a toaster gives you: the power
+converter and the heating element (difficulty 1, which need a soldering iron). The rule stays BN's.
+What changed is that you can now see it.
+
+**The flow bug.** Choosing an item action that starts an activity (Disassemble, Read, Continue
+crafting) did start the activity, but the inventory stayed open. Under the default "time is paused
+while the inventory is open", the work sat frozen until you closed the window yourself. Now those
+actions close every window, re-capture the mouse (the click counts as the gesture) and the work runs
+at once with the crosshair ring (`BnHooks.activityStarted`, `src/ui2/bn/install.ts`). BN asks
+"Really disassemble?" with the yield list. Here the menu label already shows the yield
+("Disassemble (2 copper wire, 1 power converter, …)"), so the click is the confirmation. Stacks get
+**"Disassemble all N"** (identical items in one place, or every batch of a charges stack). They are
+queued one after another like BN's `disassemble_activity_actor` target list, and the queue stops at
+the first one that is gone or can't be done.
+
+### What you see now
+
+- **A practice cue by the needs** (Options → Practice feedback: **Card** (default) / Line / Off;
+  `?pcue=card|line|off`). Each time something trains a skill, or a task you chose trains nothing,
+  a small card shows the source and one row per skill:
+  - "Disassembling the toaster · Electronics: no practice, too simple to learn from"
+  - "Disassembling the curling iron · ▲ Electronics +2% · 2% to level 1", with a thin bar toward
+    the next level
+  - "…you're past what this teaches (level N)" (the BN cap), "…your focus is too low", "Electronics
+    reached level 1!"
+  
+  It doesn't spam. A fight's swings fold into one "Fighting" card. A "no practice" row only shows
+  for an action you chose (a named source), never for every zombie swing. A gain in the same card
+  replaces a rolled-down step. At most two cards show, and each fades 4.5 s after its last update
+  (6.5 s for "no practice"). The **Line** variant is a single line under the crosshair. A
+  **level-up** is also a toast ("Electronics is now level 1"). Hovering a cue row (cursor free)
+  shows how to reach the next level.
+- **Previews before acting**, using the same formulas the actions use:
+  - item right-click menus get a second line under Disassemble / Read: "Too simple to train
+    Electronics (difficulty 0)" (dim) or "Trains Electronics up to level 2 (+2% of level 1 each
+    time)" (green)
+  - crafting cards: "Trains Fabrication up to level 3 (+31% of level 1 per craft)", plus sub-skills
+  - construction stage cards: "… when built"
+  - the item info card has a "Trains" block: fighting with it (BN `melee_train`: the weapon's
+    bash/cut/stab share and Melee), shooting it (the gun skill and Marksmanship, every shot),
+    reading it, disassembling it
+  - the classic `(` and `R` menus' detail panes
+- **Character sheet (`@` → Skills)**: focus as "learning at N% speed", "Recently trained: Electronics
+  (disassembling the curling iron), …", trained skills highlighted, and per skill a tooltip with
+  progress, "Recently trained by: …" (the last 4 sources) and **"How to reach Electronics 1"**.
+
+### "How to reach level N+1" (`src/game/skill_hints.ts`)
+
+3–5 lines, nearest first, built from data. Every claim uses the action's own rule, so it never
+suggests something that won't train you:
+1. Things you can do **now**: known recipes whose cap still covers your level (difficulty level+1
+   first, since harder teaches more and one above your level is still makeable), items you carry or
+   stand next to that teach when taken apart, constructions you're skilled enough for, books you
+   have that still teach you.
+2. Ones you know but **lack something** for ("… when you have the parts", "… with the right
+   tools"). For example, after the toaster: "Disassemble the power converter (Electronics 1) with
+   the right tools".
+3. **Activities** that train it in BN and in this port: fighting, shooting, dodging, swimming,
+   driving, first aid, butchering and fires, conversation and trading, terminals, traps, chopping
+   trees.
+4. One **cap** line when something blocks you: "Starting fires no longer teaches it past level 5",
+   "Misses no longer teach it past level 5", "Your books only go to level 3".
+
+Books are the ones you carry or have within reach (`readableBooks`). The seen-items memory
+(`seenitems.ts`) only keeps reload items, so books seen elsewhere aren't remembered yet.
+
+### Formulas (BN, checked in the C++)
+
+| Source | practice(skill, amount, cap) | Where |
+|---|---|---|
+| Disassembly | `difficulty × 2`, cap `difficulty` | `crafting.cpp` complete_disassemble |
+| Crafting (every 5 %, 20×) | `roll_remainder((difficulty × 15 + 10) × batch_mult / 20)`, cap `difficulty × 1.25`. `batch_mult = batch + base_moves / 30000`. Sub-skills get half of `(their level × 15 + 10)` | `crafting.cpp` craft_skill_gain |
+| Construction | `(10 + 15 × level) × (1 + time / 10 min)`, cap `level × 1.25` | `construction.cpp` award_xp |
+| Reading (per chapter) | `(level+1) × rng(min_ex, max_ex)`, focus-adjusted, up to the book's `max_level` (bypasses `practice`, as `readBook`) | `avatar.cpp` do_read |
+| Driving (new here) | every turn at the controls of a moving vehicle, 1 in 8: `1 + mass/400 kg + |v|/3200 vmiph` | `character_turn.cpp` |
+| Melee, guns, dodge, first aid, survival, speech… | unchanged call sites; reported through `Character.practice` | |
+
+`Character.practice` applies focus: `amount × (focus + 5 × (Int − 8) ± 15 for Fast/Slow
+Learner) / 100`, with the remainder rolled. A level takes `100 × (level+1)²`, and the cap blocks
+when `level > cap`, so a cap-N task can take you to N+1. A blocked call doesn't drain focus. The
+previews show the expected share per action at your current effective focus.
+
+### Adaptation switch: "Practice from simple tasks" (default **off** = BN)
+
+Options → Practice from simple tasks: **Off (BN)** / On. With it on, a difficulty-0 disassembly
+gives a token amount: half what crafting a difficulty-0 recipe of the same length teaches,
+`5 × (1 + time / 300 s)`, with cap 0, so it stops at level 1. A 10-minute toaster gives 15, about
+seven toasters to Electronics 1. The menu marks it "· simple-task practice". Difficulty-0 *crafts*
+already train to level 1 in BN, so the switch only touches uncrafts. The user agreed to keep it off
+by default.
+
+### Plumbing
+
+`src/game/practice.ts`: every `Character.practice` outcome (and reading's direct `train`) emits a
+`PracticeEvent` (skill, source, requested, gained, cap, level and progress before and after,
+level-up, `blocked: no_amount | cap | focus | max | asleep`). Callers name the source with
+`withPracticeSource('Disassembling the toaster', …)`: disassembly, crafting, construction, reading
+and driving do. Everything else falls back to the running activity's name ("butchering the
+zombie"), or "Fighting" / "Shooting" / … by skill. The UI is `src/ui/practice_feed.ts` (pure
+folding) and `src/ui/practice_cue.ts` (drawing, options, `cdda.practice.cue()` / `.hints(skill)` /
+`.setMode()`). `src/game/practice_info.ts` builds the item info lines. The crafting step that
+rolls 0 is skipped rather than reported (BN's `practice(…, 0)` does nothing either). Reporting it
+flashed "too simple" in the middle of a craft that does teach.
+
+Tests: `tests/practice.test.ts` checks the toaster (0 practice, the event says why), the curling
+iron (gain = the preview), the cap, the switch, a full craft's total against its preview, the
+construction, reading, combat, ambient and driving sources, the feed's folding and expiry, the
+hints (what's suggested, what's never suggested, caps, the 5-line limit), and the inventory action
+starting the activity and closing the screens, plus "Disassemble all". Real input:
+`tools/realinput.ts --only skills` (a toaster from the inventory starts at once and the cue says
+no practice and why; a curling iron shows the gain; `@` → Skills shows the hover hints; a level-up
+toast; the Line variant). Screenshots (half-size JPEG): `docs/screenshots/wave3/skills/`.
+
+| Screenshot (`docs/screenshots/wave3/skills/`, 1280×720 GPU, half-size JPEG) | Shows |
+|---|---|
+| `toaster_menu_preview.jpg` | Right-click a toaster: "Disassemble (…)", with "Too simple to train Electronics (difficulty 0)" under it |
+| `toaster_started_at_once.jpg` | One click later: inventory closed, mouse captured, the ring and "Disassembling the toaster" running |
+| `toaster_cue_no_practice.jpg` | The cue by the needs: "Disassembling the toaster · Electronics: no practice, too simple to learn from" |
+| `curling_iron_menu_trains.jpg` | A curling iron (difficulty 1): "Trains Electronics up to level 2 (+2% of level 1 each time)" |
+| `curling_iron_cue_gain.jpg` | Its cue: "▲ Electronics +2% · 2% to level 1" above the toaster's card |
+| `charsheet_how_to_level.jpg` | `@` → Skills: focus, recently trained, and the Electronics tooltip with "How to reach Electronics 1" |
+| `levelup_toast.jpg` | Level-up: "Electronics is now level 1 · From disassembling the curling iron", and the cue row |
+| `cue_line_variant.jpg` | Options → Practice feedback: Line, one line under the crosshair |

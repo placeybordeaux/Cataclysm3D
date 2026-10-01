@@ -22,6 +22,7 @@ import { attachTooltip, button, closeKeyLabel, h, iconEl, isCloseKey, openPanel,
 import { itemIconRef, mapIconRef, rememberedWindow, requirementSections, searchField } from './common';
 import { shortfall } from './craft_model';
 import { effectiveSkills, effectiveTime } from '../../game/adaptation_rules';
+import { previewConstruction } from '../../game/practice';
 import './craft2.css';
 
 const PANEL_ID = 'craft.construct';
@@ -258,6 +259,7 @@ function stageCard(game: Game, con: ConstructionDef, inv: CraftingInventory, px:
     { class: 'c2-facts' },
     h('div', { class: 'c2-fact' }, h('span', { class: 'ui2-dim', text: 'Time' }), h('span', { text: formatDuration(effectiveTime(con)) + (effectiveTime(con) > con.time ? ' (slow without the skill)' : '') })),
     ...skills.map(([s, l]) => h('div', { class: 'c2-fact' }, h('span', { class: 'ui2-dim', text: 'Skill' }), h('span', { class: p.getSkill(s) >= l ? 'tone-good' : 'tone-bad', text: `${p.skillName(s)} ${l} (you ${p.getSkill(s)})` }))),
+    ...previewConstruction(p, con).map((pv) => h('div', { class: 'c2-fact' }, h('span', { class: 'ui2-dim', text: 'Trains' }), h('span', { class: pv.verdict === 'trains' ? 'tone-good' : 'ui2-dim', text: pv.text }))),
     con.dark_craftable ? h('div', { class: 'c2-fact' }, h('span', { class: 'ui2-dim', text: 'Works in the dark' })) : null,
   );
   const ev = evaluateRequirements(data, con, inv);

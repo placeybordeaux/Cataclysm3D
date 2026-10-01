@@ -5,6 +5,7 @@ import { asArray, type Item } from '../game/item';
 import { cddaText } from '../game/units';
 import { drawStyle, rangedClass, strRequirementLine } from '../game/rangedfeel';
 import { reloadHintsFor, seenLine, takesLine } from '../game/reloadhelp';
+import { itemPracticeLines } from '../game/practice_info';
 import { c, colorize } from './framework';
 import { durationText, kg, liters } from './format';
 
@@ -143,6 +144,12 @@ export function itemInfo(it: Item, who: Character): string {
     L.push(c('c_light_gray', esc(takes)));
     const seen = seenLine(it, reloadHintsFor(who));
     if (seen) L.push(c('c_light_green', esc(seen)));
+  }
+  // What it trains (src/game/practice_info.ts): weapons, guns, books, disassembly.
+  const trains = itemPracticeLines(who, it);
+  if (trains.length) {
+    L.push(SEP);
+    for (const t of trains) L.push(c(t.trains ? 'c_light_green' : 'c_dark_gray', esc(t.text)));
   }
   if (it.isBook()) {
     L.push(SEP);

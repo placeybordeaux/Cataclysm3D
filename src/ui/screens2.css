@@ -44,6 +44,7 @@
 #ui2 .cs-skill { display: grid; grid-template-columns: 1fr 2ch calc(var(--fs) * 5); gap: calc(var(--u) * 3); align-items: center; font-size: var(--fs-s); padding: 0 var(--u); }
 #ui2 .cs-skill:hover { background: var(--p-bg-hover); }
 #ui2 .cs-skill.zero { color: var(--p-text-dim); }
+#ui2 .cs-skill.recent .cs-skill-name { color: var(--p-good); }
 #ui2 .cs-skill-lvl { text-align: right; color: var(--p-accent); }
 #ui2 .cs-skill.zero .cs-skill-lvl { color: var(--p-text-dim); }
 #ui2 .cs-list { display: flex; flex-direction: column; gap: calc(var(--u) * 3); }
