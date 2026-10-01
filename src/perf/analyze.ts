@@ -78,7 +78,9 @@ export interface PerfSummary {
     slowest: { omt: string; n: number; mean: number; max: number; total: number }[];
   };
   /** longest single mesher/tree stretch visible in the event log (ms) */
-  worstFrames: { t: number; interval: number; split: Record<string, number>; gens: string[]; builds: number }[];
+  worstFrames: { t: number; interval: number; split: Record<string, number>; gens: string[]; builds: number; compiled: number }[];
+  /** shader programs compiled during the window (each one a stall: ~0.1-1 s in Firefox) */
+  compiles: number;
   findings: string[];
 }
 
@@ -137,8 +139,9 @@ export function summarize(d: PerfDump): PerfSummary {
     }
     const t1 = t[i], t0 = t1 - iv[i];
     const inFrame = ev.filter((e) => e.t >= t0 && e.t <= t1 + 1);
+    const pr = col(d, 'programs');
     return {
-      t: Math.round(t1), interval: Math.round(iv[i] * 10) / 10, split,
+      t: Math.round(t1), interval: Math.round(iv[i] * 10) / 10, split, compiled: i > 0 && pr[i] > pr[i - 1] ? pr[i] - pr[i - 1] : 0,
       gens: inFrame.filter((e) => e.k === 'gen').map((e) => `${e.omt ?? '?'}${e.pre ? ' (prefetch)' : ''} ${e.ms}ms`),
       builds: inFrame.filter((e) => e.k === 'built' || e.k === 'rebuild').length,
     };
@@ -177,6 +180,12 @@ export function summarize(d: PerfDump): PerfSummary {
       slowest,
     },
     worstFrames,
+    compiles: (() => {
+      const pr = col(d, 'programs');
+      let n = 0;
+      for (let i = 1; i < pr.length; i++) if (pr[i] > pr[i - 1]) n += pr[i] - pr[i - 1];
+      return n;
+    })(),
     findings: [],
   };
   s.missed = iv.filter((v) => v > 1.5 * s.interval.p50).length;
@@ -198,6 +207,7 @@ function findings(s: PerfSummary): string[] {
   const top = Object.entries(sec).filter(([k]) => !['mesh', 'trees', 'genSync', 'genHooks', 'kModels', 'kSurfaces', 'kDressing', 'kRooms', 'gpu', 'wait'].includes(k)).sort((a, b) => b[1] - a[1]).slice(0, 3);
   if (top.length) f.push(`Main loop per frame: ${top.map(([k, v]) => `${k} ${v} ms`).join(', ')}.`);
   if (s.missed > s.frames * 0.05) f.push(`${s.missed} of ${s.frames} frames missed a refresh (over 1.5x the median ${s.interval.p50} ms).`);
+  if (s.compiles > 0) f.push(`${s.compiles} shader programs compiled during the window (each stalls a frame; see worst frames).`);
   if (s.hitches50 > 0) f.push(`${s.hitches50} frames over 50 ms, ${s.hitches33} over 33 ms (worst ${s.interval.max} ms).`);
   if (!f.length) f.push('No streaming or frame-time problems in this window.');
   return f;

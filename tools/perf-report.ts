@@ -58,7 +58,7 @@ export function printReport(d: PerfDump, name = 'dump'): void {
   console.log('\n   worst frames');
   for (const w of s.worstFrames.slice(0, 8)) {
     const split = Object.entries(w.split).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k} ${v}`).join('  ');
-    console.log(`   ${String(w.interval).padStart(6)} ms @${(w.t / 1000).toFixed(1)}s  ${split}${w.gens.length ? `  | gen: ${w.gens.slice(0, 3).join(', ')}${w.gens.length > 3 ? ` +${w.gens.length - 3}` : ''}` : ''}${w.builds ? `  | ${w.builds} builds done` : ''}`);
+    console.log(`   ${String(w.interval).padStart(6)} ms @${(w.t / 1000).toFixed(1)}s  ${split}${w.gens.length ? `  | gen: ${w.gens.slice(0, 3).join(', ')}${w.gens.length > 3 ? ` +${w.gens.length - 3}` : ''}` : ''}${w.builds ? `  | ${w.builds} builds done` : ''}${w.compiled ? `  | ${w.compiled} shader compile(s)` : ''}`);
   }
   console.log('\n   findings');
   for (const f of s.findings) console.log(`   - ${f}`);

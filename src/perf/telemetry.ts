@@ -32,7 +32,7 @@ export interface TelemetrySource {
   /** fog fully opaque at this distance (tiles) */
   fogFar(): number;
   prefetch?: { stats: { queue: number }; inPrefetch: boolean };
-  gl?: { calls: number; triangles: number; geometries: number; textures: number };
+  gl?: { calls: number; triangles: number; geometries: number; textures: number; programs: number };
 }
 
 export type EventKind = 'want' | 'gen' | 'built' | 'rebuild' | 'trees' | 'empty' | 'drop' | 'evict';
@@ -78,6 +78,8 @@ export const CHANNELS = [
   'entries', 'builds', 'prefetchQ', 'budget',
   // renderer / memory
   'calls', 'triangles', 'geometries', 'textures', 'heapMB',
+  // shader programs compiled so far: a step is a compile (a new material or light setup: ~0.1-1 s in Firefox)
+  'programs',
 ] as const;
 export type Channel = (typeof CHANNELS)[number];
 
@@ -273,6 +275,7 @@ export class Telemetry implements ChunkProbe {
     C.triangles[i] = g ? g.triangles : NaN;
     C.geometries[i] = g ? g.geometries : NaN;
     C.textures[i] = g ? g.textures : NaN;
+    C.programs[i] = g ? g.programs : NaN;
     C.heapMB[i] = (r.n & 31) === 0 ? this.heapMB() : C.heapMB[r.back(0)];
     r.n++;
   }

@@ -52,7 +52,7 @@ interface Route {
   what: string;
   /** where: 'town' (longest straight road through the nearest town), 'rural' (longest straight road
    *  outside towns near the start), 'forest' (through the nearest thick forest) */
-  kind: 'town' | 'city' | 'rural' | 'forest' | 'load' | 'loaddrive' | 'teleport';
+  kind: 'town' | 'city' | 'rural' | 'forest' | 'load' | 'loaddrive' | 'teleport' | 'stand';
   mph: number;
   seconds: number;
   /** absolute limits for this route instead of LIMITS' (merged over them) */
@@ -75,6 +75,10 @@ export const ROUTES: Record<string, Route> = {
   // Firefox pauses ~250-280 ms between two frames about a second after the curtain lifts,
   // outside our frame (no headless profiler to name it; a major GC is the likely one).
   loaddrive: { what: 'the same reload, then drive off at 40 mph the moment the curtain lifts', kind: 'loaddrive', mph: 40, seconds: 15, limits: { maxHoleS: 8, maxStepMs: 150, maxFrameMs: 350 } },
+  // Standing in a dense city (the user's second dump: draw-bound, 9.5 ms/frame of WebGL calls in
+  // Firefox): mean draw ms and calls, and the longest frame with the flashlight switched on and
+  // off twice mid-run (its first use once recompiled every shader: a 0.8-1 s freeze).
+  citystand: { what: 'stand in the city centre for 12 s, flashlight on/off twice', kind: 'stand', mph: 0, seconds: 12, limits: { maxFrameMs: 150 } },
   teleport: { what: 'jump from the city to Holden (~150 OMTs), stand still until everything in view is built', kind: 'teleport', mph: 0, seconds: 15 },
 };
 
@@ -82,7 +86,7 @@ if (argv.includes('--list')) {
   for (const [k, r] of Object.entries(ROUTES)) console.log(`${k.padEnd(8)} ${r.seconds}s  ${r.what}`);
   process.exit(0);
 }
-const routeNames = opt('--routes', 'town40,town60,city40,city60,forest,rural,teleport,load,loaddrive').split(',');
+const routeNames = opt('--routes', 'town40,town60,city40,city60,forest,rural,citystand,teleport,load,loaddrive').split(',');
 for (const r of routeNames) if (!ROUTES[r]) throw new Error(`unknown route ${r} (${Object.keys(ROUTES).join(', ')})`);
 const size = opt('--size', '3440x1304').split('x').map(Number);
 if (size.length !== 2 || size.some((v) => !(v > 0))) throw new Error(`--size ${opt('--size', '')}: expected WxH`);
@@ -119,6 +123,9 @@ export interface Metrics {
   /** load/teleport: longest frame after the curtain lifted (until full), and behind it (ms) */
   maxFrameMs?: number;
   curtainFrameMs?: number;
+  /** standing routes: mean CPU ms of the draw section, and mean draw calls per frame */
+  drawMs?: number;
+  calls?: number;
 }
 // Absolute limits: an unbuilt chunk may be in clear view for a moment (a side street swinging
 // into the ultrawide view as you enter a city; the stand-in covers it), not for seconds.
@@ -135,6 +142,8 @@ const DEFAULT_TOL: Record<keyof Metrics, { rel: number; abs: number }> = {
   fullMs: { rel: 0.4, abs: 1500 },
   maxFrameMs: { rel: 0.5, abs: 50 },
   curtainFrameMs: { rel: 1, abs: 200 },
+  drawMs: { rel: 0.35, abs: 1.5 },
+  calls: { rel: 0.25, abs: 100 },
 };
 interface Baseline {
   note: string;
@@ -237,7 +246,7 @@ try {
     const r = ROUTES[name];
     const seconds = secondsArg ? Number(secondsArg) : r.seconds;
     const jump = r.kind === 'load' || r.kind === 'loaddrive' || r.kind === 'teleport';
-    const route = await page.evaluate(`__perfBench.pick(${JSON.stringify(jump ? (r.kind === 'teleport' ? 'town' : 'city') : r.kind)})`);
+    const route = await page.evaluate(`__perfBench.pick(${JSON.stringify(jump ? (r.kind === 'teleport' ? 'town' : 'city') : r.kind === 'stand' ? 'city' : r.kind)})`);
     let mon: Mon | null = null;
     const profDir = opt('--profile', '');
     const cdp = profDir && browserKind === 'chromium' ? await page.createCDPSession() : null;
@@ -269,6 +278,13 @@ try {
       // the save kept you at the wheel of the car placed before it (vehicles restore the driver)
       if (r.kind === 'loaddrive') await page.evaluate(`(() => { if (!cdda.vehicleSystem.driving) throw new Error('not at the wheel after the load'); __perfBench.go(${r.mph * MPH}); })()`);
       else await page.evaluate(`__perfBench.stop = () => {}`);
+    } else if (r.kind === 'stand') {
+      // on foot in the middle of the densest city road, looking along it
+      await page.evaluate(`(() => { const r = ${JSON.stringify(route)}; __perfBench.place({ ...r, lead: -4 }); cdda.exitVehicle(); __perfBench.stop = () => {}; })()`);
+      await waitStreamed(page, 30_000);
+      await new Promise((res) => setTimeout(res, 8000)); // far blocks merge once settled
+      if (cdp) await cdp.send('Profiler.start');
+      await page.evaluate(`(() => { cdda.perf.reset(); const fl = (on, ms) => setTimeout(() => cdda.flashlight(on), ms); fl(true, 3000); fl(false, 5000); fl(true, 7000); fl(false, 9000); })()`);
     } else {
       await page.evaluate(`__perfBench.place(${JSON.stringify(route)})`);
       // let the start area stream in completely, then measure from standing start at full speed
@@ -296,6 +312,12 @@ try {
     }
     const s = summarize(out.dump);
     const m = metricsOf(s, out.chunks);
+    if (r.kind === 'stand') {
+      Object.assign(m, { maxHoleS: undefined, holeS: undefined, runwayP10: undefined, maxFrameMs: Math.round(s.interval.max), drawMs: s.sections.draw, calls: Math.round(s.sections.calls ?? NaN) });
+      const calls = (out.dump.frames.calls ?? []).filter((v): v is number => typeof v === 'number');
+      m.calls = Math.round(calls.reduce((a, b) => a + b, 0) / Math.max(1, calls.length));
+      console.log(`\n== ${name}: draw ${m.drawMs} ms/frame, ${m.calls} draw calls/frame, longest frame ${m.maxFrameMs} ms (flashlight toggled 4x), ${s.compiles} shader compiles`);
+    }
     if (mon) {
       if (r.kind === 'loaddrive') mon = await page.evaluate('window.__perfMon') as Mon;
       // standing through a load, unbuilt chunks in view are the point of the measurement

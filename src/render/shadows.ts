@@ -420,6 +420,10 @@ export class ShadowRig {
     const stepped = st.update(dt, dir);
     this.uRig.value.z = st.share;
     let any = false;
+    // scheduled redraws (not forced, not a new sun step) go one map per frame: the far map is
+    // ~300-1000 draw calls in a town, and landing on the same frame as the near one doubled
+    // that frame's draw cost (docs/PERF.md). A postponed map keeps its timer and goes next frame.
+    let scheduled = 0;
     for (let s = 0; s < 2; s++) {
       const d = st.dirs[s];
       // a slot that isn't shown and isn't the newest needs no maps
@@ -439,8 +443,9 @@ export class ShadowRig {
         // A centre that moved needs no immediate redraw: until the map is redrawn, sampling
         // uses the matrix it was drawn with, so a stale map is only offset by a few cm of
         // coverage, never misplaced.
-        const due = this.timers[i] >= 1 / spec.hz;
+        const due = this.timers[i] >= 1 / spec.hz && scheduled === 0;
         if (this.forced || fresh || (shown && due)) {
+          if (!this.forced && !fresh) scheduled++;
           this.timers[i] = 0;
           l.shadow.needsUpdate = true;
           this.renders[i]++;
