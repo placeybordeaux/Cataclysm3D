@@ -265,9 +265,20 @@ describe('fast-forward cap (WarpGovernor)', () => {
     expect(g.cap).toBe(1);
   });
 
-  it('falls at once, rises one step at a time after half a second of room', () => {
+  it('drawing alone over budget (slow GPU): the simulation still gets its minimum slice', () => {
     const g = new WarpGovernor();
-    for (let i = 0; i < 60; i++) g.observe(8, 1, 9, 1 / 60);
+    // 0.5 ms ticks, 30 ms draws at 12 fps (2.5 ticks a frame at ×1): 6 ms / 0.5 = 12 ticks = ×4
+    for (let i = 0; i < 60; i++) g.observe(0.5, 1, 30, 1 / 12);
+    expect(g.cap).toBe(4);
+  });
+
+  it('falls after a few frames over budget (not on one spike), rises one step at a time after half a second of room', () => {
+    const g = new WarpGovernor();
+    for (let i = 0; i < 60; i++) g.observe(0.5, 1, 9, 1 / 60);
+    // one 40 ms frame (GC) leaves the cap alone
+    g.observe(40, 1, 9, 1 / 60);
+    expect(g.cap).toBe(16);
+    for (let i = 0; i < 90; i++) g.observe(7.9, 1, 9, 1 / 60);
     expect(g.cap).toBe(4);
     const caps: number[] = [];
     for (let i = 0; i < 420; i++) {

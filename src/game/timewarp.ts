@@ -29,15 +29,24 @@ export function nextSpeed(cur: number): number {
  * Caps the fast-forward speed so our main loop stays under `budgetMs` per drawn frame.
  * Pure (no clock, no DOM): fed per frame with what the simulation and the drawing cost.
  *
- * The cap falls at once when a frame would go over budget and rises one step at a time after
- * `riseAfter` seconds of room, so it settles instead of oscillating between two speeds.
+ * The cap falls after `fallAfter` frames in a row over budget (one GC pause or a chunk entering
+ * the sim shouldn't halve the speed) and rises one step at a time after `riseAfter` seconds of
+ * room, so it settles instead of oscillating between two speeds.
  */
 export class WarpGovernor {
   budgetMs = 25;
+  /**
+   * Simulation time a frame may always use, even when drawing alone is over budget (a slow
+   * GPU, streaming after a teleport): otherwise such a machine could never fast-forward at all,
+   * and a few ms more on an already slow frame barely changes how it feels.
+   */
+  minSimMs = 6;
   /** Never cap below this (×1 must always be possible) or above this. */
   readonly max: number;
   /** Seconds of headroom before the cap goes up by one. */
   riseAfter = 0.5;
+  /** Frames in a row over budget before the cap falls. */
+  fallAfter = 3;
   /** Smoothed cost of one simulation tick, ms. */
   tickMs = 0;
   /** Smoothed cost of the rest of a drawn frame (drawing, streaming), ms. */
@@ -46,6 +55,7 @@ export class WarpGovernor {
   frameS = 1 / 60;
   cap: number;
   private room = 0;
+  private over = 0;
 
   constructor(max: number = SPEED_STEPS[SPEED_STEPS.length - 1]) {
     this.max = max;
@@ -57,7 +67,7 @@ export class WarpGovernor {
     if (this.tickMs <= 0) return this.max;
     // Ticks one frame needs at ×1: a frame of frameS seconds holds frameS / TICK ticks.
     const ticksAt1 = Math.max(this.frameS, 1 / 240) / TICK;
-    const fit = Math.max(0, this.budgetMs - this.otherMs) / this.tickMs;
+    const fit = Math.max(this.minSimMs, this.budgetMs - this.otherMs) / this.tickMs;
     return Math.max(1, Math.min(this.max, Math.floor(fit / ticksAt1)));
   }
 
@@ -75,15 +85,19 @@ export class WarpGovernor {
     this.frameS += (Math.min(frameS, 0.1) - this.frameS) * k;
     const can = this.affordable();
     if (can < this.cap) {
-      this.cap = can;
       this.room = 0;
+      if (++this.over >= this.fallAfter) {
+        this.cap = can;
+        this.over = 0;
+      }
     } else if (can > this.cap) {
+      this.over = 0;
       this.room += frameS;
       if (this.room >= this.riseAfter) {
         this.cap++;
         this.room = 0;
       }
-    } else this.room = 0;
+    } else this.room = this.over = 0;
   }
 }
 

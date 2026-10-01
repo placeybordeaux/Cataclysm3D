@@ -145,6 +145,67 @@ Reading the table:
   turns keep their real-time length, because `clockScale()` is used everywhere real time is
   turned into game time.
 
+
+### Fast-forward (`+`)
+
+User: *"I'd kind of want to be able to accelerate reading a bit more, maybe add a button to make
+time pass faster (if possible on the machine while reading?)"*
+
+During any timed action whose clock is warped (reading, crafting, construction, butchering,
+waiting, sleeping) **`+`** (also `=`, rebindable as `fast_forward`) steps the speed
+**×1 → ×2 → ×4 → ×8 → ×16 → ×1** on top of the action's own warp. A chapter that takes ~4.5 real s
+takes ~0.6 s at ×8; a night's sleep (~16 s) takes 1 s at ×16. The line under the crosshair ring
+says it: `Reading · ×8 · 18 min left (~2 s)`, `» [+] faster` (clickable when the cursor is
+free), and `×8 (capped ×5)` when the machine can't keep up. The Rest window has a **Fast** pick
+(`+` there too) so a wait or a night starts fast.
+
+![reading at ×8](screenshots/wave3/timewarp/reading_x8.png)
+
+**How it stays safe and exact** (`src/game/timewarp.ts`): fast-forward runs *more* 1/30 s ticks
+per real second (`Game.simSpeed`), never longer ticks, so every per-tick check — the activity's
+interrupts ("You see a zombie!", noises, the cold), monster AI, fields and fire, needs, the
+spawner — runs exactly as at ×1. `tests/timewarp.test.ts` plays read / craft / wait / sleep with
+a zombie walking in mid-way at ×1 and ×8 and requires identical results (same tick, game second,
+fraction, messages, HP, zombie position, skill exercise). It drops back to **×1** at once (the
+rest of that frame runs at ×1 too) when:
+- the action is interrupted or cancelled for any reason (a hostile in view, a noise, moving…);
+- you are hurt — and, as BN's `Character::on_hurt`, being hurt now also **stops** the action
+  ("You were attacked by the zombie!") and **wakes** a sleeper (before, a zombie got six blows in
+  on a sleeping survivor);
+- hunger or thirst gets a step worse (Hungry, Very Thirsty…: it doesn't stop the action, BN only
+  stops at the dangerous ones, but at ×8 the change would fly past unread);
+- you wake up.
+The speed also resets when the action ends; "read until …" chapters keep it.
+
+**"If possible on the machine"**: a governor measures what a tick and a drawn frame cost and caps
+the speed so our loop stays under **25 ms** a frame (the simulation always gets at least 6 ms, so
+a machine whose drawing alone is over budget still fast-forwards a little). The cap falls after 3
+frames in a row over budget and rises one step per 0.5 s of room. Options:
+- **Fast-forward key**: *Press to step ×1-×16* (default) / *Hold for top speed* (`?ffkey=hold`).
+- **Fast-forward drawing**: *Lighter* (default: the 3D view redraws at most 30 times a second
+  while fast-forwarding, shadows and all, leaving the frame to the simulation) / *Full*
+  (`?ffdraw=full`).
+
+Measured (`tools/realinput.ts --gpu --size 3440x1304 --only ffmeasure`, reading a manual in a
+field at ×16 asked; machine shared with other agents, load ~6, browser frame interval 80+ ms in
+Xvfb whatever we did):
+
+| browser | drawing | tick ms | draw ms | cap / effective | game s per real s |
+|---|---|---|---|---|---|
+| Chromium | Lighter | 0.23 | 29 (streaming after the teleport) | ×9 | 1389 |
+| Chromium | Full | 0.19 | 7 | ×16 | 3034 |
+| Firefox | Lighter | 0.77 | 21 | ×3 | 267 |
+| Firefox | Full | 0.37 | 10 | ×9 | 871 |
+
+A tick costs well under a millisecond while you sit still, so on a 60 Hz machine the cap is
+×16 unless the drawing itself is slow. Known gap: the shadowcast light map is refreshed per drawn
+frame, so with Lighter drawing at ×16 vision lags the sun by up to ~1 game minute.
+
+Reading: the reading card shows **"~N more to level L"** (BN's experience formula at your current
+focus; an estimate, each chapter's experience is a roll), and the book's actions offer
+**Read (until you level up)** (BN), **Read until done (to level N)** (ours: the same as choosing
+"until you level up" again after each level) and **Read one chapter** (BN).
+
 ## Accessible tuning: measurements
 
 `tools/balance_sim.ts` builds the real world headlessly, as main.ts does minus the renderer: the

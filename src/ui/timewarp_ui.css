@@ -18,5 +18,5 @@
 .ff-line .ff-note { order: 2; color: #ff9a80; }
 .ff-line .ff-note:empty { display: none; }
 @media (min-height: 1000px) {
-  .ff-line { top: calc(50% + 52px); font-size: 18px; }
+  .ff-line { top: calc(50% + 52px); font-size: 20px; }
 }

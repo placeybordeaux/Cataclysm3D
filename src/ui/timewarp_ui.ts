@@ -14,6 +14,8 @@ import type { Renderer } from '../render/renderer';
 import type { DebugApi } from '../debug';
 import { SPEED_STEPS, timeWarp, type TimeWarp, type WarpKeyMode } from '../game/timewarp';
 import { clockScale } from '../core/time';
+import { createItem } from '../game/item';
+import { startReading, type ReadMode } from '../game/reading';
 import { fmtDuration } from '../ui2/logic/items';
 import { surfacesOpen } from '../ui2/host';
 import { registerOption } from './options';
@@ -212,6 +214,12 @@ export function installTimeWarpUi(game: Game, renderer: Renderer, api: DebugApi)
       line: el.classList.contains('on') ? `${text.textContent} ${btn.textContent}` : null,
     }),
     set: (s: number) => w.set(s),
+    /** Setup for measurements: give a book and start reading it (default: until done). */
+    read: (id: string, mode: ReadMode = 'until_done') => {
+      const it = createItem(game.data, id);
+      if (!game.player.inv.giveNew(it)) throw new Error(`cdda.timewarp.read: no room for ${id}`);
+      return startReading(game, it, mode);
+    },
   };
   return w;
 }
