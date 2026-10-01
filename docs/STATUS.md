@@ -71,6 +71,10 @@ Screenshots for every area: `docs/screenshots/wave3/<area>/` (before/after pairs
    two branches rewrite the same flow, send the merge back to the agent that knows it.
 5. **Advertise Space (the `close_menu` key) or the opening key for closing, never Esc** — outside
    fullscreen Esc also frees the mouse; Esc still works, it just never appears in a hint (docs/UX_REVIEW.md).
+6. **What exists is derived from the world, never from a window around the player.** Which
+   z-levels are built/drawn, whether something is overhead, which creatures are shown: ask
+   `src/world/levels.ts` (per-column extent from the overmap). `tools/skyleak.ts` and the chunk
+   manager's level audit fail loudly when the render misses something the map has.
 
 ## Documentation map
 

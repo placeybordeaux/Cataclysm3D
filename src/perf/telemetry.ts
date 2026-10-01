@@ -1,4 +1,4 @@
-import { CHUNK, MAX_Z } from '../world/coords';
+import { CHUNK } from '../world/coords';
 import type { ChunkEntryView, ChunkProbe } from '../render/chunkManager';
 
 // Live performance telemetry: a rolling per-frame recording (last ~60 s) plus a log of
@@ -21,6 +21,8 @@ export interface TelemetrySource {
     radius: number;
     levelsBelow: number;
     levelsAbove: number;
+    /** which levels exist per column (src/world/levels.ts) */
+    levels: { radiusAt(cx: number, cy: number, z: number, pz: number): number; span(pz: number): [number, number] };
     visibleDist: number;
     budgetMs: number;
     effBudgetMs: number;
@@ -282,7 +284,8 @@ export class Telemetry implements ChunkProbe {
   private offsR = -1;
 
   /**
-   * Holes = wanted chunks (player's level and the one above: roofs, upper floors) that are not
+   * Holes = wanted chunks (the levels each column draws at or above the player: walls, upper
+   * floors, roofs; src/world/levels.ts) that are not
    * built yet, split by whether they are in the camera's horizontal field of view and inside the
    * clearly visible range (`visibleDist`) or the fog (`fogFar`). Runway = how far along the
    * direction of travel the world is built, in metres and in seconds at the current speed.
@@ -298,7 +301,8 @@ export class Telemetry implements ChunkProbe {
     const pz = p.z;
     ch.forEachEntry((e) => {
       map.set(ekey(e.cx, e.cy, e.z), e);
-      if (e.z < pz - ch.levelsBelow || e.z > pz + ch.levelsAbove) return;
+      // wanted = on a level the column draws (not the hysteresis ring kept around it)
+      if (ch.levels.radiusAt(e.cx, e.cy, e.z, pz) < 0) return;
       wanted++;
       if (e.shown) built++;
       else oldest = Math.max(oldest, now - e.wantT);
@@ -314,8 +318,14 @@ export class Telemetry implements ChunkProbe {
     const half = v.hfov / 2;
     const vis = ch.visibleDist, fog = this.src.fogFar();
     let hv = 0, hf = 0, ha = 0;
+    const [zLo, zHi] = ch.levels.span(pz);
     const unbuilt = (cx: number, cy: number) => {
-      for (let z = pz; z <= Math.min(MAX_Z, pz + 1); z++) {
+      // the levels in front of the eye: the player's own and the one above (walls, upper floors,
+      // roofs), and the ground under a rooftop. Storeys further up (tower tops) are built a
+      // second later by design and are not counted, so the budgets stay comparable.
+      for (let z = Math.max(zLo, pz > 0 ? 0 : pz); z <= Math.min(zHi, pz + 1); z++) {
+        if (z > 0 && z < pz) continue;
+        if (ch.levels.radiusAt(cx, cy, z, pz) < 0) continue;
         const e = map.get(ekey(cx, cy, z));
         if (!e || !e.shown) return true;
       }

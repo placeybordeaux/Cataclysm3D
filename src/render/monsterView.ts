@@ -489,7 +489,8 @@ export class MonsterView implements GameSystem {
         v = this.create(m);
         createMs += performance.now() - c0 + 0.01;
       }
-      const visible = Math.abs(m.z - p.z) <= 1;
+      // drawn iff its level is (src/world/levels.ts), not within one level of the player
+      const visible = this.renderer.chunks.levels.drawn(m.x, m.y, m.z);
       v.h?.setVisible(visible);
       // Hit-stop: the struck sprite holds exactly where the blow found it.
       if (v.hold > 0) {
@@ -654,7 +655,10 @@ export class MonsterView implements GameSystem {
     const range = Math.min(FAR_FIGURE_MAX, (this.renderer.chunks.radius + 0.5) * CHUNK);
     this.farRange = range;
     for (const m of this.sys.all) {
-      if (m.dead || !m.dormant || Math.abs(m.z - p.z) > 1) continue;
+      if (m.dead || !m.dormant || !this.renderer.chunks.levels.drawn(m.x, m.y, m.z)) continue;
+      // a dormant figure indoors on another level is behind walls and floors (at most a glimpse
+      // through a window): skipping them saved ~0.4 ms/frame in a city (docs/PERF.md)
+      if (m.z !== p.z && this.renderer.chunks.covered(Math.floor(m.x), Math.floor(m.y), m.z)) continue;
       if (Math.hypot(m.x - p.x, m.y - p.y) > range) continue;
       this.far.push(m);
       this.farSet.add(m);

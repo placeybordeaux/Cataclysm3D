@@ -49,7 +49,11 @@ export class FireView {
     const p = this.game.player;
     const pcx = Math.floor(p.x / CHUNK), pcy = Math.floor(p.y / CHUNK);
     const out: FireSpot[] = [];
-    for (let z = p.z - 1; z <= p.z + 1; z++) for (let cy = pcy - RANGE; cy <= pcy + RANGE; cy++) for (let cx = pcx - RANGE; cx <= pcx + RANGE; cx++) {
+    // the levels the world draws (src/world/levels.ts): a fire on the street seen from a roof
+    const lv = this.renderer.chunks.levels;
+    const [zLo, zHi] = lv.span(p.z);
+    for (let z = zLo; z <= zHi; z++) for (let cy = pcy - RANGE; cy <= pcy + RANGE; cy++) for (let cx = pcx - RANGE; cx <= pcx + RANGE; cx++) {
+      if (!lv.drawn(cx * CHUNK, cy * CHUNK, z) || !this.game.map.hasChunk(cx, cy, z)) continue;
       const c = this.game.map.chunk(cx, cy, z);
       if (!c) continue;
       for (const [i, list] of c.fields) for (const fd of list) {
@@ -129,7 +133,7 @@ export class FireView {
     // embers: a few per fire, drifting up and sideways, shrinking as they cool
     const p = this.game.player;
     for (const f of this.fires) {
-      if (Math.abs(f.z - p.z) > 1 || Math.hypot(f.x - p.x, f.y - p.y) > 40) continue;
+      if (!this.renderer.chunks.levels.drawn(f.x, f.y, f.z) || Math.hypot(f.x - p.x, f.y - p.y) > 40) continue;
       if (this.rand() < dt * (1.5 + f.lvl * 1.5)) {
         const max = 0.8 + this.rand() * 0.9;
         this.sparks.push({ x: f.x + 0.3 + this.rand() * 0.4, y: f.y + 0.3 + this.rand() * 0.4, z: f.z, h: 0.3 + f.lvl * 0.15, vx: (this.rand() - 0.5) * 0.3, vy: (this.rand() - 0.5) * 0.3, vh: 0.6 + this.rand() * 0.5, life: max, max });

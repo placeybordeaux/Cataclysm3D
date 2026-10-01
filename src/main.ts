@@ -141,6 +141,7 @@ async function main(): Promise<void> {
   // Mapgen ahead of the player in idle time (see src/world/prefetch.ts); ?prefetch=0 disables.
   const prefetch = new ChunkPrefetcher(game.map, () => game.player);
   api.prefetch = prefetch;
+  prefetch.levels = renderer.chunks.levels;
   // Generate one ring beyond what's drawn so chunks entering the draw circle are ready to mesh.
   prefetch.opts.radius = renderer.chunks.radius + 1;
   // (after a pending load is applied, below: it would prefetch around the wrong spot)

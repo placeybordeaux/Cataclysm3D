@@ -299,12 +299,12 @@ z=3 roof only levels [z-1, z+2] were built, so the street (z 0) and z 1 were nev
 the roofs was the post pass's haze over nothing (a flat pale sheet; the far ground ring starts
 only near the draw edge) and buildings floated on it.
 
-| before (`?below=window`) | after |
+| before (`?levels=window`) | after |
 | --- | --- |
 | ![](screenshots/wave3/zlevels/before_down.jpg) | ![](screenshots/wave3/zlevels/after_down.jpg) |
 | ![](screenshots/wave3/zlevels/before_out.jpg) | ![](screenshots/wave3/zlevels/after_out.jpg) |
 
-* **Levels drawn** (`chunkManager.ts levelRadius`): around the player [z-1, z+above] as before;
+* **Levels drawn** (now `src/world/levels.ts`, see the next section): around the player [z-1, z+above] as before;
   above ground also **the ground level at the full radius and every storey down to it**. Most
   of those chunks are open air (skipped without meshing), so the cost is the buildings you see.
   Up a tower with more than 4 storeys between the ground and the player's window, the middle
@@ -312,7 +312,7 @@ only near the draw edge) and buildings floated on it.
   below the player use the far LOD (no near-ring volumes). Above-ground lower levels rank
   +0.25 s in the need order (basements keep +1.5 s). In a basement nothing changes: no
   surface through the ground. Stand-ins (placeholders.ts) and the prefetcher cover z 0 from
-  above too. `?below=window` / `cdda.drawBelow('window')` gives back the old window.
+  above too. `?levels=window` / `cdda.drawLevels('window')` gives back the old window.
 * **The two pale-yellow lines** in the user's frame were the ui2 hover outline (`src/ui2/
   install.ts worldHover`, a `LineSegments` box drawn with depthTest off): hovering a knee-high
   roof railing with the cursor free drew a full storey-high (2.6 m) box around it, whose far
@@ -336,6 +336,100 @@ only near the draw edge) and buildings floated on it.
   basement; the manager builds and drops them), `tools/zlevel-shots.ts --gpu --check --hover`
   (the street views are not a flat sheet: no colour covers 40 % of the lower frame, before
   54-63 %, after 31-37 %; the railing's hover outline is 1 m and gone once the inventory closes).
+
+## Levels from the world (wave 3, zlevels 2)
+
+User report: inside a fire station at z 0 (seed 443226190, `urban_32_6_south`, tile 942,1539)
+looking up showed the sky and the sun. The column is z0 floor, z1 `t_open_air_rooved` (a
+two-storey engine bay), z2 catwalk grate, z3 flat roof. The renderer built z-1..z+2, so the roof
+never existed; and everything that asked "is something overhead?" looked one level up only (open
+air), so the bay was lit and ambient-shaded as outdoors. Same bug class as the rooftop street:
+*what exists was decided by a window around the player's z*.
+
+| before | after |
+| --- | --- |
+| ![](screenshots/wave3/zlevels/firestation_before_up_n.jpg) | ![](screenshots/wave3/zlevels/firestation_after_up_n.jpg) |
+| ![](screenshots/wave3/zlevels/firestation_before_up_s.jpg) | ![](screenshots/wave3/zlevels/firestation_after_up_s.jpg) |
+
+![eye level after](screenshots/wave3/zlevels/firestation_after_eye.jpg)
+
+**Rule: what exists is derived from the world, never from a window around the player.**
+
+* **One source of truth: `src/world/levels.ts` `VisibleLevels`** (owned by the chunk manager as
+  `chunks.levels`). Per column (one OMT), the overmap says how tall it is without generating
+  anything: top = highest non-open-air OMT + 1 (mapgen writes a building's roof into the level
+  above its top floor), raised by any generated non-empty chunk above that (a player-built floor;
+  re-read every 30 frames). `radiusAt(cx, cy, z, pz)`: the player's window [pz-1, pz+2] at full
+  radius; on the surface or above, every level from the ground up to the column's top (R - 2
+  above the window: far tower tops are deep in the haze); underground
+  only the window (rock hides the rest: no surface through the ground). `drawn(x, y, z)` = is that
+  level of that column drawn for the current eye. `roofAbove(map, x, y, z)` = anything overhead at
+  any height (the sky-light test). `?levels=window` / `cdda.drawLevels('window')` = the old rule.
+* **Consumers switched to it** (each used its own `pz ± n`):
+  * `chunkManager.ts`: entry creation iterates each column's span; eviction/visibility by
+    `radiusAt`; `covered()` = `roofAbove`. Scheduling keeps near-first: storeys above the window
+    that aren't overhead (tower tops across the street) are a new `'high'` class, ranked +3 s and
+    deferred while a hole is needed within 3 s; the bay's own roof (within a chunk) is not.
+    Driving (> 8 m/s) they aren't started at all except over your own column (renderer and
+    prefetcher): they fill in when you slow down.
+  * `prefetch.ts`: the same per-column extent with its own wider window.
+  * `perf/telemetry.ts`: wanted = levels the column draws; holes = the levels in front of the eye
+    (player's, the one above, the ground under a rooftop), so budgets stay comparable.
+  * `monsterView` (live and dormant far figures), `npcView`, `vehicleMesh`, `fireView` (fires and
+    embers), `arrowFx`: a thing is drawn iff its level is (`levels.drawn`), not within one level of
+    the player (zombies on the street are visible from a roof).
+  * `lightmap.ts`: the outside flag and the rain cover height look at every level up to the sky
+    (was three levels, outside only one); `lightAt`'s fallback uses `roofAbove`.
+  * `chunkMesh.ts`: rooms and the per-vertex sky ambient use "anything overhead" (only generated
+    levels: the chunk manager generates every level a column has, so fields don't grow five
+    levels of air); `audio/install.ts`: rain sound shelter the same.
+  * Placeholders (z 0 stand-ins) and the skyline are ground-level by nature and unchanged.
+  * **Not changed on purpose (simulation, not existence):** the monster/NPC activity bubble
+    (`monai`/`npcai` `|dz| <= 1`), actualize and field sweeps. Monsters on the street below a
+    roof are now drawn but stay dormant (idle) until you come within a level; making the sim
+    bubble follow the column is a gameplay/perf decision for its owner.
+* **The guard** (fails loudly):
+  * Dev builds and tests: `ChunkManager.audit` checks every 60 frames that every generated,
+    non-empty chunk on the surface or above inside the radius is on a drawn level, and once
+    streaming is idle that every wanted level is built. Misses log once (`[levels] ...`) and
+    collect in `chunks.levelMisses`.
+  * `tools/skyleak.ts` (part of `npm run perf`, GPU): from each viewpoint in
+    `tools/skyleak-views.ts` (fire station bay and roof, cathedral, apartment tower, office tower,
+    parking garage, hotel tower top floor and roof, house basement, lab; add new spots there) it
+    renders with the sky, skyline and weather hidden behind a sentinel colour (`cdda.skyLeak()`,
+    `src/render/skyLeak.ts`), raycasts the tile map through every pixel, and fails if more than
+    2 % of the pixels whose ray hits a wall, floor or roof within 60 m show the sentinel.
+    Old rule: the fire station bay leaks 6-42 % per look, the cathedral roof 36-100 %; new: 0 %
+    everywhere. (BN has no water tower OMT; the hotel tower is the tall one.)
+  * `tests/render/zlevels.test.ts`: the level set for the fire station column, a field, a roof,
+    a basement, a tower; column tops from the overmap and from live chunks; the manager builds
+    the bay's roof; the guard reports content on a level the extent misses; `roofAbove`.
+* **Cost** (3440x1304, voxel, radius 8, RTX 5080, shared machine, load ~4;
+  `tools/skyleak.ts --bench 12`, a double turn; before = `?levels=window`):
+
+| where | loop p50 / p99 (ms) | draw ms | draw calls | triangles | entries |
+| --- | --- | --- | --- | --- | --- |
+| fire station bay, before | 6.8 / 16.8 | 4.2 | 995 | 1.64 M | 900 |
+| fire station bay, after | 7.9 / 18.5 | 4.9 | 1429 | 2.60 M | 956 (only tall columns get z3-5) |
+| office tower roof z3, before | 3.6 / 11.2 | 1.9 | 206 | 0.20 M | 1125 |
+| office tower roof z3, after | 8.8 / 15.4 | 5.5 | 1369 | 1.70 M | 1350 |
+| hotel tower roof z5, before | 2.9 / 12.0 | 1.3 | 112 | 0.18 M | 450 |
+| hotel tower roof z5, after | 8.6 / 15.5 | 5.3 | 1186 | 1.87 M | 1028 |
+
+  On a roof the new cost is the city you now see (before: nothing below the window).
+
+  **Street level** (`npm run perf`, final run: PASS, sky-leak PASS): towns, forest, rural,
+  teleport, load and loaddrive unchanged. The city was the hard case: with tower tops built like
+  any level, town40-then-city40 sequences had the street unbuilt in view for 4-11 s vs 0-3.5 s
+  with the old window (this shared machine, load ~4, is noisy: single runs of either overlap).
+  A/B with tower tops disabled matched the old window, and a CPU profile diff showed meshing
+  passing towers' upper floors next to the road, more 3D characters (figures on storeys that are
+  now drawn) and the mesher's new overhead test. Fixed by: tower tops only to R - 2, the
+  deferred `'high'` class, not starting them while driving except over your own column (renderer
+  and prefetcher), dormant far figures skipped when indoors on another level, and a typed-array
+  memo for the mesher's overhead test. After: city40 0-0.12 s in the full suite, 0-4.7 s in
+  sequences vs the window's 0-1.7 s; loop p99 unchanged (37-40 ms both). Still a bit more work
+  in a city than before; far-tower shells (no interiors above the window) would be the next win.
 
 ## Not done / next
 

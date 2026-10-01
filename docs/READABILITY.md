@@ -164,6 +164,10 @@ chunk streaming after the teleport; render time is unaffected.)
 * (Fixed, wave 3 zlevels) From a rooftop the street used to be a flat pale sheet: only one
   level below the player was built. Above ground the ground and the storeys down to it are
   drawn now (docs/PERF.md "Above ground").
+* (Fixed, wave 3 zlevels 2) Inside a two-storey engine bay the sky and the sun showed through the
+  roof (three levels up, outside the old window), and the bay was lit as outdoors (only one
+  level up was checked for cover). Levels and "overhead" now come from the world
+  (docs/PERF.md "Levels from the world").
 
 * Dormant monsters past 60 tiles are invisible (see above).
 * The ground ring is one flat colour per OMT (roads as strips); up close to the draw edge on a

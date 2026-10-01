@@ -39,7 +39,7 @@ export class PlaceholderLayer {
   update(px: number, py: number, pz: number, radius: number, forEachEntry: (fn: (e: ChunkEntryView) => void) => void, groundBelow = true): void {
     // every 4th frame: a stand-in a few frames late is still far ahead of the real mesh
     if ((this.tick++ & 3) !== 0) return;
-    // above ground too: the ground level is drawn from rooftops (chunkManager levelRadius)
+    // above ground too: the ground level is drawn from rooftops (src/world/levels.ts)
     if (!this.enabled || !this.overmap || pz < 0 || (pz > 0 && !groundBelow)) {
       if (this.meshes.size) this.clear();
       return;
@@ -122,7 +122,7 @@ export function installPlaceholders(renderer: {
   beforeRender: ((dt: number) => void)[];
   skyline: { overmap: OmtLookup | null };
   whiteFrame(): TileFrame;
-  chunks: { radius: number; below: 'ground' | 'window'; forEachEntry(fn: (e: ChunkEntryView) => void): void };
+  chunks: { radius: number; levels: { policy: { mode: 'world' | 'window' } }; forEachEntry(fn: (e: ChunkEntryView) => void): void };
 }, player: () => { x: number; y: number; z: number }, api: Record<string, unknown>): PlaceholderLayer {
   const layer = new PlaceholderLayer(renderer.skyline.overmap, () => renderer.whiteFrame());
   const q = typeof location !== 'undefined' ? new URLSearchParams(location.search).get('placeholders') : null;
@@ -133,7 +133,7 @@ export function installPlaceholders(renderer: {
     // the overmap is attached after the renderer is made (lookInstall)
     layer.overmap ??= renderer.skyline.overmap;
     const p = player();
-    layer.update(p.x, p.y, p.z, renderer.chunks.radius, (fn) => renderer.chunks.forEachEntry(fn), renderer.chunks.below === 'ground');
+    layer.update(p.x, p.y, p.z, renderer.chunks.radius, (fn) => renderer.chunks.forEachEntry(fn), renderer.chunks.levels.policy.mode === 'world');
   });
   api.placeholders = (on?: boolean) => {
     if (on !== undefined) {

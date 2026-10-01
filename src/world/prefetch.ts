@@ -1,5 +1,6 @@
 import { CHUNK, MAX_Z, MIN_Z } from './coords';
 import type { GameMap } from './map';
+import type { VisibleLevels } from './levels';
 
 // Generates map chunks ahead of need in the browser's idle time, so walking into new
 // territory finds its chunks already there instead of running mapgen (1–20 ms per house,
@@ -41,6 +42,8 @@ export class ChunkPrefetcher {
   // well under a millisecond (a town house 1-6 ms), so starting one with 3 ms left rarely overruns.
   opts: PrefetchOpts = { radius: 6, below: 2, above: 2, lookahead: 3, minIdleMs: 3 };
   enabled = true;
+  /** Which levels exist (the renderer's, src/world/levels.ts); null = only the window below/above. */
+  levels: VisibleLevels | null = null;
   /** true while the prefetcher itself is generating (telemetry tells sync from prefetched mapgen) */
   inPrefetch = false;
   private queue: [number, number, number][] = [];
@@ -139,13 +142,20 @@ export class ChunkPrefetcher {
     this.queueFor = key;
     const o = this.opts, R = o.radius;
     const want = new Map<string, [number, number, number, number]>();
+    const lv = this.levels;
+    // the same per-column extent the renderer draws, with the prefetcher's own (wider) window
+    const pol = lv ? { radius: R, below: o.below, above: o.above, mode: lv.policy.mode } : null;
+    const [zLo, zHi] = lv ? lv.span(pz, pol!) : [Math.max(MIN_Z, pz - o.below), Math.min(MAX_Z, pz + o.above)];
+    const fast = Math.hypot(this.vel.x, this.vel.y) > 8;
     const addAround = (ccx: number, ccy: number, bias: number) => {
       for (let dy = -R; dy <= R; dy++)
         for (let dx = -R; dx <= R; dx++) {
           if (dx * dx + dy * dy > (R + 0.5) * (R + 0.5)) continue;
-          // above ground the renderer draws down to the ground (chunkManager levelRadius)
-          for (let z = Math.max(MIN_Z, pz > 0 ? Math.min(0, pz - o.below) : pz - o.below); z <= Math.min(MAX_Z, pz + o.above); z++) {
+          for (let z = zLo; z <= zHi; z++) {
             const cx = ccx + dx, cy = ccy + dy;
+            if (lv && lv.radiusAt(cx, cy, z, pz, pol!) < 0) continue;
+            // driving: not tower tops above the window (the renderer doesn't start them either)
+            if (fast && z > pz + o.above) continue;
             if (this.map.hasChunk(cx, cy, z)) continue;
             // Priority: distance from the player, pulled toward the direction of travel;
             // the player's own level first, then the ones next to it.
