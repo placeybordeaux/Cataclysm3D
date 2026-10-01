@@ -14,7 +14,7 @@ import { CREATURE_RADIUS } from './physics';
 import { sfx } from '../audio/sfx';
 import { flightSpeed, fliesVisibly, rangedClass } from './rangedfeel';
 import { enemyFireOf } from './enemyfire';
-import { BODY_HEIGHT } from './aimmodel';
+import { bodyHeightOf } from './aimmodel';
 import { LEVEL_HEIGHT } from '../world/coords';
 
 // Monster guns (mattack_actors.cpp gun_actor): turrets, secubots, armed zombies/humans and
@@ -219,7 +219,7 @@ function shootAt(sys: MonsterSystem, m: Monster, gun: ItemDef, ammo: ItemDef | n
 
 /** Where a monster's shots leave from (m above its floor): about chest height for its size. */
 function muzzleHeight(m: Monster): number {
-  return (BODY_HEIGHT[m.size] ?? 1.7) * 0.72;
+  return bodyHeightOf(m) * 0.72;
 }
 
 /**

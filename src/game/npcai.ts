@@ -26,7 +26,7 @@ import type { BodyPartId } from './bodyparts';
 import { BODY_PARTS } from './bodyparts';
 import { enemyFireOf } from './enemyfire';
 import { flightSpeed, fliesVisibly, rangedClass } from './rangedfeel';
-import { BODY_HEIGHT } from './aimmodel';
+import { bodyHeightOf } from './aimmodel';
 import { LEVEL_HEIGHT } from '../world/coords';
 
 /** Tiles within which fights between NPCs and monsters are narrated blow by blow. */
@@ -798,7 +798,7 @@ export class NpcSystem implements GameSystem, TalkWorld, MissionHost {
     // whatever it meets first — its foe, a follower or the survivor in the way, a wall.
     const cls = rangedClass(gun);
     const flies = fliesVisibly(cls);
-    const th = foe.kind === 'monster' ? foe.m.z * LEVEL_HEIGHT + (BODY_HEIGHT[foe.m.size] ?? 1.7) * 0.6 : n.z * LEVEL_HEIGHT + 1.2;
+    const th = foe.kind === 'monster' ? foe.m.z * LEVEL_HEIGHT + bodyHeightOf(foe.m) * 0.6 : n.z * LEVEL_HEIGHT + 1.2;
     const band = (mb: number) => (mb < 0.2 ? 1.5 : mb < 0.8 ? 1 : 0.5);
     const scaled = (mb: number) => shot.damage.map((u) => ({ type: u.type, amount: u.amount * band(mb), armor_penetration: u.armor_penetration, armor_multiplier: 1 }));
     const round = enemyFireOf(this.game).fire({

@@ -283,7 +283,7 @@ export class MonsterView implements GameSystem {
   rigFor(def: MonsterDef): Rig {
     let r = this.rigs.get(def.id);
     if (!r) {
-      const shape = bodyShapeOf({ id: def.id, bodytype: (def as { bodytype?: string }).bodytype, species: def.species, flags: def.flags, symbol: def.symbol, volume: def.volume });
+      const shape = bodyShapeOf({ id: def.id, bodytype: (def as { bodytype?: string }).bodytype, species: def.species, flags: def.flags, symbol: def.symbol, volume: def.volume, name: def.name, description: def.description });
       r = makeRig(shape, { turret: def.symbol === '2' || /turret/.test(def.id) });
       this.rigs.set(def.id, r);
     }
