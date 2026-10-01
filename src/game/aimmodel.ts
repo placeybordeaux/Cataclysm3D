@@ -54,6 +54,20 @@ export function timingGames(m: AimModelId = model): boolean {
   return m === 'timing';
 }
 
+/** Seconds the weaving reticle stays up after a shot, so follow-up shots read. */
+export const RETICLE_AFTER_SHOT = 2.5;
+
+/**
+ * Whether the weaving reticle (and its overlay) is shown (user: "having the bow out all of the
+ * time makes the little aiming minigame play constantly … I'd just hide the weaving icon if you
+ * haven't fired for a while and aren't in the aiming mode"): while aiming a gun (RMB), while
+ * drawing a bow or sling, and for RETICLE_AFTER_SHOT s after a shot. The rest of the time a plain
+ * crosshair sits at the centre — but a hip shot still goes where the hidden weave is.
+ */
+export function reticleVisible(o: { aiming: boolean; drawing: boolean; sinceShot: number }): boolean {
+  return o.aiming || o.drawing || o.sinceShot < RETICLE_AFTER_SHOT;
+}
+
 // ------------------------------------------------------------------ sway amplitude
 
 const MOA = Math.PI / 180 / 60;

@@ -207,9 +207,13 @@ function installPresenter(game: Game, renderer: Renderer, monsters: MonstersHand
     last = now;
     const aim = combat.aim;
     const view = renderer.cameraMode !== 'top' && !game.input.captured && !p.dead;
-    const on = view && aim.active;
+    // `live`: the weave runs (free aim with a ranged weapon) and decides a shot even at the hip;
+    // `on`: it is *shown* — only while aiming/drawing and just after a shot (aimmodel.reticleVisible).
+    // The rest of the time a plain crosshair sits at the centre and the gun rests still.
+    const live = view && aim.active;
+    const on = live && combat.reticleShown();
     let rel = { x: 0, y: 0 }, vk = { x: 0, y: 0 };
-    if (on) {
+    if (live) {
       // In between simulation ticks: sample the weave where it is *now* (the shot uses what we draw).
       const extra = game.paused || game.tacticalPause ? 0 : Math.max(0, Math.min(0.05, (now - aim.tickAt) / 1000));
       const off = aim.offset(extra);
@@ -221,7 +225,8 @@ function installPresenter(game: Game, renderer: Renderer, monsters: MonstersHand
     renderer.rig.aimView.y = vk.y;
     const fov = renderer.rig.camera.fov;
     const H = root.clientHeight || window.innerHeight;
-    const px = offsetToPixels(rel, fov, H);
+    // Hidden (not aiming, no recent shot): everything sits at the centre; the weave still decides a hip shot.
+    const px = on ? offsetToPixels(rel, fov, H) : { x: 0, y: 0 };
     cross ??= root.querySelector('.hud-cross');
     if (cross) cross.style.transform = on && (px.x || px.y) ? `translate(calc(-50% + ${px.x.toFixed(1)}px), calc(-50% + ${px.y.toFixed(1)}px))` : '';
     // The aim readout (combatdepth.ts, 18 px under the centre) rides along under the reticle, a
@@ -231,7 +236,7 @@ function installPresenter(game: Game, renderer: Renderer, monsters: MonstersHand
     (api?.combatHud as { setReticle?: (x: number, y: number) => void } | undefined)?.setReticle?.(px.x, px.y);
     const vm = renderer.viewmodel;
     if (vm) {
-      const lp = offsetToPixels(rel, fov, renderer.pipeline.lowH);
+      const lp = on ? offsetToPixels(rel, fov, renderer.pipeline.lowH) : { x: 0, y: 0 };
       vm.aimPx.x = lp.x;
       vm.aimPx.y = -lp.y;
     }

@@ -74,6 +74,13 @@ Three models, switchable at any time: **Options → Aim model**, `?aim=sway|timi
   - skill also adds stagger (`aimStaggerPerSkill`: the flinch/interrupt counts the blow as bigger).
   Misses say nothing (you saw the round go wide) except the physical reasons you might not see:
   *blocked by cover*, *low: hit the ground short of it*, *high: flew over it*, *fell short: out of range*.
+- **The reticle shows only while you aim** (user: "having the bow out all of the time makes the
+  little aiming minigame play constantly"): the weaving crosshair, the overlay, the gun's follow
+  and the timing marks show while RMB aims a gun, while a bow or sling is drawn, and for
+  `RETICLE_AFTER_SHOT` (2.5 s) after a shot so follow-ups read (`aimmodel.reticleVisible`,
+  `PlayerCombat.reticleShown`). Otherwise a plain crosshair sits at the centre and the gun rests
+  still — but the weave keeps running underneath, so a hip shot goes where it really points (no
+  extra hip penalty: BN's unaimed recoil already makes hip shots wild). Real input: `--only aimreticle`.
 - **The overlay** (`aimHud.ts`): a faint dot where the mouse looks; while aiming, a dashed circle
   of the current weave size, green/yellow/red by whether it fits the body under the view centre
   (replaces the BN spread circle). **Options → Aim trail** adds a fading trail of the reticle's

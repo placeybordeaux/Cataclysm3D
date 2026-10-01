@@ -325,6 +325,62 @@ export function aimScenarios(c: AimCtx): Scenario[] {
       const dodged = await js<number>('window.__dodged');
       check('a dodge is a visible hop on the model (it springs up and leans away)', dodged > 0 && peak > 0.1, { dodged, peak });
     }],
+    ['aimreticle', 'the weaving reticle shows only while aiming (gun RMB, bow drawn) and for ~2.5 s after a shot; otherwise a plain centred crosshair', async () => {
+      await c.toGameplay();
+      // Largest distance (px) of the drawn crosshair from the screen centre over `ms`, and whether the aim overlay's centre dot showed.
+      const wander = (ms: number) => js<{ max: number; dot: boolean }>(`new Promise((res) => {
+        let max = 0, dot = false; const t0 = performance.now();
+        const f = () => {
+          const r = document.querySelector('.hud-cross').getBoundingClientRect();
+          max = Math.max(max, Math.hypot(r.left + r.width / 2 - innerWidth / 2, r.top + r.height / 2 - innerHeight / 2));
+          const d = document.querySelector('.aim-hud circle'); dot ||= !!d && d.style.display !== 'none' && document.querySelector('.aim-hud').style.display !== 'none';
+          if (performance.now() - t0 < ${ms}) requestAnimationFrame(f); else res({ max: +max.toFixed(1), dot });
+        };
+        f();
+      })`);
+      await js(SETUP('pistol', 0, 10, 'sway'));
+      await js('cdda.aimHud.trail = 0');
+      // Past the after-shot moment of whatever fired last (the previous scenario).
+      await sleep(3000);
+      await js(AIM);
+      const idle = await wander(1200);
+      check('a pistol at rest: a plain crosshair at the centre (no weave, no overlay)', idle.max < 1.5 && !idle.dot, idle);
+      await x().buttonDown(3);
+      await sleep(300);
+      const aiming = await wander(1200);
+      check('RMB: the reticle weaves (skill 0)', aiming.max > 3 && aiming.dot, aiming);
+      await x().clickHere(1);
+      await sleep(100);
+      await x().buttonUp(3);
+      await sleep(400);
+      const after = await wander(800);
+      check('just after a shot (RMB released): still shown, so the follow-up reads', after.max > 1.5, after);
+      await sleep(2500);
+      const later = await wander(800);
+      check('a few seconds later: plain and centred again', later.max < 1.5 && !later.dot, later);
+      // A hip shot (no RMB) after a quiet spell: it fires along the hidden weave, then the reticle shows.
+      await js('window.__hip = cdda.combat.shots');
+      await x().clickHere(1);
+      await sleep(300);
+      const hip = await wander(600);
+      check('a hip shot fires and brings the reticle up for a moment', (await js<number>('cdda.combat.shots - window.__hip')) === 1 && hip.max > 1.5, hip);
+      // Bow: hidden at rest, weaving while drawn, hidden after letting the string down (and the moment passed).
+      await js(SETUP('bow', 0, 10, 'sway'));
+      await js('cdda.aimHud.trail = 0');
+      await sleep(3200);
+      await js(AIM);
+      const bowIdle = await wander(1000);
+      check('a bow at rest: plain crosshair (no minigame while you just carry it)', bowIdle.max < 1.5 && !bowIdle.dot, bowIdle);
+      await x().buttonDown(3);
+      await sleep(400);
+      const drawing = await wander(1000);
+      await shot('reticle_bow_drawn');
+      check('drawing: the weave shows', drawing.max > 3, drawing);
+      await x().buttonUp(3);
+      await sleep(300);
+      const letDown = await wander(800);
+      check('string let down: plain again', letDown.max < 1.5, letDown);
+    }],
     ['aimwide', 'free aim HUD at the ultrawide size (run with --size 3440x1304): crosshair, weave circle, readout, timing marks', async () => {
       await c.toGameplay();
       await js(SETUP('pistol', 0, 12, 'timing'));

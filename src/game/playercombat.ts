@@ -21,7 +21,7 @@ import { FEEL, arcFor, defenseOf, hitStopSeconds, missReason, sweptArcTarget, sw
 import { moveWithCollision, CREATURE_RADIUS } from './physics';
 import { projectileHit } from './projectile';
 import {
-  aimDirection, aimHooks, AimSway, basisDirection, basisOf, swingFan, yawPitch, type Vec3, BODY_HEIGHT, Breath, bowPerfect, describeHit, freeAim, hitDamageMul, rhythmWindow, swayAmplitude, timingGames, weakSpotChance,
+  aimDirection, aimHooks, AimSway, reticleVisible, basisDirection, basisOf, swingFan, yawPitch, type Vec3, BODY_HEIGHT, Breath, bowPerfect, describeHit, freeAim, hitDamageMul, rhythmWindow, swayAmplitude, timingGames, weakSpotChance,
   type HitZone,
 } from './aimmodel';
 import { raycastTiles } from './raycast';
@@ -294,6 +294,21 @@ export class PlayerCombat implements GameSystem {
   private readyAt = -Infinity;
   private buffered = false;
   private wasReady = true;
+  /** When the last round left (combat clock, s): the reticle shows for a moment after a shot. */
+  lastShotAt = -Infinity;
+
+  /**
+   * Is the weaving reticle up (aimmodel.reticleVisible)? Free aim with a ranged weapon only: RMB
+   * held with a trigger weapon, a bow/sling being drawn or whirled, or just after a shot.
+   */
+  reticleShown(): boolean {
+    const game = this.game;
+    const gun = game.player.inv.wielded?.isGun() ? game.player.inv.wielded : null;
+    if (!this.aim.active || !gun) return false;
+    const rmb = (game.input.mouseButtons & 4) !== 0 && !game.input.captured;
+    return reticleVisible({ aiming: rmb && drawStyle(gun) === 'trigger', drawing: !!this.draw, sinceShot: this.time - this.lastShotAt });
+  }
+
   /** The last free-aim hit's readout (tests, debug). */
   lastHit: { zone: HitZone; mul: number; text: string; perfect: boolean } | null = null;
 
@@ -1047,6 +1062,7 @@ export class PlayerCombat implements GameSystem {
       return null;
     }
     this.shots++;
+    this.lastShotAt = this.time;
     this.lastShotClass = cls;
     if (hasMuzzleFlash(cls)) this.flashShots++;
     // Kick scaled by the round's recoil (MOA added; ~150-250 for a 9 mm pistol), and by what
