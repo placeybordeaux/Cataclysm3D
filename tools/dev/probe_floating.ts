@@ -89,3 +89,13 @@ if (argv.includes('--origins')) {
   }
   console.log(Object.entries(o).sort((a, b) => b[1] - a[1]).slice(0, 40));
 }
+if (argv.includes('--bench')) {
+  // settleDormant cost: first pass checks everyone, later passes only monsters whose tile changed
+  for (const m of sys.all) m.dormant = true;
+  let t = performance.now();
+  sys.settleDormant();
+  const first = performance.now() - t;
+  t = performance.now();
+  for (let i = 0; i < 100; i++) sys.settleDormant();
+  console.log(`settleDormant over ${sys.all.length}: first ${first.toFixed(2)} ms, then ${((performance.now() - t) / 100).toFixed(3)} ms/pass (once a second)`);
+}
