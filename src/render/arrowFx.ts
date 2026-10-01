@@ -159,7 +159,7 @@ export class ArrowFx {
         this.combat.landed.splice(i, 1);
         continue;
       }
-      if (!this.renderer.chunks.levels.drawn(r.x, r.y, r.z) || Math.hypot(r.x - p.x, r.y - p.y) > 60) continue;
+      if (!this.renderer.chunks.drawnAt(r.x, r.y, r.z) || Math.hypot(r.x - p.x, r.y - p.y) > 60) continue;
       this.landed(r);
     }
     for (const m of this.sys.active) if (m.stuck.items.length && !m.dead) this.stuckIn(m);

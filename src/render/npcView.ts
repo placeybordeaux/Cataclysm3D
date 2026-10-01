@@ -107,6 +107,12 @@ export class NpcView implements GameSystem {
   private rigs = new Map<string, Rig>();
 
   constructor(readonly game: Game, readonly renderer: Renderer, readonly sys: NpcSystem) {
+    // only hides: showing waits for the next update (as monsterView, src/render/surroundings.ts)
+    renderer.chunks.afterUpdate.push(() => {
+      const ch = renderer.chunks;
+      for (const [n, v] of this.views) if (!ch.drawnAt(n.x, n.y, n.z)) (v.c?.inst.setVisible(false), v.h?.setVisible(false));
+      for (const b of this.bodies) if (!ch.drawnAt(b.npc.x, b.npc.y, b.npc.z)) (b.body?.inst.setVisible(false), b.h?.setVisible(false));
+    });
     loadAtlas().then(
       (a) => {
         this.atlas = a;
@@ -273,8 +279,9 @@ export class NpcView implements GameSystem {
         this.views.set(n, v);
       } else if (outfitCheck) this.refresh(n, v);
       const downed = n.effects.has('downed') || n.isAsleep();
-      // drawn iff its level is (src/world/levels.ts), not within one level of the player
-      const visible = this.renderer.chunks.levels.drawn(n.x, n.y, n.z);
+      // drawn iff its level is (src/world/levels.ts) and its surroundings are on screen
+      // (src/render/surroundings.ts)
+      const visible = this.renderer.chunks.drawnAt(n.x, n.y, n.z);
       if (v.c) {
         if (n.attackCooldown > v.cool + 0.05) v.c.strike();
         v.cool = n.attackCooldown;
@@ -308,6 +315,10 @@ export class NpcView implements GameSystem {
         b.h?.remove();
         this.makeBody(b, false);
       }
+      // (as live NPCs: not before the floor it lies on is on screen)
+      const shown = this.renderer.chunks.drawnAt(b.npc.x, b.npc.y, b.npc.z);
+      b.body?.inst.setVisible(shown);
+      b.h?.setVisible(shown);
       if (outfitCheck && (b.body || b.t >= FALL_TIME)) {
         const items = game.map.itemsAt(b.npc.tileX, b.npc.tileY, b.npc.z) as { vars?: Record<string, unknown> }[];
         if (!items.some((it) => it.vars?.npc === b.npc.uid)) {

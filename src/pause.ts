@@ -29,7 +29,9 @@ export function installTacticalPause(game: Game, api?: DebugApi): TacticalPause 
   // The PAUSED banner lives in the HUD's status banner slot (top centre, under the compass).
   // A menu's own pause is a small note (the window says so itself); the player's pause is big.
   const draw = () => {
-    if (!tp.paused || game.player.dead) return hud.setBanner('pause', null);
+    // (the load gate's hold shows its own loading screen / note: src/loadgate/install.ts)
+    const onlyLoading = !tp.manual && tp.reasons().every((r) => r === 'loading');
+    if (!tp.paused || game.player.dead || onlyLoading) return hud.setBanner('pause', null);
     const key = game.keys.label('tactical_pause');
     hud.setBanner('pause', tp.manual
       ? { text: 'PAUSED', sub: `${key} to resume · look around, open any menu`, tone: 'warn' }

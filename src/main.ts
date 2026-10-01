@@ -40,6 +40,8 @@ import { installChunkEviction } from './save/eviction';
 import { installPerf } from './perf/install';
 import { installStairs, installStairNpcs } from './stairs';
 import { installStairsView } from './render/stairs/install';
+import { installLoadGate } from './loadgate/install';
+import { randomTip } from './ui/tips';
 
 // URL params (all optional): seed=<int>, gen=world|test (default world), debug=1 (render stats overlay),
 // renderer params px/grade/tex/cam/walls (see src/render/renderer.ts), debug=atlas (sprite sheet view
@@ -135,6 +137,8 @@ async function main(): Promise<void> {
   const progression = await installProgression(game, ui.ctx, worldgen, achievements, api);
   // Tactical pause key + PAUSED banner (src/pause.ts).
   installTacticalPause(game, api);
+  // Load gate (src/loadgate): the game waits while the world around the player is unbuilt.
+  const loadGate = installLoadGate(game, renderer, api, { tip: () => randomTip(ui.ctx) });
   // ui2 dialogue/trade/missions/vehicle/body-mod/achievement panels replace the curses ones.
   installScreens(game, renderer, { npcs, mods }, api);
 
@@ -189,6 +193,7 @@ async function main(): Promise<void> {
   // Gameplay proper: capture the mouse from here on (title/chargen use it as a pointer).
   const pointer = installPointerPolicy(game);
   pointer.begin();
+  loadGate.arm();
   game.events.on('playerDied', () => pointer.end());
   // Spawns were held while the title screen / character creation ran (density choice).
   monsters.spawner.release();

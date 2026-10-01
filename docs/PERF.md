@@ -505,6 +505,78 @@ air), so the bay was lit and ambient-shaded as outdoors. Same bug class as the r
   sequences vs the window's 0-1.7 s; loop p99 unchanged (37-40 ms both). Still a bit more work
   in a city than before; far-tower shells (no interiors above the window) would be the next win.
 
+## Load gate and "never the inside before the outside" (loadgate branch)
+
+User report: *"zombies are drawn on higher z-levels before the walls around them are drawn ...
+it might be worth just having a loading screen that doesn't advance the game until stuff is
+loaded in."*
+
+**Root cause.** Every per-entity view (monsterView live and far figures, npcView, vehicleMesh,
+fireView, arrowFx) decided visibility with `levels.drawn(x, y, z)`: "does this level of this
+column exist for the eye?" That is the *extent* (levels.ts, from the overmap), which is true the
+moment the player arrives; the chunk manager builds the geometry later, nearest and most needed
+first, and storeys above the player's window last of all (the deferred `'high'` class, not
+started at all while driving). Corpses, grass cards and tufts, smoke/trap/item-light fx had no
+check at all. So right after a load, a teleport or a walk into town, a zombie on a first or second
+floor stood in mid-air over a ground floor whose upper walls did not exist yet (reproduced at
+the apartment block by Holden, seed 1: 13-290 frames of floating figures per arrival depending on
+how busy streaming was; on a slow budget for the whole 4 s of the probe).
+
+**Fix at the source:** one question, `ChunkManager.drawnAt(x, y, z)` = level drawn **and**
+`surroundingsDrawn` (src/render/surroundings.ts): the entity's own chunk is built and visible,
+and a neighbour chunk within 2 tiles of the entity is not still waiting for its first build. All
+views above use it (the car you drive is exempt); corpses and NPC bodies got it; grass, tufts
+and world fx wait for `chunkShown`. Views that update on simulation ticks also re-check in
+`chunks.afterUpdate` (hide only), so a figure never outlives its chunk by a frame, even while the
+game is held. `cdda.entityRule(false)` gives back the old rule for comparisons.
+
+| before (old rule, 1 s after arriving) | after |
+| --- | --- |
+| ![](screenshots/loadgate/before_upstairs_zombies_crop.jpg) | ![](screenshots/loadgate/after_upstairs_zombies_crop.jpg) |
+
+**The load gate** (src/loadgate): while chunks within 40 m on the player's level and the ones
+above and below are unbuilt, the game is held (a tactical-pause hold `'loading'`: no ticks, no
+monster moves, clock stopped, the car frozen in place), the meshing budget goes to 30 ms, and the
+gate opens once the 64 m ring is built. Not flickering: a ring hole must last 0.25 s (1 s within
+3 s of the last opening), the player's own 3x3 closes it at once, it stays at least 0.4 s, and
+it gives up (loudly, console warning) after 20 s and stays off 10 s. Options → Load gate,
+`?loadgate=`, `cdda.loadGate(mode?)`:
+
+| mode | what you see |
+| --- | --- |
+| **auto** (default) | the full loading screen when your own surroundings are missing (load, new game, teleport, a level never built); the small "Loading surroundings" note over the frozen view when only the ring is behind (outrunning streaming) |
+| block | always the full loading screen; gameplay keys do nothing under it (Esc and F-keys do) |
+| soft | always the small note over the frozen live view |
+| off | never waits (old behaviour); creatures still wait for their walls |
+
+Why auto: after a jump there is nothing worth looking at (black curtain, then a town assembling)
+and a loading screen with a progress bar and a tip reads as intended; while driving the gap is a
+fraction of a second to a few seconds and the world is mostly there, so a full-screen flash is
+jarring while a frozen frame with a small note is not.
+
+| loading screen (auto after a jump) | soft note (driving faster than the world streams) |
+| --- | --- |
+| ![](screenshots/loadgate/chromium/01_loadgate_jump_loading_screen.jpg) | ![](screenshots/loadgate/chromium/07_loadgate_drive_soft.jpg) |
+
+**Cost** (`npm run perf`, Chromium 3440x1304, same machine, before = `bn` 2fed6f4): driving
+routes unchanged within noise (loop p99 town40 21.6 → 17.8, town60 18.2 → 16.9, city60 29 → 26.1,
+forest 17.8 → 16.7, rural 26.5 → 23.5 ms; city40 39.2 → 40.1, which fails its baseline both before
+and after on this machine), citystand draw 4.48 → 3.89 ms, 542 → 540 calls. Loads are faster
+(the gate's budget): teleport all-in-view 2586 → 1753 ms, load 4100 → 2583 ms, loaddrive
+unbuilt-in-view 5.25 → 2.18 s (the ghost car waits under the gate). Firefox: town40 loop p99
+25 → 23, load all-in-view 3417 → 2033 ms, citystand draw 5.09/5.34 → 4.99/5.07 ms (two runs each).
+The gate's scan is ~150 chunk lookups a frame; the entity rule one to four map lookups per drawn
+creature.
+
+**Checks:** `tests/loadgate.test.ts` (gate state machine: closes, debounce, no flicker, reclose,
+upgrade, modes, give-up), `tests/render/surroundings.test.ts` (the rule; the chunk manager never
+reports a catwalk zombie drawn before its chunk, though its level "exists" for many frames;
+`missingAround`). Real input: `tools/realinput.ts --only loadgate` (new game, a jump with W held
+under the loading screen, walking upstairs into the block with zombies upstairs, F5 + title
+Load, driving on a slowed streaming budget: soft note, car frozen, no re-close within a second;
+a per-frame monitor asserts no creature drawn without its chunk throughout): 21/21 in Chromium
+and Firefox at 3440x1304. `toGameplay()` in realinput waits for the gate.
+
 ## Not done / next
 
 * **Draw cost in cities** is now the biggest frame item after streaming: ~1000-1200 draw

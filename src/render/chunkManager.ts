@@ -10,9 +10,10 @@ import { puddleMaterial } from './props';
 import { worldMaterials } from './materials';
 import { glassMaterial } from './furniture/glass';
 import type { SpriteLayer, StaticSpriteGroup } from './sprites';
-import { LEVEL_HEIGHT, MAX_Z } from '../world/coords';
+import { LEVEL_HEIGHT, MAX_Z, MIN_Z } from '../world/coords';
 import type { TileTextureSource } from './textureSource';
 import { VisibleLevels, roofAbove } from '../world/levels';
+import { ChunkState, surroundingsDrawn } from './surroundings';
 
 // Keeps chunk meshes around the player in sync with the map:
 //  - desired set = chunks within `radius` (circular) on the levels src/world/levels.ts says
@@ -171,6 +172,12 @@ export class ChunkManager {
   settleBudgetMs = 16;
   /** 'need': creating entries (mapgen) may take this share of the budget while builds are pending */
   createShare = 0.5;
+  /**
+   * The load gate holds the game (src/loadgate.ts): nothing moves, so frame rate matters less
+   * than getting the surroundings built; budgets are at least gateBudgetMs.
+   */
+  gateBoost = false;
+  gateBudgetMs = 30;
   /** the view is curtained this frame (telemetry) */
   curtained = false;
   private pendingLast = 0;
@@ -204,6 +211,14 @@ export class ChunkManager {
   /** Builds extra per-chunk objects from mesh data (3D trees; time-sliced); added to the chunk group. */
   extraObjects: ((data: ChunkMeshData, cx: number, cy: number, z: number) => Generator<void, THREE.Object3D[]>) | null = null;
 
+  /**
+   * Called at the end of every update(), after chunks were built, hidden or dropped. Creature
+   * views update on simulation ticks (before this, and not at all while the game is held), so
+   * they re-check here and hide anything whose geometry just went away (a level left behind
+   * on the stairs, a teleport): never one frame of a figure without its walls.
+   */
+  readonly afterUpdate: (() => void)[] = [];
+
   /** Telemetry observer (src/perf), null when off. */
   probe: ChunkProbe | null = null;
 
@@ -226,6 +241,63 @@ export class ChunkManager {
         if (!e || !e.shown) n++;
       }
     return n;
+  }
+
+  /** What exists of chunk (cx, cy, z) on screen (src/render/surroundings.ts). */
+  chunkState(cx: number, cy: number, z: number): ChunkState {
+    const e = this.entries.get(key(cx, cy, z));
+    if (!e) return ChunkState.None;
+    if (!e.shown) return ChunkState.Pending;
+    return e.visible ? ChunkState.Shown : ChunkState.Hidden;
+  }
+  private readonly stateFn = (cx: number, cy: number, z: number) => this.chunkState(cx, cy, z);
+
+  /**
+   * May a creature, corpse, vehicle or effect at (x, y, z) be drawn? Its level must be drawn for
+   * the eye (levels.ts) *and* the geometry around it must be on screen: the one visibility
+   * question every per-entity view asks (never the inside before the outside).
+   */
+  drawnAt(x: number, y: number, z: number): boolean {
+    return this.levels.drawn(x, y, z) && (!this.entityRule || surroundingsDrawn(this.stateFn, x, y, z));
+  }
+  /** false = the level extent alone (the old rule; cdda.entityRule(false), before/after shots) */
+  entityRule = true;
+
+  /** Is chunk (cx, cy, z)'s geometry on screen (built and visible)? Grass and tufts wait for it. */
+  chunkShown(cx: number, cy: number, z: number): boolean {
+    return !this.entityRule || this.chunkState(cx, cy, z) === ChunkState.Shown;
+  }
+
+  /**
+   * The load gate's question (src/loadgate.ts): of the chunks on levels pz - dz .. pz + dz whose
+   * nearest point is within `near` m of the player, how many are wanted and never built
+   * (`near`), and the same within `far` m (`far` >= near: the gate opens only once the wider
+   * ring is built, so walking on doesn't close it again at once). Levels the column doesn't
+   * draw are skipped; a wanted chunk without an entry yet counts as missing. `core` = the
+   * player's own 3x3 on pz (nearUnbuilt).
+   */
+  missingAround(px: number, py: number, pz: number, near: number, far: number, dz = 1): { core: number; near: number; far: number; wanted: number } {
+    const out = { core: this.nearUnbuilt(px, py, pz), near: 0, far: 0, wanted: 0 };
+    const pcx = Math.floor(px / CHUNK), pcy = Math.floor(py / CHUNK);
+    const rc = Math.ceil(far / CHUNK);
+    const lv = this.levels;
+    for (let cy = pcy - rc; cy <= pcy + rc; cy++)
+      for (let cx = pcx - rc; cx <= pcx + rc; cx++) {
+        const x0 = cx * CHUNK, y0 = cy * CHUNK;
+        const d = Math.hypot(Math.max(x0, Math.min(px, x0 + CHUNK)) - px, Math.max(y0, Math.min(py, y0 + CHUNK)) - py);
+        if (d > far) continue;
+        for (let z = Math.max(MIN_Z, pz - dz); z <= Math.min(MAX_Z, pz + dz); z++) {
+          // (as levels.drawn, but for this pz: the eye there is last frame's)
+          const rz = lv.radiusAt(cx, cy, z, pz);
+          if (rz < 0 || (cx - pcx) ** 2 + (cy - pcy) ** 2 > (rz + 0.5) * (rz + 0.5)) continue;
+          out.wanted++;
+          const e = this.entries.get(key(cx, cy, z));
+          if (e && e.shown) continue;
+          out.far++;
+          if (d <= near) out.near++;
+        }
+      }
+    return out;
   }
 
   /** Every entry (wanted chunk) as telemetry sees it. */
@@ -283,9 +355,13 @@ export class ChunkManager {
     const need = this.schedule === 'need';
     // slack beyond what this frame's chunk work already takes (loopEma includes it)
     const slack = Math.max(0, this.ivEma - this.loopEma - Math.max(2, this.ivEma * 0.15));
-    const base = need ? Math.min(12, this.budgetMs + slack * this.slackShare) : this.budgetMs;
+    let base = need ? Math.min(12, this.budgetMs + slack * this.slackShare) : this.budgetMs;
     let boost = need ? Math.min(20, this.boostBudgetMs + slack * this.boostSlackShare) : this.boostBudgetMs;
     if (need && Math.hypot(this.vel.x, this.vel.y) < 1.5) boost = Math.max(boost, this.settleBudgetMs);
+    if (this.gateBoost) {
+      base = Math.max(base, this.gateBudgetMs);
+      boost = Math.max(boost, this.gateBudgetMs);
+    }
     // (as nearChunks.ts, give up after 4 s: a stuck build must not hold the big budget)
     let curtain = need && !unlimited && this.nearUnbuilt(px, py, pz) > 0;
     if (!curtain) this.curtainSince = -1;
@@ -439,6 +515,7 @@ export class ChunkManager {
     this.pendingLast = dirty.length - built;
     this.stats.entries = this.entries.size;
     if (this.audit && (unlimited || ++this.auditTick % 60 === 0)) this.auditLevels(px, py, pz, creationDone && this.stats.pending === 0);
+    for (const f of this.afterUpdate) f();
   }
 
   /**

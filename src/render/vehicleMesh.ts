@@ -830,8 +830,10 @@ export class VehicleRenderer {
     const now = t0 / 1000;
     for (const v of this.system.list) {
       const d = Math.hypot(v.x - p.x, v.y - p.y);
-      // drawn iff its level is (src/world/levels.ts), not within one level of the player
-      if (d > VIEW_RANGE || !this.renderer.chunks.levels.drawn(v.x, v.y, v.z)) {
+      // drawn iff its level is (src/world/levels.ts) and the road or floor around it is on
+      // screen (src/render/surroundings.ts); the car you drive always (outrunning streaming
+      // must not take the car out from under you)
+      if (d > VIEW_RANGE || (v !== driving && !this.renderer.chunks.drawnAt(v.x, v.y, v.z))) {
         if (this.entries.has(v)) this.drop(v);
         continue;
       }

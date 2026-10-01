@@ -75,6 +75,8 @@ export class FireView {
   private build(step: number): void {
     const byPage = new Map<THREE.Texture, { pos: number[]; uv: number[]; idx: number[] }>();
     for (const f of this.fires) {
+      // (scan takes the level extent; the flames wait for the chunk they burn in to be on screen)
+      if (!this.renderer.chunks.drawnAt(f.x + 0.5, f.y + 0.5, f.z)) continue;
       const fr = this.frames(f.lvl);
       if (!fr.length) continue;
       const r = fr[(step + (f.seed % fr.length)) % fr.length];
@@ -133,7 +135,7 @@ export class FireView {
     // embers: a few per fire, drifting up and sideways, shrinking as they cool
     const p = this.game.player;
     for (const f of this.fires) {
-      if (!this.renderer.chunks.levels.drawn(f.x, f.y, f.z) || Math.hypot(f.x - p.x, f.y - p.y) > 40) continue;
+      if (!this.renderer.chunks.drawnAt(f.x, f.y, f.z) || Math.hypot(f.x - p.x, f.y - p.y) > 40) continue;
       if (this.rand() < dt * (1.5 + f.lvl * 1.5)) {
         const max = 0.8 + this.rand() * 0.9;
         this.sparks.push({ x: f.x + 0.3 + this.rand() * 0.4, y: f.y + 0.3 + this.rand() * 0.4, z: f.z, h: 0.3 + f.lvl * 0.15, vx: (this.rand() - 0.5) * 0.3, vy: (this.rand() - 0.5) * 0.3, vh: 0.6 + this.rand() * 0.5, life: max, max });

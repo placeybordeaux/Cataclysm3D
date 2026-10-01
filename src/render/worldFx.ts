@@ -143,7 +143,8 @@ export class WorldFx {
     const want = new Set<string>();
     for (let cy = pcy - RADIUS; cy <= pcy + RADIUS; cy++)
       for (let cx = pcx - RADIUS; cx <= pcx + RADIUS; cx++) {
-        if (!game.map.hasChunk(cx, cy, p.z)) continue;
+        // smoke, traps, item lights: not before the chunk's own geometry (src/render/surroundings.ts)
+        if (!game.map.hasChunk(cx, cy, p.z) || !this.renderer.chunks.chunkShown(cx, cy, p.z)) continue;
         const key = `${cx},${cy},${p.z}`;
         want.add(key);
         const c = game.map.chunk(cx, cy, p.z)!;
