@@ -39,6 +39,8 @@ function storedDriveCam(): DriveCam {
 const EYE = 1.6;
 const EYE_CROUCH = 1.0;
 const TOP_PITCH = (60 * Math.PI) / 180;
+/** Time constant for `fallDrop`'s decay: ~3 half-lives (0.3 s) reads as a quick, eased settle. */
+const FALL_DROP_TAU = 0.1;
 
 export class CameraRig {
   readonly camera = new THREE.PerspectiveCamera(70, 1, 0.1, 200);
@@ -69,6 +71,14 @@ export class CameraRig {
   eyeOffset = 0;
   /** Metres the player stands above their level's floor: walking a flight (render/stairs, set per frame). */
   lift = 0;
+  /**
+   * Extra eye height left over from a fall (metres), decaying to 0: the fall itself moves the
+   * player instantly (game state, as always), but snapping the camera down the same frame read
+   * as surprisingly abrupt. `fall()` sets it to the drop's full height and `update` eases it
+   * back out, so the eye visibly glides down from the old floor to the new one over a few
+   * frames instead of teleporting.
+   */
+  private fallDrop = 0;
   /**
    * Highest the first-person eye may be (absolute, metres), or null: standing in a car's
    * doorway ducks you under its roof instead of putting the camera through it
@@ -116,6 +126,12 @@ export class CameraRig {
     this.kickYaw += yaw;
   }
 
+  /** A fall just landed `levels` z-levels down (src/game/zlevels.ts `playerFell`): ease the eye
+   *  down from the old floor instead of snapping straight to the new one. Purely visual. */
+  fall(levels: number): void {
+    this.fallDrop = Math.min(3 * LEVEL_HEIGHT, this.fallDrop + levels * LEVEL_HEIGHT);
+  }
+
   /** Effective camera mode: the driving camera's on-foot equivalent while driving. */
   get mode(): CameraMode {
     return this.drive ? DRIVE_AS_MODE[this.driveCam] : this.footMode;
@@ -151,7 +167,9 @@ export class CameraRig {
     this.kickYaw *= back;
     const fovFirst = this.fovFirst + (this.adsFov - this.fovFirst) * this.adsBlend;
     const eyeH = (p.crouching ? EYE_CROUCH : EYE) + this.eyeOffset;
-    const base = p.z * LEVEL_HEIGHT + this.lift;
+    this.fallDrop *= Math.exp(-dt / FALL_DROP_TAU);
+    if (this.fallDrop < 0.002) this.fallDrop = 0;
+    const base = p.z * LEVEL_HEIGHT + this.lift + this.fallDrop;
 
     // head-bob amplitude follows actual ground speed (so bumping a wall doesn't bob)
     const moved = Number.isNaN(this.lastX) ? 0 : Math.hypot(p.x - this.lastX, p.y - this.lastY);

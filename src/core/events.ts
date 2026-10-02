@@ -63,6 +63,12 @@ export interface GameEvents {
   monsterAttack: { monster: unknown; phase: 'windup' | 'resolved' | 'whiff' | 'interrupted'; x: number; y: number; z: number; seconds?: number; heavy?: boolean };
   /** A save was loaded into this game (renderer: rebuild chunk meshes; UI: refresh). */
   gameLoaded: { slot: string | null };
+  /**
+   * The survivor fell one or more z-levels (src/game/zlevels.ts fallIfUnsupported): game state
+   * (position, fall damage) has already applied instantly. Purely a hook for the camera to ease
+   * the eye down instead of snapping (render/camera.ts `fall`, wired in renderer.ts).
+   */
+  playerFell: { levels: number; fromZ: number; toZ: number };
 }
 
 type Handler<T> = (payload: T) => void;

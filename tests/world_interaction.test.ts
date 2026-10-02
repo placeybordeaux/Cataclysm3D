@@ -15,7 +15,8 @@ import { emitSound, hearingLine, heardVolume, installSound, noisePhrase, NOISE_R
 import { bresenham, creatureCanSee, lightAt, lineOfSight, monsterSightRange, naturalLight, playerCanSee, sunLight } from '../src/game/vision';
 import { bash, getMapDamage, smashAbility } from '../src/game/bash';
 import { closeDoor, interactionsAt, openDoor, interactionPrompt } from '../src/game/interact';
-import { fallIfUnsupported, goStairs, stairDestination } from '../src/game/zlevels';
+import { fallIfUnsupported, goStairs, installZLevels, stairDestination } from '../src/game/zlevels';
+import { overlapsSolid } from '../src/game/physics';
 import { addField, fieldDamageAt, ignite, installFields, processFields } from '../src/game/fields';
 import { BN_START_CLIMATE_OFFSET_DAYS, climateSeconds, evalWeatherCondition, forceWeather, installWeather, meetsBnRequirements, weatherConditions, weatherPoint } from '../src/game/weather';
 import { comfortAt, goToSleep, installRest, waitFor } from '../src/game/rest';
@@ -290,6 +291,72 @@ describe('z-levels', () => {
     expect(game.player.hpPercent()).toBeLessThan(hp);
     place(game, 8, 8, 1); // on the flat roof
     expect(fallIfUnsupported(game)).toBe(0);
+  });
+
+  it('fallfix bug repro: landing through a gutter gap pushes clear of the wall below instead of freezing in it', () => {
+    // The live report: walking a roof gutter at z=3 drifted the free-move x to 1186.98, whose
+    // tile (1186) is open air; falling dropped the player to a flat roof at z=2, but the kept
+    // fractional x left their collision circle overlapping a brick wall at x=1187 on z=2, and
+    // every move was refused (moveWithCollision never allows a move into solid ground, even to
+    // get less stuck). Reproduced at smaller coordinates with the same column layout:
+    //   z=3 row y-1: all gutter
+    //   z=3 row y:   open_air, open_air, *open_air, gutter, brick_wall
+    //   z=2 row y-1: window_frame, brick_wall, brick_wall, brick_wall, brick_wall
+    //   z=2 row y:   flat_roof, flat_roof, *flat_roof, brick_wall, floor
+    const { game } = makeGame();
+    const map = game.map;
+    const cols = [200, 201, 202, 203, 204]; // * = 202
+    const z3Row = ['t_open_air', 't_open_air', 't_open_air', 't_gutter', 't_brick_wall'];
+    const z2RowNorth = ['t_window_frame', 't_brick_wall', 't_brick_wall', 't_brick_wall', 't_brick_wall'];
+    const z2Row = ['t_flat_roof', 't_flat_roof', 't_flat_roof', 't_brick_wall', 't_floor'];
+    cols.forEach((x, i) => {
+      map.setTer(x, 49, 3, 't_gutter');
+      map.setTer(x, 50, 3, z3Row[i]);
+      map.setTer(x, 49, 2, z2RowNorth[i]);
+      map.setTer(x, 50, 2, z2Row[i]);
+    });
+    game.player.x = 202.98; // drifted to the far edge of the open-air tile, as in the report
+    game.player.y = 50.5;
+    game.player.z = 3;
+    const events: { levels: number; fromZ: number; toZ: number }[] = [];
+    game.events.on('playerFell', (e) => events.push(e));
+    expect(fallIfUnsupported(game)).toBe(1);
+    expect(game.player.z).toBe(2);
+    expect(events).toEqual([{ levels: 1, fromZ: 3, toZ: 2 }]);
+    // The bug: this used to be true (wedged in the brick wall at x = 203).
+    expect(overlapsSolid(game.map, game.player.x, game.player.y, game.player.z)).toBe(false);
+    expect(game.player.tileX).toBe(202); // still the tile fallen through, just nudged within it
+  });
+});
+
+describe('overlap safety net', () => {
+  // A player wedged into solid terrain by some other means (a door shut on them, a save loaded
+  // into a since-edited map) must never be frozen: input toward open ground should move them,
+  // and the passive "falling" system should creep them clear even with no input at all.
+  const wedge = () => {
+    const { game } = makeGame();
+    game.map.setTer(10, 10, 0, 't_floor');
+    game.map.setTer(11, 10, 0, 't_brick_wall');
+    place(game, 10, 10, 0);
+    game.player.x = 10.95; // 0.05 from the wall's edge, radius 0.3: wedged into it
+    game.player.y = 10.5;
+    expect(overlapsSolid(game.map, game.player.x, game.player.y, 0)).toBe(true);
+    return game;
+  };
+
+  it('WASD input away from the wall moves the player even while overlapping', () => {
+    const game = wedge();
+    game.input.held.add('KeyA'); // yaw 0 faces north; A strafes west, away from the wall
+    const x0 = game.player.x;
+    game.tick(1 / 30);
+    expect(game.player.x).toBeLessThan(x0);
+  });
+
+  it('the passive per-tick nudge clears an overlap with no input at all', () => {
+    const game = wedge();
+    installZLevels(game); // registers the "falling" system (fallIfUnsupported + the nudge)
+    for (let i = 0; i < 120 && overlapsSolid(game.map, game.player.x, game.player.y, 0); i++) game.tick(1 / 30);
+    expect(overlapsSolid(game.map, game.player.x, game.player.y, 0)).toBe(false);
   });
 });
 
