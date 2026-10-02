@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { GameMap } from '../world/map';
-import { CHUNK, LEVEL_HEIGHT, MAX_Z } from '../world/coords';
+import { CHUNK, LEVEL_HEIGHT, MAX_Z, MIN_Z } from '../world/coords';
 import { hasFlag } from '../world/registry';
 import { displayIrradiance, LightField, type LightSource } from './lightfield';
 import { terrainShape } from './tileKinds';
@@ -30,6 +30,10 @@ const FIRE_LUM = [0, 20, 60, 160];
 /** Uniforms shared by every patched material (materials.ts reads them by reference). */
 export const lmUniforms = {
   tLightMap: { value: null as THREE.Texture | null },
+  tLightMapBelow: { value: null as THREE.Texture | null },
+  tLightMapAbove: { value: null as THREE.Texture | null },
+  /** Whether neighboring-level maps are inside world bounds. */
+  uLmAdjacent: { value: new THREE.Vector2() },
   /** x, y = world tile of texel (0,0); z = size; w = 1 when valid */
   uLmRect: { value: new THREE.Vector4(0, 0, LM_SIZE, 0) },
   /** floor Y of the mapped level and level height */
@@ -70,6 +74,7 @@ export class LightMap {
   hz = 10;
   /** Lit items: return a luminance for items that glow (hook for the items system). */
   itemLight: ((item: unknown) => number) | null = (it) => defaultItemLight(it);
+  private ownStats = { naturalMs: 0, artificialMs: 0, sources: 0, rebuilds: 0 };
   readonly stats = { naturalMs: 0, artificialMs: 0, sources: 0, rebuilds: 0 };
   private data: Float32Array;
   private coverData: Float32Array;
@@ -83,8 +88,13 @@ export class LightMap {
   /** Tile sources of the last collection (new array whenever it is rebuilt). */
   statics: StaticLight[] = [];
   private valid = false;
+  private below: LightMap | null = null;
+  private above: LightMap | null = null;
+  private dynamicScratch: DynamicLight[] = [];
+  private ownStatics: StaticLight[] = [];
+  private staticInputs: (StaticLight[] | null)[] = [];
 
-  constructor(private map: GameMap) {
+  constructor(private map: GameMap, private publishUniforms = true) {
     this.data = new Float32Array(LM_SIZE * LM_SIZE * 4);
     this.texture = new THREE.DataTexture(this.data, LM_SIZE, LM_SIZE, THREE.RGBAFormat, THREE.FloatType);
     this.texture.magFilter = this.texture.minFilter = THREE.NearestFilter;
@@ -93,8 +103,12 @@ export class LightMap {
     this.cover = new THREE.DataTexture(this.coverData, LM_SIZE, LM_SIZE, THREE.RedFormat, THREE.FloatType);
     this.cover.magFilter = this.cover.minFilter = THREE.NearestFilter;
     this.cover.generateMipmaps = false;
-    lmUniforms.tLightMap.value = this.texture;
-    lmUniforms.tCover.value = this.cover;
+    if (publishUniforms) {
+      lmUniforms.tLightMap.value = this.texture;
+      lmUniforms.tLightMapBelow.value = this.texture;
+      lmUniforms.tLightMapAbove.value = this.texture;
+      lmUniforms.tCover.value = this.cover;
+    }
   }
 
   private ids(kind: 'ter' | 'furn'): IdCache {
@@ -123,7 +137,7 @@ export class LightMap {
     let sig = (ox * 73856093) ^ (oy * 19349663) ^ (z * 83492791);
     const c0x = Math.floor(ox / CHUNK), c0y = Math.floor(oy / CHUNK);
     const c1x = Math.floor((ox + LM_SIZE - 1) / CHUNK), c1y = Math.floor((oy + LM_SIZE - 1) / CHUNK);
-    for (let dz = 0; dz <= 3; dz++)
+    for (let dz = 0; z + dz <= MAX_Z; dz++)
       for (let cy = c0y; cy <= c1y; cy++)
         for (let cx = c0x; cx <= c1x; cx++) {
           const has = this.map.hasChunk(cx, cy, z + dz);
@@ -138,6 +152,13 @@ export class LightMap {
    * renderer clock in seconds (drives fire flicker). Returns true if the texture changed.
    */
   update(px: number, py: number, pz: number, dt: number, time: number, dynamic: Iterable<DynamicLight>, force = false): boolean {
+    this.ownStats.naturalMs = this.ownStats.artificialMs = 0;
+    // Handles can be a one-shot generator. Reuse a buffer for the three independent levels.
+    if (this.publishUniforms) {
+      this.dynamicScratch.length = 0;
+      for (const source of dynamic) this.dynamicScratch.push(source);
+      dynamic = this.dynamicScratch;
+    }
     const ox = Math.floor(px / SNAP) * SNAP - LM_SIZE / 2 + SNAP / 2;
     const oy = Math.floor(py / SNAP) * SNAP - LM_SIZE / 2 + SNAP / 2;
     const f = this.field;
@@ -150,7 +171,7 @@ export class LightMap {
       this.buildGrid();
       f.computeNatural();
       this.natSig = nsig;
-      this.stats.naturalMs = performance.now() - t0;
+      this.ownStats.naturalMs = performance.now() - t0;
       this.artSig = NaN; // grid changed: occlusion of every source may have changed
       changed = true;
       this.valid = true;
@@ -165,21 +186,59 @@ export class LightMap {
         const t0 = performance.now();
         f.computeArtificial(sources);
         this.artSig = sig;
-        this.stats.artificialMs = performance.now() - t0;
-        this.stats.sources = sources.length;
+        this.ownStats.artificialMs = performance.now() - t0;
+        this.ownStats.sources = sources.length;
         changed = true;
       }
       this.artT = 0;
     }
     if (changed) this.upload();
-    lmUniforms.uLmRect.value.set(f.ox, f.oy, LM_SIZE, this.enabled ? 1 : 0);
-    lmUniforms.uLmLevel.value.set(this.z * LEVEL_HEIGHT, LEVEL_HEIGHT);
+    if (this.publishUniforms) {
+      const below = this.adjacent(pz - 1, 'below'), above = this.adjacent(pz + 1, 'above');
+      if (below) changed = below.update(px, py, pz - 1, dt, time, dynamic, force) || changed;
+      if (above) changed = above.update(px, py, pz + 1, dt, time, dynamic, force) || changed;
+      lmUniforms.tLightMapBelow.value = below?.texture ?? this.texture;
+      lmUniforms.tLightMapAbove.value = above?.texture ?? this.texture;
+      lmUniforms.uLmAdjacent.value.set(below ? 1 : 0, above ? 1 : 0);
+      lmUniforms.uLmRect.value.set(f.ox, f.oy, LM_SIZE, this.enabled ? 1 : 0);
+      lmUniforms.uLmLevel.value.set(this.z * LEVEL_HEIGHT, LEVEL_HEIGHT);
+      const bs = below?.statics ?? null, as = above?.statics ?? null;
+      if (this.staticInputs[0] !== bs || this.staticInputs[1] !== this.ownStatics || this.staticInputs[2] !== as) {
+        const statics = [...(bs ?? []), ...this.ownStatics, ...(as ?? [])];
+        if (!sameStatics(statics, this.statics)) this.statics = statics;
+        this.staticInputs[0] = bs; this.staticInputs[1] = this.ownStatics; this.staticInputs[2] = as;
+      }
+    }
+    Object.assign(this.stats, this.ownStats);
+    if (this.publishUniforms) {
+      this.addAdjacentStats(this.below, pz - 1);
+      this.addAdjacentStats(this.above, pz + 1);
+    }
     return changed;
+  }
+
+  private addAdjacentStats(cache: LightMap | null, level: number): void {
+    if (!cache || cache.z !== level) return;
+    this.stats.naturalMs += cache.stats.naturalMs;
+    this.stats.artificialMs += cache.stats.artificialMs;
+    this.stats.sources += cache.stats.sources;
+    this.stats.rebuilds += cache.stats.rebuilds;
+  }
+
+  private adjacent(level: number, direction: 'below' | 'above'): LightMap | null {
+    if (level < MIN_Z || level > MAX_Z) return null;
+    const cache = this[direction] ??= new LightMap(this.map, false);
+    cache.itemLight = this.itemLight;
+    cache.field.indoorAmbient = this.field.indoorAmbient;
+    cache.naturalLevel = this.naturalLevel;
+    return cache;
   }
 
   /** Force a full rebuild next update (texture source swap, save loaded). */
   invalidate(): void {
     this.valid = false;
+    this.below?.invalidate();
+    this.above?.invalidate();
   }
 
   private buildGrid(): void {
@@ -275,7 +334,8 @@ export class LightMap {
     }
     this.flickering = flicker;
     // keep the previous array (identity) when nothing changed, so consumers can skip work
-    if (!sameStatics(statics, this.statics)) this.statics = statics;
+    if (!sameStatics(statics, this.ownStatics)) this.ownStatics = statics;
+    if (!this.publishUniforms) this.statics = this.ownStatics;
     return out;
   }
 
@@ -294,12 +354,16 @@ export class LightMap {
     }
     this.texture.needsUpdate = true;
     this.cover.needsUpdate = true;
-    this.stats.rebuilds++;
+    this.ownStats.rebuilds++;
   }
 
   /** lightAt restricted to the mapped window on the mapped level; null elsewhere. */
   exactLightAt(x: number, y: number, z: number): number | null {
-    if (!this.valid || z !== this.z) return null;
+    if (z !== this.z) {
+      const cache = z === this.z - 1 ? this.below : z === this.z + 1 ? this.above : null;
+      return cache?.z === z ? cache.exactLightAt(x, y, z) : null;
+    }
+    if (!this.valid) return null;
     const tx = Math.floor(x), ty = Math.floor(y);
     const i = this.field.index(tx, ty);
     return i >= 0 ? this.field.natural[i] * this.naturalLevel + this.field.artificialAt(tx, ty) : null;
@@ -322,7 +386,7 @@ export class LightMap {
 
 function sameStatics(a: StaticLight[], b: StaticLight[]): boolean {
   if (a.length !== b.length) return false;
-  for (let i = 0; i < a.length; i++) if (a[i].x !== b[i].x || a[i].y !== b[i].y || a[i].lum !== b[i].lum) return false;
+  for (let i = 0; i < a.length; i++) if (a[i].x !== b[i].x || a[i].y !== b[i].y || a[i].z !== b[i].z || a[i].lum !== b[i].lum) return false;
   return true;
 }
 

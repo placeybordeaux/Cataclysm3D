@@ -25,6 +25,7 @@ import type { V3 } from './geometry';
 import { bodyRectFor, setVehicleWidth, vehicleWidth, type VehicleWidth } from './vehicleLayout';
 import { noseX } from '../game/chassis';
 import { liveryBody } from './vehicleSkin';
+import { createHeadlight, prepareHeadlightShadow } from './headlightShadow';
 
 // 3D meshes for vehicles, built from their parts mount by mount, as low-poly boxes wearing
 // small procedural pixel-art swatches (UltiCa's vp_* sprites are 3/4-view drawings for a
@@ -35,7 +36,7 @@ import { liveryBody } from './vehicleSkin';
 // Each vehicle is an Object3D (body, roof, glass, lamps) placed every frame from the
 // vehicle's continuous position and facing; geometry is rebuilt when vehicle.version
 // changes (doors, damage, lights). Roofs hide in top-down view so you can see inside,
-// like CDDA's map. Headlights: one shadowless SpotLight for the nearest lit vehicle (the
+// like CDDA's map. Headlights: one shadowed SpotLight for the nearest lit vehicle (the
 // light count is fixed at startup so shaders never recompile) + pool point lights.
 //
 // Local frame: three.js X = mount x (forward), Z = mount y (right side), Y = metres above
@@ -578,10 +579,10 @@ export class VehicleRenderer {
   private tailOn = new THREE.MeshBasicMaterial({ color: 0xff3020 });
   private tailOff = new THREE.MeshBasicMaterial({ color: 0x5a1410 });
   private beaconMat = new THREE.MeshBasicMaterial({ vertexColors: true });
-  /** One shadowless spot for the nearest vehicle with its headlights on. */
+  /** One shadowed spot for the nearest vehicle with its headlights on. */
   // Range must stay over materials.ts HEADLIGHT_MIN_RANGE (that's what gives it the road
   // wrap); decay 0.5 keeps the road ~30 m out within a few bands of the road at the bumper.
-  readonly headlight = new THREE.SpotLight(0xfff0d4, 0, 80, 0.5, 0.45, 0.5);
+  readonly headlight = createHeadlight();
   /** Spot intensity: the road reads ~35 m ahead at night. */
   headlightIntensity = 45;
   private lookMode: VehicleLook = initialVehicleLook();
@@ -599,7 +600,6 @@ export class VehicleRenderer {
     // Creatures collide with the drawn body, not the whole grid tiles (vehicleShape.ts).
     system.bodyShape = (v) => (this.lookMode === 'model' ? bodyRectFor(v) : null);
     for (const m of [this.glassMat, this.glassOut, this.glassOutRider, this.glassIn, this.lampOn, this.lampOff, this.tailOn, this.tailOff, this.beaconMat]) patchNormalOutput(m, false);
-    this.headlight.castShadow = false;
     renderer.scene.add(this.group, this.headlight, this.headlight.target);
     renderer.vehicleView = this;
     system.onRemoved.push((v) => this.drop(v));
@@ -913,6 +913,7 @@ export class VehicleRenderer {
       s.target.updateMatrixWorld();
       s.intensity = this.headlightIntensity;
     } else s.intensity = 0;
+    prepareHeadlightShadow(s, this.renderer.three.shadowMap.type);
   }
 
   /**

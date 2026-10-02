@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { lmUniforms } from './lightmap';
 import { shadowUniforms } from './shadows';
+import { LEVEL_HEIGHT } from '../world/coords';
 
 // Every material drawn into the low-res scene target is a built-in three.js material with
 // a few shader patches, so we keep three's lights/shadows machinery:
@@ -96,21 +97,27 @@ void RE_Direct_Lambert( const in IncidentLight directLight, const in vec3 geomet
 // filter drops opaque taps, so light never interpolates through a wall.
 export const LM_FUNCS = /* glsl */ `
 uniform highp sampler2D tLightMap;
+uniform highp sampler2D tLightMapBelow;
+uniform highp sampler2D tLightMapAbove;
 uniform vec4 uLmRect;
 uniform vec2 uLmLevel;
-vec4 lmTap(ivec2 c) {
+uniform vec2 uLmAdjacent;
+vec4 lmTap(ivec2 c, int level) {
   int n = int(uLmRect.z);
   if (c.x < 0 || c.y < 0 || c.x >= n || c.y >= n) return vec4(0.0, 0.0, 0.0, -1.0);
+  if (level < 0) return texelFetch(tLightMapBelow, c, 0);
+  if (level > 0) return texelFetch(tLightMapAbove, c, 0);
   return texelFetch(tLightMap, c, 0);
 }
 // wp: three.js world position. Returns (artificial rgb, natural); natural < 0 = no data.
 vec4 lmSample(vec3 wp) {
-  if (uLmRect.w < 0.5 || wp.y < uLmLevel.x - 0.3 || wp.y > uLmLevel.x + uLmLevel.y + 0.05) return vec4(0.0, 0.0, 0.0, -1.0);
+  int level = int(floor((wp.y + 0.05 - uLmLevel.x) / uLmLevel.y));
+  if (uLmRect.w < 0.5 || level < -1 || level > 1 || (level < 0 && uLmAdjacent.x < 0.5) || (level > 0 && uLmAdjacent.y < 0.5)) return vec4(0.0, 0.0, 0.0, -1.0);
   vec2 t = vec2(wp.x, wp.z) - uLmRect.xy - 0.5;
   vec2 f0 = floor(t);
   vec2 fr = t - f0;
   ivec2 c = ivec2(f0);
-  vec4 a = lmTap(c), b = lmTap(c + ivec2(1, 0)), e = lmTap(c + ivec2(0, 1)), d = lmTap(c + ivec2(1, 1));
+  vec4 a = lmTap(c, level), b = lmTap(c + ivec2(1, 0), level), e = lmTap(c + ivec2(0, 1), level), d = lmTap(c + ivec2(1, 1), level);
   vec4 w = vec4((1.0 - fr.x) * (1.0 - fr.y), fr.x * (1.0 - fr.y), (1.0 - fr.x) * fr.y, fr.x * fr.y);
   w *= step(0.0, vec4(a.w, b.w, e.w, d.w));
   float sw = w.x + w.y + w.z + w.w;
@@ -121,7 +128,7 @@ vec4 lmSample(vec3 wp) {
   float n = 0.0;
   for (int k = 0; k < 4; k++) {
     ivec2 o = k == 0 ? ivec2(1, 0) : k == 1 ? ivec2(-1, 0) : k == 2 ? ivec2(0, 1) : ivec2(0, -1);
-    vec4 v = lmTap(m + o);
+    vec4 v = lmTap(m + o, level);
     if (v.w >= 0.0) { acc += v; n += 1.0; }
   }
   return n > 0.0 ? acc / n : vec4(0.0, 0.0, 0.0, -1.0);
@@ -145,6 +152,14 @@ float lmNatural() { return gLm.w >= 0.0 ? gLm.w : SKYVIS; }
 float lmSunGate() { return gLm.w >= 0.0 ? smoothstep(0.02, 0.2, gLm.w) : 1.0; }
 // Point lights are unoccluded; they only count where the light map has artificial light.
 float lmPointGate() { return gLm.w >= 0.0 ? smoothstep(0.0, 0.25, max(gLm.r, max(gLm.g, gLm.b))) : 1.0; }
+// Both positions are in view space. The view-space world-up column recovers height
+// without an inverse matrix, including a pitched/rolled camera. Separate levels must
+// never enable each other's unshadowed point-light pools.
+float lmPointLevelGate(vec3 sourcePosition, vec3 receiverPosition) {
+  float sourceY = dot(sourcePosition, viewMatrix[1].xyz) + cameraPosition.y;
+  float receiverY = dot(receiverPosition, viewMatrix[1].xyz) + cameraPosition.y;
+  return abs(floor((sourceY + 0.05) / ${LEVEL_HEIGHT.toFixed(8)}) - floor((receiverY + 0.05) / ${LEVEL_HEIGHT.toFixed(8)})) < 0.5 ? 1.0 : 0.0;
+}
 void RE_IndirectDiffuse_Lambert( const in vec3 irradiance, const in vec3 geometryPosition, const in vec3 geometryNormal, const in vec3 geometryViewDir, const in vec3 geometryClearcoatNormal, const in LambertMaterial material, inout ReflectedLight reflectedLight ) {
   reflectedLight.indirectDiffuse += irradiance * lmNatural() * BRDF_Lambert( material.diffuseColor );
   if (uRim > 0.0) {
@@ -259,7 +274,7 @@ export const HEADLIGHT_MIN_RANGE = 50;
 const LIGHTS_BEGIN = replaceOnce(patchChunk(
   patchChunk(
     patchChunk(THREE.ShaderChunk.lights_fragment_begin, 'getDirectionalLightInfo( directionalLight, directLight );', 'directLight.color *= lmSunGate(); gBandDither = 0.0;'),
-    'getPointLightInfo( pointLight, geometryPosition, directLight );', 'directLight.color *= lmPointGate(); gBandDither = uPointDither;',
+    'getPointLightInfo( pointLight, geometryPosition, directLight );', 'directLight.color *= lmPointGate() * lmPointLevelGate(pointLight.position, geometryPosition); gBandDither = uPointDither;',
   ),
   'getSpotLightInfo( spotLight, geometryPosition, directLight );',
   `gBandDither = 0.0; if ( spotLight.distance > ${HEADLIGHT_MIN_RANGE.toFixed(1)} && dot( geometryNormal, directLight.direction ) > 0.0 ) directLight.direction = normalize( directLight.direction + geometryNormal * 0.9 );`,
@@ -405,6 +420,9 @@ export function worldMaterials(page: THREE.Texture): { mat: THREE.MeshLambertMat
   if (m) return m;
   enableMips(page);
   const mat = new THREE.MeshLambertMaterial({ map: page, vertexColors: true, alphaTest: 0.5, side: THREE.FrontSide });
+  // Thin floor slabs and adjacent wall faces must occlude from either side. Default
+  // back-face-only casters leave bright headlight seams in rooms beneath the slab.
+  mat.shadowSide = THREE.DoubleSide;
   mat.onBeforeCompile = (shader) => {
     patchWorldVertex(shader, true);
     patchBandedLambert(shader, 'world');

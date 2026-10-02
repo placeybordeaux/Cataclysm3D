@@ -572,7 +572,7 @@ export class Renderer {
     su.uSkyTint.value.copy(this.skyState.hemiSky).multiplyScalar(this.skyState.hemiIntensity * 0.6);
     // the flashlight's shadow moves with the camera, so it can't be rate limited; the sun
     // maps say themselves when they're due (shadows.ts)
-    if (this.lights.shadowDue || this.lights.flashlightOn) this.three.shadowMap.needsUpdate = true;
+    if (this.lights.shadowDue || this.lights.flashlightOn || this.vehicleView?.headlight.intensity || this.vehicleView?.headlight.shadow.needsUpdate) this.three.shadowMap.needsUpdate = true;
     this.sky.update(this.skyState, cam.position, this.time);
     this.weather.update(dt, cam.position);
     this.autoPatch();

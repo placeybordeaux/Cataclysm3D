@@ -1,0 +1,43 @@
+{
+  "date": "2026-10-02",
+  "browser": "Chromium 154 / SwiftShader",
+  "viewport": "960x540",
+  "worldComparisonRegion": {
+    "x": 0,
+    "y": 65,
+    "width": 960,
+    "height": 335
+  },
+  "cases": {
+    "legacy-dark": {
+      "max": 0,
+      "sum": 0,
+      "count": 0
+    },
+    "legacy-lamp": {
+      "max": 0,
+      "sum": 0,
+      "count": 0
+    },
+    "smooth-dark": {
+      "max": 0,
+      "sum": 0,
+      "count": 0
+    },
+    "smooth-lamp": {
+      "max": 0,
+      "sum": 0,
+      "count": 0
+    },
+    "transition": {
+      "max": 0,
+      "sum": 0,
+      "count": 0
+    },
+    "surface": {
+      "max": 249,
+      "sum": 36637431,
+      "count": 675512
+    }
+  }
+}
