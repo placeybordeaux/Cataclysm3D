@@ -66,6 +66,8 @@ export interface RendererOptions {
 export class Renderer {
   readonly three: THREE.WebGLRenderer;
   readonly scene = new THREE.Scene();
+  /** Factory-owned static subtrees whose materials are patched when installed. */
+  readonly staticMaterialRoots = new Set<THREE.Object3D>();
   readonly sprites: SpriteLayer;
   readonly lights = new LightManager();
   readonly sky = new Sky();
@@ -140,6 +142,8 @@ export class Renderer {
   private sunT: SunTimes = sunTimes(0);
   /** `?px=` pins the render resolution regardless of the look. */
   private pxParam = 0;
+  /** 0 uses the display's native ratio; explicit values reduce HiDPI presentation cost. */
+  pixelRatio = 0;
   /** `?grade=` pins the colour grading regardless of the look. */
   private gradeParam = false;
   /** Per-look scene layers (grass, skyline...) register here; setLook toggles them. */
@@ -166,13 +170,18 @@ export class Renderer {
       dither: (params.get('dither') as 'screen' | 'view') || opts.dither,
     };
     this.three = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' });
-    this.three.setPixelRatio(window.devicePixelRatio || 1);
+    const ratio = Number(params.get('pixelRatio'));
+    this.pixelRatio = Number.isFinite(ratio) && ratio >= 0.5 && ratio <= 2 ? ratio : 0;
+    this.three.setPixelRatio(this.pixelRatio || window.devicePixelRatio || 1);
     this.three.shadowMap.enabled = true;
     // Hard shadow edges: soft PCF blurs into mush at 360p and fights the banded lighting.
     this.three.shadowMap.type = THREE.BasicShadowMap;
     this.three.shadowMap.autoUpdate = false;
     this.three.info.autoReset = false;
     this.three.autoClear = true;
+    // The scene root stays at identity. Rebuilding it marks every descendant dirty,
+    // defeating frozen local transforms on static chunks during every render pass.
+    this.scene.matrixAutoUpdate = false;
 
     this.pipeline = new PixelPipeline(this.three, { targetHeight: o.targetHeight, grade: o.grade, ...(o.dither ? { ditherAnchor: o.dither } : {}) });
     this.rig.mode = o.camera!;
@@ -181,6 +190,7 @@ export class Renderer {
     this.source = this.procedural;
     this.sprites = new SpriteLayer(() => this.source);
     this.chunks = new ChunkManager(game.map, this.sprites, this.source);
+    this.staticMaterialRoots.add(this.chunks.group);
     if (o.radius) this.chunks.radius = o.radius;
     this.lightmap = new LightMap(game.map);
     this.ground = new GroundField(game.map);
@@ -426,6 +436,7 @@ export class Renderer {
   resize(): void {
     const o = this.sizeOverride?.();
     const w = o?.w ?? window.innerWidth, h = o?.h ?? window.innerHeight;
+    this.three.setPixelRatio(this.pixelRatio || window.devicePixelRatio || 1);
     this.three.setSize(w, h, false);
     const buf = this.three.getDrawingBufferSize(new THREE.Vector2());
     this.pipeline.setSize(buf.x, buf.y);
@@ -668,12 +679,15 @@ export class Renderer {
 
   /** Other systems may add plain three.js objects to `scene`; give them the MRT output. */
   private autoPatch(): void {
-    this.scene.traverseVisible((o) => {
-      const m = (o as THREE.Mesh).material as THREE.Material | THREE.Material[] | undefined;
-      if (!m) return;
-      if (Array.isArray(m)) for (const x of m) patchNormalOutput(x);
-      else patchNormalOutput(m);
-    });
+    this.patchDynamicMaterials(this.scene);
+  }
+
+  private patchDynamicMaterials(o: THREE.Object3D): void {
+    if (!o.visible || this.staticMaterialRoots.has(o)) return;
+    const m = (o as THREE.Mesh).material as THREE.Material | THREE.Material[] | undefined;
+    if (Array.isArray(m)) for (const x of m) patchNormalOutput(x);
+    else if (m) patchNormalOutput(m);
+    for (const child of o.children) this.patchDynamicMaterials(child);
   }
 
   /** Numbers for the ?debug=1 overlay and for scripted checks. */

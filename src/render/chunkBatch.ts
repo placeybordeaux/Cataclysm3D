@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { CHUNK } from '../world/coords';
+import { patchStaticMaterials } from './staticMaterials';
 
 // Draw-call batching for far chunks (docs/PERF.md). Every chunk is one mesh per texture page
 // (~5 per chunk, 10 pages in use), so a 168 m draw distance in a town is ~950 draw calls in the
@@ -58,6 +59,7 @@ export class ChunkBatcher {
 
   constructor() {
     this.group.name = 'chunk batches';
+    this.group.matrixAutoUpdate = false; // identity container for world-space baked meshes
   }
 
   /**
@@ -182,6 +184,7 @@ export class ChunkBatcher {
         mesh.receiveShadow = src.receiveShadow;
         mesh.matrixAutoUpdate = false;
         mesh.name = `batch ${b.key}`;
+        patchStaticMaterials(mesh);
         this.group.add(mesh);
         b.merged.push(mesh);
         this.stats.merged++;
@@ -287,6 +290,7 @@ export function* mergeIndexedSteps(geos: THREE.BufferGeometry[]): Generator<void
 /** Add the batcher to the renderer (on by default; `?batch=0`, `cdda.chunkBatch(false)`). */
 export function installChunkBatch(renderer: {
   scene: THREE.Scene;
+  staticMaterialRoots?: Set<THREE.Object3D>;
   beforeRender: ((dt: number) => void)[];
   chunks: { group: THREE.Group; behind: boolean; curtained: boolean; vel: { x: number; y: number } };
 }, player: () => { x: number; y: number }, api: Record<string, unknown>): ChunkBatcher {
@@ -295,6 +299,7 @@ export function installChunkBatch(renderer: {
   if (q !== null && q !== '0' && q !== '1') throw new Error(`?batch=${q}: expected 0 or 1`);
   if (q === '0') b.enabled = false;
   renderer.scene.add(b.group);
+  renderer.staticMaterialRoots?.add(b.group);
   renderer.beforeRender.push(() => {
     const p = player();
     b.update(p.x, p.y, renderer.chunks.group, renderer.chunks.behind || renderer.chunks.curtained, Math.hypot(renderer.chunks.vel.x, renderer.chunks.vel.y));

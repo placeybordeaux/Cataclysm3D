@@ -1,5 +1,8 @@
 # Performance: telemetry, streaming, benchmarks (wave 3)
 
+The `perf` branch's desktop rendering, allocation, worker/WASM and WebGPU investigations,
+with reproducible tools and measurement limits, are in [PERF_EXPERIMENTS.md](PERF_EXPERIMENTS.md).
+
 User report: *"when I am driving through town it is struggling to load things fast enough."*
 (Firefox, 3440x1304, voxel look, 168 m draw distance.) This doc covers the tools built to see
 that live, what they found, what was fixed, and the checks that keep it fixed.

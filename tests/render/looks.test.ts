@@ -7,7 +7,7 @@ import { CHUNK } from '../../src/world/coords';
 import { lowResSize } from '../../src/render/grading';
 import { GroundField, RAISE, hash2, vnoise } from '../../src/render/ground';
 import { LOOKS, LOOK_NAMES, isLookName } from '../../src/render/look';
-import { buildChunkMesh, ShapeTable } from '../../src/render/chunkMesh';
+import { buildChunkMesh, buildChunkMeshSteps, ShapeTable } from '../../src/render/chunkMesh';
 import type { TileFrame, TileTextureSource } from '../../src/render/textureSource';
 
 const terrain = JSON.parse(readFileSync('public/data/terrain.json', 'utf8')) as Record<string, TerrainDef>;
@@ -123,4 +123,37 @@ describe('mesher with look extras', () => {
     // sidewalk stops at the grass of the neighbouring chunks
     expect(verts(curbed) - verts(plain)).toBe((CHUNK * 2 + 2) * 4);
   });
+});
+
+
+it('keeps relief, colours and rotated frames intact when meshing jobs interleave', () => {
+  const m = world();
+  // Fix the loaded neighbourhood before references: generating neighbours changes relief.
+  for (let cx = -2; cx <= 5; cx++) for (let cy = -2; cy <= 2; cy++) for (let z = -1; z <= 1; z++) m.chunk(cx, cy, z);
+  const ground = new GroundField(m);
+  ground.relief = true;
+  const shapes = new ShapeTable(m), page = new THREE.Texture();
+  const jobs = ([0, 1, 2, 3] as const).map((rotate) => {
+    const frame: TileFrame = { texture: page, uv: [.1, .2, .8, .9], w: 16, h: 16, rotate };
+    const src: TileTextureSource = { terrain: () => frame, furniture: () => frame, item: () => frame, glyph: () => frame, sprite: () => frame };
+    const chunk = m.chunk(rotate, 0, 0)!;
+    const extras = { f: { ...LOOKS.classic, macroTint: true }, ground, white: frame, near: false };
+    const expected = buildChunkMesh(m, shapes, src, chunk, 'summer', undefined, extras).pages.get(page)!.build();
+    return { expected, steps: buildChunkMeshSteps(m, shapes, src, chunk, 'summer', undefined, extras), done: false };
+  });
+  while (jobs.some((job) => !job.done)) {
+    for (const job of jobs) {
+      if (job.done) continue;
+      const step = job.steps.next();
+      if (!step.done) continue;
+      job.done = true;
+      const actual = step.value.pages.get(page)!.build();
+      for (const key of Object.keys(job.expected.attributes)) {
+        expect(actual.getAttribute(key).array).toEqual(job.expected.getAttribute(key).array);
+      }
+      expect(actual.index!.array).toEqual(job.expected.index!.array);
+      actual.dispose();
+      job.expected.dispose();
+    }
+  }
 });

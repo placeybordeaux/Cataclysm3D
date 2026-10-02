@@ -294,14 +294,27 @@ export function* buildChunkMeshSteps(
     return [0.62, 0.74, 0.87, 1][lvl];
   };
 
+  // Scratch belongs to this meshing job (jobs can interleave at generator yields).
+  // GeomBuilder copies values synchronously, so no emitted geometry retains these arrays.
+  const quadCorners: [number, number, number][] = [[0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0]];
+  const quadNormals: [number, number, number][] = [[0, 1, 0], [0, 1, 0], [0, 1, 0], [0, 1, 0]];
+  const rotatedCorners = quadCorners.slice();
+  const rotatedNormals = quadNormals.slice();
+  const quadColors = new Array<number>(12);
+  const quadAo = new Array<number>(4);
+  const quadUv = [0, 0, 1, 1];
+  const up: [number, number, number] = [0, 1, 0];
   /** Horizontal upward quad covering tile (x,y) at height y0, honouring frame rotation. */
   const topQuad = (x: number, y: number, y0: number, f: TileFrame, ao?: number[], cut = 0) => {
-    // corners a=(x0,z1) b=(x1,z1) c=(x1,z0) d=(x0,z0); rotating the corner list rotates the
-    // texture on the quad (CDDA rotates single sprites / multitile edges in 90 deg steps)
-    const c: [number, number, number][] = [[x, y0, y + 1], [x + 1, y0, y + 1], [x + 1, y0, y], [x, y0, y]];
     const r = (4 - (f.rotate ?? 0)) & 3;
-    const k = (i: number) => (r + i) & 3;
-    geo(f).quad(c[k(0)], c[k(1)], c[k(2)], c[k(3)], [0, 1, 0], [0, 0, 1, 1], f, ao && [ao[k(0)], ao[k(1)], ao[k(2)], ao[k(3)]], cut);
+    for (let i = 0; i < 4; i++) {
+      const k = (r + i) & 3, c = quadCorners[i];
+      c[0] = x + (k === 1 || k === 2 ? 1 : 0);
+      c[1] = y0;
+      c[2] = y + (k < 2 ? 1 : 0);
+      if (ao) quadAo[i] = ao[k];
+    }
+    geo(f).quad(quadCorners[0], quadCorners[1], quadCorners[2], quadCorners[3], up, quadUv, f, ao && quadAo, cut);
   };
   // Local caches of the ground field for this chunk (+1 tile / +2 corner border): the mesher
   // asks for the same corners and tile classes many times per tile, and the field's own
@@ -323,11 +336,6 @@ export function* buildChunkMeshSteps(
     let h = cornerCache[i];
     if (Number.isNaN(h)) cornerCache[i] = h = G!.corner(X, Y, z);
     return h;
-  };
-  const cornerN = (X: number, Y: number): [number, number, number] => {
-    const dx = (cornerH(X + 1, Y) - cornerH(X - 1, Y)) / 2, dy = (cornerH(X, Y + 1) - cornerH(X, Y - 1)) / 2;
-    const l = Math.hypot(dx, 1, dy);
-    return [-dx / l, 1 / l, -dy / l];
   };
   /** Visual ground height at a float position inside this chunk (props, items). */
   const heightLocal = (px: number, py: number) => {
@@ -362,18 +370,31 @@ export function* buildChunkMeshSteps(
     const raise = relief ? 0 : raiseOf(x, y);
     const tint = !!LF?.macroTint && outdoor;
     if (!relief && !tint) return topQuad(x, y, y0 + raise + lift, f, ao);
-    const P: [number, number][] = [[x, y + 1], [x + 1, y + 1], [x + 1, y], [x, y]];
-    const c: [number, number, number][] = P.map(([X, Y]) => [X, y0 + raise + lift + (relief ? cornerH(X, Y) : 0), Y]);
-    const nrm = P.map(([X, Y]) => (relief ? cornerN(X, Y) : ([0, 1, 0] as [number, number, number])));
-    const col: number[] = [];
-    P.forEach(([X, Y], i) => {
-      const k = ao ? ao[i] : 1;
-      const t = tint ? macro(X, Y) : [1, 1, 1];
-      col.push(k * t[0], k * t[1], k * t[2]);
-    });
     const r = (4 - (f.rotate ?? 0)) & 3;
-    const ord = [0, 1, 2, 3].map((i) => (r + i) & 3);
-    geo(f).quadEx(c[ord[0]], c[ord[1]], c[ord[2]], c[ord[3]], ord.map((i) => nrm[i]), [0, 0, 1, 1], f, ord.flatMap((i) => col.slice(i * 3, i * 3 + 3)));
+    // Read heights in the original corner order before normals: cornerH caches Float32
+    // values, so reordering first reads can change the final geometry's last bits.
+    for (let k = 0; k < 4; k++) {
+      const X = x + (k === 1 || k === 2 ? 1 : 0), Y = y + (k < 2 ? 1 : 0);
+      const c = quadCorners[k];
+      c[0] = X; c[1] = y0 + raise + lift + (relief ? cornerH(X, Y) : 0); c[2] = Y;
+    }
+    for (let k = 0; k < 4; k++) {
+      const c = quadCorners[k], X = c[0], Y = c[2], n = quadNormals[k];
+      if (relief) {
+        const dx = (cornerH(X + 1, Y) - cornerH(X - 1, Y)) / 2;
+        const dy = (cornerH(X, Y + 1) - cornerH(X, Y - 1)) / 2;
+        const l = Math.hypot(dx, 1, dy);
+        n[0] = -dx / l; n[1] = 1 / l; n[2] = -dy / l;
+      } else { n[0] = 0; n[1] = 1; n[2] = 0; }
+      const i = (k - r + 4) & 3;
+      rotatedCorners[i] = c; rotatedNormals[i] = n;
+      const brightness = ao ? ao[k] : 1;
+      const t = tint ? macro(X, Y) : null;
+      quadColors[i * 3] = brightness * (t ? t[0] : 1);
+      quadColors[i * 3 + 1] = brightness * (t ? t[1] : 1);
+      quadColors[i * 3 + 2] = brightness * (t ? t[2] : 1);
+    }
+    geo(f).quadEx(rotatedCorners[0], rotatedCorners[1], rotatedCorners[2], rotatedCorners[3], rotatedNormals, quadUv, f, quadColors);
   };
   const emitFloor = (x: number, y: number, id: string, seed: number, y0 = base) => {
     const f = src.terrain(id, 'floor', { variantSeed: seed, season });

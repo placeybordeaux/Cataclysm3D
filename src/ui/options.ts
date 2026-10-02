@@ -19,6 +19,7 @@ const STORAGE_KEY = 'cdda3d.options';
 export interface GameOptions {
   mouseSensitivity: number;
   px: number;
+  pixelRatio: number;
   grade: GradeMode;
   camera: (typeof CAMERA_MODES)[number];
   /** Legacy (pre-wave-3) draw radius; Options > Draw distance now lives in render/lookInstall.ts,
@@ -53,6 +54,11 @@ export function applyStoredOptions(ctx: UiContext): void {
   if (o.mouseSensitivity) ctx.game.mouseSensitivity = o.mouseSensitivity;
   if (o.menuCursor === 'free' || o.menuCursor === 'captured') ctx.game.input.menuCursor = o.menuCursor;
   const pipe = ctx.renderer.pipeline;
+  if (o.pixelRatio !== undefined && !params.has('pixelRatio') &&
+    (o.pixelRatio === 0 || (Number.isFinite(o.pixelRatio) && o.pixelRatio >= 0.5 && o.pixelRatio <= 2))) {
+    ctx.renderer.pixelRatio = o.pixelRatio;
+    ctx.renderer.resize();
+  }
   if (o.px !== undefined && !params.get('px')) {
     pipe.options.targetHeight = o.px;
     ctx.renderer.resize();
@@ -116,6 +122,16 @@ export function openOptions(ctx: UiContext): Panel {
   });
   // 0 = auto: the integer upscale giving a 540-720 px image (grading.ts lowResSize)
   const PX = [0, 240, 270, 300, 360, 432, 480, 540, 720];
+  opts.push({
+    name: 'Display pixel ratio',
+    value: () => renderer.pixelRatio ? `${renderer.pixelRatio}×` : 'Native',
+    change: (d) => {
+      renderer.pixelRatio = cycle([0, 0.5, 1, 1.5, 2], renderer.pixelRatio, d);
+      renderer.resize();
+      store({ pixelRatio: renderer.pixelRatio });
+    },
+    desc: 'Native uses the display resolution. Lower values reduce graphics work on high-density displays; the game image may be softer or chunkier. Interface text stays sharp.',
+  });
   opts.push({
     name: 'Render resolution',
     value: () => (pipe.options.targetHeight > 0 ? `${pipe.options.targetHeight} px` : `auto (${pipe.lowH - 2})`),

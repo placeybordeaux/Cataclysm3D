@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { LEVEL_HEIGHT } from '../world/coords';
 import { shared, spriteMaterial } from './materials';
 import type { TileFrame, TileTextureSource } from './textureSource';
+import { touchInstanceRange } from './instanceUpload';
 
 // World-space billboards (Doom/Daggerfall style) for creatures, items, furniture, trees.
 // One InstancedMesh per texture page, so thousands of sprites cost a handful of draw
@@ -162,13 +163,13 @@ class Batch {
     this.touch();
   }
 
-  touch(): void {
+  touch(index = 0, count = this.count): void {
     this.mesh.count = this.count;
-    this.mesh.instanceMatrix.needsUpdate = true;
-    this.rect.needsUpdate = true;
-    this.size.needsUpdate = true;
-    this.flash.needsUpdate = true;
-    this.extra.needsUpdate = true;
+    touchInstanceRange(this.mesh.instanceMatrix, index * 16, count * 16);
+    touchInstanceRange(this.rect, index * 4, count * 4);
+    touchInstanceRange(this.size, index * 4, count * 4);
+    touchInstanceRange(this.flash, index * 4, count * 4);
+    touchInstanceRange(this.extra, index * 4, count * 4);
   }
 }
 
@@ -359,7 +360,7 @@ export class SpriteLayer {
     }
     b.owners.length = last;
     b.count = last;
-    b.touch();
+    b.mesh.count = b.count;
     s.batch = null;
     s.index = -1;
   }
@@ -372,7 +373,7 @@ export class SpriteLayer {
     writeSprite(b.arrays(), s.index, s.x, s.y, s.z, s.frame, s.visible ? s.w : 0, s.visible ? s.h : 0, s.yOff,
       this.skyVisAt ? this.skyVisAt(s.x, s.y, s.z) : 1, s.opacity, s.fadeNear,
       { r: s.flashColor.r, g: s.flashColor.g, b: s.flashColor.b, k }, this.groundAt ? this.groundAt(s.x, s.y, Math.round(s.z)) : 0);
-    b.touch();
+    b.touch(s.index, 1);
   }
 
   private depthMaterial(page: THREE.Texture): THREE.Material {

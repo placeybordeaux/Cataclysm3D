@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { touchInstanceRange } from '../instanceUpload';
 import { LEVEL_HEIGHT } from '../../world/coords';
 import { addNormalOutput, patchBandedLambert } from '../materials';
 import { analyseSprite, netSize, paintPart, texelDims, type Img, type PaintOpts, type SpriteInfo } from './paint';
@@ -300,8 +301,12 @@ class Batch {
   commit(n: number): void {
     this.count = n;
     this.mesh.count = n;
-    this.mesh.instanceMatrix.needsUpdate = true;
-    for (const a of [this.tex, this.misc, this.flash, this.root, this.shape]) a.needsUpdate = true;
+    touchInstanceRange(this.mesh.instanceMatrix, 0, n * 16);
+    touchInstanceRange(this.tex, 0, n * 4);
+    touchInstanceRange(this.misc, 0, n * 4);
+    touchInstanceRange(this.flash, 0, n * 4);
+    touchInstanceRange(this.root, 0, n * 4);
+    touchInstanceRange(this.shape, 0, n * 4);
   }
 }
 

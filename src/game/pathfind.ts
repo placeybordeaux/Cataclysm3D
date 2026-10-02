@@ -90,6 +90,25 @@ const DIRS: [number, number, number][] = [
   [1, 1, Math.SQRT2], [1, -1, Math.SQRT2], [-1, 1, Math.SQRT2], [-1, -1, Math.SQRT2],
 ];
 
+// Sequential monster searches share scratch storage, not results. Keep the retained buffer
+// bounded (~3.25 MiB); exceptional long paths and reentrant grid callbacks use private
+// storage. Every search still clears its active range, so map edits are observed immediately.
+const MAX_SCRATCH_NODES = 262144;
+class Scratch {
+  readonly g: Float32Array;
+  readonly from: Int32Array;
+  readonly closed: Uint8Array;
+  readonly cost: Float32Array;
+  constructor(readonly capacity: number) {
+    this.g = new Float32Array(capacity);
+    this.from = new Int32Array(capacity);
+    this.closed = new Uint8Array(capacity);
+    this.cost = new Float32Array(capacity);
+  }
+}
+let scratch: Scratch | undefined;
+let scratchBusy = false;
+
 /**
  * A* from tile (sx,sy) to (gx,gy) on level z. Diagonals may not cut wall corners. When the
  * goal is unreachable within the budget, returns the path to the node closest to the goal
@@ -101,10 +120,26 @@ export function findPath(grid: Grid, sx: number, sy: number, gx: number, gy: num
   const x0 = Math.min(sx, gx) - margin, y0 = Math.min(sy, gy) - margin;
   const w = Math.abs(gx - sx) + 2 * margin + 1, h = Math.abs(gy - sy) + 2 * margin + 1;
   const N = w * h;
-  const g = new Float32Array(N).fill(Infinity);
-  const from = new Int32Array(N).fill(-1);
-  const closed = new Uint8Array(N);
-  const costCache = new Float32Array(N).fill(-1);
+  const reusable = !scratchBusy && N <= MAX_SCRATCH_NODES;
+  let work: Scratch;
+  if (reusable) {
+    if (!scratch || scratch.capacity < N) scratch = new Scratch(Math.min(MAX_SCRATCH_NODES, 2 ** Math.ceil(Math.log2(N))));
+    work = scratch;
+    scratchBusy = true;
+  } else work = new Scratch(N);
+  try {
+    return search(grid, sx, sy, gx, gy, z, opts, maxNodes, x0, y0, w, h, N, work);
+  } finally {
+    if (reusable) scratchBusy = false;
+  }
+}
+
+function search(grid: Grid, sx: number, sy: number, gx: number, gy: number, z: number, opts: PathOpts,
+  maxNodes: number, x0: number, y0: number, w: number, h: number, N: number, work: Scratch): PathResult {
+  const g = work.g.fill(Infinity, 0, N);
+  const from = work.from.fill(-1, 0, N);
+  const closed = work.closed.fill(0, 0, N);
+  const costCache = work.cost.fill(-1, 0, N);
   const idx = (x: number, y: number) => (y - y0) * w + (x - x0);
   const inb = (x: number, y: number) => x >= x0 && y >= y0 && x < x0 + w && y < y0 + h;
   const cost = (x: number, y: number) => {

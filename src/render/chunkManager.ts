@@ -1,4 +1,6 @@
 import * as THREE from 'three';
+import { freezeLocalTransforms } from './staticTransform';
+import { patchStaticMaterials } from './staticMaterials';
 import type { Chunk, GameMap } from '../world/map';
 import { CHUNK } from '../world/coords';
 import { buildChunkMeshSteps, ShapeTable, type ChunkMeshData, type MeshExtras } from './chunkMesh';
@@ -223,6 +225,8 @@ export class ChunkManager {
   probe: ChunkProbe | null = null;
 
   constructor(private map: GameMap, private sprites: SpriteLayer, public source: TileTextureSource) {
+    // Identity container; recomposing it every frame would force all chunk world matrices.
+    this.group.matrixAutoUpdate = false;
     this.group.name = 'chunks';
     this.shapes = new ShapeTable(map);
     this.levels.map = map;
@@ -732,7 +736,7 @@ export class ChunkManager {
       (o as THREE.Mesh).geometry?.dispose();
       (o.userData as { dispose?: () => void }).dispose?.();
     }
-    for (const o of objs) g.add(o);
+    for (const o of objs) { freezeLocalTransforms(o); patchStaticMaterials(o); g.add(o); }
     e.treeObjs = objs;
     e.trees = trees;
     e.treeMid = mid;
@@ -803,7 +807,8 @@ export class ChunkManager {
     }
     // swap: the old mesh stayed up while this one was built
     this.dispose(e);
-    g.matrixAutoUpdate = false;
+    freezeLocalTransforms(g);
+    patchStaticMaterials(g);
     g.visible = e.visible;
     this.group.add(g);
     e.group = g;

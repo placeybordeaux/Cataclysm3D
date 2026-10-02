@@ -72,14 +72,12 @@ export class GeomBuilder {
    */
   quad(a: V3, b: V3, c: V3, d: V3, n: V3, uv: readonly number[], f: TileFrame, ao?: readonly number[], cut = 0): void {
     const base = this.vertexCount;
-    const corners = [a, b, c, d];
-    const uvs = [uv[0], uv[1], uv[2], uv[1], uv[2], uv[3], uv[0], uv[3]];
     const du = f.uv[2] - f.uv[0], dv = f.uv[3] - f.uv[1];
     for (let i = 0; i < 4; i++) {
-      const p = corners[i];
+      const p = i === 0 ? a : i === 1 ? b : i === 2 ? c : d;
       this.pos.push3(p[0], p[1], p[2]);
       this.nrm.push3(n[0], n[1], n[2]);
-      this.uv.push2(uvs[i * 2], uvs[i * 2 + 1]);
+      this.uv.push2(i === 0 || i === 3 ? uv[0] : uv[2], i < 2 ? uv[1] : uv[3]);
       this.rect.push4(f.uv[0], f.uv[1], du, dv);
       const k = ao ? ao[i] : 1;
       this.col.push3(k, k, k);
@@ -96,15 +94,13 @@ export class GeomBuilder {
    */
   quadEx(a: V3, b: V3, c: V3, d: V3, n: readonly V3[], uv: readonly number[], f: TileFrame, col: readonly number[], cut = 0): void {
     const base = this.vertexCount;
-    const corners = [a, b, c, d];
-    const uvs = [uv[0], uv[1], uv[2], uv[1], uv[2], uv[3], uv[0], uv[3]];
     const du = f.uv[2] - f.uv[0], dv = f.uv[3] - f.uv[1];
     const one = col.length === 3;
     for (let i = 0; i < 4; i++) {
-      const p = corners[i], nn = n[i];
+      const p = i === 0 ? a : i === 1 ? b : i === 2 ? c : d, nn = n[i];
       this.pos.push3(p[0], p[1], p[2]);
       this.nrm.push3(nn[0], nn[1], nn[2]);
-      this.uv.push2(uvs[i * 2], uvs[i * 2 + 1]);
+      this.uv.push2(i === 0 || i === 3 ? uv[0] : uv[2], i < 2 ? uv[1] : uv[3]);
       this.rect.push4(f.uv[0], f.uv[1], du, dv);
       if (one) this.col.push3(col[0], col[1], col[2]);
       else this.col.push3(col[i * 3], col[i * 3 + 1], col[i * 3 + 2]);
@@ -119,9 +115,8 @@ export class GeomBuilder {
   tri(a: V3, b: V3, c: V3, n: V3, uv: readonly number[], f: TileFrame, col: readonly number[], cut = 0): void {
     const base = this.vertexCount;
     const du = f.uv[2] - f.uv[0], dv = f.uv[3] - f.uv[1];
-    const corners = [a, b, c];
     for (let i = 0; i < 3; i++) {
-      const p = corners[i];
+      const p = i === 0 ? a : i === 1 ? b : c;
       this.pos.push3(p[0], p[1], p[2]);
       this.nrm.push3(n[0], n[1], n[2]);
       this.uv.push2(uv[i * 2], uv[i * 2 + 1]);

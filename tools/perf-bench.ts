@@ -13,12 +13,15 @@
 // Options:
 //   --routes a,b       routes to run (default: all six); --list shows them
 //   --size WxH         viewport (default 3440x1304, the user's ultrawide)
+//   --dpr N            simulated display pixel ratio (default 1; try 2 for HiDPI)
 //   --seconds N        override every route's duration
 //   --params '<q>'     extra URL params (e.g. 'radius=6', 'look=full')
 //   --browser firefox  headless Firefox (also on the GPU) instead of Chromium
 //   --save DIR         write each route's telemetry dump (tools/perf-report.ts reads them)
+//   --heap-profile DIR Chromium: sampled allocations per route (<route>.heapprofile; includes collected objects)
 //   --profile DIR      Chromium: a CPU profile per route (<route>.cpuprofile; DevTools > Performance loads it)
 //   --shots DIR        JPEG screenshots at 1/3 and 2/3 of each route (<route>_<s>s.jpg)
+//                      diagnostic only: screenshots can disturb presentation timing
 //   --baseline FILE    budgets to compare with (default tools/perf-baseline.json, .firefox.json for Firefox)
 //   --write-baseline   record this run as the new baseline (keeps the tolerances)
 //   --report           print the full perf-report for each route
@@ -92,6 +95,8 @@ const routeNames = opt('--routes', 'town40,town60,city40,city60,forest,rural,cit
 // "the world is drawn" gate (tools/lib/worldDrawn.ts) runs first unless --no-drawn
 for (const r of routeNames) if (!ROUTES[r]) throw new Error(`unknown route ${r} (${Object.keys(ROUTES).join(', ')})`);
 const size = opt('--size', '3440x1304').split('x').map(Number);
+const dpr = Number(opt('--dpr', '1'));
+if (!(dpr > 0 && dpr <= 4)) throw new Error('--dpr must be greater than 0 and at most 4');
 if (size.length !== 2 || size.some((v) => !(v > 0))) throw new Error(`--size ${opt('--size', '')}: expected WxH`);
 const secondsArg = opt('--seconds', '');
 const params = opt('--params', '');
@@ -235,7 +240,7 @@ const results: Record<string, { route: unknown; metrics: Metrics; summary: PerfS
 const failures: string[] = [];
 try {
   const page = (await browser.pages())[0] ?? (await browser.newPage());
-  await page.setViewport({ width: size[0], height: size[1] });
+  await page.setViewport({ width: size[0], height: size[1], deviceScaleFactor: dpr });
   page.on('pageerror', (e) => console.log(`[page exception] ${(e as Error).stack ?? e}`));
   page.on('dialog', (d) => void d.accept());
   await page.goto(`http://127.0.0.1:${port}/?seed=1&skipmenu=1${params ? '&' + params : ''}`, { waitUntil: 'load' });
@@ -272,18 +277,30 @@ try {
     const route = await page.evaluate(`__perfBench.pick(${JSON.stringify(jump ? (r.kind === 'teleport' ? 'town' : 'city') : r.kind === 'stand' ? 'city' : r.kind)})`);
     let mon: Mon | null = null;
     const profDir = opt('--profile', '');
-    const cdp = profDir && browserKind === 'chromium' ? await page.createCDPSession() : null;
-    if (cdp) {
+    const heapDir = opt('--heap-profile', '');
+    const cdp = (profDir || heapDir) && browserKind === 'chromium' ? await page.createCDPSession() : null;
+    if (cdp && profDir) {
       await cdp.send('Profiler.enable');
       await cdp.send('Profiler.setSamplingInterval', { interval: 250 });
     }
+    const startProfiles = async () => {
+      if (!cdp) return;
+      if (profDir) await cdp.send('Profiler.start');
+      if (heapDir) {
+        await cdp.send('HeapProfiler.enable');
+        await cdp.send('HeapProfiler.startSampling', { samplingInterval: 32768, includeObjectsCollectedByMajorGC: true, includeObjectsCollectedByMinorGC: true });
+      }
+      // Starting DevTools profilers blocks the page. Let that artificial interval
+      // pass before resetting telemetry or beginning a load/teleport measurement.
+      await page.evaluate('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
+    };
     if (jump) {
       // start in the city, streamed in; then the jump
       const from = await page.evaluate(`__perfBench.pick('city')`);
       await page.evaluate(`__perfBench.place(${JSON.stringify(from)})`);
       await waitStreamed(page, 30_000);
       await new Promise((res) => setTimeout(res, 1500));
-      if (cdp) await cdp.send('Profiler.start');
+      await startProfiles();
       if (r.kind === 'teleport') {
         await page.evaluate(PERF_MONITOR);
         await page.evaluate(`(() => { cdda.perf.reset(); __perfMonStart(); __perfBench.place(${JSON.stringify(route)}); })()`);
@@ -306,14 +323,14 @@ try {
       await page.evaluate(`(() => { const r = ${JSON.stringify(route)}; __perfBench.place({ ...r, lead: -4 }); cdda.exitVehicle(); __perfBench.stop = () => {}; })()`);
       await waitStreamed(page, 30_000);
       await new Promise((res) => setTimeout(res, 8000)); // far blocks merge once settled
-      if (cdp) await cdp.send('Profiler.start');
+      await startProfiles();
       await page.evaluate(`(() => { cdda.perf.reset(); const fl = (on, ms) => setTimeout(() => cdda.flashlight(on), ms); fl(true, 3000); fl(false, 5000); fl(true, 7000); fl(false, 9000); })()`);
     } else {
       await page.evaluate(`__perfBench.place(${JSON.stringify(route)})`);
       // let the start area stream in completely, then measure from standing start at full speed
       await waitStreamed(page, 30_000);
       await new Promise((res) => setTimeout(res, 1500));
-      if (cdp) await cdp.send('Profiler.start');
+      await startProfiles();
       await page.evaluate(`(() => { Object.assign(cdda.renderer.chunks.stats, { maxStepMs: 0, maxStep: '', maxFrameMs: 0, maxBuildMs: 0, slowBuilds: 0 }); cdda.perf.reset(); __perfBench.go(${r.mph * MPH}); })()`);
     }
     const shotsDir = opt('--shots', '');
@@ -326,13 +343,18 @@ try {
       }
       await new Promise((res) => setTimeout(res, (seconds * 1000) / 3));
     } else await new Promise((res) => setTimeout(res, seconds * 1000));
+    if (cdp && heapDir) {
+      const { profile } = await cdp.send('HeapProfiler.stopSampling');
+      mkdirSync(heapDir, { recursive: true });
+      writeFileSync(join(heapDir, `${name}.heapprofile`), JSON.stringify(profile));
+    }
     const out = (await page.evaluate(`(() => { __perfBench.stop(); return { dump: cdda.perf.dump(${seconds + 5}), chunks: { ...cdda.renderer.chunks.stats } }; })()`)) as { dump: PerfDump; chunks: { maxStepMs: number; maxStep: string } };
-    if (cdp) {
+    if (cdp && profDir) {
       const { profile } = (await cdp.send('Profiler.stop')) as { profile: unknown };
       mkdirSync(profDir, { recursive: true });
       writeFileSync(join(profDir, `${name}.cpuprofile`), JSON.stringify(profile));
-      await cdp.detach();
     }
+    if (cdp) await cdp.detach();
     const s = summarize(out.dump);
     const m = metricsOf(s, out.chunks);
     if (r.kind === 'stand') {

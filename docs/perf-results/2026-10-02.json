@@ -1,0 +1,1005 @@
+{
+  "date": "2026-10-02",
+  "note": "Single paired 20-second Chromium route runs on the development RTX 5080; CPU profiling enabled; no screenshots in timing windows. Not a cross-hardware FPS claim.",
+  "chromium": {
+    "city40": {
+      "before": {
+        "meta": {
+          "date": "2026-10-02T17:07:39.125Z",
+          "url": "http://127.0.0.1:34997/?seed=1&skipmenu=1",
+          "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/154.0.0.0 Safari/537.36",
+          "gpu": "ANGLE (NVIDIA, Vulkan 1.4.329 (NVIDIA NVIDIA GeForce RTX 5080 (0x00002C02)), NVIDIA)",
+          "window": "1920x1080",
+          "dpr": 1,
+          "canvas": "1920x1080",
+          "lowres": "642x362",
+          "seed": 1,
+          "look": "voxel",
+          "radius": 8
+        },
+        "frames": 1113,
+        "mean": {
+          "loop": 12.389,
+          "sim": 1.293,
+          "draw": 6.175,
+          "scene": 0.566,
+          "beforeRender": 1.02,
+          "gpu": 0.904,
+          "calls": 1129.365
+        },
+        "loopP99": 21.7,
+        "intervalP99": 33.4,
+        "intervalMax": 33.4
+      },
+      "after": {
+        "meta": {
+          "date": "2026-10-02T17:09:32.719Z",
+          "url": "http://127.0.0.1:40225/?seed=1&skipmenu=1",
+          "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/154.0.0.0 Safari/537.36",
+          "gpu": "ANGLE (NVIDIA, Vulkan 1.4.329 (NVIDIA NVIDIA GeForce RTX 5080 (0x00002C02)), NVIDIA)",
+          "window": "1920x1080",
+          "dpr": 1,
+          "canvas": "1920x1080",
+          "lowres": "642x362",
+          "seed": 1,
+          "look": "voxel",
+          "radius": 8
+        },
+        "frames": 1127,
+        "mean": {
+          "loop": 11.861,
+          "sim": 1.272,
+          "draw": 6.228,
+          "scene": 0.072,
+          "beforeRender": 1.003,
+          "gpu": 0.887,
+          "calls": 1148.879
+        },
+        "loopP99": 21,
+        "intervalP99": 33.4,
+        "intervalMax": 33.4
+      }
+    },
+    "forest": {
+      "before": {
+        "meta": {
+          "date": "2026-10-02T17:08:04.397Z",
+          "url": "http://127.0.0.1:34997/?seed=1&skipmenu=1",
+          "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/154.0.0.0 Safari/537.36",
+          "gpu": "ANGLE (NVIDIA, Vulkan 1.4.329 (NVIDIA NVIDIA GeForce RTX 5080 (0x00002C02)), NVIDIA)",
+          "window": "1920x1080",
+          "dpr": 1,
+          "canvas": "1920x1080",
+          "lowres": "642x362",
+          "seed": 1,
+          "look": "voxel",
+          "radius": 8
+        },
+        "frames": 1192,
+        "mean": {
+          "loop": 8.847,
+          "sim": 1.023,
+          "draw": 3.449,
+          "scene": 0.359,
+          "beforeRender": 0.555,
+          "gpu": 0.866,
+          "calls": 506.562
+        },
+        "loopP99": 17.2,
+        "intervalP99": 16.8,
+        "intervalMax": 33.4
+      },
+      "after": {
+        "meta": {
+          "date": "2026-10-02T17:09:57.974Z",
+          "url": "http://127.0.0.1:40225/?seed=1&skipmenu=1",
+          "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/154.0.0.0 Safari/537.36",
+          "gpu": "ANGLE (NVIDIA, Vulkan 1.4.329 (NVIDIA NVIDIA GeForce RTX 5080 (0x00002C02)), NVIDIA)",
+          "window": "1920x1080",
+          "dpr": 1,
+          "canvas": "1920x1080",
+          "lowres": "642x362",
+          "seed": 1,
+          "look": "voxel",
+          "radius": 8
+        },
+        "frames": 1189,
+        "mean": {
+          "loop": 8.172,
+          "sim": 1.036,
+          "draw": 3.154,
+          "scene": 0.031,
+          "beforeRender": 0.543,
+          "gpu": 0.913,
+          "calls": 506.507
+        },
+        "loopP99": 17.3,
+        "intervalP99": 16.8,
+        "intervalMax": 50
+      }
+    },
+    "citystand": {
+      "before": {
+        "meta": {
+          "date": "2026-10-02T17:07:10.695Z",
+          "url": "http://127.0.0.1:34997/?seed=1&skipmenu=1",
+          "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/154.0.0.0 Safari/537.36",
+          "gpu": "ANGLE (NVIDIA, Vulkan 1.4.329 (NVIDIA NVIDIA GeForce RTX 5080 (0x00002C02)), NVIDIA)",
+          "window": "1920x1080",
+          "dpr": 1,
+          "canvas": "1920x1080",
+          "lowres": "642x362",
+          "seed": 1,
+          "look": "voxel",
+          "radius": 8
+        },
+        "frames": 956,
+        "mean": {
+          "loop": 14.845,
+          "sim": 3.556,
+          "draw": 4.278,
+          "scene": 0.466,
+          "beforeRender": 2.941,
+          "gpu": 1.195,
+          "calls": 539.214
+        },
+        "loopP99": 30.7,
+        "intervalP99": 33.5,
+        "intervalMax": 66.7
+      },
+      "after": {
+        "meta": {
+          "date": "2026-10-02T17:09:05.021Z",
+          "url": "http://127.0.0.1:40225/?seed=1&skipmenu=1",
+          "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/154.0.0.0 Safari/537.36",
+          "gpu": "ANGLE (NVIDIA, Vulkan 1.4.329 (NVIDIA NVIDIA GeForce RTX 5080 (0x00002C02)), NVIDIA)",
+          "window": "1920x1080",
+          "dpr": 1,
+          "canvas": "1920x1080",
+          "lowres": "642x362",
+          "seed": 1,
+          "look": "voxel",
+          "radius": 8
+        },
+        "frames": 1057,
+        "mean": {
+          "loop": 12.186,
+          "sim": 3.12,
+          "draw": 3.508,
+          "scene": 0.081,
+          "beforeRender": 2.624,
+          "gpu": 1.188,
+          "calls": 510.833
+        },
+        "loopP99": 26.2,
+        "intervalP99": 33.4,
+        "intervalMax": 50
+      }
+    }
+  },
+  "syntheticBackends": {
+    "note": "Synthetic submission benchmark; no game shaders, shadows, postprocessing or simulation. CPU timings are submission only, not GPU completion.",
+    "results": [
+      {
+        "backend": "webgl",
+        "batch": 0,
+        "ratio": 1,
+        "result": {
+          "mode": "webgl",
+          "instanced": false,
+          "count": 1000,
+          "ratio": 1,
+          "canvas": [
+            1920,
+            1080
+          ],
+          "cpuSubmitMs": {
+            "mean": 0.5573333362738292,
+            "p50": 0.5,
+            "p95": 0.800000011920929
+          },
+          "frameIntervalMs": {
+            "mean": 16.666,
+            "p50": 16.699999999999818,
+            "p95": 16.700000000000273
+          },
+          "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/154.0.0.0 Safari/537.36"
+        }
+      },
+      {
+        "backend": "webgl-fallback",
+        "batch": 0,
+        "ratio": 1,
+        "result": {
+          "mode": "webgl-fallback",
+          "instanced": false,
+          "count": 1000,
+          "ratio": 1,
+          "canvas": [
+            1920,
+            1080
+          ],
+          "cpuSubmitMs": {
+            "mean": 1.4959999994436899,
+            "p50": 1.5,
+            "p95": 1.899999976158142
+          },
+          "frameIntervalMs": {
+            "mean": 16.665999999999997,
+            "p50": 16.699999999999818,
+            "p95": 16.700000000000273
+          },
+          "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/154.0.0.0 Safari/537.36"
+        }
+      },
+      {
+        "backend": "webgpu",
+        "batch": 0,
+        "ratio": 1,
+        "result": {
+          "mode": "webgpu",
+          "instanced": false,
+          "count": 1000,
+          "ratio": 1,
+          "canvas": [
+            1920,
+            1080
+          ],
+          "cpuSubmitMs": {
+            "mean": 1.017333331902822,
+            "p50": 0.9000000357627869,
+            "p95": 1.5
+          },
+          "frameIntervalMs": {
+            "mean": 16.666666666666668,
+            "p50": 16.699999999999818,
+            "p95": 16.700000000000273
+          },
+          "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/154.0.0.0 Safari/537.36"
+        }
+      },
+      {
+        "backend": "webgl",
+        "batch": 1,
+        "ratio": 1,
+        "result": {
+          "mode": "webgl",
+          "instanced": true,
+          "count": 1000,
+          "ratio": 1,
+          "canvas": [
+            1920,
+            1080
+          ],
+          "cpuSubmitMs": {
+            "mean": 0.10533332943916321,
+            "p50": 0.10000002384185791,
+            "p95": 0.19999998807907104
+          },
+          "frameIntervalMs": {
+            "mean": 16.665333333333333,
+            "p50": 16.699999999999818,
+            "p95": 16.799999999999955
+          },
+          "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/154.0.0.0 Safari/537.36"
+        }
+      },
+      {
+        "backend": "webgl-fallback",
+        "batch": 1,
+        "ratio": 1,
+        "result": {
+          "mode": "webgl-fallback",
+          "instanced": true,
+          "count": 1000,
+          "ratio": 1,
+          "canvas": [
+            1920,
+            1080
+          ],
+          "cpuSubmitMs": {
+            "mean": 0.31333333492279053,
+            "p50": 0.30000001192092896,
+            "p95": 0.5
+          },
+          "frameIntervalMs": {
+            "mean": 16.666,
+            "p50": 16.699999999999818,
+            "p95": 16.799999999999955
+          },
+          "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/154.0.0.0 Safari/537.36"
+        }
+      },
+      {
+        "backend": "webgpu",
+        "batch": 1,
+        "ratio": 1,
+        "result": {
+          "mode": "webgpu",
+          "instanced": true,
+          "count": 1000,
+          "ratio": 1,
+          "canvas": [
+            1920,
+            1080
+          ],
+          "cpuSubmitMs": {
+            "mean": 0.21666666507720947,
+            "p50": 0.19999998807907104,
+            "p95": 0.3999999761581421
+          },
+          "frameIntervalMs": {
+            "mean": 16.665333333333333,
+            "p50": 16.699999999999818,
+            "p95": 16.799999999999727
+          },
+          "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/154.0.0.0 Safari/537.36"
+        }
+      },
+      {
+        "backend": "webgl",
+        "batch": 0,
+        "ratio": 2,
+        "result": {
+          "mode": "webgl",
+          "instanced": false,
+          "count": 1000,
+          "ratio": 2,
+          "canvas": [
+            3840,
+            2160
+          ],
+          "cpuSubmitMs": {
+            "mean": 0.9706666640440623,
+            "p50": 0.9000000357627869,
+            "p95": 1.300000011920929
+          },
+          "frameIntervalMs": {
+            "mean": 16.665999999999997,
+            "p50": 16.699999999999818,
+            "p95": 16.799999999999955
+          },
+          "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/154.0.0.0 Safari/537.36"
+        }
+      },
+      {
+        "backend": "webgl-fallback",
+        "batch": 0,
+        "ratio": 2,
+        "result": {
+          "mode": "webgl-fallback",
+          "instanced": false,
+          "count": 1000,
+          "ratio": 2,
+          "canvas": [
+            3840,
+            2160
+          ],
+          "cpuSubmitMs": {
+            "mean": 2.177333335876465,
+            "p50": 2.199999988079071,
+            "p95": 2.5
+          },
+          "frameIntervalMs": {
+            "mean": 17.110666666666667,
+            "p50": 16.699999999999818,
+            "p95": 16.799999999999955
+          },
+          "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/154.0.0.0 Safari/537.36"
+        }
+      },
+      {
+        "backend": "webgpu",
+        "batch": 0,
+        "ratio": 2,
+        "result": {
+          "mode": "webgpu",
+          "instanced": false,
+          "count": 1000,
+          "ratio": 2,
+          "canvas": [
+            3840,
+            2160
+          ],
+          "cpuSubmitMs": {
+            "mean": 1.021333330074946,
+            "p50": 1,
+            "p95": 1.600000023841858
+          },
+          "frameIntervalMs": {
+            "mean": 16.666666666666668,
+            "p50": 16.699999999999818,
+            "p95": 16.799999999999955
+          },
+          "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/154.0.0.0 Safari/537.36"
+        }
+      },
+      {
+        "backend": "webgl",
+        "batch": 1,
+        "ratio": 2,
+        "result": {
+          "mode": "webgl",
+          "instanced": true,
+          "count": 1000,
+          "ratio": 2,
+          "canvas": [
+            3840,
+            2160
+          ],
+          "cpuSubmitMs": {
+            "mean": 0.13466666301091512,
+            "p50": 0.10000002384185791,
+            "p95": 0.2999999523162842
+          },
+          "frameIntervalMs": {
+            "mean": 23.110000000000003,
+            "p50": 16.699999999999818,
+            "p95": 50.09999999999991
+          },
+          "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/154.0.0.0 Safari/537.36"
+        }
+      },
+      {
+        "backend": "webgl-fallback",
+        "batch": 1,
+        "ratio": 2,
+        "result": {
+          "mode": "webgl-fallback",
+          "instanced": true,
+          "count": 1000,
+          "ratio": 2,
+          "canvas": [
+            3840,
+            2160
+          ],
+          "cpuSubmitMs": {
+            "mean": 0.39266666531562805,
+            "p50": 0.3999999761581421,
+            "p95": 0.6000000238418579
+          },
+          "frameIntervalMs": {
+            "mean": 18.99866666666667,
+            "p50": 16.699999999999818,
+            "p95": 33.40000000000009
+          },
+          "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/154.0.0.0 Safari/537.36"
+        }
+      },
+      {
+        "backend": "webgpu",
+        "batch": 1,
+        "ratio": 2,
+        "result": {
+          "mode": "webgpu",
+          "instanced": true,
+          "count": 1000,
+          "ratio": 2,
+          "canvas": [
+            3840,
+            2160
+          ],
+          "cpuSubmitMs": {
+            "mean": 0.2099999980131785,
+            "p50": 0.19999998807907104,
+            "p95": 0.3999999761581421
+          },
+          "frameIntervalMs": {
+            "mean": 16.666,
+            "p50": 16.699999999999818,
+            "p95": 16.799999999999727
+          },
+          "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/154.0.0.0 Safari/537.36"
+        }
+      }
+    ]
+  },
+  "displayRatios": [
+    {
+      "ratio": 0,
+      "summary": {
+        "seconds": 6,
+        "frames": 221,
+        "interval": {
+          "n": 221,
+          "p50": 33.3,
+          "p95": 33.4,
+          "p99": 50,
+          "max": 50,
+          "mean": 27.37
+        },
+        "loop": {
+          "n": 221,
+          "p50": 11.4,
+          "p95": 16.5,
+          "p99": 20,
+          "max": 22.7,
+          "mean": 10.84
+        },
+        "sections": {
+          "sim": 4.7,
+          "chunkCreate": 0.06,
+          "chunkSig": 0.15,
+          "chunkBuild": 0.22,
+          "grass": 0,
+          "skyline": 0,
+          "decor": 0.01,
+          "sprites": 0,
+          "beforeRender": 2.55,
+          "lightmap": 0.09,
+          "scene": 0.07,
+          "draw": 2.95,
+          "other": 0.02,
+          "wait": 9.85,
+          "mesh": 0.13,
+          "trees": 0.02,
+          "genSync": 0,
+          "genHooks": 0,
+          "gpu": 1.57
+        },
+        "stream": {
+          "holeSeconds": 0,
+          "maxHoleSeconds": 0,
+          "builds": 0,
+          "rebuilds": 12
+        }
+      },
+      "meta": {
+        "date": "2026-10-02T17:14:02.617Z",
+        "url": "http://127.0.0.1:46599/?seed=1&skipmenu=1&px=360",
+        "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/154.0.0.0 Safari/537.36",
+        "gpu": "ANGLE (NVIDIA, Vulkan 1.4.329 (NVIDIA NVIDIA GeForce RTX 5080 (0x00002C02)), NVIDIA)",
+        "window": "1920x1080",
+        "dpr": 2,
+        "canvas": "3840x2160",
+        "lowres": "642x362",
+        "seed": 1,
+        "look": "voxel",
+        "radius": 8
+      }
+    },
+    {
+      "ratio": 1,
+      "summary": {
+        "seconds": 6,
+        "frames": 358,
+        "interval": {
+          "n": 358,
+          "p50": 16.7,
+          "p95": 16.8,
+          "p99": 33.3,
+          "max": 33.4,
+          "mean": 16.85
+        },
+        "loop": {
+          "n": 358,
+          "p50": 9.4,
+          "p95": 14,
+          "p99": 20,
+          "max": 20.4,
+          "mean": 7.66
+        },
+        "sections": {
+          "sim": 2.68,
+          "chunkCreate": 0.06,
+          "chunkSig": 0.14,
+          "chunkBuild": 0.24,
+          "grass": 0,
+          "skyline": 0,
+          "decor": 0.01,
+          "sprites": 0,
+          "beforeRender": 1.96,
+          "lightmap": 0.07,
+          "scene": 0.06,
+          "draw": 2.43,
+          "other": 0.02,
+          "wait": 2.14,
+          "mesh": 0.15,
+          "trees": 0.02,
+          "genSync": 0,
+          "genHooks": 0,
+          "gpu": 0.83
+        },
+        "stream": {
+          "holeSeconds": 0,
+          "maxHoleSeconds": 0,
+          "builds": 0,
+          "rebuilds": 18
+        }
+      },
+      "meta": {
+        "date": "2026-10-02T17:14:10.379Z",
+        "url": "http://127.0.0.1:46599/?seed=1&skipmenu=1&px=360",
+        "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/154.0.0.0 Safari/537.36",
+        "gpu": "ANGLE (NVIDIA, Vulkan 1.4.329 (NVIDIA NVIDIA GeForce RTX 5080 (0x00002C02)), NVIDIA)",
+        "window": "1920x1080",
+        "dpr": 2,
+        "canvas": "1920x1080",
+        "lowres": "642x362",
+        "seed": 1,
+        "look": "voxel",
+        "radius": 8
+      }
+    },
+    {
+      "ratio": 0.5,
+      "summary": {
+        "seconds": 6,
+        "frames": 354,
+        "interval": {
+          "n": 354,
+          "p50": 16.7,
+          "p95": 16.8,
+          "p99": 33.3,
+          "max": 33.4,
+          "mean": 17
+        },
+        "loop": {
+          "n": 354,
+          "p50": 9.8,
+          "p95": 19.4,
+          "p99": 25.2,
+          "max": 27.9,
+          "mean": 9.29
+        },
+        "sections": {
+          "sim": 2.86,
+          "chunkCreate": 0.05,
+          "chunkSig": 0.13,
+          "chunkBuild": 1.33,
+          "grass": 0,
+          "skyline": 0,
+          "decor": 0.01,
+          "sprites": 0,
+          "beforeRender": 2.18,
+          "lightmap": 0.11,
+          "scene": 0.06,
+          "draw": 2.52,
+          "other": 0.03,
+          "wait": 3.48,
+          "mesh": 0.96,
+          "trees": 0.09,
+          "genSync": 0,
+          "genHooks": 0,
+          "gpu": 0.81
+        },
+        "stream": {
+          "holeSeconds": 0,
+          "maxHoleSeconds": 0,
+          "builds": 0,
+          "rebuilds": 113
+        }
+      },
+      "meta": {
+        "date": "2026-10-02T17:14:18.053Z",
+        "url": "http://127.0.0.1:46599/?seed=1&skipmenu=1&px=360",
+        "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/154.0.0.0 Safari/537.36",
+        "gpu": "ANGLE (NVIDIA, Vulkan 1.4.329 (NVIDIA NVIDIA GeForce RTX 5080 (0x00002C02)), NVIDIA)",
+        "window": "1920x1080",
+        "dpr": 2,
+        "canvas": "960x540",
+        "lowres": "482x272",
+        "seed": 1,
+        "look": "voxel",
+        "radius": 8
+      }
+    },
+    {
+      "ratio": 0.5,
+      "summary": {
+        "seconds": 6,
+        "frames": 358,
+        "interval": {
+          "n": 358,
+          "p50": 16.7,
+          "p95": 16.8,
+          "p99": 33.3,
+          "max": 33.4,
+          "mean": 16.85
+        },
+        "loop": {
+          "n": 358,
+          "p50": 9.2,
+          "p95": 16,
+          "p99": 21.1,
+          "max": 26.5,
+          "mean": 7.79
+        },
+        "sections": {
+          "sim": 2.87,
+          "chunkCreate": 0.05,
+          "chunkSig": 0.13,
+          "chunkBuild": 0.39,
+          "grass": 0,
+          "skyline": 0,
+          "decor": 0.01,
+          "sprites": 0,
+          "beforeRender": 1.95,
+          "lightmap": 0.07,
+          "scene": 0.05,
+          "draw": 2.24,
+          "other": 0.02,
+          "wait": 1.93,
+          "mesh": 0.26,
+          "trees": 0.03,
+          "genSync": 0,
+          "genHooks": 0,
+          "gpu": 0.79
+        },
+        "stream": {
+          "holeSeconds": 0,
+          "maxHoleSeconds": 0,
+          "builds": 0,
+          "rebuilds": 27
+        }
+      },
+      "meta": {
+        "date": "2026-10-02T17:14:25.729Z",
+        "url": "http://127.0.0.1:46599/?seed=1&skipmenu=1&px=360",
+        "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/154.0.0.0 Safari/537.36",
+        "gpu": "ANGLE (NVIDIA, Vulkan 1.4.329 (NVIDIA NVIDIA GeForce RTX 5080 (0x00002C02)), NVIDIA)",
+        "window": "1920x1080",
+        "dpr": 2,
+        "canvas": "960x540",
+        "lowres": "482x272",
+        "seed": 1,
+        "look": "voxel",
+        "radius": 8
+      }
+    },
+    {
+      "ratio": 1,
+      "summary": {
+        "seconds": 6,
+        "frames": 356,
+        "interval": {
+          "n": 356,
+          "p50": 16.7,
+          "p95": 16.8,
+          "p99": 33.3,
+          "max": 33.4,
+          "mean": 16.9
+        },
+        "loop": {
+          "n": 356,
+          "p50": 9.8,
+          "p95": 15.7,
+          "p99": 19.4,
+          "max": 21,
+          "mean": 7.99
+        },
+        "sections": {
+          "sim": 2.98,
+          "chunkCreate": 0.05,
+          "chunkSig": 0.13,
+          "chunkBuild": 0.25,
+          "grass": 0,
+          "skyline": 0,
+          "decor": 0.01,
+          "sprites": 0,
+          "beforeRender": 2.01,
+          "lightmap": 0.07,
+          "scene": 0.05,
+          "draw": 2.39,
+          "other": 0.02,
+          "wait": 2.68,
+          "mesh": 0.16,
+          "trees": 0.01,
+          "genSync": 0,
+          "genHooks": 0,
+          "gpu": 0.83
+        },
+        "stream": {
+          "holeSeconds": 0,
+          "maxHoleSeconds": 0,
+          "builds": 0,
+          "rebuilds": 24
+        }
+      },
+      "meta": {
+        "date": "2026-10-02T17:14:33.380Z",
+        "url": "http://127.0.0.1:46599/?seed=1&skipmenu=1&px=360",
+        "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/154.0.0.0 Safari/537.36",
+        "gpu": "ANGLE (NVIDIA, Vulkan 1.4.329 (NVIDIA NVIDIA GeForce RTX 5080 (0x00002C02)), NVIDIA)",
+        "window": "1920x1080",
+        "dpr": 2,
+        "canvas": "1920x1080",
+        "lowres": "642x362",
+        "seed": 1,
+        "look": "voxel",
+        "radius": 8
+      }
+    },
+    {
+      "ratio": 0,
+      "summary": {
+        "seconds": 6,
+        "frames": 225,
+        "interval": {
+          "n": 225,
+          "p50": 33.3,
+          "p95": 33.4,
+          "p99": 50,
+          "max": 50,
+          "mean": 26.96
+        },
+        "loop": {
+          "n": 225,
+          "p50": 11.4,
+          "p95": 19.7,
+          "p99": 23.3,
+          "max": 30.8,
+          "mean": 11.3
+        },
+        "sections": {
+          "sim": 4.78,
+          "chunkCreate": 0.05,
+          "chunkSig": 0.15,
+          "chunkBuild": 0.54,
+          "grass": 0,
+          "skyline": 0,
+          "decor": 0.01,
+          "sprites": 0,
+          "beforeRender": 2.59,
+          "lightmap": 0.1,
+          "scene": 0.07,
+          "draw": 2.99,
+          "other": 0.02,
+          "wait": 9.78,
+          "mesh": 0.37,
+          "trees": 0.05,
+          "genSync": 0,
+          "genHooks": 0,
+          "gpu": 1.06
+        },
+        "stream": {
+          "holeSeconds": 0,
+          "maxHoleSeconds": 0,
+          "builds": 0,
+          "rebuilds": 31
+        }
+      },
+      "meta": {
+        "date": "2026-10-02T17:14:41.084Z",
+        "url": "http://127.0.0.1:46599/?seed=1&skipmenu=1&px=360",
+        "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/154.0.0.0 Safari/537.36",
+        "gpu": "ANGLE (NVIDIA, Vulkan 1.4.329 (NVIDIA NVIDIA GeForce RTX 5080 (0x00002C02)), NVIDIA)",
+        "window": "1920x1080",
+        "dpr": 2,
+        "canvas": "3840x2160",
+        "lowres": "642x362",
+        "seed": 1,
+        "look": "voxel",
+        "radius": 8
+      }
+    }
+  ],
+  "firefoxVerification": {
+    "city40": {
+      "note": "Final source only; no paired pristine Firefox run. 12-second routes.",
+      "meta": {
+        "date": "2026-10-02T17:17:35.687Z",
+        "url": "http://127.0.0.1:39333/?seed=1&skipmenu=1",
+        "userAgent": "Mozilla/5.0 (X11; Linux x86_64; rv:157.0) Gecko/20100101 Firefox/157.0",
+        "gpu": "NVIDIA GeForce GTX 980, or similar",
+        "window": "1920x1080",
+        "dpr": 1,
+        "canvas": "1920x1080",
+        "lowres": "642x362",
+        "seed": 1,
+        "look": "voxel",
+        "radius": 8
+      },
+      "mean": {
+        "loop": 13.641,
+        "draw": 6.685,
+        "scene": 0.03,
+        "calls": 1116.987
+      }
+    },
+    "citystand": {
+      "note": "Final source only; no paired pristine Firefox run. 12-second routes.",
+      "meta": {
+        "date": "2026-10-02T17:17:16.171Z",
+        "url": "http://127.0.0.1:39333/?seed=1&skipmenu=1",
+        "userAgent": "Mozilla/5.0 (X11; Linux x86_64; rv:157.0) Gecko/20100101 Firefox/157.0",
+        "gpu": "NVIDIA GeForce GTX 980, or similar",
+        "window": "1920x1080",
+        "dpr": 1,
+        "canvas": "1920x1080",
+        "lowres": "642x362",
+        "seed": 1,
+        "look": "voxel",
+        "radius": 8
+      },
+      "mean": {
+        "loop": 10.333,
+        "draw": 3.81,
+        "scene": 0.059,
+        "calls": 476.524
+      }
+    }
+  },
+  "chromiumConfiguration": {
+    "date": "2026-10-02T17:07:39.125Z",
+    "url": "http://127.0.0.1:34997/?seed=1&skipmenu=1",
+    "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/154.0.0.0 Safari/537.36",
+    "gpu": "ANGLE (NVIDIA, Vulkan 1.4.329 (NVIDIA NVIDIA GeForce RTX 5080 (0x00002C02)), NVIDIA)",
+    "cores": 24,
+    "window": "1920x1080",
+    "dpr": 1,
+    "canvas": "1920x1080",
+    "lowres": "642x362",
+    "seed": 1,
+    "look": "voxel",
+    "radius": 8,
+    "lodRadius": 1.8,
+    "midRadius": 3.3,
+    "levels": [
+      1,
+      2
+    ],
+    "budgetMs": 4,
+    "urgentBudgetMs": 10,
+    "prefetch": {
+      "radius": 9,
+      "below": 2,
+      "above": 2,
+      "lookahead": 3,
+      "minIdleMs": 3,
+      "enabled": true
+    },
+    "detail": false,
+    "gpuTimer": true,
+    "options": {
+      "Visual style": "Voxel",
+      "Distance haze": "Clear",
+      "Form lighting": "Toon",
+      "Trees": "models",
+      "Draw distance": "168 m",
+      "Shadows": "Smooth",
+      "Furniture": "Modelled",
+      "Surfaces": "Painted",
+      "Reading": "Field notes",
+      "Practice feedback": "Card",
+      "Practice from simple tasks": "Off (BN)",
+      "Zombie density": "1.0x",
+      "First-person hands": "sprites",
+      "Creatures": "3D models",
+      "Stairs": "Flights",
+      "Difficulty\u2026": "Accessible",
+      "Vehicle look": "modelled bodies",
+      "Vehicle width": "true to life",
+      "Driving controls": "direct throttle",
+      "Autosave": "every 6 h",
+      "HUD style": "Modern",
+      "HUD width": "Auto",
+      "Tips": "Adapted",
+      "Show hints at start": "off",
+      "Map": "Road atlas",
+      "First beds": "No skill needed (slower)",
+      "Fire safety": "Warn outside a fire ring",
+      "Weather messages": "Changes you notice",
+      "Climate": "Mid-spring start (BN)",
+      "Rest menus": "Modern",
+      "Route guide": "Trail on the ground",
+      "Activity progress": "Crosshair ring",
+      "Fast-forward key": "Press to step \u00d71-\u00d716",
+      "Fast-forward drawing": "Lighter (30 fps)",
+      "Inventory screens": "New",
+      "Looting style": "Quick (crosshair)",
+      "Loot markers": "on",
+      "UI scale": "Auto (2\u00d7)",
+      "Aim model": "Steady hands",
+      "Aim trail": "off",
+      "Top-view aim assist": "off",
+      "Discovery hints": "on",
+      "Classic mode (unlock everything)": "off",
+      "Load gate": "auto",
+      "Dialogue text speed": "Normal",
+      "Dialogue layout": "Scene",
+      "Performance overlay": "off"
+    },
+    "eventsDropped": 0
+  }
+}
