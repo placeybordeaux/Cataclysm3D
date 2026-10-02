@@ -78,6 +78,8 @@ export function perfScenarios(c: PerfCtx): Scenario[] {
         // stop: brake, and hand the road back
         await c.x().hold('space', 1500);
         await js(`__perfBench.stopClear()`);
+        // out of the car: later scenarios (stairs) walk with W
+        await js(`cdda.exitVehicle?.()`);
       }
     }],
   ];

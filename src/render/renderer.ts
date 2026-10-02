@@ -194,6 +194,8 @@ export class Renderer {
     this.decor = new DecorLayer(() => this.source);
     this.decor.sprites.skyVisAt = this.sprites.skyVisAt;
     this.grass = new GrassLayer(this.ground);
+    // tufts and grass cards wait for the chunk they grow on (src/render/surroundings.ts)
+    this.decor.ready = this.grass.ready = (cx, cy, z) => this.chunks.chunkShown(cx, cy, z);
 
     this.viewmodel = new Viewmodel();
     game.events.on('playerHurt', (e) => {

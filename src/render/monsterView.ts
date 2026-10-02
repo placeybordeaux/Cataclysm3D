@@ -225,6 +225,12 @@ export class MonsterView implements GameSystem {
   onBodyLanded: ((x: number, y: number, z: number, blood: string | null) => void) | null = null;
 
   constructor(readonly game: Game, readonly renderer: Renderer, readonly sys: MonsterSystem, readonly combat: PlayerCombat | null) {
+    // only hides: showing waits for the next tick's update (src/render/surroundings.ts)
+    renderer.chunks.afterUpdate.push(() => {
+      const ch = renderer.chunks;
+      for (const [m, v] of this.views) if (!ch.drawnAt(m.x, m.y, m.z)) (v.c?.inst.setVisible(false), v.h?.setVisible(false));
+      for (const [c, v] of this.corpses) if (!ch.drawnAt(c.x, c.y, c.z)) (v.body?.inst.setVisible(false), v.h?.setVisible(false));
+    });
     loadAtlas().then(
       (a) => {
         this.atlas = a;
@@ -491,8 +497,9 @@ export class MonsterView implements GameSystem {
         v = this.create(m);
         createMs += performance.now() - c0 + 0.01;
       }
-      // drawn iff its level is (src/world/levels.ts), not within one level of the player
-      const visible = this.renderer.chunks.levels.drawn(m.x, m.y, m.z);
+      // drawn iff its level is (src/world/levels.ts) and the walls and floors around it are
+      // on screen (src/render/surroundings.ts): never a zombie in mid-air before its building
+      const visible = this.renderer.chunks.drawnAt(m.x, m.y, m.z);
       v.h?.setVisible(visible);
       // Hit-stop: the struck sprite holds exactly where the blow found it.
       if (v.hold > 0) {
@@ -587,6 +594,10 @@ export class MonsterView implements GameSystem {
         this.dropCorpse(c);
         continue;
       }
+      // a body lies on a floor: not before that floor (and the walls around it) is on screen
+      const shown = this.renderer.chunks.drawnAt(c.x, c.y, c.z);
+      v.body?.inst.setVisible(shown);
+      v.h?.setVisible(shown);
       if (v.body) {
         if (v.body.t < MODEL_DEATH_TOTAL && v.body.update(dt)) this.landed(v, c);
         continue;
@@ -657,6 +668,7 @@ export class MonsterView implements GameSystem {
     const range = Math.min(FAR_FIGURE_MAX, (this.renderer.chunks.radius + 0.5) * CHUNK);
     this.farRange = range;
     for (const m of this.sys.all) {
+      // (the level extent only: whether its chunk is built yet is decided per frame in update)
       if (m.dead || !m.dormant || !this.renderer.chunks.levels.drawn(m.x, m.y, m.z)) continue;
       // a dormant figure indoors on another level is behind walls and floors (at most a glimpse
       // through a window): skipping them saved ~0.4 ms/frame in a city (docs/PERF.md)

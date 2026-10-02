@@ -79,7 +79,7 @@ export function installMonsters(game: Game, renderer: Renderer | null, worldgen:
     combat.viewmodel = () => (renderer as unknown as { viewmodel?: ViewModelHook }).viewmodel;
     const fx = new HitFx(game, renderer, view);
     const arrows = new ArrowFx(game, renderer, combat, sys, view);
-    if (api) Object.assign(api, { hitFx: fx, arrowFx: arrows, nearClamp: NEAR_CLAMP, meleeAim: MELEE_AIM, chars: charsApi });
+    if (api) Object.assign(api, { hitFx: fx, arrowFx: arrows, nearClamp: NEAR_CLAMP, meleeAim: MELEE_AIM, chars: charsApi, monsterView: view });
     if (renderer.viewmodel) new FpView(game, renderer, renderer.viewmodel);
     new FireView(game, renderer);
     registerOption({

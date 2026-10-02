@@ -146,6 +146,13 @@ export class GrassLayer {
     return this.mesh?.count ?? 0;
   }
 
+  /**
+   * Is a chunk's own geometry on screen (ChunkManager.chunkShown)? Tufts wait for it: grass
+   * standing on the far ground ring before the street is built is the inside before the outside
+   * (src/render/surroundings.ts). Null = always (tests, headless).
+   */
+  ready: ((cx: number, cy: number, z: number) => boolean) | null = null;
+
   invalidate(): void {
     this.cx = NaN;
     this.job = null;
@@ -156,7 +163,7 @@ export class GrassLayer {
     const r = this.radius + this.step;
     for (let cy = Math.floor((py - r) / CHUNK); cy <= Math.floor((py + r) / CHUNK); cy++)
       for (let cx = Math.floor((px - r) / CHUNK); cx <= Math.floor((px + r) / CHUNK); cx++) {
-        const v = map.hasChunk(cx, cy, pz) ? map.chunk(cx, cy, pz)!.version + 1 : 0;
+        const v = map.hasChunk(cx, cy, pz) && (!this.ready || this.ready(cx, cy, pz)) ? map.chunk(cx, cy, pz)!.version + 1 : 0;
         sig = (Math.imul(sig, 31) + v) | 0;
       }
     return sig;
@@ -227,7 +234,7 @@ export class GrassLayer {
         const dx = x - x0, dy = y - y0;
         if (dx * dx + dy * dy > R * R) continue;
         const ccx = Math.floor(x / CHUNK), ccy = Math.floor(y / CHUNK);
-        if (!map.hasChunk(ccx, ccy, z)) continue;
+        if (!map.hasChunk(ccx, ccy, z) || (this.ready && !this.ready(ccx, ccy, z))) continue;
         const c = map.chunk(ccx, ccy, z)!;
         const li = (((y % CHUNK) + CHUNK) % CHUNK) * CHUNK + (((x % CHUNK) + CHUNK) % CHUNK);
         const def = map.terrain.defs[c.ter[li]];

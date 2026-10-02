@@ -50,7 +50,7 @@ export class DecorLayer {
     const r = this.radius + this.step;
     for (let cy = Math.floor((py - r) / CHUNK); cy <= Math.floor((py + r) / CHUNK); cy++)
       for (let cx = Math.floor((px - r) / CHUNK); cx <= Math.floor((px + r) / CHUNK); cx++) {
-        const v = map.hasChunk(cx, cy, pz) ? map.chunk(cx, cy, pz)!.version + 1 : 0;
+        const v = map.hasChunk(cx, cy, pz) && (!this.ready || this.ready(cx, cy, pz)) ? map.chunk(cx, cy, pz)!.version + 1 : 0;
         sig = (Math.imul(sig, 31) + v) | 0;
       }
     return sig;
@@ -73,6 +73,13 @@ export class DecorLayer {
   }
 
   /** Rebuild on the next update (texture source swapped). */
+  /**
+   * Is a chunk's own geometry on screen (ChunkManager.chunkShown)? Tufts wait for it: grass
+   * standing on the far ground ring before the street is built is the inside before the outside
+   * (src/render/surroundings.ts). Null = always (tests, headless).
+   */
+  ready: ((cx: number, cy: number, z: number) => boolean) | null = null;
+
   invalidate(): void {
     this.cx = NaN;
   }
@@ -91,7 +98,8 @@ export class DecorLayer {
       for (let x = x0 - R; x <= x0 + R; x++) {
         const dx = x - x0, dy = y - y0;
         if (dx * dx + dy * dy > R * R) continue;
-        const c = map.hasChunk(Math.floor(x / CHUNK), Math.floor(y / CHUNK), z) ? map.chunk(Math.floor(x / CHUNK), Math.floor(y / CHUNK), z)! : null;
+        const ccx = Math.floor(x / CHUNK), ccy = Math.floor(y / CHUNK);
+        const c = map.hasChunk(ccx, ccy, z) && (!this.ready || this.ready(ccx, ccy, z)) ? map.chunk(ccx, ccy, z)! : null;
         if (!c) continue;
         const li = (((y % CHUNK) + CHUNK) % CHUNK) * CHUNK + (((x % CHUNK) + CHUNK) % CHUNK);
         const kind = this.grassKind(map, c.ter[li]);

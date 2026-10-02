@@ -471,6 +471,15 @@ tests/               vitest unit tests (pure logic, no DOM/WebGL)
   + `src/ui/liquid_ui.ts` menu (the liquid stays in its container until a choice moves it), wired
   through `liquidHooks` (crafting.ts) and Unload on containers. (DDA e-file storage is gone: BN has none.)
 
+### Loading: surroundings first, the load gate (src/render/surroundings.ts, src/loadgate; docs/PERF.md "Load gate")
+- Per-entity views ask `renderer.chunks.drawnAt(x, y, z)` (level drawn for the eye **and** its chunk built and
+  visible, plus the neighbour when within 2 tiles of its edge), never `levels.drawn` alone; tufts/grass use
+  `chunks.chunkShown`. Views that update on ticks also hide through `chunks.afterUpdate`. New per-entity
+  visuals must do the same.
+- `LoadGate` (pure, src/loadgate/gate.ts) holds the game with the tactical-pause hold `'loading'` while
+  `chunks.missingAround` reports unbuilt chunks within 40 m on pz +-1 (opens once 64 m is built); armed by
+  main.ts when gameplay starts. `cdda.loadGate(mode?)`, `cdda.entityRule(on?)`, `cdda.monsterView`.
+
 ### Progression & onboarding (src/progression, docs/DESIGN_V2.md decision 6)
 - Title: **Start** = quick start (named Evacuee, BN `unemployed` kit, one name field, difficulty
   stub), **New Game** = start picker (ui2 cards: profession + scenario, pitch, kit preview,

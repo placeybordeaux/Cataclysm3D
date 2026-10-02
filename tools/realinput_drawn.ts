@@ -42,7 +42,11 @@ export function drawnScenarios(c: DrawnCtx): Scenario[] {
         cdda.teleportOmt(h.x, h.y, 0, 18, -1);
         cdda.look(-95, -2);
       })()`);
+      // (a frame first: right after the teleport, pending still describes the old spot)
+      await sleep(250);
       for (let i = 0; i < 120 && (await js<number>(`cdda.renderer.chunks.stats.pending`)) > 0; i++) await sleep(250);
+      // (and the load gate's loading screen, src/loadgate: it covers the view and holds the F key)
+      for (let i = 0; i < 120 && (await js<boolean>(`!!cdda.loadGate?.().closed`)); i++) await sleep(250);
       await sleep(800);
       await drawn('after the load');
       await c.x().key('F');

@@ -38,6 +38,7 @@ import { curtainsScenarios } from './realinput_curtains';
 import { reloadScenarios } from './realinput_reload';
 import { skillsScenarios } from './realinput_skills';
 import { timewarpScenarios } from './realinput_timewarp';
+import { loadgateScenarios } from './realinput_loadgate';
 import { readquizScenarios } from './realinput_readquiz';
 
 const argv = process.argv.slice(2);
@@ -134,6 +135,12 @@ async function toGameplay(): Promise<State> {
     await x.click(W / 2, H / 2);
     s = await until((t) => t.lock);
   }
+  // The load gate (src/loadgate) holds the game and swallows gameplay keys under its loading
+  // screen while the surroundings are built, e.g. right after a setup teleport: wait it out, as
+  // a player would. (The loadgate scenario tests the gate itself.)
+  // (a frame or two first: a teleport made just before this is noticed on the next frame)
+  await sleep(120);
+  for (let i = 0; i < 300 && (await js<boolean>('!!window.cdda?.loadGate?.().closed')); i++) await sleep(100);
   return s;
 }
 /** `sinceContact`: game seconds past the swing's contact point when a melee blow resolved
@@ -1535,6 +1542,8 @@ scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...skillsScenar
 // Fast-forward (reading, the Rest window's Fast pick, the cap measurement).
 scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...timewarpScenarios({ x: () => x, js, check, shot, toGameplay, sleep }));
 scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...readquizScenarios({ x: () => x, js, check, shot, toGameplay, sleep }));
+// Load gate + creatures never before their walls (src/loadgate, render/surroundings.ts): reloads the page, ends in a car.
+scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...loadgateScenarios({ page: () => page, x: () => x, js, check, shot, toGameplay, sleep, quickStart, size: [W, H] }));
 
 if (argv.includes('--list') || argv.includes('--dry-run')) {
   for (const [n, what] of scenarios) console.log(`${only && !only.has(n) ? '  (skip)' : '  run   '} ${n.padEnd(11)} ${what}`);
