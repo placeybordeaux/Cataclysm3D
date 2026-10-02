@@ -206,6 +206,12 @@ export class Renderer {
       this.shake(0.25 + k * 0.6);
       this.hurtFlash(0.35 + k * 0.65);
     });
+    game.events.on('playerFell', (e) => {
+      // The landing's own jolt/damage already fires `playerHurt` (zlevels.ts impact()) for the
+      // shake + red flash; this only adds the eased eye drop so the level change itself doesn't
+      // read as a snap.
+      this.rig.fall(e.levels);
+    });
 
     this.scene.add(this.sky.mesh, this.lights.group, this.chunks.group, this.sprites.group, this.decor.sprites.group, this.weather.group, this.grass.group, this.skyline.group);
     this.scene.matrixWorldAutoUpdate = true;

@@ -3,6 +3,7 @@ import { MAX_Z, MIN_Z } from '../world/coords';
 import { hasFlag, isDiggable } from '../world/registry';
 import { MAIN_PARTS } from './bodyparts';
 import { emitSound } from './sound';
+import { CREATURE_RADIUS, nudgeOutOfOverlap, overlapsSolid, resolveOverlap } from './physics';
 
 // Vertical movement, after CDDA game::vertical_move / find_or_make_stairs and
 // map::creature_falls / Character::impact:
@@ -89,6 +90,9 @@ export function goStairs(game: Game, dir: StairDir): boolean {
   p.x = dest.x + 0.5;
   p.y = dest.y + 0.5;
   p.z = dest.z;
+  // Tile-centre is always clear of terrain, but a shaped overlay (a vehicle parked over the
+  // stairs) could still be there: keep the general landing-safety net for free.
+  [p.x, p.y] = resolveOverlap(game.map, p.x, p.y, p.z);
   p.burnMoveStamina(ladder ? 200 : 100);
   game.message(ladder ? (dir === 'up' ? 'You climb up the ladder.' : 'You climb down the ladder.') : dir === 'up' ? 'You walk up the stairs.' : 'You walk down the stairs.');
   emitSound(game, dest, 6, 'footsteps', { category: 'movement', source: p, sfxId: '' });
@@ -110,6 +114,9 @@ export function fallIfUnsupported(game: Game): number {
   const p = game.player;
   const map = game.map;
   if (stairHooks.climbing?.(p)) return 0;
+  // The landing x/y stays whatever tile the player's centre is over the whole way down (the
+  // tile they fell through) — only z changes here; see the overlap fix-up below for why the
+  // fractional x/y carried along with it needs checking once we're on the new level.
   let z = p.z;
   while (z > MIN_Z && !map.hasFloor(p.tileX, p.tileY, z) && map.terAt(p.tileX, p.tileY, z).id !== 't_null') z--;
   const height = p.z - z;
@@ -119,9 +126,15 @@ export function fallIfUnsupported(game: Game): number {
     z++;
     if (z === p.z) return 0;
   }
+  const fromZ = p.z;
   p.z = z;
+  // The fall kept the free-move fractional x/y, which can overlap solid terrain one level down
+  // even though the tile under the player's centre is clear (e.g. a gutter's edge tile sits
+  // right over a wall corner below): push clear of it, or snap to the tile's centre.
+  [p.x, p.y] = resolveOverlap(map, p.x, p.y, z);
   const levels = height;
   game.message(levels > 1 ? `You fall down ${levels} levels!` : 'You fall down a level!', 'c_red');
+  game.events.emit('playerFell', { levels, fromZ, toZ: z });
   impact(game, levels * 30);
   emitSound(game, { x: p.tileX, y: p.tileY, z }, 10 + levels * 5, 'a thud', { category: 'combat', source: p });
   return levels;
@@ -143,6 +156,7 @@ export function impact(game: Game, force: number): number {
   const target = furn.id !== 'f_null' ? `the ${furn.name}` : `the ${ter.name}`;
   if (mod < 1 && mod * force < 5) {
     game.message(`You land on ${target}.`);
+    game.events.emit('playerHurt', { amount: 0 }); // no damage, but still a jolt (camera shake)
     return 0;
   }
   let total = 0;
@@ -154,6 +168,9 @@ export function impact(game: Game, force: number): number {
   }
   if (total > 0) game.message(`You are slammed against ${target} for ${total} damage.`, 'c_red');
   else game.message(`You land on ${target}.`);
+  // This went straight through takeHit (no attacker to credit), so the hit-feedback hooks
+  // (red flash + camera shake, src/render/renderer.ts) never ran for it; fire it here too.
+  game.events.emit('playerHurt', { amount: total });
   if (p.rng.next() < mod) p.addEffect('downed', p.rng.int(1, 1 + Math.floor(mod * 3)));
   return total;
 }
@@ -164,9 +181,18 @@ export function installZLevels(game: Game): void {
   game.keys.register('stairs_down', 'Go down stairs', () => goStairs(game, 'down'));
   game.systems.push({
     name: 'falling',
-    update(g) {
+    update(g, dt) {
       if (g.player.dead) return;
       fallIfUnsupported(g);
+      // General safety net: wherever an overlap with solid geometry came from (a save loaded
+      // into a since-edited map, a door shut on the player, a mapgen edge case), the player
+      // should never be stuck frozen in it. moveWithCollision already lets input-driven moves
+      // that reduce the overlap through; this passively creeps them clear even with no input.
+      // Skip it while on a modelled stair flight (same reason fallIfUnsupported does above):
+      // stairwalk legitimately places the player over what the 2D grid sees as wall tiles.
+      if (stairHooks.climbing?.(g.player)) return;
+      const p = g.player;
+      if (overlapsSolid(g.map, p.x, p.y, p.z, CREATURE_RADIUS)) [p.x, p.y] = nudgeOutOfOverlap(g.map, p.x, p.y, p.z, dt, CREATURE_RADIUS);
     },
   });
 }

@@ -8,6 +8,7 @@ import { hasFlag } from '../world/registry';
 import { emitSound } from './sound';
 import { snippet } from '../data/index';
 import { MIN_Z, MAX_Z } from '../world/coords';
+import { resolveOverlap } from './physics';
 
 // Lab machinery, after CDDA iexamine.cpp / iexamine_actors.cpp / computer_session.cpp /
 // gates.cpp: ID card readers (and hacking them with an electrohack), computer consoles
@@ -539,6 +540,10 @@ export function rideElevator(game: Game, x: number, y: number, z: number, toZ: n
   p.x = px + (p.x - Math.floor(p.x));
   p.y = py + (p.y - Math.floor(p.y));
   p.z = toZ;
+  // Keeping the sub-tile offset across the rotation can land it inside a wall on the other
+  // floor even though the cab's own footprint is clear (same class of bug as a fall carrying
+  // its fractional x/y onto a different layout below — src/game/zlevels.ts fallIfUnsupported).
+  [p.x, p.y] = resolveOverlap(game.map, p.x, p.y, toZ);
   game.message(`The elevator ${toZ < z ? 'descends' : 'ascends'} to level ${toZ}.`);
   emitSound(game, { x: px, y: py, z: toZ }, 8, 'a mechanical hum', { source: p });
   return null;
