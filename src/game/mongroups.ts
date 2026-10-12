@@ -45,7 +45,18 @@ export interface MonGroupSource {
   monGroupsAt(sx: number, sy: number): readonly MonGroup[];
 }
 
+/**
+ * Options > Colony monsters (saved per world): BN's special populations are big for real time
+ * (an anthill puts ~100 ants into the bubble, a fungal park ~100 fungi into a town), so worlds can
+ * scale them. 1 = BN's numbers.
+ */
+export const COLONY_SCALES = [1, 0.25, 0] as const;
+export const COLONY_LABELS: Record<number, string> = { 1: 'BN (full)', 0.25: 'reduced (1/4)', 0: 'off' };
+export const DEFAULT_COLONY_SCALE = 0.25;
+
 export class MonGroupSpawner {
+  /** Population multiplier (COLONY_SCALES); 1 keeps BN's draws exactly. */
+  scale: number = DEFAULT_COLONY_SCALE;
   /** keys (MonGroup.key) of groups already materialised or cleared */
   readonly spent = new Set<string>();
   readonly stats = { groups: 0, monsters: 0, empty: 0 };
@@ -124,7 +135,12 @@ export class MonGroupSpawner {
     const rng = new Rng(hashSeed(game.seed, g.sx, g.sy, g.z, g.special, 0x6d73));
     const ctx = this.spawner.groupCtx();
     const ids: string[] = [];
+    // Scaled populations round the fraction randomly (BN roll_remainder); at 1 no draw is added.
     let pop = g.population;
+    if (this.scale !== 1) {
+      const f = g.population * this.scale;
+      pop = Math.floor(f) + (rng.next() < f - Math.floor(f) ? 1 : 0);
+    }
     for (let m = 0; m < pop; m++) {
       const res = pickMonsterGroupResult(data, g.group, rng, ctx);
       if (!res) break;

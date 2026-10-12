@@ -147,6 +147,8 @@ function build(seed: number, genVersion?: number): World {
   const spawner = new Spawner(sys, null);
   registerCoreSaveables(game, { monsters: { sys, spawner }, worldgen });
   const mg = installMonGroups(game, sys, worldgen.overmap, spawner);
+  // BN's populations (the Options default scales them down for real time; tested below)
+  mg.scale = 1;
   return { game, sys, spawner, mg, worldgen };
 }
 
@@ -256,6 +258,21 @@ describe('special spawn groups materialise near the survivor', () => {
     applySave(C.game, old);
     expect(C.mg.spent.size).toBe(0);
   }, 240_000);
+
+  it('Options > Colony monsters scales the colony: a quarter of BN, or none', () => {
+    const count = (scale: number) => {
+      const w = build(2);
+      w.mg.scale = scale;
+      const ant = w.worldgen.overmap.findSpecial('Anthill', { x: 0, y: 0 }, 1)!;
+      standAt(w, ant.x * CHUNK + 12, ant.y * CHUNK + 12);
+      w.mg.scan();
+      return w.mg.stats.monsters;
+    };
+    const full = count(1), quarter = count(0.25);
+    expect(full).toBeGreaterThan(20);
+    expect(quarter).toBeLessThan(full / 2);
+    expect(count(0)).toBe(0);
+  });
 
   it('genVersion 2 worlds spawn nothing new', () => {
     const w = build(2, 2);

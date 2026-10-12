@@ -382,6 +382,11 @@ MIN_Z..MAX_Z (−7..5) instead of BN's −10..10.
 
 ## Special spawns (genVersion 3)
 
+**Options > Colony monsters** (lead, saved per world): BN's populations are big for real time
+(~100 ants around an anthill, ~100 fungi in a fungal-park town), so worlds scale them: BN (full)
+1x, reduced 1/4 (the default for new worlds), or off. At 1x the spawner's draws are BN's exactly
+(`MonGroupSpawner.scale`, `COLONY_SCALES` in src/game/mongroups.ts).
+
 BN overmap specials can carry `"spawns": {"group", "population", "radius"}`: a roaming
 population placed on the overmap when the special is, which turns into monsters as the player
 comes near. Before genVersion 3 we ignored it, so an anthill had only its OMTs' own spawns

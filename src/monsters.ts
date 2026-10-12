@@ -22,7 +22,7 @@ import { openMenu } from './ui/framework';
 import { registerOption } from './ui/options';
 import { cycleDensity, defaultDensity, densityLabel, registerDensityHost } from './game/density';
 import { registerSaveable } from './save/registry';
-import { installMonGroups, type MonGroupSpawner } from './game/mongroups';
+import { COLONY_LABELS, COLONY_SCALES, DEFAULT_COLONY_SCALE, installMonGroups, type MonGroupSpawner } from './game/mongroups';
 
 // Wiring for monsters & combat: simulation systems, spawning, player attacks, keys, danger
 // checks, rendering and window.cdda helpers. main.ts calls installMonsters() once.
@@ -76,6 +76,29 @@ export function installMonsters(game: Game, renderer: Renderer | null, worldgen:
   }
   spawner.install();
   const monGroups = worldgen ? installMonGroups(game, sys, worldgen.overmap, spawner) : null;
+  if (monGroups) {
+    registerSaveable<number>(game, 'colonyScale', {
+      order: 19,
+      save: () => monGroups.scale,
+      load: (v) => {
+        if (!COLONY_SCALES.includes(v as (typeof COLONY_SCALES)[number])) throw new Error(`colonyScale: expected one of ${COLONY_SCALES.join(', ')}, not ${v}`);
+        monGroups.scale = v;
+      },
+      // Saves from before the option: genVersion 2 or older, which place no colony groups anyway.
+      missing: () => void (monGroups.scale = DEFAULT_COLONY_SCALE),
+    });
+    if (renderer)
+      registerOption({
+        category: 'Gameplay',
+        name: 'Colony monsters',
+        value: () => COLONY_LABELS[monGroups.scale],
+        change: (d) => {
+          const i = COLONY_SCALES.indexOf(monGroups.scale as (typeof COLONY_SCALES)[number]);
+          monGroups.scale = COLONY_SCALES[(i + d + COLONY_SCALES.length) % COLONY_SCALES.length];
+        },
+        desc: 'The roaming populations BN gives anthills, slime pits and fungal or triffid parks (genVersion 3 worlds). BN (full) is about a hundred ants around an anthill and a hundred fungi in a park town, a lot in real time; reduced is a quarter; off leaves only what the buildings themselves spawn.  Applies to groups you haven\'t met yet.',
+      });
+  }
   let view: MonsterView | null = null;
   if (renderer) {
     view = new MonsterView(game, renderer, sys, combat);
