@@ -10,6 +10,7 @@ import { MapBuffer, OMT } from './mapgen/buffer';
 import { mapgenForest, mapgenWater, biomeFor, isWaterType, resolveRegional } from './mapgen/builtin';
 import { type BuiltinEnv, addManholeLadder, manholeSpot, runBnBuiltin } from './mapgen/bnbuiltin';
 import { mapgenLab } from './mapgen/lab';
+import { MAP_EXTRA_FUNCTIONS, type MapExtraEnv } from './mapgen/mapextras';
 import { Levels, MapgenDat, MapgenEnv, MapgenRunner } from './mapgen/jsonmapgen';
 import { GenStats } from './mapgen/stats';
 import { ArgStores, ParamCtx } from './mapgen/values';
@@ -93,6 +94,34 @@ export class WorldGenerator implements ChunkGenerator {
       region: this.wg.overmap.region,
       terrains: this.wg.overmap.terrains,
       expandItems: (ref, rng) => expandItemGroup(this.game, ref as any, rng),
+    };
+  }
+
+  private get mapExtraEnv(): MapExtraEnv {
+    const m = this.map;
+    if (!m) throw new Error('map extras before the generator has a map');
+    return {
+      expandItems: (ref, rng) => expandItemGroup(this.game, ref as any, rng),
+      terrainFlags: (id) => this.terrainFlags(id),
+      passable: (buf, i) => this.tilePassable(buf, i),
+      terrainBash: (id) => {
+        const n = m.terrain.tryIndex(this.terMigration.get(id)?.ter ?? id);
+        const b = n === undefined ? undefined : m.terrain.get(n).bash;
+        // (a bashable terrain without ter_set counts as unbashable: make_rubble then lays t_dirt,
+        // which is where BN's destroy loop ends up for rubble too)
+        return b && b.str_max !== -1 ? b.ter_set : undefined;
+      },
+      furnitureBash: (id) => {
+        const n = m.furniture.tryIndex(this.furnMigration.get(id) ?? id);
+        const b = n === undefined ? undefined : m.furniture.get(n).bash;
+        if (!b || b.str_max === -1) return undefined;
+        return !b.furn_set || b.furn_set === 'f_null' ? '' : b.furn_set;
+      },
+      fieldMaxIntensity: (id) => {
+        const levels = this.game.misc?.field_type?.[id]?.intensity_levels;
+        if (!Array.isArray(levels) || !levels.length) throw new Error(`map extra: unknown field type ${id}`);
+        return levels.length;
+      },
     };
   }
 
@@ -376,7 +405,11 @@ export class WorldGenerator implements ChunkGenerator {
     const pick = weightedPick(rng, table.values.map((v) => [v, v.w] as const));
     if (!pick) throw new Error(`map_extras ${key}: empty table`);
     if (pick.o === undefined) {
-      this.stats.unsupportedFeature(`map_extra_function ${pick.fn ?? pick.id}`);
+      // C++ generators run on the unrotated base buffer, like BN's mapgen_constructor. Gated so
+      // a genVersion 1/2 world's untouched (regenerated) chunks come out as they did before.
+      const fn = pick.fn !== undefined && this.genVersion >= 3 ? MAP_EXTRA_FUNCTIONS[pick.fn] : undefined;
+      if (fn) fn(this.mapExtraEnv, levels.get(0)!, rng);
+      else this.stats.unsupportedFeature(`map_extra_function ${pick.fn ?? pick.id}`);
       return;
     }
     const id = oterId(dat.oter, this.wg.overmap.terrains);
@@ -462,6 +495,7 @@ export class WorldGenerator implements ChunkGenerator {
       ...(s.count !== undefined && s.count !== 1 ? { count: s.count } : {}),
       ...(s.name ? { name: s.name } : {}),
       ...(s.friendly ? { friendly: true } : {}),
+      ...(s.individual ? { individual: true } : {}),
     }));
     c.vehicles = b.vehicles.map((v) => ({ ...v, x: X + v.x, y: Y + v.y, z: c.z }));
     c.zones = b.zones.map((z) => ({ type: z.type, faction: z.faction, x0: X + z.x0, y0: Y + z.y0, x1: X + z.x1, y1: Y + z.y1, z: c.z }));

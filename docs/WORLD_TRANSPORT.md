@@ -35,7 +35,9 @@ Real-input checks: `tools/realinput.ts --only sewer` (pry, climb down, climb out
 
 Remaining limits: tunnels never cross region edges (networks are per region); sunken_lab isn't
 placed (no lake columns); special-level roaming monster groups (e.g. GROUP_ANT) aren't spawned;
-z is clamped to −7..5; `mx_portal`/`mx_casings` subway extras are C++ functions and not ported.
+z is clamped to −7..5; the `mx_portal_in` subway extra (C++) is not ported, and the portal
+trap that `mx_portal` places does nothing when stepped on (BN trapfunc::portal teleports, like a
+telepad; `src/game/traps.ts` has no teleport).
 
 The sections below are each part's own notes.
 
@@ -113,7 +115,16 @@ work). Tests: `tests/undermap.test.ts` (synthetic overmap fixtures, real data).
   `sewer` loot. BN's look comes from the **map extra**: region `map_extras.sewer` has chance 1, so
   every sewer gets one of 21 `mx_sewer_*` update_mapgen layouts (pipes, pumps, grates, walkways,
   maintenance rooms). `subway` rolls `map_extras.subway` (1 in 75: corpses of soldiers,
-  scientists, campers; `mx_portal`/`mx_casings` are BN C++ and only counted as unsupported).
+  scientists, campers, and two BN C++ extras ported in `src/world/mapgen/mapextras.ts` from
+  map_extras.cpp, genVersion ≥ 3 only: **`mx_portal`** (~957: a `tr_portal` trap on a random
+  floored tile off the edge, `make_rubble` rock rubble on it and its 8 neighbours, which knocks
+  down walls in the way, then rng(0, 4) single `GROUP_NETHER_PORTAL` creatures on their own
+  rubble, rolled one at a time and not density-scaled: `place_spawns(..., individual)` becomes
+  a spawn request with `individual`) and **`mx_casings`** (~2436: one of four shootout layouts,
+  a pile, a littered OMT, a firing line or two piles, of `ammo_casings`, with 1-3 heaps of
+  `map_extra_casings` trash, stacking `fd_blood` and `rag_bloody`; BN's own quirks are kept: the
+  trash loop re-rolls its bound each pass, and the firing line bleeds at its start). `mx_portal_in`
+  is still only counted as unsupported, as every C++ extra is in genVersion 1/2 worlds).
   `worldgen.ts` `applyMapExtra` runs extras for these two builtins only (BN runs every oter's
   extras; doing that generally would change existing chunks), with its own RNG stream and
   BN's suffix rotation. The extractor ships the tables as `mapgen.json` `extras`.
