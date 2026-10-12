@@ -35,6 +35,10 @@ Real-input checks: `tools/realinput.ts --only sewer` (pry, climb down, climb out
 
 Remaining limits: genVersion 2 tunnels never cross region edges (networks are per region; genVersion 3 subways do, sewers deliberately don't); sunken_lab is
 placed from genVersion 3 (lake columns, see "Lakes in depth") but rare; special-level roaming monster groups (e.g. GROUP_ANT) aren't spawned;
+
+Remaining limits: tunnels never cross region edges (networks are per region); sunken_lab isn't
+placed (no lake columns); special-level roaming monster groups (e.g. GROUP_ANT) spawn from
+genVersion 3 ("Special spawns" below);
 z is clamped to −7..5; `mx_portal`/`mx_casings` subway extras are C++ functions and not ported.
 
 The sections below are each part's own notes.
@@ -362,3 +366,84 @@ BN generates lakes in 3D (`overmap.cpp` `place_lakes`, 3889–4007); genVersion 
   to the bed, `e` opens the outer and inner bulkhead doors, held W walks into the dry room, `>`
   takes the stairs into the airlock; 18/18 with `--gpu` (SwiftShader takes long enough to build the
   water levels that the load gate holds the game for a while).
+
+Not done: **sunken_lab** (a fixed special under lakes: needs `lake_water_cube`/`lake_bed`
+columns, which we don't generate); special-level roaming monster groups (`spawns`, e.g.
+GROUP_ANT 1000–2000) came with genVersion 3 ("Special spawns" below); z is clamped to our
+MIN_Z..MAX_Z (−7..5) instead of BN's −10..10.
+
+## Special spawns (genVersion 3)
+
+BN overmap specials can carry `"spawns": {"group", "population", "radius"}`: a roaming
+population placed on the overmap when the special is, which turns into monsters as the player
+comes near. Before genVersion 3 we ignored it, so an anthill had only its OMTs' own spawns
+(`ants`/`ants_food`), not BN's colony around it.
+
+**BN semantics** (all ported):
+- `overmap_special_spawns::deserialize` (overmap.cpp 589): group and population mandatory,
+  radius optional (default 0). The extractor ships them on fixed specials (`SpecialDef.spawns`,
+  `tools/extract/mapgen.ts`) as well as mutable ones (`tools/extract/mutable.ts`).
+- `place_special` (overmap.cpp 5991–5998, reached for wilderness specials, mutable specials and
+  city buildings alike: `place_building` → `place_special`, 5107): `pop = rng(population)`,
+  `rad = rng(radius)`, one `mongroup` at the special's origin `p` (a mutable special's root), in
+  submap coordinates (`project_to<coords::sm>`: the OMT's north-west submap), not a horde.
+- `add_mon_group` (6568–6630) splits it into radius-1 groups, one per submap: radius 1 stays one
+  group with all of `pop` (radius 0 too); otherwise every submap with `trig_dist ≤ rad` (the float
+  distance truncated into an int, so a 5×5 square at radius 2) gets
+  `(rad − dist)/rad × pop/(π rad² + 1)`, its fraction one more point with `x_in_y(frac × 10000, 10000)`.
+  The linear fall-off leaves about a third of `pop` in the groups (an anthill's 1000–2000 →
+  ~350–700).
+- `map::spawn_monsters_submap_group` (map/map.cpp 7837–7953): a group spawns when its submap is
+  in the reality bubble (11×11 submaps, every z), on its submap's tiles that are free,
+  passable with a floor (`allow_on_terrain`), outside (`is_outside`: open sky) and not seen by
+  the player — sight is ignored on the bubble's outermost ring, on another z, and on a new game
+  or load (`spawn_monsters(true)`). The population is rolled with `GetResultFromGroup`, each pick
+  costing `max(1, cost_multiplier × pack)` (BN's `for (m = 0; m < pop; m++)` runs against the
+  shrinking `pop`, so a group yields fewer monsters than its points; kept), each monster tries
+  10 random spots, and the group is cleared — also when no spot exists (not a horde).
+  `process_mongroups` (only `dying` groups) and `move_hordes`/`signal_hordes` (only hordes) never
+  touch these groups, so nothing else changes them.
+
+**Here.** `src/world/overmap/mongroups.ts` `specialMonGroups` (place_special + add_mon_group, its
+own RNG per special uid, so no other generation draw moves). `Overmap` calls it from
+`placeSpecial` (fixed and city specials, origin z0) and from mutable_place.ts through
+`MutableHost.addSpawns` (at the root), only when `genVersion >= 3`, and indexes the groups by
+submap (`monGroupsAt(sx, sy)`, `monGroupsOf(uid)`; only regions already generated: a group can lie
+in a neighbouring region and joins the index with its special's region). `src/game/mongroups.ts`
+`MonGroupSpawner` (installed by `installMonsters` when there is a world generator) scans the bubble
+once a real second — which covers both BN triggers, new submaps on the edge as the map shifts and
+the 2.5-minute whole-bubble pass — and materialises groups as above. Spawned monsters are
+ordinary monsters (saved in `monsters`, stashed when far). Save section `mongroups` (order 21) is
+the sorted list of spent group keys (`"sx,sy,z,uid"`); the groups regenerate with the overmap. A
+save without it has spent none.
+
+Which specials have them (BN data; the ones we place): Anthill and Lab with Anthill (GROUP_ANT
+1000–2000, r 10–30), Acid Anthill (GROUP_ANT_ACID, same), Slime Pit (GROUP_GOO 100–200, r 2–10),
+and three city park buildings: `triffid_sprout` (GROUP_TRIFFID_OUTER 100–160, r 0–10),
+`fungal_buds` (GROUP_FUNGI_BUDS 200–320, r 0–20), `mi-go_foward_camp` (GROUP_MI-GO_CAMP_OM
+10–16, r 1–5). The other BN specials with spawns (Bee Hive, wasp towers, fungal bloom/tower,
+triffid grove, Mi-Go camps, power stations, Shipwreck, Large Dermatik Nest) aren't placed by our
+overmap; they get their groups as soon as they are (no code change: `placeSpecial` does it).
+
+`tsx tools/dev/probe_spawns.ts [seed...]` lists them over 3×3 regions. Seed 2: 27 specials with
+spawns, 3859 population points in all (3 Anthills 408–536, 2 Labs with Anthill 448/647, 3 Slime
+Pits 50–66, the rest park growths). Seed 1: 24, 2266 points (one Anthill, 507).
+
+Tests: `tests/special_spawns.test.ts` (BN split math and ranges; every placed special with BN
+spawns has its groups at its origin within its radius; genVersion 2 places none; walking up to a
+seed 2 anthill one submap at a time spawns groups only on the bubble's edge and drains the
+colony's population; spawns wait for the title-screen hold and for ungenerated chunks; save/load
+keeps the spent set and spawns nothing twice; a genVersion 2 world spawns nothing).
+Real input: `tools/realinput.ts --only antcolony` (W toward the nearest anthill from just outside
+its spread; ants come into view, the colony's unspent population drains; seed 1, 6/6: 60 s of W
+took the survivor from 181 to 100 tiles off the hill, 68 groups spawned 81 ants, unspent 507 →
+388, up to 66 ants in sight; `docs/screenshots/transport/spawns_antcolony.png`). Debug:
+`cdda.specialSpawns('Anthill')`, `cdda.monGroups(r)`, `cdda.monGroupStats()`, `cdda.monGroupScan()`.
+
+Not BN / limits: the port's safe radius (no hostile within `SpawnerOptions.safeRadius`) applies,
+as to every spawn; the Zombie density option does not scale these groups (BN doesn't either);
+a group waits while its chunk or the chunk above (for `is_outside`) isn't generated, where BN
+always has the whole bubble loaded; BN's uniform-submap shortcut (spawning into a roofed uniform
+submap) isn't modelled; the evolve rolls of `GetUpgradedMonsterGroup` aren't (as for every group
+here). BN populations are large for real time: ~100 ants come out within the bubble at a hill's
+centre, and a park's `fungal_buds` brings ~100 fungal monsters into a town.

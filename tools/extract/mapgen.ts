@@ -213,6 +213,12 @@ for (const [type, city] of [['overmap_special', false], ['city_building', true]]
     // e.g. the classic Lab's lab_basement under its lab_stairs entrance.
     if (Array.isArray(o.place_nested) && o.place_nested.length)
       specials[o.id].nested = o.place_nested.map((n: any) => ({ p: pt(n.point), special: n.special }));
+    // BN overmap_special_spawns (group and population mandatory, radius optional): the roaming
+    // monster group place_special drops at the origin (overmap.cpp 5991-5998), genVersion >= 3.
+    if (o.spawns) {
+      if (typeof o.spawns.group !== 'string' || o.spawns.population === undefined) throw new Error(`special ${o.id}: spawns needs group and population`);
+      specials[o.id].spawns = { group: o.spawns.group, population: range(o.spawns.population, [0, 0]), radius: range(o.spawns.radius, [0, 0]) };
+    }
   }
 }
 for (const w of WILD_SPECIALS) if (!specials[w]) throw new Error(`WILD_SPECIALS entry not found: ${w}`);

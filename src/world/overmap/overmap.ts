@@ -1,5 +1,5 @@
 import { Rng, hashSeed } from '../../core/rng';
-import type { CubeDir, OvermapData, SpecialConnection, SpecialDef } from '../worldgen_data';
+import type { CubeDir, OvermapData, SpecialConnection, SpecialDef, SpecialSpawns } from '../worldgen_data';
 import { ConnectionBuilder, type ConnectionGrid } from './connections';
 import { tunnelSeams, type TunnelSeam } from './seams';
 import { MinHeap } from './heap';
@@ -7,6 +7,7 @@ import { Noise2D } from './noise';
 import { placeMutableSpecials, type MutableHost } from './mutable_place';
 import { MutableSpecial, type MutableReadHost, type PlacedPiece } from './mutable';
 import { LAKE_COLUMN_TYPES, lakeColumn } from './lakes';
+import { specialMonGroups, type MonGroup } from './mongroups';
 import { MAX_Z, MIN_Z } from '../coords';
 import {
   LINE_E, LINE_N, LINE_S, LINE_W, OmtRef, isLinear, isRotatable, oterId, parseOterId, rotateLine, rotateOffset,
@@ -115,6 +116,7 @@ class Region {
 }
 
 const DX = [0, 1, 0, -1], DY = [-1, 0, 1, 0];
+const NO_GROUPS: readonly MonGroup[] = Object.freeze([]);
 const LINE_BIT = [LINE_N, LINE_E, LINE_S, LINE_W];
 
 /**
@@ -150,6 +152,10 @@ export class Overmap {
   /** One entry per mutable special grown (mutable_place.ts), for tests and probes. */
   readonly mutableReports: { uid: number; def: string; openMandatory: number; bnUnresolved: boolean; pieces: PlacedPiece[] }[] = [];
   private labBasement?: MutableSpecial;
+  /** BN overmap::zg for special spawns (genVersion >= 3): "sx,sy" (absolute submap) -> groups.
+   *  A group can lie in a neighbouring region; it is listed once its special's region exists. */
+  private monGroupIndex = new Map<string, MonGroup[]>();
+  private monGroupsBySpecial = new Map<number, MonGroup[]>();
   /** Default terrain below ground: DDA has solid_earth at z-1; BN is empty_rock everywhere. */
   private readonly shallowUnderground: string;
   readonly T: Record<string, number> = {};
@@ -212,6 +218,19 @@ export class Overmap {
     if (sp) info.special = this.specialsByUid.get(sp);
     if (z === 0 && (sp || ref.type === 'road' || ref.type === 'bridge' || ref.type === 'road_nesw_manhole')) info.predecessor = this.baseLand(x, y);
     return info;
+  }
+
+  /**
+   * Special-spawn monster groups on absolute submap (sx, sy), any z (src/world/overmap/mongroups.ts).
+   * Only regions generated so far contribute: never generates one (callers run every frame).
+   */
+  monGroupsAt(sx: number, sy: number): readonly MonGroup[] {
+    return this.monGroupIndex.get(`${sx},${sy}`) ?? NO_GROUPS;
+  }
+
+  /** The groups a placed special spawned (empty below genVersion 3 or without BN spawns). */
+  monGroupsOf(uid: number): readonly MonGroup[] {
+    return this.monGroupsBySpecial.get(uid) ?? NO_GROUPS;
   }
 
   /** BN overmap::join_used_at: the join a mutable special matched on this OMT face (mapgen reads it). */
@@ -677,6 +696,8 @@ export class Overmap {
     const inst: SpecialInstance = { uid, def: def.id, x: r.x0 + ox, y: r.y0 + oy, rot, city, args: new Map() };
     this.specialsByUid.set(inst.uid, inst);
     r.specials.push(inst);
+    // Fixed specials are placed with their origin at z0.
+    if (def.spawns) this.addSpecialSpawns(inst, def.spawns, inst.x, inst.y, 0);
     for (const o of def.overmaps) {
       if (!o.om) continue;
       const [dx, dy] = rotateOffset(o.p[0], o.p[1], rot);
@@ -694,6 +715,19 @@ export class Overmap {
       } else r.layers.set(o.p[2] * RR + i, { t, rot: orot, line, sp: inst.uid });
     }
     return inst;
+  }
+
+  /** BN place_special's "Place spawns" step (genVersion >= 3); (x, y, z) is the origin, global OMT. */
+  private addSpecialSpawns(inst: SpecialInstance, spawns: SpecialSpawns, x: number, y: number, z: number): void {
+    if (this.genVersion < 3) return;
+    const groups = specialMonGroups(this.seed, inst.uid, spawns, x, y, z);
+    this.monGroupsBySpecial.set(inst.uid, groups);
+    for (const g of groups) {
+      const k = `${g.sx},${g.sy}`;
+      const list = this.monGroupIndex.get(k);
+      if (list) list.push(g);
+      else this.monGroupIndex.set(k, [g]);
+    }
   }
 
   // --- roads between towns / regions ---
@@ -1184,6 +1218,7 @@ export class Overmap {
         return inst;
       },
       placeFixed: (def, x, y, rot, city) => this.placeSpecial(r, def, x, y, rot, city),
+      addSpawns: (inst, spawns, x, y, z) => this.addSpecialSpawns(inst, spawns, r.x0 + x, r.y0 + y, z),
       buildLocalRoad: (x, y) => {
         const target = this.nearestRoad(r, x, y);
         if (target) this.buildRoad(r, [x, y], target);
