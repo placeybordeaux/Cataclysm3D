@@ -10,6 +10,7 @@ import { paintZombiePart } from '../../src/render/chars/zombieSkin';
 import { personPalette } from '../../src/render/chars/styled';
 import { analyseSprite, netSize, texelDims, type Img } from '../../src/render/chars/paint';
 import { pickModel } from '../../src/render/aimPick';
+import { CreatureModel, type CreatureState } from '../../src/render/chars/creature';
 import monsters from '../../public/data/monsters.json';
 
 type Mon = { id: string; bodytype?: string; species?: string[]; flags?: string[]; symbol?: string; volume?: number; special_attacks?: { id?: string; type?: string }[]; emit_fields?: { emit_id?: string }[] };
@@ -309,5 +310,43 @@ describe('aim picking skips cosmetic fx parts', () => {
     const hit = pickModel({ rig, mats: inst.mats, visible: true }, { x: 0, y: -5, h: 1.2 }, { x: 0, y: 1, h: 0 });
     expect(hit).toBeTruthy();
     expect(hit!.part.startsWith('fx')).toBe(false);
+  });
+});
+
+describe('idle life (creature.ts IDLE_LIFE)', () => {
+  // Zombies standing about, and dormant far figures the simulation never moves, used to hold a
+  // near-still pose that read as statues past a few metres.
+  const state: CreatureState = { x: 5, y: 5, z: 0, facing: 0, target: null, moving: false, walkPhase: 0, windup: null, flinch: 0, down: 0, visible: true, emph: 1, camDist: 40, sy: 1, sxz: 1 };
+  const run = (id: string, s: Partial<CreatureState> = {}) => {
+    const rig = makeRig(bodyShapeOf(like(MON[id])));
+    const skin: Skin = { page: 0, rects: new Int32Array(rig.parts.length * 5), refs: 0 };
+    const cm = new CreatureModel(new CharLayer(false), rig, skin, 0.37, 5, 5, 0);
+    const roll: number[] = [], yaw: number[] = [];
+    let stepped = false;
+    for (let i = 0; i < 30 * 15; i++) {
+      cm.update(1 / 30, { ...state, ...s });
+      roll.push(cm.inst.pose.lean[2]);
+      yaw.push(cm.inst.yaw);
+      if (Math.abs(cm.inst.pose.rot[HUM.thighR * 3]) > 0.05) stepped = true;
+    }
+    const span = (a: number[]) => Math.max(...a) - Math.min(...a);
+    return { roll: span(roll.slice(60)), yaw: span(yaw), stepped };
+  };
+
+  it('an idle zombie rocks visibly, shuffles its feet and turns now and then', () => {
+    const r = run('mon_zombie');
+    expect(r.roll).toBeGreaterThan(0.08);
+    expect(r.stepped).toBe(true);
+    expect(r.yaw).toBeGreaterThan(0.1);
+  });
+
+  it('stays out of the way while it fights or walks', () => {
+    const r = run('mon_zombie', { target: { x: 5, y: 3 } });
+    expect(r.roll).toBeLessThan(0.02);
+    expect(r.yaw).toBeLessThan(0.01);
+  });
+
+  it('leaves animals alone', () => {
+    expect(run('mon_dog').roll).toBeLessThan(0.02);
   });
 });

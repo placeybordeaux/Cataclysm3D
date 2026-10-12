@@ -9,7 +9,8 @@
 // Options: --out <dir>, --views a,b (default all), --size WxH (default 1920x1080), --gpu,
 // --prefix <name> (file prefix, default "shot"), --params '<query>' (extra URL params),
 // --look <look> (default full), --js '<expr>' (after each view is set up), --bench
-// (cdda.benchView per view), --png (lossless instead of JPEG q85), --full (full-size JPEG; default half size), --dry-run, --help.
+// (cdda.benchView per view), --frames N --every MS (N shots per view, MS apart: <prefix>_<view>_fK; for
+// motion), --png (lossless instead of JPEG q85), --full (full-size JPEG; default half size), --dry-run, --help.
 import { createServer } from 'vite';
 import puppeteer from 'puppeteer-core';
 import { mkdirSync, readFileSync } from 'node:fs';
@@ -39,6 +40,9 @@ const bench = argv.includes('--bench');
 const dry = argv.includes('--dry-run');
 const png = argv.includes('--png');
 const full = argv.includes('--full');
+const frames = Number(opt('--frames', '1'));
+const every = Number(opt('--every', '400'));
+if (!(frames >= 1) || !(every >= 0)) throw new Error('--frames must be >= 1 and --every >= 0');
 const allViews = ['horde_near', 'horde_mid', 'horde_far', 'horde_road', 'horde_dusk', 'dog', 'npc', 'windup', 'critters', 'zoo', 'night', 'third', 'props', 'bugs', 'zombies2', 'crawlers', 'crawl_move', 'crowd', 'fire', 'corpse', 'bench', 'fp_fists', 'fp_punch', 'fp_pistol', 'fp_pistol_fire', 'fp_rifle', 'fp_rifle_ads', 'fp_shotgun', 'fp_reload', 'fp_bat', 'fp_bat_swing', 'fp_guard', 'fp_knife', 'fp_axe', 'fp_spear', 'fp_katana', 'fp_flashlight', 'fp_bow', 'fp_revolver', 'fp_1911', 'fp_double', 'fp_ak', 'fp_hunting', 'fp_crowbar', 'fp_kitchen', 'fp_sledge', 'fp_lever', 'fp_lever_ads', 'fp_lever_fire', 'third_lever', 'npc_lever', 'zombie_lineup_a', 'zombie_lineup_b', 'zombie_lineup_c', 'zombie_lineup_d', 'zombie_lineup_far', 'zombie_lineup_windup', 'zombie_lineup_close', 'zombie_lineup_walk', 'zombie_lineup_dead', 'zombie_lineup_crawl', 'zombie_scene_crowd', 'zombie_scene_dusk', 'zombie_scene_night', 'zombie_scene_face'];
 const defaultViews = allViews.filter((v) => v !== 'bench' && !v.startsWith('fp_') && !v.startsWith('zombie_lineup'));
 const views = viewsArg ? viewsArg.split(',') : defaultViews;
@@ -82,8 +86,12 @@ try {
     if (info && info !== v) console.log(`  ${v}: ${info}`);
     if (extraJs) await page.evaluate(`(async () => { const cdda = window.cdda; ${extraJs}; })()`);
     // JPEG keeps the committed comparison shots light (--png for lossless)
-    const file = resolve(`${out}/${prefix}_${v}.${png ? 'png' : 'jpg'}`);
-    await page.screenshot(png ? { path: file as `${string}.png` } : { path: file as `${string}.jpeg`, type: 'jpeg', quality: 85, clip: { x: 0, y: 0, width: size[0], height: size[1], scale: full ? 1 : 0.5 } });
+    let file = '';
+    for (let k = 0; k < frames; k++) {
+      if (k) await new Promise((r) => setTimeout(r, every));
+      file = resolve(`${out}/${prefix}_${v}${frames > 1 ? `_f${k}` : ''}.${png ? 'png' : 'jpg'}`);
+      await page.screenshot(png ? { path: file as `${string}.png` } : { path: file as `${string}.jpeg`, type: 'jpeg', quality: 85, clip: { x: 0, y: 0, width: size[0], height: size[1], scale: full ? 1 : 0.5 } });
+    }
     let b = '';
     if (bench) {
       // let skins, chunk builds and grass settle before timing

@@ -1,6 +1,6 @@
 import { charSettings } from './index';
 import type { CharInstance, CharLayer, Skin } from './charLayer';
-import type { PoseIn, Rig } from './rig';
+import { HUM, quirk, type PoseIn, type Rig } from './rig';
 
 // Animation driver for one procedural creature (monster or NPC): turns simulation state into
 // stepped poses (charSettings.fps), a facing that follows movement/target rather than the
@@ -38,6 +38,13 @@ export interface CreatureState {
 
 const TURN_RATE = 9; // rad/s
 const STRIKE_TIME = 0.28;
+/**
+ * Idle life of a zombie standing about (and of dormant far figures, which the simulation never
+ * moves): a slow rock from foot to foot big enough to read at 50 m, a lolling head, and every
+ * few seconds a couple of shuffle steps in place with a slow turn. Render-only. The rock grows by
+ * up to farBoost over the FAR_LOD range: 4° moves a head only 2-3 pixels at 50 m.
+ */
+export const IDLE_LIFE = { rock: 0.075, sway: 0.045, pitch: 0.035, head: 0.14, gait: 0.35, shuffle: [1.0, 1.8], gap: [3, 9], turn: 0.7, turnRate: 0.6, farBoost: 0.8 };
 /** Far-LOD silhouette thickening: starts / full (m). Keeps limbs a few pixels wide at range. */
 export const FAR_LOD = { near: 22, far: 55 };
 
@@ -66,6 +73,16 @@ export class CreatureModel {
   private strikeT = 0;
   private clock = 0;
   private readonly pin: PoseIn;
+  /** Zombie-style humanoids idle with IDLE_LIFE. */
+  private readonly lively: boolean;
+  private idleK = 0;
+  private idlePhase = 0;
+  private idleYaw = 0;
+  private idleYawTo = 0;
+  private shuffleT = 0;
+  private shuffleDur = 0;
+  private nextShuffle: number;
+  private shuffles = 0;
 
   constructor(layer: CharLayer, readonly rig: Rig, skin: Skin, readonly seed: number, x: number, y: number, facing: number) {
     this.inst = layer.add(rig, skin);
@@ -74,6 +91,8 @@ export class CreatureModel {
     this.lastY = y;
     this.clock = seed * 10;
     this.pin = { t: 0, phase: 0, gait: 0, windup: null, windKind: 'melee', strike: 0, down: 0, flinch: 0, dead: false, seed };
+    this.lively = rig.shape.arch === 'humanoid' && (rig.shape.zombie || !!rig.zlook);
+    this.nextShuffle = IDLE_LIFE.gap[0] * quirk(seed, 21) * 2;
   }
 
   /** A blow landed or whiffed: play the follow-through. */
@@ -112,12 +131,16 @@ export class CreatureModel {
     p.down = s.down;
     p.flinch = s.flinch;
     p.dead = false;
+    const idle = this.lively && !s.moving && !s.target && !s.windup && s.down < 0.05 && s.flinch < 0.05 && this.gait < 0.05;
+    this.idleK += ((idle ? 1 : 0) - this.idleK) * Math.min(1, dt * 2);
+    if (this.idleK > 0.01) this.idleLife(dt, p);
     c.setPose(p);
+    if (this.idleK > 0.01) this.idleRock(c, s.camDist);
 
     c.x = s.x;
     c.y = s.y;
     c.z = s.z;
-    c.yaw = this.yawR;
+    c.yaw = this.yawR + this.idleYaw * this.idleK;
     c.sy = s.sy;
     c.sxz = s.sxz;
     c.emph = s.emph;
@@ -133,6 +156,42 @@ export class CreatureModel {
     c.fallDx = Math.sin(back);
     c.fallDy = -Math.cos(back);
     c.lift = liftFor(this.rig, fall) + this.rig.hover * (1 - s.down) + (s.lift ?? 0);
+  }
+
+  /** Shuffle steps in place and a slow turn now and then (feeds the walk cycle). */
+  private idleLife(dt: number, p: PoseIn): void {
+    const L = IDLE_LIFE, k = this.idleK;
+    this.nextShuffle -= dt;
+    if (this.nextShuffle <= 0 && this.shuffleT <= 0) {
+      const n = ++this.shuffles;
+      this.shuffleT = this.shuffleDur = L.shuffle[0] + (L.shuffle[1] - L.shuffle[0]) * quirk(this.seed, 30 + (n % 50));
+      this.nextShuffle = L.gap[0] + (L.gap[1] - L.gap[0]) * quirk(this.seed, 90 + (n % 50));
+      this.idleYawTo = (quirk(this.seed, 150 + (n % 50)) * 2 - 1) * L.turn;
+    }
+    if (this.shuffleT > 0) {
+      this.shuffleT -= dt;
+      this.idlePhase += dt * 0.9;
+      const d = this.idleYawTo - this.idleYaw;
+      this.idleYaw += Math.sign(d) * Math.min(Math.abs(d), L.turnRate * dt);
+      const f = charSettings.fps;
+      p.phase = f > 0 ? Math.floor(this.idlePhase * 8) / 8 : this.idlePhase;
+      // ease the steps in and out so the feet don't snap
+      p.gait = Math.max(p.gait, L.gait * k * Math.min(1, this.shuffleT * 3, (this.shuffleDur - this.shuffleT) * 3));
+    }
+  }
+
+  /** The foot-to-foot rock and head loll on top of the rig's own pose. */
+  private idleRock(c: CharInstance, camDist: number): void {
+    const L = IDLE_LIFE, k = this.idleK * (1 + L.farBoost * smooth(FAR_LOD.near, FAR_LOD.far, camDist));
+    // each zombie rocks at its own pace (0.3-0.55 Hz) so a horde doesn't sway in step
+    const ph = step(this.clock) * Math.PI * 2 * (0.3 + 0.25 * quirk(this.seed, 17)) + this.seed * 40;
+    const amp = k * (0.7 + 0.6 * quirk(this.seed, 18));
+    const o = c.pose, sc = this.rig.shape.scale;
+    o.lean[2] += Math.sin(ph) * L.rock * amp;
+    o.pos[0] += Math.sin(ph) * L.sway * amp * sc;
+    o.lean[0] += Math.sin(ph * 0.5 + this.seed * 7) * L.pitch * amp;
+    o.rot[HUM.head * 3 + 2] -= Math.sin(ph - 0.6) * L.head * amp;
+    o.rot[HUM.head * 3] += Math.sin(ph * 0.5 + 1.3) * L.head * 0.5 * amp;
   }
 
   flash(color: number, seconds: number): void {
