@@ -37,6 +37,7 @@ import { grabScenarios } from './realinput_grab';
 import { curtainsScenarios } from './realinput_curtains';
 import { sewerScenarios } from './realinput_sewer';
 import { subwaySeamScenarios } from './realinput_subwayseam';
+import { sunkenLabScenarios } from './realinput_sunkenlab';
 import { reloadScenarios } from './realinput_reload';
 import { upsScenarios } from './realinput_ups';
 import { powerArmorScenarios } from './realinput_powerarmor';
@@ -1584,6 +1585,8 @@ scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...curtainsScen
 scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...sewerScenarios({ x: () => x, js, check, shot, toGameplay, sleep }));
 // Cross-region subway tunnels (genVersion 3, src/world/overmap/seams.ts): walk the track through a region edge.
 scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...subwaySeamScenarios({ x: () => x, js, check, shot, toGameplay, sleep }));
+// Lakes in depth (genVersion 3, src/world/overmap/lakes.ts): dive to the sunken lab on seed 24 and go in; reloads the page.
+scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...sunkenLabScenarios({ page: () => page, x: () => x, js, check, shot, toGameplay, sleep, gameUrl: () => gameUrl, quickStart }));
 // Reload help (src/game/reloadhelp.ts): a battery-less flashlight says what it takes and where you saw some.
 scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...reloadScenarios({ x: () => x, js, check, shot, toGameplay, sleep }));
 // Carried UPS charging (src/game/upsTransfer.ts): enable it from the item menu, wait, see it charge.

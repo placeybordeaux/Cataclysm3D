@@ -33,8 +33,8 @@ diagonally, as BN's tee does), and every manhole has a sewer with a ladder below
 Real-input checks: `tools/realinput.ts --only sewer` (pry, climb down, climb out) and
 `--only labescape`.
 
-Remaining limits: genVersion 2 tunnels never cross region edges (networks are per region; genVersion 3 subways do, sewers deliberately don't); sunken_lab isn't
-placed (no lake columns); special-level roaming monster groups (e.g. GROUP_ANT) aren't spawned;
+Remaining limits: genVersion 2 tunnels never cross region edges (networks are per region; genVersion 3 subways do, sewers deliberately don't); sunken_lab is
+placed from genVersion 3 (lake columns, see "Lakes in depth") but rare; special-level roaming monster groups (e.g. GROUP_ANT) aren't spawned;
 z is clamped to −7..5; `mx_portal`/`mx_casings` subway extras are C++ functions and not ported.
 
 The sections below are each part's own notes.
@@ -237,8 +237,7 @@ mine_tunnel): s1 0/1/0/1/0/3/8, s2 0/1/0/1/1/2/11, s3 1/0/1/5/2/2/9, s4 0/1/1/4/
 s42 0/0/2/4/2/1/7, s743667900 0/0/2/5/0/1/4 (after the lab_basement merge: the deeper BN labs
 occupy rock the later specials would have used, so placements moved). `tools/dev/probe_mutable.ts <seed>...` prints these.
 
-Not done: **sunken_lab** (a fixed special under lakes: needs `lake_water_cube`/`lake_bed`
-columns, which we don't generate); special-level roaming monster groups (`spawns`, e.g.
+Not done: **sunken_lab** (done for genVersion 3, see "Lakes in depth"); special-level roaming monster groups (`spawns`, e.g.
 GROUP_ANT 1000–2000) — the OMTs' own spawns (ants, ants_food) do fire; z is clamped to our
 MIN_Z..MAX_Z (−7..5) instead of BN's −10..10.
 
@@ -311,3 +310,55 @@ into the next, staying at z−2.
 whose region has no subway and no other crossing is a short dead end at the edge (no stairs reach
 it). Crossings link to the nearest endpoint, not a deliberately chosen station, so lines can be
 long (≈50 tiles per crossing half); total z−2 tunnel roughly doubles.
+
+## Lakes in depth (genVersion 3)
+
+BN generates lakes in 3D (`overmap.cpp` `place_lakes`, 3889–4007); genVersion 3 ports it. Code:
+`src/world/overmap/lakes.ts`, `Overmap.baseLand` / `placeLakeColumns`, `mapgenLakeUnderwaterShore`
+(`src/world/mapgen/builtin.ts`), `swimVertical` (`src/game/water.ts`). Tests: `tests/lakes.test.ts`.
+
+- **Shore ring.** A lake OMT with any of its eight neighbours outside the lake (rivers count as
+  lake) is `lake_shore`, else `lake_surface` (BN 3947–3959). The z0 chunks don't change: our
+  `mapgenWater` already drew shores on lake tiles next to land; lake_surface keeps BN's JSON (all
+  deep water). Roads/bridges treat lake_shore like lake_surface; lake_shore has no GROUP_RIVER spawns
+  (BN). BN's `lake_size_min` (20) isn't applied: our lake noise predates it and keeps small lakes.
+- **Columns.** Under lake_surface: `lake_water_cube` z−1..−4, `lake_bed` z−5; under lake_shore:
+  `lake_underwater_shore` z−1..−5 (BN default region `lake_depth` −5). Laid right after base terrain,
+  before cities, tunnel seams and specials, as BN does, so they take the rock first: tunnels route
+  around them (BN subway/sewer locations are subterranean rock), manholes are skipped over a lake
+  street, and specials needing rock there don't fit. `Overmap.lakeColumnAt(x, y, z)` answers from
+  the noise alone, without generating a region.
+- **Seams.** A cross-region subway seam whose tile, or its partner across the edge, is under a lake
+  at z−2 is dropped by both neighbours (each computes it from the noise, so the regions still agree
+  whichever generates first). BN would never lay a subway there either.
+- **Mapgen.** `lake_water_cube`: BN JSON, all `t_water_cube`. `lake_bed`: BN JSON (lake_bed_palette,
+  12×12 nested chunks: trees, hot springs, debris, toxic waste, safes, corpses, pests).
+  `lake_underwater_shore`: BN's builtin `lake_shore` below z0 keeps the surface's shoreline on every
+  level; ours follows our surface shoreline instead (mapgenWater's bank distance, no RNG): water
+  cubes / lake bed (one in four moss, BN's 1-in-20 plant rolls) exactly under the surface's deep
+  water, `t_rock` under the bank and shallows.
+- **Swimming down** (BN `game::vertical_move` swim branch, `game.cpp` 14522–14615): in deep water
+  `>` dives under (no level change; refused wearing FLOTATION), `>` again swims into a water cube
+  below, `<` swims up and, at the top, surfaces (needs swim speed < 500, fins or MUTATION_SWIM). In
+  a water cube you are always underwater (oxygen runs down, then drowning). A dive stays under until
+  `<`; only an involuntary sinking still kicks back up on its own (our older real-time choice). The
+  eye floats mid-level inside a water cube. Not BN: nothing underwater is drawn differently (no
+  tint/fog) and it is dark below z0 (as in BN: sunlight doesn't reach z<0).
+- **sunken_lab** (`data/json/overmap/overmap_mutable/lab.json`): a fixed LAKE special,
+  `lake_bed_lab_entrance_roof` at z−4 (in a water cube), `lake_bed_lab_entrance` at z−5 (on the
+  bed: a dry bulkhead cross with doors at its arms and stairs down), `lake_bed_lab_entrance_airlock`
+  at z−6 (stairs up, scuba lockers), nesting `lab_basement` at its four neighbours at z−6
+  (`placeLabBasement`, each only if it still fits). Placed by `placeMutableSpecials`' new **lake
+  zone** (BN `place_specials` zone::lake: candidates are lake_surface OMTs, count
+  `roll_remainder(rng_float(0, 5 × lake ratio))` × region area), in a second call with its own RNG
+  stream after the mutable specials (BN sorts by z0 area; sunken_lab has none). City distance
+  [20, −1] isn't enforced (BN's `requires_city` ignores an unbounded range).
+- **Rare.** BN scales the count by the share of lake_surface, and our lakes are small (≈1% of
+  OMTs, ≈0.35% lake_surface; BN's are large, low-frequency noise): measured 3 sunken labs in 1470
+  regions (`tsx tools/dev/probe_lakes.ts --scan --radius 3 1..30`: seed 10 region 2,0; seed 19
+  region 1,−2; seed 24 region 0,0 at OMT 21,14). Each grew 66–94 lab OMTs at z−6/−7; our MIN_Z −7
+  cuts BN's depth (labs reach z−10 there).
+- **Real input**: `tools/realinput.ts --only sunkenlab` (reloads on seed 24): `>` dives, `>` ×5 swims
+  to the bed, `e` opens the outer and inner bulkhead doors, held W walks into the dry room, `>`
+  takes the stairs into the airlock; 18/18 with `--gpu` (SwiftShader takes long enough to build the
+  water levels that the load gate holds the game for a while).

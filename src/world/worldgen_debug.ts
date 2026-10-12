@@ -30,6 +30,11 @@ export function installWorldgenDebug(api: DebugApi, game: Game, gen: WorldGenera
     const f = gen.overmap.findNearest((o) => o.id.includes(text), pOmt(), maxRadius);
     return f ? { x: f.x, y: f.y, id: f.omt.id } : null;
   };
+  /** Nearest placed overmap special `id` (e.g. "sunken_lab") within `maxRegions` regions; OMT coords. */
+  api.findSpecial = (id: string, maxRegions = 1) => {
+    const s = gen.overmap.findSpecial(id, pOmt(), maxRegions);
+    return s ? { x: s.x, y: s.y, rot: s.rot } : null;
+  };
   /** Teleport to the centre of an OMT (or tile (lx, ly) inside it). */
   api.teleportOmt = (x: number, y: number, z = 0, lx = 12, ly = 12) => {
     game.player.x = x * CHUNK + lx + 0.5;
