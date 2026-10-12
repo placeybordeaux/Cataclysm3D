@@ -775,7 +775,46 @@ const scenarios: Scenario[] = [
     await toGameplay();
     // Setup: a weapon and nothing in reach.
     await js(`cdda.giveItem('crowbar', { wield: true })`);
+    // Setup: face open floor. A swing that meets a wall, window or furniture smashes it instead of
+    // whiffing (playercombat melee -> smashWorld: "whump.", no playerAttack event), and where the
+    // `move` scenario leaves you (it runs and turns in the evac shelter) a wall is often in reach;
+    // that, not a swallowed click, was the intermittent failure here.
+    // The shelter is cramped, so when no direction is clear where you stand, step (teleport) to
+    // the nearest spot that has one. 2.3 tiles covers what a swing can smash (targeting.ts
+    // targetTile looks REACH + 0.5 = 2 tiles out).
+    const clear = await js<{ ok: boolean; x: number; y: number; yaw: number; moved: boolean }>(`(() => {
+      const p = cdda.game.player, map = cdda.game.map;
+      const open = (ox, oy, yaw) => {
+        for (let t = 0; t <= 2.3; t += 0.1) {
+          const x = Math.floor(ox + Math.sin(yaw) * t), y = Math.floor(oy - Math.cos(yaw) * t);
+          const ter = map.terAt(x, y, p.z);
+          // (an open door is passable yet smashable, like bash.ts smashAimed's breakable test)
+          if (!map.passable(x, y, p.z) || map.furnAt(x, y, p.z).id !== 'f_null' || ter.open !== undefined || ter.close !== undefined) return false;
+        }
+        return true;
+      };
+      const yawAt = (ox, oy) => {
+        for (let k = 0; k < 16; k++) if (open(ox, oy, p.yaw + k * Math.PI / 8)) return p.yaw + k * Math.PI / 8;
+        return null;
+      };
+      const here = yawAt(p.x, p.y);
+      if (here !== null) { p.yaw = here; p.pitch = 0; return { ok: true, x: p.x, y: p.y, yaw: here, moved: false }; }
+      for (let r = 1; r <= 12; r++)
+        for (let dy = -r; dy <= r; dy++)
+          for (let dx = -r; dx <= r; dx++) {
+            if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+            const x = Math.floor(p.x) + dx + 0.5, y = Math.floor(p.y) + dy + 0.5;
+            const yaw = yawAt(x, y);
+            if (yaw === null) continue;
+            cdda.teleport(x, y);
+            p.yaw = yaw; p.pitch = 0;
+            return { ok: true, x, y, yaw, moved: true };
+          }
+      return { ok: false, x: p.x, y: p.y, yaw: p.yaw, moved: false };
+    })()`);
+    if (clear.moved) await settleWorld(js);
     await js(`cdda.clearMonsters(8)`);
+    check('setup: open floor in front to swing at', clear.ok, clear);
     let a0 = (await attacks()).length;
     const swingState = () => js<object>(`(() => { const c = cdda.combat, i = cdda.game.input; return { lock: i.locked, captured: i.captured, paused: cdda.game.paused, lockPaused: cdda.game.lockPaused, cooldown: c.cooldown, swing: !!c.swing }; })()`);
     const pre = await swingState();

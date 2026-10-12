@@ -360,6 +360,11 @@ plus screenshot bursts (`docs/screenshots/combat_feel/before_*.png`, about 80 ms
   *off balance* (your hit roll or the weapon's stumble), *too small to hit*, *out of reach* (a whiff with
   a monster in the arc just past the weapon's reach) and *no damage* (armor took it all). The rule is
   `missReason()` in combatfeel.ts.
+- **Swinging at a wall**: a melee swing that meets no creature but has a wall, window, door or
+  furniture under the crosshair within reach (`targeting.ts targetTile`) smashes it instead of
+  whiffing ("whump.", `PlayerCombat.melee` → `smashWorld` → `bash.ts smashAimed`). That is a smash,
+  not an attack: no `playerAttack` event. The real-input `mouse` scenario faces open floor before
+  its "LMB at nothing" whiff check for this reason.
 
 ### Hit reactions (`monai.ts react`, `monsterView.ts`, `hitFx.ts`)
 - Every damaging player hit makes the monster **flinch**. The flinch lasts up to 0.35 s, scaled by damage/max HP. The monster pauses and
