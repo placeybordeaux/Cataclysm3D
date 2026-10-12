@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import * as THREE from 'three';
-import { createHeadlight, prepareHeadlightShadow } from '../../src/render/headlightShadow';
+import { createHeadlight, HEADLIGHT_SPOTS, pickHeadlightSpots, prepareHeadlightShadow } from '../../src/render/headlightShadow';
 
 function map(light: THREE.SpotLight, compare: boolean) {
   const target = new THREE.WebGLRenderTarget(1024, 1024);
@@ -45,3 +45,23 @@ describe('headlight occlusion shadows', () => {
   });
 });
 
+
+describe('headlight spot slots', () => {
+  // Regression: one spot, and the car you drive always took it, so switching your own lights
+  // on put out the beam of every other car on the road.
+  it("keeps another car's spot when your own headlights come on", () => {
+    expect(HEADLIGHT_SPOTS).toBeGreaterThanOrEqual(2);
+    const own = 'own', near = 'near', far = 'far';
+    expect(pickHeadlightSpots([{ v: near, d: 20 }], own)).toEqual([near]);
+    expect(pickHeadlightSpots([{ v: far, d: 40 }, { v: near, d: 20 }, { v: own, d: 0 }], own)).toEqual([own, near]);
+  });
+
+  it('gives the car you drive a spot even when others are nearer the camera', () => {
+    expect(pickHeadlightSpots([{ v: 'a', d: 3 }, { v: 'b', d: 4 }, { v: 'own', d: 6 }], 'own', 2)).toEqual(['own', 'a']);
+  });
+
+  it('on foot, the nearest lit cars share the spots', () => {
+    expect(pickHeadlightSpots([{ v: 'c', d: 30 }, { v: 'a', d: 10 }, { v: 'b', d: 20 }], null, 2)).toEqual(['a', 'b']);
+    expect(pickHeadlightSpots([], null, 2)).toEqual([]);
+  });
+});

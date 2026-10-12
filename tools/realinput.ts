@@ -57,6 +57,7 @@ import { towingScenarios } from './realinput_towing';
 import { labEscapeScenarios } from './realinput_labescape';
 import { spawnsScenarios } from './realinput_spawns';
 import { deepLabScenarios } from './realinput_deeplab';
+import { headlightScenarios } from './realinput_headlights';
 
 const argv = process.argv.slice(2);
 const opt = (n: string, d: string) => (argv.includes(n) ? argv[argv.indexOf(n) + 1] : d);
@@ -1678,6 +1679,8 @@ scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...labEscapeSce
 scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...spawnsScenarios({ x: () => x, js, check, shot, toGameplay, sleep }));
 // BN's full z range (docs/WORLD_TRANSPORT.md): down the classic lab to z-10 with real keys.
 scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...deepLabScenarios({ x: () => x, js, check, shot, toGameplay, sleep }));
+// Another car's headlights survive switching your own on (H): the renderer's headlight budget.
+scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...headlightScenarios({ page: () => page, x: () => x, js, check, toGameplay, sleep }));
 
 if (argv.includes('--list') || argv.includes('--dry-run')) {
   for (const [n, what] of scenarios) console.log(`${only && !only.has(n) ? '  (skip)' : '  run   '} ${n.padEnd(11)} ${what}`);

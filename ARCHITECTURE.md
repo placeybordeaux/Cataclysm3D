@@ -299,7 +299,8 @@ tests/               vitest unit tests (pure logic, no DOM/WebGL)
 - Mesh (vehicleMesh.ts): bonnet rows ahead of the windscreen slope from 0.9 m to 0.7 m at the
   nose, low dark cowl/dash, thin A-pillars, faint glass (0.14), painted panels mid-tone with
   darker tops (`panelTop`) so sunlit cars don't read as white slabs; BN wheel sizes are cm.
-  Headlights: a spot aimed ~30 m out plus four light-map beam lights out to ~30 m.
+  Headlights: a spot aimed ~30 m out plus four light-map beam lights out to ~30 m. There are
+  two shadowed spots (`HEADLIGHT_SPOTS`): the car you drive, then the nearest other lit car.
 - Model look (default since wave 3, docs/VEHICLES.md; `?vehicles=model|parts`, Options >
   Vehicle look, `cdda.vehicleLook()`): `vehicleLayout.ts` classifies the grid (style, livery,
   sections, wheels, doors; width squeezed, seats keep their tiles via `zOf`),

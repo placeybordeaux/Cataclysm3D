@@ -26,3 +26,22 @@ export function prepareHeadlightShadow(light: THREE.SpotLight, type: THREE.Shado
     light.shadow.needsUpdate = true;
   }
 }
+
+/**
+ * Shadowed headlight spots in the scene. Fixed at startup: each one is a spot shadow every
+ * material is compiled for, so the count never changes at runtime (no recompiles), and each
+ * lit one redraws a 1024 map per frame. Two = the car you drive plus the nearest other one.
+ */
+export const HEADLIGHT_SPOTS = 2;
+
+/**
+ * Which lit vehicles get the headlight spots, best first: the one you drive (its beam is the
+ * road you're about to drive on), then the rest by distance. With a single spot and yours
+ * always first, switching your own lights on put out every other car's beam.
+ */
+export function pickHeadlightSpots<T>(lit: readonly { v: T; d: number }[], driving: T | null, n = HEADLIGHT_SPOTS): T[] {
+  return [...lit]
+    .sort((a, b) => (a.v === driving ? -1 : b.v === driving ? 1 : a.d - b.d))
+    .slice(0, n)
+    .map((l) => l.v);
+}

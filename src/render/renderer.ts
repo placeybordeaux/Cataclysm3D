@@ -155,7 +155,7 @@ export class Renderer {
   /** Visual ground offset at a tile position (relief/curbs); 0 when the look has none. */
   groundAt: ((x: number, y: number, z: number) => number) | null = null;
   /** The vehicle renderer (vehicleMesh.ts) once installed: headlight tuning from cdda.renderer. */
-  vehicleView: { headlightIntensity: number; headlight: THREE.SpotLight } | null = null;
+  vehicleView: { headlightIntensity: number; headlights: readonly THREE.SpotLight[] } | null = null;
 
   constructor(private canvas: HTMLCanvasElement, private game: Game, opts: RendererOptions = {}) {
     const params = typeof location !== 'undefined' ? new URLSearchParams(location.search) : new URLSearchParams();
@@ -576,7 +576,7 @@ export class Renderer {
     su.uSkyTint.value.copy(this.skyState.hemiSky).multiplyScalar(this.skyState.hemiIntensity * 0.6);
     // the flashlight's shadow moves with the camera, so it can't be rate limited; the sun
     // maps say themselves when they're due (shadows.ts)
-    if (this.lights.shadowDue || this.lights.flashlightOn || this.vehicleView?.headlight.intensity || this.vehicleView?.headlight.shadow.needsUpdate) this.three.shadowMap.needsUpdate = true;
+    if (this.lights.shadowDue || this.lights.flashlightOn || this.vehicleView?.headlights.some((s) => s.intensity || s.shadow.needsUpdate)) this.three.shadowMap.needsUpdate = true;
     this.sky.update(this.skyState, cam.position, this.time);
     this.weather.update(dt, cam.position);
     this.autoPatch();
