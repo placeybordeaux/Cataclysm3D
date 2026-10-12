@@ -161,6 +161,9 @@ tests/               vitest unit tests (pure logic, no DOM/WebGL)
   monster-vs-monster fights. Upgrades: half_life × MONSTER_UPGRADE_FACTOR 2, EVOLVE_MAX_ITERS 5.
 - `spawner.ts` consumes `chunk.spawns` (then clears them) + CDDA city hordes; tuning knob
   `cityHordeScale` (0.3 of CDDA's 80 zombies × city size).
+- `mongroups.ts` (genVersion >= 3): BN overmap special spawns (anthill colonies etc.), per-submap
+  groups from `Overmap.monGroupsAt`, materialised when their submap enters the 11×11-submap bubble;
+  save section `mongroups` = spent group keys. docs/WORLD_TRANSPORT.md "Special spawns".
 - `playercombat.ts` LMB melee (crosshair cone) / hitscan guns / `G` throw; `butchery.ts`.
 - Seams: `game.bash?.(x, y, z, str)` (bash.ts) lets zombies smash doors;
   `game.stats?.kills` gets kill counts; `renderer.viewmodel?.attack(kind)` is called on

@@ -171,6 +171,19 @@ export function installMonsters(game: Game, renderer: Renderer | null, worldgen:
       return out;
     };
     api.monGroupStats = () => ({ ...monGroups.stats, spent: monGroups.spent.size });
+    // cdda.specialSpawns('Anthill'): the nearest such special (OMT origin), its group and how far its submaps reach.
+    api.specialSpawns = (def: string, maxRegions = 3) => {
+      const p = game.player;
+      const sp = worldgen.overmap.findSpecial(def, { x: Math.floor(p.x / 24), y: Math.floor(p.y / 24) }, maxRegions);
+      if (!sp) return null;
+      const gs = worldgen.overmap.monGroupsOf(sp.uid);
+      return {
+        x: sp.x, y: sp.y, uid: sp.uid, group: gs[0]?.group ?? null, groups: gs.length,
+        population: gs.reduce((a, g) => a + g.population, 0),
+        unspent: gs.filter((g) => !monGroups.spent.has(g.key)).reduce((a, g) => a + g.population, 0),
+        reach: gs.reduce((a, g) => Math.max(a, Math.abs(g.sx - sp.x * 2), Math.abs(g.sy - sp.y * 2)), 0),
+      };
+    };
     api.monGroupScan = () => monGroups.scan();
   }
   return { sys, spawner, combat, view, monGroups };
