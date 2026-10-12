@@ -894,13 +894,17 @@ export interface MonsterAttackResult {
  * character's dodge*5; body part by anatomy weights; damage = melee_damage units plus
  * bash dice(melee_dice, melee_dice_sides); worn armor absorbs; pain via takeHit.
  * `damage` overrides the default roll (monster_attack damage_max_instance etc.).
+ * `bonus` is the monster's bash_bonus / cut_bonus (poison: Monster.meleeBonus), added like BN
+ * only with the dice roll; a `damage` override already has it (melee_actor adds it before its
+ * multiplier), so passing both is a caller bug.
  */
 export function monsterMeleeAttack(
   mon: MonsterDef,
   target: Character,
   rng: Rng,
-  opts: { accuracy?: number; damage?: DamageUnit[]; bp?: BodyPartId; name?: string; dodgeable?: boolean } = {},
+  opts: { accuracy?: number; damage?: DamageUnit[]; bp?: BodyPartId; name?: string; dodgeable?: boolean; bonus?: { bash: number; cut: number } } = {},
 ): MonsterAttackResult {
+  if (opts.damage && opts.bonus) throw new Error('monsterMeleeAttack: a damage override must already include the melee bonus');
   const name = opts.name ?? `The ${typeof mon.name === 'string' ? mon.name : (mon.name as { str: string }).str}`;
   const acc = opts.accuracy ?? mon.melee_skill;
   const hitRoll = normalRoll(rng, acc * 5, 25);
@@ -918,10 +922,17 @@ export function monsterMeleeAttack(
     if (u.amount > 0) raw.push({ type: u.damage_type, amount: u.amount, armor_penetration: u.armor_penetration, armor_multiplier: u.armor_multiplier });
   }
   if (!opts.damage && mon.melee_dice > 0) {
-    const bash = rng.dice(mon.melee_dice, mon.melee_dice_sides);
-    const e = raw.find((r) => r.type === 'bash');
-    if (e) e.amount += bash;
-    else raw.push({ type: 'bash', amount: bash });
+    // monster::melee_attack: the dice and bash_bonus go into the bash unit, cut_bonus into the
+    // cut unit (damage_instance::add merges by type). A unit left at <= 0 deals nothing
+    // (deal_damage_handle_type), so it is dropped before block and armor see it.
+    const add = (type: string, amount: number) => {
+      const e = raw.find((r) => r.type === type);
+      if (e) e.amount += amount;
+      else raw.push({ type, amount });
+    };
+    add('bash', rng.dice(mon.melee_dice, mon.melee_dice_sides) + (opts.bonus?.bash ?? 0));
+    if (opts.bonus?.cut) add('cut', opts.bonus.cut);
+    for (let i = raw.length - 1; i >= 0; i--) if (raw[i].amount <= 0) raw.splice(i, 1);
   }
   const rawCopy = raw.map((r) => ({ type: r.type, amount: r.amount }));
   // Creature::deal_melee_hit -> block_hit before armor; a limb block moves the hit to that limb.
