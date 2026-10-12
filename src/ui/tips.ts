@@ -4,6 +4,7 @@ import { c, closeKeyLabel, isCloseKey, openWindow, type UiWindow } from './frame
 import { registerOption } from './options';
 import type { UiContext } from './context';
 import { adaptedTips, registerTipsOption } from './tips_adapted';
+import { meleeControl } from '../game/combatfeel';
 
 // Onboarding hints, CDDA-style: a "Hints" popup when a new game starts (disable it with
 // [d] in the popup or Options > Show hints at start), and CDDA's own "tip of the day"
@@ -57,7 +58,7 @@ export function startHints(keys: KeyNames = DEFAULT_NAMES): string[] {
   return [
     `You wake up in an evacuation shelter.  Nobody is coming.  ${c('c_light_green', 'Search the lockers and the table')}: walk up to furniture and press ${key('interact')}; ${key('pickup')} picks things up.`,
     `Move with ${c('c_yellow', keys.movementKeys())} and the mouse.  Hold ${c('c_yellow', 'Shift')} to run: ${c('c_light_green', 'you can outrun most zombies')}, but it burns stamina.  ${key('crouch')} crouches.`,
-    `${c('c_yellow', 'Left mouse')} attacks.  ${key('wield')} wields a weapon, ${key('inventory')} opens your inventory, ${key('craft')} crafts.  ${c('c_light_red', 'Zombies hear you:')} smashing, shouting and above all ${c('c_light_red', 'gunfire')} pull in everything nearby.`,
+    `${meleeControl() === 'ready' ? `Hold ${c('c_yellow', 'right mouse')} to ready your weapon, ${c('c_yellow', 'left mouse')} swings.` : `${c('c_yellow', 'Left mouse')} attacks.`}  ${key('wield')} wields a weapon, ${key('inventory')} opens your inventory, ${key('craft')} crafts.  ${c('c_light_red', 'Zombies hear you:')} smashing, shouting and above all ${c('c_light_red', 'gunfire')} pull in everything nearby.`,
     `No weapon?  Smash (${key('smash')}) a young tree for ${c('c_white', 'long sticks')}; with a knife or a ${c('c_white', 'sharp rock')} a long stick becomes a ${c('c_white', 'long pointy stick')} (${key('craft')}).`,
     `Menus pause the game; ${key('close_menu')} or the key that opened one closes it and keeps the mouse captured.  ${key('menu')} pauses but frees the mouse (click or press a key to resume); in fullscreen (${key('fullscreen')}) it keeps it.`,
     `${key('help')} lists every key (rebind them in ${c('c_white', 'Options')}).  Don't fight against the odds: there's no shame in running.`,

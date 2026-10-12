@@ -91,7 +91,7 @@ export const DEFAULT_BINDINGS: Record<string, string[]> = {
   // hotbar slots in gameplay (src/ui2/bn/install.ts): use / wield / eat what's bound there
   hotbar_1: ['1'], hotbar_2: ['2'], hotbar_3: ['3'], hotbar_4: ['4'], hotbar_5: ['5'],
   hotbar_6: ['6'], hotbar_7: ['7'], hotbar_8: ['8'], hotbar_9: ['9'], hotbar_0: ['0'],
-  world_menu: ['o'], // context menu for what's under the crosshair (RMB is guard/aim while captured)
+  world_menu: ['o'], // context menu for what's under the crosshair (RMB is ready/guard/aim while captured)
   // --- tactical pause (src/pause.ts): works in menus too; Space is the side-step, P the message log ---
   tactical_pause: ['`', 'Pause'],
   // --- progression (src/progression): tips, recipes, places, unlock progress ---

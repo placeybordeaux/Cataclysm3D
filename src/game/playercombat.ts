@@ -20,7 +20,7 @@ import { techniqueMessage, type TargetInfo, type TechniqueOutcome } from './tech
 import type { MonsterSystem } from './monai';
 import { Grid, hasLOS } from './los';
 import { sfx, type MeleeSkill } from '../audio/sfx';
-import { FEEL, arcFor, defenseOf, hitStopSeconds, missReason, sweptArcTarget, swingTiming, type SwingStyle, type SwingTiming } from './combatfeel';
+import { FEEL, arcFor, defenseOf, hitStopSeconds, meleeControl, meleeStance, missReason, sweptArcTarget, swingTiming, type Stance, type SwingStyle, type SwingTiming } from './combatfeel';
 import { moveWithCollision, CREATURE_RADIUS } from './physics';
 import { GUN_PROJECTILE_SPEED, projectileDodge, projectileHit } from './projectile';
 import { npcOnArc, npcOnLine, npcOnRay, type NpcBody, type NpcFireHooks, type NpcProjectileHit, type NpcRayHit } from './npcfire';
@@ -32,8 +32,10 @@ import { raycastTiles } from './raycast';
 import { damageVehicleMount, vehicleHitHeight, type FuelBlast } from './vehicleDamage';
 import { LEVEL_HEIGHT } from '../world/coords';
 
-// The survivor's attacks in real time: LMB / `f` swings or fires, RMB aims a gun (or guards
-// with a melee weapon / bare hands), Space or a double-tapped strafe side-steps, `t` throws (the `throw` binding).
+// The survivor's attacks in real time: LMB / `f` swings or fires, RMB aims a gun (or, with a
+// melee weapon / bare hands, readies it: combatfeel.meleeStance — by default LMB only swings
+// while readied, and the readied stance is the guard), Space or a double-tapped strafe
+// side-steps, `t` throws (the `throw` binding).
 //
 // LMB melee runs through the feel layer (combatfeel.ts): wind-up -> contact -> active window ->
 // recovery. The blow resolves at contact, against whatever the weapon's swept arc finds around
@@ -94,6 +96,8 @@ export interface ViewModelHook {
   /** Hold the pose for hit-stop. */
   impact?(seconds: number): void;
   setGuard?(on: boolean): void;
+  /** Ready-stance control, weapon not readied: carry it lowered so the state reads at a glance. */
+  setLowered?(on: boolean): void;
   /** Gun kick scaled by the round's recoil (replaces attack('fire') when present); `flash` false for bows, slings, air guns. */
   recoil?(k: number, o?: { flash?: boolean; cls?: RangedClass }): void;
 }
@@ -337,6 +341,8 @@ export class PlayerCombat implements GameSystem {
   private wasReady = true;
   /** When the last round left (combat clock, s): the reticle shows for a moment after a shot. */
   lastShotAt = -Infinity;
+  /** This tick's melee stance (combatfeel.meleeStance); null with a gun, in a menu or dead. */
+  stance: Stance | null = null;
 
   /**
    * Is the weaving reticle up (aimmodel.reticleVisible)? Free aim with a ranged weapon only: RMB
@@ -413,7 +419,7 @@ export class PlayerCombat implements GameSystem {
     this.updateFlights(dt);
     if (p.dead || input.captured) {
       if (this.draw) this.cancelDraw();
-      this.setGuard(false);
+      this.setStance(null);
       this.prevHeld.clear();
       return;
     }
@@ -431,7 +437,7 @@ export class PlayerCombat implements GameSystem {
     const rmb = (input.mouseButtons & 4) !== 0;
     // Bows and slingshots are drawn (RMB), slings whirled; both loose on LMB (rangedfeel.ts).
     if (gun && style !== 'trigger') {
-      this.setGuard(false);
+      this.setStance(null);
       this.detectSidestep();
       this.updateDraw(gun, style, clicks.includes(0), rmb, dt);
       return;
@@ -439,22 +445,32 @@ export class PlayerCombat implements GameSystem {
     if (this.draw) this.cancelDraw();
     const lmb = clicks.includes(0) || held;
     if (gun && rmb) aim(p, gun, dt * ACTION_SCALE * 100);
-    // RMB with a melee weapon or bare hands: guard (lowered while a swing plays).
-    this.setGuard(!gun && rmb && !this.swing && !p.effects.has('downed') && !game.movementOverride?.());
-    if (def.guarding) {
-      def.guardAge += dt;
-      p.modStamina(-FEEL.guardStaminaPerSec * dt);
-    }
+    // RMB with a melee weapon or bare hands: the ready stance / guard (combatfeel.meleeStance).
+    const stance = gun ? null : meleeStance({
+      rmb,
+      running: p.running && p.canRun() && ['KeyW', 'KeyA', 'KeyS', 'KeyD'].some((k) => input.held.has(k)),
+      blocked: !!game.movementOverride?.(),
+      downed: p.effects.has('downed'),
+      swinging: !!this.swing,
+    });
+    this.setStance(stance, dt);
     this.detectSidestep();
     const ready = this.cooldown <= 0 && !this.swing;
     if (ready && !this.wasReady) this.readyAt = this.time;
     this.wasReady = ready;
+    const click = clicks.includes(0);
+    // Lowered (ready control): the click doesn't swing; say why at the crosshair. A swing already
+    // under way finishes either way, and a banked timing-model click is dropped.
+    const canSwing = gun !== null || stance!.canSwing;
+    if (!canSwing) {
+      this.buffered = false;
+      if (click) this.refuse(rmb ? "can't swing while running" : 'hold right mouse to ready');
+    }
     // Timing model, melee: a click just before the swing is ready is banked, and one landing in
     // the window around the ready moment chains a perfect swing. Holding LMB repeats plainly.
     const rhythm = timingGames() && !gun;
-    const click = clicks.includes(0);
-    if (rhythm && click && !ready && this.cooldown <= rhythmWindow(this.meleeSkill()).early) this.buffered = true;
-    if (ready && (lmb || this.buffered)) {
+    if (rhythm && canSwing && click && !ready && this.cooldown <= rhythmWindow(this.meleeSkill()).early) this.buffered = true;
+    if (ready && canSwing && (lmb || this.buffered)) {
       const onBeat = rhythm && (this.buffered || (click && this.time - this.readyAt <= rhythmWindow(this.meleeSkill()).late));
       this.buffered = false;
       this.attack();
@@ -744,15 +760,28 @@ export class PlayerCombat implements GameSystem {
     return null;
   }
 
-  private setGuard(on: boolean): void {
+  /**
+   * Apply this tick's melee stance (null: gun, menu, dead). The parry clock (guardAge) starts
+   * when the guard goes up; with the ready control it starts when the stance is *raised* and
+   * keeps running through your own swings, so the guard coming back after a swing is not a
+   * fresh parry (else every swing would end in a free one).
+   */
+  private setStance(st: Stance | null, dt = 0): void {
     const p = this.game.player;
     const def = defenseOf(p);
-    if (on !== def.guarding) {
-      def.guarding = on;
-      def.guardAge = 0;
-      this.viewmodel()?.setGuard?.(on);
-    }
-    p.moveSpeedMul = on ? FEEL.guardMoveMul : 1;
+    const prev = this.stance;
+    this.stance = st;
+    const readyCtl = meleeControl() === 'ready';
+    const raisedNow = readyCtl ? !!st?.ready : !!st?.guarding;
+    const raisedBefore = readyCtl ? !!prev?.ready : def.guarding;
+    if (raisedNow && !raisedBefore) def.guardAge = 0;
+    else if (raisedNow) def.guardAge += dt;
+    def.guarding = !!st?.guarding;
+    const vm = this.viewmodel();
+    vm?.setGuard?.(raisedNow);
+    vm?.setLowered?.(readyCtl && !!st && !st.ready);
+    p.moveSpeedMul = st?.moveMul ?? 1;
+    if (st && st.staminaPerSec > 0) p.modStamina(-st.staminaPerSec * dt);
   }
 
   // ------------------------------------------------------------------ side-step

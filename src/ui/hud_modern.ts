@@ -40,6 +40,7 @@ import { mapMarkers } from '../game/mapmarkers';
 import { refugeeCenterOmt, seenKey } from './overmap_ui';
 import { CHUNK } from '../world/coords';
 import './hud_modern.css';
+import { meleeControl } from '../game/combatfeel';
 
 export interface BannerSpec {
   text: string;
@@ -530,7 +531,7 @@ export class ModernHud {
       h('div', { class: 'hud2-weapon-main' }, icon, h('div', { class: 'hud2-weapon-text' }, h('div', { class: 'hud2-weapon-name', text: bionic ? bionic.name : w ? w.name() : 'Bare hands' }), h('div', { class: `ui2-small tone-${tone}`, text: line2 }))),
       ...extras.map((html) => h('div', { class: 'ui2-small hud2-extra', html })),
     );
-    attachTooltip(this.weapon, () => (w ? `${w.name()} — ${w.isGun() ? `reload [${g.keys.label('reload')}], fire mode [${g.keys.label('fire_mode')}]` : `swing with the left mouse button; wield something else with [${g.keys.label('wield')}]`}` : `Unarmed. Wield a weapon with [${g.keys.label('wield')}].`));
+    attachTooltip(this.weapon, () => (w ? `${w.name()} — ${w.isGun() ? `reload [${g.keys.label('reload')}], fire mode [${g.keys.label('fire_mode')}]` : `${meleeControl() === 'ready' ? 'hold the right mouse button to ready it, then left click to swing' : 'swing with the left mouse button'}; wield something else with [${g.keys.label('wield')}]`}` : `Unarmed. Wield a weapon with [${g.keys.label('wield')}].`));
   }
 
   /** Lines other systems add to the sidebar (bionic power, martial arts style, fire mode). */

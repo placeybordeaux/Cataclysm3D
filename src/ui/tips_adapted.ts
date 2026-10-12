@@ -121,6 +121,7 @@ const KEEP = new Set<string>([
  * veteran and a newcomer both have to learn. `{key:action}` is replaced by the bound key.
  */
 export const PORT_TIPS: string[] = [
+  'Hold the right mouse button to ready your weapon: you only swing with it up, and it guards.  Raise it as a blow comes to parry.',
   'Watch a zombie\'s arms: when it winds up, hold the right mouse button to guard, or side-step with Space.',
   'Timed jobs like lighting a fire or crafting need you to stand still.  Walking away stops them.',
   'Tap {key:tactical_pause} to pause the world and think.  Nothing moves until you tap it again.',

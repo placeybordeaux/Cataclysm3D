@@ -383,6 +383,8 @@ describe('free aim melee: a blow that connects lands', () => {
     setAimModel('timing');
     const { game, sys, combat, input } = world();
     target(sys, game, 1.0);
+    // Readied (RMB held: the default melee control only swings from the ready stance).
+    (input as unknown as { mouseButtons: number }).mouseButtons = 4;
     combat.beginSwing();
     // Run until just inside the early window, then click once.
     while (combat.cooldown > 0.08) game.tick(1 / 30);

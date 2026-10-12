@@ -5,7 +5,10 @@ import type { DebugApi } from './debug';
 import type { MonstersHandle } from './monsters';
 import type { Monster } from './game/monster';
 import { ACTION_SCALE } from './core/time';
-import { FEEL, FEEL_PRESETS, defenseOf, feelDifficulty, setFeelDifficulty, type FeelDifficulty } from './game/combatfeel';
+import {
+  FEEL, FEEL_PRESETS, MELEE_CONTROLS, defenseOf, feelDifficulty, isMeleeControl, meleeControl, setFeelDifficulty, setMeleeControl, type FeelDifficulty, type MeleeControl,
+} from './game/combatfeel';
+import { registerOption } from './ui/options';
 import { interactOverrides } from './game/interact';
 import { CombatHud } from './ui/combatHud';
 import { getUiRoot } from './ui/framework';
@@ -17,12 +20,64 @@ import { freeAim } from './game/aimmodel';
 // Wiring for the combat feel layer (src/game/combatfeel.ts; rules in playercombat.ts/monai.ts,
 // visuals in render/{viewmodel,monsterView,hitFx,camera}.ts): the crosshair combat HUD, the
 // struggle key while grabbed, gun kick on the camera, aim-down-sights zoom, the viewmodel
-// jolt when you're hit, reload timing, and window.cdda helpers. main.ts calls it once, after
-// installCombatDepth (it wraps the reload key that one installs).
+// jolt when you're hit, reload timing, the melee control (Options > Controls > Melee,
+// `?melee=ready|anytime`, remembered in localStorage, `cdda.setMeleeControl`), and window.cdda
+// helpers. main.ts calls it once, after installCombatDepth (it wraps the reload key that one installs).
+
+const MELEE_KEY = 'cdda3d.meleeControl';
+
+function storedMeleeControl(): MeleeControl | null {
+  try {
+    const v = localStorage.getItem(MELEE_KEY);
+    return isMeleeControl(v) ? v : null;
+  } catch {
+    return null;
+  }
+}
+
+function storeMeleeControl(m: MeleeControl): void {
+  try {
+    localStorage.setItem(MELEE_KEY, m);
+  } catch {
+    // private mode: the choice just doesn't persist
+  }
+}
 
 export function installCombatFeel(game: Game, renderer: Renderer | null, monsters: MonstersHandle, api?: DebugApi): void {
   const { combat, sys } = monsters;
   const p = game.player;
+
+  // --- melee control: the URL wins (a shared link or a test run), then the stored choice.
+  const q = typeof location !== 'undefined' ? new URLSearchParams(location.search).get('melee') : null;
+  if (q !== null) {
+    if (isMeleeControl(q)) setMeleeControl(q);
+    else game.message(`Unknown melee control "?melee=${q}" (use ready or anytime); keeping ${meleeControl()}.`, 'c_light_red');
+  } else {
+    const s = storedMeleeControl();
+    if (s) setMeleeControl(s);
+  }
+  const chooseMelee = (m: MeleeControl) => {
+    setMeleeControl(m);
+    storeMeleeControl(m);
+  };
+  registerOption({
+    category: 'Controls',
+    name: 'Melee',
+    value: () => MELEE_CONTROLS.find((m) => m.id === meleeControl())!.name,
+    change: (d) => {
+      const i = MELEE_CONTROLS.findIndex((m) => m.id === meleeControl());
+      chooseMelee(MELEE_CONTROLS[(i + d + MELEE_CONTROLS.length) % MELEE_CONTROLS.length].id);
+    },
+    desc: MELEE_CONTROLS.map((m) => `${m.name}: ${m.desc}.`).join('  '),
+  });
+  if (api) {
+    api.meleeControl = () => meleeControl();
+    api.meleeControls = MELEE_CONTROLS;
+    api.setMeleeControl = (m: MeleeControl) => {
+      chooseMelee(m);
+      return meleeControl();
+    };
+  }
 
   // --- grabbed: the interact key struggles (CDDA: you break free by trying to move away,
   // which still works; mashing the key is the explicit version and builds a bonus).
@@ -166,6 +221,7 @@ function installDebug(api: DebugApi, game: Game, monsters: MonstersHandle): void
       difficulty: feelDifficulty(),
       swing: s && { t: +s.t.toFixed(3), windup: +s.timing.windup.toFixed(3), contact: +(s.timing.windup + s.timing.strike).toFixed(3), total: +s.timing.total.toFixed(3), resolved: s.resolved, style: s.style },
       cooldown: +combat.cooldown.toFixed(3), hitStop: +combat.hitStop.toFixed(3),
+      melee: meleeControl(), ready: !!combat.stance?.ready, canSwing: combat.stance?.canSwing ?? null, moveSpeedMul: +game.player.moveSpeedMul.toFixed(3),
       guarding: def.guarding, guardAge: +def.guardAge.toFixed(2), dodgeWindow: +def.dodgeWindow.toFixed(2), stepping: !!combat.step,
       grabbed: !!sys.grabbedBy, struggle: def.struggle,
       windups: sys.active.filter((m: Monster) => m.windup).map((m: Monster) => ({ uid: m.uid, kind: m.windup!.kind, t: +m.windup!.t.toFixed(3), total: +m.windup!.total.toFixed(3) })),

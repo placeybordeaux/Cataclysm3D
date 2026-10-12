@@ -26,6 +26,7 @@ import { screenScenarios } from './realinput_screens';
 import { lootScenarios } from './realinput_loot';
 import { archeryScenarios } from './realinput_archery';
 import { aimScenarios } from './realinput_aim';
+import { stanceScenarios } from './realinput_stance';
 import { qaScenarios } from './realinput_qa';
 import { galleryScenarios } from './realinput_gallery';
 import { driveScenarios } from './realinput_drive';
@@ -138,6 +139,17 @@ async function until(what: (s: State) => boolean, ms = 3000): Promise<State> {
     s = await state();
   }
   return s;
+}
+/**
+ * A melee swing the default way (Options > Controls > Melee "Ready to swing"): RMB readies, LMB
+ * swings, RMB goes back up (the swing finishes on its own). tools/realinput_stance.ts tests the stance itself.
+ */
+async function readyClick(): Promise<void> {
+  await x.buttonDown(3);
+  await sleep(60);
+  await x.clickHere(1);
+  await sleep(40);
+  await x.buttonUp(3);
 }
 /** Back to plain gameplay with the mouse captured. Chrome refuses a re-lock for ~1 s after an Esc unlock. */
 async function toGameplay(): Promise<State> {
@@ -775,7 +787,7 @@ const scenarios: Scenario[] = [
     check('the rebind is stored', /"wear":\["y"\]/.test(stored ?? ''), stored);
     await js(`cdda.game.keys.resetBindings()`);
   }],
-  ['mouse', 'LMB swings (wind-up, then the blow resolves at contact); wheel zooms the top-down camera', async () => {
+  ['mouse', 'RMB readies, LMB swings (wind-up, then the blow resolves at contact); wheel zooms the top-down camera', async () => {
     await toGameplay();
     // Setup: a weapon and nothing in reach.
     await js(`cdda.giveItem('crowbar', { wield: true })`);
@@ -822,7 +834,7 @@ const scenarios: Scenario[] = [
     let a0 = (await attacks()).length;
     const swingState = () => js<object>(`(() => { const c = cdda.combat, i = cdda.game.input; return { lock: i.locked, captured: i.captured, paused: cdda.game.paused, lockPaused: cdda.game.lockPaused, cooldown: c.cooldown, swing: !!c.swing }; })()`);
     const pre = await swingState();
-    await x.clickHere(1);
+    await readyClick();
     // Slow software-rendered frames (1920x1080) stretch the swing in real time: poll.
     let blows: Attack[] = [];
     for (let i = 0; i < 30 && !blows.length; i++) {
@@ -842,7 +854,7 @@ const scenarios: Scenario[] = [
     a0 = (await attacks()).length;
     for (let i = 0; i < 8 && !(await attacks()).slice(a0).some((b) => b.outcome === 'hit' || b.outcome === 'crit'); i++) {
       await js(`(() => { const m = cdda.game.monsters.all.find((z) => z.uid === ${uid}); const p = cdda.game.player; p.yaw = Math.atan2(m.x - p.x, -(m.y - p.y)); p.pitch = -0.1; })()`);
-      await x.clickHere(1);
+      await readyClick();
       await sleep(1200);
     }
     blows = (await attacks()).slice(a0);
@@ -870,7 +882,7 @@ const scenarios: Scenario[] = [
     let msgs: string[] = [];
     for (let i = 0; i < 12 && !msgs.some((m) => /inject your venom/.test(m)); i++) {
       await js(`(() => { const m = cdda.game.monsters.all.find((z) => z.uid === ${uid}); const p = cdda.game.player; p.yaw = Math.atan2(m.x - p.x, -(m.y - p.y)); p.pitch = -0.1; })()`);
-      await x.clickHere(1);
+      await readyClick();
       await sleep(1200);
       msgs = (await log()).slice(before);
     }
@@ -923,7 +935,7 @@ const scenarios: Scenario[] = [
         await x.hold('w', 150);
       } else {
         if (!engaged) engaged = Date.now();
-        if (st.cd <= 0 && !st.swing) await x.clickHere(1);
+        if (st.cd <= 0 && !st.swing) await readyClick();
       }
       wasGrabbed = st.grabbed;
       await sleep(60);
@@ -1613,6 +1625,8 @@ scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...chassisScena
 scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...archeryScenarios({ x: () => x, js, check, shot, toGameplay, sleep }));
 // Aim models (free aim vs classic dice, the timing games): also after the screen scenarios (it hands out weapons).
 scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...aimScenarios({ x: () => x, js, check, shot, toGameplay, sleep }));
+// Melee "right mouse readies" (combatfeel.meleeStance): LMB alone, RMB+LMB, walk speed, Shift, Esc, the classic option.
+scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...stanceScenarios({ x: () => x, js, check, shot, toGameplay, sleep }));
 // Every Options row cycles (wave-3 QA): after everything else, so its toggles can't shift earlier scenarios.
 scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...qaScenarios({ x: () => x, js, check, shot, toGameplay, sleep, errors: () => errors }));
 // The style gallery (docs/GALLERY.md): its own page; restores localStorage and comes back to a quick-started game.

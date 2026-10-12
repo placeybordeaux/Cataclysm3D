@@ -132,7 +132,8 @@ export class CombatHints {
       const p = game.player;
       if (e.phase === 'windup') {
         if (p.inv.wielded?.isGun() || m.z !== p.z || Math.hypot(m.x - p.x, m.y - p.y) > 3) return;
-        if (defenseOf(p).guarding) return;
+        // (readied but mid-swing counts: the guard comes back with the stance)
+        if (defenseOf(p).guarding || this.combat.stance?.ready) return;
         if (this.show('melee_guard', Math.max(0.6, (e.seconds ?? 0.5) + 0.3))) this.windup = m;
       } else if (m === this.windup) {
         // The blow landed or whiffed: guarded (or side-stepped) through it counts as practice.
