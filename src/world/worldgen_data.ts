@@ -87,6 +87,19 @@ export interface SpecialDef {
   flags: string[];
   /** BN place_nested: specials grown from a point of this one (e.g. Lab -> lab_basement). */
   nested?: { p: [number, number, number]; special: string }[];
+  /** BN overmap_special_spawns: the monster group place_special drops at the special's origin. */
+  spawns?: SpecialSpawns;
+}
+
+/**
+ * BN overmap_special_spawns (overmap.cpp 589): a roaming population (e.g. an anthill's GROUP_ANT,
+ * 1000-2000 within 10-30 submaps) placed as overmap monster groups, genVersion >= 3
+ * (src/world/overmap/mongroups.ts). Ranges are inclusive [min, max]; radius is in submaps.
+ */
+export interface SpecialSpawns {
+  group: string;
+  population: [number, number];
+  radius: [number, number];
 }
 
 // --- BN "subtype": "mutable" overmap specials (overmap.cpp mutable_overmap_special_data),
@@ -164,7 +177,7 @@ export interface MutableSpecialDef {
   root: string;
   shared: Record<string, IntDistribution>;
   phases: MutablePlacementRule[][];
-  spawns?: { group: string; population: [number, number]; radius: [number, number] };
+  spawns?: SpecialSpawns;
 }
 
 export interface ForestBiome {

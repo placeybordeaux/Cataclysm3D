@@ -22,6 +22,7 @@ import { openMenu } from './ui/framework';
 import { registerOption } from './ui/options';
 import { cycleDensity, defaultDensity, densityLabel, registerDensityHost } from './game/density';
 import { registerSaveable } from './save/registry';
+import { installMonGroups, type MonGroupSpawner } from './game/mongroups';
 
 // Wiring for monsters & combat: simulation systems, spawning, player attacks, keys, danger
 // checks, rendering and window.cdda helpers. main.ts calls installMonsters() once.
@@ -31,6 +32,8 @@ export interface MonstersHandle {
   spawner: Spawner;
   combat: PlayerCombat;
   view: MonsterView | null;
+  /** overmap special spawns (genVersion >= 3); null without a world generator */
+  monGroups?: MonGroupSpawner | null;
 }
 
 /** Adapter from the world generator's overmap to what the spawner needs. */
@@ -72,6 +75,7 @@ export function installMonsters(game: Game, renderer: Renderer | null, worldgen:
     });
   }
   spawner.install();
+  const monGroups = worldgen ? installMonGroups(game, sys, worldgen.overmap, spawner) : null;
   let view: MonsterView | null = null;
   if (renderer) {
     view = new MonsterView(game, renderer, sys, combat);
@@ -155,7 +159,21 @@ export function installMonsters(game: Game, renderer: Renderer | null, worldgen:
   game.keys.register('butcher', 'Butcher corpse', () => butcherMenu(game, sys));
 
   if (api) installDebug(api, game, sys, spawner, combat);
-  return { sys, spawner, combat, view };
+  if (api && monGroups && worldgen) {
+    // cdda.monGroups(r): special-spawn groups within r submaps (spent or not); cdda.monGroupScan() runs a scan now.
+    api.monGroups = (r = 5) => {
+      const p = game.player, sx = Math.floor(p.x / 12), sy = Math.floor(p.y / 12);
+      const out: { key: string; group: string; x: number; y: number; z: number; population: number; spent: boolean }[] = [];
+      for (let dy = -r; dy <= r; dy++)
+        for (let dx = -r; dx <= r; dx++)
+          for (const g of worldgen.overmap.monGroupsAt(sx + dx, sy + dy))
+            out.push({ key: g.key, group: g.group, x: g.sx * 12, y: g.sy * 12, z: g.z, population: g.population, spent: monGroups.spent.has(g.key) });
+      return out;
+    };
+    api.monGroupStats = () => ({ ...monGroups.stats, spent: monGroups.spent.size });
+    api.monGroupScan = () => monGroups.scan();
+  }
+  return { sys, spawner, combat, view, monGroups };
 }
 
 /** Look-mode text: CDDA monster::extended_description basics (health, attitude, description). */

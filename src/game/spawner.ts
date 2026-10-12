@@ -107,6 +107,11 @@ export class Spawner {
     this.held ??= [];
   }
 
+  /** Spawns are being held (title screen): overmap monster groups wait too. */
+  get holding(): boolean {
+    return this.held !== null;
+  }
+
   /** Spawn everything queued by hold() and stop queueing. */
   release(): void {
     const q = this.held;
@@ -144,7 +149,8 @@ export class Spawner {
     }
   }
 
-  private groupCtx(): MonsterGroupContext {
+  /** MonsterGroupManager's time/season conditions as of now (also used by src/game/mongroups.ts). */
+  groupCtx(): MonsterGroupContext {
     const clock = this.sys.game.clock;
     const h = clock.hourOfDay;
     return {

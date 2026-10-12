@@ -1,6 +1,6 @@
 import { Rng } from '../../core/rng';
 import { MAX_Z, MIN_Z } from '../coords';
-import type { CubeDir, MutableSpecialDef, OvermapData, SpecialConnection, SpecialDef } from '../worldgen_data';
+import type { CubeDir, MutableSpecialDef, OvermapData, SpecialConnection, SpecialDef, SpecialSpawns } from '../worldgen_data';
 import { mutableRequiredLocations, placeMutable, type MutableGrid, type MutablePlacement } from './mutable';
 import { rotateOffset } from './oter';
 import type { City, ConnectionRequest, SpecialInstance } from './overmap';
@@ -32,6 +32,8 @@ export interface MutableHost {
   setTerrain(x: number, y: number, z: number, oter: string, rot: number, uid: number): void;
   newInstance(def: string, x: number, y: number, rot: number, city: City | undefined): SpecialInstance;
   placeFixed(def: SpecialDef, x: number, y: number, rot: number, city: City | undefined): SpecialInstance;
+  /** BN place_special's monster group at the special's origin (region-local); a no-op below genVersion 3 */
+  addSpawns(inst: SpecialInstance, spawns: SpecialSpawns, x: number, y: number, z: number): void;
   /** BN local_road connection to (x, y, 0): link it to the nearest road */
   buildLocalRoad(x: number, y: number): void;
   requestConnection(c: ConnectionRequest): void;
@@ -206,6 +208,8 @@ export function placeMutableSpecials(h: MutableHost, rng: Rng): void {
       inst = h.newInstance(e.id, h.x0 + x, h.y0 + y, rot, city);
       const res = placeMutable(e.mut, gridFor(h, inst.uid, inbounds), rng, x, y, z, rot);
       h.report?.(inst, res);
+      // BN place_special puts the group at `p`, the root, whichever way the special grew.
+      if (e.mut.spawns) h.addSpawns(inst, e.mut.spawns, x, y, z);
       for (const [jx, jy, jz, dir, id] of res.joinsUsed) h.recordJoin(jx, jy, jz, dir, id);
       for (const p of res.placed) used.push([p.x, p.y, p.z]);
       for (const c of res.connections) conns.push(c);

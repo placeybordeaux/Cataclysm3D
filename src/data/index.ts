@@ -127,21 +127,32 @@ function entryValid(e: MonsterGroupDef['monsters'][number], ctx: MonsterGroupCon
  * upgrade rolls of GetUpgradedMonsterGroup are not modelled.)
  */
 export function pickFromMonsterGroup(data: GameData, groupId: string, rng: Rng, ctx: MonsterGroupContext = {}, _recursive = false): MonsterSpawn[] {
+  return pickMonsterGroupResult(data, groupId, rng, ctx)?.spawns ?? [];
+}
+
+/**
+ * pickFromMonsterGroup plus what GetResultFromGroup takes off its `quantity`:
+ * max(1, cost_multiplier * pack size) for a picked entry, 1 for the default monster. Null for
+ * an unknown group (warned once).
+ */
+export function pickMonsterGroupResult(data: GameData, groupId: string, rng: Rng, ctx: MonsterGroupContext = {}): { spawns: MonsterSpawn[]; cost: number } | null {
   const g = data.monsterGroups[groupId];
   if (!g) {
     warnOnce('monstergroup', groupId);
-    return [];
+    return null;
   }
   let chance = rng.int(1, Math.max(1, g.freq_total));
   let out: MonsterSpawn = { id: g.default, count: 1 };
+  let cost = 1;
   for (const e of g.monsters) {
     if (!entryValid(e, ctx)) continue;
     if (e.weight >= chance) {
       const pack = e.pack_size && e.pack_size[1] > 1 ? rng.int(e.pack_size[0], e.pack_size[1]) : 1;
       out = { id: e.monster, count: pack };
+      cost = Math.max(1, e.cost_multiplier * pack);
       break;
     }
     chance -= e.weight;
   }
-  return out.id && out.id !== 'mon_null' ? [out] : [];
+  return { spawns: out.id && out.id !== 'mon_null' ? [out] : [], cost };
 }
