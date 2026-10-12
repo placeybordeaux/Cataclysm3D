@@ -86,12 +86,22 @@ for (const v of versions)
             inc(hubs.has(comp.get(`${x},${y}`)) ? 'manhole joined' : 'manhole cut off');
           }
       } else {
+        // regions holding a station, per network: a station "reaches another region" when its
+        // network also holds a station in a different region (cross-region tunnels, genVersion 3)
+        const stationRegions = new Map<number, Set<string>>();
+        const stations: { comp: number | undefined; region: string }[] = [];
         for (let y = lo; y < hi; y++)
           for (let x = lo; x < hi; x++) {
             const t = om.omtAt(x, y, z).type;
             if (!/sub_station/.test(t)) continue;
             inc(comp.has(`${x},${y}`) ? `${t} joined` : `${t} cut off`);
+            const region = `${Math.floor(x / REGION)},${Math.floor(y / REGION)}`, k = comp.get(`${x},${y}`);
+            stations.push({ comp: k, region });
+            if (k !== undefined) (stationRegions.get(k) ?? stationRegions.set(k, new Set()).get(k)!).add(region);
           }
+        c['subway networks with a station'] = stationRegions.size;
+        c['stations reaching another region'] = stations.filter((s) => s.comp !== undefined && [...stationRegions.get(s.comp)!].some((r) => r !== s.region)).length;
+        c['stations'] = stations.length;
       }
     }
     console.log(`v${v} seed ${seed}: ${JSON.stringify(c)} (${(performance.now() - t0).toFixed(0)} ms)`);

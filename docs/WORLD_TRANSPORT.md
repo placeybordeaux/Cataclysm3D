@@ -17,7 +17,7 @@ run genVersion 1 and keep generating exactly the world they stored chunks of
 | Railroad station (`railroad_city`) | Town building, JSON mapgen, stairs to z−1. Existed before this work. |
 | Railroad track network | Not a gap: BN core never lays rails (no special uses `local_railroad`). |
 | Subway stations | Town building, JSON, stairs down to the z−2 platform. Existed before. |
-| Subway tunnels | **Built.** `subway_tunnel` connections at z−2 join stations, urban_30/39, the mall, microlabs, lab cargo stations, lab train depots and mine stations, per region (`connections.ts`). Rendered by the `mapgen_subway` port; track meets every station. |
+| Subway tunnels | **Built.** `subway_tunnel` connections at z−2 join stations, urban_30/39, the mall, microlabs, lab cargo stations, lab train depots and mine stations, per region (`connections.ts`); genVersion 3 continues them across region edges (`seams.ts`, below). Rendered by the `mapgen_subway` port; track meets every station. |
 | Sewers | **Built.** A sewer hub under every town centre, manholes on four-way streets, `sewer_tunnel` at z−1 joining them (BN's "city" layout). Rendered by the `mapgen_sewer` port plus BN's `mx_sewer_*` map extras. Covers stay shut until pried; a ladder under each leads down and back up. |
 | `UNIQUE` specials | **Fixed.** At most one per region, chance scaled by region area; mutagen labs went from ~150 to 1–2 per 3×3 regions. Start-region guarantees kept. |
 | Road stubs over underground connections | **Fixed.** Only `local_road` connections at z0 become roads. |
@@ -33,7 +33,7 @@ diagonally, as BN's tee does), and every manhole has a sewer with a ladder below
 Real-input checks: `tools/realinput.ts --only sewer` (pry, climb down, climb out) and
 `--only labescape`.
 
-Remaining limits: tunnels never cross region edges (networks are per region); sunken_lab isn't
+Remaining limits: genVersion 2 tunnels never cross region edges (networks are per region; genVersion 3 subways do, sewers deliberately don't); sunken_lab isn't
 placed (no lake columns); special-level roaming monster groups (e.g. GROUP_ANT) aren't spawned;
 z is clamped to −7..5; `mx_portal`/`mx_casings` subway extras are C++ functions and not ported.
 
@@ -241,3 +241,73 @@ Not done: **sunken_lab** (a fixed special under lakes: needs `lake_water_cube`/`
 columns, which we don't generate); special-level roaming monster groups (`spawns`, e.g.
 GROUP_ANT 1000–2000) — the OMTs' own spawns (ants, ants_food) do fire; z is clamped to our
 MIN_Z..MAX_Z (−7..5) instead of BN's −10..10.
+
+## Cross-region subways (genVersion 3)
+
+genVersion 2 built every tunnel network inside one 96×96 region, so subways came out as 7–9
+separate networks per 3×3 regions, none reaching a station in another region. genVersion 3 lets
+subway tunnels cross region edges; genVersion 1 and 2 output is unchanged (pinned by
+`tests/overmap_genversion.test.ts`, and `tests/overmap_seams.test.ts` checks v2 has no crossing).
+
+**BN.** BN never links networks across overmaps on purpose: `build_connection` only records a
+path end that happens to touch the border in `connections_out` (src/overmap/overmap.cpp:5463),
+and an overmap generated later picks up its already-generated neighbours' border points
+(`populate_connections_out_from_neighbors`, overmap.cpp:3680–3711) — order dependent, which we
+can't afford. Its overmaps are 180×180 though, so per-overmap networks are big; ours have
+0.28 of the area. Layouts: `subway_tunnel` is `"layout": "p2p"` (data/json/overmap/
+overmap_connections.json:27: each new endpoint links to the nearest earlier one), `sewer_tunnel`
+has the default `city` layout (src/overmap/overmap_connection.cpp:195: each manhole links to its
+own city's centre).
+
+**Seams** (`src/world/overmap/seams.ts`). Regions generate lazily, in any order, so a crossing is
+derived from the seed alone, like road portals (`overmap.ts portal()`): for every region edge,
+keyed by the region that owns it (the one to the west/north), `hashSeed(seed, ox, oy, side,
+0x5e4, 1) % 100 < 35` decides whether a subway crosses and `hashSeed(…, 2)` its offset along the
+edge (kept 8 OMTs from corners). Both neighbours compute the same point. Each region then:
+
+1. reserves its half of every crossing on its edges at z−2 right after the base terrain, before
+   cities and specials (`reserveSeams`): `subway` with the one line bit that points across the
+   edge. Fixed specials skip occupied z≠0 tiles and the mutable/lab solvers need their own
+   locations (`subterranean_subway` is used by none), so nothing can take it;
+   `buildConnections` throws if one was overwritten (none over 750 regions, seeds 100–129);
+2. builds its own connection requests exactly as before (stations, labs, mines…);
+3. joins each half to its network with the p2p rule (`ConnectionBuilder.connect` with
+   `initialDir` pointing back across the edge): the nearest earlier subway endpoint, ten tries; in
+   a region without a subway the first crossing is a stub and later ones link to it, so a region
+   with no stations still carries a line through.
+
+Nothing a region builds depends on its neighbours, so the result is order independent (tested:
+a region generated alone hashes the same as after its eight neighbours, z−7..1), and the halves
+always line up because each carries the across-edge bit from step 1.
+
+**Sewers don't cross**, by design: a BN sewer belongs to one city, and our cities never straddle
+a region edge (`placeCities` keeps the centre `size + 3` from the edge, `layOutStreet` keeps
+streets 2 from it), so each city's sewer already lies in one region. A crossing would only join
+two different towns' sewers, which BN never does. Sewer networks are unchanged (23–26 per 3×3).
+
+**Measured** (`tsx tools/transport_probe.ts`, 3×3 regions around the start, z−2; a station
+"reaches another region" when its network also holds a station in a different region):
+
+| seed | subway networks v2 → v3 | stations reaching another region v2 → v3 | subway tiles v2 → v3 |
+|---|---|---|---|
+| 1 | 9 → 3 | 0 → 46/46 | 1271 → 2042 |
+| 2 | 7 → 4 | 0 → 28/32 | 932 → 1505 |
+| 3 | 8 → 6 | 0 → 17/25 | 1018 → 1475 |
+| 42 | 9 → 4 | 0 → 28/33 | 894 → 1810 |
+| 743667900 | 9 → 4 | 0 → 23/26 | 823 → 1915 |
+
+The crossing chance is one constant (`KINDS` in seams.ts). At 50% the same block became 1–3
+networks (73–100% of stations reaching another region); at 25%, 5–8 networks and 22–88%. 35%
+keeps "sometimes" with most stations on an inter-region line. Generation cost: 46.1 → 49.5 ms
+per region.
+
+**Rendering.** The seam OMTs are ordinary `subway_*` tiles; `tests/overmap_seams.test.ts`
+renders both sides of every seam on the start region's edges (seed 42) and checks every rail
+tile on one side of the shared edge has rail opposite it. Real input: `tools/realinput.ts --only
+subwayseam` stands the survivor in a crossing tunnel and walks it with a held W from one region
+into the next, staying at z−2.
+
+**Limits.** Only z−2 subways cross (the mutagen lab's z−4 cargo subway stays a stub). A crossing
+whose region has no subway and no other crossing is a short dead end at the edge (no stairs reach
+it). Crossings link to the nearest endpoint, not a deliberately chosen station, so lines can be
+long (≈50 tiles per crossing half); total z−2 tunnel roughly doubles.

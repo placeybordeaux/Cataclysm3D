@@ -1,6 +1,7 @@
 import { Rng, hashSeed } from '../../core/rng';
 import type { CubeDir, OvermapData, SpecialConnection, SpecialDef } from '../worldgen_data';
 import { ConnectionBuilder, type ConnectionGrid } from './connections';
+import { tunnelSeams, type TunnelSeam } from './seams';
 import { MinHeap } from './heap';
 import { Noise2D } from './noise';
 import { placeMutableSpecials, type MutableHost } from './mutable_place';
@@ -106,6 +107,8 @@ class Region {
   /** BN road_nesw_manhole candidates (city centres and one in 8 street branch points), checked
    *  once road lines are known (genVersion >= 2). */
   readonly manholes: { x: number; y: number; city: City; center: boolean }[] = [];
+  /** This region's halves of the tunnel crossings on its edges (seams.ts, genVersion >= 3). */
+  seams: readonly TunnelSeam[] = [];
   constructor(readonly rx: number, readonly ry: number) {}
   get x0() { return this.rx * REGION; }
   get y0() { return this.ry * REGION; }
@@ -405,8 +408,13 @@ export class Overmap {
     const rng = new Rng(hashSeed(this.seed, r.rx, r.ry, 7));
     for (let y = 0; y < REGION; y++)
       for (let x = 0; x < REGION; x++) r.t[y * REGION + x] = this.intern(this.baseLand(r.x0 + x, r.y0 + y));
-    // BN place_lakes writes the columns with the lake, before cities and specials claim rock.
-    if (this.genVersion >= 3) this.placeLakeColumns(r);
+    // BN place_lakes writes the columns with the lake, before cities and specials claim rock and
+    // before any connection is built (BN tunnels only run through subterranean rock), so lakes
+    // go first and a seam whose tile is under a lake is dropped (reserveSeams).
+    if (this.genVersion >= 3) {
+      this.placeLakeColumns(r);
+      this.reserveSeams(r);
+    }
     this.placeCities(r, rng);
     this.connectRegion(r, rng);
     this.placeSpecials(r, rng);
@@ -419,6 +427,16 @@ export class Overmap {
       this.placeManholes(r);
       this.buildConnections(r);
     }
+  }
+
+  /**
+   * genVersion >= 3: the lake column oter at global (x, y, z < 0), from the noise alone (what
+   * placeLakeColumns lays before anything else), or undefined. Safe to call for tiles of regions
+   * that don't exist yet: it never generates one.
+   */
+  lakeColumnAt(x: number, y: number, z: number): string | undefined {
+    if (this.genVersion < 3 || z >= 0) return undefined;
+    return lakeColumn(this.baseLand(x, y))[-z - 1];
   }
 
   /** genVersion >= 3: BN place_lakes' columns under every lake_surface / lake_shore (lakes.ts). */
@@ -1074,6 +1092,35 @@ export class Overmap {
         initialDir: inst ? this.initialDirOf(r, req, inst) : -1,
         city: city && { x: city.x - r.x0, y: city.y - r.y0 },
       });
+    }
+    // After the region's own requests, so a crossing joins the network nearest to it (BN p2p);
+    // in a region without one, the first crossing is a stub and later ones link to it.
+    for (const s of r.seams) {
+      const k = s.z * RR + s.y * REGION + s.x;
+      const slot = r.layers.get(k);
+      if (!slot || this.types[slot.t] !== s.terrain || slot.sp !== 0 || !(slot.line & (1 << s.side)))
+        throw new Error(`overmap: the ${s.terrain} seam reserved at ${r.x0 + s.x},${r.y0 + s.y},${s.z} was overwritten by ${slot ? this.types[slot.t] : 'nothing'}`);
+      b.connect({ x: s.x, y: s.y, z: s.z, connection: s.connection, initialDir: (s.side + 2) % 4 });
+    }
+  }
+
+  /**
+   * genVersion >= 3: reserve this region's half of every tunnel crossing on its edges (seams.ts)
+   * before anything is placed, so no special can take a tile the neighbour's half lines up with.
+   * Its line bit already points across the edge; buildConnections joins it to the network.
+   */
+  private reserveSeams(r: Region): void {
+    // A crossing under a lake can't exist (BN's subway only runs through subterranean rock, and
+    // the lake column is laid first). Both halves test both sides' tiles from the noise alone, so
+    // the two regions drop the same crossings whichever generates first.
+    r.seams = tunnelSeams(this.seed, r.rx, r.ry, REGION).filter((s) => {
+      const gx = r.x0 + s.x, gy = r.y0 + s.y;
+      return !this.lakeColumnAt(gx, gy, s.z) && !this.lakeColumnAt(gx + DX[s.side], gy + DY[s.side], s.z);
+    });
+    for (const s of r.seams) {
+      const k = s.z * RR + s.y * REGION + s.x;
+      if (r.layers.has(k)) throw new Error(`overmap: two tunnel seams at ${r.x0 + s.x},${r.y0 + s.y},${s.z}`);
+      r.layers.set(k, { t: this.intern(s.terrain), rot: 0, line: 1 << s.side, sp: 0 });
     }
   }
 
