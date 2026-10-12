@@ -152,10 +152,10 @@ From playtests and agent reports, roughly by value for the new-audience goal:
   z-levels deliberately (they do fall now).
 - NPCs don't eat/sleep/keep schedules; recruiting followers is hard early.
 - Vehicle construction/repair, siphoning/refuelling not built. Towing is built: BN's heavy duty tow cable as a rope in the momentum physics, attached from the cable or the vehicle panel, snapping per BN or on overload, saved (docs/VEHICLES.md "Towing"); BN has no trailer/semi hitch, so there's no coupling. Turrets: manual fire from gunner stations and the controls volley are built (docs/VEHICLES.md "Turrets"); autoloaders, automatic targeting, firing USE_TANKS turrets by hand and gun recoil pushing the vehicle are not.
-- Mapgen (new games, genVersion 2): sewers and subway tunnels join towns, stations and labs per
-  region (not across region edges); BN's mutable specials (lab basement with escape cells and
-  train depots, anthills, slime pits, Ice Lab, mines, streams) are placed; sunken_lab isn't.
-  Saves from before keep their old generation. See [WORLD_TRANSPORT.md](WORLD_TRANSPORT.md).
+- Mapgen (new games, genVersion 3): sewers per town and subway tunnels that also cross region
+  edges; BN's mutable specials (lab basement with escape cells and train depots, anthills, slime
+  pits, Ice Lab, mines, streams), lakes with depth and the (rare) sunken lab, colony monster
+  groups (Options > Colony monsters), BN's z −10..10. Older saves keep their generation. See [WORLD_TRANSPORT.md](WORLD_TRANSPORT.md).
 - Mutation special attacks: see [BN_MUTATION_ATTACKS.md](BN_MUTATION_ATTACKS.md). Bionic guns: the player aims and fires them, with power paid per shot; EMP, chain lightning and trail effects are not modelled, and NPCs don't use them. See [BN_BIONIC_GUNS.md](BN_BIONIC_GUNS.md). Frostbite/blisters: see [THERMAL_INJURIES.md](THERMAL_INJURIES.md).
 - Power armor switches on from the worn exoskeleton and runs on a carried UPS or a Power Armor Interface CBM; climate control, recon vision, radiation protection and NPC activation are not ported. See [BN_POWER_ARMOR.md](BN_POWER_ARMOR.md).
 - Achievements that need untracked events never unlock (listed in the achievements screen).
