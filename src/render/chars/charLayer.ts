@@ -417,6 +417,9 @@ export class CharLayer {
   private live = new Set<CharInstance>();
   /** keyed page * SHAPES.length + shape index */
   private batches = new Map<number, Batch>();
+  private perKey: number[] = [];
+  private fillKey: number[] = [];
+  private batchByKey: Batch[] = [];
   private scratch: THREE.Matrix4[] = [];
   private needsWrite = true;
   private needsLayout = true;
@@ -495,26 +498,31 @@ export class CharLayer {
     // Rig tapers and packed rects are immutable; future in-place edits must touch(true).
     const layout = this.needsLayout || !this.reuseStaticUploads;
     this.needsLayout = false;
-    // count per page
+    // count per (page, shape); keys are small ints, so plain arrays (this loop runs per part)
     const NS = SHAPES.length;
-    const per = new Map<number, number>();
+    const per = this.perKey;
+    per.fill(0);
     for (const i of this.live) {
       if (!i.visible) continue;
       const sh = shapeIndex(i.rig);
-      for (let p = 0; p < sh.length; p++) {
-        const key = i.skin.page * NS + sh[p];
-        per.set(key, (per.get(key) ?? 0) + 1);
-      }
+      const base = i.skin.page * NS;
+      while (per.length < base + NS) per.push(0);
+      for (let p = 0; p < sh.length; p++) per[base + sh[p]]++;
     }
-    for (const [key, n] of per) {
+    const byKey = this.batchByKey;
+    for (let key = 0; key < per.length; key++) {
+      if (!per[key]) continue;
       let b = this.batches.get(key);
       if (!b) {
         b = new Batch(shapeGeometry(SHAPES[key % NS]), store.texture(Math.floor(key / NS)), this.group, this.shadows, this.matFor);
         this.batches.set(key, b);
       }
-      b.ensure(n);
+      byKey[key] = b;
+      b.ensure(per[key]);
     }
-    const fill = new Map<number, number>();
+    const fill = this.fillKey;
+    fill.length = per.length;
+    fill.fill(0);
     for (const i of this.live) {
       if (!i.visible) continue;
       const sh = shapeIndex(i.rig);
@@ -523,9 +531,8 @@ export class CharLayer {
       const rx = i.x, ry = i.z * LEVEL_HEIGHT + i.lift, rz = i.y;
       for (let p = 0; p < i.rig.parts.length; p++) {
         const key = i.skin.page * NS + sh[p];
-        const b = this.batches.get(key)!;
-        const k = fill.get(key) ?? 0;
-        fill.set(key, k + 1);
+        const b = byKey[key];
+        const k = fill[key]++;
         const M = b.mesh.instanceMatrix.array as Float32Array;
         const T = b.tex.array as Float32Array, X = b.misc.array as Float32Array, F = b.flash.array as Float32Array, R = b.root.array as Float32Array, P = b.shape.array as Float32Array;
         M.set(i.mats.subarray(p * 16, p * 16 + 16), k * 16);
@@ -539,7 +546,7 @@ export class CharLayer {
         R[k * 4] = rx; R[k * 4 + 1] = ry; R[k * 4 + 2] = rz; R[k * 4 + 3] = i.fade;
       }
     }
-    for (const [key, b] of this.batches) b.commit(fill.get(key) ?? 0, layout);
+    for (const [key, b] of this.batches) b.commit(fill[key] ?? 0, layout);
   }
 
   dispose(): void {

@@ -227,8 +227,9 @@ export function zombieRig(sh: BodyShape, look: ZombieLook, style: Exclude<ZStyle
   const gear: Gear[] = [];
   switch (look.gear) {
     case 'cop':
-      gear.push({ name: 'headCap', parent: H.head, joint: [0, cY - 0.035, 0], size: [hW * 1.1, 0.07, hD * 1.08], shape: 'bevel', color: [34, 40, 66] });
-      gear.push({ name: 'headBrim', parent: H.head, joint: [0, cY - 0.05, -hD * 0.55], size: [hW * 0.95, 0.016, 0.07], center: [0, 0, -0.025], rest: [-0.15, 0, 0], color: [20, 22, 30] });
+      // the sprite's riot helmet with a raised clear visor, a dark navy uniform
+      gear.push({ name: 'headHelmet', parent: H.head, joint: [0, cY - 0.065, 0.005], size: [hW * 1.26, 0.14, hD * 1.24], shape: 'ball', color: [30, 36, 58] });
+      gear.push({ name: 'headVisor', parent: H.head, joint: [0, cY - 0.02, -hD * 0.6], size: [hW * 1.1, 0.06, 0.02], rest: [-0.5, 0, 0], color: [150, 170, 190], glow: 0.05, zr: 'visor' });
       gear.push({ name: 'torsoBadge', parent: H.torso, joint: [torsoW * 0.22, torsoH * 0.72, -torsoD / 2 - 0.008], size: [0.04, 0.05, 0.015], color: [214, 186, 90], glow: 0.15 });
       break;
     case 'swat':
@@ -355,7 +356,7 @@ export function zombieRig(sh: BodyShape, look: ZombieLook, style: Exclude<ZStyle
   }
   if (fx.has('redEyes')) {
     // eyes that burn red out of a black face: separate glowing pips so they read past 10 m
-    for (const x of [-1, 1]) add({ name: x > 0 ? 'headEyeR' : 'headEyeL', parent: H.head, joint: [x * headW * 0.22, jawH * 0.45 + craniumH * 0.45, -headD * 0.47], size: [0.04, 0.03, 0.02], center: [0, 0, 0], shape: 'box', src: { zr: 'arc', color: [255, 40, 30], glow: 1 }, kind: 'thin' });
+    for (const x of [-1, 1]) add({ name: x > 0 ? 'headEyeR' : 'headEyeL', parent: H.head, joint: [x * headW * 0.22, jawH * 0.45 + craniumH * 0.45, -headD * 0.47], size: [0.032, 0.022, 0.02], center: [0, 0, 0], shape: 'box', src: { zr: 'arc', color: [255, 40, 30], glow: 1 }, kind: 'thin' });
   }
   if (fx.has('charred')) {
     for (let k = 0; k < 6; k++) add({ name: `torsoChar${k}`, parent: k < 4 ? H.torso : H.head, joint: k < 4 ? [((k * 37) % 7 - 3) * 0.035 * B.girth, 0.1 + ((k * 13) % 5) * 0.08, -torsoD * 0.52] : [((k * 5) % 3 - 1) * 0.05, cY * 0.7, -hD * 0.5], size: [0.07, 0.05, 0.02], center: [0, 0, 0], rest: [0, 0, k * 0.7], shape: 'bevel', src: { color: [26, 22, 20], zr: 'gear' }, kind: 'thin' });

@@ -257,7 +257,7 @@ export function paintZombiePart(dst: Img, ox: number, oy: number, dims: [number,
         }
       }
       // charged hands: a blue cast and a faint glow, the arcs do the rest
-      if (look.fx.includes('arcs')) fill((f) => mix(pp.skin, [120, 180, 255], f === 5 ? 0.7 : 0.45), 0.18);
+      if (look.fx.includes('arcs')) fill((f) => mix(pp.skin, [120, 180, 255], f === 5 ? 0.5 : 0.3));
       break;
     }
     case 'neck':
@@ -317,7 +317,8 @@ function paintSurface(src: PartSrc, pp: PersonPalette, look: ZombieLook, c: Ctx)
         if (f === 4 || (f < 4 && v < (bloat ? 0.16 : 0.3))) return pp.shirt;
         if (f === 1 && Math.abs(u - 0.5) < 0.6 / fw && Math.abs(v - 0.62) < 0.6 / fh) return mul(sk, 0.45);
         if ((x * 5 + y * 3) % 11 === 0) return mul(sk, 0.78);
-        if (bloat && Math.sin(x * 1.7 + y * 0.9) + Math.sin(y * 1.3 - x * 0.6) > 1.5) return [150, 96, 136];
+        // a few bile-purple bruises, not a pattern
+        if (bloat && Math.sin(x * 0.9 + y * 0.5 + 1.3) + Math.sin(y * 0.7 - x * 0.35) > 1.82) return [142, 92, 128];
         return sk;
       });
       if (look.undead) for (let i = 0; i < 3; i++) put(1, Math.floor(r() * rects[1][2]), Math.floor(rects[1][3] * (0.3 + 0.6 * r())), BLOOD[1]);

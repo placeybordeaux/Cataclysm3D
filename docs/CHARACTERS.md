@@ -18,6 +18,7 @@ The billboards are still there as a variant.
 | `cdda.chars({ far: [16, 45], emph: 0.35 })` | hostile readability ramp (m) and strength |
 | `cdda.chars({ paint: 'sprite' })` / `?charpaint=sprite` | people painted by projecting the sprite (round 1) instead of the styled skins |
 | `?viewmodel=model` / `?viewmodel=sprite`, Options → **First-person hands**, `cdda.chars({ viewmodel: 'sprite' })` | 3D first-person arms/items (default) or the classic 2D viewmodel sprites |
+| `?zstyle=shamble` / `caricature` / `boxy`, Options → **Zombie bodies**, `cdda.chars({ zstyle })` | zombie bodies: hunched, reaching, a silhouette per family (default) / the same pushed further / the round-6 upright box bodies (persisted, `localStorage cdda3d.visual.zstyle`) |
 | `cdda.chars()` | current settings + live/body/skin/page counts |
 
 ## How it works (src/render/chars/)
@@ -31,6 +32,10 @@ The billboards are still there as a variant.
 | `creature.ts` | Animation driver: stepped pose clock, gait from actual speed, facing that turns toward movement or the target it fights (9 rad/s), downed topple, and `FallingBody` (death: stagger along the killing blow, topple — backwards for people, onto a side for animals, onto the back for bugs — bounce, lie). |
 | `index.ts` | Mode switch, shared layers per renderer, sprite pixel reading (atlas page or outfit composite canvas). |
 | `playerModel.ts` | The survivor's own body in the third-person/top-down cameras, painted from the player's outfit composite (repainted when clothes change); hides the renderer's billboard via `renderer.playerBodyOverride`. At the wheel (chase / top-down cameras) it hands the body to `VehicleRenderer`, which seats it on the saddle / seat (`src/render/vehicleRider.ts`, docs/VEHICLES.md "Your body in the seat"). |
+| `shapes.ts` | Unit shapes the parts are drawn with: box, octagonal prism, bevelled box, ball (rhombicuboctahedron). Every triangle belongs to one of the cube's six faces and takes its uv by projection onto it, so any part can change shape without repainting. |
+| `zombieFamily.ts` | The zombie family table (BN data → family, build, features, gear). Pure. |
+| `zombie.ts` | Zombie bodies on the 16 person parts plus silhouette pieces and animated features; poses blended in world terms. Pure. |
+| `zombieSkin.ts` | Zombie skins: the styled person painter pushed toward the sprites, plus rags, gear, sacs, bone, plants, smoke, arcs, flesh, tendrils. Pure. |
 | `ridePose.ts` | Seated / riding pose: `PoseIn.ride` gives hand and ankle targets in model space and the humanoid solves each limb by two-bone IK (splay, swing, elbow / knee bend), torso lean, head kept level. Pure, unit-tested against the built matrices. |
 
 `monsterView.ts` and `npcView.ts` keep all the combat-feel logic (telegraph warm/hot flashes,
@@ -229,6 +234,144 @@ axe.
   ponytail, bald; women and men draw from different lists), or the worn headgear instead (cap,
   hat, helmet from worn item ids). Palette overrides go through `PaintOpts.person`.
 
+## Round 7: zombie readability
+
+The user's verdict on round 6: zombies were too boxy and the special zombies too similar —
+upright mannequins with their arms out, told apart mostly by colour
+([old horde](screenshots/wave3/characters/after_zombies2.jpg)). The UltiCa sprites
+([common](screenshots/zombies/common.png), [specials](screenshots/zombies/special.png)) say
+something else: zombies are hunched with the head thrust forward and the arms reaching out at
+chest height; they are torn and lopsided; their skin is a rotten grey-green; and every special
+has its own outline. This round is also groundwork for a telegraphed lunge-grab.
+
+**Sprite / before / after** (`tools/zombie-compare.py`; rows are the same scene, same light):
+
+| | |
+|---|---|
+| common town zombies | ![](screenshots/zombies/compare_common.jpg) |
+| specials | ![](screenshots/zombies/compare_specials.jpg) |
+| more specials (necro master, skeleton brute, screecher, gasbag, brute shocker, survivor, bio-op, predator, hulk) | ![](screenshots/zombies/compare_specials2.jpg) |
+| uniforms, skeleton, thorny, necromancer | ![](screenshots/zombies/compare_uniforms.jpg) |
+| the same families at 25-30 m (crop, 2× nearest) | ![](screenshots/zombies/compare_far.jpg) |
+
+Wind-ups: rear-back (front, 3/4), overhead hammer (brute, broadside), crouch before a leap
+(broadside, front), lunge-grab: [after](screenshots/zombies/after_zombie_lineup_windup.jpg) vs
+[before](screenshots/zombies/before_zombie_lineup_windup.jpg),
+[caricature](screenshots/zombies/caricature_zombie_lineup_windup.jpg). Also: individuals of one
+type up close ([after](screenshots/zombies/after_zombie_lineup_close.jpg) /
+[before](screenshots/zombies/before_zombie_lineup_close.jpg)), a hostile group shambling in
+([after](screenshots/zombies/after_zombie_lineup_walk.jpg) /
+[before](screenshots/zombies/before_zombie_lineup_walk.jpg)), crawlers
+([after](screenshots/zombies/after_zombie_lineup_crawl.jpg)) and bodies
+([after](screenshots/zombies/after_zombie_lineup_dead.jpg) /
+[before](screenshots/zombies/before_zombie_lineup_dead.jpg)).
+
+### Shapes (shapes.ts, charLayer.ts)
+
+Still instanced, still pixel-textured: a part now names a unit shape — `oct` (octagonal prism:
+limbs, neck, torso, hips), `bevel` (chamfered box: jaw, hands, feet, gear), `ball`
+(rhombicuboctahedron: skull, belly, hump, deltoids, sacs, helmets) or `box`. The six-face nets
+are unchanged: each facet is textured by projection onto the box face it leans toward, so
+chamfers sample that face's edge strip and catch the banded light as facets. One InstancedMesh
+per (skin page, shape), so a street of zombies is a handful of draws. Skin alpha became a
+channel: 0 cuts a texel out (torn rag edges, dithered smoke), 1..254 glows (acid sacs, red eyes,
+arcs, the miner's lamp), 255 is plain. Aim picking skips cosmetic parts named `fx…` (smoke,
+arcs, tendrils, drool), so shots pass through smoke and a flickering arc never makes a body
+unpickable.
+
+### Families (zombieFamily.ts)
+
+One table, first match wins, read from BN data first (special attacks, flags, species, volume,
+`emit_fields`) and the id second — so unlisted variants and mod monsters land somewhere
+sensible (anything with `ACID_BLOOD` grows sacs, anything `ELECTRIC` crackles, anything with
+`SMASH` is built like a brute, anything over 500 L is a hulk). A look is a family label, a
+**build** (proportions + resting posture), stacking **features**, **gear** (by id: BN has no
+field for uniforms), a degree (zombie_tough is half a brute; a huge boomer is all belly),
+`bone` (species SKELETON: a skeleton brute is a brute made of bone) and `undead`.
+
+| Family | Read from | Build / signature |
+|---|---|---|
+| thorny | species PLANT | walker under a leafy plant mass with yellow-tipped thorns |
+| necro | RESURRECT / COMMAND_BUFF | tall, thin, jet black; red glowing eye pips; five writhing tendrils from the back |
+| hulk | volume ≥ 500 L | towering hunch, hump, logs for forearms, fists the size of a torso, small sunk head |
+| boomer | BOOMER / BOOMER_GLOW / SUICIDE | a ball of pale stretched belly with the shirt riding up, short legs, arms out; boomer_huge almost all ball |
+| acid | ACID_BLOOD or ACID / ACID_BARF | glowing yellow-green sacs on shoulders, back, neck, arm; glowing drool; corrosive bigger and covered |
+| electric | ELECTRIC or SHOCKSTORM | blue arcs jumping off hands, shoulders, head and shins every pose step; blue-cast hands; brute build with SMASH |
+| smoker | emit_fields smoke | wrapped in dithered grey puffs turning round the body |
+| shrieker | SHRIEK* on a stumbling adult | gaunt, crouched low on bent knees, long neck, head up, maw hanging wide open |
+| fat | id | belly and bulk, arms spread |
+| brute | SMASH | wide deltoids and hump, heavy arms hanging low, big fists, swinging arms when walking |
+| grabber | GRAB_DRAG / RANGED_PULL / STRETCH_* | long straight reaching arms, big hands |
+| child | volume ≤ 32 L | small, big head |
+| runner | no STUMBLES + leap, runner/hunter/predator ids | lean, pitched forward, elbows bent, arms pumping when running |
+| scorched | id | burnt crust flakes, charred skin and clothes |
+| skeleton | species SKELETON | thin bone limbs, skull with dark sockets, rib bars, rags of trousers |
+| feral | living HUMAN with a feral id | runner build, living skin |
+| walker | everything else | hunched, head forward, arms reaching at chest height |
+
+Gear: cop (riot helmet, raised visor, badge), swat (helmet, dark visor, vest), soldier (helmet,
+vest, pouches, camo blotches), hazmat (big rounded hood with a window), fireman (helmet with a
+long brim, coat skirt, reflective bands), bio-op (helmet, glowing cyan visor, plate), survivor
+(helmet, backpack), armored (plates, pauldrons), miner (hard hat, glowing lamp), beekeeper (wide
+brim and veil), scientist (lab-coat tails), medic (surgical mask).
+
+### Bodies and poses (zombie.ts)
+
+The 16 person parts in their usual order (hit zones, crawl poses, sprite rects and aimPick
+work unchanged) plus a hanging **jaw**, **deltoids**, a **hump**, a **belly**, **rags** and the
+family pieces. Three torn individuals per type, picked by the creature's appearance seed (the
+same for its corpse): rags front + a sleeve, a forearm torn off at the elbow (a bloody stump) +
+back rags, or rags both sides and the other sleeve; each also a little taller or shorter. On
+top, per-individual quirks from the seed: one arm hanging dead in about a third, a head tilt, a
+lean, a dragged leg.
+
+Poses are blended between named states in world terms (how far the torso leans, where an arm
+points from straight down) and only then turned into part rotations, so a hunched torso doesn't
+drag the arms or the head with it. Standing height and floor contact come from forward
+kinematics of the idle pose (`poseBounds`), not a constant.
+
+- **Idle / walk**: hunched, head thrust forward, arms reaching at chest height with limp
+  wrists, knees bent; a lurching shamble that drags one leg and sways onto the good one. Brutes
+  and runners swing their arms instead; running pitches the body into the stride.
+- **Wind-up (melee)**: the torso arches back, both arms are thrown up and back over the head,
+  the maw opens. **Heavy** (and every brute/hulk blow): a double-fisted overhead hammer, rocked
+  back further.
+- **Leap (crouch before a lunge)**: coiled low, chest over the knees, arms swept back, eyes up,
+  weight back — a completely different shape from the rear-back, readable from the front and the
+  side. The strike after a leap is a **lunge-grab**: body flung forward, both arms straight out
+  and open, a leg trailing. This is the pose the coming telegraphed lunge-grab can use (it is
+  already wired to the existing `leap` telegraph kind and plays on the `resolved`/`whiff` event).
+- Flinch, downed and dead as before (corpses lie flat with the jaw slack; arcs stop).
+
+### Skins (zombieSkin.ts)
+
+The styled person painter, then: skin pulled toward one rotten grey-green; dark UltiCa cloth
+lifted to a readable level keeping its hue; a 6-row cranium face (every row is one texel, so
+the eye row is never skipped) with a brow ridge, sunken sockets, a dull yellow glint (red and
+glowing on a necromancer), nostrils and upper teeth; the jaw's lower teeth, dark mouth and a
+blood drip; holes torn through the shirt showing skin, a ragged hem, torn-off sleeves, rips in
+the trousers, dark nails and blood on the fingers. Bone, black, charred and plant skins for the
+families. 32 texels/m as before.
+
+### Variants
+
+`shamble` (default) follows the sprites. `caricature` pushes every family further (geometry
+deviations ×1.7, bigger heads and hands, deeper hunch, more belly and hump): a second direction
+to compare, not a fix. `boxy` is the round-6 body, untouched. All three are in Options →
+**Zombie bodies**, the gallery's Characters switches (scenes *Zombie lineup: specials / common
+/ at 25 m / wind-ups*), `?zstyle=` and `cdda.chars({ zstyle })`; switching rebuilds every
+creature and body. NPCs, the survivor's body, animals and robots are unchanged.
+
+### Tooling
+
+`tools/char-shots.ts --views zombie_lineup_a|b|c|d|far|windup|close|walk|crawl|dead`: the
+lineups stand on the nearest open strip of pavement (`terAt`/`furnAt`), looking away from the
+sun, with the clock paused so nobody turns; `windup` freezes telegraphs and a lunge-grab.
+`tools/zombie-compare.py` builds the sprite/before/after sheets above.
+
+    ~/claude-stuff/bin/heavy --kind gpu --vram 2 --mem 2.5 -- nix-shell --run 'npx tsx tools/char-shots.ts --gpu --full --out docs/screenshots/zombies --prefix after --views zombie_lineup_c'
+    ... --prefix before --params zstyle=boxy        ... --prefix caricature --params zstyle=caricature
+
 ## Performance
 
 `tools/char-shots.ts --gpu --bench --views bench` (60 hostile zombies and dogs 8–45 m down
@@ -246,6 +389,20 @@ p99 39.6, work 18.5 ms — the same. Humanoids are now 16 parts (18 with wings, 
 Round 6 (fires, body plans, NPC variety, props as cards; same bench scene): 3D models + cards
 p50 5.3 ms / p99 8.3 ms, work p50 7.8 ms; `?chars=billboard&props=billboard` p50 5.6 ms /
 p99 49.9 ms (spikes from other GPU jobs during that run) — no cost from the round.
+
+Round 7 (zombie bodies; same bench scene, three interleaved runs each, RTX 5080, machine
+shared with other sessions):
+
+| | frame p50 | p95 | p99 | work p50 | draw calls | triangles |
+|---|---|---|---|---|---|---|
+| `zstyle=boxy` (round 6 bodies) | 7.2–7.6 ms | 11.6–12.0 | 17.3–17.8 | 10.9–12.0 | 344–384 | 1.40 M |
+| `shamble` (default) | 7.4–7.5 ms | 11.4–12.1 | 16.0–19.7 | 11.5–11.9 | 349–350 | 1.46 M |
+| `caricature` | 7.2–7.5 ms | 11.0–12.6 | 16.0–16.9 | 11.1–12.1 | 353–354 | 1.46 M |
+
+Within run-to-run noise. A walker is ~22 parts (was 16), a necromancer ~45; the octagonal and
+bevelled shapes take the 60 creatures from ~10 k to ~70 k triangles (+4% of the frame). A
+first version cost ~0.5 ms of CPU work: the per-part Map lookups added to the instance flush
+for the per-shape batches; plain arrays keyed by page × shape brought it back.
 
 No measurable cost: ~800 part instances are one or two instanced draws (plus shadow), 12
 triangles each. Matrices are rebuilt at the simulation rate (30 Hz) only for creatures that
@@ -335,6 +492,14 @@ looks_like (tileset art, including a looks_like sprite, always wins).
 | ![](screenshots/grounditems/icons_glyph.png) | ![](screenshots/grounditems/icons_model.png) |
 
 ## Known gaps
+
+- Zombie bodies (round 7): zombie *animals* (zombie dogs, zombears) still use the plain animal
+  plans with zombie colours; the zombie dog has no hunch, torn flesh or exposed ribs yet. Smoke
+  around smokers is model puffs, not BN's emitted smoke fields (our game doesn't emit them).
+  Gear is chosen by id (BN has no uniform field), so a modded uniformed zombie gets none.
+  Feral humans now use the runner build but still don't show the weapon they wield. The cop
+  and soldier sprite colours come through the sprite palette, so a cop is only as blue as its
+  sprite reads.
 
 - Common quadruped families now differ in anatomy, but cattle, many unusual creatures,
   and unique species art still reuse broader plans. Insects retain their shared segmented
