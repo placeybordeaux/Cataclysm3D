@@ -129,6 +129,9 @@ describe('cross-region tunnels (genVersion 3)', () => {
       for (let y = LO; y < HI; y++)
         for (let x = LO; x < HI; x++) {
           if (!/sub_station/.test(om.omtAt(x, y, z).type)) continue;
+          // A station walled in by a special placed before it (no rock or tunnel beside it) can't
+          // be joined, as in BN (build_connection won't start from another special's terrain).
+          if ([0, 1, 2, 3].every((d) => !/^(empty_rock|subway)$/.test(om.omtAt(x + DX[d], y + DY[d], z).type))) continue;
           const k = comp.get(`${x},${y}`), region = `${Math.floor(x / REGION)},${Math.floor(y / REGION)}`;
           expect(k, `station ${x},${y} on a network, seed ${seed}`).toBeDefined();
           found.push([k!, region]);

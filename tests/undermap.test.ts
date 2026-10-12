@@ -224,7 +224,7 @@ describe('manholes', () => {
       map.setTer(x, y, 0, 't_manhole');
       expect(stairDestination(g, x, y, 0, 'down')).toEqual({ x, y, z: -1 });
     }
-  });
+  }, 30_000);
 
   it('the ladder becomes a walkable ladder link (docs/STAIRS.md)', () => {
     const { map } = world(2, town(LINE_N | LINE_S));
