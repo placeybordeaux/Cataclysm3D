@@ -241,7 +241,8 @@ tests/               vitest unit tests (pure logic, no DOM/WebGL)
 - `fields.ts` fire/smoke/blood processing near the player; `ignite`, `addField`,
   `fieldDamageAt(game,x,y,z,{materials,flags})` for monsters standing in fire.
 - `targeting.ts` `targetTile(game)` = tile under the crosshair within reach; `interact.ts`
-  (`e`), `zlevels.ts` (`<`/`>`, falling), `rest.ts` (`|` wait, `$` sleep), `weather.ts`
+  (`e`), `zlevels.ts` (`<`/`>`, falling; in deep water they dive and swim between the lake
+  levels, `water.ts` `swimVertical`, docs/WORLD_TRANSPORT.md "Lakes in depth"), `rest.ts` (`|` wait, `$` sleep), `weather.ts`
   (`game.weather`), `traps.ts`, `lightitems.ts` (`F`: flashlight transform).
 - Walkable stairs (docs/STAIRS.md): `stairs.ts` solves each BN stair pair into a link (straight
   flight / spiral / ladder, footprint, landings, path), `stairwalk.ts` carries walkers along it
