@@ -268,10 +268,13 @@ export function installNature(game: Game, renderer: Renderer | null, api?: Debug
   installRubble(game);
 
   if (renderer) {
-    // swimming: head just above the surface; sunk: just below it
+    // swimming: head just above the surface; sunk: just below it. Inside a water cube (the
+    // levels under a lake) there is no surface on this level: float mid-level.
     renderer.beforeRender.push(() => {
       const st = swimState(game);
-      renderer.rig.eyeOffset = st.underwater ? -1.75 : st.swimming ? -1.35 : 0;
+      const p = game.player;
+      const cube = st.underwater && hasFlag(game.map.terAt(p.tileX, p.tileY, p.z), 'WATER_CUBE');
+      renderer.rig.eyeOffset = cube ? -0.6 : st.underwater ? -1.75 : st.swimming ? -1.35 : 0;
     });
     swimUi.confirmDive = (warn, answer) => {
       if (typeof document === 'undefined') return answer(true);
