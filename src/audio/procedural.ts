@@ -252,6 +252,49 @@ const GENERATORS: Record<string, Gen> = {
     }
     return normalize(out, 0.8);
   },
+  // A zombie drawing back to strike, take two: the windup above is a low sawtooth sliding up
+  // with a 9 Hz wobble, which players heard as a fart. This is a voice instead: irregular
+  // strained "vocal" pulses (jittered period and loudness, ~110-190 Hz) buried in breath noise,
+  // shaped through an open-mouth "ahh" (formants ~750 / 1250 / 2600 Hz) that opens as it
+  // swells, nothing below 160 Hz, and a hard catch at the end where the blow comes.
+  snarl(sr, rnd) {
+    const sec = 0.42 + rnd() * 0.08, n = Math.round(sr * sec);
+    const src = buf(sr, sec);
+    let next = 0;
+    while (next < n) {
+      const u = next / n;
+      const f0 = (110 + rnd() * 25) * (1 + 0.6 * u) * (0.85 + rnd() * 0.3);
+      const amp = 0.6 + rnd() * 0.6;
+      // one glottal pulse: a sharp snap that rings briefly
+      for (let k = 0; k < sr * 0.004 && next + k < n; k++) src[next + k] += amp * Math.exp(-k / (sr * 0.0012)) * (k === 0 ? 1 : 0.6);
+      next += Math.max(1, Math.round(sr / f0));
+    }
+    noise(src, rnd, 0.35);
+    const mouth = (lo: number, hi: number, q: number, g: number) => {
+      // the formant rises a little as the jaw drops: three overlapping bands across the swell
+      const out = buf(sr, sec);
+      for (let b = 0; b < 3; b++) {
+        const f = lo + ((hi - lo) * b) / 2;
+        const band = bandpass(src.slice(), sr, f, q);
+        for (let i = 0; i < n; i++) {
+          const u = i / n, w = Math.max(0, 1 - Math.abs(u * 2 - b));
+          out[i] += band[i] * w * g;
+        }
+      }
+      return out;
+    };
+    const out = mouth(650, 850, 4, 1);
+    mix(out, mouth(1100, 1350, 5, 0.6));
+    mix(out, mouth(2400, 2700, 6, 0.35));
+    // breath rasp on top, brighter than the voice
+    mix(out, bandpass(noise(buf(sr, sec), rnd), sr, 1800 + rnd() * 600, 1.2), 0.3);
+    highpass(out, sr, 160);
+    for (let i = 0; i < n; i++) {
+      const u = i / n;
+      out[i] *= (0.2 + 0.8 * u ** 1.5) * Math.min(1, u * 12) * (u < 0.9 ? 1 : (1 - u) * 10);
+    }
+    return normalize(out, 0.8);
+  },
   // Guard meets blow at the right moment: bright clack with a short ring.
   parry(sr, rnd) {
     const x = partials(sr, 0.45, 900 + rnd() * 200, [1, 2.3, 3.7, 5.9], 0.09, rnd);
@@ -439,6 +482,7 @@ export const SYNTH_EFFECTS: SoundEffectDef[] = [
   { id: 'synth_heartbeat', variants: ['default'], volume: 80, files: files('heartbeat', 1) },
   { id: 'synth_whoosh', variants: ['default'], volume: 55, files: files('whoosh', 3) },
   { id: 'synth_windup', variants: ['default'], volume: 70, files: files('windup', 4) },
+  { id: 'synth_snarl', variants: ['default'], volume: 75, files: files('snarl', 4) },
   { id: 'synth_parry', variants: ['default'], volume: 85, files: files('parry', 2) },
   { id: 'synth_bodyfall', variants: ['default'], volume: 75, files: files('bodyfall', 3) },
   { id: 'synth_bow_twang', variants: ['default'], volume: 80, files: files('bow_twang', 3) },

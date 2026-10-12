@@ -1146,7 +1146,7 @@ export class MonsterSystem implements GameSystem {
       const cost = sa ? (typeof sa.def.move_cost === 'number' ? sa.def.move_cost : 100) : m.type.attack_cost || 100;
       m.attackCooldown = Math.max(m.attackCooldown, this.attackCycle(m, cost, secs));
     }
-    sfx.monsterWindup(m, kind === 'heavy');
+    sfx.monsterWindup(m, kind === 'heavy', secs, m.type.id);
     this.game.events.emit('monsterAttack', { monster: m, phase: 'windup', x: m.x, y: m.y, z: m.z, seconds: secs, heavy: kind === 'heavy' });
   }
 

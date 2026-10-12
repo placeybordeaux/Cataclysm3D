@@ -4,7 +4,8 @@ import { AudioEngine } from './audio';
 import { isNight } from './ambience';
 import { footstepVariant, strideLength } from './footsteps';
 import { isClimbing } from '../game/stairwalk';
-import { setAudioEngine, sfx } from './sfx';
+import { setAudioEngine, setWindupSound, sfx, windupSound, WINDUP_SOUNDS, type WindupSound } from './sfx';
+import { registerOption } from '../ui/options';
 import { soundForEvent } from './soundEvents';
 import { rangeForLoudness } from './spatial';
 
@@ -27,6 +28,40 @@ export function installAudio(game: Game, debugApi?: Record<string, any>): AudioH
   engine.opaque = (x, y, z) => game.map.opaque(x, y, z);
   setAudioEngine(engine);
   engine.unlockOnGesture();
+
+  // --- which sound telegraphs a monster's blow (sfx.ts WINDUP_SOUNDS): URL, then the stored choice
+  const WINDUP_KEY = 'cdda3d.windupSound';
+  const WINDUP_NAMES: Record<WindupSound, string> = { snarl: 'Snarl (synth voice)', groan: 'Groan (recorded)', buzz: 'Buzz (original)' };
+  const chooseWindup = (m: string, store: boolean) => {
+    setWindupSound(m);
+    if (store) try { localStorage.setItem(WINDUP_KEY, m); } catch { /* private mode: not persisted */ }
+  };
+  const wq = typeof location !== 'undefined' ? new URLSearchParams(location.search).get('windupsfx') : null;
+  if (wq !== null) {
+    if ((WINDUP_SOUNDS as readonly string[]).includes(wq)) chooseWindup(wq, false);
+    else game.message(`Unknown wind-up sound "?windupsfx=${wq}" (use ${WINDUP_SOUNDS.join(', ')}); keeping ${windupSound()}.`, 'c_light_red');
+  } else {
+    let stored: string | null = null;
+    try { stored = localStorage.getItem(WINDUP_KEY); } catch { /* private mode */ }
+    if (stored && (WINDUP_SOUNDS as readonly string[]).includes(stored)) chooseWindup(stored, false);
+  }
+  registerOption({
+    category: 'Audio',
+    name: 'Attack wind-up',
+    value: () => WINDUP_NAMES[windupSound()],
+    change: (d) => {
+      const i = WINDUP_SOUNDS.indexOf(windupSound());
+      chooseWindup(WINDUP_SOUNDS[(i + d + WINDUP_SOUNDS.length) % WINDUP_SOUNDS.length], true);
+    },
+    desc: 'The sound a monster makes as it draws back to hit you.  Snarl: a synthesized rasp.  Groan: the zombie groan recording, cut where the blow lands.  Buzz: the original sound.',
+  });
+  if (debugApi) {
+    debugApi.windupSound = () => windupSound();
+    debugApi.setWindupSound = (m: string) => {
+      chooseWindup(m, true);
+      return windupSound();
+    };
+  }
 
   const ready = engine.load().then(() => {
     void engine.preload(PRELOAD);
