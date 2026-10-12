@@ -415,6 +415,19 @@ describe('spacing', () => {
     expect(surroundAngles([{ angle: 0, radius: 0.3 }, { angle: Math.PI, radius: 0.3 }], 1.1)).toEqual([0, Math.PI]);
   });
 
+  it('zombies walking straight at their surround slots close to striking distance and swing', () => {
+    // Regression (live playtest): two zombies stood ~1.45 m from a survivor who stood still and
+    // never attacked. moveToward treated "within 0.35 m of the slot" as arrived, but the slot
+    // sits only holdInside (0.2 m) inside reach, so a zombie coming straight in stopped outside it.
+    const { game, sys, events } = world();
+    tough(game);
+    const zs = [sys.spawnById('mon_zombie', 12.5, 9.5, 0)!, sys.spawnById('mon_zombie', 12.5, 15.5, 0)!];
+    for (const z of zs) for (const s of z.specials) s.cooldown = 999;
+    step(game, 4);
+    for (const z of zs) expect(sys.distToPlayer(z)).toBeLessThanOrEqual(sys.reach(z));
+    expect(events.filter((e) => e === 'resolved' || e === 'whiff').length).toBeGreaterThanOrEqual(2);
+  });
+
   it('zombies arriving from one side surround the survivor and hold without jitter', () => {
     const { game, sys } = world();
     tough(game);

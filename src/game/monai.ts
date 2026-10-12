@@ -1118,9 +1118,13 @@ export class MonsterSystem implements GameSystem {
       const slot = this.slots.get(m);
       if (slot !== undefined) {
         // Close in on a free slot around the survivor rather than the survivor's own tile.
+        // The slot is only holdInside inside reach, so "arrived" must mean really there: the
+        // usual 0.35 m arrival slack left zombies standing just out of reach, never swinging.
         const hold = reach - FEEL.holdInside;
         brain.gx = p.x + Math.sin(slot) * hold;
         brain.gy = p.y - Math.cos(slot) * hold;
+        this.moveToward(m, brain, dt, 0.05);
+        return;
       }
     } else brain.holding = false;
     this.moveToward(m, brain, dt);
@@ -1242,7 +1246,8 @@ export class MonsterSystem implements GameSystem {
     m.facing = Math.atan2(x - m.x, -(y - m.y));
   }
 
-  private moveToward(m: Monster, brain: MonBrain, dt: number): void {
+  /** `arrive`: how close to the goal counts as there (m). */
+  private moveToward(m: Monster, brain: MonBrain, dt: number, arrive = 0.35): void {
     // CDDA IMMOBILE (turrets, fungal towers, lab containment specimens): never moves.
     if (m.type.flags.includes('IMMOBILE')) {
       m.moving = false;
@@ -1250,7 +1255,7 @@ export class MonsterSystem implements GameSystem {
     }
     let tx = brain.gx, ty = brain.gy;
     const dGoal = Math.hypot(tx - m.x, ty - m.y);
-    if (dGoal < 0.35) {
+    if (dGoal < arrive) {
       m.moving = false;
       if (brain.goal === 'wander' || brain.goal === 'idle') brain.goal = 'none';
       return;
