@@ -477,6 +477,8 @@ tests/               vitest unit tests (pure logic, no DOM/WebGL)
   genVersion 2 (`WORLDGEN_VERSION`, saves keep theirs) adds BN's `UNIQUE` rule, manholes over a
   city sewer (z-1) and subway tunnels (z-2): non-road connections go to `Region.connectionRequests`
   and src/world/overmap/connections.ts (BN overmap_connection layout) builds them per region.
+  genVersion 3: subways cross region edges at seed-derived seams (overmap/seams.ts), reserved by
+  both neighbours before anything places, so generation stays order independent.
   docs/WORLD_TRANSPORT.md; `tsx tools/transport_probe.ts` counts them per seed.
 - Mutable specials (genVersion >= 2): overmap/mutable.ts is a port of BN's join-matching solver,
   overmap/mutable_place.ts scatters `mutableWildSpecials` (anthills, slime pit, Ice Lab, stream, mines +
