@@ -17,6 +17,7 @@ import { applySave, serializeGame } from '../src/save/format';
 import { loadNodeData } from '../tools/lib/node_data';
 
 const { game: data, wg } = loadNodeData();
+const mutables = wg.overmap.mutables!;
 
 function fakeInput(): Input {
   return { held: new Set<string>(), captured: false, mouseButtons: 0, onPress() {}, capture: () => () => {}, consumeMouse: () => [0, 0], consumeClicks: () => [] } as unknown as Input;
@@ -89,7 +90,7 @@ describe('overmap places special spawns (genVersion 3)', () => {
     const om = new Overmap(2, wg.overmap);
     const defs = new Set<string>();
     for (const s of placed(om).values()) {
-      const sp = wg.overmap.mutables[s.def]?.spawns ?? wg.overmap.specials[s.def]?.spawns;
+      const sp = mutables[s.def]?.spawns ?? wg.overmap.specials[s.def]?.spawns;
       if (!sp) {
         expect(s.groups, s.def).toHaveLength(0);
         continue;
@@ -118,13 +119,13 @@ describe('overmap places special spawns (genVersion 3)', () => {
   }, 120_000);
 
   it('ships BN spawns for every special that has them', () => {
-    expect(wg.overmap.mutables.Anthill.spawns).toEqual({ group: 'GROUP_ANT', population: [1000, 2000], radius: [10, 30] });
-    expect(wg.overmap.mutables['Acid Anthill'].spawns?.group).toBe('GROUP_ANT_ACID');
-    expect(wg.overmap.mutables['Slime Pit'].spawns).toEqual({ group: 'GROUP_GOO', population: [100, 200], radius: [2, 10] });
+    expect(mutables.Anthill.spawns).toEqual({ group: 'GROUP_ANT', population: [1000, 2000], radius: [10, 30] });
+    expect(mutables['Acid Anthill'].spawns?.group).toBe('GROUP_ANT_ACID');
+    expect(mutables['Slime Pit'].spawns).toEqual({ group: 'GROUP_GOO', population: [100, 200], radius: [2, 10] });
     expect(wg.overmap.specials.fungal_buds.spawns).toEqual({ group: 'GROUP_FUNGI_BUDS', population: [200, 320], radius: [0, 20] });
     expect(wg.overmap.specials.triffid_sprout.spawns?.group).toBe('GROUP_TRIFFID_OUTER');
     expect(wg.overmap.specials['mi-go_foward_camp'].spawns?.group).toBe('GROUP_MI-GO_CAMP_OM');
-    for (const s of [...Object.values(wg.overmap.specials), ...Object.values(wg.overmap.mutables)])
+    for (const s of [...Object.values(wg.overmap.specials), ...Object.values(mutables)])
       if (s.spawns) expect(data.monsterGroups[s.spawns.group], `${s.id}: ${s.spawns.group}`).toBeDefined();
   });
 });
