@@ -273,6 +273,14 @@ BN's map is z −10..10 (`OVERMAP_DEPTH` / `OVERMAP_HEIGHT`, `game_constants.h`)
   it) and higher levels only where generated, like `roofAbove`, so a solar car no longer runs mapgen
   for open air up to the sky. Per-column draw extents were already derived from the overmap
   (`src/world/levels.ts`), so the renderer never wanted the empty levels.
+- **Measured cost.** `perf-bench --no-drawn --routes city40` (GPU, Chromium 3440x1304, 3 runs
+  each, interleaved, shared machine): transport2-base / this branch / this branch with
+  `MAX_Z = 5` — no unbuilt chunk in view in 9 of 9 runs but one 0.15 s blip (MAX_Z 5), runway p10
+  9.5 / 9.5 / 9.3 s, mapgen in frames 9.5 / 10.0 / 10.0 ms/s, frame p99 50–67 ms in all three.
+  An earlier town40/city40/citystand pair (with the drawn gate) showed 4–13 s holes on both base
+  and branch runs at random: load noise. Light map steady-state frame (node, synthetic 9x9
+  chunks): surface 155 → 135–160 µs, eye at z−7 135 → 143 µs (a level below z−7 now exists, so the
+  below-level light map runs), eye at z−10 138 µs.
 - **Bounds that assumed −7..5:** the overmap screen's PgUp/PgDn clamp, fire smoke rising past z5,
   the lab debug map, and monai's packed tile key (`z + 8`, now `z − MIN_Z`) were fixed; other packed
   keys (`los.ts`, `stairs.ts packKey`, chunk manager/telemetry/ground keys, `vehicles.ts`) have room.
