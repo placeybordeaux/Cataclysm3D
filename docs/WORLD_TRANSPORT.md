@@ -306,7 +306,9 @@ seed 2 anthill one submap at a time spawns groups only on the bubble's edge and 
 colony's population; spawns wait for the title-screen hold and for ungenerated chunks; save/load
 keeps the spent set and spawns nothing twice; a genVersion 2 world spawns nothing).
 Real input: `tools/realinput.ts --only antcolony` (W toward the nearest anthill from just outside
-its spread; ants come into view, the colony's unspent population drains). Debug:
+its spread; ants come into view, the colony's unspent population drains; seed 1, 6/6: 60 s of W
+took the survivor from 181 to 100 tiles off the hill, 68 groups spawned 81 ants, unspent 507 →
+388, up to 66 ants in sight; `docs/screenshots/transport/spawns_antcolony.png`). Debug:
 `cdda.specialSpawns('Anthill')`, `cdda.monGroups(r)`, `cdda.monGroupStats()`, `cdda.monGroupScan()`.
 
 Not BN / limits: the port's safe radius (no hostile within `SpawnerOptions.safeRadius`) applies,
