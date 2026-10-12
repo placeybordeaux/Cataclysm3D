@@ -3,11 +3,34 @@
 // street viewpoint, spawns the subject(s) ahead of the camera and waits for the pose asked for.
 // Returns a short list of what is standing where. Plain JS so it can be pasted into
 // `drive.ts eval` too.
-window.charViews = ['horde_near', 'horde_mid', 'horde_far', 'horde_road', 'horde_dusk', 'dog', 'npc', 'windup', 'critters', 'zoo', 'night', 'third', 'props', 'bugs', 'zombies2', 'crawlers', 'crawl_move', 'crowd', 'fire', 'corpse', 'bench', 'fp_fists', 'fp_punch', 'fp_pistol', 'fp_pistol_fire', 'fp_rifle', 'fp_rifle_ads', 'fp_shotgun', 'fp_reload', 'fp_bat', 'fp_bat_swing', 'fp_guard', 'fp_knife', 'fp_axe', 'fp_spear', 'fp_katana', 'fp_flashlight', 'fp_bow', 'fp_revolver', 'fp_1911', 'fp_double', 'fp_ak', 'fp_hunting', 'fp_crowbar', 'fp_kitchen', 'fp_sledge', 'fp_lever', 'fp_lever_ads', 'fp_lever_fire', 'third_lever', 'npc_lever', 'zombie_lineup_a', 'zombie_lineup_b', 'zombie_lineup_c', 'zombie_lineup_d', 'zombie_lineup_far', 'zombie_lineup_windup', 'zombie_lineup_close', 'zombie_lineup_walk', 'zombie_lineup_dead', 'zombie_lineup_crawl'];
+window.charViews = ['horde_near', 'horde_mid', 'horde_far', 'horde_road', 'horde_dusk', 'dog', 'npc', 'windup', 'critters', 'zoo', 'night', 'third', 'props', 'bugs', 'zombies2', 'crawlers', 'crawl_move', 'crowd', 'fire', 'corpse', 'bench', 'fp_fists', 'fp_punch', 'fp_pistol', 'fp_pistol_fire', 'fp_rifle', 'fp_rifle_ads', 'fp_shotgun', 'fp_reload', 'fp_bat', 'fp_bat_swing', 'fp_guard', 'fp_knife', 'fp_axe', 'fp_spear', 'fp_katana', 'fp_flashlight', 'fp_bow', 'fp_revolver', 'fp_1911', 'fp_double', 'fp_ak', 'fp_hunting', 'fp_crowbar', 'fp_kitchen', 'fp_sledge', 'fp_lever', 'fp_lever_ads', 'fp_lever_fire', 'third_lever', 'npc_lever', 'zombie_lineup_a', 'zombie_lineup_b', 'zombie_lineup_c', 'zombie_lineup_d', 'zombie_lineup_far', 'zombie_lineup_windup', 'zombie_lineup_close', 'zombie_lineup_walk', 'zombie_lineup_dead', 'zombie_lineup_crawl', 'zombie_scene_crowd', 'zombie_scene_dusk', 'zombie_scene_night', 'zombie_scene_face'];
+// An open paved strip (road, parking lot) so nothing stands in a flower bed or behind a tree:
+// the nearest spot with (2*half+1) m x len m of pavement and no furniture ahead, in one of the
+// four directions, preferring to look away from the sun so zombies are lit from the front.
+// The game's map API (terAt/furnAt) is the ground truth.
+window.zombieOpenStrip = (c, p, len, half) => {
+  const m0 = c.game.map, px0 = Math.floor(p.x), py0 = Math.floor(p.y);
+  const paved = (x, y) => /pavement|road|asphalt|parking|concrete|sidewalk/.test(m0.terAt(x, y, p.z).id) && m0.furnAt(x, y, p.z).id === 'f_null';
+  const dirs = [[0, -1], [1, 0], [0, 1], [-1, 0]];
+  const sun = c.renderer.skyState?.sunDir;
+  const sunDot = (fx, fy) => (sun ? fx * sun.x + fy * sun.z : 0);
+  let spot = null;
+  for (let r = 0; r < 70 && !(spot && spot.score < -0.25); r += 2) for (let oy = -r; oy <= r; oy += 2) for (let ox = -r; ox <= r; ox += 2) {
+    if (Math.max(Math.abs(ox), Math.abs(oy)) !== r) continue;
+    for (const [fx, fy] of dirs) {
+      if (spot && sunDot(fx, fy) >= spot.score) continue;
+      let ok = true;
+      for (let f = 0; f <= len && ok; f++) for (let w = -half; w <= half && ok; w++) ok = paved(px0 + ox + fx * f - fy * w, py0 + oy + fy * f + fx * w);
+      if (ok) spot = { x: px0 + ox, y: py0 + oy, fx, fy, score: sunDot(fx, fy) };
+    }
+  }
+  if (!spot) throw new Error(`zombie views: no open paved strip ${len} m x ${2 * half + 1} m near the street view`);
+  return spot;
+};
 window.charView = async (name) => {
   const c = window.cdda;
   const wait = (ms) => new Promise((r) => setTimeout(r, ms));
-  const dusk = name === 'horde_dusk';
+  const dusk = name === 'horde_dusk' || name === 'zombie_scene_dusk';
   c.game.paused = false;
   await window.lookView('street');
   c.clearMonsters();
@@ -254,6 +277,68 @@ window.charView = async (name) => {
     c.killAll(20);
     lookAt(3.5, 1.3, -30);
     await wait(1500);
+  } else if (name.startsWith('zombie_scene')) {
+    // Gallery scenes for choosing the zombie look (docs/GALLERY.md, ?zstyle=): zombies as you
+    // meet them rather than in a row. _crowd/_dusk hide a few specials in a crowd of common
+    // town zombies (picked by BN GROUP_ZOMBIE frequency) to test whether they can be picked out;
+    // _night is the same question under a flashlight; _face is a fight at arm's length with a
+    // bat raised: a blow coming, a heavy blow behind it and a runner crouching to lunge.
+    const strip = window.zombieOpenStrip(c, p, 34, 7);
+    c.teleport(strip.x + 0.5, strip.y + 0.5, p.z);
+    const yaw = Math.atan2(strip.fx, -strip.fy);
+    const atS = (f, s2) => [Math.round(strip.fx * f - strip.fy * s2), Math.round(strip.fy * f + strip.fx * s2)];
+    // [id, metres ahead, metres right, facing (180 = toward us)]
+    const crowd = [
+      ['mon_zombie', 5, -1.5, 175], ['mon_zombie_fat', 6.5, 2, 195], ['mon_zombie_child', 7, -3.5, 160],
+      ['mon_zombie_tough', 9, 0.5, 185], ['mon_zombie_brainless', 10, -2.5, 150], ['mon_boomer', 11, 3.5, 200],
+      ['mon_zombie_rot', 12, -5, 170], ['mon_zombie', 13, 1.5, 140], ['mon_zombie_shrieker', 14, -1, 180],
+      ['mon_zombie_cop', 15, 4.5, 210], ['mon_zombie_fat', 16, -3.5, 165], ['mon_zombie_brute', 17.5, 1, 190],
+      ['mon_zombie_child', 18.5, 5.5, 150], ['mon_zombie_acidic', 19.5, -5.5, 175], ['mon_zombie', 21, -1.5, 200],
+      ['mon_zombie_spitter', 22, 3, 160], ['mon_zombie_tough', 23.5, -4, 185], ['mon_zombie_soldier', 25, 0.5, 170],
+      ['mon_zombie_brainless', 26.5, 5, 155], ['mon_zombie_necro', 28, -2.5, 190], ['mon_zombie_rot', 29.5, 2.5, 175],
+      ['mon_zombie_fireman', 31, -5.5, 200], ['mon_zombie_hulk', 32.5, 1, 180],
+    ];
+    const night = [
+      ['mon_zombie', 3.5, -0.8, 175], ['mon_zombie_fat', 5.5, 1.8, 200], ['mon_zombie_brute', 7.5, -2, 165],
+      ['mon_zombie_necro', 10, 1, 185], ['mon_zombie_acidic', 12, -3, 170], ['mon_zombie_electric', 14, 2.5, 190],
+    ];
+    // face: [id, ahead, right, facing, telegraph kind, how far through it]
+    const face = [
+      ['mon_zombie', 1.5, -0.2, 180, 'melee', 0.75], ['mon_zombie_brute', 3.2, 1.3, 195, 'heavy', 0.6],
+      ['mon_zombie_hunter', 5, -1.6, 165, 'leap', 0.85], ['mon_zombie_fat', 6.5, 2.4, 185, null, 0], ['mon_zombie', 8, -0.5, 175, null, 0],
+    ];
+    const isFace = name === 'zombie_scene_face', isNight = name === 'zombie_scene_night';
+    const rows = isFace ? face : isNight ? night : crowd;
+    if (isNight) { c.setHour(23.2); c.flashlight(true); }
+    if (isFace) {
+      if (p.inv.wielded) p.inv.unwield();
+      c.giveItem('bat', { wield: true });
+    }
+    const uids = rows.map(([id, f, s2, deg]) => {
+      const [dx, dy] = atS(f, s2);
+      const uid = c.spawnMonster(id, dx, dy, { friendly: true });
+      if (uid === null) { console.warn(`charView: could not spawn ${id}`); return uid; }
+      const mm = byUid(uid);
+      mm.type = { ...mm.type, flags: [...mm.type.flags, 'IMMOBILE'] };
+      mm.facing = yaw + (deg * Math.PI) / 180;
+      return uid;
+    });
+    c.look(yaw * 180 / Math.PI, isFace ? -4 : isNight ? -5 : -2);
+    c.settle();
+    await wait(600);
+    c.game.paused = true;
+    const mview = c.game.systems.find((s) => s.name === 'monster-view');
+    const stepView = async (n) => { for (let i = 0; i < n; i++) { mview?.update(c.game, 1 / 30); c.renderer.render(); await wait(30); } };
+    uids.forEach((uid, i) => {
+      const mm = byUid(uid);
+      if (!mm) return;
+      mm.facing = yaw + (rows[i][3] * Math.PI) / 180;
+      if (isFace && rows[i][4]) mm.windup = { t: 1 - rows[i][5], total: 1, kind: rows[i][4], special: null };
+    });
+    if (isFace) c.renderer.viewmodel?.setLowered?.(false);
+    await stepView(isFace ? 3 : 20);
+    await wait(300);
+    return name;
   } else if (name.startsWith('zombie_lineup')) {
     // Zombie readability (docs/CHARACTERS.md "Zombie readability"): one row of zombies facing
     // us, ~4.5 m out (or 25 m for _far), idling in place, compared with the UltiCa sprite
@@ -287,26 +372,8 @@ window.charView = async (name) => {
     // (window.zombieLineupFacing overrides: 180 = facing us)
     const facing = windup ? [180, 140, 90, 90, 180, 90] : null;
     const rowDeg = window.zombieLineupFacing ?? 145;
-    // An open paved strip (road, parking lot) so nothing stands in a flower bed or behind a
-    // tree: the nearest spot with 12 m x 30 m of pavement and no furniture ahead, in one of the
-    // four directions. The game's map API (terAt/furnAt) is the ground truth.
-    const m0 = c.game.map, px0 = Math.floor(p.x), py0 = Math.floor(p.y);
-    const paved = (x, y) => /pavement|road|asphalt|parking|concrete|sidewalk/.test(m0.terAt(x, y, p.z).id) && m0.furnAt(x, y, p.z).id === 'f_null';
-    const dirs = [[0, -1], [1, 0], [0, 1], [-1, 0]];
-    // prefer looking away from the sun, so the row is lit from the front, not silhouetted
-    const sun = c.renderer.skyState?.sunDir;
-    const sunDot = (fx, fy) => (sun ? fx * sun.x + fy * sun.z : 0);
-    let spot = null;
-    for (let r = 0; r < 70 && !(spot && spot.score < -0.25); r += 2) for (let oy = -r; oy <= r; oy += 2) for (let ox = -r; ox <= r; ox += 2) {
-      if (Math.max(Math.abs(ox), Math.abs(oy)) !== r) continue;
-      for (const [fx, fy] of dirs) {
-        if (spot && sunDot(fx, fy) >= spot.score) continue;
-        let ok = true;
-        for (let f = 0; f <= 30 && ok; f++) for (let w = -6; w <= 6 && ok; w++) ok = paved(px0 + ox + fx * f - fy * w, py0 + oy + fy * f + fx * w);
-        if (ok) spot = { x: px0 + ox, y: py0 + oy, fx, fy, score: sunDot(fx, fy) };
-      }
-    }
-    if (!spot) throw new Error('zombie lineup: no open paved strip near the street view');
+    // 13 m x 30 m of open pavement (window.zombieOpenStrip)
+    const spot = window.zombieOpenStrip(c, p, 30, 6);
     c.teleport(spot.x + 0.5, spot.y + 0.5, p.z);
     const yaw = Math.atan2(spot.fx, -spot.fy);
     const atL = (f, s2) => [Math.round(spot.fx * f - spot.fy * s2), Math.round(spot.fy * f + spot.fx * s2)];

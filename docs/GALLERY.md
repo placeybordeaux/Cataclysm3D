@@ -55,10 +55,13 @@ previous scene made (planted trees, fires, loot, bodies) are rolled back
 |---|---|
 | Town | Street by day · House from the street · Long road, zombies 15–60 m · Zombies down the road 66–110 m · Dusk street · Long road at dusk · Night street, flashlight · Rain · Snow · Into the sun (form lighting) |
 | Creatures | Zombie horde, close · Zombie horde, 18–30 m · Special zombies · NPC group · Dogs and animals · Zoo: every body plan · Bugs and birds · Bodies · Night, flashlight, zombies · Props: fire, loot, mannequin |
+| Zombie bodies | Spot the specials: crowd 5–33 m · Spot the specials at dusk · Night, flashlight · Arm's length: blows coming, lunge crouch · Shambling toward you · Lineups: common / uniforms / specials / more specials / 25 m · Close: individuals of one type · Wind-ups and lunge crouch · Crawlers · Bodies |
 | Interiors | House, main room · Kitchen · Living room · Bathroom · Bedroom · Wrecked house · Shop · Dropped weapons · House at night, flashlight · Lamp-lit room at night |
 | Nature | Forest in spring / summer / autumn / winter · Tree lineup 14 m · Tree lineup 60 m · Tree lineup, autumn |
 | Vehicles | Car lineup · SUV, pickup, van · Parked cars in town · Wrecked car · Burnt-out car · Driving: cockpit · Driving: chase camera · Driving at night |
 | First person | Fists · Pistol · Rifle · Shotgun · Baseball bat · Fire axe · Longbow, drawn |
+
+The *Zombie bodies* group is for choosing that switch: the "spot the specials" crowds hide a boomer, shrieker, brute, spitter, acid zombie, necromancer and hulk among common town zombies (picked by BN `GROUP_ZOMBIE` frequency), and *Arm's length* holds a blow, a heavy blow and a lunge crouch mid-telegraph with a bat raised. Use Matrix on `Zombie bodies` across these scenes, or A/B against `Creatures: sprites` for the tileset reference. Views: `zombie_scene_*` and `zombie_lineup_*` in `tools/char-views.js`.
 
 New scene code (not in the tools views): *House from the street* (walks out from a house to the
 road and turns back), *Shop* (nearest store, facing the densest shelving), *Lamp-lit room*
@@ -78,6 +81,7 @@ All are live (no reload needed). "Proof" is the scene the automated pixel-diff c
 | Cutout mips | stable · off (v2) | Options > Cutout mips | `?cutout=` | forest | 1.7 % (mostly a motion effect) |
 | Creatures | 3D models · sprites | Options > Creatures | `?chars=` | horde | 7 % |
 | Creature paint | styled skins · projected sprite | Options > Creature paint | `?charpaint=` | npcs | 11 % |
+| Zombie bodies | shambling · exaggerated · boxy (v2) | Options > Zombie bodies | `?zstyle=` | zcrowd | — |
 | First-person hands | 3D · sprites | Options > First-person hands | `?viewmodel=` | fp_pistol | 11 % |
 | First-person bow | 2D art · 3D bow | Options > First-person bow | `?fpbow=` | fp_bow | 10 % |
 | Props | world-fixed cards · billboards (v2) | Options > Props | `?props=` | props | 1.8 % |

@@ -157,7 +157,7 @@ export function buildSwitches(renderer: Renderer, api: DebugApi): GallerySwitch[
       id: 'zstyle', label: 'Zombie bodies', group: 'Characters', option: 'Zombie bodies', url: 'zstyle',
       values: [{ v: 'shamble', label: 'shambling' }, { v: 'caricature', label: 'exaggerated' }, { v: 'boxy', label: 'boxy (v2)' }], def: 'shamble',
       note: '3D creatures only. Console: cdda.chars({ zstyle }).',
-      get: () => charSettings.zstyle, set: (v) => setZombieStyle(v as 'shamble' | 'caricature' | 'boxy'), proof: 'zlineup',
+      get: () => charSettings.zstyle, set: (v) => setZombieStyle(v as 'shamble' | 'caricature' | 'boxy'), proof: 'zcrowd',
     },
     {
       id: 'charpaint', label: 'Creature paint', group: 'Characters', option: 'Creature paint', url: 'charpaint',
