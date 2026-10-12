@@ -35,7 +35,8 @@ Real-input checks: `tools/realinput.ts --only sewer` (pry, climb down, climb out
 
 Remaining limits: tunnels never cross region edges (networks are per region); sunken_lab isn't
 placed (no lake columns); special-level roaming monster groups (e.g. GROUP_ANT) aren't spawned;
-z is clamped to −7..5; `mx_portal`/`mx_casings` subway extras are C++ functions and not ported.
+z was clamped to −7..5 before genVersion 3 (see "Full z range"); `mx_portal`/`mx_casings` subway
+extras are C++ functions and not ported.
 
 The sections below are each part's own notes.
 
@@ -152,8 +153,9 @@ solver, `src/world/overmap/mutable.ts` (`mutable_overmap_special_data::place`, `
 - **Shape.** Shared `size` is `[4, 4]`, so every `scale: "size"` rule multiplies by 4: ~16 lab rooms
   and ~16 stairs-over-core chunks in phase 1 (the chunks only at the current bottom level), then
   the later phases. BN labs are therefore deep: seeds 1–10 (53 labs) median 60 OMTs, 50 of 53 reach
-  our floor, z−7 (`MIN_Z`; BN's is −10). Once the lab rooms run out, the leftover stair chunks
-  pile up on the bottom two levels (BN does the same at −9/−10).
+  genVersion 2's floor, z−7. Once the lab rooms run out, the leftover stair chunks pile up on the
+  bottom two levels (BN does the same at −9/−10). genVersion 3 grows them to BN's −10 ("Full z
+  range" below).
 - **Escape cells.** The `lab_escape` chunk (`lab_escape_entrance` + `lab_escape_cells` north of it,
   never rotated) at z −10..−4 with `{"chance": 0.2}` × size 4 = 80% (`chance_distribution::sample`:
   `chance * scale >= rng_float(0, 1)`), not 20%. Measured 81%. The cells reject lab joins north,
@@ -239,5 +241,50 @@ occupy rock the later specials would have used, so placements moved). `tools/dev
 
 Not done: **sunken_lab** (a fixed special under lakes: needs `lake_water_cube`/`lake_bed`
 columns, which we don't generate); special-level roaming monster groups (`spawns`, e.g.
-GROUP_ANT 1000–2000) — the OMTs' own spawns (ants, ants_food) do fire; z is clamped to our
-MIN_Z..MAX_Z (−7..5) instead of BN's −10..10.
+GROUP_ANT 1000–2000) — the OMTs' own spawns (ants, ants_food) do fire. Before genVersion 3 the
+solver was bounded to −7..5 instead of BN's −10..10 (see "Full z range").
+
+## Full z range (genVersion 3)
+
+BN's map is z −10..10 (`OVERMAP_DEPTH` / `OVERMAP_HEIGHT`, `game_constants.h`). Ours was −7..5
+(`MIN_Z`/`MAX_Z` in `src/world/coords.ts`), so BN's deep labs hit our floor. Now:
+
+- **The map holds −10..10** for every world. `GameMap.chunk` returns null only outside that range;
+  `putChunk` throws on a chunk outside it. Saves store chunks as plain `[cx, cy, z]`, so old saves
+  load unchanged. Construction's dig/build limits already used BN's ±10 (`construction.ts`).
+- **Generation depth is per genVersion.** `genZRange(genVersion)` / `Overmap.zRange`: −7..5 before
+  3, −10..10 from 3. It bounds the mutable special solver (`mutable_place.ts` placement and the
+  lab grower's `labReadHost.inbounds`, BN `overmap::inbounds`). genVersion 1 and 2 worlds generate
+  identically on all 21 levels (`tests/world_depth.test.ts` pins z −10..10 hashes taken before the
+  change; `tests/overmap_genversion.test.ts` keeps its −7..1 pins). Fixed specials were never
+  clamped: tower tops at z6/z7 (cathedral, hotel, office towers, radio tower) were on the overmap
+  all along but outside the map; they now generate in every world. That adds content above levels
+  that never existed, it moves nothing a save stored.
+- **Labs at BN depth.** `tools/dev/probe_labbasement.ts --seeds 10 --gen 3` (53 labs): bottoms
+  z−10 ×45, −9 ×5, −8 ×2, −6 ×1 (genVersion 2: −7 ×52, −6 ×1). The share of `lab_stairs` chunks on
+  the level just above the bottom (the pile-up) went from 52% to 29%; the rest spread evenly over
+  the nine levels above. Escape cells 85%, both train depots 100%. Other mutables (anthills, mines,
+  Ice Lab) can also use −8..−10 and above 5 now.
+- **Empty levels cost nothing.** `GameMap` counts chunks per level; loops that read "every level
+  above" (the light map's natural signature and grid, chunk meshes' sky cover, room roof
+  snapshots, `VisibleLevels.columnTop`'s live scan, the DEV level audit, the elevator's floor scan)
+  stop at `topZ()`, the highest populated level, instead of `MAX_Z`. `roomDependencySnapshot` still
+  invalidates when a chunk appears above the old top. Solar panels read the level above (generating
+  it) and higher levels only where generated, like `roofAbove`, so a solar car no longer runs mapgen
+  for open air up to the sky. Per-column draw extents were already derived from the overmap
+  (`src/world/levels.ts`), so the renderer never wanted the empty levels.
+- **Bounds that assumed −7..5:** the overmap screen's PgUp/PgDn clamp, fire smoke rising past z5,
+  the lab debug map, and monai's packed tile key (`z + 8`, now `z − MIN_Z`) were fixed; other packed
+  keys (`los.ts`, `stairs.ts packKey`, chunk manager/telemetry/ground keys, `vehicles.ts`) have room.
+- **Sealed stations.** A special placed before a station can take the rock its tunnel starts from:
+  seed 1's start microlab station is walled in by the (deeper, so differently grown) classic lab in
+  genVersion 3. Our generator places that Lab before the microlab; BN's `place_special` builds a
+  special's connections as it places it, but `build_connection` refuses to start from another
+  special's terrain (`can_start_at`, `overmap.cpp` ~5916), so in that order BN seals it too. The station tests skip stations with no rock or
+  tunnel beside them.
+- **Tests:** `tests/world_depth.test.ts` (range, v1/v2 hashes on all levels, v3 labs below −7 with
+  BN rules and less pile-up, a z−10 lab chunk whose stairs from z−9 all land on stairs up, `topZ`
+  bookkeeping and room snapshots), `tests/save.test.ts` (a player and an edited chunk at z−10
+  round-trip). Real input: `tools/realinput.ts --only deeplab` climbs the seed 1 classic lab from
+  its bunker to z−10 with real keys.
+

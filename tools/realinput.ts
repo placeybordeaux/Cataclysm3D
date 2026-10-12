@@ -52,6 +52,7 @@ import { vehwalkScenarios } from './realinput_vehwalk';
 import { turretScenarios } from './realinput_turret';
 import { towingScenarios } from './realinput_towing';
 import { labEscapeScenarios } from './realinput_labescape';
+import { deepLabScenarios } from './realinput_deeplab';
 
 const argv = process.argv.slice(2);
 const opt = (n: string, d: string) => (argv.includes(n) ? argv[argv.indexOf(n) + 1] : d);
@@ -1613,6 +1614,8 @@ scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...turretScenar
 scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...towingScenarios({ x: () => x, js, check, shot, toGameplay, sleep }));
 // The lab escape start (lab_chal through the picker, waking in a lab_escape_cells cell): reloads the page.
 scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...labEscapeScenarios({ page: () => page, x: () => x, js, check, shot, toGameplay, sleep, size: [W, H] }));
+// BN's full z range (docs/WORLD_TRANSPORT.md): down the classic lab to z-10 with real keys.
+scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...deepLabScenarios({ x: () => x, js, check, shot, toGameplay, sleep }));
 
 if (argv.includes('--list') || argv.includes('--dry-run')) {
   for (const [n, what] of scenarios) console.log(`${only && !only.has(n) ? '  (skip)' : '  run   '} ${n.padEnd(11)} ${what}`);
