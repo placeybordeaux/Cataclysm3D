@@ -162,7 +162,7 @@ const steps: Step[] = [
     await sleep(700);
     await toGameplay();
   }],
-  ['fight', 'first zombie fight (default aim model) with the starting weapon, LMB by real mouse', async () => {
+  ['fight', 'first zombie fight (default aim model) with the starting weapon, RMB readied + LMB by real mouse', async () => {
     await js(`(() => { const c = cdda, t = ${TOWN}; c.setHour(13); c.teleportOmt(t.x, t.y); const h = c.findOmt('house', 40); c.teleportOmt(h.x, h.y, 0, 18, -1); c.clearMonsters(60); c.godMode(false); })()`);
     await sleep(1500);
     const aim = await js<string>(`cdda.aimModel?.() ?? cdda.game.aimModel ?? '?'`);
@@ -172,6 +172,8 @@ const steps: Step[] = [
     await shot('zombie_approach');
     const t0 = Date.now();
     let shots = 0;
+    // RMB held through the fight: readies a melee weapon (the default melee control), aims a gun.
+    await x.buttonDown(3);
     while (Date.now() - t0 < 20_000) {
       const dead = await js<boolean>(`!window.__z || window.__z.dead`);
       if (dead) break;
@@ -181,6 +183,7 @@ const steps: Step[] = [
       if (shots++ === 2) await shot('zombie_fight');
       if ((await state()).panels.length) await x.key('e');
     }
+    await x.buttonUp(3);
     const dead = await js<boolean>(`!window.__z || window.__z.dead`);
     note(`zombie ${dead ? 'killed' : 'still up'} after ${((Date.now() - t0) / 1000).toFixed(1)} s, ${shots} clicks; log: ${(await js<string[]>(`cdda.ui.log().slice(-4)`)).join(' | ')}`);
     await shot('zombie_after');

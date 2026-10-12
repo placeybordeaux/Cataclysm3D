@@ -318,8 +318,52 @@ plus screenshot bursts (`docs/screenshots/combat_feel/before_*.png`, about 80 ms
   clock, the hands (snapped to contact) and the struck sprite.
 - Audio: the swing sound plays on contact, and the impact sound on the same frame. A miss or whiff adds a clear
   synthesized **whoosh** (`synth_whoosh`).
-- Holding LMB repeats at the weapon's rate. `melee()` without phases (scripts, tests, NPC code)
-  still resolves instantly.
+- Holding LMB repeats at the weapon's rate (while readied, see below). `melee()` without phases
+  (scripts, tests, NPC code) still resolves instantly.
+
+### Ready stance: right mouse readies (`combatfeel.ts meleeStance`, `playercombat.ts setStance`)
+Kiting a mob with a melee weapon was far too easy: LMB swung any time while you walked backwards
+at full speed, and the monsters' telegraphed blows (rooted wind-up, then reach + lunge) all
+whiffed against a survivor stepping back. In CDDA a swing spends the moves you would have walked
+with. The fix is a stance the player chooses, never a surprise slowdown on the click:
+- **Hold RMB to ready** the weapon (or fists). **LMB swings only while readied**. LMB from the hip
+  does nothing but put "hold right mouse to ready" above the crosshair, and the reach brackets are
+  faint while lowered. Guns, bows, throwing and the bash key are unchanged.
+- Readied you **walk at ×0.65** (Classic ×0.6), `FEEL.readyMoveMul`. The survivor walks ~2.8 m/s
+  (speed 100 / ~107 moves dressed × ACTION_SCALE 3; 3.0 bare); a speed-70 zombie 2.1 m/s, 1.89 at
+  Accessible's 0.9 monster speed. Readied that is ~1.8-1.95 m/s: backing off from a zombie with the
+  weapon up about keeps pace in Accessible and loses ground in Classic (~1.7 vs 2.1), so a
+  retreat buys no free swings. To open distance you lower it (let go of RMB) or run.
+- **Running lowers the weapon**: Shift + a movement key while readied drops the stance (full run
+  speed, no swings, no guard); letting go of Shift with RMB still held raises it again. A readied
+  stance that vetoed running would leave a player holding RMB unable to flee.
+- **Readied is guarding** (the block bonus feeding BN's `block_hit`, below) except while your own
+  swing is in the arc. **Raising the stance just before a blow lands is the parry**: the parry
+  clock starts when the stance goes up and keeps running through your swings, so the guard coming
+  back after a swing is not a free parry.
+- **Stamina**: readied costs **20/s** (Classic 40/s), `FEEL.readyStaminaPerSec`, a third (two
+  thirds) of the base regen of 20 per turn = 60/s. Readiness is now how every melee fight is
+  fought, so standing ready never runs you dry, it only slows recovery; a fight's real cost stays
+  BN's: ~100 per swing plus each block.
+- Edge cases: letting go of RMB mid-swing finishes that swing (you just can't start the next);
+  side-stepping keeps the stance; switching to a gun drops it (RMB aims), switching back with RMB
+  held re-raises it (a fresh raise); a menu or losing pointer lock clears the buttons, so back in
+  play you are lowered until RMB is pressed again; **downed** you can still ready and swing from the
+  ground but not guard; driving, at a vehicle station or moving furniture you can ready and swing as
+  before, without the guard. Grabbed: readied guards and swings as usual. There is no VR/XR input
+  path in this codebase, so nothing there to keep.
+- **Viewmodel**: readied = the guard pose (bat raised across the body, fists up); lowered = a
+  relaxed carry, low and tipped right (`LOWER_POSE`/`LOWER_FISTS` in `render/viewmodel.ts`, also
+  drawn by the 3D hands in `render/chars/fpView.ts`). A swing starts from wherever the hands are
+  and ends in whatever stance is held by then, so ready-swing-ready and releasing mid-swing never pop.
+- **Classic control kept**: Options › Controls › **Melee**: *Ready to swing (RMB)* (default) /
+  *Swing any time (classic)*, the old LMB-whenever with the separate RMB guard (×0.55, 60 stamina/s,
+  as below). `?melee=ready|anytime`, `cdda.setMeleeControl('anytime')`, `cdda.meleeControl()`;
+  remembered in localStorage `cdda3d.meleeControl`. `cdda.feelState()` shows `melee`, `ready`,
+  `canSwing`, `moveSpeedMul`.
+- Tests: `tests/meleestance.test.ts`; real input: `tools/realinput.ts --only stance --shots dir`.
+  Screenshots (real input): `docs/screenshots/stance/` — `stance_bat_lowered_3d.png` vs `stance_bat_readied_3d.png`,
+  the sprite hands (`stance_bat_*_sprite.png`), fists (`stance_fists_*_3d.png`), `stance_lmb_refused.png`, `stance_bat_swing_3d.png`.
 
 ### Monster telegraphs (`monai.ts startWindup/tickWindup`, `monattack.ts specialTelegraph`, `monsterView.ts`)
 - Every melee blow aimed at the survivor winds up first. That covers plain swings, grab, bite, scratch, hulk
@@ -336,13 +380,14 @@ plus screenshot bursts (`docs/screenshots/combat_feel/before_*.png`, about 80 ms
 - Guns keep their existing CDDA targeting warm-up. Shrieks, spit and bile fire as before.
 
 ### Active defence (`combatfeel.ts`, `techniques.ts blockHit`, `combat.ts tryDodgeRoll`)
-- **Guard: hold RMB with a melee weapon or bare hands.** You raise the weapon or fists and walk at
-  ×0.55. It drains 60 stamina/s. It maps onto BN's `block_hit`:
+- **Guard: the ready stance (RMB with a melee weapon or bare hands, see above).** Under the classic
+  *Swing any time* control it is a separate guard: you walk at ×0.55 and it drains 60 stamina/s.
+  Either way it maps onto BN's `block_hit`:
   - The block attempt always happens. That's BN's rule. DDA's melee×20 % reaction roll only applies
     unguarded. Blocks don't run out while you guard, but each still costs stamina, and below
     2000 stamina nothing blocks.
   - The block score gets **+8** (Classic +4). Bare-handed guards block with the arms.
-  - **Parry**: the guard was raised within 0.35 s of the blow landing (Classic 0.18 s). That gives another **+10** score.
+  - **Parry**: the guard (ready stance) was raised within 0.35 s of the blow landing (Classic 0.18 s). That gives another **+10** score.
     The attacker is **stunned 0.8 s**, a parried grab never takes hold, and a clack plays (`synth_parry`).
     Timing the guard to the tell is the skill.
 - **Side-step: Space** (in the held movement direction, default back), or **double-tap A, D or S**.
@@ -488,9 +533,9 @@ real-input screenshots, and those do include the HUD.
 `tests/monsters.test.ts` now checks both presets: **Classic keeps CDDA's swing rate**, and Accessible stretches it to tell + recovery.
 
 ## What to try (for the human)
-1. Wield a bat and fight one zombie. Watch it rear back and flash, then step back (S) or tap Space as it flashes white: it whiffs. Hold RMB just as it flashes to parry. You'll hear a clack and it staggers.
+1. Wield a bat and fight one zombie. Click LMB alone: nothing (hold RMB to ready). Hold RMB: the bat comes up and you walk slower; LMB swings. Watch it rear back and flash, then tap Space as it flashes white: it whiffs. Let go of RMB and raise it again just as it flashes to parry. You'll hear a clack and it staggers. Try backing away readied from two zombies: they keep up. Options › Controls › Melee brings back swinging any time.
 2. Hit it hard during its tell. A heavy blow or a crit knocks it out of the attack.
-3. Hold LMB and watch the ring: the next swing comes when it fills. The red brackets tell you you're in reach.
+3. Hold RMB and LMB and watch the ring: the next swing comes when it fills. The red brackets tell you you're in reach.
 4. Let three or four zombies come at you from one side. They should spread around you, not stack.
 5. Get grabbed and mash `e`.
 6. Pistol: RMB to aim down the sights, then fire and reload. Try `cdda.setFeel('classic')` in the console to feel the tighter timings.
@@ -499,7 +544,8 @@ real-input screenshots, and those do include the HUD.
 ## Known gaps and follow-ups
 - Monster-versus-NPC melee now uses attack windups; third-party special attacks remain limited.
 - The side-step double-tap can trigger for players who stutter-strafe. Space is the main binding. The double-tap window is `FEEL.doubleTap`.
-- RMB is guard (melee) and aim (gun). If the UI v2 toolkit wants RMB for world context menus in gameplay, it needs a modifier or a different trigger. The guard reads `input.mouseButtons & 4` in `PlayerCombat.update`.
+- RMB is ready/guard (melee) and aim (gun). If the UI v2 toolkit wants RMB for world context menus in gameplay, it needs a modifier or a different trigger. The stance reads `input.mouseButtons & 4` in `PlayerCombat.update`.
+- The ready stance takes effect at once (no raise time). If backing off readied still feels too safe, the next knobs are `FEEL.readyMoveMul` and the planned telegraphed lunge-grab (monsters).
 - Tracers remain billboards. Persistent bullet marks now align to verified loaded wall,
   furniture, floor or ceiling planes; their reconstructed point is cosmetic, and uncertain
   or legacy impacts without explicit landing facts are omitted.

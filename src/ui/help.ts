@@ -3,6 +3,7 @@ import { h, scrollList, type Panel } from '../ui2';
 import { openScreen } from './screen2';
 import type { UiContext } from './context';
 import { keyLabel } from './keymap';
+import { meleeControl } from '../game/combatfeel';
 
 // '?' help: CDDA's help menu (data/core/help.json topics) with two topics of our own in
 // front: the key bindings (from game.keys.list(): every registered action, and only those)
@@ -40,7 +41,9 @@ function keybindingsEl(ctx: UiContext): HTMLElement {
   };
   group('Moving and fighting', [
     [wasd, 'Move (forward / left / back / right)'], ['Mouse', 'Look around (click the view to capture the mouse)'], ['Shift', 'Run (uses stamina)'],
-    ['Space', 'Side-step / dodge'], ['LMB', 'Attack / fire'], ['RMB', 'Guard (melee) / aim (guns)'], ['Wheel', 'Zoom (top-down camera)'],
+    ['Space', 'Side-step / dodge'], ...(meleeControl() === 'ready'
+      ? [['RMB', 'Ready the weapon or fists (walk slower, guard; raised just in time: parry) / aim (guns)'], ['LMB', 'Swing while readied / fire']] as [string, string][]
+      : [['LMB', 'Attack / fire'], ['RMB', 'Guard (melee) / aim (guns)']] as [string, string][]), ['Wheel', 'Zoom (top-down camera)'],
   ]);
   group('Windows and menus', [
     ['Click', 'Select; double-click uses'], ['Right-click', 'Every action for an item or object, with its time'], ['Drag', 'Move items between containers, slots and the world'],

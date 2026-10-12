@@ -13,6 +13,7 @@ import { freeAim } from '../game/aimmodel';
 // The combat feel HUD around the crosshair (src/game/combatfeel.ts), drawn as one small SVG
 // overlay so it never touches the main HUD's layout:
 //  - reach brackets: four corner ticks close in on the crosshair when a swing would connect
+//    (faint while the weapon is lowered under the ready-stance melee control)
 //  - swing ring: a thin arc that fills while the swing recovers, so the cooldown is visible
 //    without a number; it blinks once when you can swing again, then hides
 //  - guard: a shield arc under the crosshair, bright during the parry window
@@ -202,6 +203,8 @@ export class CombatHud {
       this.inReach = melee && !!c.meleeTarget(reach, arcFor(swingStyleOf(w)));
     }
     this.brackets.style.display = this.inReach ? '' : 'none';
+    // Ready-stance control with the weapon lowered: in reach, but a click won't swing yet.
+    this.brackets.style.opacity = melee && c.stance && !c.stance.canSwing ? '0.35' : '';
 
     // --- ranged: the spread circle shrinks as you aim; its colour says whether it fits on the
     // body under the crosshair (green), about does (yellow) or is wider than it (red).

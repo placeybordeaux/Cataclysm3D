@@ -19,7 +19,7 @@ distance; replace hidden to-hit dice with visible skill; fix the boxy cars; adap
 | Vehicles | `docs/VEHICLES.md` | One modelled body per vehicle (11 styles + liveries), damage/wreck states, collision follows the drawn body, cockpit with live gauges, wipers, hands on the wheel, trunk lids, LOD. Fill up at gas pumps. | Options → Vehicle look / width; `?vehicles=parts` |
 | Readability & image | `docs/READABILITY.md` | Sky-tinted light haze instead of the grey fog wall, far ground ring to the horizon, weather-driven sky, toon-stepped form lighting with a world-fixed fill light, cutout mips (less shimmer), round sun. | Options → Distance haze / Draw distance / Form lighting |
 | Flora | `docs/FLORA.md` | Species-family 3D trees (round, willow, conifer, birch, fruit, sapling, dead) and bushes, seasonal colours, 3 LOD rings with no billboard pop, stepped wind. | Options → Trees |
-| Combat | `docs/COMBAT_FEEL.md` (Aim models, rounds 2–3) | Shots/swings go where the crosshair is. Skill = sway, recoil recovery, damage, crit/stagger; hit zones read the 3D model (head ×2); optional timing minigame; melee on model parts; visible enemy fire with near-miss cues; first-fight hints. | Options → Aim model (`sway` default, `timing`, `dice` = BN) |
+| Combat | `docs/COMBAT_FEEL.md` (Aim models, rounds 2–3) | Shots/swings go where the crosshair is. Skill = sway, recoil recovery, damage, crit/stagger; hit zones read the 3D model (head ×2); optional timing minigame; melee on model parts; visible enemy fire with near-miss cues; first-fight hints. | Options → Aim model (`sway` default, `timing`, `dice` = BN); Options → Controls → Melee (`?melee=ready` default: RMB readies, `anytime` = classic) |
 | Adaptation | `docs/ADAPTATION.md` | Principles + 69 playtest findings. Big fixes: BN weather was always a snowstorm; BN item light ignored (flashlights dark); shelter paved over on some seeds; nothing buildable on grass/dirt; fires died unburnt when time sped up. New: big-button title, crosshair activity ring, Rest window, route guide + road atlas, crafting "Almost" tab, credits screen, first beds / boil water / fire safety / freshness. | Several Options rows (listed in the doc) |
 | Loading | `docs/PERF.md` (Load gate) | Creatures, corpses, NPCs, vehicles, fire, arrows and grass appear only once the chunk geometry around them is on screen (no zombies standing in mid-air on unbuilt upper floors). The game waits (no turns, no monster moves, clock stopped) while the world within 40 m on your level and the ones above and below is unbuilt: a loading screen after loads, teleports and jumps, a small "Loading surroundings" note when you outrun streaming. | Options → Load gate; `?loadgate=auto\|block\|soft\|off` (`auto` default) |
 | QA | `docs/QA_WAVE3.md` | Integrated playtest at 3440x1304 in Chromium + Firefox, every Options switch cycled, save/load, per-scenario real-input results. | — |
@@ -105,7 +105,8 @@ Screenshots for every area: `docs/screenshots/wave3/<area>/` (before/after pairs
 ## Controls (current defaults; all rebindable in Options → Key bindings)
 
 Move WASD (Shift run, `c` crouch, Space side-step) · mouse look · LMB attack/fire/loose ·
-RMB guard (melee) / aim (guns) / draw (bows) · `e` interact (drive a car from beside it,
+RMB ready + guard (melee: LMB swings only while readied; Options → Controls → Melee for the
+classic swing-any-time) / aim (guns) / draw (bows) · `e` interact (drive a car from beside it,
 get out when stopped) · `o` world action menu · `Tab`/`i` inventory · quick-loot at the
 crosshair: wheel select, `e` take, `r` take all · `g` pick up / Area loot · `1`–`0` hotbar ·
 `` ` `` tactical pause · `&` craft · `*` construct · `@` character · `m` map · `J` journal ·

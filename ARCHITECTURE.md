@@ -164,7 +164,7 @@ tests/               vitest unit tests (pure logic, no DOM/WebGL)
 - `mongroups.ts` (genVersion >= 3): BN overmap special spawns (anthill colonies etc.), per-submap
   groups from `Overmap.monGroupsAt`, materialised when their submap enters the 11×11-submap bubble;
   save section `mongroups` = spent group keys. docs/WORLD_TRANSPORT.md "Special spawns".
-- `playercombat.ts` LMB melee (crosshair cone) / hitscan guns / `G` throw; `butchery.ts`.
+- `playercombat.ts` RMB-readied LMB melee (crosshair cone) / hitscan guns / `G` throw; `butchery.ts`.
 - Seams: `game.bash?.(x, y, z, str)` (bash.ts) lets zombies smash doors;
   `game.stats?.kills` gets kill counts; `renderer.viewmodel?.attack(kind)` is called on
   attacks. Rendering: `src/render/monsterView.ts` (sprites, corpses, blood decals).
@@ -605,11 +605,15 @@ tests/               vitest unit tests (pure logic, no DOM/WebGL)
   is the difficulty hook). The CDDA/BN math stays underneath; this layer only times and targets it.
 - Survivor swings: `PlayerCombat.beginSwing()` (LMB) → wind-up → contact (resolves via `melee(m, {phased})`
   against `sweptArcTarget`) → recovery, `combat.swing`/`hitStop`; `melee()` without `phased` stays instant.
-  RMB guard (`defenseOf(c).guarding`, read by `blockHit`), Space/double-tap side-step (`tryDodgeRoll` bonus).
+  Melee control (`meleeControl()`: 'ready' default | 'anytime'): `meleeStance(inputs)` each tick → `combat.stance`
+  {ready, canSwing, guarding, moveMul, staminaPerSec}; 'ready' = RMB readies, LMB swings only while readied, readied
+  walks at `FEEL.readyMoveMul` and guards (`defenseOf(c).guarding`, read by `blockHit`; parry clock from the raise),
+  Shift-running lowers it; 'anytime' = the old LMB-whenever + RMB guard. Options › Controls › Melee, `?melee=`,
+  `cdda.setMeleeControl`. Space/double-tap side-step (`tryDodgeRoll` bonus).
 - Monsters: `m.windup` telegraphs melee/special blows (`specialTelegraph` in monattack.ts); event
   `monsterAttack` (windup/resolved/whiff/interrupted); hit reactions `m.flinch` + shove; surround slots;
   `sys.struggle()` for grabs (interact key while grabbed).
-- Render hooks: `viewmodel.swing/impact/setGuard/recoil/jolt/reload/ads`, `rig.kick()/rig.ads`,
+- Render hooks: `viewmodel.swing/impact/setGuard/setLowered/recoil/jolt/reload/ads`, `rig.kick()/rig.ads`,
   `SpriteHandle.setSize`, `hitFx.tracer/watchTracers`, `playerAttack.hitStop`. HUD: `src/ui/combatHud.ts`.
 - Aim models (src/game/aimmodel.ts, wired by src/aim.ts): `aimModel()`/`setAimModel('sway'|'timing'|'dice')`,
   `freeAim()`. Free aim: `combat.aim` (AimSway: sway + kick; the shot uses `shotOffset`), `castAim`,
@@ -775,7 +779,7 @@ Keys: `V` camera mode, `F` flashlight.
 
 ## Game design conversion rules
 
-- Controls: WASD move, mouse look, Shift run, C crouch, LMB attack/fire, RMB aim,
+- Controls: WASD move, mouse look, Shift run, C crouch, LMB attack/fire, RMB aim (guns) / ready (melee: LMB only swings readied),
   E/`e` examine/interact (open doors, furniture), and **CDDA keys for menus**: `i`
   inventory, `w` wield, `W` wear, `T` take off, `E` eat, `g` pickup, `d` drop, `&`
   craft, `*` construct, `@` character, `m` map, `r` reload, `a` activate, `R` read,

@@ -262,6 +262,10 @@ const SWING_POSES: Record<SwingStyle, { wind: [number, number, number]; contact:
 // Guard: weapon raised across the body / both fists up.
 const GUARD_POSE: [number, number, number] = [-0.14, 0.2, 0.55];
 const GUARD_FISTS: [number, number, number] = [-0.1, 0.17, 0];
+// Lowered (ready-stance melee control, weapon not readied): carried low and tipped out to the
+// right, fists dropped, so "can't swing yet" reads at a glance against the raised guard pose.
+export const LOWER_POSE: [number, number, number] = [0.04, -0.05, -0.22];
+export const LOWER_FISTS: [number, number, number] = [0.03, -0.05, 0];
 
 /**
  * Keys (normalised to 0..1) for a phased swing, starting from the pose the hands are in now so
@@ -298,6 +302,8 @@ export interface ViewmodelState {
   item: { x: number; y: number; dx: number; dy: number; rot: number; vis: boolean };
   ads: number;
   guard: number;
+  /** How far the hands are in the lowered carry (0..1; ready-stance control, not readied). */
+  lower: number;
   flash: boolean;
   anim: AttackKind | null;
   animT: number;
@@ -311,7 +317,7 @@ export class Viewmodel {
   hide2d = false;
   readonly state: ViewmodelState = {
     mode: 'none', lowW: 1, lowH: 1, hands: [{ x: 0, y: 0, dx: 0, dy: 0, rot: 0 }, { x: 0, y: 0, dx: 0, dy: 0, rot: 0 }],
-    item: { x: 0, y: 0, dx: 0, dy: 0, rot: 0, vis: false }, ads: 0, guard: 0, flash: false, anim: null, animT: 0, drawn: null, whirl: 0,
+    item: { x: 0, y: 0, dx: 0, dy: 0, rot: 0, vis: false }, ads: 0, guard: 0, lower: 0, flash: false, anim: null, animT: 0, drawn: null, whirl: 0,
   };
   readonly scene = new THREE.Scene();
   readonly camera = new THREE.OrthographicCamera(0, 1, 1, 0, -10, 10);
@@ -323,8 +329,12 @@ export class Viewmodel {
   private flash: Part | null = null;
   private itemKey = '';
   private handKey = -1;
-  /** `contact`: normalised time of the swing's contact pose (hit-stop snaps to it). */
-  private anim: { kind: AttackKind; t: number; dur: number; keys: Key[]; hand: 0 | 1 | 2; contact?: number } | null = null;
+  /**
+   * `contact`: normalised time of the swing's contact pose (hit-stop snaps to it). `toIdle`: the
+   * last key is not a fixed pose but wherever the hands rest right now (raised, lowered or
+   * neither), so a swing ends in the stance the player is holding by then without a pop.
+   */
+  private anim: { kind: AttackKind; t: number; dur: number; keys: Key[]; hand: 0 | 1 | 2; contact?: number; toIdle?: boolean } | null = null;
   /** Hold the current animation at its t (tests/screenshots). */
   private frozen = false;
   private punchHand: 0 | 1 = 1;
@@ -339,6 +349,8 @@ export class Viewmodel {
   private holdT = 0;
   private guardOn = false;
   private guardBlend = 0;
+  private lowerOn = false;
+  private lowerBlend = 0;
   /** Aim down sights (RMB with a gun): the gun eases toward the centre of the view. */
   ads = false;
   /**
@@ -424,9 +436,9 @@ export class Viewmodel {
     const fists = !this.itemKey;
     const style: SwingStyle = fists ? 'punch' : ph.style;
     if (fists) this.punchHand = this.punchHand === 1 ? 0 : 1;
-    const from: [number, number, number] = fists ? [0, 0, 0] : this.lastPose;
+    const from: [number, number, number] = fists ? this.idlePose(true) : this.lastPose;
     const { keys, dur } = swingKeys({ ...ph, style }, from);
-    this.anim = { kind: 'melee', t: 0, dur, keys, hand: fists ? this.punchHand : 1, contact: keys[2][0] };
+    this.anim = { kind: 'melee', t: 0, dur, keys, hand: fists ? this.punchHand : 1, contact: keys[2][0], toIdle: true };
   }
 
   /**
@@ -442,6 +454,18 @@ export class Viewmodel {
   /** Raise (or lower) the guard; held until released, a swing takes precedence while it plays. */
   setGuard(on: boolean): void {
     this.guardOn = on;
+  }
+
+  /** Carry the weapon / fists lowered (ready-stance control while not readied). */
+  setLowered(on: boolean): void {
+    this.lowerOn = on;
+  }
+
+  /** Where the hands rest between animations: the blend of the guard and lowered poses. */
+  private idlePose(fists: boolean): [number, number, number] {
+    const G = fists ? GUARD_FISTS : GUARD_POSE, L = fists ? LOWER_FISTS : LOWER_POSE;
+    const g = this.guardBlend, l = this.lowerBlend;
+    return [G[0] * g + L[0] * l, G[1] * g + L[1] * l, G[2] * g + L[2] * l];
   }
 
   /** Gun kick scaled by the shot's recoil (1 = a typical pistol round). */
@@ -679,6 +703,8 @@ export class Viewmodel {
     }
     if (!this.frozen) this.flashT = Math.max(0, this.flashT - dt);
     this.guardBlend += ((this.guardOn ? 1 : 0) - this.guardBlend) * Math.min(1, dt * 16);
+    // Lowering is a touch slower than raising: the raise is the reaction, the drop a relaxation.
+    this.lowerBlend += ((this.lowerOn ? 1 : 0) - this.lowerBlend) * Math.min(1, dt * 10);
     this.adsBlend += ((this.ads && wielded?.isGun?.() ? 1 : 0) - this.adsBlend) * Math.min(1, dt * 12);
     const spring = Math.min(1, dt * 9);
     this.joltX -= this.joltX * spring;
@@ -691,7 +717,7 @@ export class Viewmodel {
     const bobY = -Math.abs(Math.sin(this.bobPhase)) * this.bobAmp * 0.025 * steady + this.joltY;
     const vis = this.enabled && !this.hide2d;
     const st = this.state;
-    st.lowW = lowW; st.lowH = lowH; st.ads = this.adsBlend; st.guard = this.guardBlend;
+    st.lowW = lowW; st.lowH = lowH; st.ads = this.adsBlend; st.guard = this.guardBlend; st.lower = this.lowerBlend;
     st.anim = this.anim?.kind ?? null; st.animT = this.anim?.t ?? 0; st.flash = this.flashT > 0; st.drawn = null;
     const place = (p: Part, x: number, y: number, rot: number, shown: boolean) => {
       p.mesh.visible = vis && shown;
@@ -701,7 +727,13 @@ export class Viewmodel {
     };
 
     const [fl, fr] = this.fists!;
-    const g = this.guardBlend;
+    const idle = this.idlePose(!this.weapon);
+    if (this.anim?.toIdle) {
+      const end = this.anim.keys[this.anim.keys.length - 1];
+      end[1] = idle[0];
+      end[2] = idle[1];
+      end[3] = idle[2];
+    }
     // Bows and slingshots: the procedural drawn weapon instead of the icon held like a gun.
     const bowPose = wielded ? this.bowSource?.() ?? null : null;
     const drawn: DrawnKind | null = bowPose?.style === 'draw' ? (bowPose.cls === 'bow' ? 'bow' : 'slingshot') : null;
@@ -727,7 +759,7 @@ export class Viewmodel {
       return;
     }
     if (this.weapon) {
-      const a = this.anim ? pose(this.anim.keys, this.anim.t) : { dx: GUARD_POSE[0] * g, dy: GUARD_POSE[1] * g, rot: GUARD_POSE[2] * g, vis: true };
+      const a = this.anim ? pose(this.anim.keys, this.anim.t) : { dx: idle[0], dy: idle[1], rot: idle[2], vis: true };
       this.lastPose = [a.dx, a.dy, a.rot];
       // ADS: the gun comes in toward the centre and up so the muzzle sits just under the crosshair.
       const ads = this.adsBlend;
@@ -743,7 +775,7 @@ export class Viewmodel {
       for (let hand = 0; hand < 2; hand++) {
         const a = this.anim && (this.anim.hand === hand || this.anim.hand === 2)
           ? pose(this.anim.keys, this.anim.t)
-          : { dx: GUARD_FISTS[0] * g, dy: GUARD_FISTS[1] * g, rot: 0, vis: true };
+          : { dx: idle[0], dy: idle[1], rot: 0, vis: true };
         const side = hand === 1 ? 1 : -1;
         const x = lowW * 0.5 + lowH * (side * (0.36 + bobX + a.dx) + this.sway);
         const y = lowH * (0.14 + bobY * (hand ? 1 : 0.8) + a.dy);

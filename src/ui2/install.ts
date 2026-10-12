@@ -144,7 +144,7 @@ export function installUi2(game: Game, renderer: Renderer, ctx: UiContext, api: 
     if (primary && 'action' in primary) primary.action?.();
   });
 
-  // While the mouse is captured RMB is guard/aim, so the crosshair's context menu is a key.
+  // While the mouse is captured RMB is ready/guard/aim, so the crosshair's context menu is a key.
   // It opens at the screen centre; being a ui2 surface it frees the cursor for pointing.
   // With a person in front (what `e` talks to: interact.ts aimedCreature) the menu is theirs,
   // plus, under its own heading, the tile `e` would act on without them: the bench the beggar

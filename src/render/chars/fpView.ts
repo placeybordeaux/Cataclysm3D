@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { ItemGesture, gestureClass } from './itemGesture';
 import type { Game } from '../../game/game';
 import type { Renderer } from '../renderer';
-import type { Viewmodel, ViewmodelItem, ViewmodelState } from '../viewmodel';
+import { LOWER_POSE, type Viewmodel, type ViewmodelItem, type ViewmodelState } from '../viewmodel';
 import { AtlasTextureSource } from '../atlasSource';
 import { bodyShapeOf } from './archetype';
 import { CharLayer, fpMaterial, type CharInstance } from './charLayer';
@@ -391,7 +391,9 @@ export class FpView {
         // the right edge so it doesn't stand in the middle of a wide view (QA on 3440x1304);
         // the lean fades out as soon as a swing or the guard moves the hands.
         const long = this.cls === 'bat' || this.cls === 'spear' || this.cls === 'sword' || this.cls === 'pipe' || this.cls === 'axe' || this.cls === 'hammer' || this.cls === 'machete';
-        const rest = long ? Math.max(0, 1 - Math.abs(it.rot) * 3 - Math.abs(it.dy) * 6 - Math.abs(it.dx) * 6 - st.guard * 1.5) : 0;
+        // (the lowered carry of the ready-stance control is a rest pose too: it doesn't fade the lean)
+        const lo = st.lower;
+        const rest = long ? Math.max(0, 1 - Math.abs(it.rot - LOWER_POSE[2] * lo) * 3 - Math.abs(it.dy - LOWER_POSE[1] * lo) * 6 - Math.abs(it.dx - LOWER_POSE[0] * lo) * 6 - st.guard * 1.5) : 0;
         place(this.rootR, at(it.x + H * 0.16 * rest, it.y - H * 0.16 * rest, 0.56 + Math.max(0, it.dy) * 0.4),
           [it.rot * 0.55 + 0.35 * rest, -it.rot * 0.25, it.rot * 0.85 - 1.35 * rest]);
       }

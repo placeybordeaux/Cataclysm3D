@@ -105,6 +105,17 @@ const AIM_POINT = (pt: string) => `(() => {
 export function aimScenarios(c: AimCtx): Scenario[] {
   const { js, check, shot, sleep } = c;
   const x = () => c.x();
+  /**
+   * A melee swing the default way (Options > Controls > Melee "Ready to swing"): RMB readies,
+   * LMB swings, RMB goes back up (the swing finishes on its own) so the next check starts lowered.
+   */
+  const readyClick = async () => {
+    await x().buttonDown(3);
+    await sleep(60);
+    await x().clickHere(1);
+    await sleep(40);
+    await x().buttonUp(3);
+  };
   const why = () => js<string>(`(() => { const w = document.querySelector('.combat-why'); return w && w.style.display !== 'none' ? w.textContent : ''; })()`);
   // Own globals (the archery suite has its own listener on window.__ev), re-hooked if the game object was replaced.
   const listen = () => js(`window.__aimEv = []; if (window.__aimEvGame !== cdda.game) { window.__aimEvGame = cdda.game; cdda.game.events.on('playerAttack', (e) => window.__aimEv.push({ k: e.kind, o: e.outcome, r: e.reason ?? '', d: e.damage, landed: !!e.landed })); }`);
@@ -135,7 +146,7 @@ export function aimScenarios(c: AimCtx): Scenario[] {
     for (let i = 0; i < n; i++) {
       await js(AIM);
       if (w.melee) {
-        await x().clickHere(1);
+        await readyClick();
         await sleep(900);
       } else {
         await x().buttonDown(3);
@@ -307,7 +318,7 @@ export function aimScenarios(c: AimCtx): Scenario[] {
       let peak = 0;
       for (let i = 0; i < 6 && peak < 0.1; i++) {
         await js(AIM);
-        await x().clickHere(1);
+        await readyClick();
         for (let k = 0; k < 20; k++) {
           const l = await js<{ lift: number; fall: number } | null>('cdda.modelLift(window.__uid)');
           if (l && l.fall > 0.2) {
@@ -465,7 +476,7 @@ export function aimScenarios(c: AimCtx): Scenario[] {
         await js(AIM_POINT(`cdda.modelPart(${uid}, '${part}')`));
         await sleep(80);
         await js('window.__hitUids = []');
-        await x().clickHere(1);
+        await readyClick();
         await sleep(700);
         return js<{ uid: number | null; r: string; o: string }[]>('window.__hitUids');
       };
@@ -485,7 +496,7 @@ export function aimScenarios(c: AimCtx): Scenario[] {
         await js(AIM_POINT(`cdda.modelPart(${uids[1]}, 'shinL')`));
         await js('cdda.game.player.pitch -= 0.02');
         await js('window.__hitUids = []');
-        await x().clickHere(1);
+        await readyClick();
         await sleep(700);
         legs = (await js<{ r: string }[]>('window.__hitUids')).filter((e) => /legs/.test(e.r));
       }
@@ -646,7 +657,7 @@ export function aimScenarios(c: AimCtx): Scenario[] {
       await sleep(3000);
       await js(`(() => { const m = window.__m, p = cdda.game.player; p.yaw = Math.atan2(m.x - p.x, -(m.y - p.y)); })()`);
       await js(`window.__mh = 0; window.__mhOn || (window.__mhOn = cdda.game.events.on('playerAttack', (e) => e.kind === 'melee' && (e.outcome === 'hit' || e.outcome === 'crit') && window.__mh++))`);
-      await x().clickHere(1);
+      await readyClick();
       await sleep(900);
       check('top view: a swing hits what is in front of the facing', (await js<number>('window.__mh')) > 0);
       await shot('top_melee');
@@ -750,6 +761,9 @@ export function aimScenarios(c: AimCtx): Scenario[] {
       await js(SETUP('bat', 0, 1.0, 'timing'));
       await sleep(300);
       await js(AIM);
+      // Readied (RMB) through both swings, as a player chaining blows holds it.
+      await x().buttonDown(3);
+      await sleep(60);
       await x().clickHere(1);
       await sleep(50);
       for (let i = 0; i < 200; i++) {
@@ -758,6 +772,7 @@ export function aimScenarios(c: AimCtx): Scenario[] {
       }
       await x().clickHere(1);
       await sleep(150);
+      await x().buttonUp(3);
       check('a click on the beat chains a perfect swing', await js<boolean>('!!cdda.combat.swing?.perfect'));
       await sleep(600);
       console.log(`    melee beat line: ${await why()}`);

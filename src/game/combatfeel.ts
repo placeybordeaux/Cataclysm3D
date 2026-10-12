@@ -62,10 +62,17 @@ export interface FeelConstants {
   parryBonus: number;
   /** Seconds a parried attacker is stunned. */
   parryStun: number;
-  /** Walk speed multiplier while guarding. */
+  /** Walk speed multiplier while guarding (the "Swing any time" melee control only). */
   guardMoveMul: number;
-  /** Stamina per second spent holding the guard. */
+  /** Stamina per second spent holding the guard (the "Swing any time" melee control only). */
   guardStaminaPerSec: number;
+
+  // --- ready stance (the default "Ready to swing" melee control, see meleeStance): RMB raises the
+  // weapon or fists, LMB swings only while it is up, and the raised stance is also the guard.
+  /** Walk speed multiplier while readied. */
+  readyMoveMul: number;
+  /** Stamina per second spent holding the weapon up. */
+  readyStaminaPerSec: number;
 
   // --- side-step (Space, or double-tap A/D/S) -> CDDA dodge_roll
   dodgeDistance: number;
@@ -158,6 +165,14 @@ const ACCESSIBLE: FeelConstants = {
   reach: 1.2, reachLong: 2.2,
   telegraph: 0.5, telegraphMin: 0.4, telegraphMax: 0.8, telegraphHeavyMul: 1.5, telegraphLeap: 0.45, lunge: 0.35, monsterRecovery: 0.35,
   guardBlockBonus: 8, parryWindow: 0.35, parryBonus: 10, parryStun: 0.8, guardMoveMul: 0.55, guardStaminaPerSec: 60,
+  // Readied walk speed: the survivor walks ~2.8 m/s (speed 100 / ~107 moves with clothes on, x
+  // ACTION_SCALE 3; 3.0 bare), a speed-70 zombie 2.1 m/s (1.89 at Accessible's 0.9 monster speed).
+  // 0.65 puts a readied survivor at ~1.8-1.95 m/s: backing off from a zombie with the weapon up
+  // about keeps pace with it and buys no free swings; to open distance you lower it (or run).
+  // Stamina: base regen is 20 per turn = 60/s. Holding the weapon up is now how every melee fight
+  // is fought, so it costs a third of the regen (standing ready never runs you dry, you just
+  // recover slower); a fight's real cost stays BN's: ~100 per swing, plus each block.
+  readyMoveMul: 0.65, readyStaminaPerSec: 20,
   dodgeDistance: 1.3, dodgeTime: 0.18, dodgeCooldown: 0.6, dodgeWindow: 0.3, dodgeBonus: 6, dodgeStamina: 300, doubleTap: 0.25,
   struggleBonus: 3, grabCooldownMul: 1.6, staggerBreaksGrab: true,
   flinchPerHp: 1.2, flinchMax: 0.35, staggerShare: 0.2, shovePerHp: 1.2, shoveMax: 0.35,
@@ -174,6 +189,9 @@ const CLASSIC: FeelConstants = {
   ...ACCESSIBLE,
   telegraph: 0.35, telegraphMin: 0.25, telegraphMax: 0.6, telegraphLeap: 0.3, lunge: 0.45, monsterRecovery: 0.2,
   guardBlockBonus: 4, parryWindow: 0.18, parryBonus: 6, parryStun: 0.5, guardMoveMul: 0.45, guardStaminaPerSec: 120,
+  // ~1.7-1.8 m/s readied vs a 2.1 m/s zombie: backing away readied loses ground. Two thirds of
+  // the regen while held: a long stand-off readied still recovers, slowly.
+  readyMoveMul: 0.6, readyStaminaPerSec: 40,
   dodgeWindow: 0.22, dodgeBonus: 3, dodgeStamina: 450,
   struggleBonus: 1, grabCooldownMul: 1, staggerBreaksGrab: false,
   staggerShare: 0.3,
@@ -369,6 +387,82 @@ export function parryWindowOf(s: Pick<DefenseState, 'parryMul'> | null, f: FeelC
 export function sidestepDodgeRoll(dodge: number, s: Pick<DefenseState, 'dodgeWindow'> | null, f: FeelConstants = FEEL): number | null {
   if (!s || s.dodgeWindow <= 0) return null;
   return (Math.max(0, dodge) + f.dodgeBonus) * 5;
+}
+
+// ------------------------------------------------------------------ melee control: ready stance
+
+/**
+ * How LMB melee works (Options > Melee, `?melee=`, `cdda.setMeleeControl`):
+ *  - 'ready'   (default): hold RMB to ready the weapon or fists; LMB swings only while readied.
+ *              Readied you walk at FEEL.readyMoveMul and are guarding (block_hit bonus); raising
+ *              it just before a blow lands is the parry. In CDDA a swing spends the moves you
+ *              would have walked with: free swings while backpedalling at full speed made
+ *              kiting a crowd trivial, and the slowdown has to come from a stance the player
+ *              chose, never as a surprise on the click.
+ *  - 'anytime' (classic): LMB swings whenever, RMB is a separate guard (the pre-stance controls).
+ */
+export type MeleeControl = 'ready' | 'anytime';
+export const MELEE_CONTROLS: readonly { id: MeleeControl; name: string; desc: string }[] = [
+  { id: 'ready', name: 'Ready to swing (RMB)', desc: 'hold right mouse to raise your weapon (you walk slower and guard), left click swings while it is up' },
+  { id: 'anytime', name: 'Swing any time (classic)', desc: 'left click swings whenever, right mouse is a separate guard' },
+];
+let meleeControlMode: MeleeControl = 'ready';
+export function isMeleeControl(v: unknown): v is MeleeControl {
+  return v === 'ready' || v === 'anytime';
+}
+export function meleeControl(): MeleeControl {
+  return meleeControlMode;
+}
+export function setMeleeControl(m: MeleeControl): void {
+  if (!isMeleeControl(m)) throw new Error(`unknown melee control ${String(m)} (use ready or anytime)`);
+  meleeControlMode = m;
+}
+
+export interface StanceInputs {
+  /** RMB held in play (pointer captured by the game, no menu). */
+  rmb: boolean;
+  /** Actually running (Shift, able to run, a movement key down). */
+  running: boolean;
+  /** Driving, at a vehicle station, moving furniture: no guard (you can still swing from there, as before). */
+  blocked: boolean;
+  /** Knocked down: you can still swing from the ground but not guard. */
+  downed: boolean;
+  /** The survivor's own swing is playing (the guard is down while the weapon is in the arc). */
+  swinging: boolean;
+}
+
+export interface Stance {
+  /** The ready stance is up ('ready' control only): the weapon is shown raised. */
+  ready: boolean;
+  /** LMB may start a swing now. */
+  canSwing: boolean;
+  /** Counts as guarding for block_hit (defenseOf(c).guarding). */
+  guarding: boolean;
+  /** Walk speed multiplier (Player.moveSpeedMul). */
+  moveMul: number;
+  /** Stamina per second the stance costs. */
+  staminaPerSec: number;
+}
+
+/**
+ * The melee stance for one tick. Running drops the ready stance: Shift lowers the weapon to
+ * sprint (full run speed, no swings, no guard) and letting go of Shift with RMB still held
+ * raises it again, a fresh raise (so a parry is possible). The alternative, readiness vetoing
+ * the run, would leave a player holding RMB unable to flee.
+ */
+export function meleeStance(i: StanceInputs, mode: MeleeControl = meleeControlMode, f: FeelConstants = FEEL): Stance {
+  if (mode === 'anytime') {
+    const guarding = i.rmb && !i.blocked && !i.downed && !i.swinging;
+    return { ready: false, canSwing: true, guarding, moveMul: guarding ? f.guardMoveMul : 1, staminaPerSec: guarding ? f.guardStaminaPerSec : 0 };
+  }
+  const ready = i.rmb && !i.running;
+  return {
+    ready,
+    canSwing: ready,
+    guarding: ready && !i.blocked && !i.downed && !i.swinging,
+    moveMul: ready ? f.readyMoveMul : 1,
+    staminaPerSec: ready ? f.readyStaminaPerSec : 0,
+  };
 }
 
 // ------------------------------------------------------------------ spacing
