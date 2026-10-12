@@ -37,11 +37,13 @@ export function sewerScenarios(c: SewerCtx): Scenario[] {
     })()`);
     if (!letter) {
       const text = await menuText();
-      // Only close a menu that opened: Esc in gameplay would open the pause menu instead.
-      if (text) {
-        await c.x().key('Escape');
-        await sleep(200);
+      // No menu: with one action on offer `e` does it straight away (the [e] prompt).
+      if (!text) {
+        await sleep(600);
+        return { ok: true, text: '' };
       }
+      await c.x().key('Escape');
+      await sleep(200);
       return { ok: false, text };
     }
     await c.x().key(letter);
@@ -72,7 +74,7 @@ export function sewerScenarios(c: SewerCtx): Scenario[] {
         return;
       }
       const [cx, cy] = spot.cover, [sx, sy] = spot.stand;
-      await js(`(() => { cdda.clearMonsters(30); cdda.godMode(true); cdda.teleport(${sx} + 0.5, ${sy} + 0.5, 0); cdda.faceTile(${cx}, ${cy}); cdda.game.player.pitch = -0.6; cdda.step(0.05); })()`);
+      await js(`(() => { cdda.godMode(true); cdda.teleport(${sx} + 0.5, ${sy} + 0.5, 0); cdda.clearMonsters(120); cdda.faceTile(${cx}, ${cy}); cdda.game.player.pitch = -0.6; cdda.step(0.05); })()`);
       const w = await settleWorld(js);
       if (!w.ok) check('the surroundings finished loading', false, w);
       const linkShut = await js<unknown>(`cdda.stairs.at(${cx}, ${cy}, 0) ?? cdda.stairs.at(${cx}, ${cy}, -1)`);
