@@ -16,6 +16,8 @@ import { CreatureModel, DEATH_TOTAL as MODEL_DEATH_TOTAL, FallingBody } from './
 import { makeRig, type Rig } from './chars/rig';
 import { ZVARIANTS } from './chars/zombie';
 import { FxMeshes } from './chars/fxMeshes';
+import { RAGDOLL, RagdollBody, nearestLie, type RagdollEvent, type RagdollFeel } from './chars/ragdoll';
+import { sampleFling, type FlingPlan } from '../game/runoverFling';
 import { cardsOn } from './cards';
 import { cddaColor } from './atlasIndex';
 import type { MonsterDef } from '../data/types';
@@ -71,6 +73,10 @@ interface MonView {
   hold: number;
   /** Second (hotter) telegraph flash already fired for the current wind-up. */
   warned: boolean;
+  /** Thrown by a vehicle and still flying (model mode): the rag doll drawn instead of `c`. */
+  rag: RagdollBody | null;
+  /** the flight the last rag doll played (the simulation may still be finishing it) */
+  flown: FlingPlan | null;
 }
 
 interface CorpseView {
@@ -86,6 +92,11 @@ interface CorpseView {
   dx: number;
   dy: number;
   heavy: boolean;
+  /** appearance seed source (the monster's), so the body after a rag doll is the same individual */
+  uid: number;
+  /** Thrown by a vehicle: the flight (model mode: `rag` plays it; billboards follow it) */
+  fling: FlingPlan | null;
+  rag: RagdollBody | null;
 }
 
 /**
@@ -249,7 +260,7 @@ export class MonsterView implements GameSystem {
     sys.onCorpse.push((c) => {
       const def = game.data.monsters[c.monId];
       const f = this.frameFor({ type: def, uid: 0, size: monsterSize(def) });
-      const v: CorpseView = { h: null, body: null, rec: c, frame: f.frame, height: f.height, t: DIE_TOTAL, x0: c.x, y0: c.y, dx: 0, dy: 0, heavy: false };
+      const v: CorpseView = { h: null, body: null, rec: c, frame: f.frame, height: f.height, t: DIE_TOTAL, x0: c.x, y0: c.y, dx: 0, dy: 0, heavy: false, uid: 0, fling: null, rag: null };
       this.makeCorpseVisual(v, def, 0, true);
       this.corpses.set(c, v);
     });
@@ -379,7 +390,7 @@ export class MonsterView implements GameSystem {
 
   private create(m: Monster): MonView {
     const { frame, height } = this.frameFor(m);
-    const v: MonView = { h: null, c: null, frame, height, typeId: m.type.id, down: 0, hold: 0, warned: false };
+    const v: MonView = { h: null, c: null, frame, height, typeId: m.type.id, down: 0, hold: 0, warned: false, rag: null, flown: null };
     this.makeVisual(m, v);
     this.views.set(m, v);
     return v;
@@ -396,8 +407,32 @@ export class MonsterView implements GameSystem {
   private dropVisual(v: MonView): void {
     v.h?.remove();
     v.c?.remove();
+    v.rag?.remove();
     v.h = null;
     v.c = null;
+    v.rag = null;
+  }
+
+  /** How thrown bodies flail (Options > Run-over bodies: rag doll stiff / loose). */
+  private ragFeel(): RagdollFeel {
+    return this.game.vehicles?.runoverMode === 'loose' ? RAGDOLL.loose : RAGDOLL.stiff;
+  }
+
+  /** Bodies landing, bouncing and hitting walls: a thud, and dust / blood where it first lands. */
+  private ragEvents(ev: RagdollEvent[], z: number, heavy: boolean, monId: string): void {
+    for (const e of ev) {
+      if (e.kind === 'land') {
+        sfx.bodyFall({ x: e.x, y: e.y, z }, heavy);
+        this.onBodyLanded?.(e.x, e.y, z, this.sys.bloodType(this.game.data.monsters[monId]));
+      } else if (e.speed > 2.5) sfx.bodyFall({ x: e.x, y: e.y, z }, false);
+    }
+  }
+
+  /** A rag doll for a flight already `t` seconds in (0 = the moment of the hit). */
+  private makeRag(layer: CharLayers['live'], rig: Rig, skin: ReturnType<MonsterView['skinFor']>, seed: number, plan: FlingPlan, z: number, facing: number, live: boolean, t: number): RagdollBody {
+    const r = new RagdollBody(layer, rig, skin, seed, plan, z, facing, { feel: this.ragFeel(), live });
+    for (let s = 0; s < t - 1e-9; s += 1 / 30) r.update(Math.min(1 / 30, t - s));
+    return r;
   }
 
   private refresh(m: Monster, v: MonView): void {
@@ -428,10 +463,16 @@ export class MonsterView implements GameSystem {
     v.height = f.height;
     v.h?.remove();
     v.body?.remove();
+    v.rag?.remove();
     v.h = null;
     v.body = null;
+    v.rag = null;
+    v.fling = null;
+    v.x0 = c.x;
+    v.y0 = c.y;
+    v.dx = v.dy = 0;
     v.t = Math.max(v.t, DIE_TOTAL);
-    this.makeCorpseVisual(v, def, 0, true);
+    this.makeCorpseVisual(v, def, v.uid, true);
   }
 
   /** The lying (or about to fall) body: a billboard or a 3D body on the corpse layer. */
@@ -440,7 +481,8 @@ export class MonsterView implements GameSystem {
     if (this.models) {
       const seed = seedOf(uid || Math.floor(c.x * 7 + c.y * 13));
       const rig = this.rigFor(def, seed);
-      v.body = new FallingBody(this.layers().dead, rig, this.skinFor(rig, v.frame), seed, v.x0, v.y0, c.z, c.facing, v.dx, v.dy, done);
+      if (!done && v.fling) v.rag = this.makeRag(this.layers().dead, rig, this.skinFor(rig, v.frame), seed, v.fling, c.z, c.facing, false, 0);
+      else v.body = new FallingBody(this.layers().dead, rig, this.skinFor(rig, v.frame), seed, v.x0, v.y0, c.z, c.facing, v.dx, v.dy, done);
     } else {
       v.h = this.renderer.sprites.add({ x: v.x0 + v.dx, y: v.y0 + v.dy, z: c.z, frame: v.frame, height: v.height });
       if (done) v.h.setSize((v.frame.w / MON_PPM) * FALLEN_WIDE, v.height * FALLEN);
@@ -467,16 +509,24 @@ export class MonsterView implements GameSystem {
     const p = this.game.player;
     const d = Math.hypot(m.x - p.x, m.y - p.y);
     const slide = d < 6 && d > 0.01 ? 0.35 : 0;
+    // Run over: the body flies the vehicle's throw (c.fling, runoverFling.ts) and comes down on
+    // the corpse; killed in mid-flight (shot while thrown), it carries on from where it was.
+    const fling = c.fling && this.game.vehicles?.runoverMode !== 'fall' ? c.fling : null;
+    const flown = fling && m.fling?.plan === fling ? Math.max(0, m.fling.t) : 0;
     const cv: CorpseView = {
       h: null, body: null, rec: c, frame: f.frame, height: f.height, t: 0, x0: m.x, y0: m.y,
       dx: slide ? ((m.x - p.x) / d) * slide : 0, dy: slide ? ((m.y - p.y) / d) * slide : 0, heavy: m.size === 'large' || m.size === 'huge',
+      uid: appearanceSeed(m), fling, rag: null,
     };
     // the dying body keeps the facing it had, so a 3D body falls from where it stood
     c.facing = m.facing;
     this.makeCorpseVisual(cv, m.type, appearanceSeed(m), false);
+    if (cv.rag && flown > 0) for (let s = 0; s < flown; s += 1 / 30) cv.rag.update(1 / 30);
+    cv.t = flown;
     if (cv.h) cv.h.set(m.x, m.y, c.z);
     cv.h?.flash(0xff2020, 0.15);
     cv.body?.inst.flash(0xff2020, 0.15);
+    cv.rag?.inst.flash(0xff2020, 0.15);
     this.corpses.set(c, cv);
   }
 
@@ -485,6 +535,7 @@ export class MonsterView implements GameSystem {
     if (!v) return;
     v.h?.remove();
     v.body?.remove();
+    v.rag?.remove();
     this.corpses.delete(c);
   }
 
@@ -564,6 +615,7 @@ export class MonsterView implements GameSystem {
           this.flash(m, 0xfff4d0, 0.12);
         }
       }
+      if (v.c && this.thrown(m, v, dt, visible)) continue;
       if (v.c) {
         // 3D body: the pose carries the bob, telegraph and flinch; the sway and shoves move it.
         const x = m.x + kx + sway * Math.cos(m.facing), y = m.y + ky + sway * Math.sin(m.facing);
@@ -584,7 +636,7 @@ export class MonsterView implements GameSystem {
       const h = v.h!;
       const x = m.x + sway * Math.cos(p.yaw) + kx, y = m.y + sway * Math.sin(p.yaw) + ky;
       // foot height as drawn (the sprite layer adds the look's ground relief itself)
-      const climb = liftOf(m);
+      const climb = liftOf(m) + (m.fling && m.fling.t >= 0 ? sampleFling(m.fling.plan, m.fling.t).h : 0);
       const foot = m.z * LEVEL_HEIGHT + (this.renderer.groundAt?.(x, y, m.z) ?? 0) + climb;
       const aim = v.down > 0 || this.renderer.cameraMode !== 'first' ? 0 : meleeAimLift(Math.hypot(x - cam.x, y - cam.z), cam.y - foot, v.height);
       const near = nearClamp(cam, x, y, foot + aim);
@@ -610,7 +662,34 @@ export class MonsterView implements GameSystem {
       // a body lies on a floor: not before that floor (and the walls around it) is on screen
       const shown = this.renderer.chunks.drawnAt(c.x, c.y, c.z);
       v.body?.inst.setVisible(shown);
+      v.rag?.inst.setVisible(shown);
       v.h?.setVisible(shown);
+      if (v.rag) {
+        this.ragEvents(v.rag.update(dt), c.z, v.heavy, c.monId);
+        if (v.rag.done) {
+          // hand over to the lying body it has blended into (the same one a save loads)
+          c.facing = v.rag.facing!;
+          v.rag.remove();
+          v.rag = null;
+          v.fling = null;
+          v.x0 = c.x;
+          v.y0 = c.y;
+          v.dx = v.dy = 0;
+          this.makeCorpseVisual(v, this.game.data.monsters[c.monId], v.uid, true);
+          v.body?.inst.setVisible(shown);
+        }
+        continue;
+      }
+      if (v.fling && v.h) {
+        // billboards just follow the flight, standing until it touches down
+        v.t += dt;
+        const s = sampleFling(v.fling, v.t);
+        v.h.set(s.x, s.y, c.z + s.h / LEVEL_HEIGHT);
+        if (v.t >= v.fling.landT) v.h.setSize((v.frame.w / MON_PPM) * FALLEN_WIDE, v.height * FALLEN);
+        if (v.t - dt < v.fling.landT && v.t >= v.fling.landT) this.ragEvents([{ kind: 'land', x: s.x, y: s.y, speed: 5 }], c.z, v.heavy, c.monId);
+        if (v.t >= v.fling.duration) v.fling = null;
+        continue;
+      }
       if (v.body) {
         if (v.body.t < MODEL_DEATH_TOTAL && v.body.update(dt)) this.landed(v, c);
         continue;
@@ -667,6 +746,36 @@ export class MonsterView implements GameSystem {
       if (this.muzzleT <= 0) this.muzzle.intensity = 0;
     }
     this.sys.playerLight = () => (this.renderer.flashlightOn ? 60 : 0);
+  }
+
+  /**
+   * A survivor thrown by a vehicle (Monster.fling, runoverFling.ts): while the simulation flies
+   * it, the rag doll is drawn in place of its body; when it lands, the body takes over lying
+   * downed at the rag doll's heading and gets up from there. true = the rag doll drew it.
+   */
+  private thrown(m: Monster, v: MonView, dt: number, visible: boolean): boolean {
+    const run = m.fling && m.fling.t >= 0 && this.game.vehicles?.runoverMode !== 'fall' ? m.fling : null;
+    const c = v.c!;
+    if (run && run.plan !== v.flown) {
+      if (!v.rag) {
+        v.rag = this.makeRag(this.layers().live, c.rig, c.inst.skin, c.seed, run.plan, m.z, m.facing, true, Math.max(0, run.t - dt));
+        c.inst.setVisible(false);
+      }
+      this.ragEvents(v.rag.update(dt), m.z, m.size === 'large' || m.size === 'huge', m.type.id);
+      v.rag.inst.setVisible(visible);
+      if (!v.rag.done) return true;
+    }
+    if (!v.rag) return false;
+    const r = v.rag;
+    const f = r.facing ?? nearestLie(c.rig, r.inst.tumble!, 1);
+    r.remove();
+    v.rag = null;
+    v.flown = r.plan;
+    c.inst.setVisible(visible);
+    m.facing = f;
+    c.setYaw(f);
+    v.down = 1;
+    return false;
   }
 
   /**

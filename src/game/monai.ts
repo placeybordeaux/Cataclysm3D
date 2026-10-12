@@ -28,6 +28,7 @@ import { addField, fieldDamageAt } from './fields';
 import { emitSound, heardVolume, type SoundCategory } from './sound';
 import { lightAt, playerCanSee } from './vision';
 import { monsterFactionAttitude } from './monfaction';
+import { flingEnd, sampleFling, type FlingPlan } from './runoverFling';
 
 // The monster simulation (CDDA monmove.cpp + monster.cpp, real-time). Monsters live in `all`
 // forever once spawned; only those inside the "reality bubble" (ACTIVE_RADIUS tiles of the
@@ -122,6 +123,8 @@ export interface CorpseRecord {
   facing: number;
   /** CDDA dormant zombie (pseudo_dormant_* spawns): lies as a corpse until someone comes close. */
   dormant?: boolean;
+  /** Thrown by a vehicle: the flight the body took to get here (renderer only; not saved). */
+  fling?: FlingPlan;
 }
 
 /** pseudo_dormant_mon_zombie_fat -> mon_zombie_fat, mon_pseudo_dormant_zombie -> mon_zombie. */
@@ -722,8 +725,12 @@ export class MonsterSystem implements GameSystem {
    * the implants its harvest hides (rolled now, recovered by dissection).
    */
   dropCorpse(m: Monster, damage = 0): CorpseRecord | null {
-    const rec = this.placeCorpse(m.type, m.x, m.y, m.z, { facing: m.facing, name: m.name });
+    // killed by a vehicle: the body comes down at the end of its flight (runoverFling.ts)
+    const plan = m.fling?.plan;
+    const [cx, cy] = plan ? flingEnd(plan) : [m.x, m.y];
+    const rec = this.placeCorpse(m.type, cx, cy, m.z, { facing: m.facing, name: m.name });
     if (!rec) return null;
+    if (plan) rec.fling = plan;
     const it = rec.item as Item;
     it.damage = damage;
     const hidden = corpseDissectables(this.game.data, m.type, new Rng(hashSeed(this.game.seed, m.uid, 0xd155)));
@@ -1026,6 +1033,7 @@ export class MonsterSystem implements GameSystem {
     const p = this.game.player;
     const brain = this.brains.get(m)!;
     if (this.stairs?.drive(m, dt)) return;
+    if (m.fling && this.flight(m, dt)) return;
     if (m.windup) this.tickWindup(m, dt);
     if (m.dashTime > 0) {
       const t = Math.min(dt, m.dashTime);
@@ -1367,17 +1375,41 @@ export class MonsterSystem implements GameSystem {
     }
   }
 
+  /**
+   * A body thrown by a vehicle follows its planned flight (it already bounced off the walls in
+   * the plan); no AI until it has landed, then it lies `downed` and gets up. true = still flying.
+   */
+  private flight(m: Monster, dt: number): boolean {
+    const run = m.fling!;
+    if (run.t < 0) {
+      // planned for a hit it survived without being thrown (the vehicle stopped): never launched
+      m.fling = null;
+      return false;
+    }
+    // a blow it was winding up dies with the hit
+    if (m.windup) this.interruptWindup(m);
+    run.t += dt;
+    const s = sampleFling(run.plan, run.t);
+    m.x = s.x;
+    m.y = s.y;
+    m.moving = false;
+    if (run.t < run.plan.duration) return true;
+    m.fling = null;
+    m.dashTime = 0;
+    return false;
+  }
+
   /** Circle separation between monsters and against the player (no walking through bodies). */
   private separate(): void {
     const p = this.game.player;
     for (const m of this.active) {
-      if (m.dead) continue;
+      if (m.dead || m.fling) continue;
       for (let dy = -1; dy <= 1; dy++)
         for (let dx = -1; dx <= 1; dx++) {
           const l = this.spatial.get(key(m.tileX + dx, m.tileY + dy, m.z));
           if (!l) continue;
           for (const o of l) {
-            if (o.uid <= m.uid || o.dead) continue;
+            if (o.uid <= m.uid || o.dead || o.fling) continue;
             const ddx = o.x - m.x, ddy = o.y - m.y;
             const d = Math.hypot(ddx, ddy);
             const min = (m.radius + o.radius) * 0.9;
