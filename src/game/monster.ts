@@ -27,7 +27,7 @@ export type MonEffect = 'stunned' | 'downed' | 'grabbing' | 'boomered' | 'onfire
  * melee_attack, mattack_actors.cpp melee_actor).
  */
 export const MON_POISON = {
-  poison: { speed: 0, dodge: -1, hit: -1, bash: -2, cut: -2, hurtOneIn: 450, hurt: [1, 1] },
+  poison: { speed: 0, dodge: -1, hit: -1, bash: -2, cut: -2, hurtOneIn: 90, hurt: [1, 1] },
   badpoison: { speed: -10, dodge: -2, hit: -2, bash: -3, cut: -3, hurtOneIn: 60, hurt: [1, 2] },
 } as const;
 
