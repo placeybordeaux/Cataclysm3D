@@ -5,12 +5,13 @@ Read-only audit of overmap generation against BN (`~/code/Cataclysm-BN`: `src/ov
 `src/world/worldgen.ts`, `src/world/mapgen/bnbuiltin.ts`. Seeds 1, 2, 3, 42 and 743667900 were
 probed over 3×3 regions (288×288 OMTs), z0 to −4, rendering one chunk of every oter type found.
 
-## Status (2026-10-11, genVersion 2)
+## Status (2026-10-12, genVersion 3)
 
 Everything below is gated on the world's generation version (`WORLDGEN_VERSION` in
 `src/world/overmap/overmap.ts`, recorded in saves as `world.genVersion`). Saves made before it
-run genVersion 1 and keep generating exactly the world they stored chunks of
-(`tests/overmap_genversion.test.ts`); new games get genVersion 2.
+run genVersion 1 and keep generating exactly the world they stored chunks of; genVersion 2
+worlds keep theirs too (`tests/overmap_genversion.test.ts`, `tests/world_depth.test.ts`); new
+games get genVersion 3.
 
 | Item | State |
 |---|---|
@@ -24,6 +25,11 @@ run genVersion 1 and keep generating exactly the world they stored chunks of
 | Classic lab basement | **BN's mutable lab**: escape cells (~80%), train depots at z−2/−4 joined to the subway, deeper levels. |
 | `lab_escape` start | **Built** for `lab_chal` / `lab_staff` (unlocked by reaching a lab). |
 | Other mutable specials | **Placed** by one BN-faithful solver (`mutable.ts`): Anthill, Acid Anthill, Lab with Anthill, Slime Pit, Ice Lab, stream, and mine_tunnel under the four mines. |
+| Cross-region subways (v3) | **Built.** Seam crossings derived from the seed join neighbouring regions' subway networks; order independent. Sewers stay per city. |
+| Lakes in depth (v3) | **Built.** Water columns and a lake bed under lakes; `>`/`<` dive and surface; sunken_lab placed (rare: our lakes are small). |
+| Colony monsters (v3) | **Built.** BN special spawns (anthills, slime pits, fungal/triffid/mi-go parks); Options > Colony monsters scales them (default 1/4). |
+| Full z range (v3) | **Built.** The map holds BN's −10..10; labs reach their BN depth. Tower tops at z6/z7 now appear in every world. |
+| Subway map extras (v3) | **Built.** `mx_portal` (its portal trap doesn't teleport yet) and `mx_casings`. |
 
 Integration notes (lead): city sewer hubs are reserved at z−1 when the manhole candidate is
 recorded, before any special places, as BN lays them while building the city (an anthill had
