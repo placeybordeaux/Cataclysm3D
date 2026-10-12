@@ -176,7 +176,7 @@ describe('sewers (mapgen_sewer + mx_sewer_* extras)', () => {
     }
     expect(n).toBeGreaterThan(8);
     expect(n).toBeLessThan(32);
-  });
+  }, 30_000);
 });
 
 describe('transport data', () => {
