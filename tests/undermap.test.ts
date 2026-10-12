@@ -187,7 +187,7 @@ describe('transport data', () => {
       map.chunk(10, 10, -1);
       map.chunk(10, 10, -2);
       expect([...gen.stats.unknownIds.keys()], `seed ${s}`).toEqual([]);
-      // only BN's C++ subway extras (mx_portal, mx_casings...) may be reported
+      // only BN's unported C++ subway extras (mx_portal_in) may be reported
       for (const k of gen.stats.unsupported.keys()) expect(k).toMatch(/^map_extra_function mx_/);
     }
   }, 30_000);

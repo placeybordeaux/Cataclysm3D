@@ -474,8 +474,16 @@ export class MonsterSystem implements GameSystem {
       const existing = units.find((u) => u.type === 'bash');
       if (existing) existing.amount += bash;
       else units.push({ type: 'bash', amount: bash, armor_penetration: 0, armor_multiplier: 1 });
+      // bash_bonus / cut_bonus (poison) ride with the dice, as in monster::melee_attack.
+      const bonus = m.meleeBonus();
+      for (const [type, amount] of [['bash', bonus.bash], ['cut', bonus.cut]] as const) {
+        if (!amount) continue;
+        const u = units.find((v) => v.type === type);
+        if (u) u.amount += amount;
+        else units.push({ type, amount, armor_penetration: 0, armor_multiplier: 1 });
+      }
     }
-    const damage = applyFlatArmor(units, t.type.armor).reduce((n, u) => n + u.amount, 0);
+    const damage = applyFlatArmor(units.filter((u) => u.amount > 0), t.type.armor).reduce((n, u) => n + u.amount, 0);
     this.hurt(t, damage, m);
     this.narrateThirdParty(m, `${m.TheName()} hits ${t.theName()} for ${Math.round(damage)} damage.`);
   }
@@ -495,7 +503,7 @@ export class MonsterSystem implements GameSystem {
     c.onMessage = null;
     let res: MonsterAttackResult;
     try {
-      res = monsterMeleeAttack(m.type, c, this.rng, { name: m.TheName(), accuracy: m.type.melee_skill + m.hitBonus() });
+      res = monsterMeleeAttack(m.type, c, this.rng, { name: m.TheName(), accuracy: m.type.melee_skill + m.hitBonus(), bonus: m.meleeBonus() });
     } finally {
       c.onMessage = sink;
     }

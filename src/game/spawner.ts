@@ -213,6 +213,11 @@ export class Spawner {
       warnOnce('monstergroup', r.id);
       return;
     }
+    if (r.individual) {
+      // place_spawns(individual = true): num = 1, so one GetResultFromGroup (its pack) at the point.
+      this.place(c, pickFromMonsterGroup(data, r.id, rng, this.groupCtx()), r.x, r.y, rng, r);
+      return;
+    }
     const area = r.area ?? [r.x, r.y, r.x, r.y];
     if (r.count !== undefined || r.density === undefined && !this.isPlaceMonsters(r)) {
       // Population points (overmap spawns / monster-group entries), density-scaled like

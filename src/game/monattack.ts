@@ -4,7 +4,7 @@ import { warnOnce } from '../data/warn';
 import { gunActor } from './monguns';
 import { monsterCanAttackHigh, monsterMeleeAttack, selectBodyPart, type MonsterAttackResult } from './combat';
 import { BODY_PARTS, isBodyPart, type BodyPartId } from './bodyparts';
-import { SIZE_RANK, turnsToEffectSeconds, turnsToSeconds, type Monster, type SpecialAttackState } from './monster';
+import { SIZE_RANK, turnsToEffectSeconds, turnsToSeconds, type MeleeBonus, type Monster, type SpecialAttackState } from './monster';
 import type { MonsterSystem } from './monai';
 import { sfx } from '../audio/sfx';
 import { FEEL, defenseOf, type TelegraphKind } from './combatfeel';
@@ -67,6 +67,19 @@ function asUnits(v: unknown): DamageUnit[] | undefined {
   return out.length ? out : undefined;
 }
 
+/** damage_instance::add of bash_bonus / cut_bonus onto a damage list (merged by type; a new
+ *  negative unit just deals nothing). Returns a new list. */
+export function withMeleeBonus(units: DamageUnit[], bonus: MeleeBonus): DamageUnit[] {
+  const out = units.map((u) => ({ ...u }));
+  for (const [type, amount] of [['bash', bonus.bash], ['cut', bonus.cut]] as const) {
+    if (!amount) continue;
+    const u = out.find((v) => v.damage_type === type);
+    if (u) u.amount += amount;
+    else out.push({ damage_type: type, amount });
+  }
+  return out;
+}
+
 /** Is this special attack a melee blow (melee/bite actor or a JSON monster_attack melee)? */
 function isActor(d: SpecialAttackState['def']): 'melee' | 'bite' | null {
   if (d.attack_type === 'bite' || d.type === 'bite') return 'bite';
@@ -113,7 +126,9 @@ export function meleeActor(sys: MonsterSystem, m: Monster, sa: SpecialAttackStat
   if (!meleeActorReady(sys, m, sa)) return false;
   const name = mname(m);
   const mul = (d.min_mul ?? 0) + sys.rng.next() * ((d.max_mul ?? 1) - (d.min_mul ?? 0));
-  const units = (asUnits(d.damage_max_instance) ?? [{ damage_type: 'bash', amount: 9 }]).map((u) => ({ ...u, amount: u.amount * mul }));
+  // mattack_actors.cpp melee_actor::call: bash_bonus / cut_bonus are added to damage_max_instance
+  // before the multiplier (merging by type, as damage_instance::add does).
+  const units = withMeleeBonus(asUnits(d.damage_max_instance) ?? [{ damage_type: 'bash', amount: 9 }], m.meleeBonus()).map((u) => ({ ...u, amount: u.amount * mul }));
   const bp: BodyPartId = pickBodyPart(sys, d.body_parts) ?? selectBodyPart(sys.rng, { canAttackHigh: monsterCanAttackHigh(m.type) });
   const res: MonsterAttackResult = quiet(sys, () =>
     monsterMeleeAttack(m.type, p, sys.rng, { accuracy: typeof d.accuracy === 'number' ? d.accuracy : m.type.melee_skill + m.hitBonus(), damage: units, bp, name: m.TheName() }),
@@ -215,7 +230,7 @@ function grab(sys: MonsterSystem, m: Monster): boolean {
     return true;
   }
   // "A hit to use up our moves" — resolved first here so a parry can stop the grab.
-  const res = quiet(sys, () => monsterMeleeAttack(m.type, p, sys.rng, { name: m.TheName(), accuracy: m.type.melee_skill + m.hitBonus() }));
+  const res = quiet(sys, () => monsterMeleeAttack(m.type, p, sys.rng, { name: m.TheName(), accuracy: m.type.melee_skill + m.hitBonus(), bonus: m.meleeBonus() }));
   if (res.block?.parry) {
     sys.message(fmt('The %s grabs at you, but you knock its arms aside!', name));
     parried(sys, m);
@@ -272,7 +287,7 @@ export function defaultMelee(sys: MonsterSystem, m: Monster): void {
   const p = sys.game.player;
   const hasDamage = m.type.melee_dice > 0 || (m.type.melee_damage ?? []).some((u) => u.amount > 0);
   if (!hasDamage) return;
-  const res = monsterMeleeAttack(m.type, p, sys.rng, { name: m.TheName(), accuracy: m.type.melee_skill + m.hitBonus() });
+  const res = monsterMeleeAttack(m.type, p, sys.rng, { name: m.TheName(), accuracy: m.type.melee_skill + m.hitBonus(), bonus: m.meleeBonus() });
   if (res.hit) {
     sfx.monsterHit(m);
     sys.onPlayerHurt(m, res.result?.damage ?? 0, res.bp);

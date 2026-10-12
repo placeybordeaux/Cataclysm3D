@@ -19,12 +19,23 @@ export type MonEffect = 'stunned' | 'downed' | 'grabbing' | 'boomered' | 'onfire
 
 /**
  * BN effects.json mods a monster gets from poison (monster::process_one_effect reads SPEED,
- * DODGE, HIT and HURT). HURT rolls one_in(hurtOneIn) each turn.
+ * DODGE, HIT, BASH, CUT and HURT). HURT rolls one_in(hurtOneIn) each turn.
+ * A two-value mod like `"bash_mod": [-3, -1]` is [normal, reduced] (effect.cpp extract_effect),
+ * not a range: monsters only get the reduced value through resist_effects (antitoxin), which
+ * nothing gives them, so they take the first value flat (effect::get_mod returns min when there
+ * is no max). BASH/CUT are added to the bash and cut damage of every melee blow (monster.cpp
+ * melee_attack, mattack_actors.cpp melee_actor).
  */
 export const MON_POISON = {
-  poison: { speed: 0, dodge: 0, hit: 0, hurtOneIn: 450, hurt: [1, 1] },
-  badpoison: { speed: -10, dodge: -2, hit: -2, hurtOneIn: 60, hurt: [1, 2] },
+  poison: { speed: 0, dodge: -1, hit: -1, bash: -2, cut: -2, hurtOneIn: 450, hurt: [1, 1] },
+  badpoison: { speed: -10, dodge: -2, hit: -2, bash: -3, cut: -3, hurtOneIn: 60, hurt: [1, 2] },
 } as const;
+
+/** Creature bash_bonus / cut_bonus: flat damage added to a monster's melee blows. */
+export interface MeleeBonus {
+  bash: number;
+  cut: number;
+}
 
 export interface SpecialAttackState {
   /** Entry from MonsterDef.special_attacks, merged over misc.monster_attack when referenced. */
@@ -280,7 +291,7 @@ export class Monster {
   }
 
   /** Sum of one mod over the active poisons (BN adds every effect's bonus). */
-  private poisonMod(k: 'speed' | 'dodge' | 'hit'): number {
+  private poisonMod(k: 'speed' | 'dodge' | 'hit' | 'bash' | 'cut'): number {
     let v = 0;
     for (const id of ['poison', 'badpoison'] as const) if (this.hasEffect(id)) v += MON_POISON[id][k];
     return v;
@@ -288,6 +299,10 @@ export class Monster {
   /** monster hit_bonus from effects (melee accuracy). */
   hitBonus(): number {
     return this.poisonMod('hit');
+  }
+  /** monster bash_bonus / cut_bonus from effects: added to its melee damage (usually negative). */
+  meleeBonus(): MeleeBonus {
+    return { bash: this.poisonMod('bash'), cut: this.poisonMod('cut') };
   }
 
   /** "zombie" (or the mapgen-given name). */

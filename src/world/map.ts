@@ -47,6 +47,9 @@ export interface SpawnRequest {
   area?: [number, number, number, number];
   name?: string;
   friendly?: boolean;
+  /** For groups: BN place_spawns(..., individual = true): one roll from the group at (x, y),
+   *  not scaled by spawn density (map extras' single monsters, e.g. mx_portal). */
+  individual?: boolean;
 }
 
 /** Vehicle placement requested by mapgen (consumed by src/game/vehicles.ts). Absolute tiles. */

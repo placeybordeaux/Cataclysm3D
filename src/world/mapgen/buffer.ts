@@ -20,6 +20,8 @@ export interface LocalSpawn {
   count?: number;
   name?: string;
   friendly?: boolean;
+  /** BN place_spawns(..., individual = true): exactly one group roll, not density-scaled. */
+  individual?: boolean;
 }
 
 export interface LocalVehicle {

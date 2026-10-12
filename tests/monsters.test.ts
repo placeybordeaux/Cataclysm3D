@@ -269,6 +269,18 @@ describe('spawning', () => {
     expect(a.chunk.spawns.length).toBe(0);
   });
 
+  it('an individual group spawn (place_spawns individual, e.g. mx_portal) is one roll at its tile, whatever the density', () => {
+    for (const density of [0.01, 1, 4]) {
+      const { game, sys } = world(9);
+      const sp = new Spawner(sys, null, { safeRadius: 0, density, realtimeScale: 1 });
+      const c = game.map.chunk(1, 1, 0)!;
+      c.spawns = [{ kind: 'group', id: 'GROUP_VANILLA', x: 36, y: 36, z: 0, count: 1, individual: true }];
+      sp.onChunk(c);
+      expect(sys.all.length, `density ${density}`).toBe(1);
+      expect([sys.all[0].tileX, sys.all[0].tileY]).toEqual([36, 36]);
+    }
+  });
+
   it('place_monsters density scales the number of rolls (density * rng(10, 50))', () => {
     const { game, sys } = world(5);
     const sp = new Spawner(sys, null, { safeRadius: 0, realtimeScale: 1 });
