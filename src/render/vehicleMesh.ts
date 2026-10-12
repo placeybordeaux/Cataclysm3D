@@ -26,7 +26,7 @@ import type { V3 } from './geometry';
 import { bodyRectFor, setVehicleWidth, vehicleWidth, type VehicleWidth } from './vehicleLayout';
 import { noseX } from '../game/chassis';
 import { liveryBody } from './vehicleSkin';
-import { createHeadlight, prepareHeadlightShadow } from './headlightShadow';
+import { createHeadlight, HEADLIGHT_SPOTS, pickHeadlightSpots, prepareHeadlightShadow } from './headlightShadow';
 import type { TurretBuild } from './vehicleTank';
 import { hullYaw, turretAim, turretHooks } from '../game/turret';
 
@@ -42,8 +42,9 @@ const STAND_EYE = 1.6;
 // Each vehicle is an Object3D (body, roof, glass, lamps) placed every frame from the
 // vehicle's continuous position and facing; geometry is rebuilt when vehicle.version
 // changes (doors, damage, lights). Roofs hide in top-down view so you can see inside,
-// like CDDA's map. Headlights: one shadowed SpotLight for the nearest lit vehicle (the
-// light count is fixed at startup so shaders never recompile) + pool point lights.
+// like CDDA's map. Headlights: HEADLIGHT_SPOTS shadowed SpotLights, the car you drive first and
+// then the nearest lit ones (the light count is fixed at startup so shaders never recompile)
+// + pool point lights.
 //
 // Local frame: three.js X = mount x (forward), Z = mount y (right side), Y = metres above
 // z = 0 (absolute, so the renderer's top-down wall cut compares heights correctly).
@@ -611,10 +612,10 @@ export class VehicleRenderer {
   private tailOn = new THREE.MeshBasicMaterial({ color: 0xff3020 });
   private tailOff = new THREE.MeshBasicMaterial({ color: 0x5a1410 });
   private beaconMat = new THREE.MeshBasicMaterial({ vertexColors: true });
-  /** One shadowed spot for the nearest vehicle with its headlights on. */
+  /** Shadowed headlight spots (headlightShadow.ts pickHeadlightSpots says which cars get them). */
   // Range must stay over materials.ts HEADLIGHT_MIN_RANGE (that's what gives it the road
   // wrap); decay 0.5 keeps the road ~30 m out within a few bands of the road at the bumper.
-  readonly headlight = createHeadlight();
+  readonly headlights: readonly THREE.SpotLight[] = Array.from({ length: HEADLIGHT_SPOTS }, createHeadlight);
   /** Spot intensity: the road reads ~35 m ahead at night. */
   headlightIntensity = 45;
   private lookMode: VehicleLook = initialVehicleLook();
@@ -632,7 +633,7 @@ export class VehicleRenderer {
     // Creatures collide with the drawn body, not the whole grid tiles (vehicleShape.ts).
     system.bodyShape = (v) => (this.lookMode === 'model' ? bodyRectFor(v) : null);
     for (const m of [this.glassMat, this.glassOut, this.glassOutRider, this.glassIn, this.lampOn, this.lampOff, this.tailOn, this.tailOff, this.beaconMat]) patchNormalOutput(m, false);
-    renderer.scene.add(this.group, this.headlight, this.headlight.target);
+    renderer.scene.add(this.group, ...this.headlights.flatMap((s) => [s, s.target]));
     renderer.vehicleView = this;
     // Turret shots leave the drawn muzzle (src/game/turret.ts muzzleOf falls back to an estimate).
     turretHooks.muzzle = (v, part) => this.muzzleOf(v, part);
@@ -862,7 +863,7 @@ export class VehicleRenderer {
     }
     this.lastDriving = driving;
     const top = this.renderer.cameraMode === 'top';
-    let spotFor: Vehicle | null = null, spotD = Infinity;
+    const litNow: { v: Vehicle; d: number }[] = [];
     const seen = new Set<Vehicle>();
     const t0 = performance.now();
     let built = 0;
@@ -914,13 +915,7 @@ export class VehicleRenderer {
       // Emergency beacons flash while the vehicle's lights are on.
       if (e.beacons) e.beacons.visible = !v.lightsOn || Math.floor(now * 3 + v.uid) % 2 === 0;
       const lit = v.lightsOn && v.withFlag('CONE_LIGHT', true).length > 0;
-      if (lit) {
-        const pri = this.system.driving === v ? -1 : d;
-        if (pri < spotD) {
-          spotD = pri;
-          spotFor = v;
-        }
-      }
+      if (lit) litNow.push({ v, d });
       // The light map only knows round sources, so a headlight cone is approximated by
       // lights stepping out along the beam, dimmer and wider with distance.
       if (lit && !e.beam.length) {
@@ -945,19 +940,21 @@ export class VehicleRenderer {
     // no rain inside the cabin in the cockpit view (the glass is ~1 m ahead)
     this.renderer.weather.clearRadius = driving && rig.driveCam === 'cockpit' && !this.entries.get(driving)?.bike ? 1.1 : 0;
 
-    const s = this.headlight;
-    if (spotFor) {
-      const v = spotFor;
-      const [fx, fy] = this.front(v, 0.6);
-      // Aimed at the road ~30 m out (dipped beam), strong enough to still read there.
-      const [tx, ty] = this.front(v, 30);
-      const h = v.z * LEVEL_HEIGHT;
-      s.position.set(fx, h + 0.7, fy);
-      s.target.position.set(tx, h - 0.4, ty);
-      s.target.updateMatrixWorld();
-      s.intensity = this.headlightIntensity;
-    } else s.intensity = 0;
-    prepareHeadlightShadow(s, this.renderer.three.shadowMap.type);
+    const spotFor = pickHeadlightSpots(litNow, driving, this.headlights.length);
+    this.headlights.forEach((s, i) => {
+      const v = spotFor[i];
+      if (v) {
+        const [fx, fy] = this.front(v, 0.6);
+        // Aimed at the road ~30 m out (dipped beam), strong enough to still read there.
+        const [tx, ty] = this.front(v, 30);
+        const h = v.z * LEVEL_HEIGHT;
+        s.position.set(fx, h + 0.7, fy);
+        s.target.position.set(tx, h - 0.4, ty);
+        s.target.updateMatrixWorld();
+        s.intensity = this.headlightIntensity;
+      } else s.intensity = 0;
+      prepareHeadlightShadow(s, this.renderer.three.shadowMap.type);
+    });
   }
 
   /** The moving pieces of a hull's turret (vehicleTank.ts TurretBuild) under the vehicle's mount frame. */
