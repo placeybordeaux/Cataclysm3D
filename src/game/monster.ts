@@ -1,3 +1,4 @@
+import type { FlingRun } from './runoverFling';
 import type { GameData, MonsterAttack, MonsterDef } from '../data/types';
 import { monsterName } from '../data/index';
 import { warnOnce } from '../data/warn';
@@ -190,6 +191,11 @@ export class Monster {
   dashTime = 0;
   dashVx = 0;
   dashVy = 0;
+  /**
+   * Thrown by a vehicle (runoverFling.ts): monai moves it along the planned flight, AI off, and
+   * the renderer tumbles it. Transient (not saved: a load drops it wherever it is).
+   */
+  fling: FlingRun | null = null;
   /** Accumulated damage flash for the renderer (set to >0 when hit). */
   hitFlash = 0;
   /**

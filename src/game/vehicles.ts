@@ -30,6 +30,7 @@ import { pickVehicleProto, type VehicleDataFile } from './vehicle_data';
 import { chassisOf, hitMount, seatPoint } from './chassis';
 import { VehicleStations, type Station } from './vehwalk';
 import { warnOnce } from '../data/warn';
+import { launchFromImpact, planFling, RUNOVER, type FlingWorld, type RunoverImpact, type RunoverMode } from './runoverFling';
 import { updateVehiclePower } from './vehiclePower';
 import { TowSystem, type TowLinkJSON } from './towing';
 import {
@@ -134,6 +135,16 @@ export interface CreatureHooks {
   name(c: unknown): string;
   /** How messages refer to it ("the zombie", "Bernard Andrews"); default `the ${name}`. */
   title?(c: unknown): string;
+  /**
+   * Run-over flights (runoverFling.ts, `runoverMode` 'ragdoll' / 'loose'): plan the throw before
+   * the damage lands, so a body the hit kills comes down where the flight ends. false = this
+   * creature can't be thrown that way (BN's teleport `place` is used instead).
+   */
+  planFling?(c: unknown, impact: RunoverImpact, world: FlingWorld): boolean;
+  /** The hit threw it and it lived: start the planned flight. */
+  launch?(c: unknown): void;
+  /** The planned throw didn't happen (too slow to fling: it stopped the vehicle). */
+  cancelFling?(c: unknown): void;
 }
 
 export interface VehicleOccupant {
@@ -314,6 +325,12 @@ export class VehicleSystem implements GameSystem, MapOverlay {
   crashModel: CrashModel = 'momentum';
   /** Heavy / tracked handling (vehicleImpact.ts handlingFor): Options > Heavy vehicles, ?vehheft=. */
   handlingMode: HandlingMode = 'weighty';
+  /**
+   * What a run-over does to the body (runoverFling.ts): 'ragdoll' / 'loose' throw it along a
+   * planned flight (the renderer tumbles it stiffly / loosely), 'fall' is BN's teleport to a
+   * free tile a few tiles ahead. Options > Run-over bodies, ?runover=.
+   */
+  runoverMode: RunoverMode = 'ragdoll';
   /** Vehicles already moved this frame (a crash can move the one it hit early: advanceStruck). */
   private moved = new Set<Vehicle>();
   /** This frame's dt (s), for moving a struck vehicle out of the way mid-frame. */
@@ -1530,15 +1547,23 @@ export class VehicleSystem implements GameSystem, MapOverlay {
       const cp = c ? creaturePos(c) : null;
       if (c && (body && cp ? struck(cp[0], cp[1], cp[2]) : isNew)) {
         const h = this.creatureHooks;
+        const planned = !!cp && this.planRunover(v, c, cp[0], cp[1], nf, nx, ny, (x, y) => free(x, y) || (h.at(x, y, z) === c && map.passable(x, y, z) && !poseKeys.has(tileKey(x, y, z)) && !before.has(tileKey(x, y, z))));
+        let launched = false;
         const res = this.hitBody(v, cp ? partNear(t, cp[0], cp[1]) : part, {
           name: h.title ? h.title(c) : `the ${h.name(c)}`, mass: h.mass(c), hpMax: h.hpMax?.(c), damage: (dmg) => h.damage(c, dmg, v),
           fling: (force) => {
+            if (planned) {
+              h.launch!(c);
+              launched = true;
+              return true;
+            }
             const spot = this.flingSpot(t.tx + 0.5, t.ty + 0.5, fdx, fdy, force, free);
             if (!spot) return false;
             h.place(c, spot[0], spot[1]);
             return true;
           },
         });
+        if (planned && !launched) h.cancelFling?.(c);
         if (!res) {
           stopped = 'creature';
           break;
@@ -1932,6 +1957,39 @@ export class VehicleSystem implements GameSystem, MapOverlay {
   }
 
   /**
+   * Plan the throw of a creature the vehicle is about to hit (runoverMode 'ragdoll' / 'loose'):
+   * launched along the vehicle's velocity at the hit, off the side it was struck on, through the
+   * map (walls, other vehicles, ledges and roofs; not this vehicle, which it flies over). False
+   * when it can't be (BN's teleport fling then applies).
+   */
+  private planRunover(v: Vehicle, c: unknown, cx: number, cy: number, nf: number, nx: number, ny: number, free: (tx: number, ty: number) => boolean): boolean {
+    const h = this.creatureHooks;
+    if (this.runoverMode === 'fall' || !h.planFling) return false;
+    const [vx, vy] = this.planarVelocity(v);
+    // BN flings only above 5 mph; slower, the creature stops the vehicle
+    if (Math.hypot(vx, vy) * MPH_PER_MS <= 5) return false;
+    const rect = this.physRect(v);
+    const [, ly] = v.worldToMount(cx, cy, nf, nx, ny);
+    const half = Math.max(0.3, (rect.y1 - rect.y0) / 2);
+    // mount +y is the vehicle's right; reversing, the right of the travel is its left
+    const rad = (nf * Math.PI) / 180;
+    const fwd = Math.sign(vx * Math.cos(rad) + vy * Math.sin(rad)) || 1;
+    const offset = Math.max(-1, Math.min(1, ((ly - (rect.y0 + rect.y1) / 2) / half) * fwd));
+    const map = this.game.map, z = v.z;
+    const world: FlingWorld = {
+      blocked: (tx, ty) => {
+        const ter = map.terAt(tx, ty, z);
+        if (ter.move_cost <= 0 || map.furnAt(tx, ty, z).move_cost_mod < 0 || !map.hasFloor(tx, ty, z)) return true;
+        const l = this.index.get(tileKey(tx, ty, z));
+        return !!l && l.some((o) => o.v !== v && o.v.moveCostAt(o.mx, o.my) === 0);
+      },
+      roofed: (tx, ty) => map.hasFloor(tx, ty, z + 1),
+      free,
+    };
+    return h.planFling(c, { x: cx, y: cy, vx, vy, offset, mass: h.mass(c), seed: this.rng.next() }, world);
+  }
+
+  /**
    * CDDA fling_creature: thrown ahead at up to +-60 deg from the direction of travel, a
    * distance growing with the impact speed; the first free landing spot wins (null = pinned
    * against something, the vehicle has to stop).
@@ -2099,7 +2157,11 @@ export class VehicleSystem implements GameSystem, MapOverlay {
  */
 export function monsterCreatureHooks(ms: MonsterSystem): CreatureHooks {
   return {
-    at: (x, y, z) => ms.monsterAt(x, y, z),
+    // a body already flying from an earlier hit can't be hit again until it lands
+    at: (x, y, z) => {
+      const m = ms.monsterAt(x, y, z);
+      return m && !(m.fling && m.fling.t >= 0) ? m : null;
+    },
     mass: (c) => Math.max(1, ((c as Monster).type.weight ?? 80000) / 1000),
     hpMax: (c) => (c as Monster).hpMax,
     damage: (c, dmg, v) => {
@@ -2119,6 +2181,26 @@ export function monsterCreatureHooks(ms: MonsterSystem): CreatureHooks {
       m.addEffect('downed', 1);
     },
     name: (c) => (c as Monster).displayName(),
+    planFling: (c, imp, world) => {
+      const m = c as Monster;
+      if (m.has('IMMOBILE')) return false;
+      const plan = planFling(m.x, m.y, launchFromImpact(imp), world, imp.seed);
+      if (!plan) return false;
+      m.fling = { plan, t: -1 };
+      return true;
+    },
+    launch: (c) => {
+      const m = c as Monster;
+      if (!m.fling) throw new Error(`launch: ${m.type.id} #${m.uid} has no planned flight`);
+      m.fling.t = 0;
+      m.dashTime = 0;
+      // down for the flight, then a moment on the ground before it gets up (the old fling: 1 s)
+      m.addEffect('downed', m.fling.plan.duration + RUNOVER.getUp);
+    },
+    cancelFling: (c) => {
+      const m = c as Monster;
+      if (m.fling && m.fling.t < 0) m.fling = null;
+    },
   };
 }
 
@@ -2188,6 +2270,9 @@ export function composeCreatureHooks(list: CreatureHooks[]): CreatureHooks {
     damage: (c, dmg, v) => of(c).damage(c, dmg, v),
     place: (c, x, y) => of(c).place(c, x, y),
     name: (c) => of(c).name(c),
+    planFling: (c, imp, w) => of(c).planFling?.(c, imp, w) ?? false,
+    launch: (c) => of(c).launch!(c),
+    cancelFling: (c) => of(c).cancelFling?.(c),
     title: (c) => {
       const h = of(c);
       return h.title ? h.title(c) : `the ${h.name(c)}`;

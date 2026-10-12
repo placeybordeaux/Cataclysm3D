@@ -30,6 +30,7 @@ import { stanceScenarios } from './realinput_stance';
 import { qaScenarios } from './realinput_qa';
 import { galleryScenarios } from './realinput_gallery';
 import { driveScenarios } from './realinput_drive';
+import { runoverScenarios } from './realinput_runover';
 import { perfScenarios } from './realinput_perf';
 import { drawnScenarios } from './realinput_drawn';
 import { chassisScenarios } from './realinput_chassis';
@@ -1681,6 +1682,8 @@ scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...spawnsScenar
 scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...deepLabScenarios({ x: () => x, js, check, shot, toGameplay, sleep }));
 // Another car's headlights survive switching your own on (H): the renderer's headlight budget.
 scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...headlightScenarios({ page: () => page, x: () => x, js, check, toGameplay, sleep }));
+// Run-over bodies (src/game/runoverFling.ts, render/chars/ragdoll.ts): W into a row of zombies, frame strips.
+scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...runoverScenarios({ page: () => page, x: () => x, js, check, toGameplay, sleep }));
 
 if (argv.includes('--list') || argv.includes('--dry-run')) {
   for (const [n, what] of scenarios) console.log(`${only && !only.has(n) ? '  (skip)' : '  run   '} ${n.padEnd(11)} ${what}`);

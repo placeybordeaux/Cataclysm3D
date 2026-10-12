@@ -20,6 +20,7 @@ The billboards are still there as a variant.
 | `?viewmodel=model` / `?viewmodel=sprite`, Options → **First-person hands**, `cdda.chars({ viewmodel: 'sprite' })` | 3D first-person arms/items (default) or the classic 2D viewmodel sprites |
 | `?zstyle=shamble` / `caricature` / `boxy`, Options → **Zombie bodies**, `cdda.chars({ zstyle })` | zombie bodies: hunched, reaching, a silhouette per family (default) / the same pushed further / the round-6 upright box bodies (persisted, `localStorage cdda3d.visual.zstyle`) |
 | `cdda.chars()` | current settings + live/body/skin/page counts |
+| `?runover=ragdoll\|loose\|fall`, Options → Gameplay → **Run-over bodies**, `cdda.runoverBodies()` | bodies hit by a vehicle: stiff rag doll (default) / loose rag doll / the old fall ("Run-over rag doll" below) |
 
 ## How it works (src/render/chars/)
 
@@ -640,6 +641,43 @@ replaced flint and steel for extra cancel-timing margin (every firestarter tool'
 falls well short of the ~8 real s `defaultWarp` caps activities at, so none of them gives much
 room; the lens's is the longest available). A combined `--only toolgestureaxe,toolgesture` run
 is green 3 consecutive times under `heavy` as part of this fix's own verification.
+
+## Run-over rag doll
+
+`src/render/chars/ragdoll.ts` `RagdollBody`. The simulation decides where a body hit by a vehicle
+goes (docs/VEHICLES.md "Run-over bodies": `FlingPlan`, positions and height over time, contacts);
+the rag doll draws it: the plan's position, plus
+
+- **a rigid tumble**: one world rotation for the whole posed body (`CharInstance.tumble` about the
+  centre of its boxes, replacing yaw/fall while set), started from the plan's somersault, spin and
+  roll, knocked about at every bounce (spin x0.35, a seeded kick), off walls (spin about the
+  vertical reversed), dying while it skids, and flopping toward the nearest lying orientation
+  whenever it touches the ground. The centre height keeps the lowest box corner on the floor.
+- **stiff limbs**: each limb (by part name: upper arms, thighs, legs, tails, wings 1; forearms,
+  shins 0.7; head, neck, jaw 0.45; hands, feet 0.35) is a damped spring around the corpse's
+  spread pose, kicked at launch and at bounces and driven in the air by a slow per-limb flail;
+  limbs move at the stepped pose rate, the trunk smoothly. *Slightly rigid*: the body keeps its
+  shape and the limbs swing and settle.
+- **the settle**: over the last 0.4 s (and at least from touch-down) it blends into exactly the
+  pose that takes over: for a corpse the `FallingBody` lie at the corpse's spot (its feet on the
+  flight's end) with the facing nearest the tumble (written to `CorpseRecord.facing`, so a save
+  loads the same body); for a survivor the downed `CreatureModel` (it gets `setYaw`, the monster
+  its facing, `down = 1`), which then gets up. The hand-over matrices match to 2 mm (tests).
+
+| `RAGDOLL` | stiff (default) | loose |
+| --- | --- | --- |
+| joint spring k (1/s²), damping ratio | 240, 0.55 | 70, 0.25 |
+| limb kick at the hit / per bounce (rad/s) | 9 / 6 | 15 / 11 |
+| airborne flail (rad, Hz) | 0.22, 2.2 | 0.55, 1.6 |
+| furthest a limb strays (rad) | 0.85 | 1.7 |
+| spin kept per bounce, spin decay on the ground, flop rate | 0.35, 6/s, 9/s | 0.5, 4/s, 6/s |
+
+Works on every rig (zombies in all three `zstyle`s, children, hulks, crawlers, dogs, ants,
+spiders, blobs: `tests/ragdoll.test.ts` flies each at 70 km/h, checks it tumbles, never sinks
+deeper than its own lying pose (plus a few cm of a flailing limb) and ends matrix-for-matrix as
+its corpse). Billboards (`?chars=billboard`) follow the flight standing and lie flat when it
+touches down. Cost: a rag doll is the same instances as a body plus ~180 corner rotations a frame
+while it flies; it becomes an ordinary static body when it lands.
 
 ## Common quadruped family anatomy
 

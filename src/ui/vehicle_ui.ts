@@ -1,3 +1,4 @@
+import { isRunoverMode, RUNOVER_MODES, type RunoverMode } from '../game/runoverFling';
 import * as THREE from 'three';
 import type { DebugApi } from '../debug';
 import type { Game } from '../game/game';
@@ -498,6 +499,8 @@ function storeSetting(key: string, v: string): void {
 }
 const CRASH_MODEL_KEY = 'cdda3d.vehicleCrashModel';
 const HANDLING_KEY = 'cdda3d.vehicleHandling';
+const RUNOVER_KEY = 'cdda3d.runoverBodies';
+const RUNOVER_LABEL: Record<RunoverMode, string> = { ragdoll: 'rag doll (stiff)', loose: 'rag doll (loose)', fall: 'simple fall (old)' };
 function storedDriveMode(): DriveMode {
   try {
     return localStorage.getItem(DRIVE_MODE_KEY) === 'cruise' ? 'cruise' : 'direct';
@@ -668,6 +671,18 @@ export async function installVehicles(game: Game, renderer: Renderer, api?: Debu
       storeSetting(HANDLING_KEY, vs.handlingMode);
     },
     desc: 'Weighty (default): heavy and tracked vehicles take their time to get moving, steer and pivot slowly, and are governed to their real top speeds (an M1 about 45 mph). Taken from each vehicle\'s mass, power and tracks; cars are unchanged. Light: everything handles like a car (the older feel). Also ?vehheft=weighty|light.',
+  });
+  vs.runoverMode = initialSetting('runover', RUNOVER_KEY, RUNOVER_MODES, 'ragdoll');
+  registerOption({
+    category: 'Gameplay',
+    name: 'Run-over bodies',
+    value: () => RUNOVER_LABEL[vs.runoverMode],
+    change: (d) => {
+      const i = RUNOVER_MODES.indexOf(vs.runoverMode);
+      vs.runoverMode = RUNOVER_MODES[(i + (d < 0 ? -1 : 1) + RUNOVER_MODES.length) % RUNOVER_MODES.length];
+      storeSetting(RUNOVER_KEY, vs.runoverMode);
+    },
+    desc: 'What a vehicle does to a creature it runs over. Rag doll (default): it is thrown along your path with a kick up and a spin, over the bonnet and roof at speed, tumbles, bounces off walls and skids to rest where its corpse lies; a survivor gets up where it lands. Stiff limbs keep the body\'s shape; loose ones flop more. Simple fall: the older look, where the body is put down a few tiles ahead (BN\'s fling) and a corpse drops where it was hit. Also ?runover=ragdoll|loose|fall.',
   });
   vs.driveMode = storedDriveMode();
   registerOption({
@@ -877,6 +892,12 @@ function installVehicleDebug(api: DebugApi, game: Game, vs: VehicleSystem): void
     if (mode !== undefined && !isCrashModel(mode)) throw new Error(`vehicleCrashModel: ${CRASH_MODELS.join(' or ')}, not ${String(mode)}`);
     if (mode) vs.crashModel = mode;
     return vs.crashModel;
+  };
+  /** Run-over bodies: 'ragdoll' (default, stiff), 'loose' or 'fall' (the old teleport + simple fall); no argument = current. */
+  api.runoverBodies = (mode?: RunoverMode) => {
+    if (mode !== undefined && !isRunoverMode(mode)) throw new Error(`runoverBodies: ${RUNOVER_MODES.join(' or ')}, not ${String(mode)}`);
+    if (mode) vs.runoverMode = mode;
+    return vs.runoverMode;
   };
   /** Heavy-vehicle handling: 'weighty' (default) or 'light' (the old car tuning for everything); no argument = current. */
   api.vehicleHandling = (mode?: HandlingMode) => {

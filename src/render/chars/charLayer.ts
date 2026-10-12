@@ -325,6 +325,13 @@ export class CharInstance {
   fade = 0;
   /** A full root transform (camera space for the first-person arms) instead of x/y/yaw/lean. */
   rootOverride: THREE.Matrix4 | null = null;
+  /**
+   * Tumbling (run-over rag doll, ragdoll.ts): the whole posed body turned by this world
+   * rotation about `tumbleCenter` (model space, after lean/pos/scale), which sits at
+   * (x, floor + lift, y). Replaces fall and yaw while set.
+   */
+  tumble: THREE.Quaternion | null = null;
+  readonly tumbleCenter = new THREE.Vector3();
   readonly pose: PoseOut;
   readonly mats: Float32Array;
   /** set when the pose/placement changed and matrices must be rebuilt */
@@ -368,14 +375,17 @@ export class CharInstance {
     // root: position -> topple about the feet -> yaw -> lean -> root offset
     const root = tmpM.makeTranslation(this.x, foot, this.y);
     if (this.rootOverride) root.copy(this.rootOverride);
-    else if (this.fall > 0) {
+    else if (this.tumble) {
+      root.multiply(tmpM2.makeRotationFromQuaternion(this.tumble));
+      root.multiply(tmpM2.makeTranslation(-this.tumbleCenter.x, -this.tumbleCenter.y, -this.tumbleCenter.z));
+    } else if (this.fall > 0) {
       const d = Math.hypot(this.fallDx, this.fallDy) || 1;
       // rotate "up" toward the fall direction: axis = up × dir (three.js x, z)
       AXIS.set(this.fallDy / d, 0, -this.fallDx / d);
       root.multiply(tmpM2.makeRotationAxis(AXIS, this.fall));
     }
     if (!this.rootOverride) {
-      root.multiply(tmpM2.makeRotationY(-this.yaw));
+      if (!this.tumble) root.multiply(tmpM2.makeRotationY(-this.yaw));
       tmpE.set(po.lean[0], po.lean[1], po.lean[2]);
       root.multiply(tmpM2.makeRotationFromEuler(tmpE));
       root.multiply(tmpM2.makeTranslation(po.pos[0], po.pos[1], po.pos[2]));

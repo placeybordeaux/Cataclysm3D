@@ -95,6 +95,11 @@ export class CreatureModel {
     this.nextShuffle = IDLE_LIFE.gap[0] * quirk(seed, 21) * 2;
   }
 
+  /** Turn to `facing` at once (a thrown body handing over to the downed pose: ragdoll.ts). */
+  setYaw(facing: number): void {
+    this.yawR = facing;
+  }
+
   /** A blow landed or whiffed: play the follow-through. */
   strike(): void {
     this.strikeT = STRIKE_TIME;
