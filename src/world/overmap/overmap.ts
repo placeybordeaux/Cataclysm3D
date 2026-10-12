@@ -131,6 +131,17 @@ const LINE_BIT = [LINE_N, LINE_E, LINE_S, LINE_W];
  */
 export const WORLDGEN_VERSION = 3;
 
+/**
+ * Levels overmap generation may grow specials into (mutable specials, lab_basement), by
+ * genVersion. Before 3 the map stopped at -7..5 and the grower was bounded by it; those worlds
+ * must keep growing the same labs, so they keep that bound although the map now holds BN's
+ * -10..10 (OVERMAP_DEPTH / OVERMAP_HEIGHT, which genVersion 3 uses: BN labs go deep).
+ * Fixed specials were never clamped (tower tops at z6/z7 were placed, just not reachable).
+ */
+export function genZRange(genVersion: number): [number, number] {
+  return genVersion >= 3 ? [MIN_Z, MAX_Z] : [-7, 5];
+}
+
 export class Overmap {
   private regions = new Map<string, Region>();
   private types: string[] = [];
@@ -160,8 +171,11 @@ export class Overmap {
   private readonly shallowUnderground: string;
   readonly T: Record<string, number> = {};
 
+  /** [lo, hi] levels specials may grow into (genZRange) */
+  readonly zRange: [number, number];
   constructor(readonly seed: number, readonly data: OvermapData, readonly genVersion: number = WORLDGEN_VERSION) {
     if (!Number.isInteger(genVersion) || genVersion < 1 || genVersion > WORLDGEN_VERSION) throw new Error(`unsupported overmap genVersion ${genVersion} (this build knows 1..${WORLDGEN_VERSION})`);
+    this.zRange = genZRange(genVersion);
     this.landNoise = new Noise2D(hashSeed(seed, 101));
     this.thickNoise = new Noise2D(hashSeed(seed, 102));
     this.lakeNoise = new Noise2D(hashSeed(seed, 103));
@@ -969,7 +983,7 @@ export class Overmap {
   }
 
   /** What the mutable special grower reads: region-local terrain, bounded by the region and
-   *  the z range the game renders (BN: the 180-OMT overmap and OVERMAP_DEPTH 10). */
+   *  the generation z range (genZRange; BN: the 180-OMT overmap and OVERMAP_DEPTH 10). */
   private labReadHost(r: Region): MutableReadHost {
     return {
       terrainAt: (x, y, z) => {
@@ -978,7 +992,7 @@ export class Overmap {
         const s = r.layers.get(z * RR + i);
         return s ? this.types[s.t] : this.defaultTerrain(z);
       },
-      inbounds: (x, y, z) => x >= 0 && y >= 0 && x < REGION && y < REGION && z >= MIN_Z && z <= MAX_Z,
+      inbounds: (x, y, z) => x >= 0 && y >= 0 && x < REGION && y < REGION && z >= this.zRange[0] && z <= this.zRange[1],
       location: (id) => this.locationSets.get(id),
       defaultTerrain: (z) => this.defaultTerrain(z),
     };
@@ -1182,6 +1196,7 @@ export class Overmap {
     return {
       data: this.data,
       regionSize: REGION,
+      zRange: this.zRange,
       cities: r.cities,
       x0: r.x0,
       y0: r.y0,

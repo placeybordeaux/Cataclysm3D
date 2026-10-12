@@ -129,6 +129,11 @@ describe('overmap transport (genVersion 2)', () => {
           const t = om.omtAt(x, y, -2).type;
           if (t !== 'underground_sub_station' && t !== 'microlab_sub_station') continue;
           stations++;
+          // A special placed before the station can take the rock its tunnel starts from (genVersion
+          // 3's deeper lab walled in seed 1's start microlab); BN's build_connection then fails
+          // can_start_at the same way. Only a station with rock or tunnel beside it must connect.
+          const sealed = [0, 1, 2, 3].every((d) => !/^(empty_rock|subway)$/.test(om.omtAt(x + DX[d], y + DY[d], -2).type));
+          if (sealed) continue;
           expect(subways.has(`${x},${y}`), `${t} at ${x},${y} has a tunnel, seed ${seed}`).toBe(true);
         }
       expect(stations).toBeGreaterThan(5);

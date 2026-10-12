@@ -26,6 +26,8 @@ export interface OmtLookup {
 export interface LiveMap {
   hasChunk(cx: number, cy: number, z: number): boolean;
   chunk(cx: number, cy: number, z: number): { empty: boolean } | null;
+  /** highest level holding any chunk (GameMap.topZ); absent = MAX_Z */
+  topZ?(): number;
 }
 
 export interface LevelPolicy {
@@ -102,7 +104,7 @@ export class VisibleLevels {
     if (t !== undefined) return t;
     t = om;
     // generated, non-empty chunks above it (only those already generated: nothing is made here)
-    for (let z = MAX_Z; z > (Number.isNaN(om) ? MIN_Z : om); z--)
+    for (let z = Math.min(MAX_Z, this.map.topZ?.() ?? MAX_Z); z > (Number.isNaN(om) ? MIN_Z : om); z--)
       if (this.map.hasChunk(cx, cy, z) && !this.map.chunk(cx, cy, z)!.empty) {
         t = z;
         break;

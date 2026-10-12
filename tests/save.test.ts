@@ -314,6 +314,29 @@ describe('world generator determinism after load', () => {
     expect(diff).toEqual([]);
     expect(living(B.sys).length).toBe(monsA);
   }, 60_000);
+
+  it('a player and an edited chunk at z-10 (BN\'s floor, below the old -7) round-trip', async () => {
+    const A = build(77, 'world');
+    const p = A.game.player;
+    const cx = Math.floor(p.x / CHUNK), cy = Math.floor(p.y / CHUNK);
+    const x = cx * CHUNK + 5, y = cy * CHUNK + 6;
+    A.game.map.setTer(x, y, -10, 't_floor');
+    A.game.map.setTer(x + 1, y, -10, 't_floor');
+    A.game.map.addItem(x, y, -10, createItem(data, 'rock'));
+    p.x = x + 1.5;
+    p.y = y + 0.5;
+    p.z = -10;
+    const file = await roundTrip(serializeGame(A.game, { slot: 'deep', name: 'x', gen: 'world', genVersion: WORLDGEN_VERSION }));
+    const saved = (file.sections.map as { chunks: { at: number[] }[] }).chunks.map((c) => c.at.join(','));
+    expect(saved).toContain(`${cx},${cy},-10`);
+    const B = build(77, 'world');
+    applySave(B.game, file);
+    expect(B.game.player.z).toBe(-10);
+    expect(B.game.map.terAt(x, y, -10).id).toBe('t_floor');
+    expect(names(B.game.map.itemsAt(x, y, -10))).toEqual(['rock']);
+    // the untouched rock around it regenerates as it was
+    expect(B.game.map.terAt(x + 9, y + 9, -10).id).toBe(A.game.map.terAt(x + 9, y + 9, -10).id);
+  }, 60_000);
 });
 
 describe('far chunk eviction', () => {

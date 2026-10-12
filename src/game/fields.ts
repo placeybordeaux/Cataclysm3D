@@ -1,6 +1,6 @@
 import type { Game } from './game';
 import type { Chunk, Field, MapItem } from '../world/map';
-import { CHUNK, chunkOf, localOf } from '../world/coords';
+import { CHUNK, chunkOf, localOf, MAX_Z } from '../world/coords';
 import { hasFlag } from '../world/registry';
 import { Rng } from '../core/rng';
 import type { Item } from './item';
@@ -348,7 +348,7 @@ function processFire(game: Game, x: number, y: number, z: number, f: Field, st: 
   // Smoke: above if open air, else on the tile.
   if (rng.int(0, 100 - Math.min(100, windpower)) <= smoke && rng.int(3, 35) < f.intensity * 10) {
     if (fieldType(game, 'fd_smoke')) {
-      if (!map.hasFloor(x, y, z + 1) && z < 5) addField(game, x, y, z + 1, 'fd_smoke', rng.int(1, f.intensity));
+      if (z < MAX_Z && !map.hasFloor(x, y, z + 1)) addField(game, x, y, z + 1, 'fd_smoke', rng.int(1, f.intensity));
       else addField(game, x, y, z, 'fd_smoke', f.intensity);
     }
   }

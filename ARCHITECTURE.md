@@ -447,7 +447,7 @@ tests/               vitest unit tests (pure logic, no DOM/WebGL)
   the surface, residential z-2/-3, cargo z-4, mutagen research z-5/-6, a -7 hallway) and the 4x4 surface
   microlab (`MICROLAB_SPECIAL`, elevator z0 → z-2). Both are in `WILD_SPECIALS` (tools/extract/mapgen.ts)
   and overmap.ts always places one of each in the start region (after all other specials, so older
-  placement is unchanged). `MIN_Z` is -7. Stairs line up via the JSON (zlevels' 24-tile stair search
+  placement is unchanged). The map holds BN's z -10..10 (`MIN_Z`/`MAX_Z`); genVersion 1/2 worlds grow specials only to -7..5 (`genZRange`, docs/WORLD_TRANSPORT.md "Full z range"). Stairs line up via the JSON (zlevels' 24-tile stair search
   covers the few offset ones); tests/labs.test.ts walks from the parking lot to z-6.
 - Machinery (UI-free, prompts via `LabUi`; `autoUi(game, picks?)` for tests): ID card readers
   (`cardreader` examine actor: card flags, terrain_changes radius, ID_CARD_DESPAWN turrets, consume;

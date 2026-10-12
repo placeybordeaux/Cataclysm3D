@@ -5,6 +5,7 @@
 //   --draw K     print the first K labs level by level (default 1)
 //   --gen V      overmap genVersion (default latest)
 import { Overmap, REGION, WORLDGEN_VERSION } from '../../src/world/overmap/overmap';
+import { MIN_Z } from '../../src/world/coords';
 import { loadNodeData } from '../lib/node_data';
 
 const argv = process.argv.slice(2);
@@ -21,6 +22,8 @@ const SYM: Record<string, string> = {
 
 let labs = 0, withCells = 0, withDepot2 = 0, withDepot4 = 0, deep4 = 0, drawn = 0;
 const depth: Record<number, number> = {}, sizes: number[] = [];
+// stair-over-core chunks per level relative to each lab's bottom (0 = bottom): the pile-up
+const stairsAt: Record<number, number> = {};
 for (let seed = 1; seed <= SEEDS; seed++) {
   const ov = new Overmap(seed, wg.overmap, GEN);
   for (let ry = -RAD; ry <= RAD; ry++)
@@ -32,7 +35,7 @@ for (let seed = 1; seed <= SEEDS; seed++) {
         labs++;
         const cells = new Map<string, string>();
         let minZ = 0;
-        for (let z = -1; z >= -7; z--)
+        for (let z = -1; z >= MIN_Z; z--)
           for (let dy = -12; dy <= 12; dy++)
             for (let dx = -12; dx <= 12; dx++) {
               const o = ov.omtAt(sp.x + dx, sp.y + dy, z);
@@ -44,6 +47,10 @@ for (let seed = 1; seed <= SEEDS; seed++) {
         depth[minZ] = (depth[minZ] ?? 0) + 1;
         if (minZ <= -4) deep4++;
         const types = [...cells.entries()];
+        for (const [k, t] of types) if (t === 'lab_stairs') {
+          const up = Number(k.split(',')[2]) - minZ;
+          stairsAt[up] = (stairsAt[up] ?? 0) + 1;
+        }
         if (types.some(([, t]) => t === 'lab_escape_cells')) withCells++;
         if (types.some(([k, t]) => t === 'lab_train_depot' && k.endsWith(',-2'))) withDepot2++;
         if (types.some(([k, t]) => t === 'lab_train_depot' && k.endsWith(',-4'))) withDepot4++;
@@ -66,4 +73,6 @@ const pct = (n: number) => `${((100 * n) / Math.max(1, labs)).toFixed(0)}%`;
 sizes.sort((a, b) => a - b);
 console.log(`\n${labs} labs (gen ${GEN}); OMTs median ${sizes[sizes.length >> 1]} (min ${sizes[0]}, max ${sizes[sizes.length - 1]})`);
 console.log(`bottom level: ${Object.entries(depth).sort(([a], [b]) => Number(b) - Number(a)).map(([z, n]) => `z${z}:${n}`).join(' ')}`);
+const totalStairs = Object.values(stairsAt).reduce((a, b) => a + b, 0);
+console.log(`lab_stairs by height over the lab's bottom: ${Object.entries(stairsAt).sort(([a], [b]) => Number(a) - Number(b)).map(([h, n]) => `+${h}:${((100 * n) / totalStairs).toFixed(0)}%`).join(' ')}`);
 console.log(`reach z-4: ${pct(deep4)}  escape cells: ${pct(withCells)}  depot z-2: ${pct(withDepot2)}  depot z-4: ${pct(withDepot4)}`);

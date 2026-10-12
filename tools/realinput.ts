@@ -55,6 +55,7 @@ import { turretScenarios } from './realinput_turret';
 import { towingScenarios } from './realinput_towing';
 import { labEscapeScenarios } from './realinput_labescape';
 import { spawnsScenarios } from './realinput_spawns';
+import { deepLabScenarios } from './realinput_deeplab';
 
 const argv = process.argv.slice(2);
 const opt = (n: string, d: string) => (argv.includes(n) ? argv[argv.indexOf(n) + 1] : d);
@@ -1661,6 +1662,8 @@ scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...towingScenar
 scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...labEscapeScenarios({ page: () => page, x: () => x, js, check, shot, toGameplay, sleep, size: [W, H] }));
 // Overmap special spawns (src/game/mongroups.ts): walk up to an anthill and its colony comes out.
 scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...spawnsScenarios({ x: () => x, js, check, shot, toGameplay, sleep }));
+// BN's full z range (docs/WORLD_TRANSPORT.md): down the classic lab to z-10 with real keys.
+scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...deepLabScenarios({ x: () => x, js, check, shot, toGameplay, sleep }));
 
 if (argv.includes('--list') || argv.includes('--dry-run')) {
   for (const [n, what] of scenarios) console.log(`${only && !only.has(n) ? '  (skip)' : '  run   '} ${n.padEnd(11)} ${what}`);

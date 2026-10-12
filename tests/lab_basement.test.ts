@@ -3,8 +3,8 @@
 // promise that genVersion 1 worlds still generate exactly as before.
 import { describe, expect, it } from 'vitest';
 import { hashString, Rng } from '../src/core/rng';
-import { CHUNK } from '../src/world/coords';
-import { CLASSIC_LAB_SPECIAL, LAB_BASEMENT_TYPES, Overmap, REGION, WORLDGEN_VERSION } from '../src/world/overmap/overmap';
+import { CHUNK, MIN_Z } from '../src/world/coords';
+import { CLASSIC_LAB_SPECIAL, LAB_BASEMENT_TYPES, Overmap, REGION, WORLDGEN_VERSION, genZRange } from '../src/world/overmap/overmap';
 import { MutableSpecial, sampleDist } from '../src/world/overmap/mutable';
 import { LINE_S } from '../src/world/overmap/oter';
 import { WorldGenerator } from '../src/world/worldgen';
@@ -41,10 +41,10 @@ describe('genVersion 1 is frozen', () => {
 
 
 interface LabOmt { x: number; y: number; z: number; type: string }
-/** Every OMT of a classic lab's basement (the special's uid), z -1..-7. */
+/** Every OMT of a classic lab's basement (the special's uid), z -1 down to the map's floor. */
 function labOmts(ov: Overmap, sp: { x: number; y: number; uid: number }): LabOmt[] {
   const out: LabOmt[] = [];
-  for (let z = -1; z >= -7; z--)
+  for (let z = -1; z >= MIN_Z; z--)
     for (let dy = -14; dy <= 14; dy++)
       for (let dx = -14; dx <= 14; dx++) {
         const o = ov.omtAt(sp.x + dx, sp.y + dy, z);
@@ -93,7 +93,8 @@ describe('BN lab_basement (genVersion 2)', () => {
         if (o.type === 'lab_stairs') expect(at.get(`${o.x},${o.y},${o.z - 1}`), `${o.x},${o.y},${o.z}`).toBe('lab_core');
       }
       const bottom = Math.min(...omts.map((o) => o.z));
-      expect(bottom).toBeGreaterThanOrEqual(-7);
+      // genVersion 3 grows to BN's -10 (tests/world_depth.test.ts), 2 stopped at -7
+      expect(bottom).toBeGreaterThanOrEqual(genZRange(ov.genVersion)[0]);
       if (omts.some((o) => o.type === 'lab_finale' && o.z === bottom)) finales++;
     }
     expect(finales / labs.length).toBeGreaterThan(0.9);

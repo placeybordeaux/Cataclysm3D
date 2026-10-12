@@ -26,7 +26,10 @@ describe('sewer and subway networks, overmap to tiles', () => {
     it(`seed ${seed}: every station is entered by a tunnel whose track meets the platform`, () => {
       const { map, gen, om } = world(seed);
       const stations: [number, number][] = [];
-      for (let y = 0; y < REGION; y++) for (let x = 0; x < REGION; x++) if (/sub_station/.test(om.omtAt(x, y, -2).type)) stations.push([x, y]);
+      // a station walled in by a special placed before it (no rock or tunnel beside it) can't be
+      // reached, in BN too (tests/overmap_transport.test.ts)
+      const sealed = (x: number, y: number) => DIRS.every(([dx, dy]) => !/^(empty_rock|subway)$/.test(om.omtAt(x + dx, y + dy, -2).type));
+      for (let y = 0; y < REGION; y++) for (let x = 0; x < REGION; x++) if (/sub_station/.test(om.omtAt(x, y, -2).type) && !sealed(x, y)) stations.push([x, y]);
       expect(stations.length).toBeGreaterThan(0);
       let checked = 0;
       for (const [x, y] of stations.slice(0, 6)) {

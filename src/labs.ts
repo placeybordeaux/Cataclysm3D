@@ -9,7 +9,7 @@ import {
 } from './game/labs';
 import { oterRotation } from './world/overmap/oter';
 import { LAB_SPECIAL, MICROLAB_SPECIAL } from './world/overmap/overmap';
-import { CHUNK } from './world/coords';
+import { CHUNK, MIN_Z } from './world/coords';
 import { hasFlag } from './world/registry';
 import { c, colorize, confirm, openMenu, openWindow } from './ui/framework';
 
@@ -109,7 +109,7 @@ function installLabDebug(api: DebugApi, game: Game, wg: WorldGenerator): void {
     const sp = labs(def);
     if (!sp) return [];
     const out: { x: number; y: number; z: number; id: string }[] = [];
-    for (let z = 2; z >= -7; z--)
+    for (let z = 2; z >= MIN_Z; z--)
       for (let dy = -6; dy <= 6; dy++)
         for (let dx = -6; dx <= 6; dx++) {
           const o = wg.overmap.omtAt(sp.x + dx, sp.y + dy, z);

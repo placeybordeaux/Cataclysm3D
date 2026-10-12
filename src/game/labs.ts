@@ -524,7 +524,10 @@ export function elevatorFloors(game: Game, x: number, y: number, z: number, hook
   const out: { z: number; x: number; y: number; name: string }[] = [];
   const cx = chunkOf(x), cy = chunkOf(y);
   const rotHere = hooks.omtRotation?.(cx, cy, z) ?? 0;
-  for (let tz = MAX_Z; tz >= MIN_Z; tz--) {
+  // from the highest populated level (GameMap.topZ), not MAX_Z: reading a level runs its
+  // mapgen, and open air up to z10 would raise topZ for every sky-cover loop. A tower's levels
+  // are generated with its column whenever you stand at its foot.
+  for (let tz = Math.min(MAX_Z, game.map.topZ()); tz >= MIN_Z; tz--) {
     const rot = (((hooks.omtRotation?.(cx, cy, tz) ?? 0) - rotHere) % 4 + 4) % 4;
     const [lx, ly] = rotateLocal(localOf(x), localOf(y), rot);
     const tx = cx * CHUNK + lx, ty = cy * CHUNK + ly;

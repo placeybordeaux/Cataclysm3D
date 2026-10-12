@@ -137,7 +137,9 @@ export class LightMap {
     let sig = (ox * 73856093) ^ (oy * 19349663) ^ (z * 83492791);
     const c0x = Math.floor(ox / CHUNK), c0y = Math.floor(oy / CHUNK);
     const c1x = Math.floor((ox + LM_SIZE - 1) / CHUNK), c1y = Math.floor((oy + LM_SIZE - 1) / CHUNK);
-    for (let dz = 0; z + dz <= MAX_Z; dz++)
+    // up to the highest level anything exists on (not MAX_Z: BN's 21 levels are mostly empty)
+    const top = this.map.topZ();
+    for (let dz = 0; z + dz <= top; dz++)
       for (let cy = c0y; cy <= c1y; cy++)
         for (let cx = c0x; cx <= c1x; cx++) {
           const has = this.map.hasChunk(cx, cy, z + dz);
@@ -249,13 +251,14 @@ export class LightMap {
     this.coverData.fill(z * LEVEL_HEIGHT);
     const c0x = Math.floor(f.ox / CHUNK), c0y = Math.floor(f.oy / CHUNK);
     const c1x = Math.floor((f.ox + S - 1) / CHUNK), c1y = Math.floor((f.oy + S - 1) / CHUNK);
+    const top = Math.min(MAX_Z, this.map.topZ());
     for (let cy = c0y; cy <= c1y; cy++)
       for (let cx = c0x; cx <= c1x; cx++) {
         const here = this.map.hasChunk(cx, cy, z) ? this.map.chunk(cx, cy, z) : null;
         const above: ({ ter: Uint16Array } | null)[] = [];
         // every level up to the sky (src/world/levels.ts roofAbove): a two-storey engine bay is
         // open air at z+1 under a roof at z+3, and three levels was the old fixed reach
-        for (let dz = 1; z + dz <= MAX_Z; dz++) above.push(this.map.hasChunk(cx, cy, z + dz) ? this.map.chunk(cx, cy, z + dz) : null);
+        for (let dz = 1; z + dz <= top; dz++) above.push(this.map.hasChunk(cx, cy, z + dz) ? this.map.chunk(cx, cy, z + dz) : null);
         for (let ly = 0; ly < CHUNK; ly++) {
           const gy = cy * CHUNK + ly - f.oy;
           if (gy < 0 || gy >= S) continue;
