@@ -1,4 +1,5 @@
-import { visualPreference } from '../visualPreference';
+import { storeVisualPreference, visualPreference } from '../visualPreference';
+import { ZSTYLES, type ZStyle } from './zombie';
 import type { Renderer } from '../renderer';
 import type { TileFrame } from '../textureSource';
 import { CharLayer, SkinStore, charUniforms } from './charLayer';
@@ -10,6 +11,7 @@ import { analyseSprite, type Img, type SpriteInfo } from './paint';
 //   ?chars=model|billboard       URL (wins for the session)
 //   Options → Creatures          persisted in localStorage
 //   cdda.chars('billboard')      debug console; cdda.chars({ fps: 12, far: [16, 45] }) tweaks
+//   ?zstyle=shamble|caricature|boxy, Options → Zombie bodies, cdda.chars({ zstyle })
 
 export type CharMode = 'model' | 'billboard';
 const STORAGE_KEY = 'cdda3d.chars';
@@ -62,6 +64,11 @@ export const charSettings = {
   viewmodel: initialViewmodel(),
   /** people's skins: styled.ts (default) or the projected sprite (?charpaint=sprite) */
   paint: visualPreference('charpaint', ['styled', 'sprite'], 'styled'),
+  /**
+   * Zombie bodies (zombie.ts): 'shamble' (default: hunched, reaching, family silhouettes after
+   * the sprites), 'caricature' (the same pushed further), 'boxy' (the round-6 person rig).
+   */
+  zstyle: visualPreference<ZStyle>('zstyle', ZSTYLES, 'shamble'),
   listeners: [] as ((m: CharMode) => void)[],
 };
 
@@ -78,7 +85,16 @@ export function setCharMode(m: CharMode): void {
 }
 
 /** Debug entry (cdda.chars): mode string, or a tweak object; returns the current settings. */
-export function charsApi(arg?: CharMode | { fps?: number; far?: [number, number]; emph?: number; paint?: 'styled' | 'sprite'; viewmodel?: 'model' | 'sprite'; fpBow?: boolean }): Record<string, unknown> {
+/** Switch the zombie bodies (persisted); every creature and body is rebuilt. */
+export function setZombieStyle(z: ZStyle): void {
+  if (!ZSTYLES.includes(z)) throw new Error(`zombie style: ${z} (expected ${ZSTYLES.join('|')})`);
+  if (z === charSettings.zstyle) return;
+  charSettings.zstyle = z;
+  storeVisualPreference('zstyle', z);
+  for (const f of charSettings.listeners) f(charSettings.mode);
+}
+
+export function charsApi(arg?: CharMode | { fps?: number; far?: [number, number]; emph?: number; paint?: 'styled' | 'sprite'; viewmodel?: 'model' | 'sprite'; fpBow?: boolean; zstyle?: ZStyle }): Record<string, unknown> {
   if (typeof arg === 'string') setCharMode(arg);
   else if (arg) {
     if (arg.viewmodel) setViewmodelMode(arg.viewmodel);
@@ -90,13 +106,14 @@ export function charsApi(arg?: CharMode | { fps?: number; far?: [number, number]
       // repaint: every view rebuilds its visuals (skins are keyed by style)
       for (const f of charSettings.listeners) f(charSettings.mode);
     }
+    if (arg.zstyle) setZombieStyle(arg.zstyle);
     if (arg.fps !== undefined) charSettings.fps = arg.fps;
     if (arg.far) (charUniforms.uFarNear.value = arg.far[0], charUniforms.uFarFar.value = arg.far[1]);
     if (arg.emph !== undefined) charUniforms.uEmphK.value = arg.emph;
   }
   const L = layersIfAny;
   return {
-    mode: charSettings.mode, paint: charSettings.paint, viewmodel: charSettings.viewmodel, fps: charSettings.fps, far: [charUniforms.uFarNear.value, charUniforms.uFarFar.value], emph: charUniforms.uEmphK.value,
+    mode: charSettings.mode, paint: charSettings.paint, zstyle: charSettings.zstyle, viewmodel: charSettings.viewmodel, fps: charSettings.fps, far: [charUniforms.uFarNear.value, charUniforms.uFarFar.value], emph: charUniforms.uEmphK.value,
     live: L?.live.count ?? 0, bodies: L?.dead.count ?? 0, skins: L?.store.skinCount ?? 0, pages: L?.store.pageCount ?? 0,
   };
 }

@@ -3,7 +3,7 @@
 // street viewpoint, spawns the subject(s) ahead of the camera and waits for the pose asked for.
 // Returns a short list of what is standing where. Plain JS so it can be pasted into
 // `drive.ts eval` too.
-window.charViews = ['horde_near', 'horde_mid', 'horde_far', 'horde_road', 'horde_dusk', 'dog', 'npc', 'windup', 'critters', 'zoo', 'night', 'third', 'props', 'bugs', 'zombies2', 'crawlers', 'crawl_move', 'crowd', 'fire', 'corpse', 'bench', 'fp_fists', 'fp_punch', 'fp_pistol', 'fp_pistol_fire', 'fp_rifle', 'fp_rifle_ads', 'fp_shotgun', 'fp_reload', 'fp_bat', 'fp_bat_swing', 'fp_guard', 'fp_knife', 'fp_axe', 'fp_spear', 'fp_katana', 'fp_flashlight', 'fp_bow', 'fp_revolver', 'fp_1911', 'fp_double', 'fp_ak', 'fp_hunting', 'fp_crowbar', 'fp_kitchen', 'fp_sledge', 'fp_lever', 'fp_lever_ads', 'fp_lever_fire', 'third_lever', 'npc_lever', 'zombie_lineup_a', 'zombie_lineup_b', 'zombie_lineup_c', 'zombie_lineup_d', 'zombie_lineup_far', 'zombie_lineup_windup'];
+window.charViews = ['horde_near', 'horde_mid', 'horde_far', 'horde_road', 'horde_dusk', 'dog', 'npc', 'windup', 'critters', 'zoo', 'night', 'third', 'props', 'bugs', 'zombies2', 'crawlers', 'crawl_move', 'crowd', 'fire', 'corpse', 'bench', 'fp_fists', 'fp_punch', 'fp_pistol', 'fp_pistol_fire', 'fp_rifle', 'fp_rifle_ads', 'fp_shotgun', 'fp_reload', 'fp_bat', 'fp_bat_swing', 'fp_guard', 'fp_knife', 'fp_axe', 'fp_spear', 'fp_katana', 'fp_flashlight', 'fp_bow', 'fp_revolver', 'fp_1911', 'fp_double', 'fp_ak', 'fp_hunting', 'fp_crowbar', 'fp_kitchen', 'fp_sledge', 'fp_lever', 'fp_lever_ads', 'fp_lever_fire', 'third_lever', 'npc_lever', 'zombie_lineup_a', 'zombie_lineup_b', 'zombie_lineup_c', 'zombie_lineup_d', 'zombie_lineup_far', 'zombie_lineup_windup', 'zombie_lineup_close', 'zombie_lineup_walk', 'zombie_lineup_dead', 'zombie_lineup_crawl'];
 window.charView = async (name) => {
   const c = window.cdda;
   const wait = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -264,29 +264,46 @@ window.charView = async (name) => {
       zombie_lineup_c: ['mon_boomer', 'mon_boomer_huge', 'mon_zombie_brute', 'mon_zombie_shrieker', 'mon_zombie_spitter', 'mon_zombie_electric', 'mon_zombie_smoker', 'mon_zombie_grabber', 'mon_zombie_corrosive'],
       zombie_lineup_d: ['mon_zombie_master', 'mon_skeleton_brute', 'mon_zombie_screecher', 'mon_zombie_gasbag', 'mon_zombie_brute_shocker', 'mon_zombie_survivor', 'mon_zombie_bio_op', 'mon_zombie_predator', 'mon_zombie_hulk'],
       zombie_lineup_far: ['mon_zombie', 'mon_boomer', 'mon_zombie_brute', 'mon_zombie_hulk', 'mon_zombie_shrieker', 'mon_zombie_spitter', 'mon_zombie_electric', 'mon_zombie_necro', 'mon_skeleton', 'mon_zombie_cop', 'mon_zombie_child', 'mon_zombie_runner'],
-      zombie_lineup_windup: ['mon_zombie', 'mon_zombie', 'mon_zombie_brute', 'mon_zombie_hunter', 'mon_zombie_hunter'],
+      zombie_lineup_windup: ['mon_zombie', 'mon_zombie', 'mon_zombie_brute', 'mon_zombie_hunter', 'mon_zombie_hunter', 'mon_zombie_hunter'],
+      // close up: individuals of one type differ (rags, a torn-off forearm, a dangling arm)
+      zombie_lineup_close: ['mon_zombie', 'mon_zombie', 'mon_zombie', 'mon_zombie', 'mon_zombie'],
+      // hostile, shambling toward the camera from 9-15 m (caught mid-stride)
+      zombie_lineup_walk: ['mon_zombie', 'mon_zombie_fat', 'mon_zombie_brute', 'mon_zombie_runner', 'mon_boomer', 'mon_zombie', 'mon_zombie_shrieker', 'mon_zombie_cop', 'mon_zombie_hulk'],
+      // bodies: the same row killed where it stood
+      zombie_lineup_dead: ['mon_zombie', 'mon_boomer', 'mon_zombie_brute', 'mon_zombie_necro', 'mon_zombie_hulk', 'mon_skeleton'],
+      // crawlers (game/crawl.ts) with a walker for scale
+      zombie_lineup_crawl: ['mon_zombie_crawler', 'mon_zombie_creepy', 'mon_zombie', 'mon_zombie_crawler_pupa', 'mon_zombie_crawler'],
     };
     const ids = rows[name];
     if (!ids) throw new Error(`unknown lineup ${name}`);
     const far = name === 'zombie_lineup_far';
     const windup = name === 'zombie_lineup_windup';
-    const dist = far ? 25 : windup ? 4 : 4.5;
-    const gap = far ? 2 : windup ? 1.6 : 1;
-    // windup: front, 3/4, broadside, broadside crouch (leap), front crouch
-    const facing = windup ? [180, 140, 90, 90, 180] : null;
+    const close = name === 'zombie_lineup_close';
+    const walking = name === 'zombie_lineup_walk', dead = name === 'zombie_lineup_dead';
+    const dist = far ? 25 : windup ? 4 : close ? 2.6 : walking ? 12 : dead ? 4 : 4.5;
+    const gap = far ? 2 : windup || dead ? 1.6 : 1;
+    // windup: front, 3/4, broadside heavy, broadside crouch (leap), front crouch, broadside
+    // lunge-grab (the strike after a leap); the rows stand at three-quarters like the sprites
+    // (window.zombieLineupFacing overrides: 180 = facing us)
+    const facing = windup ? [180, 140, 90, 90, 180, 90] : null;
+    const rowDeg = window.zombieLineupFacing ?? 145;
     // An open paved strip (road, parking lot) so nothing stands in a flower bed or behind a
     // tree: the nearest spot with 12 m x 30 m of pavement and no furniture ahead, in one of the
     // four directions. The game's map API (terAt/furnAt) is the ground truth.
     const m0 = c.game.map, px0 = Math.floor(p.x), py0 = Math.floor(p.y);
     const paved = (x, y) => /pavement|road|asphalt|parking|concrete|sidewalk/.test(m0.terAt(x, y, p.z).id) && m0.furnAt(x, y, p.z).id === 'f_null';
     const dirs = [[0, -1], [1, 0], [0, 1], [-1, 0]];
+    // prefer looking away from the sun, so the row is lit from the front, not silhouetted
+    const sun = c.renderer.skyState?.sunDir;
+    const sunDot = (fx, fy) => (sun ? fx * sun.x + fy * sun.z : 0);
     let spot = null;
-    for (let r = 0; r < 70 && !spot; r += 2) for (let oy = -r; oy <= r && !spot; oy += 2) for (let ox = -r; ox <= r && !spot; ox += 2) {
+    for (let r = 0; r < 70 && !(spot && spot.score < -0.25); r += 2) for (let oy = -r; oy <= r; oy += 2) for (let ox = -r; ox <= r; ox += 2) {
       if (Math.max(Math.abs(ox), Math.abs(oy)) !== r) continue;
       for (const [fx, fy] of dirs) {
+        if (spot && sunDot(fx, fy) >= spot.score) continue;
         let ok = true;
         for (let f = 0; f <= 30 && ok; f++) for (let w = -6; w <= 6 && ok; w++) ok = paved(px0 + ox + fx * f - fy * w, py0 + oy + fy * f + fx * w);
-        if (ok) { spot = { x: px0 + ox, y: py0 + oy, fx, fy }; break; }
+        if (ok) spot = { x: px0 + ox, y: py0 + oy, fx, fy, score: sunDot(fx, fy) };
       }
     }
     if (!spot) throw new Error('zombie lineup: no open paved strip near the street view');
@@ -294,34 +311,57 @@ window.charView = async (name) => {
     const yaw = Math.atan2(spot.fx, -spot.fy);
     const atL = (f, s2) => [Math.round(spot.fx * f - spot.fy * s2), Math.round(spot.fy * f + spot.fx * s2)];
     const uids = ids.map((id, i) => {
-      const [dx, dy] = atL(dist, (i - (ids.length - 1) / 2) * gap);
-      const uid = c.spawnMonster(id, dx, dy, { friendly: true });
+      const [dx, dy] = atL(dist + (walking ? (i % 3) * 1.5 : 0), (i - (ids.length - 1) / 2) * gap);
+      const uid = c.spawnMonster(id, dx, dy, walking || dead ? {} : { friendly: true });
       if (uid === null) { console.warn(`charView: could not spawn ${id}`); return uid; }
       const mm = byUid(uid);
+      if (walking) return uid;
       mm.type = { ...mm.type, flags: [...mm.type.flags, 'IMMOBILE'] };
-      mm.facing = yaw + ((facing ? facing[i] : far ? 160 + ((i * 37) % 40) : 180) * Math.PI) / 180;
+      mm.facing = yaw + ((facing ? facing[i] : far ? 160 + ((i * 37) % 40) : rowDeg) * Math.PI) / 180;
       return uid;
     });
-    c.look(yaw * 180 / Math.PI, far ? -1 : -6);
+    c.look(yaw * 180 / Math.PI, far ? -1 : dead ? -22 : -6);
     c.settle();
+    if (walking) {
+      // let them come: the real AI and the real walk cycle
+      await wait(1800);
+      return name;
+    }
+    if (dead) {
+      await wait(200);
+      c.killAll(20);
+      await wait(2200);
+      return name;
+    }
     await wait(600);
+    // stop the clock so nobody turns away; the monster view is stepped by hand below
+    c.game.paused = true;
+    const mview = c.game.systems.find((s) => s.name === 'monster-view');
+    const stepView = async (n) => { for (let i = 0; i < n; i++) { mview?.update(c.game, 1 / 30); c.renderer.render(); await wait(30); } };
+    uids.forEach((uid, i) => { const mm = byUid(uid); if (mm && !windup) mm.facing = yaw + ((far ? 160 + ((i * 37) % 40) : rowDeg) * Math.PI) / 180; });
     if (windup) {
       // freeze the telegraphs: the clock stops, each monster gets a wind-up at a set point and
       // the monster view is stepped by hand so the pose is drawn
-      const kinds = [['melee', 0.65], ['melee', 0.9], ['heavy', 0.7], ['leap', 0.8], ['leap', 0.8]];
-      c.game.paused = true;
+      const kinds = [['melee', 0.65], ['melee', 0.9], ['heavy', 0.7], ['leap', 0.8], ['leap', 0.8], ['leap', 1]];
       uids.forEach((uid, i) => {
         const m = byUid(uid);
         if (!m) return;
         const [kind, u] = kinds[i];
         m.windup = { t: 1 - u, total: 1, kind, special: null };
       });
-      const view = c.game.systems.find((s) => s.name === 'monster-view');
-      for (let i = 0; i < 4; i++) { view?.update(c.game, 1 / 30); c.renderer.render(); await wait(60); }
+      await stepView(3);
+      // the last one has leapt: the wind-up is over and the strike (lunge-grab) plays
+      const lunger = byUid(uids[5]);
+      if (lunger) {
+        lunger.windup = null;
+        mview?.views?.get(lunger)?.c?.strike();
+      }
+      await stepView(1);
       await wait(300);
       return name;
     }
-    await wait(800);
+    await stepView(20);
+    await wait(300);
     return name;
   } else if (name === 'windup') {
     spawnAt('mon_zombie', 1.6, 0);

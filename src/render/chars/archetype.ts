@@ -8,6 +8,7 @@
 // monstergenerator.cpp with the "ml"/"L" string form our extractor normalises to ml).
 
 import { crawlPlanOf, type CrawlPlan } from '../../game/crawl';
+import { zombieLookOf, type ZombieLook } from './zombieFamily';
 
 export type Archetype = 'humanoid' | 'quadruped' | 'critter' | 'insect' | 'flyer' | 'blob' | 'serpent' | 'plant' | 'machine' | 'lump';
 
@@ -44,6 +45,8 @@ export interface BodyShape {
    * half-corpse, the creepy crawler): a prone body plan and a crawl cycle (rig.ts crawlPose).
    */
   crawl?: CrawlPlan;
+  /** Zombie-like humanoids (zombieFamily.ts): family, features and gear for the zombie bodies. */
+  zlook?: ZombieLook;
   /** humanoids: hair style / headgear piece (NPC variety) */
   hair?: 'none' | 'short' | 'long' | 'ponytail' | 'cap' | 'hat' | 'helmet';
 }
@@ -60,6 +63,10 @@ export interface MonsterLike {
   volume?: number;
   name?: unknown;
   description?: string;
+  /** special attack ids (BN special_attacks[].id ?? type) */
+  attacks?: string[];
+  /** BN emit_fields ids */
+  emits?: string[];
 }
 
 /** Reference volumes (ml) the archetype meshes are built at. */
@@ -158,7 +165,8 @@ export function bodyShapeOf(m: MonsterLike): BodyShape {
       : /shock|electric|static/.test(id) ? 'shocker' : /scorched|charred|burnt/.test(id) ? 'charred' : '';
   }
   const crawl = arch === 'humanoid' ? crawlPlanOf(m) : null;
-  return { arch, scale, girth, legs, head, zombie, legCount, flies: fliesFlag, wings, variant, ...(crawl ? { crawl } : {}) };
+  const zlook = arch === 'humanoid' ? zombieLookOf(m) : null;
+  return { arch, scale, girth, legs, head, zombie, legCount, flies: fliesFlag, wings, variant, ...(crawl ? { crawl } : {}), ...(zlook ? { zlook } : {}) };
 }
 
 /**

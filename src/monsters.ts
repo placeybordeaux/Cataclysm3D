@@ -8,7 +8,8 @@ import { Spawner, type OvermapView } from './game/spawner';
 import { PlayerCombat, type ViewModelHook } from './game/playercombat';
 import { MELEE_AIM, MonsterView, NEAR_CLAMP } from './render/monsterView';
 import { HitFx } from './render/hitFx';
-import { charSettings, charsApi, setCharMode, setViewmodelMode } from './render/chars';
+import { charSettings, charsApi, setCharMode, setViewmodelMode, setZombieStyle } from './render/chars';
+import { ZSTYLES } from './render/chars/zombie';
 import { FpView } from './render/chars/fpView';
 import { FireView } from './render/chars/fireView';
 import { PlayerModel } from './render/chars/playerModel';
@@ -125,6 +126,13 @@ export function installMonsters(game: Game, renderer: Renderer | null, worldgen:
       value: () => (charSettings.mode === 'model' ? '3D models' : 'sprites'),
       change: () => setCharMode(charSettings.mode === 'model' ? 'billboard' : 'model'),
       desc: 'How monsters, people and bodies are drawn: 3D pixel-textured models that turn and move, or the classic flat tileset sprites that always face you.',
+    });
+    registerOption({
+      category: 'World',
+      name: 'Zombie bodies',
+      value: () => ({ shamble: 'shambling', caricature: 'exaggerated', boxy: 'boxy (v2)' } as const)[charSettings.zstyle],
+      change: () => setZombieStyle(ZSTYLES[(ZSTYLES.indexOf(charSettings.zstyle) + 1) % ZSTYLES.length]),
+      desc: 'How 3D zombies are built: hunched and reaching with a silhouette per kind of special (after the tileset sprites), the same pushed further, or the older upright box bodies.',
     });
   }
   (game as unknown as { monsters: MonsterSystem }).monsters = sys;

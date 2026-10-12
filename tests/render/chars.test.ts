@@ -15,9 +15,9 @@ const MON = monsters as unknown as Record<string, Mon>;
 const idle: PoseIn = { t: 0, phase: 0, gait: 0, windup: null, windKind: 'melee', strike: 0, down: 0, flinch: 0, dead: false, seed: 0.3 };
 
 /** World-space bounds of every part box of a rig in a pose (instance at the origin, level 0). */
-function bounds(arch: Archetype | Mon, pose: Partial<PoseIn> = {}, setup?: (i: ReturnType<CharLayer['add']>) => void) {
+function bounds(arch: Archetype | Mon, pose: Partial<PoseIn> = {}, setup?: (i: ReturnType<CharLayer['add']>) => void, zstyle?: 'boxy') {
   const shape = typeof arch === 'string' ? { ...bodyShapeOf({ id: 'x' }), arch } : bodyShapeOf(arch);
-  const rig = makeRig(shape);
+  const rig = makeRig(shape, { zstyle });
   const layer = new CharLayer(false);
   const skin: Skin = { page: 0, rects: new Int32Array(rig.parts.length * 5), refs: 0 };
   const inst = layer.add(rig, skin);
@@ -106,7 +106,8 @@ describe('procedural rigs', () => {
     expect(makeRig(bodyShapeOf(MON.mon_deer)).parts.some(p => p.name.includes('antler'))).toBe(false);
   });
   it('makes an adult zombie about 1.75 m with its head at eye level', () => {
-    const { box, rig } = bounds(MON.mon_zombie);
+    // the upright round-6 body (?zstyle=boxy); the hunched default is in zombies.test.ts
+    const { box, rig } = bounds(MON.mon_zombie, {}, undefined, 'boxy');
     expect(box.max.y).toBeGreaterThan(1.6);
     expect(box.max.y).toBeLessThan(1.85);
     const head = rig.parts.find((p) => p.name === 'head')!;

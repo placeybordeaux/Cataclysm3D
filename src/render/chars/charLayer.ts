@@ -4,12 +4,19 @@ import { LEVEL_HEIGHT } from '../../world/coords';
 import { addNormalOutput, patchBandedLambert } from '../materials';
 import { analyseSprite, netSize, paintPart, texelDims, type Img, type PaintOpts, type SpriteInfo } from './paint';
 import { paintStyled, personPalette } from './styled';
+import { paintZombiePart } from './zombieSkin';
 import { newPoseOut, resetPose, type PoseIn, type PoseOut, type Rig } from './rig';
+import { SHAPES, shapeGeometry } from './shapes';
 
 // Draws every procedural character (render/chars/rig.ts bodies) as instanced boxes: one
-// instance per body part, one InstancedMesh per skin page (and per layer: live creatures are
-// rewritten every frame, lying corpses only when one is added, removed or still falling).
-// A whole street of zombies is one or two draw calls plus their shadow pass.
+// instance per body part, one InstancedMesh per skin page and unit shape (shapes.ts: box,
+// octagonal prism, bevelled box, ball; and per layer: live creatures are rewritten every
+// frame, lying corpses only when one is added, removed or still falling). A whole street of
+// zombies is a handful of draw calls plus their shadow pass.
+//
+// Skin alpha is not transparency: 255 is a normal texel, 0 is cut out (torn cloth edges,
+// smoke dither) and anything between glows (1 - a/255 of its colour is emitted): acid sacs,
+// red eyes, electric arcs.
 //
 // Skins (paint.ts nets) live on 1024² RGBA pages, shelf-packed. A page is uploaded again when
 // a new skin is painted on it, at most once per frame; new species arrive a few at a time.
@@ -123,6 +130,7 @@ varying float vEmph;
 varying float vFade;
 #define SKYVIS vSkyVis
 uniform float uEmphK;
+vec3 vGlowC = vec3(0.0);
 `;
 const FRAG_MAP = /* glsl */ `
 // far figures dissolve in and out at the draw distance (ordered dither on the pixel grid)
@@ -134,8 +142,10 @@ if (vFade > 0.001) {
 {
   vec2 texel = vFaceRect.xy + clamp(vFaceUv * vFaceRect.zw, vec2(0.001), vFaceRect.zw - 0.001);
   vec4 c = texture2D(map, texel / vec2(${PAGE}.0));
+  if (c.a < 0.002) discard;
   diffuseColor.rgb *= c.rgb;
   diffuseColor.rgb = mix(diffuseColor.rgb, vFlash.rgb, vFlash.a);
+  vGlowC = c.rgb * (1.0 - c.a);
 }
 `;
 
@@ -157,7 +167,7 @@ function charMaterial(page: THREE.Texture): THREE.MeshLambertMaterial {
     shader.vertexShader = VERT_PARS + shader.vertexShader.replace('#include <begin_vertex>', VERT_MAIN);
     shader.fragmentShader = FRAG_PARS + shader.fragmentShader
       .replace('#include <map_fragment>', FRAG_MAP)
-      .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance += diffuseColor.rgb * vEmph * uEmphK + vFlash.rgb * vFlash.a * 0.8;');
+      .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance += diffuseColor.rgb * vEmph * uEmphK + vFlash.rgb * vFlash.a * 0.8 + vGlowC * 1.6;');
     patchBandedLambert(shader, 'world');
     addNormalOutput(shader, true, 1);
   };
@@ -213,38 +223,6 @@ export function fpMaterial(page: THREE.Texture, tint: THREE.Color): THREE.MeshLa
   m.customProgramCacheKey = () => 'cdda-char-fp';
   (m.userData as { mrt?: boolean }).mrt = true;
   return m;
-}
-
-/** Unit cube (-0.5..0.5) with per-vertex face id + face-local uv (paint.ts conventions). */
-function cubeGeometry(): THREE.BufferGeometry {
-  const P: number[] = [], N: number[] = [], F: number[] = [], UV: number[] = [], I: number[] = [];
-  // face: normal, the axis pointing to the viewer's right (u), the axis pointing down (v)
-  const faces: [number[], number[], number[]][] = [
-    [[1, 0, 0], [0, 0, -1], [0, -1, 0]], // right (+x): u toward the front
-    [[0, 0, -1], [-1, 0, 0], [0, -1, 0]], // front (-z): u toward -x
-    [[-1, 0, 0], [0, 0, 1], [0, -1, 0]], // left (-x)
-    [[0, 0, 1], [1, 0, 0], [0, -1, 0]], // back (+z)
-    [[0, 1, 0], [1, 0, 0], [0, 0, 1]], // top: u +x, v toward the back
-    [[0, -1, 0], [1, 0, 0], [0, 0, -1]], // bottom
-  ];
-  faces.forEach(([n, u, v], f) => {
-    const base = P.length / 3;
-    for (const [a, b] of [[0, 0], [1, 0], [0, 1], [1, 1]]) {
-      for (let k = 0; k < 3; k++) P.push(n[k] * 0.5 + u[k] * (a - 0.5) + v[k] * (b - 0.5));
-      N.push(...n);
-      F.push(f, a, b);
-      UV.push(a, b);
-    }
-    // winding: counter-clockwise seen from outside (u right, v down => (0,0),(0,1),(1,0))
-    I.push(base, base + 2, base + 1, base + 1, base + 2, base + 3);
-  });
-  const g = new THREE.BufferGeometry();
-  g.setAttribute('position', new THREE.Float32BufferAttribute(P, 3));
-  g.setAttribute('normal', new THREE.Float32BufferAttribute(N, 3));
-  g.setAttribute('uv', new THREE.Float32BufferAttribute(UV, 2));
-  g.setAttribute('cFace', new THREE.Float32BufferAttribute(F, 3));
-  g.setIndex(I);
-  return g;
 }
 
 // ------------------------------------------------------------------ batches
@@ -436,8 +414,8 @@ export interface SkinSource {
 
 export class CharLayer {
   readonly group = new THREE.Group();
-  private cube = cubeGeometry();
   private live = new Set<CharInstance>();
+  /** keyed page * SHAPES.length + shape index */
   private batches = new Map<number, Batch>();
   private scratch: THREE.Matrix4[] = [];
   private needsWrite = true;
@@ -518,27 +496,38 @@ export class CharLayer {
     const layout = this.needsLayout || !this.reuseStaticUploads;
     this.needsLayout = false;
     // count per page
+    const NS = SHAPES.length;
     const per = new Map<number, number>();
-    for (const i of this.live) if (i.visible) per.set(i.skin.page, (per.get(i.skin.page) ?? 0) + i.rig.parts.length);
-    for (const [pg, n] of per) {
-      let b = this.batches.get(pg);
+    for (const i of this.live) {
+      if (!i.visible) continue;
+      const sh = shapeIndex(i.rig);
+      for (let p = 0; p < sh.length; p++) {
+        const key = i.skin.page * NS + sh[p];
+        per.set(key, (per.get(key) ?? 0) + 1);
+      }
+    }
+    for (const [key, n] of per) {
+      let b = this.batches.get(key);
       if (!b) {
-        b = new Batch(this.cube, store.texture(pg), this.group, this.shadows, this.matFor);
-        this.batches.set(pg, b);
+        b = new Batch(shapeGeometry(SHAPES[key % NS]), store.texture(Math.floor(key / NS)), this.group, this.shadows, this.matFor);
+        this.batches.set(key, b);
       }
       b.ensure(n);
     }
     const fill = new Map<number, number>();
     for (const i of this.live) {
       if (!i.visible) continue;
-      const b = this.batches.get(i.skin.page)!;
-      let k = fill.get(i.skin.page) ?? 0;
-      const M = b.mesh.instanceMatrix.array as Float32Array;
-      const T = b.tex.array as Float32Array, X = b.misc.array as Float32Array, F = b.flash.array as Float32Array, R = b.root.array as Float32Array, P = b.shape.array as Float32Array;
+      const sh = shapeIndex(i.rig);
       const fk = i.flashDur > 0 ? i.flashT / i.flashDur : 0;
       const sky = this.skyVisAt ? this.skyVisAt(i.x, i.y, i.z) : 1;
       const rx = i.x, ry = i.z * LEVEL_HEIGHT + i.lift, rz = i.y;
-      for (let p = 0; p < i.rig.parts.length; p++, k++) {
+      for (let p = 0; p < i.rig.parts.length; p++) {
+        const key = i.skin.page * NS + sh[p];
+        const b = this.batches.get(key)!;
+        const k = fill.get(key) ?? 0;
+        fill.set(key, k + 1);
+        const M = b.mesh.instanceMatrix.array as Float32Array;
+        const T = b.tex.array as Float32Array, X = b.misc.array as Float32Array, F = b.flash.array as Float32Array, R = b.root.array as Float32Array, P = b.shape.array as Float32Array;
         M.set(i.mats.subarray(p * 16, p * 16 + 16), k * 16);
         const r = i.skin.rects;
         T[k * 4] = r[p * 5]; T[k * 4 + 1] = r[p * 5 + 1]; T[k * 4 + 2] = r[p * 5 + 2]; T[k * 4 + 3] = r[p * 5 + 3];
@@ -549,9 +538,8 @@ export class CharLayer {
         F[k * 4] = i.flashColor.r; F[k * 4 + 1] = i.flashColor.g; F[k * 4 + 2] = i.flashColor.b; F[k * 4 + 3] = fk;
         R[k * 4] = rx; R[k * 4 + 1] = ry; R[k * 4 + 2] = rz; R[k * 4 + 3] = i.fade;
       }
-      fill.set(i.skin.page, k);
     }
-    for (const [pg, b] of this.batches) b.commit(fill.get(pg) ?? 0, layout);
+    for (const [key, b] of this.batches) b.commit(fill.get(key) ?? 0, layout);
   }
 
   dispose(): void {
@@ -562,6 +550,17 @@ export class CharLayer {
     this.batches.clear();
     this.live.clear();
   }
+}
+
+const shapeIdx = new WeakMap<Rig, Uint8Array>();
+/** Per part: index into SHAPES (rig parts are immutable). */
+function shapeIndex(rig: Rig): Uint8Array {
+  let a = shapeIdx.get(rig);
+  if (!a) {
+    a = Uint8Array.from(rig.parts, (p) => SHAPES.indexOf(p.shape ?? 'box'));
+    shapeIdx.set(rig, a);
+  }
+  return a;
 }
 
 /** Skin pages shared by every layer (monsters, NPCs, corpses): one texture per page. */
@@ -592,7 +591,7 @@ export class SkinStore {
     const dimsOf = (v: readonly [number, number, number]) => texelDims([v[0] * tpm, v[1] * tpm, v[2] * tpm]);
     const dimsKey = rig.parts.map((p) => dimsOf(p.size).join('x')).join(',');
     const styled = this.style === 'styled' && rig.shape.arch === 'humanoid';
-    const key = `${src.key}|${rig.shape.arch}|${rig.shape.zombie ? 'z' : ''}|${styled ? 'st' : 'sp'}|${dimsKey}|${src.opts?.eyes?.join(',') ?? ''}|${src.opts?.person ? JSON.stringify(src.opts.person) : ''}`;
+    const key = `${src.key}|${rig.shape.arch}|${rig.shape.zombie ? 'z' : ''}|${styled ? 'st' : 'sp'}|${rig.skinTag ?? ''}|${dimsKey}|${src.opts?.eyes?.join(',') ?? ''}|${src.opts?.person ? JSON.stringify(src.opts.person) : ''}`;
     const hit = this.skins.get(key);
     if (hit) return hit;
     // flat-coloured rigs (effects, held items) need no sprite: a neutral stand-in palette
@@ -626,8 +625,14 @@ export class SkinStore {
       const [x, y] = places[i];
       rects.set([x, y, nt.d[0], nt.d[1], nt.d[2]], i * 5);
       const part = rig.parts[i];
+      const zl = rig.zlook;
       if (!info) fillGrey(pg.img, x, y, nt.wh[0], nt.wh[1]);
-      else if (styled && part.src.region) {
+      else if (zl && (part.src.zr || (part.src.region && (styled || !part.src.rect)))) {
+        // zombie bodies (zombie.ts): their own painter, except sprite-projected parts in
+        // ?charpaint=sprite
+        const side = /R$/.test(part.name) ? 1 : /L$/.test(part.name) ? -1 : 0;
+        paintZombiePart(pg.img, x, y, nt.d, part.src, part.name, { ...personPalette(info, zl.undead), ...(src.opts?.person ?? {}) }, zl, seedOfKey(src.key + rig.skinTag), side);
+      } else if (styled && part.src.region) {
         const side = /R$/.test(part.name) ? 1 : /L$/.test(part.name) ? -1 : 0;
         paintStyled(pg.img, x, y, nt.d, part.src.region, { ...personPalette(info, rig.shape.zombie), ...(src.opts?.person ?? {}) }, seedOfKey(src.key), side);
       } else paintPart(pg.img, x, y, nt.d, part.src, info, src.opts);

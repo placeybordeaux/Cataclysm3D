@@ -13,6 +13,13 @@ export interface PickableModel {
   readonly visible: boolean;
 }
 
+/**
+ * Cosmetic effect parts (zombie smoke, arcs, tendrils, drool: chars/zombie.ts names them 'fx…')
+ * are not body: shots pass through them, and their flicker (scaled near zero) never makes a
+ * model unpickable.
+ */
+const isFx = (name: string) => name.startsWith('fx');
+
 const M = new THREE.Matrix4();
 const O = new THREE.Vector3();
 const D = new THREE.Vector3();
@@ -45,6 +52,7 @@ export function prepareModel(model: PickableModel): ((o: Vec3, d: Vec3) => { t: 
   const parts = model.rig.parts;
   const inv: { m: THREE.Matrix4; l: THREE.Matrix3; name: string }[] = [];
   for (let i = 0; i < parts.length; i++) {
+    if (isFx(parts[i].name)) continue;
     const m = new THREE.Matrix4().fromArray(model.mats, i * 16);
     if (Math.abs(m.determinant()) < 1e-12) return undefined;
     m.invert();
@@ -72,6 +80,7 @@ export function pickModel(model: PickableModel, o: Vec3, d: Vec3): { t: number; 
   const parts = model.rig.parts;
   let best: { t: number; part: string } | null = null;
   for (let i = 0; i < parts.length; i++) {
+    if (isFx(parts[i].name)) continue;
     M.fromArray(model.mats, i * 16);
     // An unbuilt (all-zero) or degenerate matrix: the model hasn't been drawn yet.
     if (Math.abs(M.determinant()) < 1e-12) return undefined;

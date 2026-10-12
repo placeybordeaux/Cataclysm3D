@@ -17,6 +17,9 @@ import type { HeldBuild } from './held';
 import type { BodyShape, Weapon } from './archetype';
 import { CRAWL_HEIGHT, type CrawlPlan } from '../../game/crawl';
 import { ridePose, type HumanDims, type RideIn } from './ridePose';
+import type { Shape } from './shapes';
+import type { ZombieLook } from './zombieFamily';
+import { zombieRig, type ZStyle } from './zombie';
 
 export type Proj = 'front' | 'side';
 /** Painted surface detail for close-up items. */
@@ -24,6 +27,11 @@ export type Detail = 'grain' | 'serration' | 'knurl' | 'tape' | 'port' | 'vent' 
 export type Role = 'dark' | 'main' | 'light' | 'accent' | 'skin' | 'wing';
 export type Region = 'head' | 'neck' | 'torso' | 'hips' | 'upperArm' | 'foreArm' | 'hand' | 'thigh' | 'shin' | 'foot'
   | 'fpSleeveLower' | 'fpSleeveUpper' | 'fpBack' | 'fpPalm' | 'fpFinger' | 'fpThumb' | 'hair' | 'hat';
+/**
+ * Zombie-only surfaces (zombieSkin.ts): a hanging jaw, torn cloth, uniform pieces, glowing acid
+ * sacs, bone, plant matter, smoke, electric arcs, raw flesh, necromancer tendrils.
+ */
+export type ZRegion = 'jaw' | 'belly' | 'rag' | 'gear' | 'visor' | 'sac' | 'bone' | 'plant' | 'thorn' | 'smoke' | 'arc' | 'flesh' | 'tendril';
 
 export interface PartSrc {
   rect?: [number, number, number, number];
@@ -52,6 +60,10 @@ export interface PartSrc {
    * wielded-item overlays don't count as the body, so sleeves come from the shirt's edge.
    */
   edge?: 'left' | 'right';
+  /** a zombie surface (zombieSkin.ts); painted with the person palette + the zombie look */
+  zr?: ZRegion;
+  /** 0..1: share of the painted colour the part emits (glowing sacs, eyes, arcs; charLayer) */
+  glow?: number;
 }
 
 export interface PartDef {
@@ -70,6 +82,8 @@ export interface PartDef {
   taperAxis?: 'y' | 'z';
   /** 'limb' parts get fattened for far readability; 'core' parts less */
   kind?: 'core' | 'limb' | 'thin';
+  /** unit shape the box is drawn with (shapes.ts); default 'box' */
+  shape?: Shape;
 }
 
 export interface PoseIn {
@@ -124,6 +138,10 @@ export interface Rig {
   texels?: number;
   /** Humanoids: the joint layout the seated / riding pose solves against (ridePose.ts). */
   dims?: HumanDims;
+  /** Zombie bodies (zombie.ts): the look the skin is painted for. */
+  zlook?: ZombieLook;
+  /** Extra skin-cache key: rigs whose parts paint differently with the same sizes. */
+  skinTag?: string;
   pose(p: PoseIn, out: PoseOut): void;
 }
 
@@ -141,16 +159,16 @@ export function resetPose(o: PoseOut): void {
 
 const TAU = Math.PI * 2;
 const sin = Math.sin, cos = Math.cos;
-const ease = (k: number) => { const x = Math.min(1, Math.max(0, k)); return x * x * (3 - 2 * x); };
+export const ease = (k: number) => { const x = Math.min(1, Math.max(0, k)); return x * x * (3 - 2 * x); };
 
-function setRot(o: PoseOut, i: number, x: number, y = 0, z = 0): void {
+export function setRot(o: PoseOut, i: number, x: number, y = 0, z = 0): void {
   o.rot[i * 3] += x;
   o.rot[i * 3 + 1] += y;
   o.rot[i * 3 + 2] += z;
 }
 
 /** Scale every length in a part list (built at the archetype's reference size). */
-function scaleParts(parts: PartDef[], s: number): PartDef[] {
+export function scaleParts(parts: PartDef[], s: number): PartDef[] {
   const m = (v: [number, number, number]): [number, number, number] => [v[0] * s, v[1] * s, v[2] * s];
   return parts.map((p) => ({ ...p, joint: m(p.joint), size: m(p.size), center: m(p.center) }));
 }
@@ -164,7 +182,7 @@ export const HUM = {
 } as const;
 
 /** Per-individual 0..1 values from one seed (posture quirks in a horde). */
-function quirk(seed: number, k: number): number {
+export function quirk(seed: number, k: number): number {
   const x = Math.sin(seed * 91.7 + k * 17.3) * 43758.5453;
   return x - Math.floor(x);
 }
@@ -469,7 +487,7 @@ function humanoid(sh: BodyShape, held?: HeldBuild): Rig {
  * so an arm at +θ (θ = the hip pitch) hangs straight down and at ~2.9 lies along the ground
  * ahead (docs/MONSTER_PLACEMENT.md "Crawlers").
  */
-function crawlPose(plan: CrawlPlan, p: PoseIn, o: PoseOut, s: number, hipY: number, weaponI: number): void {
+export function crawlPose(plan: CrawlPlan, p: PoseIn, o: PoseOut, s: number, hipY: number, weaponI: number): void {
   const H = HUM;
   const fours = plan === 'fours';
   // body pitch: drag/legless nearly flat with the chest a little raised; fours a level back
@@ -1086,9 +1104,15 @@ function lump(sh: BodyShape): Rig {
   };
 }
 
-export function makeRig(sh: BodyShape, opts: { turret?: boolean; held?: HeldBuild } = {}): Rig {
+/**
+ * `zstyle`: zombie bodies (zombie.ts) — 'shamble' (default), 'caricature', or 'boxy' for the
+ * round-6 person rig; `variant` picks one of a zombie type's torn/asymmetric individuals.
+ */
+export function makeRig(sh: BodyShape, opts: { turret?: boolean; held?: HeldBuild; zstyle?: ZStyle; variant?: number } = {}): Rig {
   switch (sh.arch) {
-    case 'humanoid': return humanoid(sh, opts.held);
+    case 'humanoid':
+      if (sh.zlook && (opts.zstyle ?? 'shamble') !== 'boxy' && !sh.weapon) return zombieRig(sh, sh.zlook, opts.zstyle === 'caricature' ? 'caricature' : 'shamble', opts.variant ?? 0);
+      return humanoid(sh, opts.held);
     case 'quadruped': return quadruped(sh, false);
     case 'critter': return quadruped(sh, true);
     case 'insect': return insect(sh);

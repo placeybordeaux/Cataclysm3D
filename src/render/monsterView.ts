@@ -14,6 +14,7 @@ import { charLayers, charSettings, frameKey, spriteInfo, type CharLayers } from 
 import { bodyShapeOf } from './chars/archetype';
 import { CreatureModel, DEATH_TOTAL as MODEL_DEATH_TOTAL, FallingBody } from './chars/creature';
 import { makeRig, type Rig } from './chars/rig';
+import { ZVARIANTS } from './chars/zombie';
 import { FxMeshes } from './chars/fxMeshes';
 import { cardsOn } from './cards';
 import { cddaColor } from './atlasIndex';
@@ -286,13 +287,22 @@ export class MonsterView implements GameSystem {
     return (this.chars ??= charLayers(this.renderer));
   }
 
-  /** Procedural body for a monster type (shared by every monster of the type). */
-  rigFor(def: MonsterDef): Rig {
-    let r = this.rigs.get(def.id);
+  /**
+   * Procedural body for a monster type (shared by every monster of the type). Zombie bodies
+   * (chars/zombie.ts) come in a few torn/asymmetric individuals: `seed` (the creature's 0..1
+   * appearance seed, the same for its corpse) picks one.
+   */
+  rigFor(def: MonsterDef, seed = 0): Rig {
+    const zstyle = charSettings.zstyle;
+    const variant = Math.min(ZVARIANTS - 1, Math.floor(seed * ZVARIANTS));
+    const key = `${def.id}|${zstyle}|${variant}`;
+    let r = this.rigs.get(key);
     if (!r) {
-      const shape = bodyShapeOf({ id: def.id, bodytype: (def as { bodytype?: string }).bodytype, species: def.species, flags: def.flags, symbol: def.symbol, volume: def.volume, name: def.name, description: def.description });
-      r = makeRig(shape, { turret: def.symbol === '2' || /turret/.test(def.id) });
-      this.rigs.set(def.id, r);
+      const attacks = (def.special_attacks ?? []).map((a) => a.id ?? a.type ?? '').filter(Boolean);
+      const emits = ((def as { emit_fields?: { emit_id?: string }[] }).emit_fields ?? []).map((e) => e.emit_id ?? '');
+      const shape = bodyShapeOf({ id: def.id, bodytype: (def as { bodytype?: string }).bodytype, species: def.species, flags: def.flags, symbol: def.symbol, volume: def.volume, name: def.name, description: def.description, attacks, emits });
+      r = makeRig(shape, { turret: def.symbol === '2' || /turret/.test(def.id), zstyle, variant });
+      this.rigs.set(key, r);
     }
     return r;
   }
@@ -377,8 +387,9 @@ export class MonsterView implements GameSystem {
 
   private makeVisual(m: Monster, v: MonView): void {
     if (this.models) {
-      const rig = this.rigFor(m.type);
-      v.c = new CreatureModel(this.layers().live, rig, this.skinFor(rig, v.frame), seedOf(appearanceSeed(m)), m.x, m.y, m.facing);
+      const seed = seedOf(appearanceSeed(m));
+      const rig = this.rigFor(m.type, seed);
+      v.c = new CreatureModel(this.layers().live, rig, this.skinFor(rig, v.frame), seed, m.x, m.y, m.facing);
     } else v.h = this.renderer.sprites.add({ x: m.x, y: m.y, z: m.z, frame: v.frame, height: v.height });
   }
 
@@ -427,8 +438,9 @@ export class MonsterView implements GameSystem {
   private makeCorpseVisual(v: CorpseView, def: MonsterDef, uid: number, done: boolean): void {
     const c = v.rec;
     if (this.models) {
-      const rig = this.rigFor(def);
-      v.body = new FallingBody(this.layers().dead, rig, this.skinFor(rig, v.frame), seedOf(uid || Math.floor(c.x * 7 + c.y * 13)), v.x0, v.y0, c.z, c.facing, v.dx, v.dy, done);
+      const seed = seedOf(uid || Math.floor(c.x * 7 + c.y * 13));
+      const rig = this.rigFor(def, seed);
+      v.body = new FallingBody(this.layers().dead, rig, this.skinFor(rig, v.frame), seed, v.x0, v.y0, c.z, c.facing, v.dx, v.dy, done);
     } else {
       v.h = this.renderer.sprites.add({ x: v.x0 + v.dx, y: v.y0 + v.dy, z: c.z, frame: v.frame, height: v.height });
       if (done) v.h.setSize((v.frame.w / MON_PPM) * FALLEN_WIDE, v.height * FALLEN);
