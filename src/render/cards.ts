@@ -1,3 +1,4 @@
+import { visualPreference } from './visualPreference';
 import type { TileFrame } from './textureSource';
 
 // Fixed-orientation "cards" for props that used to be camera-facing billboards (docs/
@@ -17,10 +18,7 @@ interface QuadSink {
 }
 
 function initialMode(): 'cards' | 'billboard' {
-  const p = typeof location !== 'undefined' ? new URLSearchParams(location.search).get('props') : null;
-  if (p === 'cards' || p === 'billboard') return p;
-  if (p) throw new Error(`?props=${p}: expected cards or billboard`);
-  return 'cards';
+  return visualPreference('props', ['cards', 'billboard'], 'cards');
 }
 
 /** fireLive: chars/fireView.ts draws animated fires, so the mesher leaves them out */

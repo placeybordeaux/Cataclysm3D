@@ -1,7 +1,8 @@
 import type { Item } from '../game/item';
 import { unloadContainer } from './liquid_ui';
 import type { ActionResult } from '../game/inventory';
-import { qualityUsages, useActions } from '../game/inventory';
+import { itemActionName, qualityUsages, useActions } from '../game/inventory';
+import { upsToggleLabel } from '../game/upsTransfer';
 import { isAt, L, moveItem, type Loc } from '../game/moves';
 import { patchInteractUi } from '../game/interact';
 import { c, openMenu, openWindow, type MenuEntry, type UiWindow } from './framework';
@@ -155,13 +156,10 @@ function statusFooter(ctx: UiContext): string {
   return `Weight (kg): ${c(wt > cap ? 'c_red' : 'c_light_gray', kg(wt))}/${kg(cap)}   Volume (L): ${c(vol > vcap ? 'c_red' : 'c_light_gray', liters(vol))}/${liters(vcap)}`;
 }
 
-/** Menu text for a use_action: its menu_text, else a readable name for the action type. */
-function useActionLabel(ua: { type: string; menu_text?: unknown }): string {
+/** Menu text for a use_action: its menu_text override, else BN's item_actions.json name. */
+export function useActionLabel(it: Item, ua: { type: string; menu_text?: unknown }): string {
   if (typeof ua.menu_text === 'string' && ua.menu_text) return ua.menu_text;
-  const names: Record<string, string> = {
-    firestarter: 'Start a fire', transform: 'Turn on', heal: 'Heal', consume_drug: 'Take',
-  };
-  return names[ua.type] ?? ua.type.replace(/_/g, ' ');
+  return itemActionName(it.data, ua.type);
 }
 
 // ------------------------------------------------------------------ actions
@@ -199,7 +197,7 @@ export function doAction(ctx: UiContext, action: ItemAction, e: InvEntry): Actio
         // The activate submenu: "Light up" / "Start a fire" for a refillable lighter.
         openMenu({
           title: it.name(),
-          entries: acts.map(({ ua, i }) => ({ label: c('c_white', qTypes.has(ua.type) ? `Use your ${it.baseName()}` : useActionLabel(ua)), value: i })),
+          entries: acts.map(({ ua, i }) => ({ label: c('c_white', qTypes.has(ua.type) ? `Use your ${it.baseName()}` : ua.type === 'TOGGLE_UPS_CHARGING' ? upsToggleLabel(it) : useActionLabel(it, ua)), value: i })),
           onSelect: (i) => void (isAt(it, e.loc) && inv.use(it, undefined, i, e.loc)),
         });
         return null;

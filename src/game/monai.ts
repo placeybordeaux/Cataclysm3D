@@ -8,15 +8,15 @@ import { warnOnce } from '../data/warn';
 import type { MonsterDef } from '../data/types';
 import type { Game, GameSystem } from './game';
 import { moveWithCollision, CREATURE_RADIUS } from './physics';
-import { Monster, dayOf, turnsToSeconds, upgradeTarget, type MonsterWindup } from './monster';
+import { MON_POISON, Monster, dayOf, turnsToSeconds, upgradeTarget, type MonsterWindup } from './monster';
 import { Grid, clearWalk, hasLOS } from './los';
 import { findPath } from './pathfind';
 import { defaultMelee, isMeleeSpecial, specialTelegraph, trySpecial } from './monattack';
 import { FEEL, defenseOf, surroundAngles, telegraphSeconds, type TelegraphKind } from './combatfeel';
-import { monsterMeleeAttack, type MonsterAttackResult } from './combat';
+import { applyFlatArmor, normalRoll, monsterMeleeAttack, type MonsterAttackResult } from './combat';
 import type { Character } from './character';
 import { BODY_PARTS } from './bodyparts';
-import { createItem, fromSpawned, type Item } from './item';
+import { createItem, fromSpawned, MAX_ITEM_DAMAGE, type Item } from './item';
 import { consumeItem, L, moveItem, spawnOnGround } from './moves';
 import { flies, floorKnown, standingSpot, standKnown } from './standing';
 import type { BodyPartId } from './bodyparts';
@@ -27,6 +27,7 @@ import { bash } from './bash';
 import { addField, fieldDamageAt } from './fields';
 import { emitSound, heardVolume, type SoundCategory } from './sound';
 import { lightAt, playerCanSee } from './vision';
+import { monsterFactionAttitude } from './monfaction';
 
 // The monster simulation (CDDA monmove.cpp + monster.cpp, real-time). Monsters live in `all`
 // forever once spawned; only those inside the "reality bubble" (ACTIVE_RADIUS tiles of the
@@ -100,6 +101,15 @@ export interface MonsterTarget {
   onHit(m: Monster, damage: number): void;
 }
 
+/**
+ * item::can_revive's damage half: a corpse smashed to its last damage level (an NPC pulping it,
+ * npcai.ts, or an overkill) or flagged PULPED stays dead.
+ */
+export function corpsePulped(c: CorpseRecord): boolean {
+  const it = c.item as Item;
+  return it.damage >= MAX_ITEM_DAMAGE || it.hasFlag('PULPED');
+}
+
 export interface CorpseRecord {
   item: Item;
   x: number;
@@ -146,6 +156,8 @@ export class MonsterSystem implements GameSystem {
   extraTargets: () => MonsterTarget[] = () => [];
   /** Current non-player target per monster (chosen in think()). */
   readonly creatureTargets = new Map<Monster, MonsterTarget>();
+  readonly monsterTargets = new Map<Monster, Monster>();
+  private readonly thirdPartyWindups = new WeakMap<Monster, Monster | MonsterTarget>();
   /** Extra light (0..100) the player carries, e.g. a lit flashlight; set by the renderer wiring. */
   playerLight: () => number = () => 0;
   /** Renderer/UI listeners. */
@@ -433,6 +445,41 @@ export class MonsterSystem implements GameSystem {
     return best;
   }
 
+  /** BN monmove::plan selects visible hated factions, regardless of player attitude. */
+  private pickMonsterTarget(m: Monster, nearerThan: number): Monster | null {
+    let best: Monster | null = null, distance = Math.min(nearerThan, m.sightRange(this.lightCache));
+    for (const t of this.monstersNear(m.x, m.y, m.z, distance)) {
+      if (t === m || t.dead || (m.friendly && t.friendly)) continue;
+      const relation = monsterFactionAttitude(this.game.data, m.type.default_faction, t.type.default_faction);
+      const bothWild = !m.friendly && !t.friendly;
+      const hostile = m.friendly ? !t.friendly && t.attitude() === 'attack' : bothWild && relation === 'HATE' || (!(bothWild && (relation === 'NEUTRAL' || relation === 'FRIENDLY')) && m.morale >= 0 && m.anger >= 10);
+      if (!hostile) continue;
+      const d = Math.hypot(t.x - m.x, t.y - m.y);
+      if (d >= distance || !hasLOS(this.grid, m.tileX, m.tileY, t.tileX, t.tileY, m.z)) continue;
+      best = t;
+      distance = d;
+    }
+    return best;
+  }
+
+  /** Same BN hit/dodge and armor math as Character melee, with monster body armor. */
+  private meleeMonster(m: Monster, t: Monster): void {
+    if (normalRoll(m.rng, m.type.melee_skill * 5, 25) < t.dodge() * 5) {
+      this.narrateThirdParty(m, `${m.TheName()} misses ${t.theName()}.`, 'c_light_gray');
+      return;
+    }
+    const units = (m.type.melee_damage ?? []).map((u) => ({ type: u.damage_type, amount: u.amount, armor_penetration: u.armor_penetration ?? 0, armor_multiplier: u.armor_multiplier ?? 1 }));
+    if (m.type.melee_dice > 0) {
+      const bash = m.rng.dice(m.type.melee_dice, m.type.melee_dice_sides);
+      const existing = units.find((u) => u.type === 'bash');
+      if (existing) existing.amount += bash;
+      else units.push({ type: 'bash', amount: bash, armor_penetration: 0, armor_multiplier: 1 });
+    }
+    const damage = applyFlatArmor(units, t.type.armor).reduce((n, u) => n + u.amount, 0);
+    this.hurt(t, damage, m);
+    this.narrateThirdParty(m, `${m.TheName()} hits ${t.theName()} for ${Math.round(damage)} damage.`);
+  }
+
   inMeleeRangeOf(m: Monster, t: MonsterTarget, range = 1): boolean {
     if (t.dead || t.z !== m.z) return false;
     if (Math.hypot(t.x - m.x, t.y - m.y) > this.reach(m, range)) return false;
@@ -448,7 +495,7 @@ export class MonsterSystem implements GameSystem {
     c.onMessage = null;
     let res: MonsterAttackResult;
     try {
-      res = monsterMeleeAttack(m.type, c, this.rng, { name: m.TheName() });
+      res = monsterMeleeAttack(m.type, c, this.rng, { name: m.TheName(), accuracy: m.type.melee_skill + m.hitBonus() });
     } finally {
       c.onMessage = sink;
     }
@@ -488,22 +535,22 @@ export class MonsterSystem implements GameSystem {
         if (m.morale >= 0) m.wanderTo(x + m.rng.int(-err, err), y + m.rng.int(-err, err), Math.max(m.wanderTime, turnsToSeconds(interest * 10)));
         continue;
       }
-      // Sound through floors is heavily muffled.
-      const v = m.z === z ? vol : Math.abs(m.z - z) === 1 ? vol / 3 : 0;
+      // Cross-level sound uses sound.ts BN sound_distance attenuation.
+      const v = Math.abs(m.z - z) <= 1 ? vol : 0;
       if (v <= 0) continue;
       const dist = Math.max(Math.abs(m.x - x), Math.abs(m.y - y));
       if (v * 2 <= dist) continue;
       const good = m.has('GOODHEARING');
       // In the bubble, sound.ts adds weather and wall muffling; dormant monsters (whose
       // chunks may not exist) use the bare CDDA formula so we never trigger mapgen.
-      const volume = m.dormant ? (good ? 2 * v - dist : v - dist) : heardVolume(this.game, { x, y, z, volume: v }, { x: m.tileX, y: m.tileY, z }, good ? 2 : 1);
+      const volume = m.dormant ? (good ? 2 * v - dist : v - dist) : heardVolume(this.game, { x, y, z, volume: v }, { x: m.tileX, y: m.tileY, z: m.z }, good ? 2 : 1);
       if (volume <= 0) continue;
       const err = volume < 2 ? 10 : volume < 5 ? 5 : volume < 10 ? 3 : volume < 20 ? 1 : 0;
       const tx = x + m.rng.int(-err, err), ty = y + m.rng.int(-err, err);
       const wander = turnsToSeconds(volume * (good ? 6 : 1));
       if (wander < m.wanderTime) continue;
       this.trigger(m, 'SOUND', volume);
-      if (m.morale >= 0 && m.anger >= 10) m.wanderTo(tx, ty, wander);
+      if (m.morale >= 0 && m.anger >= 10) m.wanderTo(tx, ty, wander, z);
       else if (m.morale < 0) m.wanderTo(2 * m.x - tx, 2 * m.y - ty, wander);
     }
   }
@@ -607,6 +654,7 @@ export class MonsterSystem implements GameSystem {
   private interruptWindup(m: Monster): void {
     if (!m.windup) return;
     m.windup = null;
+    this.thirdPartyWindups.delete(m);
     m.attackCooldown = Math.max(m.attackCooldown, FEEL.monsterRecovery);
     this.game.events.emit('monsterAttack', { monster: m, phase: 'interrupted', x: m.x, y: m.y, z: m.z });
   }
@@ -699,7 +747,7 @@ export class MonsterSystem implements GameSystem {
     const p = this.game.player;
     for (const c of [...this.corpses]) {
       if (!c.dormant || c.z !== p.z || Math.hypot(c.x - p.x, c.y - p.y) > 3.5) continue;
-      if (!this.corpseValid(c)) continue;
+      if (!this.corpseValid(c) || corpsePulped(c)) continue;
       const m = this.reviveCorpse(c);
       if (m) {
         m.hp = m.hpMax;
@@ -730,7 +778,7 @@ export class MonsterSystem implements GameSystem {
       const def = this.game.data.monsters[c.monId];
       if (!def || !def.flags.includes('REVIVES') || !def.species.includes('ZOMBIE') || def.flags.includes('NO_NECRO')) continue;
       const d = Math.hypot(c.x - m.x, c.y - m.y);
-      if (d > range || d >= bd || !this.corpseValid(c)) continue;
+      if (d > range || d >= bd || !this.corpseValid(c) || corpsePulped(c)) continue;
       if (!hasLOS(this.grid, m.tileX, m.tileY, Math.floor(c.x), Math.floor(c.y), m.z)) continue;
       best = c;
       bd = d;
@@ -817,11 +865,19 @@ export class MonsterSystem implements GameSystem {
     for (const m of dead) {
       this.brains.delete(m);
       this.creatureTargets.delete(m);
+      this.monsterTargets.delete(m);
       for (const f of this.onRemoved) f(m);
     }
   }
 
   private tickTimers(m: Monster, dt: number): void {
+    // Poison HURT rolls one_in(N) per BN turn; turn the per-turn chance into one for this frame.
+    for (const id of ['poison', 'badpoison'] as const) {
+      if (!m.hasEffect(id)) continue;
+      const p = MON_POISON[id];
+      if (this.rng.next() < 1 - Math.pow(1 - 1 / p.hurtOneIn, Math.min(dt, m.effects.get(id)!) * ACTION_SCALE))
+        this.hurt(m, this.rng.int(p.hurt[0], p.hurt[1]), null);
+    }
     for (const [k, v] of m.effects) {
       const nv = v - dt;
       if (nv <= 0) m.effects.delete(k);
@@ -884,7 +940,15 @@ export class MonsterSystem implements GameSystem {
     const other = att === 'attack' && !m.friendly ? this.pickCreatureTarget(m, m.seesPlayer ? dist : Infinity) : null;
     if (other) this.creatureTargets.set(m, other);
     else this.creatureTargets.delete(m);
-    if (other) {
+    const foe = this.pickMonsterTarget(m, other ? Math.hypot(other.x - m.x, other.y - m.y) : !m.friendly && att === 'attack' && m.seesPlayer ? dist : Infinity);
+    if (foe) this.monsterTargets.set(m, foe);
+    else this.monsterTargets.delete(m);
+    if (foe) {
+      this.creatureTargets.delete(m);
+      brain.goal = 'chase';
+      brain.gx = foe.x;
+      brain.gy = foe.y;
+    } else if (other) {
       brain.goal = 'chase';
       brain.gx = other.x;
       brain.gy = other.y;
@@ -972,7 +1036,20 @@ export class MonsterSystem implements GameSystem {
       return;
     }
     const att = m.attitude();
-    if (m.busy <= 0 && att === 'attack' && !p.dead) {
+    const foe = this.monsterTargets.get(m);
+    if (foe && !foe.dead && foe.z === m.z) {
+      brain.gx = foe.x;
+      brain.gy = foe.y;
+      if (Math.hypot(foe.x - m.x, foe.y - m.y) <= this.reach(m) && this.noWallBetween(m.x, m.y, foe.x, foe.y, m.z)) {
+        this.face(m, foe.x, foe.y);
+        m.moving = false;
+        if (m.attackCooldown <= 0 && m.busy <= 0) {
+          this.startWindup(m, m.size === 'large' || m.size === 'huge' ? 'heavy' : 'melee', null, foe);
+        }
+        return;
+      }
+    }
+    if (!foe && m.busy <= 0 && att === 'attack' && !p.dead) {
       // Special attacks first (they check their own range/conditions), then plain melee.
       // Blows aimed at the survivor telegraph first (combatfeel.ts); ranged specials fire now.
       for (const sa of m.specials) {
@@ -1009,9 +1086,7 @@ export class MonsterSystem implements GameSystem {
         this.face(m, ct.x, ct.y);
         m.moving = false;
         if (m.attackCooldown <= 0) {
-          this.meleeCreature(m, ct);
-          m.attackCooldown = (m.type.attack_cost || 100) / m.speed / ACTION_SCALE;
-          m.busy = 0.15;
+          this.startWindup(m, m.size === 'large' || m.size === 'huge' ? 'heavy' : 'melee', null, ct);
         }
         return;
       }
@@ -1020,7 +1095,7 @@ export class MonsterSystem implements GameSystem {
       m.moving = false;
       return;
     }
-    if (brain.goal === 'chase' && !ct) {
+    if (brain.goal === 'chase' && !ct && !foe) {
       // Hold at attack distance: stop a little inside reach and stay put until the survivor is
       // properly out of it, instead of stepping in and out every tick at the edge.
       const d = this.distToPlayer(m);
@@ -1049,8 +1124,9 @@ export class MonsterSystem implements GameSystem {
   }
 
   /** Begin telegraphing a blow at the survivor (plain melee when `sa` is null). */
-  private startWindup(m: Monster, kind: TelegraphKind, sa: MonsterWindup['special']): void {
-    const p = this.game.player;
+  private startWindup(m: Monster, kind: TelegraphKind, sa: MonsterWindup['special'], target?: Monster | MonsterTarget): void {
+    const p = target ?? this.game.player;
+    if (target) this.thirdPartyWindups.set(m, target);
     const secs = telegraphSeconds(m.speed, kind);
     m.windup = { t: secs, total: secs, kind, special: sa };
     this.face(m, p.x, p.y);
@@ -1065,6 +1141,26 @@ export class MonsterSystem implements GameSystem {
   /** Count down a wind-up; at zero the blow lands if the survivor is still within reach (+lunge). */
   private tickWindup(m: Monster, dt: number): void {
     const w = m.windup!;
+    const other = this.thirdPartyWindups.get(m);
+    if (other) {
+      if (other.dead || m.hasEffect('downed') || m.hasEffect('stunned') || m.z !== other.z) {
+        this.interruptWindup(m);
+        return;
+      }
+      this.face(m, other.x, other.y);
+      w.t -= dt;
+      if (w.t > 0) return;
+      m.windup = null;
+      this.thirdPartyWindups.delete(m);
+      const inRange = Math.hypot(other.x - m.x, other.y - m.y) <= this.reach(m) + FEEL.lunge && this.noWallBetween(m.x, m.y, other.x, other.y, m.z);
+      if (inRange) {
+        if (other instanceof Monster) this.meleeMonster(m, other);
+        else this.meleeCreature(m, other);
+      } else sfx.monsterWhiff(m);
+      m.busy = Math.max(m.busy, 0.15);
+      this.game.events.emit('monsterAttack', { monster: m, phase: inRange ? 'resolved' : 'whiff', x: m.x, y: m.y, z: m.z, heavy: w.kind === 'heavy' });
+      return;
+    }
     const p = this.game.player;
     if (p.dead || m.hasEffect('downed') || m.hasEffect('stunned') || m.attitude() !== 'attack' || m.z !== p.z) {
       this.interruptWindup(m);
@@ -1118,7 +1214,7 @@ export class MonsterSystem implements GameSystem {
     if (p.dead) return;
     const close: Monster[] = [];
     for (const m of this.active) {
-      if (m.dead || m.z !== p.z || m.friendly || this.creatureTargets.has(m)) continue;
+      if (m.dead || m.z !== p.z || m.friendly || this.creatureTargets.has(m) || this.monsterTargets.has(m)) continue;
       const b = this.brains.get(m);
       if (b?.goal !== 'chase' || !b.direct || m.has('IMMOBILE')) continue;
       if (Math.hypot(m.x - p.x, m.y - p.y) > FEEL.surroundRange) continue;

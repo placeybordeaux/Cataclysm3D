@@ -28,8 +28,8 @@ export interface MonsterJSON {
   /** Special attack cooldowns by special id. */
   specials?: [string, number][];
   upgradeDay: number;
-  /** [x, y, seconds left] of the noise being investigated. */
-  wander?: [number, number, number];
+  /** [x, y, seconds left, z] of the noise being investigated; old saves omit z. */
+  wander?: [number, number, number, number?];
   /** [x, y, seconds ago] where the player was last seen; absent = never. */
   lastSeen?: [number, number, number];
   /** Arrows and bolts stuck in it (Monster.stuck). */
@@ -52,7 +52,7 @@ export function monsterToJSON(m: Monster): MonsterJSON {
   if (m.busy > 0) j.busy = m.busy;
   const sp = m.specials.filter((s) => s.cooldown > 0).map((s) => [String(s.def.id), s.cooldown] as [string, number]);
   if (sp.length) j.specials = sp;
-  if (m.wanderTime > 0) j.wander = [m.wanderX, m.wanderY, m.wanderTime];
+  if (m.wanderTime > 0) j.wander = [m.wanderX, m.wanderY, m.wanderTime, m.wanderZ ?? m.z];
   if (Number.isFinite(m.lastSeenAge)) j.lastSeen = [m.lastSeenX, m.lastSeenY, m.lastSeenAge];
   if (m.stuck.items.length) j.stuck = m.stuck.items.map((it) => it.toJSON());
   return j;
@@ -84,7 +84,10 @@ export function restoreMonster(sys: MonsterSystem, j: MonsterJSON, warn: (msg: s
   m.busy = j.busy ?? 0;
   const cds = new Map(j.specials ?? []);
   for (const sp of m.specials) sp.cooldown = cds.get(String(sp.def.id)) ?? 0;
-  if (j.wander) [m.wanderX, m.wanderY, m.wanderTime] = j.wander;
+  if (j.wander) {
+    [m.wanderX, m.wanderY, m.wanderTime] = j.wander;
+    m.wanderZ = j.wander[3] ?? m.z;
+  }
   if (j.lastSeen) [m.lastSeenX, m.lastSeenY, m.lastSeenAge] = j.lastSeen;
   for (const sj of j.stuck ?? []) {
     const it = loadItemSafe(game.data, sj, warn);

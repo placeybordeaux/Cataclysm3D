@@ -19,10 +19,21 @@ import { isBareTree, type TreeSpec } from './trees';
 import { wantsFlora3d } from './flora';
 import type { ModelFactory } from './furniture';
 import type { SurfacePainter } from './surfaces';
-import { RoomMap, type Room } from './rooms';
+import { RoomMap, RoomCache, type Room } from './rooms';
+import { roomDependencySnapshot } from './roomDependencies';
 import { FACE_ENDS, buildingState, type Dresser } from './dressing';
 import type { StairMesher } from './stairs/mesher';
 import { furnitureHide } from './furnitureHide';
+
+// Maps are weakly held; each cache is capped to 65536 classified floor tiles.
+const roomCaches = new WeakMap<GameMap, Map<number, RoomCache>>();
+function roomCache(map: GameMap, z: number): RoomCache {
+  let levels = roomCaches.get(map);
+  if (!levels) roomCaches.set(map, levels = new Map());
+  let cache = levels.get(z);
+  if (!cache) levels.set(z, cache = new RoomCache());
+  return cache;
+}
 
 // Builds the static geometry of one chunk at one z-level: merged quads grouped by texture
 // page (one draw call per page), plus the billboards the chunk contributes. Light sources
@@ -93,6 +104,9 @@ export interface MeshExtras {
   mid?: boolean;
   /** furniture style 'model' (furniture/): modelled pieces replace voxels and billboards */
   models?: ModelFactory;
+  /** dropped weapons/tools the tileset never drew, as their held mesh in looks without
+   *  modelled items (furniture/groundHeld.ts); unset in classic */
+  heldItems?: ModelFactory;
   /** painted surfaces (surfaces.ts) active: interior wall finishes, baseboards, crown */
   surfaces?: SurfacePainter;
   /** set dressing for painted rooms (dressing.ts) */
@@ -188,6 +202,8 @@ export function* buildChunkMeshSteps(
   const glassB = { g: undefined as GeomBuilder | undefined };
   const glassGeo = () => (glassB.g ??= new GeomBuilder());
   const MD = LF?.voxelProps ? extras?.models : undefined;
+  const HI = MD ? undefined : extras?.heldItems;
+  const artless = (id: string) => (src as { hasItemArt?(id: string): boolean }).hasItemArt?.(id) === false;
   const ST = extras?.stairs?.active ? extras.stairs : undefined;
   ST?.prepare(chunk.cx, chunk.cy, chunk.z);
   const SP = extras?.surfaces?.active() ? extras.surfaces : undefined;
@@ -248,8 +264,12 @@ export function* buildChunkMeshSteps(
   };
   // rooms (rooms.ts): interior finishes, curtains and set dressing are chosen per room; a
   // covered region open to the outside (a porch) is not a room. Scanned with a margin so a
-  // room across a chunk border resolves the same way from both chunks.
+  // room across a chunk border resolves the same way from both chunks. The fill follows
+  // loaded rooms beyond that margin; it never generates missing chunks.
   const RM = SP && z >= 0 ? new RoomMap({
+    dependencyKey: (tx, ty) => `${chunkOf(tx)},${chunkOf(ty)}`,
+    validateSnapshot: (tx, ty) => roomDependencySnapshot(map, z, tx, ty),
+    available: (tx, ty) => map.hasChunk(chunkOf(tx), chunkOf(ty), z),
     cls: (tx, ty) => {
       const sh = shapeAt(here, tx, ty);
       return sh === S.floor || sh === S.stairs_up || sh === S.stairs_down ? 'floor' : sh === S.wall || sh === S.halfwall ? 'wall'
@@ -257,7 +277,7 @@ export function* buildChunkMeshSteps(
     },
     covered: overhead,
     furn: (tx, ty) => map.furnAt(tx, ty, z).id,
-  }, chunk.cx * CHUNK - 14, chunk.cy * CHUNK - 14, chunk.cx * CHUNK + CHUNK + 14, chunk.cy * CHUNK + CHUNK + 14, z) : null;
+  }, chunk.cx * CHUNK - 14, chunk.cy * CHUNK - 14, chunk.cx * CHUNK + CHUNK + 14, chunk.cy * CHUNK + CHUNK + 14, z, roomCache(map, z)) : null;
   const roomAt = (tx: number, ty: number): Room | null => (RM ? RM.room(tx, ty) : null);
   const pages = new Map<THREE.Texture, GeomBuilder>();
   const sprites: ChunkSprite[] = [];
@@ -824,7 +844,8 @@ export function* buildChunkMeshSteps(
         for (let k = 0; k < n; k++) {
           const it = list[list.length - 1 - k];
           if (items && !items(it.typeId)) continue;
-          if (MD && MD.item(geo, src, it.typeId, x, y, base + heightLocal(x + 0.5, y + 0.5) + itemLift, seed, k)) continue;
+          if (MD && MD.item(geo, src, it.typeId, x, y, base + heightLocal(x + 0.5, y + 0.5) + itemLift, seed, k, false, n - 1 - k)) continue;
+          if (HI && artless(it.typeId) && HI.item(geo, src, it.typeId, x, y, base + heightLocal(x + 0.5, y + 0.5) + itemLift, seed, k, true, n - 1 - k)) continue;
           const f = src.item(it.typeId);
           // only the top of a pile becomes a volume (the rest stay small billboards): piles in
           // stores and warehouses otherwise dominate the chunk's meshing time

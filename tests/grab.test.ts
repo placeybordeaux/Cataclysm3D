@@ -299,8 +299,8 @@ describe('grab in the e menu', () => {
     const prov = () => [{ id: 'grab', label: 'Grab it', run: () => {} }];
     interactionProviders.push(prov);
     try {
-      expect(interactionsAt(w.game, 6, 5, 0).map((i) => i.id)).toEqual(['pickup', 'grab']);
-      expect(interactionsAt(w.game, 5, 6, 0).map((i) => i.id)).toEqual(['describe', 'grab']);
+      expect(interactionsAt(w.game, 6, 5, 0).map((i) => i.id)).toEqual(['pickup', 'deconstruct_furniture', 'grab']);
+      expect(interactionsAt(w.game, 5, 6, 0).map((i) => i.id)).toEqual(['describe', 'deconstruct_furniture', 'grab']);
     } finally {
       interactionProviders.splice(interactionProviders.indexOf(prov), 1);
     }

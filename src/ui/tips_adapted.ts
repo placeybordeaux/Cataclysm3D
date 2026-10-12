@@ -176,6 +176,7 @@ export function registerTipsOption(): void {
   if (registered) return;
   registered = true;
   registerOption({
+    category: 'Interface',
     name: 'Tips',
     value: () => (tipsMode() === 'original' ? 'Cataclysm originals' : 'Adapted'),
     change: () => setTipsMode(tipsMode() === 'original' ? 'adapted' : 'original'),

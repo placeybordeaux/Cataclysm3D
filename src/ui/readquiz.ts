@@ -70,6 +70,7 @@ export function installReadQuiz(game: Game, renderer?: Renderer, api?: DebugApi)
   if (!registered) {
     registered = true;
     registerOption({
+      category: 'Interface',
       name: 'Reading',
       value: () => LABEL[readingGame()],
       change: (d) => {

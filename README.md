@@ -9,6 +9,9 @@ world is built from the **UltiCa pixel-art tileset** and real 3D geometry in the
 
 **Current state, backlog and how to work on it: [`docs/STATUS.md`](docs/STATUS.md).**
 
+**Contributor explainer: [`docs/CODEBASE_GUIDE.md`](docs/CODEBASE_GUIDE.md)** — architecture,
+execution model, subsystem walkthroughs, pitfalls, strengths, and improvement priorities.
+
 ## Running
 
 ```sh

@@ -8,7 +8,7 @@
 // Options > Rest menus: Modern (default) / Classic (the old terminal menus, kept as they were).
 
 import type { Game } from '../game/game';
-import { comfortAt, goToSleep, waitFor, WAIT_OPTIONS } from '../game/rest';
+import { goToSleep, playerComfort, waitFor, WAIT_OPTIONS } from '../game/rest';
 import { isOutside } from '../game/vision';
 import { playerLightState, toggleLight } from '../game/lightitems';
 import { h } from '../ui2/dom';
@@ -94,10 +94,12 @@ export function openRest(game: Game, focus: 'sleep' | 'wait'): void {
   closeGroup(GROUP);
   const p = game.player;
   const blocked = restBlocker(game);
-  const ci = comfortAt(game, p.tileX, p.tileY, p.z);
+  const ci = playerComfort(game);
   const spot = sleepSpotText(ci.comfort, ci.on, p.sleepinessDescription());
+  const cantSleep = ci.refuse ?? (ci.comfort <= -999 ? "You can't sleep here." : undefined);
   const tired = tirednessText(p.sleepinessDescription());
-  const outside = isOutside(game.map, p.tileX, p.tileY, p.z);
+  // Under a vehicle's roof counts as indoors (the map tile under an RV reads as outdoors).
+  const outside = ci.vehicle ? !ci.vehicle.v.roofAt(ci.vehicle.mx, ci.vehicle.my) : isOutside(game.map, p.tileX, p.tileY, p.z);
   const choices = waitChoices(game);
 
   const run = (fn: () => void) => {
@@ -115,12 +117,13 @@ export function openRest(game: Game, focus: 'sleep' | 'wait'): void {
   const speedBtn = button(speedText(), cycleSpeed, { small: true, key: ffKey, title: `Run the wait or the night faster: ×1, ×2, ×4, ×8, ×16. Anything dangerous drops it back to ×1.` });
   speedBtn.classList.add('rest-fast');
   speedBtn.classList.toggle('rest-fast-on', restSpeed > 1);
-  const sleepBtn = button('Sleep here', () => run(() => sleepHere(game)), {
-    key: 'Y', tone: 'accent', disabled: blocked ?? (ci.comfort <= -999 ? "You can't sleep here." : undefined),
+  const sleepBtn = button(ci.vehicle ? `Sleep on the ${ci.vehicle.board?.def.name ?? 'seat'}` : 'Sleep here', () => run(() => sleepHere(game)), {
+    key: 'Y', tone: 'accent', disabled: blocked ?? cantSleep,
   });
   const sleepCard = h('div', { class: 'rest-card' },
     h('div', { class: 'rest-head' }, h('span', { text: 'Sleep' }), sleepBtn),
     h('div', { class: spot.good ? 'tone-good' : 'tone-warn', text: `Spot: ${spot.spot}.` }),
+    ...(ci.refuse ? [h('div', { class: 'tone-bad', text: ci.refuse })] : ci.vehicle ? [h('div', { class: 'ui2-dim', text: `You can use any bed or seat in the ${ci.vehicle.v.name} from here.` })] : []),
     h('div', { class: `tone-${tired.tone}`, text: tired.text }),
     h('div', { class: outside ? 'tone-warn' : 'ui2-dim', text: outside ? "You're outdoors: anything passing by can find you. A closed room is safer." : 'Indoors. Close the doors before you lie down.' }),
   );
@@ -147,7 +150,7 @@ export function openRest(game: Game, focus: 'sleep' | 'wait'): void {
         return true;
       }
       if (blocked) return false;
-      if (k === 'y' && ci.comfort > -999) {
+      if (k === 'y' && !cantSleep) {
         run(() => sleepHere(game));
         return true;
       }
@@ -179,6 +182,7 @@ export function installRestUi(game: Game): void {
   game.keys.register('sleep', 'Sleep', () => (restMenuStyle() === 'classic' ? classicSleep() : openRest(game, 'sleep')));
   game.keys.register('wait', 'Wait', () => (restMenuStyle() === 'classic' ? classicWait() : openRest(game, 'wait')));
   registerOption({
+    category: 'Interface',
     name: 'Rest menus',
     value: () => (restMenuStyle() === 'classic' ? 'Classic (CDDA)' : 'Modern'),
     change: () => {

@@ -1,3 +1,4 @@
+import type { RequirementData } from '../data/types';
 import type { Rng } from '../core/rng';
 import { warnOnce } from '../data/warn';
 import { DATA_BASE } from '../core/assets';
@@ -25,7 +26,13 @@ export interface VPartDef {
   epower?: number;
   /** Engines: fuel energy burnt at full load, W. */
   energy_consumption?: number;
+  /** BN engine exclusion classes; two engines sharing a class cannot coexist. */
+  engineExcludes?: string[];
+  /** BN CRAFTER pseudo tools, powered by the shared vehicle battery. */
+  integratedTools?: string[];
   fuel_type?: string;
+  /** Engines that burn more than one fuel (BN fuel_options), in BN's order; absent = fuel_type only. */
+  fuel_options?: string[];
   noise_factor?: number;
   /** Horn loudness, light luminance, muffler reduction... (CDDA "bonus"). */
   bonus?: number;
@@ -35,7 +42,12 @@ export interface VPartDef {
   m2c?: number;
   damage_modifier?: number;
   damage_reduction?: Record<string, number>;
+  /** BN vpart_info::comfort (sleep comfort of the first intact BOARDABLE part on a tile). */
   comfort?: number;
+  /** BN floor_bedding_warmth in JSON legacy body-temperature units (500 = 1 °C). */
+  floor_bedding_warmth?: number;
+  /** BN vpslot_workbench (WORKBENCH parts): speed multiplier, mass g and volume ml before slowdown. */
+  workbench?: { multiplier: number; mass: number; volume: number };
   contact_area?: number;
   wheel_terrain_modifiers?: Record<string, number[]>;
   backfire_threshold?: number;
@@ -45,6 +57,15 @@ export interface VPartDef {
   variants?: Record<string, { symbols: string; broken: string }>;
   /** Wheels: item diameter/width in cm (BN "425 mm" -> 42.5). */
   wheel?: { diameter: number; width: number };
+  requirements?: Partial<Record<'install' | 'removal' | 'repair', VPartWorkRequirement>>;
+  /** BN json_flag requires_flag mounting dependencies. */
+  anchors?: string[];
+  breaksInto?: { item: string; count: [number, number] }[];
+}
+
+export interface VPartWorkRequirement extends RequirementData {
+  seconds: number;
+  skills: [string, number][];
 }
 
 export interface VProtoPart {
@@ -54,6 +75,12 @@ export interface VProtoPart {
   variant?: string;
   /** Tanks: the fuel item they hold. */
   fuel?: string;
+  /** Turrets: percent chance to spawn loaded (BN vehicle_prototype part "ammo", 0..100). */
+  ammo?: number;
+  /** Turrets: the rounds it may spawn with (BN "ammo_types"; absent = the gun's default ammo). */
+  ammo_types?: string[];
+  /** Turrets: [min, max] rounds (BN "ammo_qty"; absent = {-1, -1} = full). */
+  ammo_qty?: [number, number];
 }
 
 export interface VItemSpawn {

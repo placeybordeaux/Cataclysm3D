@@ -30,7 +30,7 @@ switch at two values in the same frame (A/B), or one switch across several scene
 | A/B: pick switch, A, B; **Enter** or *Render A/B* | renders the current scene at A, then at B, same camera and frozen frame, then puts the switch back. Views: *side by side*, *flicker* (**Space** or **x** flips), *slider* (drag to wipe). The line above says how many pixels differ. |
 | Matrix: pick switch, click scene chips; **Enter** or *Generate* | rows = scenes, columns = every value of the switch, thumbnails up to 1400 px wide. *Proof scene* picks the scene where that switch matters most. Click a thumbnail to enlarge; **← →** other values, **↑ ↓** other scenes, **Esc** closes. |
 | *Revert to my saved* / *Factory defaults* | every switch back to what the game boots with / what it ships with. |
-| *Copy these as my defaults* | persists the current values **through the Options entries themselves** (steps each one round to the value), so storage is exactly what the Options screen would write. Switches that aren't Options settings are listed in the status line with their URL form. |
+| *Copy these as my defaults* | persists the current values **through the Options entries themselves** (steps each one round to the value), so storage is exactly what the Options screen would write. Every gallery switch has an Options entry and can be saved. URL parameters override the saved value for the current session without replacing it. |
 
 Captures come from the WebGL canvas (render, then copy in the same task: no
 `preserveDrawingBuffer` cost in normal play), so they include the first-person layer and
@@ -55,7 +55,7 @@ previous scene made (planted trees, fires, loot, bodies) are rolled back
 |---|---|
 | Town | Street by day · House from the street · Long road, zombies 15–60 m · Zombies down the road 66–110 m · Dusk street · Long road at dusk · Night street, flashlight · Rain · Snow · Into the sun (form lighting) |
 | Creatures | Zombie horde, close · Zombie horde, 18–30 m · Special zombies · NPC group · Dogs and animals · Zoo: every body plan · Bugs and birds · Bodies · Night, flashlight, zombies · Props: fire, loot, mannequin |
-| Interiors | House, main room · Kitchen · Living room · Bathroom · Bedroom · Wrecked house · Shop · House at night, flashlight · Lamp-lit room at night |
+| Interiors | House, main room · Kitchen · Living room · Bathroom · Bedroom · Wrecked house · Shop · Dropped weapons · House at night, flashlight · Lamp-lit room at night |
 | Nature | Forest in spring / summer / autumn / winter · Tree lineup 14 m · Tree lineup 60 m · Tree lineup, autumn |
 | Vehicles | Car lineup · SUV, pickup, van · Parked cars in town · Wrecked car · Burnt-out car · Driving: cockpit · Driving: chase camera · Driving at night |
 | First person | Fists · Pistol · Rifle · Shotgun · Baseball bat · Fire axe · Longbow, drawn |
@@ -75,15 +75,16 @@ All are live (no reload needed). "Proof" is the scene the automated pixel-diff c
 | Draw distance | 120 m · 96 m · 168 m | Options > Draw distance | `?radius=` | far | 0.4–0.7 % (only the horizon changes) |
 | Form lighting | Toon · Soft (v2) · Bold | Options > Form lighting | `?form=` | street | 2–24 % |
 | Colour grading | per style (Full: smooth) · palette · off | Options > Colour grading | `?grade=` | street | 3–29 % |
-| Cutout mips | stable · off (v2) | console only (`cdda.cutoutMips`) | — | forest | 1.7 % (mostly a motion effect) |
+| Cutout mips | stable · off (v2) | Options > Cutout mips | `?cutout=` | forest | 1.7 % (mostly a motion effect) |
 | Creatures | 3D models · sprites | Options > Creatures | `?chars=` | horde | 7 % |
-| Creature paint | styled skins · projected sprite | URL only | `?charpaint=` | npcs | 11 % |
+| Creature paint | styled skins · projected sprite | Options > Creature paint | `?charpaint=` | npcs | 11 % |
 | First-person hands | 3D · sprites | Options > First-person hands | `?viewmodel=` | fp_pistol | 11 % |
-| First-person bow | 2D art · 3D bow | console only (`cdda.chars({fpBow})`) | — | fp_bow | 10 % |
-| Props | world-fixed cards · billboards (v2) | URL only | `?props=` | props | 1.8 % |
+| First-person bow | 2D art · 3D bow | Options > First-person bow | `?fpbow=` | fp_bow | 10 % |
+| Props | world-fixed cards · billboards (v2) | Options > Props | `?props=` | props | 1.8 % |
 | Furniture | Modelled · Voxel | Options > Furniture | `?furniture=` | kitchen | 37 % |
+| Dropped weapons | 3D models · simple shapes (v2) | Options > Dropped weapons | `?grounditems=` | loot_weapons | not measured (visible in the scene; see CHARACTERS.md) |
 | Surfaces | Painted · Tileset | Options > Surfaces | `?surfaces=` | living | 65 % |
-| Set dressing | on · bare rooms | URL only | `?dressing=` | living | 6 % |
+| Set dressing | on · bare rooms | Options > Set dressing | `?dressing=` | living | 6 % |
 | Trees | models · clumps | Options > Trees | `?flora=` | lineup | 12 % |
 | Vehicle look | modelled bodies · part blocks | Options > Vehicle look | `?vehicles=` | cars | 7.5 % |
 | Vehicle width | true to life · fill the tiles | Options > Vehicle width | `?vehiclewidth=` | cars | 3.9 % |
@@ -125,7 +126,35 @@ per switch.
 
 - The A/B side-by-side halves are letterboxed on a 16:9-ish stage; flicker and slider use the
   full stage.
-- Scenes are deterministic per seed, but a few spawns pick random zombie variants/NPC outfits
-  when a scene is set up; the frozen frame then stays identical for every capture of it.
-- Switches without an Options row (creature paint, props, dressing, first-person bow, cutout
-  mips) can't be made "my defaults"; the copy reports the URL form to use instead.
+- Creature cosmetic variants now use world seed, scene id and spawn order. Live
+  simulation settling and animated poses can still vary by frame timing; the frozen
+  frame stays identical for repeated captures.
+## Persistent visual defaults follow-up (2026-10-04)
+
+All five former URL/console-only switches now have real Options rows. Gallery browsing
+stays live-only; Copy these as my defaults persists through those rows. Reload restores
+them, and explicit `charpaint`, `fpbow`, `props`, `dressing` and `cutout` URL values take
+precedence for the session. Cutout changes also apply to textures created after switching.
+
+Validation: typecheck and production build pass; four preference/journal tests pass.
+An isolated headful Chromium session saved all five settings, reloaded and verified each,
+then supplied all five URL overrides and verified the stored choices remained intact.
+OS-level clicks changed Cutout mips and saved the choice; the gallery remained live-only
+until Copy was clicked. Inspected capture: [Gallery defaults capture](screenshots/gaps/gallery-defaults.png).
+
+Creature cosmetics use a gallery-only weak-map seed derived from world seed, scene id
+and spawn order. Gameplay identities keep increasing and spawn functions are restored
+even when scene setup throws. Normal play still uses the creature's original identity.
+The gallery no longer changes NPC build, skin, hair or zombie sprite variant simply
+because another scene was visited. NPC equipment was already seeded by position.
+
+Validation: five preference/journal/appearance tests and typecheck pass. Browser comparison
+of NPCs → horde → NPCs reproduced all six cosmetic seeds, builds, skin/hair colours,
+headgear and worn item IDs while NPC UIDs advanced from 4–9 to 10–15.
+[Inspected NPC capture](screenshots/gaps/gallery-npcs.png). Exact pixel equality of
+live moving crowds is still outside this change; frame settling can vary by runtime.
+
+The falling corpse handoff also keeps the gallery cosmetic seed. Browser evidence:
+a normal lethal hit on UID 2 preserved the live animation/body seed exactly
+(`0.23244518343926757` before and after death).
+[Inspected corpse capture](screenshots/gaps/gallery-corpse-seed.png).

@@ -142,9 +142,22 @@ export function lootScenarios(c: LootCtx): Scenario[] {
           } else {
             await key('e');
             await sleep(400);
+            // A cupboard you could also deconstruct answers e with a menu (Look in / Deconstruct,
+            // src/game/interact.ts): take "Look in" by its letter, as a player would.
+            const lookIn = await js<string | null>(`(() => {
+              const row = [...document.querySelectorAll('.cdda-window .menu-entry')].find((r) => /Look in the/.test(r.textContent ?? ''));
+              return row?.querySelector('.hotkey')?.textContent ?? null;
+            })()`);
+            if (lookIn) {
+              await key(lookIn);
+              await sleep(400);
+            }
             const take = await js<{ x: number; y: number } | null>('cdda.ui2.textRect("Take all")');
             if (take) await click(take);
-            else check(`${style}: the inventory opened on (${dx}, ${dy}) with Take all`, false);
+            else {
+              check(`${style}: the inventory opened on (${dx}, ${dy}) with Take all`, false, await js('cdda.ui2.state()'));
+              await shot(`lootsweep_${style}_no_take_all_${dx}_${dy}`);
+            }
             await key('Tab');
             await sleep(900);
             const s = await js<{ locked: boolean }>('cdda.ui2.state()');

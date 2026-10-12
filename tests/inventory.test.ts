@@ -389,3 +389,58 @@ describe('armor', () => {
     expect(hit({ armor_multiplier: 0.5 })).toBe(6);
   });
 });
+
+describe('successful item presentation facts', () => {
+  it('reports the consumed portion, suppressing rejected consumption', () => {
+    const { c } = survivor();
+    c.inv.wear(createItem(data, 'backpack'), null);
+    const actions: { kind: string; item: { typeId: string }; moves: number }[] = [];
+    c.inv.onItemPresentation.push((a) => actions.push(a));
+    const bottle = inNewContainer(data, createItem(data, 'water_clean', { charges: 2 }), 'bottle_plastic').container;
+    c.inv.giveNew(bottle);
+    c.inv.consumeChecks.push(() => 'not now');
+    expect(c.inv.consume(bottle).ok).toBe(false);
+    expect(actions).toHaveLength(0);
+    c.inv.consumeChecks.length = 0;
+    const r = c.inv.consume(bottle);
+    expect(actions).toHaveLength(1);
+    expect(actions[0]).toMatchObject({ kind: 'drink', item: { typeId: 'water_clean' }, moves: r.moves });
+    expect(bottle.contents[0].charges).toBe(1);
+    const food = give(c, 'chocolate');
+    expect(c.inv.consume(food).ok).toBe(true);
+    expect(actions[1]).toMatchObject({ kind: 'eat', item: { typeId: 'chocolate' } });
+  });
+  it('reports successful use with pre-transform identity, but no-power failures stay silent', () => {
+    const { c } = survivor();
+    c.inv.wear(createItem(data, 'backpack'), null);
+    const actions: { kind: string; item: { typeId: string } }[] = [];
+    c.inv.onItemPresentation.push((a) => actions.push(a));
+    const fl = give(c, 'flashlight');
+    expect(c.inv.use(fl).ok).toBe(false);
+    expect(actions).toHaveLength(0);
+    spawnItem(createItem(data, 'light_battery_cell', { ammo: 'battery', ammoCount: 2 }), L.mag(fl));
+    expect(c.inv.use(fl).ok).toBe(true);
+    expect(fl.typeId).toBe('flashlight_on');
+    expect(actions).toHaveLength(1);
+    expect(actions[0]).toMatchObject({ kind: 'use', item: { typeId: 'flashlight' } });
+  });
+});
+
+describe('deferred tool presentation', () => {
+  it('use() skips its own immediate gesture when a handler marks the result deferred, leaving the completion fact to the handler itself', () => {
+    const { c } = survivor();
+    const tool = createItem(data, 'lighter');
+    const seen: unknown[] = [];
+    c.inv.onItemPresentation.push((a) => seen.push(a));
+    // A menu/activity-based handler (firestarter, axe/shovel/rod uses, bionic self-install):
+    // ok:true only means "accepted", so use() must not fire its own gesture for it.
+    c.inv.useHandlers.set('firestarter', () => ({ ok: true, msg: '', moves: 0, deferred: true }));
+    expect(c.inv.use(tool, undefined, 1, null).ok).toBe(true);
+    expect(seen).toHaveLength(0);
+    // The handler fires it itself, from the action's own completion fact (fire.ts, nature.ts,
+    // mutbio_ui.ts), never from use() guessing at open time — see those modules' tests.
+    c.inv.presentDeferredUse({ typeId: tool.typeId, def: tool.def, isGun: () => false });
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toMatchObject({ kind: 'use', item: { typeId: 'lighter' } });
+  });
+ });

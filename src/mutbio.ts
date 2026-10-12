@@ -87,6 +87,10 @@ export function installMutBio(game: Game, renderer: Renderer | null, api?: Debug
   p.inv.useHandlers.set('install_bionic', (it) => {
     if (!bio.idx.manualInstall && !p.hasTrait('DEBUG_BIONICS')) return { ok: false, msg: "You can't self-install bionics.  An Autodoc can install it.", moves: 0 };
     if (!hasDom) return { ok: false, msg: 'No UI to confirm the operation.', moves: 0 };
+    // Pre-transform snapshot: consumeItem below removes it from inventory (and the operation
+    // itself installs, not drops, the CBM), so the gesture can't read `it` back later.
+    const gun = it.isGun();
+    const shown = { typeId: it.typeId, def: it.def, isGun: () => gun };
     void installCbmFlow(game, mods, it, {
       autodoc: false,
       consumeItem: (x) => {
@@ -94,8 +98,11 @@ export function installMutBio(game: Game, renderer: Renderer | null, api?: Debug
         if (loc) consumeItem(x, loc, x.countByCharges ? 1 : undefined);
       },
       dropItem: drop,
+      onInstalled: () => p.inv.presentDeferredUse(shown),
     });
-    return { ok: true, msg: '', moves: 0 };
+    // Accepted so far (confirm dialogs still ahead): the gesture fires only from
+    // onInstalled, once the operation activity actually completes.
+    return { ok: true, msg: '', moves: 0, deferred: true };
   });
 
   // Autodoc: `e` on an f_autodoc (or its couch) opens the operation menu.

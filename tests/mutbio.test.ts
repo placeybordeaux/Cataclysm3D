@@ -13,8 +13,10 @@ import { TestGenerator } from '../src/world/testgen';
 import { playerLight, visionThreshold, LIGHT_AMBIENT_LOW } from '../src/game/vision';
 import { playerLightState } from '../src/game/lightitems';
 import { installMutBio } from '../src/mutbio';
+import { beginInstall } from '../src/ui/mutbio_ui';
 import { rollMeleeDamage } from '../src/game/combat';
 import { Rng } from '../src/core/rng';
+import { consumeItem, L } from '../src/game/moves';
 
 const dir = path.join(__dirname, '../public/data');
 const load = (f: string) => JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8'));
@@ -485,5 +487,48 @@ describe('bionics in a game', () => {
     mods.bio.toggle('bio_night_vision');
     expect(mods.bio.nightVisionRange()).toBe(10);
     expect(visionThreshold(game, 1)).toBeLessThan(2.5);
+  });
+
+  it('self-installing a CBM fires its item-use gesture only once the operation actually completes, never on open or cancel', () => {
+    const game = new Game(data, 3, stubInput());
+    game.map.generator = new TestGenerator();
+    const mods = installMutBio(game, null);
+    const p = game.player;
+    const cbm = createItem(data, 'bio_flashlight');
+    p.inv.giveNew(cbm);
+    const seen: { kind: string; item: { typeId: string } }[] = [];
+    p.inv.onItemPresentation.push((a) => seen.push(a as any));
+    const dropped: Item[] = [];
+    const onInstalled = () => p.inv.presentDeferredUse({ typeId: cbm.typeId, def: cbm.def, isGun: () => cbm.isGun() });
+
+    // Agreeing to the operation starts an activity; it hasn't installed anything yet.
+    const started = beginInstall(game, mods, cbm, {
+      autodoc: false,
+      consumeItem: (x) => { const loc = p.inv.locOf(x); if (loc) consumeItem(x, loc); },
+      dropItem: (x) => dropped.push(x),
+      onInstalled,
+    });
+    expect(started).toBe(true);
+    expect(seen).toHaveLength(0);
+    expect(mods.bio.bionics).toHaveLength(0);
+
+    // Interrupting the operation must never animate it.
+    game.activities.cancel('Operation interrupted.');
+    expect(seen).toHaveLength(0);
+    expect(mods.bio.bionics).toHaveLength(0);
+
+    // A second CBM, let through to completion, fires the gesture exactly once.
+    const cbm2 = createItem(data, 'bio_flashlight');
+    p.inv.giveNew(cbm2);
+    expect(beginInstall(game, mods, cbm2, {
+      autodoc: false,
+      consumeItem: (x) => { const loc = p.inv.locOf(x); if (loc) consumeItem(x, loc); },
+      dropItem: (x) => dropped.push(x),
+      onInstalled,
+    })).toBe(true);
+    game.activities.current!.spec.onComplete();
+    expect(mods.bio.bionics.some((b) => b.id === 'bio_flashlight')).toBe(true);
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toMatchObject({ kind: 'use', item: { typeId: 'bio_flashlight' }, moves: 0 });
   });
 });

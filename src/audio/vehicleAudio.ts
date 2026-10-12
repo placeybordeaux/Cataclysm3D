@@ -87,6 +87,13 @@ const MAX_LOOPS = 3;
 export class EngineSounds {
   private loops = new Map<AudioVehicle, Loop>();
 
+  /**
+   * `safeSpeed`: the speed the gears are spread over (m/s). VehicleSystem passes its governed
+   * figure (speedLimits), so a tracked tank governed to ~45 mph revs through its gears up to
+   * that, not toward CDDA's 122 mph; default CDDA's safe speed.
+   */
+  constructor(private readonly safeSpeed: (v: AudioVehicle) => number = (v) => v.maxVelocity(true)) {}
+
   /** Per frame: keep a loop on the nearest running engines, following them and their revs. */
   update(list: readonly AudioVehicle[], listener: { x: number; y: number; z: number }, driving: AudioVehicle | null, dt: number): void {
     const eng = getAudioEngine();
@@ -114,10 +121,10 @@ export class EngineSounds {
         const id = internal ? 'engine_working_internal' : 'engine_working_external';
         const voice = eng.play(id, engineVariant(id, v), internal ? { loop: true, fadeIn: 0.4, volume: 0.7 } : { pos, loop: true, fadeIn: 0.4, range: HEAR_TILES });
         if (!voice) continue;
-        l = { voice, internal, safe: v.maxVelocity(true), safeAge: 0, gear: 0 };
+        l = { voice, internal, safe: this.safeSpeed(v), safeAge: 0, gear: 0 };
         this.loops.set(v, l);
       }
-      if ((l.safeAge += dt) > 1) (l.safeAge = 0), (l.safe = v.maxVelocity(true));
+      if ((l.safeAge += dt) > 1) (l.safeAge = 0), (l.safe = this.safeSpeed(v));
       if (!internal) l.voice.setPosition(pos);
       l.voice.setRate(engineRate(v.velocity, l.safe));
       const gear = gearFor(v.velocity, l.safe);

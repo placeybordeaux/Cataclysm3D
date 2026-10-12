@@ -103,12 +103,17 @@ export function useFirestarter(host: CraftHost, tool: Item, ua: { moves?: number
   const moves = Math.max(Math.min(base, Math.sqrt(1 + base / 100) * 100), base * mod);
   const seconds = Math.max(1, Math.round(moves / 100));
   if (seconds > 60) host.message(`At your skill level, it will take around ${Math.round(seconds / 60)} minutes to light a fire.`, 'c_light_gray');
+  // Pre-transform snapshot: the lighter's typeId doesn't change, but a future tool might,
+  // and capturing it here (not inside the later onComplete) keeps that decoupled.
+  const gun = tool.isGun();
+  const shown = { typeId: tool.typeId, def: tool.def, isGun: () => gun };
   const light = () => {
     if (usesCharges) tool.ammoConsume(need);
     host.map.addField(x, y, z, 'fd_fire', 1);
     p.practice('survival', Math.floor(mod + fast / 100 + 2), 5);
     host.message('You successfully light a fire.', 'c_light_green');
+    p.inv.presentDeferredUse(shown);
   };
   const ok = host.activities.start({ name: 'lighting the fire', duration: seconds, onComplete: light });
-  return { ok, msg: ok ? 'You start lighting a fire.' : '', moves: 0 };
+  return { ok, msg: ok ? 'You start lighting a fire.' : '', moves: 0, deferred: ok };
 }

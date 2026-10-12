@@ -15,6 +15,7 @@ import type { SpawnedItem } from '../data/itemgroups';
 import type { ItemSpawn } from '../world/map';
 import type { VehicleSystem } from './vehicles';
 import type { WeatherState } from './weather';
+import { characterWorld } from './characterWorld';
 
 function toSpawned(sp: ItemSpawn): SpawnedItem {
   return { id: sp.typeId, count: sp.count ?? 1, charges: sp.charges, contents: sp.contents?.map(toSpawned) } as SpawnedItem;
@@ -117,6 +118,8 @@ export class Game {
     this.player.onDeath = (cause) => this.events.emit('playerDied', { cause });
     // What the survivor drops lands on the tile they stand on (src/game/moves.ts).
     this.player.groundLoc = () => L.ground(this.map, this.player.tileX, this.player.tileY, this.player.z);
+    // Time of day, shelter, depth and vehicle for item enchantments and climate control.
+    this.player.world = characterWorld(this, this.player);
     for (const t of Object.values(data.terrain)) this.map.terrain.add(t);
     for (const f of Object.values(data.furniture)) this.map.furniture.add(f);
     this.map.itemFactory = (sp) => fromSpawned(data, (sp.spawned as SpawnedItem | undefined) ?? toSpawned(sp));

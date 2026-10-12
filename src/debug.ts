@@ -39,6 +39,8 @@ export function installDebugApi(game: Game, renderer: Renderer): DebugApi {
       for (let i = 0; i < n; i++) game.tick(1 / 30);
     },
     teleport(x, y, z) {
+      // A NaN position would only fail later, inside the frame loop (map.chunk refuses it).
+      if (!Number.isFinite(x) || !Number.isFinite(y) || (z !== undefined && !Number.isInteger(z))) throw new Error(`teleport: bad position (${x}, ${y}, ${z})`);
       game.player.x = x;
       game.player.y = y;
       if (z !== undefined) game.player.z = z;
@@ -111,6 +113,10 @@ function installCharacterHelpers(api: DebugApi, game: Game): void {
     const to = p().inv.giveNew(it);
     return to ? `${it.name()} -> ${to.kind}` : `no room for ${it.name()}`;
   };
+  /** A new item, not given to anyone (for kitting out NPCs in tests: `n.inv.wield(cdda.createItem('longbow'), null)`). */
+  api.createItem = (id: string, opts: { count?: number; ammo?: string } = {}) => createItem(game.data, id, opts);
+  /** Rounds monsters and NPCs have in the air (src/game/enemyfire.ts), or null before the first one. */
+  api.enemyFire = () => (game.systems.find((s) => s.name === 'enemy-fire') as unknown) ?? null;
   api.hurt = (bp: BodyPartId, amount: number, type = 'bash') => p().takeHit(bp, [{ type, amount }]);
   api.addEffect = (id: string, seconds: number, bp?: BodyPartId) => p().addEffect(id, seconds, { bp }).name();
   api.setSkill = (id: string, level: number) => p().setSkill(id, level);

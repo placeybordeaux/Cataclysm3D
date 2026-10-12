@@ -109,6 +109,7 @@ export function maybeShowStartHints(ctx: UiContext): Promise<void> {
 export function installTipsOption(): void {
   registerTipsOption();
   registerOption({
+    category: 'Interface',
     name: 'Show hints at start',
     value: () => (hintsEnabled() ? 'on' : 'off'),
     change: () => setHintsEnabled(!hintsEnabled()),

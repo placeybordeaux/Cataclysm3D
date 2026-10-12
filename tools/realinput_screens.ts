@@ -5,7 +5,7 @@
 // tools/realinput.ts's scenario list (run: --only talk,trade,missions,vehicle,body,autodoc,scores).
 
 import type { Page } from 'puppeteer-core';
-import type { XInput } from './lib/realinput';
+import { calmSurroundings, waitFor, type XInput } from './lib/realinput';
 
 export interface ScreensCtx {
   page: () => Page;
@@ -52,6 +52,18 @@ export function screenScenarios(c: ScreensCtx): Scenario[] {
     return v;
   };
 
+  /**
+   * The crosshair prompt once it shows `want` (it follows the target on the HUD's own frame, so
+   * right after a setup teleport it can still name the last thing looked at). Waits up to 4 s;
+   * returns whatever it says then, so the caller's check reports a wrong prompt as it is.
+   */
+  const reEsc = (t: string) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const promptShowing = async (want: string): Promise<string> => {
+    const expr = `document.querySelector('.hud-prompt')?.textContent ?? ''`;
+    await waitFor(js, `new RegExp(${JSON.stringify(want)}).test(${expr})`, 4000);
+    return js<string>(expr);
+  };
+
   /** Close whatever ui2 panels a failed step left open, then back to captured gameplay. */
   const reset = async () => {
     for (let i = 0; i < 6 && (await u()).panels.length; i++) {
@@ -59,6 +71,9 @@ export function screenScenarios(c: ScreensCtx): Scenario[] {
       await sleep(150);
     }
     await c.toGameplay();
+    // Nothing hostile near (a bandit from the town shot the survivor dead mid-suite once, and
+    // every screen scenario after that ran on the death screen).
+    await calmSurroundings(js);
   };
 
   return [
@@ -66,13 +81,25 @@ export function screenScenarios(c: ScreensCtx): Scenario[] {
       await reset();
       await js(`cdda.ui2.settings.pauseInInventory = true; cdda.ui2.saveSettings(); cdda.screens.prefs.speed = 'slow'`);
       await js(`(() => { const uid = cdda.spawnNpc('NC_SCAVENGER', 0, -2, { attitude: 'NULL' }); cdda.faceNpc(uid); cdda.game.player.pitch = -0.05; return uid; })()`);
-      await sleep(600);
+      await c.toGameplay();
+      // e must land on the NPC: wait until the crosshair says so (not a fixed sleep).
+      await promptShowing('Talk to');
+      // Watch for the typewriter from the page itself: a short greeting at 30 chars/s can be
+      // fully typed before a poll from here sees it (the old check read the DOM once, after the
+      // panel showed, and failed whenever the line was already out).
+      await js(`(() => {
+        window.__typing = { seen: false };
+        const look = () => { if (document.querySelector('#ui2 .ix-said.typing')) window.__typing.seen = true; };
+        window.__typingObs?.disconnect();
+        window.__typingObs = new MutationObserver(look);
+        window.__typingObs.observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['class'] });
+      })()`);
       await c.x().key('e');
       let v = await waitPanel('talk');
       check('e on an NPC opens the conversation panel', v.panels.includes('talk'), v.panels);
       check('…with the cursor free and time paused (Accessible)', !v.locked && v.tacticalPause, v);
-      const typing = await js<boolean>(`!!document.querySelector('#ui2 .ix-said.typing')`);
-      check('the NPC line types itself out', typing);
+      const typing = await js<{ seen: boolean }>(`(window.__typingObs.disconnect(), window.__typing)`);
+      check('the NPC line types itself out', typing.seen, typing);
       await shot('talk_typing');
       await c.x().key('space');
       await sleep(150);
@@ -203,8 +230,7 @@ export function screenScenarios(c: ScreensCtx): Scenario[] {
         window.__getin = v.uid; return v.name; })()`);
       check('setup: a car with you by the driver door', !!name, name);
       await c.toGameplay();
-      await sleep(400);
-      const prompt = await js<string>(`document.querySelector('.hud-prompt')?.textContent ?? ''`);
+      const prompt = await promptShowing(`Drive the ${reEsc(String(name))}`);
       check(`the crosshair prompt says "[e] Drive the ${name}"`, prompt.includes(`Drive the ${name}`), prompt);
       await shot('getin_prompt');
       await c.x().key('o');
@@ -254,7 +280,7 @@ export function screenScenarios(c: ScreensCtx): Scenario[] {
       const side = await gap();
       check('walking into the side stops at the paint (gap < 0.45 m, the old invisible wall was ~1 m)', side < 0.45 && side > 0.2, side);
       await shot('carside_side');
-      const prompt = await js<string>(`document.querySelector('.hud-prompt')?.textContent ?? ''`);
+      const prompt = await promptShowing(`Drive the ${reEsc(String(name))}`);
       check(`from there the crosshair offers "Drive the ${name}"`, prompt.includes(`Drive the ${name}`), prompt);
       await c.x().key('e');
       await sleep(300);
@@ -294,8 +320,7 @@ export function screenScenarios(c: ScreensCtx): Scenario[] {
       const name = await place('door_front_right', 0.9, true);
       check('setup: a car, you by its open passenger door', !!name, name);
       await c.toGameplay();
-      await sleep(400);
-      let prompt = await js<string>(`document.querySelector('.hud-prompt')?.textContent ?? ''`);
+      let prompt = await promptShowing(`Drive the ${reEsc(String(name))}[^]*More`);
       check(`an open passenger door offers "Drive the ${name}" (closing is under More…)`, prompt.includes(`Drive the ${name}`) && prompt.includes('More'), prompt);
       await shot('cardoors_open_prompt');
       await c.x().key('e');
@@ -320,8 +345,10 @@ export function screenScenarios(c: ScreensCtx): Scenario[] {
       const cam = await js<{ camY: number; roof: number }>(`(() => { const v = cdda.vehicleSystem.list.find((q) => q.uid === window.__cardoors); return { camY: cdda.renderer.camera.position.y, roof: v.z * 2.6 + 1.62 }; })()`);
       check('standing in the doorway the camera stays under the roof', cam.camY < cam.roof - 0.1, cam);
       await shot('cardoors_doorway');
-      prompt = await js<string>(`document.querySelector('.hud-prompt')?.textContent ?? ''`);
-      check('…and it still offers to drive', prompt.includes(`Drive the ${name}`), prompt);
+      // Inside the body vehwalk.ts seats you at a station (docs/VEHICLES.md "Inside vehicles"): in
+      // the driver's doorway that is the wheel, whose prompt reads "Driver's seat: drive from here".
+      prompt = await promptShowing(`Drive the ${reEsc(String(name))}|drive from here`);
+      check('…and it still offers to drive', prompt.includes(`Drive the ${name}`) || /drive from here/.test(prompt), prompt);
     }],
     ['refuel', 'gas pump: e on a pump by a parked car fills it up (BN fill rate), the tank gauge rises', async () => {
       await reset();
@@ -344,8 +371,7 @@ export function screenScenarios(c: ScreensCtx): Scenario[] {
       const stocked = await js<number>(`(() => { const [x, y, z] = window.__pump; const g = cdda.game; const it = g.map.itemsAt(x, y, z).find((i) => i.typeId === 'gasoline'); return it ? it.charges : 0; })()`);
       check('setup: the pump holds gasoline', stocked > 0, stocked);
       await c.toGameplay();
-      await sleep(400);
-      const prompt = await js<string>(`document.querySelector('.hud-prompt')?.textContent ?? ''`);
+      const prompt = await promptShowing('Fill up the Car');
       check('the crosshair on the pump offers "Fill up the Car"', /Fill up the Car/.test(prompt), prompt);
       await shot('refuel_prompt');
       await c.x().key('e');

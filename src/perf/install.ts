@@ -257,6 +257,7 @@ export function installPerf(game: Game, renderer: Renderer, api: DebugApi, prefe
     }
   });
   registerOption({
+    category: 'Display',
     name: 'Performance overlay',
     value: () => (overlay.visible ? 'on' : 'off'),
     change: () => {

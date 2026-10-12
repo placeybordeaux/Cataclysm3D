@@ -58,7 +58,8 @@ pixel-art textures at a fixed texel density**. That is what this pass builds.
   rock, round food, device — sized from the item's volume (small things scaled up so they
   read past arm's length) and coloured from the item's sprite. Up to three per tile, laid
   out deterministically; they rest on the furniture's real top (table, counter, shelf, sink
-  basin, bed, sofa seat...).
+  basin, bed, sofa seat...). Weapons and tools with a held mesh lie as that mesh instead
+  (`groundHeld.ts`, docs/CHARACTERS.md "Dropped weapons on the ground"; Options > Dropped weapons).
 - Models are cheap enough to draw in **every chunk** in range (the voxels were near-only
   with billboards beyond), so furniture no longer pops between billboard and volume.
 

@@ -14,7 +14,7 @@ import type { PartDef, Rig } from './rig';
 // Rig space: the object points along -z from its origin (an arrow's tip is the origin).
 
 type RGB = [number, number, number];
-export type FxKind = 'arrow' | 'bolt' | 'stone' | 'glob' | 'spark';
+export type FxKind = 'arrow' | 'bolt' | 'stone' | 'glob' | 'spark' | 'mark';
 
 function rigOf(parts: PartDef[]): Rig {
   return { shape: bodyShapeOf({ id: 'fx' }), parts, height: 0.1, hover: 0, lie: { angle: 0, lift: 0, side: false }, texels: 4, pose() {} };
@@ -48,6 +48,9 @@ function buildRig(kind: FxKind, color: RGB): Rig {
       add('glob', -1, [0, 0, 0], [0.13, 0.11, 0.13], [0, 0, 0], color);
       add('glob2', 0, [0, 0, 0], [0.12, 0.12, 0.12], [0, 0, 0], color.map((v) => Math.min(255, v * 1.2)) as RGB, { rest: [0.6, 0.6, 0] });
       add('tail', -1, [0, 0, 0.08], [0.06, 0.06, 0.1], [0, 0, 0.03], color.map((v) => v * 0.8) as RGB, { taper: [1, 1, 0.3, 0.3], taperAxis: 'z' });
+      break;
+    case 'mark':
+      add('mark', -1, [0, 0, 0], [0.05, 0.05, 0.002], [0, 0, 0], color);
       break;
     case 'spark':
       add('spark', -1, [0, 0, 0], [0.05, 0.05, 0.05], [0, 0, 0], color, { rest: [0.6, 0.6, 0] });
@@ -84,7 +87,7 @@ export class FxMeshes {
    * along `dir` (tile-space x, y, and up), scaled by `scale`.
    */
   place(kind: FxKind, x: number, y: number, z: number, h: number, dir: [number, number, number], color: RGB = [200, 200, 200], scale = 1): void {
-    const key = `${kind}:${kind === 'glob' || kind === 'spark' ? color.join(',') : ''}`;
+    const key = `${kind}:${kind === 'glob' || kind === 'spark' || kind === 'mark' ? color.join(',') : ''}`;
     let rig = this.rigs.get(key);
     if (!rig) this.rigs.set(key, (rig = buildRig(kind, color)));
     let pool = this.pools.get(key);

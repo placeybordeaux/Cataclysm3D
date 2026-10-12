@@ -164,6 +164,7 @@ const DOT_EVERY = 2;
 
 export function installRouteGuide(game: Game, renderer: Renderer, overmap: () => Overmapish | null): void {
   registerOption({
+    category: 'Interface',
     name: 'Route guide',
     value: () => ({ trail: 'Trail on the ground', beacon: 'Beacon ahead', off: 'Off (compass only)' })[routeMode()],
     change: (dir) => {

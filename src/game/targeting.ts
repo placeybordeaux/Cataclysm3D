@@ -1,6 +1,8 @@
 import type { Game } from './game';
 import { hasFlag } from '../world/registry';
-import { furnitureSolidHeight, isBoxFurniture } from './raycast';
+import { furnitureSolidHeight, isBoxFurniture, raycastTiles } from './raycast';
+import { LEVEL_HEIGHT } from '../world/coords';
+import { CREATURE_RADIUS } from './physics';
 
 // "What am I looking at?" for interaction keys (e / X): march the view ray from the eye out
 // to arm's reach and return the first tile worth interacting with (a door, window, furniture,
@@ -78,4 +80,118 @@ export function frontTile(game: Game): TargetTile {
   const a = Math.round(p.yaw / (Math.PI / 4)) * (Math.PI / 4);
   const ox = Math.round(Math.sin(a)), oy = Math.round(-Math.cos(a));
   return { x: p.tileX + ox, y: p.tileY + oy, z: p.z, dist: Math.hypot(ox, oy) };
+}
+
+/**
+ * A person as `e` sees them: an upright cylinder on the spot they're drawn at (not their tile:
+ * someone walking is drawn across two tiles). A little wider and taller than the body (0.3 m
+ * radius) so aiming at someone's face or just over their head still means them; the playtest
+ * that found the bench-behind-the-beggar bug had the crosshair a hand above a short NPC's head.
+ */
+export const PERSON_PICK_RADIUS = 0.4;
+export const PERSON_PICK_HEIGHT = 1.9;
+/** Non-box furniture blocks the view of a person only up to about seat height. */
+const LOW_FURNITURE = 0.6;
+
+/**
+ * Entry distance (metres along the normalised ray) into an upright cylinder standing on a
+ * floor at height `base`, or null. Coordinates as raycast.ts: x east, y south, h up.
+ */
+export function rayCylinder(
+  o: { x: number; y: number; h: number },
+  d: { x: number; y: number; h: number },
+  cx: number, cy: number, base: number,
+  radius = PERSON_PICK_RADIUS, height = PERSON_PICK_HEIGHT,
+): number | null {
+  const len = Math.hypot(d.x, d.y, d.h);
+  if (!(len > 0)) return null;
+  const dx = d.x / len, dy = d.y / len, dh = d.h / len;
+  // Horizontal circle: |o + d t - c|² = r² (in plan).
+  const ox = o.x - cx, oy = o.y - cy;
+  const a = dx * dx + dy * dy, b = 2 * (ox * dx + oy * dy), c = ox * ox + oy * oy - radius * radius;
+  let t0: number, t1: number;
+  if (a < 1e-12) {
+    // Looking straight up/down: inside the circle or never.
+    if (c > 0) return null;
+    t0 = -Infinity;
+    t1 = Infinity;
+  } else {
+    const disc = b * b - 4 * a * c;
+    if (disc < 0) return null;
+    const s = Math.sqrt(disc);
+    t0 = (-b - s) / (2 * a);
+    t1 = (-b + s) / (2 * a);
+  }
+  // Vertical slab [base, base + height].
+  let h0: number, h1: number;
+  if (Math.abs(dh) < 1e-12) {
+    if (o.h < base || o.h > base + height) return null;
+    h0 = -Infinity;
+    h1 = Infinity;
+  } else {
+    h0 = (base - o.h) / dh;
+    h1 = (base + height - o.h) / dh;
+    if (h0 > h1) [h0, h1] = [h1, h0];
+  }
+  const lo = Math.max(t0, h0, 0), hi = Math.min(t1, h1);
+  return lo <= hi ? lo : null;
+}
+
+/** Someone drawn standing on their own spot (an NPC). */
+export interface Person {
+  x: number;
+  y: number;
+  z: number;
+  dead?: boolean;
+}
+
+/**
+ * Everyone who should be picked by their drawn body rather than by their tile's column
+ * (src/npcs.ts registers the NPCs). Used by `e` and by the free cursor's hover / click
+ * (src/ui2/install.ts), so both find the same person.
+ */
+export const pickablePeople: ((game: Game) => Iterable<Person>)[] = [];
+export function* allPickablePeople(game: Game): Generator<Person> {
+  for (const f of pickablePeople) yield* f(game);
+}
+
+export interface ViewRay {
+  o: { x: number; y: number; h: number };
+  d: { x: number; y: number; h: number };
+}
+
+/** The player's own view ray (eye, yaw, pitch): what the crosshair means without a camera (tests). */
+export function playerViewRay(game: Game): ViewRay {
+  const p = game.player;
+  const [x, y, h] = viewDir(game);
+  return { o: { x: p.x, y: p.y, h: p.z * LEVEL_HEIGHT + (p.crouching ? EYE_CROUCH : EYE) }, d: { x, y, h } };
+}
+
+/**
+ * The first person (NPC) the ray meets within `reach` tiles of the player (plan distance to
+ * their body), provided nothing drawn stands in front of them: a counter, a wall, a car door,
+ * or the floor when you look down at the pile at your feet. A bench below the line of sight
+ * doesn't hide whoever stands behind it. Returns the person and the distance along the ray.
+ */
+export function personOnRay<T extends Person>(
+  game: Game, people: Iterable<T>, ray: ViewRay, reach: number,
+  opts: { skipOrigin?: boolean; vehicleAt?: (x: number, y: number, z: number) => number; creatureAt?: (x: number, y: number, z: number) => unknown } = {},
+): { body: T; t: number } | null {
+  const p = game.player;
+  let best: T | null = null, bt = Infinity;
+  for (const n of people) {
+    if (n.dead || Math.hypot(n.x - p.x, n.y - p.y) - CREATURE_RADIUS > reach) continue;
+    const t = rayCylinder(ray.o, ray.d, n.x, n.y, n.z * LEVEL_HEIGHT);
+    if (t !== null && t < bt) (bt = t), (best = n);
+  }
+  if (!best) return null;
+  const solid = raycastTiles(game.map, ray.o, ray.d, {
+    maxDist: bt, skipOrigin: opts.skipOrigin ?? true, vehicleAt: opts.vehicleAt, creatureAt: opts.creatureAt,
+    // Only box furniture (counters, tables, cupboards) is a solid block as drawn. The rest (a
+    // bench, chair, bed, crate) is a 1.2 m stand-in box in raycast.ts, which hid a beggar
+    // standing behind a knee-high bench; counted up to seat height only.
+    furnitureHeight: (f) => (isBoxFurniture(f) ? furnitureSolidHeight(f) : Math.min(furnitureSolidHeight(f), LOW_FURNITURE)),
+  });
+  if (solid && solid.dist < bt) return null;
+  return { body: best, t: bt };
 }

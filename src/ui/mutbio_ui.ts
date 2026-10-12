@@ -99,7 +99,8 @@ export function openBionicsMenu(game: Game, mods: BodyMods): UiWindow {
     entries: entries(),
     footer: `${c('c_light_green', 'letter')} activate/deactivate`,
     onSelect: (id) => {
-      bio.toggle(id);
+      const activated = bio.toggle(id);
+      if (activated && bio.def(id)?.flags?.includes('BIONIC_GUN')) return true;
       m.refresh(entries());
       renderHeader();
       return false;
@@ -128,7 +129,7 @@ function bionicDetail(mods: BodyMods, id: string): string {
   const occ = (d.occupied_bodyparts ?? []).map(([bp, n]) => `${isBodyPart(bp) ? BODY_PARTS[bp].name : bp} (${n})`);
   if (occ.length) lines.push('', c('c_dark_gray', `Occupies: ${occ.join(', ')}`));
   const costs: string[] = [];
-  if (d.act_cost) costs.push(`${energy(d.act_cost)} to activate`);
+  if (d.act_cost) costs.push(`${energy(d.act_cost)} ${d.flags?.includes('BIONIC_GUN') ? 'per shot' : 'to activate'}`);
   if (d.react_cost) costs.push(`${energy(d.react_cost)} every ${d.time ?? 1} turn(s) while on`);
   if (d.trigger_cost) costs.push(`${energy(d.trigger_cost)} per trigger`);
   if (d.capacity) costs.push(`stores ${d.capacity} kJ`);
@@ -137,7 +138,8 @@ function bionicDetail(mods: BodyMods, id: string): string {
   if (protec.length) lines.push(c('c_dark_gray', `Protection: ${protec.join('; ')}`));
   if (d.stat_bonus?.length) lines.push(c('c_dark_gray', `Stats: ${d.stat_bonus.map(([s, n]) => `${s} ${n > 0 ? '+' : ''}${n}`).join(', ')}`));
   const weapon = d.flags?.includes('BIONIC_WEAPON');
-  if (d.fake_item && weapon) lines.push(c('c_dark_gray', 'Weapon: extends while active.'));
+  if (d.fake_item && d.flags?.includes('BIONIC_GUN')) lines.push(c('c_dark_gray', `Gun: ${bio.c.data.items[d.fake_item]?.name ?? d.fake_item}, aimed on activation; act cost is paid per shot.`));
+  else if (d.fake_item && weapon) lines.push(c('c_dark_gray', 'Weapon: extends while active.'));
   else if (d.fake_item) lines.push(c('c_dark_gray', `Provides: ${bio.c.data.items[d.fake_item]?.name ?? d.fake_item}${d.flags?.includes('BIONIC_TOGGLED') ? ' (while active)' : ''}`));
   return lines.join('\n');
 }
@@ -159,6 +161,13 @@ export interface InstallFlowOpts {
   consumeItem: (it: Item) => void;
   /** Put a returned (used) CBM on the ground at the patient. */
   dropItem: (it: Item) => void;
+  /**
+   * The operation activity actually finished (CBM installed, with or without complications)
+   * — never called for a declined confirm or an operation that couldn't start. Self-install
+   * via `A`pply uses this to fire the item-use gesture only once this, not the `A`pply call
+   * itself, is reached.
+   */
+  onInstalled?: () => void;
 }
 
 /**
@@ -234,6 +243,7 @@ export function beginInstall(game: Game, mods: BodyMods, it: Item, opts: Install
       const r = bio.install(itemId, { autodoc: opts.autodoc, skillLevel });
       if (r.success > 0) game.message(opts.autodoc ? 'The Autodoc returns to its resting position after successfully performing the operation.' : 'The operation is a success.', 'c_light_green');
       else game.message(opts.autodoc ? 'The Autodoc completes installation and activates bionic but reports about complications during operation.' : 'Bionic was installed and activated but a complication happened during operation!', 'c_yellow');
+      opts.onInstalled?.();
     },
   });
   if (!started) opts.dropItem(it);

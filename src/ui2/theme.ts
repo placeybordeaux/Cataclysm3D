@@ -18,6 +18,7 @@ let pref: UiScalePref = loadPref();
 let metrics: UiMetrics = uiMetrics(1);
 const listeners: ((m: UiMetrics) => void)[] = [];
 let rootEl: HTMLElement | null = null;
+const themeRoots = new Set<HTMLElement>();
 
 function loadPref(): UiScalePref {
   try {
@@ -53,9 +54,22 @@ export function onScaleChange(fn: (m: UiMetrics) => void): () => void {
   return () => listeners.splice(listeners.indexOf(fn), 1);
 }
 
+/** Share the modern palette and scale with windows on another UI layer. */
+export function shareTheme(root: HTMLElement): void {
+  themeRoots.add(root);
+  if (rootEl) {
+    for (let i = 0; i < rootEl.style.length; i++) {
+      const name = rootEl.style[i];
+      if (name.startsWith('--')) root.style.setProperty(name, rootEl.style.getPropertyValue(name));
+    }
+    root.dataset.scale = rootEl.dataset.scale ?? '';
+  }
+}
+
 /** Put palette + metrics + skins on the root element and keep them current on resize. */
 export function installTheme(root: HTMLElement): void {
   rootEl = root;
+  themeRoots.add(root);
   const p = palette as unknown as Record<string, string>;
   for (const k of Object.keys(p)) root.style.setProperty(`--p-${kebab(k)}`, p[k]);
   applyScale();
@@ -90,6 +104,14 @@ function applyScale(): void {
   r.setProperty('--row-icon-k', String(rowK / dpr));
   for (const [name, spec] of Object.entries(SKINS)) r.setProperty(`--skin-${name}`, skinCss(spec, ud, dpr));
   rootEl.dataset.scale = String(s);
+  for (const root of themeRoots) {
+    if (root === rootEl) continue;
+    for (let i = 0; i < rootEl.style.length; i++) {
+      const name = rootEl.style[i];
+      if (name.startsWith('--')) root.style.setProperty(name, rootEl.style.getPropertyValue(name));
+    }
+    root.dataset.scale = String(s);
+  }
   for (const f of listeners) f(metrics);
 }
 

@@ -4,6 +4,7 @@ import { turnsToEffectSeconds, type Monster } from './monster';
 import type { CorpseRecord, MonsterSystem } from './monai';
 import { createItem } from './item';
 import { spawnOnGround } from './moves';
+import { detonate, legacyBlast } from './blast';
 
 // Bright Nights death functions (mondeath.cpp). A MONSTER's `death_function` is a list of
 // named mdeath functions run in order when it dies (default ["NORMAL"]); only NORMAL leaves
@@ -85,10 +86,14 @@ export function runDeathFunctions(sys: MonsterSystem, m: Monster): CorpseRecord 
         spawnOnGround(sys.game.map, tx, ty, m.z, it);
         break;
       }
-      case 'EXPLODE':
-        explodeSound();
-        propagate(sys, tx, ty, m.z, 'fd_fire', 3);
+      case 'EXPLODE': {
+        // mdeath::explode: explosion_handler::explosion(pos, &z, size) with the legacy power
+        // for its size (tiny 75, small 150, medium 225, large 300, huge 375; distance factor
+        // 0.8), by explosion.cpp's rules (blast.ts). The dead monster isn't hurt by its own blast.
+        const power = ({ tiny: 75, small: 150, medium: 225, large: 300, huge: 375 } as Record<string, number>)[m.size] ?? 150;
+        detonate(sys.game, sys, m.x, m.y, m.z, legacyBlast(power), m);
         break;
+      }
       case 'SMOKEBURST':
         explodeSound();
         propagate(sys, tx, ty, m.z, 'fd_smoke', 12);

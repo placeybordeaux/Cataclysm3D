@@ -18,12 +18,13 @@
 // (any ui2 window, the context menu, look mode `x`).
 
 import type { Game } from '../game/game';
+import { activeWeapon, bionicGunHud } from '../game/bionicguns';
 import { MAIN_PARTS, BODY_PARTS, type MainPartId } from '../game/bodyparts';
 import type { MonsterSystem } from '../game/monai';
 import { isDay, lightAt } from '../game/vision';
 import { recentHeard } from '../game/sound';
 import { attackCooldownSeconds, attackSpeedMoves, swingSpeedRating } from '../game/combat';
-import { currentMode } from '../game/gunmods';
+import { ammoRequired, currentMode, upsDrain, upsShots } from '../game/gunmods';
 import { h, ui2Layers, attachTooltip, palette, iconEl } from '../ui2';
 import { colorize } from './framework';
 import { logLine, type MessageLog } from './format';
@@ -496,10 +497,20 @@ export class ModernHud {
     const driving = !!(g as unknown as { vehicles?: { driving?: unknown } }).vehicles?.driving;
     this.el.classList.toggle('driving', driving);
     const p = g.player;
-    const w = p.inv.wielded;
+    // An aimed bionic gun (src/game/bionicguns.ts) stands in for the wielded item while it lasts.
+    const bionic = bionicGunHud(g);
+    const w = activeWeapon(g);
     const extras = this.extraLines();
     let line2 = '', tone = 'dim';
-    if (w?.isGun()) {
+    if (bionic && w) {
+      line2 = `${bionic.detail} · ${currentMode(w).name} · Esc stops`;
+      tone = bionic.shots <= 1 ? 'warn' : 'text';
+    } else if (w?.isGun() && ammoRequired(w) === 0 && upsDrain(w) > 0) {
+      // Rounds don't apply to a UPS-only gun (laser rifle): show the shots carried UPS can pay.
+      const shots = upsShots(p, w);
+      line2 = `UPS ${upsDrain(w)}/shot · ${shots} shot${shots === 1 ? '' : 's'} · ${currentMode(w).name}`;
+      tone = shots === 0 ? 'bad' : shots <= 2 ? 'warn' : 'text';
+    } else if (w?.isGun()) {
       const cap = w.ammoCapacity();
       const n = w.ammoRemaining();
       const mode = currentMode(w).name;
@@ -516,7 +527,7 @@ export class ModernHud {
     this.weaponKey = key;
     const icon = w ? iconEl({ typeId: w.typeId, symbol: w.def.symbol, color: w.def.color, looksLike: w.def.looks_like }, 'row') : null;
     this.weapon.replaceChildren(
-      h('div', { class: 'hud2-weapon-main' }, icon, h('div', { class: 'hud2-weapon-text' }, h('div', { class: 'hud2-weapon-name', text: w ? w.name() : 'Bare hands' }), h('div', { class: `ui2-small tone-${tone}`, text: line2 }))),
+      h('div', { class: 'hud2-weapon-main' }, icon, h('div', { class: 'hud2-weapon-text' }, h('div', { class: 'hud2-weapon-name', text: bionic ? bionic.name : w ? w.name() : 'Bare hands' }), h('div', { class: `ui2-small tone-${tone}`, text: line2 }))),
       ...extras.map((html) => h('div', { class: 'ui2-small hud2-extra', html })),
     );
     attachTooltip(this.weapon, () => (w ? `${w.name()} — ${w.isGun() ? `reload [${g.keys.label('reload')}], fire mode [${g.keys.label('fire_mode')}]` : `swing with the left mouse button; wield something else with [${g.keys.label('wield')}]`}` : `Unarmed. Wield a weapon with [${g.keys.label('wield')}].`));

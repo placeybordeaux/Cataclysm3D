@@ -57,6 +57,7 @@ export function installStairsView(game: Game, renderer: Renderer, stairs: Stairs
   });
 
   registerOption({
+    category: 'World',
     name: 'Stairs',
     value: () => STAIR_LABEL[walker.variant],
     change: (d) => {

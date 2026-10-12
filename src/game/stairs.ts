@@ -466,6 +466,13 @@ export class StairIndex {
     if (m.itemsAt(x, y, z).length) return false;
     // doors, windows and other openings stay what they are
     if (hasFlag(t, 'DOOR') || hasFlag(t, 'WINDOW') || /door|gate|window/.test(t.id)) return false;
+    // A closed hatch (a manhole cover) stays shut until pried into its way down (t_manhole);
+    // until then you climb up through it with `<` (zlevels.stairDestination's floor fallback).
+    const pried = (t.pry as { new_ter_type?: unknown } | undefined)?.new_ter_type;
+    if (typeof pried === 'string') {
+      const n = m.terrain.tryIndex(pried);
+      if (n !== undefined && hasFlag(m.terrain.get(n), 'GOES_DOWN')) return false;
+    }
     return true;
   }
   /** The upper tile over a lower stair tile: stairs down, or floor we may cut open. */

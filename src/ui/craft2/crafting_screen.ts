@@ -12,7 +12,7 @@
 import type { RecipeDef } from '../../data/types';
 import {
   abandonCraft, booksForRecipe, cantContinue, continueCraft, craftingInventory, craftQueue, craftTime, formatDuration, inProgressCrafts, knowsRecipe,
-  lightSpeedMultiplier, recipeName, startCraft, successChance, type CraftHost,
+  lightSpeedMultiplier, craftSpeed, previewBench, recipeName, startCraft, successChance, type CraftHost,
 } from '../../game/crafting';
 import type { AltEval } from '../../game/requirements';
 import { itemDisplayName, qualityName } from '../../game/requirements';
@@ -57,6 +57,7 @@ function registerAlmostOption(): void {
   if (almostOption) return;
   almostOption = true;
   registerOption({
+    category: 'Interface',
     name: 'Crafting list',
     value: () => (almostSectionOn() ? 'Craftable + one short' : 'Craftable only'),
     change: () => {
@@ -294,8 +295,11 @@ export function openCraftingScreen(game: CraftHost): CraftingScreen {
     // What making it teaches (the same formula the craft applies: src/game/practice.ts).
     for (const pv of previewCraft(player, r, batch, craftTime(player, r, batch, 1) * 100)) fact('Trains', pv.text, pv.verdict === 'trains' ? 'tone-good' : 'ui2-dim');
     const light = lightSpeedMultiplier(game, r);
-    const secs = craftTime(player, r, batch, ch.speed || 1);
+    // The bench you'd work at right now (furniture, a vehicle WORKBENCH part, hands, ground).
+    const bench = previewBench(game, r);
+    const secs = craftTime(player, r, batch, (ch.light ? craftSpeed(game, r, light, bench.multiplier) : 0) || 1);
     fact('Time', formatDuration(secs), '');
+    fact('Workbench', `${bench.name}: ${Math.round(bench.multiplier * 100)}% speed`, bench.multiplier > 1 ? 'tone-good' : bench.multiplier < 1 ? 'tone-warn' : 'ui2-dim');
     fact('Success', `${Math.round(successChance(player, r) * 100)}%`, successChance(player, r) >= 0.8 ? 'tone-good' : successChance(player, r) >= 0.4 ? 'tone-warn' : 'tone-bad');
     if (light < 1) fact('Light', light > 0 ? `too dark: ${Math.round(light * 100)}% speed` : "too dark: can't", light > 0 ? 'tone-warn' : 'tone-bad');
     const desc = def ? cddaText(def.description) : '';

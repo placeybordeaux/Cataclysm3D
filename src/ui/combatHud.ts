@@ -1,4 +1,5 @@
 import type { Game } from '../game/game';
+import { activeWeapon } from '../game/bionicguns';
 import type { Monster } from '../game/monster';
 import type { MonsterSystem } from '../game/monai';
 import { arcFor, defenseOf, FEEL, parryWindowOf } from '../game/combatfeel';
@@ -191,7 +192,7 @@ export class CombatHud {
     const game = this.game;
     const p = game.player;
     const c = this.combat;
-    const w = p.inv.wielded;
+    const w = activeWeapon(game);
     const melee = !w?.isGun();
 
     // --- reach (throttled: a camera raycast plus a scan of nearby monsters)

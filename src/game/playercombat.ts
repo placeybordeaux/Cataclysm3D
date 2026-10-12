@@ -3,7 +3,10 @@ import type { ItemDef } from '../data/types';
 import type { Game, GameSystem } from './game';
 import { aim, aimFloorMoa, applyDelayedRecoil, applyFlatArmor, attackCooldownSeconds, dispersionBreakdown, fireGun, hitMessage, meleeAttack, meleeHitRoll, normalRoll, pelletAngle, sizeRank, type ShotResult } from './combat';
 import { MAX_RECOIL } from './character';
-import { currentMode } from './gunmods';
+import { mutationStrikeText, VENOM_TURNS, venomEffect, venomMessage, venomTriggered } from './mutationattacks';
+import type { BionicState } from './bionics';
+import { activeWeapon, beginBionicGun, bionicGunEndReason, bionicGunSession, canPayShot, endBionicGun, payShot } from './bionicguns';
+import { ammoRequired, currentMode, upsShots } from './gunmods';
 import { asArray, type Item } from './item';
 import { L, moveItem, spawnItem } from './moves';
 import {
@@ -19,12 +22,14 @@ import { Grid, hasLOS } from './los';
 import { sfx, type MeleeSkill } from '../audio/sfx';
 import { FEEL, arcFor, defenseOf, hitStopSeconds, missReason, sweptArcTarget, swingTiming, type SwingStyle, type SwingTiming } from './combatfeel';
 import { moveWithCollision, CREATURE_RADIUS } from './physics';
-import { projectileHit } from './projectile';
+import { GUN_PROJECTILE_SPEED, projectileDodge, projectileHit } from './projectile';
+import { npcOnArc, npcOnLine, npcOnRay, type NpcBody, type NpcFireHooks, type NpcProjectileHit, type NpcRayHit } from './npcfire';
 import {
   aimDirection, aimHooks, aimSettings, AimSway, reticleVisible, topAimHeight, TOP_ASSIST_CONE, basisDirection, basisOf, swingFan, yawPitch, type Vec3, bodyHeightOf, Breath, bowPerfect, describeHit, freeAim, hitDamageMul, rhythmWindow, swayAmplitude, timingGames, weakSpotChance,
   type HitZone,
 } from './aimmodel';
 import { raycastTiles } from './raycast';
+import { damageVehicleMount, vehicleHitHeight, type FuelBlast } from './vehicleDamage';
 import { LEVEL_HEIGHT } from '../world/coords';
 
 // The survivor's attacks in real time: LMB / `f` swings or fires, RMB aims a gun (or guards
@@ -38,6 +43,9 @@ import { LEVEL_HEIGHT } from '../world/coords';
 // Guns are hitscan: the CDDA dispersion roll becomes a cone offset around the view ray,
 // walked tile by tile until a wall or a monster circle stops it.
 
+/** A manned turret's weave relative to the same gun held (src/turrets.ts: the mount steadies it). */
+const MOUNT_STEADY = 0.5;
+
 /** Real seconds between the rounds of a burst (CDDA fires a burst within one action). */
 const BURST_INTERVAL = 0.075;
 
@@ -48,6 +56,32 @@ export interface Tracer {
   y1: number;
   z: number;
   t: number;
+  /** Absolute heights (m) of the ends when the round didn't leave the survivor's eye (a turret's muzzle). */
+  h0?: number;
+  h1?: number;
+  /** A big round (tank gun): drawn as a thick glowing streak. */
+  heavy?: boolean;
+}
+
+/**
+ * A manned vehicle turret (src/game/turret.ts, wired by src/turrets.ts). Its gun is the active
+ * weapon; these hooks make a shot BN's turret_data::fire: the gunner's recoil is only the
+ * vehicle's (prepare_fire / post_fire), the round leaves the muzzle, and the vehicle pays the
+ * power. null when nothing is manned.
+ */
+export interface MountedFire {
+  /** Is `gun` the manned turret's gun? */
+  is(gun: Item): boolean;
+  /** BN ranged::recoil_vehicle (MOA): the only recoil a turret shot sees. */
+  recoil(): number;
+  /** Why the next round can't go now (reloading, no power, barrel still traversing), or null. */
+  refuse(gun: Item): string | null;
+  /** The muzzle, absolute metres. */
+  muzzle(): Vec3;
+  /** Aim kick (MOA) for the reticle. */
+  kick(gun: Item): number;
+  /** A round left the muzzle toward `to` (absolute metres): battery, effects, practice. */
+  fired(gun: Item, shot: ShotResult, to: Vec3): void;
 }
 
 /** Optional first-person viewmodel from the render agent. */
@@ -110,6 +144,10 @@ export interface Flight {
   spread: DispersionBreakdown;
   /** Monsters that dodged it or that it flew over (it carries on past them). */
   passed: Set<Monster>;
+  /** NPCs that avoided it (classic dice): it flies on past them too. */
+  passedNpcs?: Set<unknown>;
+  /** The NPC under the crosshair at release (BN's accepted target), if any. */
+  aimedNpc?: unknown;
   overflew: Set<Monster>;
   /** The crosshair already said why it missed. */
   explained: boolean;
@@ -135,6 +173,8 @@ export interface AimHit {
   zone: HitZone;
   /** What stopped it when it didn't hit a body. */
   stop: 'wall' | 'floor' | 'range' | null;
+  /** The vehicle tile that stopped it (`stop` is then 'wall'): shootVehicle damages a part there. */
+  vehicle?: { x: number; y: number; z: number };
 }
 
 /** Where a recovered round came to rest in view (the renderer draws it stuck there until picked up). */
@@ -269,13 +309,14 @@ export class PlayerCombat implements GameSystem {
   /**
    * NPC system hooks (src/game/npcai.ts). attackGuard may veto an attack (it asks before
    * hitting a friendly NPC); npcMelee takes the swing when an NPC is a better target than
-   * monster `m`; npcShot lets an NPC standing on the bullet's path (before `maxDist`) take it.
+   * monster `m`; npcFire puts NPCs in the line of fire of every round, pellet and arrow
+   * (src/game/npcfire.ts: followers and neutrals too).
    */
   attackGuard: (() => boolean) | null = null;
+  /** A manned vehicle turret (src/turrets.ts), else null. */
+  mounted: MountedFire | null = null;
   npcMelee: ((reach: number, m: Monster | null) => boolean) | null = null;
-  npcShot: ((yaw: number, maxDist: number, shot: ShotResult) => { x: number; y: number } | null) | null = null;
-  /** An arrow/bolt/stone the survivor loosed struck NPC `n` (npcai applies it; followers included). */
-  npcRound: ((n: unknown, shot: ShotResult, missedBy: number, what: string) => void) | null = null;
+  npcFire: NpcFireHooks | null = null;
   private grid: Grid;
   private lastX = NaN;
   private lastY = NaN;
@@ -303,7 +344,8 @@ export class PlayerCombat implements GameSystem {
    */
   reticleShown(): boolean {
     const game = this.game;
-    const gun = game.player.inv.wielded?.isGun() ? game.player.inv.wielded : null;
+    const activeWeapon = this.weapon();
+    const gun = activeWeapon?.isGun() ? activeWeapon : null;
     if (!this.aim.active || !gun) return false;
     const rmb = (game.input.mouseButtons & 4) !== 0 && !game.input.captured;
     return reticleVisible({ aiming: rmb && drawStyle(gun) === 'trigger', drawing: !!this.draw, sinceShot: this.time - this.lastShotAt });
@@ -316,7 +358,38 @@ export class PlayerCombat implements GameSystem {
     this.grid = sys.grid;
   }
 
+  /** The gun being fired: an aimed bionic gun (src/game/bionicguns.ts), else the wielded item. */
+  weapon(): Item | null {
+    return activeWeapon(this.game);
+  }
+
+  /**
+   * BIONIC_GUN activation (bionics.ts onGunActivation): aim the detached fake gun. Refused while
+   * a swing, draw or burst is under way so no shot of the wielded weapon is still pending.
+   */
+  startBionicGun(id: string, gun: Item, bio: BionicState, cost: number): boolean {
+    if (this.burst || this.swing || this.draw) {
+      this.game.message(`You can't aim your ${bio.name(id)} while attacking.`);
+      return false;
+    }
+    if (!beginBionicGun(this.game, bio, id, gun, cost)) return false;
+    const keys = this.game.keys;
+    this.game.message(`You aim your ${bio.name(id)} (${cost} kJ per shot): left click or ${keys.label('fire')} fires, ${keys.label('fire_mode')} switches mode, Esc stops.`);
+    return true;
+  }
+
+  /** Stop aiming a bionic gun; a burst still in the air from it stops too. */
+  cancelBionicGun(message?: string): void {
+    const s = bionicGunSession(this.game);
+    if (!s) return;
+    if (this.burst?.gun === s.gun) this.endBurst(this.burst);
+    endBionicGun(this.game, message);
+  }
+
   update(game: Game, dt: number): void {
+    const session = bionicGunSession(game);
+    const why = session && bionicGunEndReason(game, session);
+    if (session && why) this.cancelBionicGun(why === 'lost' ? `You can no longer aim your ${session.gun.name()}.` : undefined);
     this.time += dt;
     // Hit-stop freezes the swing clock (and its cooldown) for a few frames when a blow lands.
     if (this.hitStop > 0) this.hitStop = Math.max(0, this.hitStop - dt);
@@ -348,7 +421,8 @@ export class PlayerCombat implements GameSystem {
     const clicks = input.consumeClicks();
     const others = clicks.filter((b) => b !== 0);
     if (others.length) (input as unknown as { clicks: number[] }).clicks.push(...others);
-    const gun = p.inv.wielded?.isGun() ? p.inv.wielded : null;
+    const activeWeapon = this.weapon();
+    const gun = activeWeapon?.isGun() ? activeWeapon : null;
     const style = gun ? drawStyle(gun) : 'trigger';
     // Holding LMB keeps swinging a melee weapon, but a gun only keeps firing when it has an
     // automatic mode; a pistol fires once per click like CDDA's one shot per `f`.
@@ -398,7 +472,7 @@ export class PlayerCombat implements GameSystem {
   // ------------------------------------------------------------------ free aim (aimmodel.ts)
 
   /** The weapon skill free aim uses: BN dispersion_from_skill's average of marksmanship and the weapon's skill. */
-  aimSkill(gun: Item | null = this.game.player.inv.wielded): number {
+  aimSkill(gun: Item | null = this.weapon()): number {
     const p = this.game.player;
     if (!gun?.isGun()) return 0;
     return Math.min((p.getSkill('gun') + p.getSkill(String(gun.def.skill ?? 'gun'))) / 2, 10);
@@ -408,7 +482,8 @@ export class PlayerCombat implements GameSystem {
   private updateAim(dt: number): void {
     const game = this.game;
     const p = game.player;
-    const gun = p.inv.wielded?.isGun() ? p.inv.wielded : null;
+    const activeWeapon = this.weapon();
+    const gun = activeWeapon?.isGun() ? activeWeapon : null;
     const moved = Number.isNaN(this.aimLast.x) ? 0 : Math.hypot(p.x - this.aimLast.x, p.y - this.aimLast.y);
     this.aimLast.x = p.x;
     this.aimLast.y = p.y;
@@ -423,6 +498,9 @@ export class PlayerCombat implements GameSystem {
     const b = dispersionBreakdown(p, gun);
     const skill = this.aimSkill(gun);
     const stamina = p.stamina / Math.max(1, p.staminaMax());
+    // A manned turret: the mount holds the gun, so riding along doesn't sway it; only the
+    // vehicle's own motion does (BN recoil_vehicle stands in for the gunner's recoil).
+    const mounted = this.mounted?.is(gun) ? this.mounted : null;
     const rmb = (game.input.mouseButtons & 4) !== 0 && !game.input.captured;
     const style = drawStyle(gun);
     const shift = game.input.held.has('ShiftLeft') || game.input.held.has('ShiftRight');
@@ -431,13 +509,15 @@ export class PlayerCombat implements GameSystem {
     const d = this.draw;
     const amp = swayAmplitude({
       staticMoa: (b.weapon + b.dex + b.hands + b.skill) * b.strMul,
-      recoilMoa: p.recoil, floorMoa: aimFloorMoa(p, gun), skill,
-      speed: this.aimSpeed, running: p.running && this.aimSpeed > 0.5, crouching: p.crouching,
-      ads: style === 'trigger' && rmb ? 1 : 0, pain: p.pain, stamina,
+      recoilMoa: mounted ? mounted.recoil() : p.recoil, floorMoa: aimFloorMoa(p, gun), skill,
+      speed: mounted ? 0 : this.aimSpeed, running: !mounted && p.running && this.aimSpeed > 0.5, crouching: !mounted && p.crouching,
+      ads: mounted || (style === 'trigger' && rmb) ? 1 : 0, pain: p.pain, stamina,
       draw: d && d.style === 'draw' ? { full: d.t >= d.full, heldFull: d.heldFull, holdSteady: FEEL.drawHoldSteady } : null,
       breath: timingGames() ? this.breath.mul(skill, stamina) : 1,
     });
-    this.aim.update(dt, amp, skill, FEEL, now);
+    // A mounted gun rests on its mount and is laid through its sight: the gunner's skill and the
+    // gun's dispersion still set the weave, but it's half a hand-held one's.
+    this.aim.update(dt, mounted ? amp * MOUNT_STEADY : amp, skill, FEEL, now);
   }
 
   /** Wall-clock ms (the HUD's clock), 0 without one. */
@@ -448,6 +528,9 @@ export class PlayerCombat implements GameSystem {
   /** The survivor's eye (absolute metres; x east, y south, h up). */
   private eye(): Vec3 {
     const p = this.game.player;
+    // At a vehicle station the eye is the seat's / hatch's / cupola's, not 1.6 m over the road.
+    const station = aimHooks.stationEye?.() ?? null;
+    if (station !== null) return { x: p.x, y: p.y, h: station };
     return { x: p.x, y: p.y, h: p.z * LEVEL_HEIGHT + (p.crouching ? 1.0 : 1.6) };
   }
 
@@ -524,12 +607,18 @@ export class PlayerCombat implements GameSystem {
     const cp = Math.max(0.02, Math.cos(pitch));
     const slope = Math.tan(pitch);
     const dir: Vec3 = { x: hx * cp, y: hy * cp, h: Math.sin(pitch) };
-    const tile = raycastTiles(this.game.map, o, dir, { maxDist: range / cp + 0.5, throughTransparent: true });
+    // Vehicles stop rounds at the height look mode and the reticle give them (vehicleHitHeight),
+    // except the one the shooter rides in (a turret fires over its own hull).
+    const vs = this.game.vehicles;
+    const own = vs ? vs.driving ?? vs.playerOn()?.v ?? null : null;
+    const vehicleAt = vs?.list.length ? (x: number, y: number, z: number) => vehicleHitHeight(this.game, x, y, z, own) : undefined;
+    const tile = raycastTiles(this.game.map, o, dir, { maxDist: range / cp + 0.5, throughTransparent: true, vehicleAt });
     let limit = range, stop: AimHit['stop'] = 'range';
     if (tile && tile.dist * cp < limit) {
       limit = tile.dist * cp;
       stop = tile.kind === 'floor' ? 'floor' : 'wall';
     }
+    const vehicleTile = tile && stop === 'wall' && tile.kind === 'vehicle' ? { x: tile.x, y: tile.y, z: tile.z } : undefined;
     const pick = aimHooks.pick;
     let best: Monster | null = null, bestS = limit, bestPerp = 1, bestFrac = 0, bestZone: HitZone = 'torso';
     for (const m of this.sys.active) {
@@ -579,8 +668,26 @@ export class PlayerCombat implements GameSystem {
     const x = o.x + hx * s, y = o.y + hy * s, hAbs = o.h + slope * s;
     return {
       x, y, h: hAbs - p.z * LEVEL_HEIGHT, hAbs, dist: Math.hypot(x - p.x, y - p.y), hit: best, missedBy: best ? bestPerp : 1, hFrac: bestFrac,
-      zone: best ? bestZone : 'torso', stop: best ? null : stop,
+      zone: best ? bestZone : 'torso', stop: best ? null : stop, ...(!best && vehicleTile ? { vehicle: vehicleTile } : {}),
     };
+  }
+
+  /**
+   * BN map::shoot on a vehicle tile the round stopped at: its damage (× each unit's multiplier)
+   * goes to a random part there through vehicle::damage (aimed: the tile under the reticle), as
+   * heat for an incendiary round, else stab. The port's hitscan round stops there (BN's flies on
+   * with whatever the part didn't absorb). vehicleDamage.ts has the armour and threshold rules.
+   */
+  shootVehicle(at: { x: number; y: number; z: number }, damage: readonly { type: string; amount: number; multiplier?: number }[], effects: readonly string[] = []): number {
+    const o = this.game.vehicles?.at(at.x, at.y, at.z);
+    if (!o) return 0;
+    const total = damage.reduce((s, u) => s + u.amount * (u.multiplier ?? 1), 0);
+    const inc = effects.includes('INCENDIARY') || damage.some((u) => u.type === 'heat' && u.amount > 0);
+    const before = o.v.parts.reduce((s, q) => s + Math.max(0, q.hp), 0);
+    const fuelBlasts: FuelBlast[] = [];
+    damageVehicleMount(this.game, o.v, o.mx, o.my, Math.trunc(total), inc ? 'heat' : 'stab', this.sys.rng, { aimed: true, fuelBlasts });
+    for (const fb of fuelBlasts) this.hooks.blast?.(fb.x + 0.5, fb.y + 0.5, fb.z, { power: fb.power, distance_factor: 0.7, fire: fb.fire });
+    return before - o.v.parts.reduce((s, q) => s + Math.max(0, q.hp), 0);
   }
 
   /**
@@ -608,6 +715,33 @@ export class PlayerCombat implements GameSystem {
     this.sys.hurt(m, total, 'player', { crit, stagger: 1 + FEEL.aimStaggerPerSkill * skill });
     this.feedback('gun', crit ? 'crit' : 'hit', m, m.x, m.y, total, 0, total <= 0 ? 'no damage' : text, { ranged: o.cls, quality: q.mul });
     return { total, dealt, crit };
+  }
+
+  /**
+   * BN Creature::deal_projectile_attack's dodge, for a free-aim round that reached monster `m`
+   * `missedBy` (0 centre .. 1 edge) off its centre: projectileDodge (dodge × 5 over dice(10,
+   * speed)) is added to it. Returns the new missedBy, or null when it reaches 1: the monster avoids
+   * the round ("The zombie runner avoids your projectile."), which flies on, and it visibly
+   * sways aside (`monsterDodge`, a short sideways hop). A gun's round (speed 1000) is almost never
+   * avoided; an arrow (~100) sometimes is by a nimble monster, at the edge of its body.
+   */
+  private freeDodge(m: Monster, missedBy: number, speed: number, from: { x: number; y: number }): number | null {
+    const roll = m.dodge() * 5;
+    if (roll <= 0) return missedBy;
+    const add = projectileDodge(roll, speed, this.sys.rng);
+    if (missedBy + add < 1) return missedBy + add;
+    this.game.message(`${m.TheName()} avoids your projectile!`);
+    m.aggroCharacter = true;
+    if (!m.has('IMMOBILE') && m.dashTime <= 0) {
+      const d = Math.max(0.01, Math.hypot(m.x - from.x, m.y - from.y));
+      const side = this.sys.rng.oneIn(2) ? 1 : -1;
+      const vx = (-(m.y - from.y) / d) * side, vy = ((m.x - from.x) / d) * side;
+      m.dashVx = vx * 0.4 / 0.15;
+      m.dashVy = vy * 0.4 / 0.15;
+      m.dashTime = 0.15;
+      this.game.events.emit('monsterDodge', { monster: m, x: m.x, y: m.y, z: m.z, dx: vx, dy: vy });
+    }
+    return null;
   }
 
   private setGuard(on: boolean): void {
@@ -752,7 +886,7 @@ export class PlayerCombat implements GameSystem {
   /** LMB / debug: fire if wielding a gun, else start a (phased) swing. */
   attack(): void {
     if (this.attackGuard && !this.attackGuard()) return;
-    const w = this.game.player.inv.wielded;
+    const w = this.weapon();
     const style = w?.isGun() ? drawStyle(w) : 'trigger';
     // A bow or sling from `f` / scripts: a snap shot, drawn (or whirled) then loosed at once.
     if (w && style !== 'trigger') {
@@ -904,6 +1038,16 @@ export class PlayerCombat implements GameSystem {
       this.feedback('melee', 'miss', m, m.x, m.y, 0, 0, missReason({ spread: res.hitSpread, dodge: m.dodge() * 5, size: m.sizeMeleePenalty(), stumble: res.stumble }));
       return false;
     }
+    let lastSpecial: { type: string; amount: number }[] | undefined;
+    for (const strike of res.mutationStrikes ?? []) {
+      if (m.dead) break;
+      if (strike.roll() < 0) continue;
+      lastSpecial = applyFlatArmor(strike.damage, m.type.armor);
+      const damage = Math.floor(lastSpecial.reduce((sum, d) => sum + d.amount, 0));
+      if (damage > 0) game.message(hitMessage(mutationStrikeText(strike, m.theName()), damage, false));
+      this.sys.hurt(m, damage, 'player');
+    }
+    if (m.dead) return true;
     let dominant = 'bash', best = 0;
     for (const d of res.damage) if (d.amount > best) (best = d.amount), (dominant = d.type);
     const phrase = (res.technique && techniqueMessage(res.technique, m.theName())) || `You ${meleeVerb(dominant, res.total, (a, b) => rng.int(a, b))} ${m.theName()}`;
@@ -914,6 +1058,12 @@ export class PlayerCombat implements GameSystem {
     const victims = res.outcome?.aoe ? this.aoeVictims(res.outcome.aoe, m, reach) : [];
     const wskill = p.getSkill(p.inv.wielded ? p.inv.wielded.meleeSkill() : 'unarmed');
     this.sys.hurt(m, res.total, 'player', { crit: res.crit || zone === 'head', stagger: free ? 1 + FEEL.aimStaggerPerSkill * (wskill + p.getSkill('melee')) / 2 + (perfect ? 0.3 : 0) + (zone === 'head' ? 0.5 : 0) : undefined });
+    const venom = venomEffect(p);
+    if (venom && !m.dead && venomTriggered(lastSpecial, !!res.primaryUnarmed, res.damage)) {
+      // BN prints the message even when the target shrugs the poison off (add_effect refuses it).
+      game.message(venomMessage(venom, m.theName()), 'c_light_green');
+      if (!m.resistsPoison()) m.addEffect(venom, turnsToSeconds(VENOM_TURNS));
+    }
     const zoneFx = free && res.total > 0 && !m.dead ? this.meleeZoneEffect(m, zone, wskill) : '';
     // Hit-stop: the hands, the swing clock and the struck monster hold for a few frames.
     let stop = 0;
@@ -1042,15 +1192,24 @@ export class PlayerCombat implements GameSystem {
       bestT = t;
       missedBy = perp / m.radius;
     }
-    // Walls stop bullets (windows and other see-through tiles let them through).
+    // Walls stop bullets (windows and other see-through tiles let them through); so does a
+    // vehicle's closed door, board or windshield (BN map::shoot stops a round there unless it
+    // punches through), except on the vehicle you're in.
     const step = 0.1;
     let tx = p.tileX, ty = p.tileY;
+    const vs = this.game.vehicles;
+    const own = vs?.list.length ? vs.driving ?? vs.playerOn()?.v ?? null : null;
+    const vehicleStops = (x: number, y: number) => {
+      if (!vs?.list.length) return false;
+      const o = vs.at(x, y, p.z);
+      return !!o && o.v !== own && !!o.v.obstacleAt(o.mx, o.my);
+    };
     for (let t = 0; t <= bestT; t += step) {
       const x = Math.floor(p.x + dx * t), y = Math.floor(p.y + dy * t);
       if (x === tx && y === ty) continue;
       tx = x;
       ty = y;
-      if (!this.grid.passable(x, y, p.z) && this.grid.opaque(x, y, p.z)) {
+      if (!this.grid.passable(x, y, p.z) && (this.grid.opaque(x, y, p.z) || vehicleStops(x, y))) {
         return { x: p.x + dx * t, y: p.y + dy * t, hit: null, missedBy: 1 };
       }
     }
@@ -1065,18 +1224,25 @@ export class PlayerCombat implements GameSystem {
   fire(): boolean {
     const game = this.game;
     const p = game.player;
-    const gun = p.inv.wielded;
+    const gun = this.weapon();
     if (!gun?.isGun()) {
       game.message("You're not wielding a gun.");
       return false;
     }
     if (this.burst) return false;
     const mode = currentMode(gun);
-    const n = Math.max(1, Math.min(mode.qty, gun.ammoRemaining() || 1));
+    // BN ranged::fire_gun caps the burst by ammo (ammo_left / ammo_required); a gun needing none
+    // (bionic fake guns) fires the full mode count, each shot then gated by power in fireOne.
+    const need = ammoRequired(gun);
+    // UPS-powered guns are capped the same way by carried UPS charge (charges_of(UPS) / drain).
+    const n = Math.max(1, Math.min(need > 0 ? Math.min(mode.qty, Math.floor(gun.ammoRemaining() / need)) : mode.qty, upsShots(p, gun)));
     const shot = this.fireOne(gun, n > 1);
     if (!shot) return false;
     if (n > 1) this.burst = { gun, left: n - 1, timer: BURST_INTERVAL, delay: shot.delayedRecoil ?? 0, cooldown: shot.cooldownSeconds };
-    else applyDelayedRecoil(p, shot.delayedRecoil ?? 0);
+    else {
+      applyDelayedRecoil(p, shot.delayedRecoil ?? 0);
+      this.afterBionicShot(gun);
+    }
     // The trigger can't be pulled again until the whole burst is out.
     this.cooldown = shot.cooldownSeconds + (n - 1) * BURST_INTERVAL;
     return true;
@@ -1087,27 +1253,53 @@ export class PlayerCombat implements GameSystem {
     const game = this.game;
     const p = game.player;
     const rng = this.sys.rng;
+    const session = bionicGunSession(game);
+    const bionic = session?.gun === gun ? session : null;
+    if (bionic && !canPayShot(bionic)) {
+      this.refuse(`not enough bionic power (${bionic.cost} kJ per shot)`);
+      return null;
+    }
     const cls = rangedClass(gun);
     const flies = fliesVisibly(cls);
+    const mounted = this.mounted?.is(gun) ? this.mounted : null;
+    if (mounted) {
+      const why = mounted.refuse(gun);
+      if (why) {
+        this.refuse(why);
+        this.cooldown = Math.max(this.cooldown, 0.15);
+        return null;
+      }
+    }
+    // BN turret_data::prepare_fire: a turret shot sees only the vehicle's recoil, and the
+    // gunner's own is put back afterwards (post_fire).
+    const keepRecoil = p.recoil;
+    if (mounted) p.recoil = mounted.recoil();
     // What made this shot wide, source by source, before the shot's own recoil lands.
     const spread = dispersionBreakdown(p, gun);
     const ammo = gun.ammoData() ?? null;
     const shot = fireGun(p, gun, rng, { burst, recover: flies });
+    if (mounted) {
+      p.recoil = keepRecoil;
+      shot.delayedRecoil = 0;
+    }
     if (!shot.ok) {
       if (!canDraw(gun, p)) this.refuse(`too weak to draw this ${cls === 'bow' ? 'bow' : 'weapon'} (Str ${strNeeded(gun)} needed)`);
-      else if (gun.ammoRemaining() <= 0) this.refuse(flies ? `no ${cls === 'bow' ? 'arrows' : cls === 'crossbow' ? 'bolt loaded: press r' : 'stones'}` : 'empty: press r to reload');
+      else if (upsShots(p, gun) < 1) this.refuse('not enough UPS charge');
+      else if (gun.ammoRemaining() < ammoRequired(gun)) this.refuse(flies ? `no ${cls === 'bow' ? 'arrows' : cls === 'crossbow' ? 'bolt loaded: press r' : 'stones'}` : 'empty: press r to reload');
       // A dry click is a firearm thing; an empty bow is just silent.
       if (!flies) sfx.gunEmpty();
       this.cooldown = 0.25;
       return null;
     }
+    // Only a shot that actually fired is paid for (aim_activity_actor::finish: cost × shots_fired).
+    if (bionic) payShot(bionic);
     this.shots++;
     this.lastShotAt = this.time;
     this.lastShotClass = cls;
     if (hasMuzzleFlash(cls)) this.flashShots++;
     // Kick scaled by the round's recoil (MOA added; ~150-250 for a 9 mm pistol), and by what
     // kind of launcher it is: a bow barely moves on release.
-    const kick = Math.max(0.4, Math.min(2.5, (shot.addedRecoil ?? 200) / 200)) * kickScale(cls);
+    const kick = mounted ? 0 : Math.max(0.4, Math.min(2.5, (shot.addedRecoil ?? 200) / 200)) * kickScale(cls);
     const vm = this.viewmodel();
     if (vm?.recoil) vm.recoil(kick, { flash: hasMuzzleFlash(cls), cls });
     else vm?.attack('fire');
@@ -1116,6 +1308,12 @@ export class PlayerCombat implements GameSystem {
     // CDDA make_gun_sound_effect: silent weapons make no sound at all.
     if (shot.noise.volume > 0) this.sys.emitSound(p.x, p.y, p.z, shot.noise.volume, shot.noise.sound || 'Bang!', 'player', '');
     const range = Math.max(1, shot.range || 30);
+    if (mounted) {
+      // Turrets always aim freely along the crosshair (the dice model's cone is applied as an
+      // offset of the same ray): the round leaves the muzzle toward what the crosshair is on.
+      this.fireFree(gun, cls, shot, ammo ?? undefined, range, spread, mounted);
+      return shot;
+    }
     if (freeAim()) return this.fireFree(gun, cls, shot, ammo ?? undefined, range, spread);
     // Dispersion becomes a sideways offset (the vertical part of the cone can't miss a sprite
     // that already fills the crosshair's column, so only the horizontal component matters).
@@ -1127,25 +1325,36 @@ export class PlayerCombat implements GameSystem {
       return shot;
     }
     const hit = this.castRay(yaw, range);
-    const npcHit = this.npcShot?.(yaw, Math.hypot(hit.x - p.x, hit.y - p.y), shot);
-    if (npcHit) {
-      this.tracers.push({ x0: p.x, y0: p.y, x1: npcHit.x, y1: npcHit.y, z: p.z, t: 0.08 });
-      return shot;
-    }
+    // An NPC nearer than what the round would otherwise reach takes it (npcfire.ts).
+    const npcMain = this.npcOnLine(yaw, Math.hypot(hit.x - p.x, hit.y - p.y));
+    const aimedNpc = this.crosshairNpc(range * 1.6);
     const pellets = shot.pellets ?? 1;
-    // Shotguns: point-blank the whole load hits as one; farther out each pellet flies on its
-    // own line off the aim (ballistics.cpp shot_spread) for shot_damage each.
-    const pointBlank = hit.hit && Math.hypot(hit.hit.x - p.x, hit.hit.y - p.y) <= 1.6;
-    if (pellets <= 1 || pointBlank || !shot.shotDamage) {
+    // BN shots retain all pellets at every range; legacy projectile_count ammunition
+    // retains its point-blank whole-load model. Each BN pellet uses normal gun damage.
+    const pointBlank = npcMain ? npcMain.s <= 1.6 : hit.hit && Math.hypot(hit.hit.x - p.x, hit.hit.y - p.y) <= 1.6;
+    if (pellets <= 1 || (pointBlank && shot.shotHalfAngle === undefined) || !shot.shotDamage) {
+      if (npcMain) {
+        this.tracers.push({ x0: p.x, y0: p.y, x1: p.x + Math.sin(yaw) * npcMain.s, y1: p.y - Math.cos(yaw) * npcMain.s, z: p.z, t: 0.08 });
+        this.shootNpcs(new Map([[npcMain.n, [npcMain]]]), shot, shot.damage, { cls, gun, free: false, perfect: false, aimed: aimedNpc, what: null, speed: GUN_PROJECTILE_SPEED });
+        return shot;
+      }
       this.tracers.push({ x0: p.x, y0: p.y, x1: hit.x, y1: hit.y, z: p.z, t: 0.08 });
       const why = meant && hit.hit !== meant.m ? this.hitscanMissWhy(hit, meant, range, spread, gun, cls) : undefined;
-      this.impact(hit, shot, shot.damage, true, why, cls);
+      this.impact(hit, shot, shot.damage, true, why, cls, gun);
       return shot;
     }
     const perMonster = new Map<Monster, { n: number; total: number }>();
+    const perNpc = new Map<NpcBody, NpcProjectileHit[]>();
     for (let i = 0; i < pellets; i++) {
-      const py = yaw + pelletAngle(shot.shotSpreadMoa ?? 0, rng);
+      const py = yaw + pelletAngle(shot.shotSpreadMoa ?? 0, rng, shot.shotHalfAngle);
       const h = this.castRay(py, range);
+      // Each pellet finds its own first body: an NPC nearer than its monster/wall takes it.
+      const nh = this.npcOnLine(py, Math.hypot(h.x - p.x, h.y - p.y));
+      if (nh) {
+        if (i < 12) this.tracers.push({ x0: p.x, y0: p.y, x1: p.x + Math.sin(py) * nh.s, y1: p.y - Math.cos(py) * nh.s, z: p.z, t: 0.06 });
+        perNpc.set(nh.n, [...(perNpc.get(nh.n) ?? []), nh]);
+        continue;
+      }
       if (i < 12) this.tracers.push({ x0: p.x, y0: p.y, x1: h.x, y1: h.y, z: p.z, t: 0.06 });
       if (!h.hit) continue;
       const units = shot.shotDamage.map((d) => ({ type: d.type, amount: d.amount, armor_penetration: d.armor_penetration, armor_multiplier: 1 }));
@@ -1155,7 +1364,8 @@ export class PlayerCombat implements GameSystem {
       e.total += dmg;
       perMonster.set(h.hit, e);
     }
-    if (!perMonster.size) {
+    if (perNpc.size) this.shootNpcs(perNpc, shot, shot.shotDamage, { cls, gun, free: false, perfect: false, aimed: aimedNpc, what: null, speed: GUN_PROJECTILE_SPEED, multi: true });
+    if (!perMonster.size && !perNpc.size) {
       sfx.bulletHit('wall', { x: hit.x, y: hit.y, z: p.z });
       const reason = meant ? this.hitscanMissWhy(hit, meant, range, spread, gun, cls) : undefined;
       game.events.emit('playerAttack', { kind: 'gun', outcome: 'whiff', x: hit.x, y: hit.y, z: p.z, damage: 0, heavy: false, blood: null, reason, ranged: cls, landed: true });
@@ -1181,14 +1391,31 @@ export class PlayerCombat implements GameSystem {
    * body the ray enters (freeHit); arrows, bolts and stones fly along it (launch). Shotgun pellets
    * still spread around the aim point: that cone is the weapon's, not the shooter's.
    */
-  private fireFree(gun: Item, cls: RangedClass, shot: ShotResult, ammo: ItemDef | undefined, range: number, spread: DispersionBreakdown): ShotResult {
+  private fireFree(gun: Item, cls: RangedClass, shot: ShotResult, ammo: ItemDef | undefined, range: number, spread: DispersionBreakdown, mounted: MountedFire | null = null): ShotResult {
     const game = this.game;
     const p = game.player;
     const rng = this.sys.rng;
     const off = this.aim.shotOffset(this.nowMs());
-    const ray = this.aimRay(off, range);
+    let ray = this.aimRay(off, range);
+    // The dice model has no reticle: a turret round still leaves along the crosshair, wide by the rolled cone.
+    if (mounted && !freeAim()) ray = { ...ray, ...aimDirection(ray.yaw, ray.pitch, shot.spread * Math.cos(shot.azimuth), shot.spread * Math.sin(shot.azimuth)) };
+    if (mounted) {
+      // A turret: from the muzzle toward the point under the crosshair (the barrel sits away
+      // from the eye; aiming at what you see is what the gunner's sight does).
+      const far = this.castAim(ray.yaw, ray.pitch, range * 1.6 + 4, undefined, ray.o);
+      const m = mounted.muzzle();
+      const d = { x: far.x - m.x, y: far.y - m.y, h: far.hAbs - m.h };
+      ray = Math.hypot(d.x, d.y) > 2 ? { o: m, ...yawPitch(d) } : { ...ray, o: m };
+    }
     const dir = { yaw: ray.yaw, pitch: ray.pitch };
-    this.aim.kick((shot.addedRecoil ?? 0) * kickScale(cls), rng.next() * 2 - 1);
+    this.aim.kick(mounted ? mounted.kick(gun) : (shot.addedRecoil ?? 0) * kickScale(cls), rng.next() * 2 - 1);
+    if (mounted) {
+      const end = this.castAim(dir.yaw, dir.pitch, range, undefined, ray.o);
+      mounted.fired(gun, shot, { x: end.x, y: end.y, h: end.hAbs });
+    }
+    // Tracers leave the muzzle for a turret, the survivor otherwise.
+    const tx = mounted ? ray.o.x : p.x, ty = mounted ? ray.o.y : p.y;
+    const th = mounted ? { h0: ray.o.h, heavy: (ammo?.weight ?? 0) >= 5000 } : null;
     // Timing: a breath held into its steady flash, or a perfect active reload banked for this shot.
     const skill = this.aimSkill(gun);
     const perfect = timingGames() && (this.breath.perfect(skill) || this.perfectNext);
@@ -1200,35 +1427,60 @@ export class PlayerCombat implements GameSystem {
       return shot;
     }
     const pellets = shot.pellets ?? 1;
-    const hit = this.castAim(dir.yaw, dir.pitch, range, undefined, ray.o);
-    const npcHit = this.npcShot?.(dir.yaw, hit.dist, shot);
-    if (npcHit) {
-      this.tracers.push({ x0: p.x, y0: p.y, x1: npcHit.x, y1: npcHit.y, z: p.z, t: 0.08 });
-      return shot;
+    let hit = this.castAim(dir.yaw, dir.pitch, range, undefined, ray.o);
+    // BN: the monster the round reaches may avoid it (freeDodge); it then flies on to what's behind.
+    const avoided: Monster[] = [];
+    while (pellets <= 1 && hit.hit && avoided.length < 4) {
+      const mb = this.freeDodge(hit.hit, hit.missedBy, GUN_PROJECTILE_SPEED, ray.o);
+      if (mb !== null) {
+        hit = { ...hit, missedBy: mb };
+        break;
+      }
+      avoided.push(hit.hit);
+      hit = this.castAim(dir.yaw, dir.pitch, range, (mm) => avoided.includes(mm), ray.o);
     }
-    const pointBlank = hit.hit && hit.dist <= 1.6;
-    if (pellets <= 1 || pointBlank || !shot.shotDamage) {
-      this.tracers.push({ x0: p.x, y0: p.y, x1: hit.x, y1: hit.y, z: p.z, t: 0.08 });
+    // An NPC body the reticle's ray enters before that monster/wall takes the round (npcfire.ts).
+    const npcMain = this.npcOnRay(ray.o, dir.yaw, dir.pitch, hit);
+    const aimedNpc = this.crosshairNpc(range * 1.6);
+    const pointBlank = npcMain ? npcMain.s <= 1.6 : hit.hit && hit.dist <= 1.6;
+    if (pellets <= 1 || (pointBlank && shot.shotHalfAngle === undefined) || !shot.shotDamage) {
+      if (npcMain) {
+        this.tracers.push({ x0: tx, y0: ty, x1: ray.o.x + Math.sin(dir.yaw) * npcMain.s, y1: ray.o.y - Math.cos(dir.yaw) * npcMain.s, z: p.z, t: 0.08, ...(th ?? {}) });
+        this.shootNpcs(new Map([[npcMain.n, [npcMain]]]), shot, shot.damage, { cls, gun, free: true, perfect, aimed: aimedNpc, what: null, speed: GUN_PROJECTILE_SPEED });
+        return shot;
+      }
+      this.tracers.push({ x0: tx, y0: ty, x1: hit.x, y1: hit.y, z: p.z, t: 0.08, ...(th ? { ...th, h1: hit.hAbs } : {}) });
       if (hit.hit) {
         const r = this.freeHit(hit.hit, shot.damage, { zone: hit.zone, missedBy: hit.missedBy, perfect, cls, gun });
         sfx.bulletHit('flesh', hit.hit);
         this.ammoEffectsAt(shot, hit.hit.x, hit.hit.y, hit.hit, r.total);
       } else {
         sfx.bulletHit('wall', { x: hit.x, y: hit.y, z: p.z });
-        game.events.emit('playerAttack', { kind: 'gun', outcome: 'whiff', x: hit.x, y: hit.y, z: p.z, damage: 0, heavy: false, blood: null, reason: this.freeMissWhy(hit, range), ranged: cls, landed: hit.stop !== 'range' });
+        game.events.emit('playerAttack', { kind: 'gun', outcome: 'whiff', x: hit.x, y: hit.y, z: p.z, damage: 0, heavy: false, blood: null, reason: avoided.length ? 'dodged' : this.freeMissWhy(hit, range), ranged: cls, landed: hit.stop !== 'range' });
+        if (hit.vehicle) this.shootVehicle(hit.vehicle, shot.damage, shot.ammoEffects ?? []);
         this.ammoEffectsAt(shot, hit.x, hit.y, null, 0);
       }
       return shot;
     }
     // Pellets: each on its own line off the aim point (ballistics.cpp shot_spread), in any direction.
     const perMonster = new Map<Monster, { n: number; total: number; head: number }>();
+    const perNpc = new Map<NpcBody, NpcProjectileHit[]>();
     const q = hitDamageMul({ zone: 'torso', graze: false, weakSpot: false, perfect, skill });
     for (let i = 0; i < pellets; i++) {
-      const a = pelletAngle(shot.shotSpreadMoa ?? 0, rng), phi = rng.next() * Math.PI * 2;
+      const a = pelletAngle(shot.shotSpreadMoa ?? 0, rng, shot.shotHalfAngle), phi = rng.next() * Math.PI * 2;
       const d2 = aimDirection(dir.yaw, dir.pitch, a * Math.cos(phi), a * Math.sin(phi));
       const h = this.castAim(d2.yaw, d2.pitch, range, undefined, ray.o);
-      if (i < 12) this.tracers.push({ x0: p.x, y0: p.y, x1: h.x, y1: h.y, z: p.z, t: 0.06 });
-      if (!h.hit) continue;
+      const nh = this.npcOnRay(ray.o, d2.yaw, d2.pitch, h);
+      if (nh) {
+        if (i < 12) this.tracers.push({ x0: tx, y0: ty, x1: ray.o.x + Math.sin(d2.yaw) * nh.s, y1: ray.o.y - Math.cos(d2.yaw) * nh.s, z: p.z, t: 0.06, ...(th ?? {}) });
+        perNpc.set(nh.n, [...(perNpc.get(nh.n) ?? []), nh]);
+        continue;
+      }
+      if (i < 12) this.tracers.push({ x0: tx, y0: ty, x1: h.x, y1: h.y, z: p.z, t: 0.06, ...(th ? { ...th, h1: h.hAbs } : {}) });
+      if (!h.hit) {
+        if (h.vehicle) this.shootVehicle(h.vehicle, shot.shotDamage, shot.ammoEffects ?? []);
+        continue;
+      }
       const zoneMul = h.zone === 'head' ? FEEL.aimHeadMul : h.zone === 'legs' ? FEEL.aimLegMul : 1;
       const units = shot.shotDamage.map((d) => ({ type: d.type, amount: d.amount * q.mul * zoneMul, armor_penetration: d.armor_penetration, armor_multiplier: 1 }));
       const dmg = applyFlatArmor(units, h.hit.type.armor).reduce((s, d) => s + d.amount, 0);
@@ -1238,7 +1490,8 @@ export class PlayerCombat implements GameSystem {
       if (h.zone === 'head') e.head++;
       perMonster.set(h.hit, e);
     }
-    if (!perMonster.size) {
+    if (perNpc.size) this.shootNpcs(perNpc, shot, shot.shotDamage, { cls, gun, free: true, perfect, aimed: aimedNpc, what: null, speed: GUN_PROJECTILE_SPEED, multi: true });
+    if (!perMonster.size && !perNpc.size) {
       sfx.bulletHit('wall', { x: hit.x, y: hit.y, z: p.z });
       game.events.emit('playerAttack', { kind: 'gun', outcome: 'whiff', x: hit.x, y: hit.y, z: p.z, damage: 0, heavy: false, blood: null, reason: this.freeMissWhy(hit, range), ranged: cls, landed: true });
     }
@@ -1271,8 +1524,60 @@ export class PlayerCombat implements GameSystem {
     return undefined;
   }
 
+  /**
+   * The NPC the crosshair is on: the first body the crosshair's own ray (no sway) enters, before
+   * any monster or wall, within `reach` m. BN's accepted target; an NPC the round meets on the
+   * way to a zombie under the crosshair is a bystander. (The look ray is tile-granular, too
+   * coarse for this: a person half a metre beside the line shares its tile.)
+   */
+  crosshairNpc(reach: number): NpcBody | null {
+    if (!this.npcFire) return null;
+    const ray = this.aimRay({ x: 0, y: 0, rx: 0, ry: 0 }, reach);
+    const hit = this.castAim(ray.yaw, ray.pitch, reach, undefined, ray.o);
+    return this.npcOnRay(ray.o, ray.yaw, ray.pitch, hit)?.n ?? null;
+  }
+
+  /** The first NPC on the classic hitscan line before plan distance `limit` (npcfire.ts). */
+  private npcOnLine(yaw: number, limit: number): NpcRayHit | null {
+    if (!this.npcFire) return null;
+    const p = this.game.player;
+    return npcOnLine(this.npcFire.bodies(), p.x, p.y, yaw, limit, { shooter: p });
+  }
+
+  /** The first NPC body the free-aim ray from `o` enters before what castAim found (`hit`). */
+  private npcOnRay(o: Vec3, yaw: number, pitch: number, hit: AimHit): NpcRayHit | null {
+    if (!this.npcFire) return null;
+    return npcOnRay(this.npcFire.bodies(), o, yaw, pitch, Math.hypot(hit.x - o.x, hit.y - o.y), { shooter: this.game.player });
+  }
+
+  /**
+   * Projectiles that reached NPCs (each pellet listed separately): npcfire.ts applies them per
+   * NPC (armor once per projectile, kill credit, BN's anger rules); here the hit marker and the
+   * round's ammo effects at the body. Returns the totals over all NPCs.
+   */
+  private shootNpcs(
+    hits: Map<NpcBody, NpcProjectileHit[]>, shot: ShotResult, damage: ShotResult['damage'],
+    o: { cls: RangedClass; gun: Item; free: boolean; perfect: boolean; aimed: unknown; what: string | null; speed: number; multi?: boolean },
+  ): { total: number; landed: number } {
+    let total = 0, landed = 0;
+    for (const [n, list] of hits) {
+      if (n.dead || !this.npcFire) continue;
+      const r = this.npcFire.hit(n, { hits: list, damage, what: o.what, free: o.free, perfect: o.perfect, gun: o.gun, speed: o.speed, intended: n === o.aimed, multi: o.multi });
+      total += r.total;
+      landed += r.landed;
+      if (!r.landed) continue;
+      const text = o.multi || list.length > 1 ? `${r.landed}/${shot.pellets ?? list.length} pellets` : r.total > 0 ? undefined : 'no damage';
+      this.game.events.emit('playerAttack', {
+        kind: 'gun', outcome: r.dead ? 'kill' : r.total <= 0 ? 'block' : r.head ? 'crit' : 'hit', x: n.x, y: n.y, z: n.z, damage: r.total,
+        heavy: r.total >= 20, blood: 'fd_blood', reason: text, ranged: o.cls,
+      });
+      this.ammoEffectsAt(shot, n.x, n.y, null, r.total);
+    }
+    return { total, landed };
+  }
+
   /** A single projectile's impact: CDDA damage bands on a monster, or a wall. */
-  private impact(hit: { x: number; y: number; hit: Monster | null; missedBy: number }, shot: ShotResult, damage: ShotResult['damage'], primary: boolean, why?: string, cls: RangedClass = 'firearm'): void {
+  private impact(hit: { x: number; y: number; hit: Monster | null; missedBy: number }, shot: ShotResult, damage: ShotResult['damage'], primary: boolean, why: string | undefined, cls: RangedClass, gun: Item): void {
     const game = this.game;
     const p = game.player;
     const rng = this.sys.rng;
@@ -1285,9 +1590,9 @@ export class PlayerCombat implements GameSystem {
     const m = hit.hit;
     m.aggroCharacter = true;
     // BN Creature::deal_projectile_attack (src/game/projectile.ts): severity multiplier and
-    // hit location from how well the round landed and how steady the shooter is.
-    const gun = p.inv.wielded;
-    const skill = gun?.def.skill ? p.getSkill(String(gun.def.skill)) : 0;
+    // hit location from how well the round landed and how steady the shooter is. `gun` is the one
+    // that fired this round (a bionic gun's session may have ended since), not what's in hand now.
+    const skill = gun.def.skill ? p.getSkill(String(gun.def.skill)) : 0;
     const r = projectileHit(
       { dodgeRoll: m.dodge() * 5, isCharacter: false, flags: m.type.flags },
       { missedBy: hit.missedBy, shooter: { dex: p.dex, per: p.per, skill, steadiness: Math.max(1, p.stamina) / Math.max(1, p.staminaMax()), isPlayer: true } },
@@ -1460,7 +1765,7 @@ export class PlayerCombat implements GameSystem {
    */
   bowPose(): { style: DrawStyle; cls: RangedClass; draw: number; nocked: boolean; shake: number; whirl: number } | null {
     const p = this.game.player;
-    const gun = p.inv.wielded;
+    const gun = this.weapon();
     if (!gun?.isGun()) return null;
     const style = drawStyle(gun);
     if (style === 'trigger') return null;
@@ -1486,7 +1791,7 @@ export class PlayerCombat implements GameSystem {
     const speed = flightSpeed(cls, Number(ammo?.speed) || 100);
     // Free aim: from where the shot ray starts (the drawn eye, which rides the ground relief the
     // drawn bodies stand on), so the arc and the models share one space.
-    const eye = free?.eye ?? (p.crouching ? 1.0 : 1.6);
+    const eye = free?.eye ?? this.eye().h - p.z * LEVEL_HEIGHT;
     // The arc meets the crosshair where the survivor aimed: the target, else where the view ray
     // reaches the ground or a wall, never past the range. Free aim: where the reticle's ray ends.
     let aimDist = range;
@@ -1504,6 +1809,7 @@ export class PlayerCombat implements GameSystem {
       x0: p.x, y0: p.y, z: p.z, dx, dy, yaw, s: 0, x: p.x, y: p.y, h: eye - LAUNCH_DROP, speed, range, arc, cls, gun, ammo, shot,
       round: shot.round ?? null, intended: meant?.m ?? null, intendedDist: meant?.dist ?? 0, spread,
       passed: new Set(), overflew: new Set(), explained: false, done: false, free: !!free, perfect: free?.perfect ?? false,
+      aimedNpc: this.crosshairNpc(range * 1.6),
     });
   }
 
@@ -1528,10 +1834,19 @@ export class PlayerCombat implements GameSystem {
     const maxS = f.range * 1.6 + 2;
     const s1 = Math.min(maxS, s0 + f.speed * dt);
     let ground = s1 >= maxS ? maxS : Infinity;
+    // A ceiling over the flight stops it as the floor does (BN's projectile never leaves its
+    // level; the arc is the picture): an arrow loosed up indoors drops from the ceiling.
+    let ceiling = false;
     for (let s = s0 + 0.2; s < s1 + 0.2; s += 0.2) {
       const q = Math.min(s, s1);
-      if (arcHeight(q, f.arc) <= 0.02) {
+      const h = arcHeight(q, f.arc);
+      if (h <= 0.02) {
         ground = q;
+        break;
+      }
+      if (h >= LEVEL_HEIGHT - 0.05 && this.game.map.hasFloor(Math.floor(f.x0 + f.dx * q), Math.floor(f.y0 + f.dy * q), f.z + 1)) {
+        ground = q;
+        ceiling = true;
         break;
       }
     }
@@ -1580,33 +1895,30 @@ export class PlayerCombat implements GameSystem {
       hitPerp = perp;
       hitZone = undefined;
     }
-    // NPCs on the way (followers too: friendly fire) take the round before anything behind them.
-    const npcHook = this.npcRound;
-    if (npcHook) {
-      const npcs = (this.game as unknown as { npcs?: { npcs: { x: number; y: number; z: number; dead?: boolean }[] } }).npcs?.npcs ?? [];
-      let hitN: { x: number; y: number; z: number } | null = null, nS = Math.min(hitS, wall), nPerp = 0;
-      for (const n of npcs) {
-        if (n.dead || n.z !== f.z) continue;
-        const ox = n.x - f.x0, oy = n.y - f.y0;
-        const t = ox * f.dx + oy * f.dy;
-        if (t <= s0 || t > end || t > f.range || t >= nS) continue;
-        const perp = Math.abs(ox * f.dy - oy * f.dx);
-        if (perp > CREATURE_RADIUS + 0.05) continue;
-        const h = arcHeight(t, f.arc);
-        if (h < 0 || h > 1.85) continue;
-        hitN = n;
-        nS = t;
-        nPerp = perp;
-      }
-      if (hitN) {
-        this.placeFlight(f, nS);
+    // NPCs on the way (followers and neutrals too) take the round before anything behind them.
+    if (this.npcFire) {
+      const passedNpcs = f.passedNpcs;
+      const nh = npcOnArc(this.npcFire.bodies(), f, s0, Math.min(end, f.range), Math.min(hitS, wall), (s) => arcHeight(s, f.arc), {
+        shooter: { x: f.x0, y: f.y0, z: f.z }, seg: f.free ? { o: segO, d: segD, n: segN } : undefined, skip: passedNpcs ? (n) => passedNpcs.has(n) : undefined,
+      });
+      if (nh) {
+        this.placeFlight(f, nh.s);
+        const what = defName(f.ammo);
+        const speed = (Number(f.ammo?.speed) || 100) + (Number(f.gun.def.speed) || 0);
+        const r = this.shootNpcs(new Map([[nh.n, [nh]]]), f.shot, f.shot.damage, { cls: f.cls, gun: f.gun, free: !!f.free, perfect: !!f.perfect, aimed: f.aimedNpc ?? null, what, speed });
+        if (!r.landed) {
+          // Avoided (BN goodhit >= 1): it flies on past them.
+          (f.passedNpcs ??= new Set()).add(nh.n);
+          sfx.arrowFly({ x: nh.n.x, y: nh.n.y, z: f.z });
+          return;
+        }
         f.done = true;
         f.explained = true;
-        npcHook(hitN, f.shot, nPerp / (CREATURE_RADIUS + 0.05), defName(f.ammo));
         const round = f.round;
         f.round = null;
-        if (round) this.placeRound(round, hitN.x, hitN.y, f.z, 0.05, f.yaw, 'ground');
-        else if (f.shot.broke) this.game.message(`Your ${defName(f.ammo)} breaks.`, 'c_dark_gray');
+        // BN drop_or_embed_projectile embeds only in monsters: it drops at the person's feet.
+        if (round) this.placeRound(round, nh.n.x, nh.n.y, f.z, 0.05, f.yaw, 'ground');
+        else if (f.shot.broke) this.game.message(`Your ${what} breaks.`, 'c_dark_gray');
         return;
       }
     }
@@ -1632,6 +1944,8 @@ export class PlayerCombat implements GameSystem {
     }
     if (ground <= s1) {
       this.placeFlight(f, ground);
+      // From a ceiling it drops to the floor under the spot it struck.
+      if (ceiling) f.h = 0;
       this.flightLands(f, 'ground');
       return;
     }
@@ -1704,12 +2018,24 @@ export class PlayerCombat implements GameSystem {
     return this.flightStruck(f, m, dealtUnits);
   }
 
-  /** Free aim: an arrow reaching a body strikes it where it arrives (height -> zone); no dice. */
+  /**
+   * Free aim: an arrow reaching a body strikes it where it arrives (height -> zone). The only dice
+   * are BN's dodge (freeDodge, at the arrow's speed): a dodged arrow flies on (returns false).
+   */
   private flightHitsFree(f: Flight, m: Monster, perp: number, zone?: HitZone): boolean {
+    const missedBy = this.freeDodge(m, perp / (m.radius * 1.1), (Number(f.ammo?.speed) || 100) + (Number(f.gun.def.speed) || 0), { x: f.x0, y: f.y0 });
+    if (missedBy === null) {
+      if (m === f.intended) {
+        f.explained = true;
+        this.feedback('gun', 'miss', m, m.x, m.y, 0, 0, 'dodged', { ranged: f.cls });
+      }
+      sfx.arrowFly({ x: m.x, y: m.y, z: m.z });
+      return false;
+    }
     const body = aimHooks.body?.(m, Math.hypot(m.x - f.x0, m.y - f.y0)) ?? { height: bodyHeightOf(m), lift: 0 };
     const hFrac = Math.max(0, Math.min(1, (f.h - body.lift) / body.height));
     sfx.arrowHit('flesh', m);
-    const r = this.freeHit(m, f.shot.damage, { zone: zone ?? aimHooks.hitZone(m, hFrac), missedBy: perp / (m.radius * 1.1), perfect: !!f.perfect, name: defName(f.ammo), cls: f.cls, gun: f.gun });
+    const r = this.freeHit(m, f.shot.damage, { zone: zone ?? aimHooks.hitZone(m, hFrac), missedBy, perfect: !!f.perfect, name: defName(f.ammo), cls: f.cls, gun: f.gun });
     f.explained = true;
     this.ammoEffectsAt(f.shot, m.x, m.y, m, r.total);
     return this.flightStruck(f, m, r.dealt);
@@ -1791,7 +2117,8 @@ export class PlayerCombat implements GameSystem {
     const game = this.game;
     const z = game.player.z;
     const rng = this.sys.rng;
-    const table = (game.data.misc?.ammo_effect ?? {}) as Record<string, { explosion?: { power?: number; distance_factor?: number; fire?: boolean }; aoe?: { field_type: string; intensity_min?: number; intensity_max?: number; size?: number }[] }>;
+    type Aoe = { field_type?: string; intensity_min?: number; intensity_max?: number; radius?: number; chance?: number };
+    const table = (game.data.misc?.ammo_effect ?? {}) as Record<string, { explosion?: unknown; aoe?: Aoe | Aoe[] }>;
     for (const id of shot.ammoEffects ?? []) {
       if (id === 'INCENDIARY') {
         const amount = dealt > 2 ? dealt / 2 : rng.oneIn(2) ? 1 : 0;
@@ -1801,12 +2128,24 @@ export class PlayerCombat implements GameSystem {
         } else if (!m && rng.oneIn(4)) this.hooks.ignite?.(Math.floor(x), Math.floor(y), z);
       }
       const eff = table[id];
-      for (const a of eff?.aoe ?? []) {
-        const r = Math.max(0, Math.floor((a.size ?? 1) / 2));
+      // BN projectile.cpp apply_ammo_effects: the extracted `aoe` is one object (ammo_effect.cpp
+      // loader defaults radius 1, chance 100); every tile within `radius` rolls `chance`% for a
+      // field of rng(intensity_min, intensity_max). The sees/passable checks are not modelled.
+      for (const a of asArray(eff?.aoe)) {
+        if (!a.field_type || a.field_type === 'fd_null') continue;
+        const r = Math.max(0, Math.floor(a.radius ?? 1));
+        const chance = a.chance ?? 100;
         for (let dy = -r; dy <= r; dy++)
-          for (let dx = -r; dx <= r; dx++) this.hooks.addField?.(Math.floor(x) + dx, Math.floor(y) + dy, z, a.field_type, rng.int(a.intensity_min ?? 1, a.intensity_max ?? a.intensity_min ?? 1));
+          for (let dx = -r; dx <= r; dx++) {
+            if (rng.next() * 100 >= chance) continue;
+            this.hooks.addField?.(Math.floor(x) + dx, Math.floor(y) + dy, z, a.field_type, rng.int(a.intensity_min ?? 0, a.intensity_max ?? a.intensity_min ?? 0));
+          }
       }
-      if (eff?.explosion?.power) this.hooks.explode?.(x, y, z, eff.explosion.power, eff.explosion.distance_factor ?? 0.75, !!eff.explosion.fire);
+      // Every ammo effect's `explosion`, legacy `power` or new `damage`/`radius`/`fragment`
+      // (EXPLOSIVE, the 40 mm HEDP's AMMO_M433_HEDP…), goes off by explosion.cpp's rules (blast.ts).
+      if (eff?.explosion) this.hooks.blast?.(x, y, z, eff.explosion);
+      // BN ranged.cpp: CUSTOM_EXPLOSION blows up with the round's own "explosion" data.
+      if (id === 'CUSTOM_EXPLOSION' && shot.explosion) this.hooks.blast?.(x, y, z, shot.explosion);
     }
   }
 
@@ -1820,7 +2159,8 @@ export class PlayerCombat implements GameSystem {
   hooks: {
     ignite?: (x: number, y: number, z: number) => void;
     addField?: (x: number, y: number, z: number, type: string, intensity: number) => void;
-    explode?: (x: number, y: number, z: number, power: number, factor: number, fire: boolean) => void;
+    /** A BN `explosion` object of any format, by explosion.cpp's rules (blast.ts detonate). */
+    blast?: (x: number, y: number, z: number, explosion: unknown) => void;
   } = {};
 
   /** Burst in progress: rounds left, time to the next one, recoil held back until the end. */
@@ -1830,22 +2170,40 @@ export class PlayerCombat implements GameSystem {
     const b = this.burst;
     if (!b) return;
     const p = this.game.player;
-    if (p.inv.wielded !== b.gun || p.dead) {
-      applyDelayedRecoil(p, b.delay);
-      this.burst = null;
+    if (this.weapon() !== b.gun || p.dead) {
+      this.endBurst(b);
       return;
     }
     b.timer -= dt;
     while (this.burst && b.timer <= 0) {
       const shot = this.fireOne(b.gun, true);
-      b.left--;
       b.timer += BURST_INTERVAL;
-      if (shot) b.delay += shot.delayedRecoil ?? 0;
+      // `left` counts rounds not yet fired, so a refused round's time is given back by endBurst.
+      if (shot) {
+        b.left--;
+        b.delay += shot.delayedRecoil ?? 0;
+      }
       if (!shot || b.left <= 0) {
-        applyDelayedRecoil(p, b.delay);
-        this.burst = null;
+        this.endBurst(b);
+        this.afterBionicShot(b.gun);
       }
     }
+  }
+
+  /** A burst ends (done, stopped short, or its gun gone): absorbed recoil lands, unfired rounds' time is given back. */
+  private endBurst(b: NonNullable<PlayerCombat['burst']>): void {
+    applyDelayedRecoil(this.game.player, b.delay);
+    if (b.left > 0) this.cooldown = Math.max(0, this.cooldown - b.left * BURST_INTERVAL);
+    this.burst = null;
+  }
+
+  /**
+   * After a bionic gun's trigger pull: BN re-aims after firing (AIM_AFTER_FIRING, default on) with
+   * the same fake gun and cost, so the session stays — until the next shot can't be paid.
+   */
+  private afterBionicShot(gun: Item): void {
+    const s = bionicGunSession(this.game);
+    if (s?.gun === gun && !canPayShot(s)) this.cancelBionicGun(`Your ${s.bio.name(s.id)} is out of power (${s.cost} kJ per shot).`);
   }
 
   // ------------------------------------------------------------------ throwing
@@ -1859,6 +2217,9 @@ export class PlayerCombat implements GameSystem {
     r = Math.min(r, p.str + p.getSkill('throw'));
     return Math.max(1, Math.floor(r));
   }
+
+  /** Told where a thrown item came to rest (armed.ts follows a live grenade there). */
+  onThrown?: (it: Item, x: number, y: number, z: number) => void;
 
   throwItem(it: Item | null = this.game.player.inv.wielded): boolean {
     const game = this.game;
@@ -1894,6 +2255,7 @@ export class PlayerCombat implements GameSystem {
       game.message(moved.msg, 'c_light_red');
       return false;
     }
+    this.onThrown?.(moved.item ?? it, land.x, land.y, p.z);
     this.sys.projectiles.push({
       x: p.x, y: p.y, z: p.z, vx: (hit.x - p.x) / 0.25, vy: (hit.y - p.y) / 0.25, t: 0.25,
       glyph: { symbol: it.def.symbol ?? '*', color: it.def.color ?? 'white' },

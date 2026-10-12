@@ -8,13 +8,14 @@ import { hasFlag } from './registry';
 import type { WorldgenData } from './worldgen_data';
 import { MapBuffer, OMT } from './mapgen/buffer';
 import { mapgenForest, mapgenWater, biomeFor, isWaterType, resolveRegional } from './mapgen/builtin';
-import { type BuiltinEnv, runBnBuiltin } from './mapgen/bnbuiltin';
+import { type BuiltinEnv, addManholeLadder, manholeSpot, runBnBuiltin } from './mapgen/bnbuiltin';
 import { mapgenLab } from './mapgen/lab';
 import { Levels, MapgenDat, MapgenEnv, MapgenRunner } from './mapgen/jsonmapgen';
 import { GenStats } from './mapgen/stats';
 import { ArgStores, ParamCtx } from './mapgen/values';
-import { OmtInfo, Overmap, SpecialInstance } from './overmap/overmap';
-import { mapgenIdOf, oterRotation } from './overmap/oter';
+import { OmtInfo, Overmap, SpecialInstance, WORLDGEN_VERSION } from './overmap/overmap';
+import { DIR_SUFFIX, mapgenIdOf, oterId, oterRotation } from './overmap/oter';
+import { weightedPick } from './mapgen/values';
 
 // The world chunk generator: one chunk == one OMT at one z-level. The overmap says what
 // goes where; CDDA JSON mapgen (or a builtin for forests/water) fills the 24x24 tiles.
@@ -47,8 +48,8 @@ export class WorldGenerator implements ChunkGenerator {
   /** update_mapgen runs so far (salts their RNG so repeated updates differ) */
   private updates = 0;
 
-  constructor(readonly seed: number, readonly wg: WorldgenData, readonly game: GameData) {
-    this.overmap = new Overmap(seed, wg.overmap);
+  constructor(readonly seed: number, readonly wg: WorldgenData, readonly game: GameData, readonly genVersion: number = WORLDGEN_VERSION) {
+    this.overmap = new Overmap(seed, wg.overmap, genVersion);
     for (const m of Object.values<any>(game.misc?.ter_furn_migration ?? {})) {
       if (m.from_ter && m.to_ter) this.terMigration.set(m.from_ter, { ter: m.to_ter, furn: m.to_furn });
       if (m.from_furn && m.to_furn) this.furnMigration.set(m.from_furn, m.to_furn);
@@ -280,6 +281,7 @@ export class WorldGenerator implements ChunkGenerator {
       adjRotation: defs[omt.type]?.flags.includes('IGNORE_ROTATION_FOR_ADJACENCY') ? 0 : oterRotation(omt, defs),
       omtAt: (dx, dy, dz) => this.overmap.omtAt(x + dx, y + dy, z + dz),
       predecessors: omt.predecessor ? [omt.predecessor] : [],
+      joinAt: (dir) => this.overmap.joinAt(x, y, z, dir),
       params: new ParamCtx(stores, new Map(), rng),
       rng,
       cityName: city?.name ?? 'illegible city name',
@@ -311,7 +313,10 @@ export class WorldGenerator implements ChunkGenerator {
         mapgenForest(dat, base, this.wg.overmap.region, (ref, rng) => expandItemGroup(this.game, ref as any, rng));
         return 'builtin:forest';
       }
-      if (runBnBuiltin(builtin, this.builtinEnv, dat, base)) return `builtin:${builtin}`;
+      if (runBnBuiltin(builtin, this.builtinEnv, dat, base)) {
+        if (builtin.startsWith('sewer_') || builtin.startsWith('subway_')) this.finishTransport(builtin, dat, levels);
+        return `builtin:${builtin}`;
+      }
       this.stats.unsupportedFeature(`builtin mapgen ${builtin}`);
     }
     if (def?.uniform) {
@@ -328,6 +333,56 @@ export class WorldGenerator implements ChunkGenerator {
       return 'fallback';
     }
     return 'fallback';
+  }
+
+  /**
+   * After the sewer/subway builtins: BN mapgen.cpp generate() rolls the oter's region map extra
+   * (every sewer gets an mx_sewer_* layout), and a sewer under a manhole gets its ladder.
+   */
+  private finishTransport(builtin: string, dat: MapgenDat, levels: Levels): void {
+    const def = this.wg.overmap.terrains[dat.oter.type];
+    if (def?.extras) this.applyMapExtra(def.extras, dat, levels);
+    if (builtin.startsWith('sewer_') && dat.omtAt(0, 0, 1).type === 'road_nesw_manhole') {
+      const base = levels.get(0)!;
+      const [x, y] = manholeSpot(this.seed, dat.omx, dat.omy);
+      addManholeLadder(this.builtinEnv, dat, base, x, y, (i) => this.tilePassable(base, i));
+    }
+  }
+
+  /** Terrain and furniture at buffer tile i both let a creature through (unknown ids don't). */
+  private tilePassable(buf: MapBuffer, i: number): boolean {
+    const m = this.map;
+    if (!m) throw new Error('tilePassable before the generator has a map');
+    const t = m.terrain.tryIndex(this.terMigration.get(buf.ter[i])?.ter ?? buf.ter[i]);
+    if (t === undefined || m.terrain.get(t).move_cost <= 0) return false;
+    if (!buf.furn[i]) return true;
+    const f = m.furniture.tryIndex(this.furnMigration.get(buf.furn[i]) ?? buf.furn[i]);
+    return f !== undefined && m.furniture.get(f).move_cost_mod >= 0;
+  }
+
+  /**
+   * BN map extras for region key `key` (mapgen.cpp generate(): one_in(chance), then a weighted
+   * pick, applied like an update_mapgen: rotated back by the oter id's _north/_east/... suffix,
+   * which for linear ids only end pieces have). Own RNG stream so the base mapgen is unchanged.
+   */
+  private applyMapExtra(key: string, dat: MapgenDat, levels: Levels): void {
+    const table = this.wg.mapgen.extras?.[key];
+    if (!table) {
+      this.stats.unsupportedFeature(`map_extras ${key}`);
+      return;
+    }
+    const rng = new Rng(hashSeed(this.seed, dat.omx, dat.omy, dat.z, hashString(`mx:${key}`)));
+    if (!(table.chance > 0 && rng.oneIn(table.chance))) return;
+    const pick = weightedPick(rng, table.values.map((v) => [v, v.w] as const));
+    if (!pick) throw new Error(`map_extras ${key}: empty table`);
+    if (pick.o === undefined) {
+      this.stats.unsupportedFeature(`map_extra_function ${pick.fn ?? pick.id}`);
+      return;
+    }
+    const id = oterId(dat.oter, this.wg.overmap.terrains);
+    const rot = Math.max(0, DIR_SUFFIX.findIndex((sfx) => id.endsWith(sfx)));
+    const compiled = { ...this.runner.compiler.build(this.wg.mapgen.objects[pick.o], 0, 0, false), fillTer: undefined, predecessor: undefined, fallbackPredecessor: undefined };
+    this.runner.runTop(compiled, { ...dat, rng, rotation: rot, params: new ParamCtx(dat.params.stores, new Map(), rng) }, levels);
   }
 
   /**

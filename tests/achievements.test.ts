@@ -217,6 +217,21 @@ describe('achievements (BN achievements.json semantics)', () => {
     expect(t.achievementSupported(ach.achievements.achievement_kill_zombie)).toBe(true);
   });
 
+  // Inventory finding (docs/ACHIEVEMENTS.md): BN's real achievement data (95 achievements, 70
+  // statistics, 68 transformations — extract:achievements --dry-run) resolves to exactly 10
+  // event types (avatar_moves, character_gets_headshot, character_heals_damage,
+  // character_kills_monster, character_takes_damage, character_wakes_up,
+  // crosses_mutation_threshold, crosses_mycus_threshold, gains_skill_level, game_start), every
+  // one already fed from a real game action (src/achievements.ts). Nothing in the current BN
+  // achievement set is actually untracked; this guards that finding against silent regressions
+  // (SUPPORTED_EVENTS losing an entry) and against BN adding a new achievement this port can't
+  // yet feed (which should fail here, not surface only as "not tracked" in the UI).
+  it('every current BN achievement is supported (no achievement is silently untracked)', () => {
+    const t = new AchievementTracker(ach, queries());
+    const unsupported = Object.values(ach.achievements).filter((a) => !t.achievementSupported(a));
+    expect(unsupported.map((a) => a.id)).toEqual([]);
+  });
+
   it('marks achievements fed by events this port never emits as unsupported', () => {
     const d = withExtra({
       transformations: { t_headshots: { id: 't_headshots', event_type: 'character_triggers_trap' } },
@@ -243,6 +258,18 @@ describe('achievements (BN achievements.json semantics)', () => {
     u.load(j);
     expect(u.value('num_avatar_zombie_kills')).toBe(3);
     expect(u.completion('achievement_kill_zombie')).toBe('completed');
+  });
+
+  it('round-trips skill-level and movement counters through JSON (save/load)', () => {
+    const { t } = tracker();
+    for (let l = 1; l <= 5; l++) t.emit('gains_skill_level', { character: 'avatar', skill: 'melee', new_level: l });
+    t.emit('avatar_moves', { mount: '', terrain: 't_floor', movement_mode: 'walk', underwater: false, z: 0 }, 7);
+    t.flush();
+    const j = JSON.parse(JSON.stringify(t.toJSON()));
+    const u = new AchievementTracker(ach, queries());
+    u.load(j);
+    expect(u.value('num_gains_melee')).toBe(5);
+    expect(u.value('num_moves_walked')).toBe(7);
   });
 
   it('global store keeps completions across characters', () => {

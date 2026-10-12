@@ -263,8 +263,8 @@ describe('BN mapgen keys', () => {
     expect(b.ter[MapBuffer.idx(3, 0)]).toBe('t_floor');
   });
 
-  // t_console / f_vending_o: BN terrain/furniture (runs once terrain.json is BN's).
-  it.runIf(!!game.terrain.t_console)('computers are t_console terrain, vending machines are f_vending_c or broken open', () => {
+  // Actual extracted BN terrain/furniture.
+  it('computers are t_console terrain, vending machines are f_vending_c or broken open', () => {
     const wg = synth({
       fill_ter: 't_floor',
       rows: rows24(() => '.'),

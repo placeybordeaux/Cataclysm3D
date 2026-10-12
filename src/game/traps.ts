@@ -4,12 +4,20 @@ import { createItem } from './item';
 import { spawnOnGround } from './moves';
 import type { BodyPartId } from './bodyparts';
 import { emitSound } from './sound';
+import { detonate, type BlastData } from './blast';
+import type { MonsterSystem } from './monai';
+
+/** trapfunc.cpp get_basic_explosion_data. */
+export const BASIC_EXPLOSION: BlastData = {
+  damage: 40, radius: 3, fire: false,
+  fragment: { impact: [{ type: 'bullet', amount: 80, armor_penetration: 0, armor_multiplier: 3 }], range: 6 },
+};
 
 // Traps from mapgen (chunk.traps: tile index → CDDA trap id, data in misc.trap), after
 // trapfunc.cpp. Stepping onto a trap tile triggers it unless you notice and avoid it
 // (Character::avoid_trap: dice(3, dex + 1.5 × dodge) vs dice(3 or 6, avoidance)).
 // Implemented actions: bubble, glass, beartrap, board, caltrops, caltrops_glass, tripwire,
-// pit, spike_pit, glass_pit, landmine, sinkhole; others (funnels, cots, lab/portal traps)
+// pit, spike_pit, glass_pit, landmine, boobytrap, sinkhole; others (funnels, cots, lab/portal traps)
 // are inert here.
 
 export interface TrapDef {
@@ -146,10 +154,13 @@ export function triggerTrap(game: Game, x: number, y: number, z: number): boolea
       return true;
     }
     case 'landmine':
-      emitSound(game, pos, 80, 'a huge explosion!', { category: 'combat', sfxId: 'explosion', sfxVariant: 'default' });
-      game.message('You trigger a land mine!', 'c_red');
-      for (const bp of ['leg_l', 'leg_r', 'torso'] as BodyPartId[]) p.takeHit(bp, [{ type: 'bash', amount: rng.int(20, 40) }, { type: 'cut', amount: rng.int(10, 30) }]);
+    case 'boobytrap':
+      // trapfunc::landmine / boobytrap: get_basic_explosion_data ("equivalent of grenade
+      // explosion": 40 damage, radius 3, an 80-bullet ×3-armour fragment out to 6 tiles) on the
+      // trap's tile, by explosion.cpp's rules (blast.ts); then the trap is gone.
+      game.message(def.action === 'landmine' ? 'You trigger a land mine!' : 'You trigger a booby trap!', 'c_red');
       setTrap(game, x, y, z, null);
+      detonate(game, (game as unknown as { monsters?: MonsterSystem }).monsters ?? null, x + 0.5, y + 0.5, z, BASIC_EXPLOSION, null);
       return true;
     case 'sinkhole':
       game.message('You step into a sinkhole!', 'c_red');

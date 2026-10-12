@@ -36,4 +36,26 @@ describe('activities vs movement keys', () => {
     for (let i = 0; i < 5; i++) acts.update(game, 0.1, 1);
     expect(done).toBe(true);
   });
+  it('notifies menus synchronously once work and its clock warp are ready', () => {
+    const { game, acts } = host();
+    let starts = 0;
+    acts.startHooks.push((a) => {
+      expect(acts.current).toBe(a);
+      expect(game.clock.warp).toBe(20);
+      starts++;
+    });
+    expect(acts.start({ name: 'disassembling', duration: 60, warp: 20, onComplete: () => {} })).toBe(true);
+    expect(starts).toBe(1);
+    acts.update(game, 0.1, 1);
+    expect(starts).toBe(1);
+  });
+  it('leaves menus alone when danger prevents starting work', () => {
+    const { acts } = host();
+    let starts = 0;
+    acts.startHooks.push(() => starts++);
+    acts.dangerChecks.push(() => 'You see a zombie!');
+    expect(acts.start({ name: 'reading', duration: 60, onComplete: () => {} })).toBe(false);
+    expect(acts.current).toBeNull();
+    expect(starts).toBe(0);
+  });
 });

@@ -427,6 +427,7 @@ export async function installProgression(
   // ------------------------------------------------------------------ options + keys
   game.keys.register('journal', 'Survival journal', () => void openJournal(game, handle, active));
   registerOption({
+    category: 'Interface',
     name: 'Discovery hints',
     value: () => (prof.data.options.hints ? 'on' : 'off'),
     change: () => {
@@ -436,6 +437,7 @@ export async function installProgression(
     desc: 'Short tips the first time you meet something new (zombies, hunger, night…), and "you could craft" when you have what a recipe needs.  Each shows once; they stay in the Survival Journal.',
   });
   registerOption({
+    category: 'Gameplay',
     name: 'Classic mode (unlock everything)',
     value: () => (prof.data.options.classic ? 'on' : 'off'),
     change: () => prof.setOption('classic', !prof.data.options.classic),

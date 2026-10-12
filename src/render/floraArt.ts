@@ -209,7 +209,10 @@ const PAD = 4;
 
 /**
  * A texture page of its own for flora (the shared procedural page is small and full of
- * surfaces). Frames are memoised by key; the page re-uploads after new paints.
+ * surfaces). Frames are memoised by key; only the rows a new paint actually touched are
+ * requested from the GPU (see `frame()`) — a bare `needsUpdate = true` with no update
+ * ranges makes Three re-upload the whole 2048^2 page (texSubImage2D of the lot) on every
+ * first-use paint, which is the spike this was built to avoid.
  */
 export class FloraAtlas {
   readonly texture: THREE.DataTexture;
@@ -218,6 +221,9 @@ export class FloraAtlas {
   private sx = 0;
   private sy = 0;
   private sh = 0;
+  /** Diagnostic off variant: request the full page every paint, like the pre-fix behavior,
+   *  for paired upload-size comparisons (tools/bench-flora-atlas.ts). */
+  partialUpload = true;
 
   constructor() {
     this.texture = new THREE.DataTexture(this.px, PAGE, PAGE, THREE.RGBAFormat);
@@ -256,6 +262,10 @@ export class FloraAtlas {
         const d = ((y0 + H - 1 - y) * PAGE + x0 + x) * 4;
         this.px[d] = img.data[s]; this.px[d + 1] = img.data[s + 1]; this.px[d + 2] = img.data[s + 2]; this.px[d + 3] = img.data[s + 3];
       }
+    // Three only does a partial texSubImage2D when update ranges are queued; with none
+    // queued it re-uploads the entire page. The painted rect is a handful of rows, so queue
+    // one range per row (ranges can't span rows: WebGLTextures.updateTexture rejects that).
+    if (this.partialUpload) for (let row = y0; row < y0 + H; row++) this.texture.addUpdateRange((row * PAGE + x0) * 4, W * 4);
     this.texture.needsUpdate = true;
     f = {
       texture: this.texture,

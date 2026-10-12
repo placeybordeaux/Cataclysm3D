@@ -1,3 +1,4 @@
+import { appearanceSeed } from './appearanceSeed';
 import type { Game, GameSystem } from '../game/game';
 import { monsterSize, type Monster } from '../game/monster';
 import type { CorpseRecord, MonsterSystem } from '../game/monai';
@@ -344,14 +345,14 @@ export class MonsterView implements GameSystem {
     const def = m.type;
     const a = this.atlas;
     if (a) {
-      const hit = a.lookupWithLooksLike(def.id, (id) => this.game.data.monsters[id]?.looks_like as string | undefined, { variantSeed: m.uid });
+      const hit = a.lookupWithLooksLike(def.id, (id) => this.game.data.monsters[id]?.looks_like as string | undefined, { variantSeed: appearanceSeed(m) });
       if (hit?.fg) return { frame: toFrame(hit.fg), height: hit.fg.h / MON_PPM };
     }
     if (a) {
       // No art (BN-only monsters UltiCa never drew): a stand-in sprite of the same kind
       // reads as a creature; a floating CDDA letter read as a sign (QA_V2 #25).
       for (const id of proxySprites(def.id, def.symbol, def.species ?? [])) {
-        const hit = a.lookup(id, { variantSeed: m.uid });
+        const hit = a.lookup(id, { variantSeed: appearanceSeed(m) });
         if (!hit?.fg) continue;
         if (!proxyWarned.has(def.id)) {
           proxyWarned.add(def.id);
@@ -377,7 +378,7 @@ export class MonsterView implements GameSystem {
   private makeVisual(m: Monster, v: MonView): void {
     if (this.models) {
       const rig = this.rigFor(m.type);
-      v.c = new CreatureModel(this.layers().live, rig, this.skinFor(rig, v.frame), seedOf(m.uid), m.x, m.y, m.facing);
+      v.c = new CreatureModel(this.layers().live, rig, this.skinFor(rig, v.frame), seedOf(appearanceSeed(m)), m.x, m.y, m.facing);
     } else v.h = this.renderer.sprites.add({ x: m.x, y: m.y, z: m.z, frame: v.frame, height: v.height });
   }
 
@@ -460,7 +461,7 @@ export class MonsterView implements GameSystem {
     };
     // the dying body keeps the facing it had, so a 3D body falls from where it stood
     c.facing = m.facing;
-    this.makeCorpseVisual(cv, m.type, m.uid, false);
+    this.makeCorpseVisual(cv, m.type, appearanceSeed(m), false);
     if (cv.h) cv.h.set(m.x, m.y, c.z);
     cv.h?.flash(0xff2020, 0.15);
     cv.body?.inst.flash(0xff2020, 0.15);

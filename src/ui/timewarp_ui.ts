@@ -77,6 +77,7 @@ export function installTimeWarpUi(game: Game, renderer: Renderer, api: DebugApi)
   if (!optionsRegistered) {
     optionsRegistered = true;
     registerOption({
+      category: 'Controls',
       name: 'Fast-forward key',
       value: () => (ffKeyMode() === 'hold' ? 'Hold for top speed' : 'Press to step ×1-×16'),
       change: () => {
@@ -86,6 +87,7 @@ export function installTimeWarpUi(game: Game, renderer: Renderer, api: DebugApi)
       desc: 'While reading, crafting, waiting or sleeping, the fast-forward key (+ by default) runs time faster: each press steps ×1, ×2, ×4, ×8, ×16 (Press), or it runs at top speed while you hold it (Hold). Anything dangerous drops it back to ×1.',
     });
     registerOption({
+      category: 'Display',
       name: 'Fast-forward drawing',
       value: () => (ffDrawMode() === 'lite' ? 'Lighter (30 fps)' : 'Full'),
       change: () => store(DRAW_MODE, ffDrawMode() === 'lite' ? 'full' : 'lite'),

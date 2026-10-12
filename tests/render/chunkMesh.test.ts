@@ -13,8 +13,7 @@ const furniture = JSON.parse(readFileSync('public/data/furniture.json', 'utf8'))
 
 describe('terrainShape', () => {
   const shape = (id: string) => terrainShape(terrain[id]);
-  // TODO(BN): written for DDA data/behaviour; fails on Bright Nights core data (AssertionError: expected 'stairs_down' to be 'liquid' // Object.is equality). Port with its system.
-  it.skip('classifies common CDDA terrain', () => {
+  it('classifies common Bright Nights terrain', () => {
     expect(shape('t_grass')).toBe('floor');
     expect(shape('t_floor')).toBe('floor');
     expect(shape('t_wall')).toBe('wall');
@@ -34,6 +33,13 @@ describe('terrainShape', () => {
     expect(shape('t_open_air')).toBe('none');
     expect(shape('t_treetop')).toBe('none');
     expect(shape('t_stairs_up')).toBe('stairs_up');
+    expect(shape('t_stairs_down')).toBe('stairs_down');
+  });
+  it('renders all extracted liquid terrain as water even when diving uses GOES_DOWN', () => {
+    const liquids = Object.values(terrain).filter(t => t.flags.includes('LIQUID'));
+    expect(liquids.length).toBeGreaterThan(0);
+    expect(terrain.t_water_dp.flags).toContain('GOES_DOWN');
+    for (const t of liquids) expect(terrainShape(t), t.id).toBe('liquid');
     expect(shape('t_stairs_down')).toBe('stairs_down');
   });
   it('classifies every extracted terrain without throwing', () => {

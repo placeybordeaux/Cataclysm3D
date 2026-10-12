@@ -48,7 +48,10 @@ export function mapgenIdOf(r: OmtRef, defs: Record<string, OterDef>): string {
 /** Rotation applied to the generated map (CDDA oter_t::get_rotation). */
 export function oterRotation(r: OmtRef, defs: Record<string, OterDef>): number {
   const d = defs[r.type];
-  if (r.line >= 0 && isLinear(d)) return LINES[r.line][1];
+  // BN: "the rotation used for linear things is the opposite of the rotation used for other
+  // things". Only JSON-mapgen linear oters (the ant tunnels) read this; road/subway builtins
+  // pick their own rotation from the line.
+  if (r.line >= 0 && isLinear(d)) return (4 - LINES[r.line][1]) % 4;
   return isRotatable(d) ? r.rot & 3 : 0;
 }
 

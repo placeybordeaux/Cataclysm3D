@@ -1,4 +1,5 @@
 import type { Game } from './game/game';
+import { activeWeapon } from './game/bionicguns';
 import type { Renderer } from './render/renderer';
 import type { DebugApi } from './debug';
 import type { MonstersHandle } from './monsters';
@@ -77,6 +78,7 @@ export function installAim(game: Game, renderer: Renderer | null, monsters: Mons
     combat.aim.shown = null;
   };
   registerOption({
+    category: 'Controls',
     name: 'Aim model',
     value: () => AIM_MODELS.find((m) => m.id === aimModel())!.name,
     change: (d) => {
@@ -87,7 +89,7 @@ export function installAim(game: Game, renderer: Renderer | null, monsters: Mons
   });
 
   const aimingTrigger = () => {
-    const w = p.inv.wielded;
+    const w = activeWeapon(game);
     return !!w?.isGun() && drawStyle(w) === 'trigger' && (game.input.mouseButtons & 4) !== 0 && !game.input.captured;
   };
   // Timing: Shift while aiming holds your breath, so it mustn't also break into a run.
@@ -147,7 +149,7 @@ export function installAim(game: Game, renderer: Renderer | null, monsters: Mons
       const a = combat.aim;
       const o = a.offset(0);
       const deg = (r: number) => +((r * 180) / Math.PI).toFixed(3);
-      const w = p.inv.wielded;
+      const w = activeWeapon(game);
       const sk = combat.aimSkill(w);
       return {
         model: aimModel(), active: a.active, ampDeg: deg(a.amp), offsetDeg: { x: deg(o.x), y: deg(o.y) }, kickDeg: { x: deg(a.kickX), y: deg(a.kickY) },
@@ -171,6 +173,7 @@ function installPresenter(game: Game, renderer: Renderer, monsters: MonstersHand
     // no storage: default off
   }
   registerOption({
+    category: 'Controls',
     name: 'Aim trail',
     value: () => (hud.trail > 0 ? 'on' : 'off'),
     change: () => {
@@ -193,6 +196,7 @@ function installPresenter(game: Game, renderer: Renderer, monsters: MonstersHand
     // default off
   }
   registerOption({
+    category: 'Controls',
     name: 'Top-view aim assist',
     value: () => (aimSettings.topAssist ? 'on' : 'off'),
     change: () => {
@@ -273,7 +277,7 @@ function installPresenter(game: Game, renderer: Renderer, monsters: MonstersHand
       hud.frame(null, now);
       return;
     }
-    const w = p.inv.wielded;
+    const w = activeWeapon(game);
     const gun = w?.isGun() ? w : null;
     const rmb = (game.input.mouseButtons & 4) !== 0;
     if (rmb) linger = 0.5;
@@ -334,7 +338,7 @@ function installModelHooks(game: Game, renderer: Renderer, monsters: MonstersHan
   aimHooks.topView = () => {
     if (renderer.cameraMode !== 'top' || renderer.rig.drive) return null;
     const eyeH = (p.crouching ? 1.0 : 1.6) + renderer.rig.eyeOffset + (renderer.groundAt?.(p.x, p.y, p.z) ?? 0);
-    return { eye: { x: p.x, y: p.y, h: p.z * LEVEL_HEIGHT + eyeH } };
+    return { eye: { x: p.x, y: p.y, h: aimHooks.stationEye?.() ?? p.z * LEVEL_HEIGHT + eyeH } };
   };
   aimHooks.view = () => {
     const mode = renderer.cameraMode;
@@ -342,7 +346,7 @@ function installModelHooks(game: Game, renderer: Renderer, monsters: MonstersHan
     const eyeH = (p.crouching ? 1.0 : 1.6) + renderer.rig.eyeOffset + (renderer.groundAt?.(p.x, p.y, p.z) ?? 0) + renderer.rig.lift;
     return {
       o: v3(e[12], e[13], e[14]), r: v3(e[0], e[1], e[2]), u: v3(e[4], e[5], e[6]), f: v3(-e[8], -e[9], -e[10]),
-      third: mode === 'third', eye: { x: p.x, y: p.y, h: p.z * LEVEL_HEIGHT + eyeH },
+      third: mode === 'third', eye: { x: p.x, y: p.y, h: aimHooks.stationEye?.() ?? p.z * LEVEL_HEIGHT + eyeH },
     };
   };
   if (!view) return;

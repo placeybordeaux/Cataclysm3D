@@ -30,7 +30,9 @@ import { h, ui2Layers } from './dom';
 import { installTheme, setScalePref, scalePref, currentMetrics } from './theme';
 import { setHost, shortcut, settings, saveSettings, surfacesOpen } from './host';
 import { closeGroup, openPanels } from './window';
-import { openContextMenu, closeMenu, menuOpen } from './menu';
+import { openContextMenu, closeMenu, menuOpen, type MenuItem } from './menu';
+import { aimedCreature } from '../game/interact';
+import { targetTile, personOnRay, allPickablePeople } from '../game/targeting';
 import { dragging } from './dragdrop';
 import { worldContextProviders, worldMenu, type WorldTarget } from './world';
 import { toast, toastState } from './toast';
@@ -144,13 +146,32 @@ export function installUi2(game: Game, renderer: Renderer, ctx: UiContext, api: 
 
   // While the mouse is captured RMB is guard/aim, so the crosshair's context menu is a key.
   // It opens at the screen centre; being a ui2 surface it frees the cursor for pointing.
+  // With a person in front (what `e` talks to: interact.ts aimedCreature) the menu is theirs,
+  // plus, under its own heading, the tile `e` would act on without them: the bench the beggar
+  // stands at stays reachable ("[e] Talk to …  [o] More…").
   game.keys.register('world_menu', 'Actions for what you look at (context menu)', () => {
-    const t = hover.fromHit(game.lookAt(6));
+    const r = canvas.getBoundingClientRect();
+    const at = { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+    const who = aimedCreature(game);
+    if (who) {
+      const ct = targetFromHit(game, syntheticHit(game, 'creature', who.x, who.y, who.z, who.dist, game.creatureAt(who.x, who.y, who.z)));
+      const items: MenuItem[] = [...worldMenu(ct!)];
+      const tile = targetTile(game);
+      if (tile && !(tile.x === who.x && tile.y === who.y)) {
+        const f = game.map.furnAt(tile.x, tile.y, tile.z);
+        const kind = f.id !== 'f_null' ? 'furniture' : game.map.itemsAt(tile.x, tile.y, tile.z).length ? 'floor' : 'terrain';
+        const tt = targetFromHit(game, syntheticHit(game, kind, tile.x, tile.y, tile.z, tile.dist));
+        const more = tt ? worldMenu(tt) : [];
+        if (more.length) items.push({ separator: true }, { header: tt!.name.replace(/^./, (c) => c.toUpperCase()) }, ...more);
+      }
+      return openContextMenu(at, items, { title: who.name });
+    }
+    // The crosshair is the screen centre: the same pick as the free cursor's right-click.
+    const t = hover.pick(at.x, at.y, 6);
     if (!t) return game.message('Nothing there to act on.', 'c_light_gray');
     const items = worldMenu(t);
     if (!items.length) return game.message(`Nothing to do with the ${t.name}.`, 'c_light_gray');
-    const r = canvas.getBoundingClientRect();
-    openContextMenu({ x: r.left + r.width / 2, y: r.top + r.height / 2 }, items, { title: t.name });
+    openContextMenu(at, items, { title: t.name });
   });
 
   // Built-in world entry: the look card (src/ui/look.ts) for it.
@@ -160,6 +181,7 @@ export function installUi2(game: Game, renderer: Renderer, ctx: UiContext, api: 
 
   // --- options
   registerOption({
+    category: 'Interface',
     name: 'UI scale',
     desc: 'Size of the new (ui2) windows: Auto picks 1×/2×/3× from the window height.',
     value: () => (scalePref() === 'auto' ? `Auto (${currentMetrics().scale}×)` : `${scalePref()}×`),
@@ -221,18 +243,29 @@ function worldHover(game: Game, renderer: Renderer) {
   ui2Layers().world.appendChild(label);
   let cur: WorldTarget | null = null;
 
-  const pick = (x: number, y: number): WorldTarget | null => {
+  const pick = (x: number, y: number, maxDist = 40): WorldTarget | null => {
     const cam = renderer.camera;
     const r = (renderer.three.domElement as HTMLCanvasElement).getBoundingClientRect();
     cam.updateMatrixWorld();
     ndc.set(((x - r.left) / r.width) * 2 - 1, -((y - r.top) / r.height) * 2 + 1, 0.5).unproject(cam).sub(cam.position).normalize();
-    const hit = raycastTiles<LookCreature>(
-      game.map,
-      { x: cam.position.x, y: cam.position.z, h: cam.position.y },
-      { x: ndc.x, y: ndc.z, h: ndc.y },
-      { maxDist: 40, creatureAt: (tx, ty, tz) => game.creatureAt(tx, ty, tz), skipOrigin: renderer.cameraMode === 'first', vehicleAt: (tx, ty, tz) => vehicleSolidHeight(game, tx, ty, tz) },
-    );
-    return fromHit(hit);
+    const ray = { o: { x: cam.position.x, y: cam.position.z, h: cam.position.y }, d: { x: ndc.x, y: ndc.z, h: ndc.y } };
+    // People (NPCs) are picked by their drawn body (targeting.ts personOnRay), as `e` picks
+    // them: their tile's 1.8 m column caught the cursor on a seated barber a metre away when it
+    // was on someone across the room, and a left-click talked to the wrong person.
+    const notPerson = (tx: number, ty: number, tz: number) => {
+      const c = game.creatureAt(tx, ty, tz);
+      return c && !(c as { npc?: unknown }).npc ? c : null;
+    };
+    const opts = { skipOrigin: renderer.cameraMode === 'first', vehicleAt: (tx: number, ty: number, tz: number) => vehicleSolidHeight(game, tx, ty, tz) };
+    const who = personOnRay(game, allPickablePeople(game), ray, maxDist, { ...opts, creatureAt: notPerson });
+    if (who && who.t <= maxDist) {
+      const b = who.body;
+      const tx = Math.floor(b.x), ty = Math.floor(b.y);
+      const hit = syntheticHit(game, 'creature', tx, ty, b.z, who.t, game.creatureAt(tx, ty, b.z));
+      hit.point = { x: ray.o.x + ray.d.x * who.t, y: ray.o.y + ray.d.y * who.t, h: ray.o.h + ray.d.h * who.t };
+      return fromHit(hit);
+    }
+    return fromHit(raycastTiles<LookCreature>(game.map, ray.o, ray.d, { ...opts, maxDist, creatureAt: notPerson }));
   };
 
   const fromHit = (hit: RayHit<LookCreature> | null) => targetFromHit(game, hit);
@@ -271,6 +304,14 @@ function worldHover(game: Game, renderer: Renderer) {
       label.style.display = 'none';
       if (had) for (const f of worldHoverListeners) f(null, 0, 0);
     },
+  };
+}
+
+/** A RayHit for a tile picked another way than the look ray (the `o` menu's `e` targets). */
+function syntheticHit(game: Game, kind: RayHit['kind'], x: number, y: number, z: number, dist: number, creature?: LookCreature | null): RayHit<LookCreature> {
+  return {
+    kind, x, y, z, dist, point: { x: x + 0.5, y: y + 0.5, h: z * LEVEL_HEIGHT }, creature: creature ?? undefined,
+    terrain: game.map.terAt(x, y, z), furniture: game.map.furnAt(x, y, z),
   };
 }
 

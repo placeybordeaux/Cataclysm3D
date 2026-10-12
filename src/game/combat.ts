@@ -6,10 +6,11 @@ import { MAX_RECOIL, type Character, type DamageResult } from './character';
 import { asArray, type Item } from './item';
 import { buffFlat, buffMult, currentStyle, isUnarmedWeapon, maOf, requirementsMet, triggerBuffs } from './martialarts';
 import { covers } from './inventory';
+import { mutationStrikes, type MutationStrike } from './mutationattacks';
 import { defenseOf, sidestepDodgeRoll } from './combatfeel';
 import { canDraw, rollRecovery, strDrawDamageMod, strDrawDispersionMul, strDrawRangeMod, type DispersionBreakdown } from './rangedfeel';
 import { takeRound } from './moves';
-import { aimLevel, isJammed, modSum, rollMalfunction, shotSpreadMultiplier, sightDispersion, type AimLevel } from './gunmods';
+import { aimLevel, ammoRequired, isJammed, upsDrain, modSum, rollMalfunction, shotSpreadMultiplier, sightDispersion, type AimLevel } from './gunmods';
 import {
   applyTechnique, blockHit, defensiveTechnique, glassShatter, handleMeleeWear, pickTechnique, techniqueMessage,
   type BlockResult, type ShatterResult, type TargetInfo, type TechniqueDef, type TechniqueOutcome, type WearResult,
@@ -369,6 +370,8 @@ export function applyFlatArmor(units: RolledDamage[], armor: Record<string, numb
 export interface MeleeTarget {
   /** Monster sk_dodge (+ effects); 0 when downed/stunned. dodge_roll = dodge * 5. */
   dodge: number;
+  /** Fresh raw dodge roll for each mutation strike against a character. */
+  specialDodge?: () => number;
   armor?: Record<string, number>;
   /** Creature::size_melee_penalty (tiny +30, small +15, medium 0, large -10, huge -20). */
   sizeMeleePenalty?: number;
@@ -398,6 +401,12 @@ export interface MeleeOpts {
 }
 
 export interface MeleeResult {
+  /** Successful primary blow before any armor, including penetration and damage multipliers. */
+  rawDamage?: RolledDamage[];
+  /** Independent mutation strikes, before the primary blow; callers apply each separately. */
+  mutationStrikes?: MutationStrike[];
+  /** The primary blow landed with the body (no weapon, or a force_unarmed technique): venom can ride on it. */
+  primaryUnarmed?: boolean;
   hit: boolean;
   crit: boolean;
   hitSpread: number;
@@ -497,6 +506,11 @@ export function meleeAttack(c: Character, target: MeleeTarget, rng: Rng, targetN
     if (cut) cut.amount += shatter.extraCut;
     else units.push({ type: 'cut', amount: shatter.extraCut, armor_penetration: 0, armor_multiplier: 1 });
   }
+  const specials = opts.allowSpecial === false ? [] : mutationStrikes(c, rng, {
+    hit: () => meleeHitRoll(c, weapon, rng),
+    dodge: () => (target.specialDodge?.() ?? target.dodge * 5) + (target.sizeMeleePenalty ?? 0) - (target.immobile ? 40 : 0),
+    twoHanded: !!c.inv.wielded && isTwoHanded(c, c.inv.wielded),
+  });
   triggerBuffs(c, 'onhit');
   const damage = applyFlatArmor(units, target.armor);
   const total = Math.floor(damage.reduce((s, d) => s + d.amount, 0));
@@ -508,7 +522,9 @@ export function meleeAttack(c: Character, target: MeleeTarget, rng: Rng, targetN
   triggerBuffs(c, 'onattack');
   const message = `You ${crit ? 'critically ' : glancing ? 'glancingly ' : ''}hit ${targetName}${total > 0 ? ` for ${total} damage` : ' but do no damage'}.`;
   return {
-    hit, crit, hitSpread: spread, damage, total, moves, cooldownSeconds: moves / 100 / MELEE_SCALE, staminaCost, message,
+    hit, crit, hitSpread: spread, damage, rawDamage: units, total, moves, cooldownSeconds: moves / 100 / MELEE_SCALE, staminaCost, message,
+    mutationStrikes: specials.length ? specials : undefined,
+    primaryUnarmed: !useWeapon,
     technique, outcome, wear, shatter: shatter.shattered ? shatter : undefined, glancing: glancing || undefined,
   };
 }
@@ -670,6 +686,8 @@ export interface ShotResult {
   cooldownSeconds: number;
   /** Projectiles per shot (shotgun pellets); 1 for bullets. */
   pellets?: number;
+  /** BN shot half-angle in degrees; every pellet uses normal gun damage. */
+  shotHalfAngle?: number;
   /** Per-pellet angular spread (ammo shot_spread × gun multiplier), MOA. */
   shotSpreadMoa?: number;
   /** Per-pellet damage (gun + ammo shot_damage) used beyond point-blank. */
@@ -689,6 +707,11 @@ export interface ShotResult {
   broke?: boolean;
   /** Recoil before this shot (the aim the shot was taken with), MOA. */
   aimRecoil?: number;
+  /**
+   * The fired round's own blast (BN ammo "explosion", used by the CUSTOM_EXPLOSION ammo effect:
+   * the 120 mm HEAT round's 150 damage / radius 3), read before the round was used up.
+   */
+  explosion?: { damage?: number; radius?: number; power?: number; distance_factor?: number; fire?: boolean };
 }
 
 /**
@@ -707,10 +730,19 @@ export function fireGun(c: Character, gun: Item, rng: Rng, opts: { burst?: boole
   // ranged::gunmode_checks_common: under half the draw strength a STR_DRAW bow can't be fired.
   if (!canDraw(gun, c)) return fail(`You don't have enough strength to fire your ${gun.baseName()}.`);
   if (isJammed(gun)) return fail(`Your ${gun.baseName()} is jammed!`);
-  if (gun.ammoRemaining() <= 0) return fail(`Your ${gun.baseName()} is empty!`);
+  // BN gunmode_checks_weapon: a gun whose ammo_required is 0 (no ammo types: bionic fake guns)
+  // fires without rounds; otherwise one shot needs ammo_required rounds or charges.
+  const need = ammoRequired(gun);
+  if (need > 0 && gun.ammoRemaining() < need) return fail(`Your ${gun.baseName()} is empty!`);
+  // BN gunmode_checks_weapon: a gun with ups_charges needs that much carried UPS charge per shot
+  // (fire_gun then draws it with use_charges(itype_UPS)). bio_ups and mech batteries are not
+  // UPS sources in this port (docs/UPS_TRANSFER.md).
+  const drain = gun.hasFlag('VEHICLE') ? 0 : upsDrain(gun);
+  if (drain > 0 && c.inv.upsCharges() < drain)
+    return fail(`You need a UPS with at least ${drain} charges or an advanced UPS with at least ${Math.max(1, Math.floor(drain / 2))} charges to fire the ${gun.baseName()}!`);
   const malfunction = rollMalfunction(gun, rng);
   if (malfunction) return fail(malfunction);
-  const ammo = gun.ammoData()!;
+  const ammo = gun.ammoData();
   const aimRecoil = c.recoil;
   const src = weaponDispersionSources(c, gun);
   const moa = rollDispersionMoa(src, rng);
@@ -718,24 +750,26 @@ export function fireGun(c: Character, gun: Item, rng: Rng, opts: { burst?: boole
   const strDamage = strDrawDamageMod(gun, c);
   const damage = gun.gunDamage().map((d) => (strDamage === 1 ? d : { ...d, amount: d.amount * strDamage }));
   const noise = gun.gunNoise(!!opts.burst);
-  const pellets = Math.max(1, Number(ammo.projectile_count) || 1);
+  const bnShot = ammo?.shot as { count?: number; half_angle?: number } | undefined;
+  const pellets = Math.max(1, Number(bnShot?.count ?? ammo?.projectile_count) || 1);
   let shotDamage: ShotResult['shotDamage'];
   if (pellets > 1) {
     const per = new Map<string, { type: string; amount: number; armor_penetration: number }>();
-    for (const u of [...asArray(gun.def.ranged_damage), ...asArray(ammo.shot_damage as DamageUnit[] | undefined)]) {
+    for (const u of [...asArray(gun.def.ranged_damage), ...asArray(ammo?.shot_damage as DamageUnit[] | undefined)]) {
       const e = per.get(u.damage_type) ?? { type: u.damage_type, amount: 0, armor_penetration: 0 };
       e.amount += u.amount;
       e.armor_penetration += u.armor_penetration ?? 0;
       per.set(u.damage_type, e);
     }
-    shotDamage = [...per.values()];
+    shotDamage = bnShot ? damage.map((d) => ({ ...d })) : [...per.values()];
   }
   // Recoverable ammo (arrows, bolts, stones) that survives the shot leaves the gun as an object
   // to land somewhere (BN drop_or_embed_projectile); everything else is used up.
   let round: Item | undefined;
-  const recoverable = !!opts.recover && (Number(ammo.dont_recover_one_in) || 1) > 1;
+  const recoverable = need === 1 && !!opts.recover && !!ammo && (Number(ammo.dont_recover_one_in) || 1) > 1;
   if (recoverable && rollRecovery(ammo, gun, rng)) round = takeRound(gun) ?? undefined;
-  if (!round) gun.ammoConsume(1);
+  if (!round && need > 0) gun.ammoConsume(need);
+  if (drain > 0) c.inv.useUpsCharges(drain);
   const skill = gun.def.skill ?? 'gun';
   const absorb = Math.min(c.getSkill(skill), 10) / 20;
   const qty = gunRecoil(c, gun);
@@ -744,7 +778,7 @@ export function fireGun(c: Character, gun: Item, rng: Rng, opts: { burst?: boole
   // ranged.cpp: shots train the gun skill and marksmanship a little each.
   c.practice('gun', 5);
   c.practice(skill, 10);
-  const range = Math.max(0, ((ammo.range ?? 0) + (gun.def.range ?? 0) + modSum(gun, 'range_modifier')) * strDrawRangeMod(gun, c));
+  const range = Math.max(0, ((ammo?.range ?? 0) + (gun.def.range ?? 0) + modSum(gun, 'range_modifier')) * strDrawRangeMod(gun, c));
   // Firing takes 100 moves for semi-autos plus action time (ranged.cpp action_time).
   const moves = 100;
   return {
@@ -759,14 +793,21 @@ export function fireGun(c: Character, gun: Item, rng: Rng, opts: { burst?: boole
     moves,
     cooldownSeconds: moves / 100 / ACTION_SCALE,
     pellets,
-    shotSpreadMoa: pellets > 1 ? (Number(ammo.shot_spread) || 0) * shotSpreadMultiplier(gun) : 0,
+    shotHalfAngle: bnShot ? Math.max(0, Number(bnShot.half_angle) || 0) : undefined,
+    shotSpreadMoa: pellets > 1 ? (bnShot ? (Number(bnShot.half_angle) || 0) * 60 : (Number(ammo?.shot_spread) || 0) * shotSpreadMultiplier(gun)) : 0,
     shotDamage,
-    ammoEffects: asArray(ammo.effects as string[] | undefined),
+    // BN item::ammo_effects: the gun's own, the loaded ammo's and every gunmod's, as a set.
+    ammoEffects: [...new Set([
+      ...asArray(gun.def.ammo_effects as string[] | undefined),
+      ...asArray(ammo?.effects as string[] | undefined),
+      ...gun.gunmods.flatMap((m) => asArray(m.def.ammo_effects as string[] | undefined)),
+    ])],
     delayedRecoil: qty * absorb,
     addedRecoil: added,
     round,
     broke: recoverable && !round,
     aimRecoil,
+    explosion: ammo?.explosion && typeof ammo.explosion === 'object' ? (ammo.explosion as ShotResult['explosion']) : undefined,
   };
 }
 
@@ -779,7 +820,8 @@ export function applyDelayedRecoil(c: Character, delay: number): void {
  * Pellet deviation for one shotgun pellet (ballistics.cpp): |rng_normal(−spread, spread)|
  * (a normal with sd spread/2, clamped), capped at 30°, radians, random side.
  */
-export function pelletAngle(shotSpreadMoa: number, rng: Rng): number {
+export function pelletAngle(shotSpreadMoa: number, rng: Rng, bnHalfAngle?: number): number {
+  if (bnHalfAngle !== undefined) return (rng.next() * 2 - 1) * bnHalfAngle * Math.PI / 180;
   if (shotSpreadMoa <= 0) return 0;
   const s = Math.min(shotSpreadMoa, Math.max(-shotSpreadMoa, normalRoll(rng, 0, shotSpreadMoa / 2)));
   const arc = Math.min(moaToRadians(Math.abs(s)), Math.PI / 6);
@@ -930,10 +972,10 @@ export function onDodged(c: Character, attackerSkill: number): void {
 }
 
 /** Martial-arts "armor" buffs reduce incoming damage per type (mabuff_armor_bonus). */
-export function maArmor<T extends { type: string; amount: number }>(c: Character, units: T[]): T[] {
+export function maArmor<T extends { type: string; amount: number; multiplier?: number }>(c: Character, units: T[]): T[] {
   for (const u of units) {
     const a = buffFlat(c, 'armor', u.type);
-    if (a > 0) u.amount = Math.max(0, u.amount - a);
+    if (a > 0) u.amount = Math.max(0, u.amount - a * (u.multiplier ?? 1));
   }
   return units;
 }

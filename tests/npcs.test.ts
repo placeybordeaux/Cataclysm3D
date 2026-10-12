@@ -10,7 +10,8 @@ import type { Input } from '../src/core/input';
 import type { Chunk, ChunkGenerator, GameMap } from '../src/world/map';
 import { MonsterSystem } from '../src/game/monai';
 import { NpcSystem, verb3 } from '../src/game/npcai';
-import { generateNpc, rollClassSkills, rollDistribution, type NpcData } from '../src/game/npc';
+import { Npc, generateNpc, rollClassSkills, rollDistribution, type NpcData } from '../src/game/npc';
+import { consumeNpcFood, npcWillEat, rateNpcFood } from '../src/game/npcneeds';
 import { Rng } from '../src/core/rng';
 import { Dialogue, parseDuration } from '../src/game/talk';
 import { evalMath, type MathHost } from '../src/game/talkmath';
@@ -57,6 +58,8 @@ function world(seed = 11) {
   for (let y = -2; y <= 2; y++) for (let x = -2; x <= 2; x++) game.map.chunk(x, y, 0);
   const mons = new MonsterSystem(game);
   const npcs = new NpcSystem(game, nd, mons);
+  // As installMonsters does: NPC rounds (enemyfire.ts) find the monsters they fly into here.
+  (game as unknown as { monsters: MonsterSystem }).monsters = mons;
   game.player.inv.wear(createItem(data, 'backpack'), null);
   game.systems.push(mons, npcs);
   game.clock.seconds = 12 * 3600;
@@ -168,19 +171,18 @@ describe('dialogue math', () => {
 });
 
 describe('dialogue on real talk topics', () => {
-  // TODO(BN): written for DDA data/behaviour; fails on Bright Nights core data (AssertionError: expected 'I gotta go<punc.…>' to match /^I gotta go[.…]$/). Port with its system.
-  it.skip('expands punctuation snippets with an ellipsis and the default goodbye', () => {
+  it('expands actual BN punctuation-bearing snippet categories and says the BN goodbye', () => {
     const { npcs } = world(3);
     const n = npcs.spawn({ template: 'evac_merchant' }, 14, 12, 0)!;
     const d = npcs.talkTo(n)!;
-    expect(d.parseTags('I gotta go<punc.…>')).toMatch(/^I gotta go[.…]$/);
-    expect(d.parseTags('Go<punc…!>')).toMatch(/^Go[…!]$/);
+    expect(data.misc.snippet!['<swear!>']).toContain(d.parseTags('<swear!>'));
+    expect(data.misc.snippet!['<no>']).toContain(d.parseTags('<no>'));
+    expect(d.parseTags('<missing_category>')).toBe('<missing_category>');
     n.restockAt = 3 * 86400 + 8 * 3600;
     expect(d.parseTags('Come back after <restock_time_point>.')).toBe('Come back after Spring 4, 08:00.');
-    // TALK_DONE says a CDDA <end_talking_bye> line, never a raw "<bye>" tag.
+    // BN npctalk.cpp returns the literal translated goodbye at TALK_DONE.
     const bye = (d as unknown as { byeMessage(): string }).byeMessage();
-    expect(bye).not.toMatch(/[<>]/);
-    expect(bye.length).toBeGreaterThan(0);
+    expect(bye).toBe('Bye.');
   });
 
 
@@ -281,7 +283,8 @@ describe('dialogue on real talk topics', () => {
     d.effect({ u_spawn_item: 'FMCNote', count: 3 });
     expect(game.player.inv.countOf('FMCNote')).toBe(3);
     d.effect([{ u_add_var: 'flag', value: 'yes' }, { math: ['u_counter += 2'] }]);
-    expect(npcs.playerVars.get('flag')).toBe('yes');
+    // BN get_talk_varname: no type/context = "npctalk_var_" + name
+    expect(npcs.playerVars.get('npctalk_var_flag')).toBe('yes');
     expect(npcs.playerVars.get('counter')).toBe('2');
     d.effect({ u_sell_item: 'FMCNote', count: 2, cost: 500 });
     expect(game.player.inv.countOf('FMCNote')).toBe(1);
@@ -493,8 +496,8 @@ describe('save', () => {
     expect(m.name).toBe(name);
     expect(m.isAlly()).toBe(true);
     expect(m.op.trust).toBe(4);
-    expect(m.vars.get('mood')).toBe('good');
-    expect(B.sys.playerVars.get('met')).toBe('yes');
+    expect(m.vars.get('npctalk_var_mood')).toBe('good');
+    expect(B.sys.playerVars.get('npctalk_var_met')).toBe('yes');
     expect(B.sys.missions.active().map((x) => x.id)).toEqual(['MISSION_FREE_MERCHANTS_EVAC_1']);
     expect(B.sys.missions.assignedFrom(m).length).toBe(1);
   });
@@ -544,6 +547,38 @@ describe('npc AI', () => {
     expect(Math.hypot(n.x - game.player.x, n.y - game.player.y)).toBeLessThan(5);
   });
 
+  // BN gunmode_checks_weapon / fire_gun: UPS-powered guns draw ups_charges from carried UPS.
+  it('an NPC fires a laser rifle on carried UPS charge, and puts it away without any', () => {
+    const { npcs, mons, step, game } = world(24);
+    game.player.x = 2.5;
+    game.player.y = 2.5;
+    const n = npcs.spawn({ cls: 'NC_SCAVENGER' }, 30, 30, 0)!;
+    if (n.inv.wielded) n.inv.drop(n.inv.wielded);
+    for (const it of n.inv.allItems()) if (it.hasFlag('IS_UPS')) n.inv.drop(it);
+    n.inv.wear(createItem(data, 'backpack'), null);
+    n.personality.bravery = 10;
+    const ups = createItem(data, 'adv_UPS_off', { charges: 200 });
+    expect(n.inv.giveNew(ups)).not.toBeNull();
+    const rifle = createItem(data, 'laser_rifle');
+    expect(n.inv.wield(rifle, null).ok).toBe(true);
+    const z = mons.spawnById('mon_zombie', 30.5, 24.5, 0)!;
+    step(4);
+    // adv_UPS: 40 useful charges cost 20 of its own per shot.
+    expect(ups.ammoRemaining()).toBeLessThan(200);
+    expect((200 - ups.ammoRemaining()) % 20).toBe(0);
+    expect(z.dead || z.hp < z.hpMax).toBe(true);
+
+    const m = npcs.spawn({ cls: 'NC_SCAVENGER' }, 60, 30, 0)!;
+    if (m.inv.wielded) m.inv.drop(m.inv.wielded);
+    for (const it of m.inv.allItems()) if (it.hasFlag('IS_UPS')) m.inv.drop(it);
+    m.personality.bravery = 10;
+    const dry = createItem(data, 'laser_rifle');
+    expect(m.inv.wield(dry, null).ok).toBe(true);
+    mons.spawnById('mon_zombie', 60.5, 24.5, 0);
+    step(4);
+    expect(m.inv.wielded).not.toBe(dry);
+  });
+
   it('a KILL-attitude bandit attacks the survivor', () => {
     const { npcs, step, game } = world(23);
     const n = npcs.spawn({ template: 'thug' }, 16, 12, 0, { attitude: 'KILL' })!;
@@ -589,4 +624,353 @@ describe('vehicles and NPCs', () => {
       expect(n.isEnemy()).toBe(true);
     }
   });
+});
+
+
+describe('monster NPC melee telegraphs', () => {
+  it('announces a windup before NPC damage and misses a victim that moves away', () => {
+    const { game, mons, npcs } = world();
+    const n = npcs.spawn({ cls: 'NC_SCAVENGER' }, 24, 12, 0)!;
+    const zombie = mons.spawnById('mon_zombie', n.x + 1, n.y, 0)!;
+    const hp = Object.values(n.hp).reduce((sum, p) => sum + p.cur, 0);
+    const phases: string[] = [];
+    game.events.on('monsterAttack', (e) => { if (e.monster === zombie) phases.push(e.phase); });
+    for (let i = 0; i < 30 && !zombie.windup; i++) mons.update(game, 1 / 60, 1 / 60);
+    expect(zombie.windup).toBeTruthy();
+    expect(mons.creatureTargets.get(zombie)?.character).toBe(n);
+    expect(phases).toEqual(['windup']);
+    expect(Object.values(n.hp).reduce((sum, p) => sum + p.cur, 0)).toBe(hp);
+    n.x += 10;
+    for (let i = 0; i < 40; i++) mons.update(game, 1 / 60, 1 / 60);
+    expect(phases).toContain('whiff');
+    expect(Object.values(n.hp).reduce((sum, p) => sum + p.cur, 0)).toBe(hp);
+  });
+});
+
+
+describe('BN ally rest permission and fatigue', () => {
+  it('uses the real miscellaneous rules menu and preserves the permission through save/load', () => {
+    const { npcs } = world();
+    const n = npcs.spawn({ cls: 'NC_SCAVENGER' }, 14, 12, 0)!;
+    const d = new Dialogue(npcs, n);
+    d.effect('follow');
+    d.topics.push('TALK_MISC_RULES');
+    let response = d.view().responses.find(r => r.text === 'Sleep when you feel tired.')!;
+    expect(response).toBeTruthy();
+    expect(n.allowSleep).toBe(false);
+    d.choose(response.index);
+    expect(n.allowSleep).toBe(true);
+    response = d.view().responses.find(r => r.text === 'Stay awake.')!;
+    expect(response).toBeTruthy();
+    const saved = n.npcJSON();
+    expect(Npc.fromJSON(data, saved).allowSleep).toBe(true);
+    // a save from before follower rules had neither field: BN's default (stay awake)
+    delete saved.allowSleep;
+    delete saved.rules;
+    expect(Npc.fromJSON(data, saved).allowSleep).toBe(false);
+    d.choose(response.index);
+    expect(n.allowSleep).toBe(false);
+    d.effect({ set_npc_rule: 'allow_sleep' });
+    expect(n.allowSleep).toBe(true);
+    d.effect({ clear_npc_rule: 'allow_sleep' });
+    expect(n.allowSleep).toBe(false);
+  });
+
+  it('keeps tired allies awake by default; allowed allies find a bed and naturally sleep', () => {
+    const { npcs, game, step } = world();
+    const n = npcs.spawn({ cls: 'NC_SCAVENGER' }, 14, 12, 0)!;
+    new Dialogue(npcs, n).effect('follow');
+    n.following = false;
+    n.sleepiness = 400;
+    step(3);
+    expect((n.isAsleep() || n.effects.has('lying_down'))).toBe(false);
+    game.map.setFurn(16, 12, 0, 'f_bed');
+    n.allowSleep = true;
+    step(8);
+    expect(n.tileX).toBe(16);
+    expect(n.tileY).toBe(12);
+    expect((n.isAsleep() || n.effects.has('lying_down'))).toBe(true);
+    expect(n.sleepComfort).toBeGreaterThan(0);
+    const at = [n.x, n.y];
+    step(2);
+    expect([n.x, n.y]).toEqual(at);
+    const loaded = Npc.fromJSON(data, n.npcJSON());
+    expect((loaded.isAsleep() || loaded.effects.has('lying_down'))).toBe(true);
+    expect(loaded.sleepiness).toBe(n.sleepiness);
+    npcs.talkTo(n);
+    n.sleepiness = 0;
+    step(1);
+    expect(n.isAsleep() || n.effects.has('lying_down')).toBe(false);
+    expect(n.goal.kind).not.toBe('rest');
+  });
+  it('interrupts lying down when a visible enemy arrives, without resetting fatigue', () => {
+    const { npcs, game, step } = world();
+    const n = npcs.spawn({ cls: 'NC_SCAVENGER' }, 14, 12, 0)!;
+    new Dialogue(npcs, n).effect('follow');
+    n.allowSleep = true;
+    n.sleepiness = 400;
+    n.addEffect('lying_down', 1800);
+    n.addEffect('meth', 60); // prevent a natural sleep roll before the threat is assessed
+    npcs.spawn({ template: 'thug' }, 17, 12, 0, { attitude: 'KILL' });
+    step(0.5);
+    expect(n.effects.has('lying_down')).toBe(false);
+    expect(['fight', 'flee']).toContain(n.goal.kind);
+    expect(n.sleepiness).toBeGreaterThanOrEqual(400);
+  });
+
+  it('consumes one real carried water portion, preserves its container, and refuses waste/drugs/parasites', () => {
+    const { npcs } = world();
+    const n = npcs.spawn({ cls: 'NC_SCAVENGER' }, 14, 12, 0)!;
+    for (const it of [...n.inv.topLevel()]) n.inv.drop(it);
+    n.thirst = 200;
+    n.storedKcal = n.maxStoredKcal();
+    const { container: bottle, rest } = inNewContainer(data, createItem(data, 'water_clean', { charges: 2 }), 'bottle_plastic');
+    expect(rest).toBeNull();
+    n.inv.giveNew(bottle);
+    const water = bottle.contents[0];
+    const result = consumeNpcFood(n);
+    expect(result?.item).toBe(water);
+    expect(water.charges).toBe(1);
+    expect(n.inv.has(bottle)).toBe(true);
+    expect(n.thirst).toBe(150);
+    expect(n.stomach.kcal).toBe(0);
+    expect(rateNpcFood(n, createItem(data, 'bread'))).toBe(0);
+    expect(rateNpcFood(n, createItem(data, 'meat'))).toBe(0);
+    expect(rateNpcFood(n, createItem(data, 'mutagen'))).toBe(0);
+    n.thirst = 0;
+    expect(consumeNpcFood(n)).toBeNull();
+    expect(water.charges).toBe(1);
+  });
+
+  it('hungry allies consume food through their AI and never fabricate recovery without supplies', () => {
+    const { npcs, step } = world();
+    const n = npcs.spawn({ cls: 'NC_SCAVENGER' }, 14, 12, 0)!;
+    new Dialogue(npcs, n).effect('follow');
+    for (const it of [...n.inv.topLevel()]) n.inv.drop(it);
+    n.storedKcal = n.maxStoredKcal() * 0.5;
+    n.thirst = 0;
+    const bread = createItem(data, 'bread', { charges: 2 });
+    n.inv.giveNew(bread);
+    step(0.25);
+    expect(bread.charges).toBe(1);
+    expect(n.stomach.kcal).toBe(84);
+    expect(n.needsCooldown).toBeGreaterThan(0);
+    n.inv.drop(bread);
+    const before = n.storedKcal;
+    step(2);
+    expect(n.storedKcal).toBeLessThanOrEqual(before);
+    expect(n.storedKcal).toBeLessThan(n.maxStoredKcal() * 0.75);
+  });
+
+  it('honors actual mutation dietary vitamins and refuses nausea or stomach overfill without spending portions', () => {
+    const { npcs } = world();
+    const n = npcs.spawn({ cls: 'NC_SCAVENGER' }, 14, 12, 0)!;
+    for (const it of [...n.inv.topLevel()]) n.inv.drop(it);
+    // the class's rolled starting traits (VEGETARIAN, ANTIJUNK…) would mask the rules under test
+    n.traits.clear();
+    n.storedKcal = n.maxStoredKcal() * 0.5;
+    n.thirst = 200;
+    const bread = createItem(data, 'bread', { charges: 2 });
+    n.inv.giveNew(bread);
+    n.addTrait('CARNIVORE');
+    expect(npcWillEat(n, bread)).toBe(false);
+    expect(consumeNpcFood(n)).toBeNull();
+    expect(bread.charges).toBe(2);
+    n.traits.delete('CARNIVORE');
+    n.addTrait('ANTIWHEAT');
+    expect(npcWillEat(n, bread)).toBe(false);
+    n.traits.delete('ANTIWHEAT');
+    n.addEffect('nausea', 60);
+    expect(npcWillEat(n, bread)).toBe(false);
+    n.effects.remove('nausea');
+    n.stomach.kcal = n.maxStoredKcal() - n.storedKcal - 20;
+    expect(npcWillEat(n, bread)).toBe(false);
+    expect(consumeNpcFood(n)).toBeNull();
+    expect(bread.charges).toBe(2);
+    n.stomach.kcal = 0;
+    expect(npcWillEat(n, bread)).toBe(true);
+    n.addTrait('LACTOSE');
+    expect(npcWillEat(n, createItem(data, 'milk'))).toBe(false);
+    n.traits.delete('LACTOSE');
+    expect(npcWillEat(n, createItem(data, 'human_flesh'))).toBe(false);
+    n.addTrait('CANNIBAL');
+    expect(npcWillEat(n, createItem(data, 'human_flesh'))).toBe(true);
+  });
+
+  it('uses BN explicit non-ally supply and fatigue approximation while allies remain supply-dependent', () => {
+    const { npcs, step } = world();
+    const n = npcs.spawn({ cls: 'NC_SCAVENGER' }, 14, 12, 0)!;
+    for (const it of [...n.inv.topLevel()]) n.inv.drop(it);
+    n.storedKcal = n.maxStoredKcal() * 0.5;
+    n.thirst = 500;
+    n.sleepiness = 400;
+    step(2);
+    expect(n.storedKcal).toBe(n.maxStoredKcal());
+    expect(n.thirst).toBe(0);
+    expect(n.sleepiness).toBe(0);
+    expect(n.inv.allItems()).toHaveLength(0);
+    expect(n.isAsleep() || n.effects.has('lying_down')).toBe(false);
+    new Dialogue(npcs, n).effect('follow');
+    n.storedKcal = n.maxStoredKcal() * 0.5;
+    n.thirst = 500;
+    n.sleepiness = 400;
+    step(2);
+    expect(n.storedKcal).toBeLessThan(n.maxStoredKcal() * 0.75);
+    expect(n.thirst).toBeGreaterThanOrEqual(500);
+    expect(n.sleepiness).toBeGreaterThanOrEqual(400);
+  });
+
+  it('protects nested unfinished craft components and tools while retaining normal bag and bottle access', () => {
+    const { npcs } = world();
+    const n = npcs.spawn({ cls: 'NC_SCAVENGER' }, 14, 12, 0)!;
+    for (const it of [...n.inv.topLevel()]) n.inv.drop(it);
+    const pack = createItem(data, 'backpack');
+    expect(n.inv.wear(pack, null).ok).toBe(true);
+    const craft = createItem(data, 'craft');
+    craft.vars = { craft_recipe: 'food_fixture', craft_batch: 2, craft_progress: 0.375, craft_next_failure: 0.5 };
+    const escrow = createItem(data, 'bread', { charges: 7 });
+    const escrowTool = createItem(data, 'knife_hunting');
+    expect(spawnItem(escrow, L.in(craft), { force: true }).ok).toBe(true);
+    expect(spawnItem(escrowTool, L.in(craft), { force: true }).ok).toBe(true);
+    const { container: craftBag } = inNewContainer(data, craft, 'bag_canvas');
+    n.inv.giveNew(craftBag);
+    expect(n.inv.has(craftBag)).toBe(true);
+    const before = craft.toJSON();
+    const uid = n.uid;
+    n.storedKcal = n.maxStoredKcal() * 0.5;
+    n.thirst = 200;
+    expect(npcWillEat(n, craft)).toBe(false);
+    expect(consumeNpcFood(n)).toBeNull();
+    expect(craft.toJSON()).toEqual(before);
+    expect(craft.contents[0]).toBe(escrow);
+    expect(craft.contents[1]).toBe(escrowTool);
+    expect(escrow.charges).toBe(7);
+    expect(n.uid).toBe(uid);
+    // Synthetic required-tool variant isolates the BN comestible.tool branch without altering extracted data.
+    const toolData = { ...data, items: { ...data.items, bread: { ...data.items.bread, tool: 'knife_hunting' } } };
+    const needsTool = createItem(toolData, 'bread');
+    expect(npcWillEat(n, needsTool)).toBe(false); // escrowed tool cannot satisfy active needs
+    const looseTool = createItem(data, 'knife_hunting');
+    expect(spawnItem(looseTool, L.inv(n)).ok).toBe(true);
+    expect(npcWillEat(n, needsTool)).toBe(true);
+    const normalBread = createItem(data, 'bread', { charges: 2 });
+    const { container: normalBag } = inNewContainer(data, normalBread, 'bag_canvas');
+    n.inv.giveNew(normalBag);
+    expect(n.inv.has(normalBag)).toBe(true);
+    expect(consumeNpcFood(n)?.item).toBe(normalBread);
+    expect(normalBread.charges).toBe(1);
+    const { container: bottle } = inNewContainer(data, createItem(data, 'water_clean', { charges: 2 }), 'bottle_plastic');
+    expect(spawnItem(bottle, L.inv(n)).ok).toBe(true);
+    n.storedKcal = n.maxStoredKcal(); n.stomach.kcal = 0;
+    expect(consumeNpcFood(n)?.item).toBe(bottle.contents[0]);
+    expect(bottle.contents[0].charges).toBe(1);
+    expect(n.inv.has(bottle)).toBe(true);
+    expect(n.inv.has(craft)).toBe(true);
+    expect(craft.toJSON()).toEqual(before);
+    expect(craft.contents).toEqual([escrow, escrowTool]);
+  });
+
+  it('routes a tired permitted ally around a wall to a better bed without generating chunks', () => {
+    const { npcs, game } = world();
+    const n = npcs.spawn({ cls: 'NC_SCAVENGER' }, 14, 12, 0)!;
+    new Dialogue(npcs, n).effect('follow');
+    n.following = false;
+    n.allowSleep = true;
+    n.sleepiness = 400;
+    for (let y = 10; y <= 14; y++) game.map.setTer(16, y, 0, 't_wall');
+    game.map.setFurn(18, 12, 0, 'f_bed');
+    const chunks = [...game.map.loadedChunks()].length;
+    // Isolate NPC movement/rest from unrelated Game falling systems which load support terrain below the player.
+    for (let i = 0; i < 300; i++) npcs.update(game, 1 / 30, 1 / 30);
+    expect([n.tileX, n.tileY]).toEqual([18, 12]);
+    expect(n.isAsleep() || n.effects.has('lying_down')).toBe(true);
+    expect([...game.map.loadedChunks()].length).toBe(chunks);
+  });
+
+  it('cancels an approach when another creature occupies the sleeping spot', () => {
+    const { npcs, game } = world();
+    const n = npcs.spawn({ cls: 'NC_SCAVENGER' }, 14, 12, 0)!;
+    new Dialogue(npcs, n).effect('follow');
+    n.following = false; n.allowSleep = true; n.sleepiness = 400;
+    game.map.setFurn(18, 12, 0, 'f_bed');
+    for (let i = 0; i < 30 && n.goal.kind !== 'rest'; i++) npcs.update(game, 1 / 30, 1 / 30);
+    expect(n.goal.kind).toBe('rest');
+    expect([n.goal.x, n.goal.y]).toEqual([18.5, 12.5]);
+    const occupant = npcs.spawn({ cls: 'NC_SCAVENGER' }, 18, 12, 0)!;
+    occupant.addEffect('downed', 60);
+    npcs.update(game, 1 / 30, 1 / 30);
+    expect(n.goal.kind).toBe('none');
+    expect(n.path).toHaveLength(0);
+    expect(n.isAsleep() || n.effects.has('lying_down')).toBe(false);
+    expect([n.tileX, n.tileY]).not.toEqual([18, 12]);
+  });
+
+  it('replans a changed route using complete paths instead of following a stale partial path', () => {
+    const { npcs, game } = world();
+    const n = npcs.spawn({ cls: 'NC_SCAVENGER' }, 14, 12, 0)!;
+    new Dialogue(npcs, n).effect('follow');
+    n.following = false; n.allowSleep = true; n.sleepiness = 400;
+    for (let y = 10; y <= 14; y++) game.map.setTer(16, y, 0, 't_wall');
+    game.map.setFurn(18, 12, 0, 'f_bed');
+    for (let i = 0; i < 30 && n.goal.kind !== 'rest'; i++) npcs.update(game, 1 / 30, 1 / 30);
+    expect(n.path.length).toBeGreaterThan(0);
+    const topRoute = n.path.some(([, y]) => y < 10);
+    // Close the initially selected side; the opposite side remains reachable.
+    for (let y = topRoute ? 6 : 15; y <= (topRoute ? 9 : 18); y++) game.map.setTer(16, y, 0, 't_wall');
+    n.pathAge = 3;
+    npcs.update(game, 1 / 30, 1 / 30);
+    expect(n.path.some(([, y]) => topRoute ? y > 14 : y < 10)).toBe(true);
+    for (let i = 0; i < 300; i++) npcs.update(game, 1 / 30, 1 / 30);
+    expect([n.tileX, n.tileY]).toEqual([18, 12]);
+    expect(n.isAsleep() || n.effects.has('lying_down')).toBe(true);
+  });
+
+  it('applies player mutation strikes against character armor separately from the primary blow', () => {
+    const { npcs, game } = world();
+    const target = npcs.spawn({ cls: 'NC_SCAVENGER' }, 13, 12, 0, { attitude: 'KILL' })!;
+    for (const item of [...target.inv.topLevel()]) target.inv.drop(item);
+    target.addEffect('downed', 60);
+    target.inv.naturalArmor.push((_bp, type) => type === 'stab' ? 15 : 100);
+    game.player.yaw = Math.PI / 2;
+    game.player.dex_base = 40;
+    game.player.addTrait('FANGS');
+    const hp = Object.values(target.hp).reduce((s, p) => s + p.cur, 0);
+    expect(npcs.playerMelee(1.5, null)).toBe(true);
+    expect(hp - Object.values(target.hp).reduce((s, p) => s + p.cur, 0)).toBe(5);
+  });
+
+  it('venomous fangs poison a person; a blocked bite does not', () => {
+    const { npcs, game } = world();
+    const target = npcs.spawn({ cls: 'NC_SCAVENGER' }, 13, 12, 0, { attitude: 'KILL' })!;
+    for (const item of [...target.inv.topLevel()]) target.inv.drop(item);
+    target.addEffect('downed', 60);
+    target.inv.naturalArmor.push((_bp, type) => type === 'stab' ? 15 : 100);
+    game.player.yaw = Math.PI / 2;
+    game.player.dex_base = 40;
+    game.player.addTrait('FANGS');
+    game.player.addTrait('POISONOUS2');
+    expect(npcs.playerMelee(1.5, null)).toBe(true);
+    expect(target.hasEffect('badpoison')).toBe(true);
+    const shielded = npcs.spawn({ cls: 'NC_SCAVENGER' }, 13, 12, 0, { attitude: 'KILL' })!;
+    for (const item of [...shielded.inv.topLevel()]) shielded.inv.drop(item);
+    target.dead = true;
+    shielded.addEffect('downed', 60);
+    shielded.inv.naturalArmor.push(() => 100);
+    expect(npcs.playerMelee(1.5, null)).toBe(true);
+    expect(shielded.hasEffect('badpoison')).toBe(false);
+  });
+
+  it('lets NPC mutation strikes damage an armored monster without granting player kill credit', () => {
+    const { npcs, mons, game } = world();
+    const n = npcs.spawn({ cls: 'NC_SCAVENGER' }, 14, 12, 0)!;
+    new Dialogue(npcs, n).effect('follow');
+    for (const item of [...n.inv.topLevel()]) n.inv.drop(item);
+    n.dex_base = 40; n.personality.bravery = 10; n.addTrait('FANGS');
+    const monster = mons.spawn({ ...data.monsters.mon_zombie, hp: 5, armor: { bash: 100, stab: 15 } }, 15.2, 12.5, 0);
+    npcs.update(game, 1 / 30, 1 / 30);
+    expect(monster.dead).toBe(true);
+    expect(npcs.totalKills()).toBe(0);
+    expect(npcs.kills.size).toBe(0);
+  });
+
 });

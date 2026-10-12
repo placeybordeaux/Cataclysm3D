@@ -6,6 +6,9 @@ import { cddaText } from '../game/units';
 import { drawStyle, rangedClass, strRequirementLine } from '../game/rangedfeel';
 import { reloadHintsFor, seenLine, takesLine } from '../game/reloadhelp';
 import { itemPracticeLines } from '../game/practice_info';
+import { belongingsOf, upsStatusLine } from '../game/upsTransfer';
+import { powerArmorStatusLine } from '../game/powerArmor';
+import { relicInfo } from '../game/relicEnchant';
 import { c, colorize } from './framework';
 import { durationText, kg, liters } from './format';
 
@@ -144,6 +147,21 @@ export function itemInfo(it: Item, who: Character): string {
     L.push(c('c_light_gray', esc(takes)));
     const seen = seenLine(it, reloadHintsFor(who));
     if (seen) L.push(c('c_light_green', esc(seen)));
+  }
+  // Carried-UPS charging state (src/game/upsTransfer.ts).
+  // Power armor: running or not, and on what (src/game/powerArmor.ts).
+  const ups = powerArmorStatusLine(who, it) ?? upsStatusLine(it, belongingsOf(who.inv));
+  if (ups) L.push(c('c_light_blue', esc(ups)));
+  // Relic passive effects (BN item::enchantment_info, src/game/relicEnchant.ts): when they
+  // apply, what they affect, and whether they apply to you right now.
+  const relics = relicInfo(who, it);
+  if (relics.length) {
+    L.push(SEP);
+    for (const r of relics) {
+      const state = r.inEffect === null ? '' : r.inEffect ? c('c_yellow', ' (in effect)') : c('c_light_gray', ' (not in effect)');
+      L.push(c('c_white', r.condition) + state);
+      for (const l of r.lines) L.push('  ' + c(l.good > 0 ? 'c_light_green' : l.good < 0 ? 'c_light_red' : 'c_magenta', l.text));
+    }
   }
   // What it trains (src/game/practice_info.ts): weapons, guns, books, disassembly.
   const trains = itemPracticeLines(who, it);

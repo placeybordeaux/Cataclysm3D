@@ -281,6 +281,8 @@ export const aimHooks: {
    * is there and the ray misses it (between the legs, past an arm). `t` = distance along `d`.
    */
   pick: ((m: unknown, o: Vec3, d: Vec3) => { t: number; zone: HitZone; part: string } | null | undefined) | null;
+  /** As `pick`, for an NPC's drawn person (npcs.ts; src/game/npcfire.ts uses it for shots). */
+  pickNpc: ((n: unknown, o: Vec3, d: Vec3) => { t: number; zone: HitZone; part: string } | null | undefined) | null;
   /** As `pick`, prepared once for many rays (a melee swing's fan); undefined = no model. */
   prepare: ((m: unknown) => ((o: Vec3, d: Vec3) => { t: number; zone: HitZone; part: string } | null) | undefined) | null;
   /**
@@ -294,7 +296,13 @@ export const aimHooks: {
    * top-down. Then shots are aimed along the facing (PlayerCombat.topAim), not through a screen point.
    */
   topView: (() => { eye: Vec3 } | null) | null;
-} = { hitZone: defaultHitZone, body: null, pick: null, prepare: null, view: null, topView: null };
+  /**
+   * The survivor's eye (absolute metres) while at a vehicle station (src/turrets.ts: the seat,
+   * hatch or cupola as drawn, else vehwalk's estimate); null on foot. Shots, the top view and
+   * the over-the-shoulder eye use it instead of 1.6 m above the floor.
+   */
+  stationEye?: (() => number | null) | null;
+} = { hitZone: defaultHitZone, body: null, pick: null, pickNpc: null, prepare: null, view: null, topView: null, stationEye: null };
 
 /** Player-facing aim switches (Options): the top-view assist snaps to the nearest hostile in a cone. */
 export const aimSettings = { topAssist: false };

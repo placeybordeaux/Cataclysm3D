@@ -107,6 +107,22 @@
       "tradeoff": "No building, no loot nearby, and nights are dark and cold."
     },
     {
+      "id": "scen_lab_chal", "kind": "scenario", "tier": 3, "name": "Lab Patient",
+      "requirement": [{ "stat": "labs_reached", "gte": 1 }],
+      "grants": { "scenario": "lab_chal" },
+      "icon": "syringe",
+      "pitch": "Wake in an experiment cell deep under a science lab, the staff long gone.",
+      "tradeoff": "Locked in four or more floors down with whatever they left behind, and nothing in your pockets."
+    },
+    {
+      "id": "scen_lab_staff", "kind": "scenario", "tier": 3, "name": "Lab Staff",
+      "requirement": [{ "stat": "labs_reached", "gte": 1 }],
+      "grants": { "scenario": "lab_staff" },
+      "icon": "id_science",
+      "pitch": "Left behind in the lockdown: start in the lab's holding cells and find a way up.",
+      "tradeoff": "Deep underground, far from food, with the lab's experiments between you and the surface."
+    },
+    {
       "id": "cos_unlucky", "kind": "cosmetic", "tier": 2, "name": "Title: the Unlucky",
       "requirement": [{ "stat": "deaths", "gte": 3 }],
       "grants": { "title": "the Unlucky" },

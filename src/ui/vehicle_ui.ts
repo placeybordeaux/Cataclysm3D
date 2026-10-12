@@ -1,15 +1,22 @@
 import * as THREE from 'three';
 import type { DebugApi } from '../debug';
 import type { Game } from '../game/game';
-import type { Item } from '../game/item';
+import { Item } from '../game/item';
 import { has, MPH_PER_MS, type Vehicle, type VehiclePart } from '../game/vehicle';
 import { loadVehicleData } from '../game/vehicle_data';
 import { installRefuel } from '../game/refuel';
+import { installTowing } from '../towing';
+import { adoptVehicle, queueVehicleWork, startVehicleWork, type VehicleWorkOrder } from '../game/vehicleWork';
+import { cancelChassis, chassisReasons, chassisSitePlan, continueChassis, startChassis, type ChassisPlan } from '../game/vehicleChassis';
+import { openVehicleChassisPanel } from '../screens/vehicleChassis';
+import { rechargeVehicleCargo } from '../game/recharging';
 import { pointInBody } from '../game/vehicleShape';
 import { cellAtPoint, chassisBodyRect, chassisOf, chassisSeats } from '../game/chassis';
 import { ChassisOverlay } from '../render/chassisDebug';
 import { composeCreatureHooks, monsterCreatureHooks, npcCreatureHooks, registerVehicleSave, VehicleSystem, type DriveMode } from '../game/vehicles';
 import { registerOption } from './options';
+import { CRASH_MODELS, HANDLING_MODES, isCrashModel, isHandlingMode, motionOf, type CrashModel, type HandlingMode } from '../game/vehicleImpact';
+import { isVehWalkMode, VEHWALK_DESC, VEHWALK_MODES, type VehWalkMode } from '../game/vehwalk';
 import type { MonsterSystem } from '../game/monai';
 import { interactOverrides } from '../game/interact';
 import type { Renderer } from '../render/renderer';
@@ -20,6 +27,7 @@ import { LEVEL_HEIGHT } from '../world/coords';
 import type { UiContext } from './context';
 import { c, cssColor, getUiRoot, openMenu, openWindow, type MenuEntry } from './framework';
 import { hud } from './hud';
+import { installStationPanel } from './stationPanel';
 import { carriedEntries, openMultiSelect, stackEntries, type InvEntry, type MultiRow } from './inventory_ui';
 import { isAt, L, moveItem } from '../game/moves';
 
@@ -186,6 +194,12 @@ export function vehicleInteractPrompt(game: Game): string | null {
   const vs = game.vehicles;
   if (!vs) return null;
   if (vs.driving) return '';
+  const here = vs.stations.prompt(game.keys.keyFor('interact'));
+  if (here !== null) {
+    // the crosshair's own action still works where the station has none ('o' More… always)
+    const more = game.keys.has('world_menu') ? `  [${game.keys.keyFor('world_menu')}] More…` : '';
+    return here + more;
+  }
   const t = targetVehicle(game);
   if (!t) return null;
   const parts = t.v.partsAt(t.mx, t.my);
@@ -209,6 +223,12 @@ function openPartMenu(game: Game, v: Vehicle, mx: number, my: number): void {
   type Act = () => void;
   const entries: MenuEntry<Act>[] = [];
   const door = parts.find((p) => has(p, 'OPENABLE'));
+  for (const charger of parts.filter(p => has(p, 'RECHARGE') && p.hp > 0)) {
+    entries.push({ label: `${charger.enabled ? 'Turn off' : 'Turn on'} the ${charger.def.name} (${charger.def.bonus ?? 0} W)`, hotkey: 'r', disabled: v.locked, value: () => {
+      charger.enabled = !charger.enabled;
+      game.message(`You ${charger.enabled ? 'enable' : 'disable'} the ${charger.def.name}. Put rechargeable items in this mount's cargo to charge them.`);
+    } });
+  }
   if (door) entries.push({ label: `${door.open ? 'Close' : 'Open'} the ${door.def.name}`, hotkey: door.open ? 'c' : 'o', value: () => game.message(vs.toggleDoor(v, mx, my) ?? '') });
   for (const cargo of parts.filter((p) => has(p, 'CARGO'))) {
     // Closed trunk lids / locked cargo keep their contents in (CDDA LOCKABLE_CARGO + door).
@@ -238,10 +258,9 @@ function showVehicleInfo(game: Game, v: Vehicle): void {
   const lines: string[] = [];
   lines.push(`${c('c_white', v.name)}  ${c('c_light_gray', `${x1 - x0 + 1}x${y1 - y0 + 1} tiles, ${Math.round(v.mass())} kg`)}`);
   const engines = v.engines;
-  const wasOn = v.engineOn;
-  v.engineOn = true;
-  const safe = v.maxVelocity(true) * MPH_PER_MS, top = v.maxVelocity() * MPH_PER_MS;
-  v.engineOn = wasOn;
+  // Governed figures (VehicleSystem.speedLimits): a tank's tracks top out near 45 mph, not CDDA's 150.
+  const lim = vs.speedLimits(v);
+  const safe = lim.safe * MPH_PER_MS, top = lim.top * MPH_PER_MS;
   if (engines.length) lines.push(`Safe/top speed: ${c('c_light_blue', `${Math.round(safe)}/${Math.round(top)} mph`)}   Engine: ${v.engineOn ? c('c_light_green', 'running') : c('c_light_gray', 'off')}${v.locked ? '  ' + c('c_red', 'LOCKED') : ''}${v.alarmOn ? '  ' + c('c_red', 'ALARM') : ''}`);
   if (!v.validWheelConfig()) lines.push(c('c_red', 'Not enough intact wheels to move.'));
   lines.push(fuelSummary(v));
@@ -388,9 +407,11 @@ function dashboard(game: Game): HTMLElement {
 
 function dashHtml(game: Game, v: Vehicle, shownMph = v.velocity * MPH_PER_MS): string {
   const mph = Math.round(Math.abs(shownMph));
-  const safe = v.engineOn ? Math.round(v.maxVelocity(true) * MPH_PER_MS) : 0;
+  // Governed figures (VehicleSystem.speedLimits), not CDDA's drag maths alone.
+  const lim = game.vehicles?.speedLimits(v) ?? { safe: v.maxVelocity(true), top: v.maxVelocity() };
+  const safe = v.engineOn ? Math.round(lim.safe * MPH_PER_MS) : 0;
   // CDDA vehicle::strain colouring: blue under the safe speed, then yellow / light red / red.
-  const safeMs = v.maxVelocity(true), maxMs = Math.max(safeMs + 0.01, v.maxVelocity());
+  const safeMs = lim.safe, maxMs = Math.max(safeMs + 0.01, lim.top);
   const strain = Math.abs(v.velocity) < safeMs ? 0 : (Math.abs(v.velocity) - safeMs) / (maxMs - safeMs);
   const speedCol = !v.engineOn ? 'c_light_blue' : strain <= 0 ? 'c_light_blue' : strain <= 0.2 ? 'c_yellow' : strain <= 0.4 ? 'c_light_red' : 'c_red';
   const cruising = game.vehicles?.driveMode === 'cruise' || !!game.vehicles?.cruiseOn;
@@ -399,7 +420,7 @@ function dashHtml(game: Game, v: Vehicle, shownMph = v.velocity * MPH_PER_MS): s
   const speed = cruising
     ? `${c('c_light_gray', 'Target:')} ${c('c_light_green', String(target))} ${c('c_light_gray', 'Current:')} ${c(speedCol, `${v.velocity < -0.05 ? '-' : ''}${mph}`)} ${c('c_light_gray', `mph (safe ${safe})`)}`
     : `${c(speedCol, `${v.velocity < -0.05 ? 'R ' : ''}${mph}`)}${c('c_light_gray', `/${safe} mph`)}`;
-  const fuels = v.engineFuels().filter((f) => f !== 'muscle' && f !== 'battery');
+  const fuels = v.runningFuels().filter((f) => f !== 'muscle' && f !== 'battery');
   const gauge = (t: string) => {
     const cap = v.fuelCapacity(t);
     const pct = cap ? Math.round((100 * v.fuelLeft(t)) / cap) : 0;
@@ -420,7 +441,63 @@ function dashHtml(game: Game, v: Vehicle, shownMph = v.velocity * MPH_PER_MS): s
   return parts.join('  ');
 }
 
+const VEHWALK_KEY = 'cdda3d.vehwalk';
+/** `?vehwalk=` (wins), else the stored option, else 'stations'. A bad URL value fails loudly. */
+function initialVehWalk(): VehWalkMode {
+  const q = typeof location === 'undefined' ? null : new URLSearchParams(location.search).get('vehwalk');
+  if (q !== null) {
+    if (!isVehWalkMode(q)) throw new Error(`?vehwalk=${q}: expected ${VEHWALK_MODES.join('|')}`);
+    return q;
+  }
+  try {
+    const s = localStorage.getItem(VEHWALK_KEY);
+    if (isVehWalkMode(s)) return s;
+  } catch {
+    // storage blocked
+  }
+  return 'stations';
+}
+function setVehWalk(vs: VehicleSystem, m: VehWalkMode, persist = false): VehWalkMode {
+  if (!isVehWalkMode(m)) throw new Error(`vehWalk: expected ${VEHWALK_MODES.join('|')}, not ${String(m)}`);
+  vs.stations.mode = m;
+  if (persist)
+    try {
+      localStorage.setItem(VEHWALK_KEY, m);
+    } catch {
+      // not persisted
+    }
+  return m;
+}
+
 const DRIVE_MODE_KEY = 'cdda3d.driveMode';
+
+/**
+ * A vehicle physics setting: `?param=` wins (a bad value fails loudly), else the stored
+ * option, else the default.
+ */
+function initialSetting<T extends string>(param: string, key: string, all: readonly T[], def: T): T {
+  const q = typeof location === 'undefined' ? null : new URLSearchParams(location.search).get(param);
+  if (q !== null) {
+    if (!(all as readonly string[]).includes(q)) throw new Error(`?${param}=${q}: expected ${all.join('|')}`);
+    return q as T;
+  }
+  try {
+    const s = localStorage.getItem(key);
+    if (s !== null && (all as readonly string[]).includes(s)) return s as T;
+  } catch {
+    // storage blocked
+  }
+  return def;
+}
+function storeSetting(key: string, v: string): void {
+  try {
+    localStorage.setItem(key, v);
+  } catch {
+    // not persisted
+  }
+}
+const CRASH_MODEL_KEY = 'cdda3d.vehicleCrashModel';
+const HANDLING_KEY = 'cdda3d.vehicleHandling';
 function storedDriveMode(): DriveMode {
   try {
     return localStorage.getItem(DRIVE_MODE_KEY) === 'cruise' ? 'cruise' : 'direct';
@@ -441,12 +518,15 @@ export async function installVehicles(game: Game, renderer: Renderer, api?: Debu
   game.systems.push(vs);
   registerVehicleSave(game, vs);
   installRefuel(game, vs);
+  // Tow cables: the item's use action, vehicle-screen actions, the cable drawn (src/towing.ts).
+  installTowing(game, renderer, api, () => targetVehicle(game));
   // Run-overs hit real monsters (the monster system is installed before us in main.ts) and
   // NPCs (installed after us: the NPC hooks look game.npcs up on each call).
   const ms = (game as unknown as { monsters?: MonsterSystem }).monsters;
   vs.creatureHooks = composeCreatureHooks([...(ms ? [monsterCreatureHooks(ms)] : []), npcCreatureHooks(game, vs)]);
   const vr = new VehicleRenderer(renderer, game, vs);
   registerOption({
+    category: 'World',
     name: 'Vehicle look',
     value: () => (vr.look === 'model' ? 'modelled bodies' : 'part blocks'),
     change: () => {
@@ -455,6 +535,7 @@ export async function installVehicles(game: Game, renderer: Renderer, api?: Debu
     desc: 'Modelled bodies (default): every car, truck, bus and bike is drawn as one shaped vehicle. Part blocks: the older look, one block per vehicle part (the grid Cataclysm uses). Also ?vehicles=model|parts.',
   });
   registerOption({
+    category: 'World',
     name: 'Vehicle width',
     value: () => (vr.width === 'real' ? 'true to life' : 'fill the tiles'),
     change: () => {
@@ -522,7 +603,21 @@ export async function installVehicles(game: Game, renderer: Renderer, api?: Debu
       if (vs.driving) {
         const v = vs.driving;
         const released = vs.releaseControls();
+        // RVs, buses, tanks (src/game/vehwalk.ts): you stay inside, in the driver's seat, and
+        // walk to a door / hatch (or another station) from there. Cars: straight out.
+        if (vs.stations.cabin(v) && vs.stations.cabin(v) !== 'wheel' && vs.stations.seatDriver(v)) {
+          g.message(`${released} W/A/S/D move to another seat; get out at a door or hatch.`);
+          return true;
+        }
         g.message(vs.climbOut(v) ?? released);
+        return true;
+      }
+      // At a station inside a vehicle: its action (drive, get out, later the turret), else the
+      // crosshair as usual (a seat's cargo from the aisle).
+      const act = vs.stations.action();
+      if (act) {
+        const msg = act.run();
+        if (msg) g.message(msg);
         return true;
       }
       const t = targetVehicle(g, renderer);
@@ -541,8 +636,42 @@ export async function installVehicles(game: Game, renderer: Renderer, api?: Debu
     });
     hud.addPromptProvider(vehicleInteractPrompt);
   }
+  vs.stations.mode = initialVehWalk();
+  registerOption({
+    category: 'Controls',
+    name: 'Inside vehicles',
+    value: () => vs.stations.mode,
+    change: (d) => {
+      const i = VEHWALK_MODES.indexOf(vs.stations.mode);
+      setVehWalk(vs, VEHWALK_MODES[(i + d + VEHWALK_MODES.length) % VEHWALK_MODES.length], true);
+    },
+    desc: 'How you move around inside a vehicle you are not driving (?vehwalk= wins over this).\n' + VEHWALK_MODES.map((m) => `${m}: ${VEHWALK_DESC[m]}`).join('\n'),
+  });
+  vs.crashModel = initialSetting('vehcrash', CRASH_MODEL_KEY, CRASH_MODELS, 'momentum');
+  registerOption({
+    category: 'Gameplay',
+    name: 'Vehicle crashes',
+    value: () => (vs.crashModel === 'momentum' ? 'momentum (arcade)' : 'immovable (old)'),
+    change: () => {
+      vs.crashModel = vs.crashModel === 'momentum' ? 'immovable' : 'momentum';
+      storeSetting(CRASH_MODEL_KEY, vs.crashModel);
+    },
+    desc: 'Momentum (default): vehicles that collide push and spin each other by their masses. A tank shoves a car aside and barely slows; a car that hits a tank stops hard. You feel your own vehicle\'s jolt, and you slide along walls instead of sticking. Immovable: the older model, where another vehicle stops you like a wall (light ones are knocked aside). Also ?vehcrash=momentum|immovable.',
+  });
+  vs.handlingMode = initialSetting('vehheft', HANDLING_KEY, HANDLING_MODES, 'weighty');
+  registerOption({
+    category: 'Gameplay',
+    name: 'Heavy vehicles',
+    value: () => (vs.handlingMode === 'weighty' ? 'weighty' : 'light (old)'),
+    change: () => {
+      vs.handlingMode = vs.handlingMode === 'weighty' ? 'light' : 'weighty';
+      storeSetting(HANDLING_KEY, vs.handlingMode);
+    },
+    desc: 'Weighty (default): heavy and tracked vehicles take their time to get moving, steer and pivot slowly, and are governed to their real top speeds (an M1 about 45 mph). Taken from each vehicle\'s mass, power and tracks; cars are unchanged. Light: everything handles like a car (the older feel). Also ?vehheft=weighty|light.',
+  });
   vs.driveMode = storedDriveMode();
   registerOption({
+    category: 'Controls',
     name: 'Driving controls',
     value: () => (vs.driveMode === 'cruise' ? 'cruise control' : 'direct throttle'),
     change: () => {
@@ -557,6 +686,7 @@ export async function installVehicles(game: Game, renderer: Renderer, api?: Debu
   });
   const dash = dashboard(game) as HTMLElement & { update: (dt?: number) => void };
   renderer.beforeRender.push((dt) => dash.update(dt));
+  installStationPanel(game, renderer);
 
   if (api) installVehicleDebug(api, game, vs);
   return vs;
@@ -564,7 +694,7 @@ export async function installVehicles(game: Game, renderer: Renderer, api?: Debu
 
 function summary(game: Game, v: Vehicle) {
   const p = game.player;
-  const gas = v.engineFuels().filter((f) => f !== 'battery' && f !== 'muscle')[0];
+  const gas = v.runningFuels().filter((f) => f !== 'battery' && f !== 'muscle')[0];
   return {
     uid: v.uid, proto: v.protoId, name: v.name, x: +v.x.toFixed(2), y: +v.y.toFixed(2), z: v.z, facing: +v.facing.toFixed(1),
     mph: +(v.velocity * MPH_PER_MS).toFixed(1), cruiseMph: v.cruiseVelocity / 100, engineOn: v.engineOn, lightsOn: v.lightsOn, locked: v.locked,
@@ -579,6 +709,38 @@ function installVehicleDebug(api: DebugApi, game: Game, vs: VehicleSystem): void
   const p = () => game.player;
   const nearest = () => [...vs.list].sort((a, b) => Math.hypot(a.x - p().x, a.y - p().y) - Math.hypot(b.x - p().x, b.y - p().y))[0] ?? null;
   const byUid = (uid?: number) => (uid === undefined ? nearest() : vs.list.find((v) => v.uid === uid) ?? null);
+  /** How being inside a vehicle works: no argument = current mode and where you are. */
+  api.vehWalk = (mode?: VehWalkMode) => {
+    if (mode !== undefined) setVehWalk(vs, mode);
+    const at = vs.stations.view();
+    return { mode: vs.stations.mode, at: at ? { uid: at.v.uid, cabin: at.cabin, kind: at.station.kind, cell: [at.station.mx, at.station.my], hop: +at.t.toFixed(2) } : null };
+  };
+  api.vehicleStations = (uid?: number) => {
+    const v = byUid(uid);
+    return v ? { cabin: vs.stations.cabin(v), stations: vs.stations.stations(v).map((s) => ({ kind: s.kind, posture: s.posture, cell: [s.mx, s.my], at: [+s.x.toFixed(2), +s.y.toFixed(2)], turret: s.turret })) } : null;
+  };
+  api.vehicleWork = (uid?: number) => {
+    const v = byUid(uid);
+    return v ? { adopted: v.adopted, orders: v.workOrders.map(j => ({ ...j })) } : null;
+  };
+  api.adoptVehicle = (uid?: number) => { const v = byUid(uid); return v ? adoptVehicle(game, v) : null; };
+  api.queueVehicleWork = (uid: number, order: Omit<VehicleWorkOrder, 'elapsed'>) => { const v = byUid(uid); return v ? queueVehicleWork(game, v, order) : null; };
+  api.resumeVehicleWork = (uid?: number) => { const v = byUid(uid); return v ? startVehicleWork(game, v) : false; };
+  api.openVehicleChassis = () => openVehicleChassisPanel(game);
+  api.vehicleChassis = (plan: ChassisPlan, x = p().tileX + 2, y = p().tileY, z = p().z) => ({ reasons: chassisReasons(game,plan,x,y,z),
+    sites: game.map.itemsAt(x,y,z).filter((i): i is Item => i instanceof Item && !!chassisSitePlan(i)).map(i=>({plan:chassisSitePlan(i),item:i.toJSON()})) });
+  api.startVehicleChassis = (plan: ChassisPlan, x = p().tileX + 2, y = p().tileY, z = p().z) => startChassis(game,plan,x,y,z)?.toJSON() ?? null;
+  const chassisAt = (x:number,y:number,z:number) => game.map.itemsAt(x,y,z).find((i): i is Item=>i instanceof Item && !!chassisSitePlan(i));
+  api.resumeVehicleChassis = (x:number,y:number,z=p().z) => { const site=chassisAt(x,y,z);return site ? continueChassis(game,site,x,y,z):false; };
+  api.cancelVehicleChassis = (x:number,y:number,z=p().z) => { const site=chassisAt(x,y,z);return site ? cancelChassis(game,site,x,y,z):false; };
+  /** Inspect/toggle chargers; optional seconds advances only charging for automation. */
+  api.vehicleCharging = (uid?: number, enabled?: boolean, seconds = 0) => {
+    const v = byUid(uid);
+    if (!v) return null;
+    if (enabled !== undefined) for (const p of v.withFlag('RECHARGE', true)) p.enabled = enabled;
+    const transferred = rechargeVehicleCargo(v, seconds);
+    return { transferred, batteryKj: v.fuelLeft('battery'), chargers: v.withFlag('RECHARGE').map(p => ({ id: p.def.id, mx: p.mx, my: p.my, enabled: p.enabled, watts: p.def.bonus ?? 0, broken: p.hp <= 0 })), cargo: v.withFlag('CARGO').map(p => ({ mx: p.mx, my: p.my, items: p.items.map(it => it.toJSON()) })) };
+  };
   /** Spawn a vehicle prototype with mount (0,0) at (dx, dy) tiles from the player. */
   api.spawnVehicle = (protoId: string, dx = 0, dy = -4, facingDeg = 0, opts: { fuel?: number; status?: number; force?: boolean } = {}) => {
     const v = vs.spawn(protoId, p().tileX + dx, p().tileY + dy, p().z, facingDeg, { fuel: opts.fuel ?? 100, status: opts.status ?? 0, force: opts.force });
@@ -710,6 +872,25 @@ function installVehicleDebug(api: DebugApi, game: Game, vs: VehicleSystem): void
   api.examineVehicle = (dx: number, dy: number) => examineVehicle(game, p().tileX + dx, p().tileY + dy, p().z);
   api.vehicleSystem = vs;
   /** Driving crashes against the drawn body ('body', default) or CDDA's whole tiles ('tiles'); no argument = current. */
+  /** Vehicle-vs-vehicle crash model: 'momentum' (default) or 'immovable' (the old one); no argument = current. */
+  api.vehicleCrashModel = (mode?: CrashModel) => {
+    if (mode !== undefined && !isCrashModel(mode)) throw new Error(`vehicleCrashModel: ${CRASH_MODELS.join(' or ')}, not ${String(mode)}`);
+    if (mode) vs.crashModel = mode;
+    return vs.crashModel;
+  };
+  /** Heavy-vehicle handling: 'weighty' (default) or 'light' (the old car tuning for everything); no argument = current. */
+  api.vehicleHandling = (mode?: HandlingMode) => {
+    if (mode !== undefined && !isHandlingMode(mode)) throw new Error(`vehicleHandling: ${HANDLING_MODES.join(' or ')}, not ${String(mode)}`);
+    if (mode) vs.handlingMode = mode;
+    return vs.handlingMode;
+  };
+  /** Crash slide / spin / pivot of a vehicle (vehicleImpact.ts Motion); no uid = the one you drive or the nearest. */
+  api.vehicleMotion = (uid?: number) => {
+    const v = uid !== undefined ? vs.list.find((q) => q.uid === uid) : vs.driving ?? nearest();
+    if (!v) return null;
+    const m = motionOf(v);
+    return { uid: v.uid, mph: +(v.velocity * MPH_PER_MS).toFixed(1), slideMph: +(Math.hypot(m.sx, m.sy) * MPH_PER_MS).toFixed(1), spin: +m.spin.toFixed(1), pivot: +m.pivot.toFixed(1), heft: +vs.handling(v).heft.toFixed(2) };
+  };
   api.vehicleCrashes = (mode?: 'body' | 'tiles') => {
     if (mode !== undefined && mode !== 'body' && mode !== 'tiles') throw new Error(`vehicleCrashes: 'body' or 'tiles', not ${String(mode)}`);
     if (mode) vs.crashGeometry = mode;

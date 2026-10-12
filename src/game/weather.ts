@@ -1,4 +1,5 @@
 import type { Game } from './game';
+import { itemsFloorWarmth, vehicleBedding, vehicleSleepSpot } from './vehicleRest';
 import type { GameData } from '../data/types';
 import { DAYS_PER_SEASON, SECONDS_PER_DAY } from '../core/time';
 import { hashSeed, Rng } from '../core/rng';
@@ -429,13 +430,7 @@ export function beddingAt(game: Game, x: number, y: number, z: number): { beddin
   const f = game.map.furnAt(x, y, z), t = game.map.terAt(x, y, z);
   const legacy = (d: { id: string; floor_bedding_warmth?: unknown }) => (typeof d.floor_bedding_warmth === 'number' ? d.floor_bedding_warmth : 0) / 500;
   const bedding = f.id !== 'f_null' ? legacy(f) : legacy(t) - 4;
-  let items = 0;
-  for (const it of game.map.itemsAt(x, y, z) as Item[]) {
-    const vol = it.def.volume ?? 0;
-    const covers = (it.def.armor ?? []).some((a) => (a.covers ?? []).some((c: string) => c === 'torso' || c === 'leg_l' || c === 'leg_r'));
-    if (vol > 250 && covers) items += 0.12 * (it.def.warmth ?? 0) * (vol / 2500);
-  }
-  return { bedding, items };
+  return { bedding, items: itemsFloorWarmth(game.map.itemsAt(x, y, z) as Item[]) };
 }
 
 export function installWeather(game: Game, hooks: WeatherHooks = {}): void {
@@ -459,7 +454,10 @@ export function installWeather(game: Game, hooks: WeatherHooks = {}): void {
       if (st.envAcc <= 0) {
         st.envAcc = 0.5;
         st.radiant = heatRadiation(g, p.tileX, p.tileY, p.z);
-        const b = beddingAt(g, p.tileX, p.tileY, p.z);
+        p.env.heatRadiationF = st.radiant * 1.8;
+        // In a vehicle: the bed/seat you'd sleep on and its cargo (vehicleRest.ts).
+        const spot = vehicleSleepSpot(g);
+        const b = spot ? vehicleBedding(spot) : beddingAt(g, p.tileX, p.tileY, p.z);
         p.env.bedding = b.bedding;
         p.env.floorItemWarmth = b.items;
         p.env.bestFire = bestFireAt(g, p.tileX, p.tileY, p.z);

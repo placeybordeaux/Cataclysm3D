@@ -1,0 +1,11 @@
+.activity-toy { position: fixed; top: 30%; max-height: 45vh; overflow: auto; left: calc(50% + 120px); box-sizing: border-box; width: min(300px, calc(50vw - 140px)); padding: 10px; border: 1px solid var(--ui-accent, #bfa569); background: rgba(16, 19, 18, .94); color: #ded5bc; font: 13px/1.5 monospace; pointer-events: auto; }
+.activity-toy[hidden] { display: none; }
+.activity-toy small { display: block; color: #b9aa85; margin-top: 7px; }
+.toy-track { position: relative; height: 22px; margin: 8px 0; background: #262d27; overflow: hidden; }
+.toy-sweet { position: absolute; left: 40%; width: 20%; height: 100%; background: #64764b; }
+.toy-marker { position: absolute; top: 2px; bottom: 2px; width: 3px; background: #eee1a8; }
+.toy-parts { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin-top: 6px; }
+.toy-part { background: #292d27; color: #ded5bc; border: 1px solid #847758; font: inherit; text-align: left; padding: 4px; }
+.toy-part:disabled { opacity: .48; }
+.toy-part.removed { color: #b9ce8a; }
+@media(max-width:700px) { .activity-toy { left: 54%; width: 40vw; font-size: 11px; } }

@@ -62,6 +62,10 @@ describe('archetypes from BN monster data', () => {
     }
     expect(seen.size).toBeGreaterThanOrEqual(8);
   });
+  it('selects distinct common quadruped families from BN identity', () => {
+    const families = { mon_dog: 'canine', mon_deer: 'cervid', mon_moose: 'cervid', mon_horse: 'equine', mon_horse_foal: 'equine', mon_bear: 'bear', mon_pig: 'pig', mon_gator: 'reptile', mon_cougar: 'feline' };
+    for (const [id, family] of Object.entries(families)) expect(bodyShapeOf(MON[id]).variant, id).toBe(family);
+  });
   it('builds zombie variants from the name and volume', () => {
     expect(bodyShapeOf(MON.mon_zombie_fat).girth).toBeGreaterThan(1.3);
     expect(bodyShapeOf(MON.mon_zombie_child).scale).toBeLessThan(0.85);
@@ -74,11 +78,32 @@ describe('archetypes from BN monster data', () => {
 
 describe('procedural rigs', () => {
   it('stand on the floor and are the size they claim', () => {
-    for (const id of ['mon_zombie', 'mon_dog', 'mon_rabbit', 'mon_giant_cockroach', 'mon_spider_wolf_giant', 'mon_blob', 'mon_triffid', 'mon_zombie_hulk', 'mon_deer']) {
+    for (const id of ['mon_zombie', 'mon_dog', 'mon_rabbit', 'mon_giant_cockroach', 'mon_spider_wolf_giant', 'mon_blob', 'mon_triffid', 'mon_zombie_hulk', 'mon_deer', 'mon_horse', 'mon_moose', 'mon_bear', 'mon_pig', 'mon_gator', 'mon_cougar']) {
       const { box, rig } = bounds(MON[id]);
       expect(Math.abs(box.min.y), id).toBeLessThan(0.06 * rig.shape.scale + 0.02);
       expect(Math.abs(box.max.y - rig.height), id).toBeLessThan(0.12 * rig.shape.scale + 0.05);
     }
+  });
+  it('adds family anatomy with ordered, animated parents', () => {
+    const anatomy = { mon_horse: ['neck', 'mane', 'hoof'], mon_deer: ['neck', 'clovenHoof'], mon_bear: ['shoulderHump', 'paw'], mon_pig: ['nosePad', 'tailCurl', 'clovenHoof'], mon_gator: ['tailTip', 'backPlate'], mon_cougar: ['paw'] };
+    for (const [id, names] of Object.entries(anatomy)) {
+      const rig = makeRig(bodyShapeOf(MON[id]));
+      for (const name of names) expect(rig.parts.some(p => p.name.startsWith(name)), `${id} ${name}`).toBe(true);
+      for (let i = 0; i < rig.parts.length; i++) expect(rig.parts[i].parent, `${id} ${i}`).toBeLessThan(i);
+      for (const pose of [{ gait: 1, phase: 0.35 }, { windup: 1 }, { strike: 1 }, { dead: true, down: 1 }] as Partial<PoseIn>[]) {
+        const { box } = bounds(MON[id], pose);
+        for (const n of [...box.min.toArray(), ...box.max.toArray()]) expect(Number.isFinite(n), id).toBe(true);
+      }
+    }
+    for (const id of Object.keys(anatomy)) {
+      const rig = makeRig(bodyShapeOf(MON[id]));
+      const { box } = bounds(MON[id], { dead: true, down: 1 }, i => { i.fall = rig.lie.angle; i.fallDx = 1; i.fallDy = 0; i.lift = rig.lie.lift; });
+      for (const n of [...box.min.toArray(), ...box.max.toArray()]) expect(Number.isFinite(n), `${id} corpse`).toBe(true);
+      expect(box.max.y, `${id} corpse`).toBeLessThan(rig.height + 0.1);
+    }
+    expect(makeRig(bodyShapeOf(MON.mon_dog)).parts.length).toBe(10);
+    // A generic deer can be male or female: identity alone doesn't add antlers.
+    expect(makeRig(bodyShapeOf(MON.mon_deer)).parts.some(p => p.name.includes('antler'))).toBe(false);
   });
   it('makes an adult zombie about 1.75 m with its head at eye level', () => {
     const { box, rig } = bounds(MON.mon_zombie);
@@ -235,6 +260,41 @@ describe('weapons', () => {
   });
 });
 
+describe('detailed NPC held items', () => {
+  const pal = analyseSprite({ w: 1, h: 1, data: new Uint8Array([120, 80, 50, 255]) }).pal;
+  const body = bodyShapeOf({ id: 'npc', bodytype: 'human', species: ['HUMAN'] });
+  it('attaches every detailed part to the weapon grip with valid parent ordering', () => {
+    for (const cls of ['rifle', 'pistol', 'axe', 'knife', 'spear', 'hammer'] as const) {
+      const held = buildHeld(cls, pal, 1000);
+      const rig = makeRig({ ...body, weapon: cls === 'rifle' || cls === 'pistol' ? cls : 'long' }, { held });
+      const grip = rig.parts.findIndex(p => p.name === 'weapon');
+      expect(rig.parts.filter(p => p.name.startsWith('weapon:'))).toHaveLength(held.parts.length);
+      rig.parts.forEach((p, index) => expect(p.parent, `${cls}:${p.name}`).toBeLessThan(index));
+      for (const part of rig.parts.filter(p => p.name.startsWith('weapon:'))) {
+        let parent = part.parent;
+        while (parent > grip) parent = rig.parts[parent].parent;
+        expect(parent).toBe(grip);
+      }
+    }
+  });
+  it('keeps item variant details and stows the whole subtree while crawling', () => {
+    const ar = buildHeld('rifle', pal, 3000, 'ar'), ak = buildHeld('rifle', pal, 3000, 'ak');
+    const names = (h: typeof ar) => makeRig({ ...body, weapon: 'rifle' }, { held: h }).parts.map(p => p.name);
+    expect(names(ar)).not.toEqual(names(ak));
+    const rig = makeRig({ ...body, weapon: 'rifle', crawl: 'drag' }, { held: ar });
+    const inst = new CharLayer(false).add(rig, { page: 0, rects: new Int32Array(rig.parts.length * 5), refs: 0 });
+    for (const pose of [idle, { ...idle, ride: { lean: .1, hands: [[.2,.8,-.3],[-.2,.8,-.3]], feet: [[.2,.1,-.3],[-.2,.1,-.3]] } }] as PoseIn[]) {
+    inst.setPose(pose); inst.build(null);
+    rig.parts.forEach((part, i) => {
+      if (!part.name.startsWith('weapon')) return;
+      const matrix = inst.mats.subarray(i * 16, i * 16 + 16);
+      const axes = [0,1,2,4,5,6,8,9,10].map(j => Math.abs(matrix[j]));
+      expect(Math.max(...axes), part.name).toBeLessThan(1e-6);
+    });
+    }
+  });
+});
+
 describe('first-person held items', () => {
   const pal = analyseSprite({ w: 1, h: 1, data: new Uint8Array([120, 80, 50, 255]) }).pal;
   it('classifies wielded items', () => {
@@ -274,14 +334,29 @@ describe('weapon variants', () => {
     expect(heldVariant(it('ak47'), 'rifle')).toBe('ak');
     expect(heldVariant(it('remington_700', { weapon_category: ['RIFLES', 'MANUAL_ACTION'] }), 'rifle')).toBe('hunting');
     expect(heldVariant(it('m4a1'), 'rifle')).toBe('ar');
+    expect(heldVariant(it('marlin_1894c', { weapon_category: ['RIFLES', 'MANUAL_ACTION'], looks_like: 'ar15' }), 'rifle')).toBe('lever');
+    expect(heldVariant(it('marlin_9a'), 'rifle')).toBe('lever');
+    expect(heldVariant(it('henry_big_boy'), 'rifle')).toBe('lever_brass');
+    expect(heldVariant(it('1895sbl'), 'rifle')).toBe('lever_stainless');
+    expect(heldVariant(it('browning_blr'), 'rifle')).toBe('lever_box');
+    expect(heldVariant(it('winchester_1887', { looks_like: 'browning_blr' }), 'shotgun')).toBe('lever');
     expect(heldVariant(it('crowbar'), 'pipe')).toBe('crowbar');
     expect(heldVariant(it('knife_chef'), 'knife')).toBe('kitchen');
     expect(heldVariant(it('hammer_sledge'), 'hammer')).toBe('sledge');
     expect(heldVariant(it('hatchet'), 'axe')).toBe('hatchet');
   });
+  it('gives lever actions a tube magazine, lever loop and hammer, no bolt handle or scope', () => {
+    const pal = analyseSprite({ w: 1, h: 1, data: new Uint8Array([120, 80, 50, 255]) }).pal;
+    const names = buildHeld('rifle', pal, 2500, 'lever').parts.map((p) => p.name);
+    for (const n of ['tube', 'lever', 'loopB', 'hammer', 'gate', 'stock', 'butt']) expect(names).toContain(n);
+    for (const n of ['scope', 'mag']) expect(names).not.toContain(n);
+    const blr = buildHeld('rifle', pal, 3000, 'lever_box').parts.map((p) => p.name);
+    expect(blr).toContain('mag');
+    expect(blr).not.toContain('tube');
+  });
   it('builds every variant with valid parents', () => {
     const pal = analyseSprite({ w: 1, h: 1, data: new Uint8Array([120, 80, 50, 255]) }).pal;
-    for (const [c, v] of [['pistol', 'revolver'], ['pistol', '1911'], ['shotgun', 'double'], ['shotgun', 'single'], ['rifle', 'ak'], ['rifle', 'hunting'], ['pipe', 'crowbar'], ['knife', 'kitchen'], ['hammer', 'sledge'], ['axe', 'hatchet'], ['axe', 'fire']] as const) {
+    for (const [c, v] of [['pistol', 'revolver'], ['pistol', '1911'], ['shotgun', 'double'], ['shotgun', 'single'], ['rifle', 'ak'], ['rifle', 'hunting'], ['rifle', 'lever'], ['rifle', 'lever_brass'], ['rifle', 'lever_stainless'], ['rifle', 'lever_box'], ['shotgun', 'lever'], ['pipe', 'crowbar'], ['knife', 'kitchen'], ['hammer', 'sledge'], ['axe', 'hatchet'], ['axe', 'fire']] as const) {
       const h = buildHeld(c, pal, 1000, v);
       h.parts.forEach((p, i) => expect(p.parent < i, `${c}/${v}:${p.name}`).toBe(true));
       if (h.gun) expect(h.muzzle).not.toBeNull();

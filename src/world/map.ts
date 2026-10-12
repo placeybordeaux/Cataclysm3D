@@ -188,6 +188,9 @@ export class GameMap {
 
   /** Returns the chunk, generating it if needed. z outside [MIN_Z, MAX_Z] returns null. */
   chunk(cx: number, cy: number, z: number): Chunk | null {
+    // A NaN/Infinity coordinate (a view ray from a NaN pitch) would otherwise generate a chunk
+    // "at NaN", whose overmap region runs the road A* without end until the tab dies of OOM.
+    if (!Number.isFinite(cx) || !Number.isFinite(cy) || !Number.isFinite(z)) throw new Error(`map.chunk: non-finite coordinates (${cx}, ${cy}, ${z})`);
     if (z < MIN_Z || z > MAX_Z) return null;
     const key = chunkKey(cx, cy, z);
     let c = this.chunks.get(key);

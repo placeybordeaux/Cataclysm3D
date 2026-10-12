@@ -46,6 +46,8 @@ export interface SaveManagerOptions {
   sync?: SyncStorage | null;
   /** World generator kind ('world' | 'test'), recorded so a load rebuilds the same world. */
   gen: string;
+  /** Overmap generation version of this world, recorded so a load regenerates the same overmap. */
+  genVersion?: number;
   /** Profession / scenario names chosen at character creation (UI state). */
   build?: () => { profession?: string; scenario?: string } | undefined;
   compress?: boolean;
@@ -123,7 +125,7 @@ export class SaveManager {
   private meta(slot: string): Omit<SaveMeta, 'version' | 'savedAt' | 'seed' | 'day' | 'time'> {
     const p = this.game.player;
     const b = this.opts.build?.();
-    return { slot, name: p.name, profession: b?.profession, male: p.male, gen: this.opts.gen };
+    return { slot, name: p.name, profession: b?.profession, male: p.male, gen: this.opts.gen, genVersion: this.opts.genVersion };
   }
 
   /** Snapshot the game now (synchronous), without writing it anywhere. */

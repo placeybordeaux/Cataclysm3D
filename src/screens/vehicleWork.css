@@ -1,0 +1,21 @@
+#ui2 .ix-vehicle-work .ix-work-pickers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: calc(var(--u) * 4);
+  margin: calc(var(--u) * 6) 0;
+}
+#ui2 .ix-vehicle-work select,
+#ui2 .ix-vehicle-work input {
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: 100%;
+  color: var(--p-text);
+  background: var(--p-bg-deep);
+  border: var(--u) solid var(--p-outline);
+  padding: calc(var(--u) * 4);
+  font: inherit;
+}
+#ui2 .ix-vehicle-work select:focus,
+#ui2 .ix-vehicle-work input:focus {
+  outline: var(--u) solid var(--p-accent);
+}

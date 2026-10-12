@@ -139,7 +139,7 @@ function powerMeter(mods: BodyMods): HTMLElement | null {
 
 export function openBionicsPanel(game: Game, mods: BodyMods): ListPanelHandle {
   const { bio } = mods;
-  return listPanel({
+  const panel = listPanel({
     id: 'bionics',
     title: 'Bionics',
     openKey: game.keys.keyFor('bionics'),
@@ -174,10 +174,11 @@ export function openBionicsPanel(game: Game, mods: BodyMods): ListPanelHandle {
         .sort((a, b) => Number(a.group === 'Passive') - Number(b.group === 'Passive') || a.name.localeCompare(b.name)),
     activate: (id) => {
       const b = bio.bionics.find((x) => x.id === id);
-      if (b && bio.activatable(b)) bio.toggle(id);
+      if (b && bio.activatable(b) && bio.toggle(id) && bio.def(id)?.flags?.includes('BIONIC_GUN')) panel.panel.close();
     },
     detail: (id) => bionicCard(mods, id),
   });
+  return panel;
 }
 
 function bionicCard(mods: BodyMods, id: string): HTMLElement[] {
@@ -194,7 +195,9 @@ function bionicCard(mods: BodyMods, id: string): HTMLElement[] {
   const occ = (d.occupied_bodyparts ?? []).map(([bp, n]) => `${partName(bp)} (${n})`);
   if (occ.length) facts.push(['Occupies', occ.join(', ')]);
   const costs: string[] = [];
-  if (d.act_cost) costs.push(`${energy(d.act_cost)} to turn on`);
+  // A bionic gun's act_cost is paid per shot fired, not on activation (src/game/bionicguns.ts).
+  const gun = !!d.flags?.includes('BIONIC_GUN');
+  if (d.act_cost) costs.push(`${energy(d.act_cost)} ${gun ? 'per shot' : 'to turn on'}`);
   if (d.react_cost) costs.push(`${energy(d.react_cost)} every ${d.time ?? 1} turn(s) while on`);
   if (d.trigger_cost) costs.push(`${energy(d.trigger_cost)} per use`);
   if (costs.length) facts.push(['Power', costs.join(', ')]);
@@ -202,7 +205,8 @@ function bionicCard(mods: BodyMods, id: string): HTMLElement[] {
   const protec = (['bash', 'cut', 'bullet'] as const).flatMap((k) => (d[`${k}_protec`] ?? []).map(([bp, v]) => `${partName(bp)} ${k} +${v}`));
   if (protec.length) facts.push(['Armor', protec.join(', ')]);
   if (d.stat_bonus?.length) facts.push(['Stats', d.stat_bonus.map(([s, n]) => `${s} ${n > 0 ? '+' : ''}${n}`).join(', ')]);
-  if (d.fake_item) facts.push([d.flags?.includes('BIONIC_WEAPON') ? 'Weapon' : 'Provides', `${bio.c.data.items[d.fake_item]?.name ?? d.fake_item}${d.flags?.includes('BIONIC_WEAPON') ? ' (extends while on)' : ''}`]);
+  if (d.fake_item && gun) facts.push(['Gun', `${bio.c.data.items[d.fake_item]?.name ?? d.fake_item} (turn on to aim; Esc stops)`]);
+  else if (d.fake_item) facts.push([d.flags?.includes('BIONIC_WEAPON') ? 'Weapon' : 'Provides', `${bio.c.data.items[d.fake_item]?.name ?? d.fake_item}${d.flags?.includes('BIONIC_WEAPON') ? ' (extends while on)' : ''}`]);
   if (facts.length) out.push(factGrid(facts));
   return out;
 }

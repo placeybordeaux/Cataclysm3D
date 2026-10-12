@@ -3,6 +3,7 @@ import { hasFlag } from '../world/registry';
 import { SECONDS_PER_DAY, SECONDS_PER_HOUR, clockScale } from '../core/time';
 import { sunAltitudeAt } from './vision';
 import { BODYTEMP, THIRST } from './character';
+import { SLEEP_MOVING_EPS, vehicleSleepMessage, vehicleSleepSpot, type VehicleSleepSpot } from './vehicleRest';
 
 // Waiting and sleeping, after CDDA's wait menu (game.cpp wait()) and sleep flow
 // (Character::can_sleep, comfort_data in sleep.cpp). Both are game.activities with a clock
@@ -20,6 +21,10 @@ export interface ComfortInfo {
   comfort: number;
   /** what you're lying on ("bed", "floor") */
   on: string;
+  /** In a vehicle: the bed/seat you'd use (src/game/vehicleRest.ts). */
+  vehicle?: VehicleSleepSpot;
+  /** Why you can't lie down here at all (a moving vehicle, BN's no-seat vehicle tile). */
+  refuse?: string;
 }
 
 /** comfort_data::human_comfort_at: furniture comfort, else terrain comfort (floors 1, ground 0). */
@@ -36,8 +41,24 @@ export function comfortAt(game: Game, x: number, y: number, z: number): ComfortI
   return { comfort: tc, on: t.name };
 }
 
+/**
+ * Where the survivor would sleep: the vehicle they're in (its best bed or seat, v3 facilities
+ * from your seat), else the map tile under them.
+ */
+export function playerComfort(game: Game): ComfortInfo {
+  const spot = vehicleSleepSpot(game);
+  if (!spot) {
+    const p = game.player;
+    return comfortAt(game, p.tileX, p.tileY, p.z);
+  }
+  const m = vehicleSleepMessage(spot);
+  const refuse = spot.moving ? `You can't sleep while the ${spot.v.name} is moving: nobody else is driving. Stop first.` : m.refuse ? m.text : undefined;
+  return { comfort: spot.comfort, on: spot.on, vehicle: spot, refuse };
+}
+
 /** CDDA's "This is a comfortable place to sleep." / "It's hard to get to sleep on this X." */
 export function comfortMessage(ci: ComfortInfo): { text: string; good: boolean } {
+  if (ci.vehicle) return vehicleSleepMessage(ci.vehicle);
   if (ci.comfort > COMFORT.neutral) return { text: 'This is a comfortable place to sleep.', good: true };
   if (ci.comfort >= -2) return { text: `It's a little hard to get to sleep on this ${ci.on}.`, good: false };
   return { text: `It's hard to get to sleep on this ${ci.on}.`, good: false };
@@ -49,7 +70,7 @@ export function comfortMessage(ci: ComfortInfo): { text: string; good: boolean }
  */
 export function canSleepRoll(game: Game): boolean {
   const p = game.player;
-  p.sleepComfort = comfortAt(game, p.tileX, p.tileY, p.z).comfort;
+  p.sleepComfort = playerComfort(game).comfort;
   return p.rateSleepSpot() + p.rng.int(-8, 8) > 0;
 }
 
@@ -137,10 +158,20 @@ export function goToSleep(game: Game): boolean {
   const p = game.player;
   if (p.dead) return false;
   if (p.isAsleep()) return true;
-  const ci = comfortAt(game, p.tileX, p.tileY, p.z);
+  const ci = playerComfort(game);
+  if (ci.refuse) {
+    game.message(ci.refuse, 'c_light_red');
+    return false;
+  }
   if (ci.comfort <= COMFORT.impossible) {
     game.message("You can't sleep here.");
     return false;
+  }
+  // Asleep at the wheel the held driving keys would still steer: let go first.
+  if (ci.vehicle && game.vehicles?.driving === ci.vehicle.v) game.message(game.vehicles.releaseControls(), 'c_light_gray');
+  if (ci.vehicle) {
+    const here = game.vehicles?.occupantAt(p.x, p.y, p.z);
+    if (!here || here.mx !== ci.vehicle.mx || here.my !== ci.vehicle.my) game.message(`You settle down on the ${ci.on}.`, 'c_light_gray');
   }
   p.sleepComfort = ci.comfort;
   p.tryToSleep();
@@ -212,7 +243,17 @@ function startSleepActivity(game: Game): boolean {
         if (a) a.elapsed = a.spec.duration;
         return;
       }
+      // A vehicle that starts moving under you (pushed, rolling, rammed) wakes you: nobody
+      // is at the wheel. Its bed breaking or the vehicle going away just changes the spot.
+      const spot = vehicleSleepSpot(game);
+      if (spot && Math.abs(spot.v.velocity) > SLEEP_MOVING_EPS) {
+        game.message(`The ${spot.v.name} lurches into motion and you wake up.`, 'c_light_red');
+        p.wakeUp();
+        if (a) a.elapsed = a.spec.duration;
+        return;
+      }
       if (p.isAsleep()) {
+        p.sleepComfort = playerComfort(game).comfort;
         awakeFor = 0;
         slept = true;
         return;
@@ -227,7 +268,7 @@ function startSleepActivity(game: Game): boolean {
       awakeFor += dt;
       // lying_down rolls roll_can_sleep itself (Character.rollCanSleep, every 30 minutes);
       // keep the comfort of the spot it rates current.
-      p.sleepComfort = comfortAt(game, p.tileX, p.tileY, p.z).comfort;
+      p.sleepComfort = playerComfort(game).comfort;
       if (awakeFor > 2 * SECONDS_PER_HOUR && !p.isAsleep()) {
         cantSleep(game);
         p.removeEffect('lying_down');

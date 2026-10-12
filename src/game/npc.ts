@@ -4,6 +4,8 @@ import { expandItemGroup, type SpawnedItem } from '../data/index';
 import { warnOnce } from '../data/warn';
 import { Character, type CharacterJSON } from './character';
 import { createItem, defaultAmmoId, fromSpawned, loadAmmo, Item, type ItemJSON } from './item';
+import { NpcRules, type NpcRulesJSON } from './npcrules';
+import { traitsFromClassList } from './traitgroup';
 
 // NPCs (CDDA npc.cpp): a Character plus position, attitude, faction, personality, the NPC's
 // opinion of the survivor (op_of_u), dialogue variables and the chatbin (which topic each
@@ -255,7 +257,14 @@ export interface NpcJSON {
   stock: ItemJSON[];
   restockAt: number;
   following: boolean;
+  /** BN ally_rule::allow_sleep; missing in older saves means stay awake. Superseded by `rules`. */
+  allowSleep?: boolean;
+  /** BN npc_follower_rules; missing in older saves means BN's defaults (+ allowSleep). */
+  rules?: NpcRulesJSON;
+  patience?: number;
   spawnKey?: string;
+  /** BN npc::complaints: complaint key -> game seconds when last voiced. */
+  complaints?: [string, number][];
 }
 
 let nextNpcUid = 1;
@@ -290,6 +299,20 @@ export class Npc extends Character {
   restockAt = 0;
   /** Follower ordered to walk with the survivor (false = "wait here"). */
   following = false;
+  /** BN npc_follower_rules: what the survivor told this NPC to do (src/game/npcrules.ts). */
+  readonly rules = new NpcRules();
+  /** BN npc::patience: turns a WAIT_FOR_LEAVE NPC waits for you to go before attacking. */
+  patience = 0;
+  /** BN npc::complaints (npc::complain_about): issue -> game seconds it was last voiced. */
+  readonly complaints = new Map<string, number>();
+  /** BN ally_rule::allow_sleep (overrides included), kept as a property for the AI and old saves. */
+  get allowSleep(): boolean {
+    return this.rules.hasFlag('allow_sleep');
+  }
+  set allowSleep(v: boolean) {
+    if (v) this.rules.flags.add('allow_sleep');
+    else this.rules.flags.delete('allow_sleep');
+  }
   /** Mapgen placement key so a regenerated/reloaded chunk doesn't spawn the NPC twice. */
   spawnKey?: string;
 
@@ -298,6 +321,7 @@ export class Npc extends Character {
   moving = false;
   walkPhase = 0;
   attackCooldown = 0;
+  needsCooldown = 0;
   thinkTimer = 0;
   hitFlash = 0;
   path: [number, number][] = [];
@@ -306,7 +330,7 @@ export class Npc extends Character {
   pathAge = 99;
   pathPending = false;
   stuckTime = 0;
-  goal: { kind: 'none' | 'wander' | 'follow' | 'flee' | 'fight' | 'return' | 'approach'; x: number; y: number; target?: unknown } = { kind: 'none', x: 0, y: 0 };
+  goal: { kind: 'none' | 'wander' | 'follow' | 'flee' | 'fight' | 'return' | 'approach' | 'rest' | 'investigate' | 'pulp'; x: number; y: number; target?: unknown } = { kind: 'none', x: 0, y: 0 };
   idleTimer = 0;
   lastSpeech = -Infinity;
   /** Real seconds this NPC stays angry-fleeing (FLEE_TEMP). */
@@ -386,7 +410,8 @@ export class Npc extends Character {
       vars: [...this.vars], talkEffects: [...this.talkEffects],
       missionIds: [...this.missionIds], missionSelected: this.missionSelected,
       guardPos: this.guardPos ? { ...this.guardPos } : null,
-      stock: this.stock.map((i) => i.toJSON()), restockAt: this.restockAt, following: this.following, spawnKey: this.spawnKey,
+      stock: this.stock.map((i) => i.toJSON()), restockAt: this.restockAt, following: this.following, allowSleep: this.allowSleep, spawnKey: this.spawnKey,
+      rules: this.rules.toJSON(), patience: this.patience, complaints: [...this.complaints],
     };
   }
 
@@ -400,8 +425,11 @@ export class Npc extends Character {
       attitude: j.attitude, mission: j.mission, faction: j.faction, nameSuffix: j.nameSuffix,
       personality: { ...j.personality }, op: { ...j.op }, chat: { ...DEFAULT_CHATBIN, ...j.chat },
       missionIds: [...j.missionIds], missionSelected: j.missionSelected,
-      guardPos: j.guardPos ? { ...j.guardPos } : null, restockAt: j.restockAt, following: j.following, spawnKey: j.spawnKey,
+      guardPos: j.guardPos ? { ...j.guardPos } : null, restockAt: j.restockAt, following: j.following, allowSleep: j.allowSleep ?? false, spawnKey: j.spawnKey,
     });
+    if (j.rules) n.rules.load(j.rules);
+    n.patience = j.patience ?? 0;
+    for (const [k, t] of j.complaints ?? []) n.complaints.set(k, t);
     for (const [k, v] of j.vars) n.vars.set(k, v);
     for (const [k, v] of j.talkEffects) n.talkEffects.set(k, v);
     n.stock = j.stock.map((s) => Item.fromJSON(data, s));
@@ -492,8 +520,11 @@ export function generateNpc(data: GameData, nd: NpcData, spec: NpcSpec, seed: nu
   for (const [id, lvl] of Object.entries(rollClassSkills(cls, skillIds, rng))) if (lvl > 0) n.setSkill(id, lvl);
   n.recalcHp(true);
   n.stamina = n.staminaMax();
-  // Fixed class traits (NO_BASH, RETURN_TO_START_POS, ...): kept as flags the AI reads.
-  for (const t of cls?.traits ?? []) if (t.trait) n.traits.add(t.trait);
+  // npc::randomize: the class "traits" list is a BN trait group (traitgroup.ts): fixed flags the
+  // AI reads (NO_BASH, RETURN_TO_START_POS…), starting traits, appearance and the background
+  // story (BGSS_*) that unlocks the "tell me about yourself" dialogue. Rolled on its own Rng so
+  // the rest of generation (gear, skills) stays as it was for a given seed.
+  for (const t of traitsFromClassList(data, cls?.traits ?? [], new Rng(seed ^ 0x7a17), n.male)) n.traits.add(t);
 
   equipNpc(data, n, cls, classId, rng);
 

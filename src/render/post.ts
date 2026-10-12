@@ -12,6 +12,18 @@ import type { SkyState } from './lights';
 // (a dither cell is one low-res pixel, an outline is one low-res pixel wide).
 
 export type GradeMode = 'palette' | 'smooth' | 'off';
+/**
+ * Antialiasing of the low-res scene image, applied before the post pass so outlines, dither
+ * and the palette snap still work on whole low-res pixels (an edge gets one in-between palette
+ * step, not a blur). Screen-space AA after grading (FXAA/SMAA) or TAA would smear exactly that.
+ *  - 'off'      : one sample per low-res pixel (the classic look).
+ *  - 'msaa'     : 4x MSAA on geometry edges. Alpha-tested cards (grass, leaves) are unaffected.
+ *  - 'msaa+a2c' : MSAA plus alpha-to-coverage on alpha-tested materials, so card edges too.
+ *  - 'ssaa2'    : scene drawn at 2x2 the low-res size, box-filtered down. Covers everything
+ *                 (textures, cards, shadow edges) at ~4x the fragment cost.
+ */
+export type AAMode = 'off' | 'msaa' | 'msaa+a2c' | 'ssaa2';
+export const AA_MODES: readonly AAMode[] = ['off', 'msaa', 'msaa+a2c', 'ssaa2'];
 const GRADE_INDEX: Record<GradeMode, number> = { palette: 0, smooth: 1, off: 2 };
 
 export interface PipelineOptions {
@@ -56,6 +68,8 @@ export interface PipelineOptions {
   edgeLevel: number;
   farEnd: number;
   farMax: number;
+  /** See AAMode. Change it with PixelPipeline.setAA (targets must be reallocated). */
+  aa: AAMode;
 }
 
 const FULLSCREEN_VERT = /* glsl */ `
@@ -188,10 +202,12 @@ void main() {
   if (uBloom > 0.0) col += texture2D(tBloom, vUv).rgb * uBloom * uExposure;
   float dC = linDepth(vUv);
   bool sky = dC > 1e5;
-  // alpha 0.5 in the normal target marks the distant skyline: no outlines, its own haze
-  // (r = true distance / 1024: the impostor is pulled in, so its depth isn't its distance)
+  // alpha -1 in the normal target marks the distant skyline: no outlines, its own haze
+  // (r = true distance / 1024: the impostor is pulled in, so its depth isn't its distance).
+  // Negative so an MSAA-resolved edge pixel (averaged flags) can't read as skyline: a 50/50
+  // mix of outlined (1) and sky (0) used to land exactly on the old 0.5 tag.
   vec4 nS = texture2D(tNormal, vUv);
-  bool skyline = abs(nS.a - 0.5) < 0.2;
+  bool skyline = nS.a < -0.4;
 
   // the sky right behind this pixel (world-space view ray): what distance fades into
   vec3 ray = normalize(uCamRot * vec3((vUv * 2.0 - 1.0) * uTan, -1.0));
@@ -316,6 +332,31 @@ void main() {
   gl_FragColor = vec4(c, 1.0);
 }`;
 
+// SSAA resolve: 2x2 hi-res texels -> one low-res pixel. Colour is the box average; normal/flag
+// and depth come from the nearest of the four, so the post pass's outlines still see one
+// coherent surface (averaged depth would invent surfaces floating between two real ones).
+const DOWN_FRAG = /* glsl */ `
+precision highp float;
+layout(location = 1) out highp vec4 gNormal;
+uniform sampler2D tColor;
+uniform sampler2D tNormal;
+uniform sampler2D tDepth;
+void main() {
+  ivec2 p = ivec2(gl_FragCoord.xy) * 2;
+  vec4 c = vec4(0.0);
+  float best = 2.0;
+  ivec2 bq = p;
+  for (int i = 0; i < 4; i++) {
+    ivec2 q = p + ivec2(i & 1, i >> 1);
+    c += texelFetch(tColor, q, 0);
+    float d = texelFetch(tDepth, q, 0).r;
+    if (d < best) { best = d; bq = q; }
+  }
+  gl_FragColor = c * 0.25;
+  gNormal = texelFetch(tNormal, bq, 0);
+  gl_FragDepth = best;
+}`;
+
 const BLIT_FRAG = /* glsl */ `
 precision highp float;
 uniform sampler2D tSrc;
@@ -327,6 +368,21 @@ void main() {
   vec2 p = floor((gl_FragCoord.xy + uOffset) / uScale) + uMargin;
   gl_FragColor = texture2D(tSrc, (p + 0.5) / uLowRes);
 }`;
+
+/** The low-res MRT: HalfFloat colour + view normal/flag, with a depth texture the post pass reads. */
+function sceneTarget(w: number, h: number, samples: number): THREE.WebGLRenderTarget {
+  const depth = new THREE.DepthTexture(w, h);
+  depth.type = THREE.UnsignedIntType;
+  return new THREE.WebGLRenderTarget(w, h, {
+    count: 2,
+    type: THREE.HalfFloatType,
+    minFilter: THREE.NearestFilter,
+    magFilter: THREE.NearestFilter,
+    depthTexture: depth,
+    depthBuffer: true,
+    samples,
+  });
+}
 
 function lut3d(data: Uint8Array, size: number, filter: THREE.MagnificationTextureFilter): THREE.Data3DTexture {
   const t = new THREE.Data3DTexture(data, size, size, size);
@@ -347,6 +403,12 @@ export class PixelPipeline {
   postTarget!: THREE.WebGLRenderTarget;
   private postMat: THREE.ShaderMaterial;
   private blitMat: THREE.ShaderMaterial;
+  private downMat: THREE.ShaderMaterial;
+  /** 'ssaa2' only: the 2x2-size MRT the scene is drawn into before DOWN_FRAG resolves it into `scene`. */
+  private hiScene: THREE.WebGLRenderTarget | null = null;
+  /** alpha-to-coverage state last applied by syncA2C, and frames until the next sweep. */
+  private a2cOn = false;
+  private a2cSweep = 0;
   private brightMat: THREE.ShaderMaterial;
   private blurMat: THREE.ShaderMaterial;
   private bloomA: THREE.WebGLRenderTarget | null = null;
@@ -381,7 +443,7 @@ export class PixelPipeline {
     this.options = {
       targetHeight: 360, grade: 'palette', dither: 0.035, outline: 0.55, crease: 0.22,
       fogNear: 28, fogFar: 96, fogMax: 0.92, ditherAnchor: 'view', ssao: 0, bloom: 0, atmosphere: 0, skylineFog: 0.7,
-      atmosMode: 0, hazeDist: 60, hazeMax: 1, hazeDesat: 0.4, detailFade: 0.28, edgeLevel: 1, farEnd: 400, farMax: 1, ...opts,
+      atmosMode: 0, hazeDist: 60, hazeMax: 1, hazeDesat: 0.4, detailFade: 0.28, edgeLevel: 1, farEnd: 400, farMax: 1, aa: 'off', ...opts,
     };
     const LUT = 32;
     const pal = lut3d(buildLut(LUT, 'palette'), LUT, THREE.NearestFilter);
@@ -416,6 +478,12 @@ export class PixelPipeline {
       depthTest: false,
       depthWrite: false,
     });
+    this.downMat = new THREE.ShaderMaterial({
+      vertexShader: FULLSCREEN_VERT, fragmentShader: DOWN_FRAG,
+      uniforms: { tColor: { value: null }, tNormal: { value: null }, tDepth: { value: null } },
+      // writes gl_FragDepth into the low-res depth texture the post pass reads
+      depthTest: true, depthFunc: THREE.AlwaysDepth, depthWrite: true,
+    });
     this.brightMat = new THREE.ShaderMaterial({
       vertexShader: FULLSCREEN_VERT, fragmentShader: BRIGHT_FRAG,
       uniforms: { tSrc: { value: null }, uExposure: { value: 1 }, uThreshold: { value: 1.4 } },
@@ -435,6 +503,18 @@ export class PixelPipeline {
   setSize(w: number, h: number): void {
     const s = lowResSize(w, h, this.options.targetHeight, this.margin);
     if (this.scene && s.w === this.lowW && s.h === this.lowH && s.scale === this.scale) return;
+    this.allocate(s);
+  }
+
+  /** Switch antialiasing; reallocates the scene targets at the current size. */
+  setAA(mode: AAMode): void {
+    if (!AA_MODES.includes(mode)) throw new Error(`unknown AA mode ${mode}`);
+    if (mode === this.options.aa) return;
+    this.options.aa = mode;
+    if (this.scene) this.allocate({ w: this.lowW, h: this.lowH, scale: this.scale });
+  }
+
+  private allocate(s: { w: number; h: number; scale: number }): void {
     this.scale = s.scale;
     this.lowW = s.w;
     this.lowH = s.h;
@@ -442,19 +522,14 @@ export class PixelPipeline {
     this.postTarget?.dispose();
     this.bloomA?.dispose();
     this.bloomB?.dispose();
+    this.hiScene?.dispose();
+    this.hiScene = null;
     const bo = { type: THREE.HalfFloatType, minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, depthBuffer: false };
     this.bloomA = new THREE.WebGLRenderTarget(Math.max(1, s.w >> 1), Math.max(1, s.h >> 1), bo);
     this.bloomB = new THREE.WebGLRenderTarget(Math.max(1, s.w >> 1), Math.max(1, s.h >> 1), bo);
-    const depth = new THREE.DepthTexture(s.w, s.h);
-    depth.type = THREE.UnsignedIntType;
-    this.scene = new THREE.WebGLRenderTarget(s.w, s.h, {
-      count: 2,
-      type: THREE.HalfFloatType,
-      minFilter: THREE.NearestFilter,
-      magFilter: THREE.NearestFilter,
-      depthTexture: depth,
-      depthBuffer: true,
-    });
+    const aa = this.options.aa;
+    this.scene = sceneTarget(s.w, s.h, aa === 'msaa' || aa === 'msaa+a2c' ? 4 : 0);
+    if (aa === 'ssaa2') this.hiScene = sceneTarget(s.w * 2, s.h * 2, 0);
     this.postTarget = new THREE.WebGLRenderTarget(s.w, s.h, {
       minFilter: THREE.NearestFilter,
       magFilter: THREE.NearestFilter,
@@ -473,6 +548,35 @@ export class PixelPipeline {
   }
 
   /**
+   * Alpha-to-coverage for every alpha-tested opaque material in the drawn scenes. Materials
+   * are created all over the renderer (chunks, flora, sprites, viewmodel) and new chunks keep
+   * arriving, so instead of threading a flag through each factory this sweeps the scene graph:
+   * at once when the mode flips, then every 30 frames to catch newly built chunks. Toggling the
+   * flag recompiles the program (ALPHA_TO_COVERAGE define), hence needsUpdate.
+   */
+  private syncA2C(scene: THREE.Scene, overlay?: THREE.Scene): void {
+    const want = this.options.aa === 'msaa+a2c';
+    if (want === this.a2cOn && (!want || --this.a2cSweep > 0)) return;
+    this.a2cOn = want;
+    this.a2cSweep = 30;
+    const apply = (m: THREE.Material) => {
+      const on = want && m.alphaTest > 0 && !m.transparent;
+      if (m.alphaToCoverage !== on) {
+        m.alphaToCoverage = on;
+        m.needsUpdate = true;
+      }
+    };
+    const visit = (obj: THREE.Object3D) => {
+      const m = (obj as THREE.Mesh).material;
+      if (!m) return;
+      if (Array.isArray(m)) m.forEach(apply);
+      else apply(m);
+    };
+    scene.traverse(visit);
+    overlay?.traverse(visit);
+  }
+
+  /**
    * `overlay` (the first-person viewmodel) is drawn into the same low-res target after the
    * world with depth cleared, so it is outlined, dithered and graded like everything else.
    */
@@ -480,7 +584,9 @@ export class PixelPipeline {
     overlay?: { scene: THREE.Scene; camera: THREE.Camera }): void {
     const r = this.three;
     const o = this.options;
-    r.setRenderTarget(this.scene);
+    this.syncA2C(scene, overlay?.scene);
+    const drawTarget = this.hiScene ?? this.scene;
+    r.setRenderTarget(drawTarget);
     r.clear();
     r.render(scene, camera);
     if (overlay) {
@@ -499,6 +605,15 @@ export class PixelPipeline {
       cam.projectionMatrix.copy(_proj);
       cam.projectionMatrixInverse.copy(_projInv);
       r.autoClear = auto;
+    }
+    if (this.hiScene) {
+      const d = this.downMat.uniforms;
+      d.tColor.value = this.hiScene.textures[0];
+      d.tNormal.value = this.hiScene.textures[1];
+      d.tDepth.value = this.hiScene.depthTexture;
+      this.quad.material = this.downMat;
+      r.setRenderTarget(this.scene);
+      r.render(this.quadScene, this.quadCam);
     }
 
     if (o.bloom > 0 && this.bloomA && this.bloomB) {

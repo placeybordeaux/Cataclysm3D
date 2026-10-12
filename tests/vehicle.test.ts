@@ -287,6 +287,113 @@ describe('physics', () => {
   });
 });
 
+// BN combustion.json gas_turbine_engine fuel_options; vehicle::start_engine switches a dry
+// engine to the first option the vehicle carries (vehicle_part::fuel_set / ammo_pref).
+describe('multi-fuel engines (BN fuel_options)', () => {
+  const abrams = (vs: VehicleSystem) => {
+    const v = vs.spawn('tank_m1_abrams', 10, 10, 0, 0, { fuel: 100, status: 2, rng: new Rng(7) })!;
+    v.locked = false;
+    return v;
+  };
+  it('the Abrams turbine starts and runs on the JP-8 it spawns with', () => {
+    const { game, vs } = world();
+    const v = abrams(vs);
+    const turbine = v.engines.find((e) => e.def.id === 'engine_turbine_small')!;
+    expect(turbine.def.fuel_type).toBe('gasoline');
+    expect(v.engineFuelOptions(turbine)).toContain('jp8');
+    expect(v.fuelLeft('gasoline')).toBe(0);
+    expect(v.fuelLeft('jp8')).toBeGreaterThan(0);
+    expect(v.runningFuels()).toEqual(['jp8']);
+    game.player.x = v.x; game.player.y = v.y;
+    expect(vs.takeControls(v).ok).toBe(true);
+    const r = vs.startEngine(v);
+    expect(r.ok, r.msg).toBe(true);
+    expect(v.engineFuel(turbine)).toBe('jp8');
+    const jp0 = v.fuelLeft('jp8');
+    const used = v.consumeFuel(10, 1);
+    expect(used.jp8).toBeGreaterThan(0);
+    expect(v.fuelLeft('jp8')).toBeCloseTo(jp0 - used.jp8, 6);
+    // The choice is saved with the engine.
+    const back = Vehicle.fromJSON(vdata, data, v.toJSON());
+    expect(back.engineFuel(back.engines.find((e) => e.def.id === 'engine_turbine_small')!)).toBe('jp8');
+  });
+  it('switches back to gasoline when the JP-8 is gone and there is gasoline; out of both says so', () => {
+    const { vs } = world();
+    const v = abrams(vs);
+    const turbine = v.engines.find((e) => e.def.id === 'engine_turbine_small')!;
+    expect(v.selectEngineFuel(turbine)).toBe(true);
+    expect(v.engineFuel(turbine)).toBe('jp8');
+    v.drainFuel('jp8', 1e12);
+    expect(v.selectEngineFuel(turbine)).toBe(false);
+    expect(vs.startEngine(v).msg).toMatch(/out of JP8/i);
+  });
+  it('a car engine takes avgas and alcohols (BN engine_combustion) but still refuses diesel', () => {
+    const { vs } = world();
+    const v = pristineCar(vs);
+    const e = v.engines[0];
+    expect(v.engineFuelOptions(e)).toEqual(['gasoline', 'avgas', 'chem_ethanol', 'denat_alcohol', 'chem_methanol']);
+    expect(v.engineFuels()).not.toContain('diesel');
+  });
+});
+
+// BN vehicle.cpp refresh(): TRACKED wheels join `steering`. The port adds a skid-steer pivot.
+describe('tracked steering', () => {
+  const drive = (vs: VehicleSystem, game: Game, steer: number, throttle: number, seconds: number) => {
+    vs.driveMode = 'direct';
+    vs.scriptedInput = true;
+    vs.input = { throttle, steer, brake: false };
+    for (let i = 0; i < seconds * 30; i++) game.tick(1 / 30);
+  };
+  const tank = () => {
+    const { game, vs } = world();
+    const v = vs.spawn('tank_m1_abrams', 10, 10, 0, 0, { fuel: 100, status: 2, rng: new Rng(7) })!;
+    v.locked = false;
+    game.player.x = v.x; game.player.y = v.y;
+    expect(vs.takeControls(v).ok).toBe(true);
+    const r = vs.startEngine(v);
+    expect(r.ok, r.msg).toBe(true);
+    return { game, vs, v };
+  };
+  it('the Abrams can steer and pivots on the spot both ways', () => {
+    const { game, vs, v } = tank();
+    expect(v.steerable()).toBe(true);
+    expect(v.skidSteers()).toBe(true);
+    const f0 = v.facing, x0 = v.x, y0 = v.y;
+    drive(vs, game, 1, 0, 2);
+    const right = ((v.facing - f0 + 540) % 360) - 180;
+    expect(Math.abs(right)).toBeGreaterThan(30);
+    expect(Math.hypot(v.x - x0, v.y - y0)).toBeLessThan(0.5);
+    const f1 = v.facing;
+    drive(vs, game, -1, 0, 2);
+    const left = ((v.facing - f1 + 540) % 360) - 180;
+    expect(Math.sign(left)).toBe(-Math.sign(right));
+  });
+  it('turns while driving forward, the same way as a car', () => {
+    const { game, vs, v } = tank();
+    const f0 = v.facing;
+    drive(vs, game, 0, 1, 2);
+    expect(v.velocity).toBeGreaterThan(1);
+    drive(vs, game, 1, 1, 2);
+    const turned = ((v.facing - f0 + 540) % 360) - 180;
+    const { vs: cvs, game: cgame } = world();
+    const car = pristineCar(cvs);
+    cgame.player.x = 10.5; cgame.player.y = 10.5;
+    cvs.takeControls(car); cvs.startEngine(car);
+    drive(cvs, cgame, 0, 1, 2); drive(cvs, cgame, 1, 1, 2);
+    expect(Math.sign(turned)).toBe(Math.sign(((car.facing + 540) % 360) - 180));
+  });
+  it('a car still cannot turn on the spot', () => {
+    const { game, vs } = world();
+    const v = pristineCar(vs);
+    game.player.x = 10.5; game.player.y = 10.5;
+    vs.takeControls(v); vs.startEngine(v);
+    expect(v.skidSteers()).toBe(false);
+    const f0 = v.facing;
+    drive(vs, game, 1, 0, 2);
+    expect(v.facing).toBeCloseTo(f0, 6);
+  });
+});
+
 describe('cruise control (CDDA driving model option)', () => {
   it('cruise_thrust steps 4 mph, snaps to the safe speed, clamps to max and reverse', () => {
     // safe 45 mph, max 60, reverse -15 (combustion: max / 4)

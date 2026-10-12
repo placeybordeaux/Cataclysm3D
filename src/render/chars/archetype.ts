@@ -141,7 +141,14 @@ export function bodyShapeOf(m: MonsterLike): BodyShape {
   if (arch === 'flyer') wings = species.includes('INSECT') || m.bodytype === 'flying insect' ? 'insect' : /bat/.test(id) ? 'membrane' : species.includes('ROBOT_FLYING') ? 'none' : 'feather';
   else if (fliesFlag && arch === 'humanoid') wings = 'membrane';
   let variant = '';
-  if (arch === 'insect') variant = /(^|_)ant(_|$)/.test(id) ? 'ant' : legCount === 8 ? 'spider' : 'roach';
+  if (arch === 'quadruped') {
+    variant = m.bodytype === 'gator' || /gator|crocodile/.test(id) ? 'reptile'
+      : m.bodytype === 'bear' || /bear/.test(id) ? 'bear'
+      : m.bodytype === 'pig' || /pig|hog|boar/.test(id) ? 'pig'
+      : m.bodytype === 'horse' || /horse|mule|donkey|zebra/.test(id) ? 'equine'
+      : /deer|moose|elk|reindeer/.test(id) ? 'cervid'
+      : /cougar|panther|lynx|tiger|lion|(^|_)cat(_|$)/.test(id) ? 'feline' : 'canine';
+  } else if (arch === 'insect') variant = /(^|_)ant(_|$)/.test(id) ? 'ant' : legCount === 8 ? 'spider' : 'roach';
   else if (arch === 'flyer') {
     variant = /wasp|hornet|yellowjacket/.test(id) ? 'wasp' : /(^|_)bee(_|$)|bumble/.test(id) ? 'bee' : /mosquito/.test(id) ? 'mosquito'
       : /dragonfly/.test(id) ? 'dragonfly' : /(^|_)fly(_|$)/.test(id) ? 'fly' : /(^|_)bat(_|$)|vampire/.test(id) ? 'bat' : wings === 'feather' ? 'bird' : '';

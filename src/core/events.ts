@@ -47,6 +47,12 @@ export interface GameEvents {
   monsterDodge: { monster: unknown; x: number; y: number; z: number; dx: number; dy: number };
   /** An enemy round passed close to the survivor without hitting (src/game/enemyfire.ts): `side` ±1 = which side it passed. */
   nearMiss: { x: number; y: number; z: number; dist: number; kind: string; side: number };
+  /** A blast went off (src/game/blast.ts detonate): the renderer draws the fireball and smoke. */
+  explosion: { x: number; y: number; z: number; radius: number; fire: boolean };
+  /** A vehicle turret fired (src/game/turret.ts, src/turrets.ts): muzzle flash, smoke, barrel recoil, camera kick. */
+  /** The gunner started reloading a turret (the renderer's loader animation / sound). */
+  turretReload: { vehicle: unknown; part: unknown; seconds: number };
+  turretFired: { vehicle: unknown; part: unknown; muzzle: { x: number; y: number; h: number }; yaw: number; pitch: number; main: boolean; to: { x: number; y: number; h: number } };
   /**
    * The survivor tried to attack and couldn't (too weak to draw the bow, no arrows): the
    * crosshair says why (src/ui/combatHud.ts).

@@ -1,4 +1,5 @@
 import type { Game } from '../game/game';
+import { activeWeapon } from '../game/bionicguns';
 import type { Monster } from '../game/monster';
 import type { PlayerCombat } from '../game/playercombat';
 import { defenseOf } from '../game/combatfeel';
@@ -159,7 +160,7 @@ export class CombatHints {
     this.time += dt;
     const p = this.game.player;
     const c = this.combat;
-    const aiming = visible && freeAim() && !!p.inv.wielded?.isGun() && (this.game.input.mouseButtons & 4) !== 0;
+    const aiming = visible && freeAim() && !!activeWeapon(this.game)?.isGun() && (this.game.input.mouseButtons & 4) !== 0;
     this.aimingFor = aiming ? this.aimingFor + dt : 0;
     if (!aiming) this.swayedThisAim = false;
     if (aiming && !this.swayedThisAim && this.aimingFor > 0.4 && c.aim.amp > (0.25 * Math.PI) / 180 && c.rangedTarget(35)) {

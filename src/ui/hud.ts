@@ -1,4 +1,5 @@
 import type { Game } from '../game/game';
+import { bionicGunHud } from '../game/bionicguns';
 import { BODY_PARTS, MAIN_PARTS } from '../game/bodyparts';
 import { colorize, c, cssColor } from './framework';
 import {
@@ -266,6 +267,9 @@ export class Hud {
     // Real-time swing interval next to the weapon, coloured by how sluggish it is.
     const swing = w?.isGun() ? '' : ` ${c(swingSpeedRating(attackSpeedMoves(p, w)).color, `${attackCooldownSeconds(p, w).toFixed(1)}s`)}`;
     L.push(`${lbl('Wield:')} ${c(w ? 'c_white' : 'c_light_gray', w ? w.name() : 'fists')}${swing}`);
+    // An aimed bionic gun (src/game/bionicguns.ts) fires instead of the wielded item while it lasts.
+    const bionic = bionicGunHud(game);
+    if (bionic) L.push(`${lbl('Aim:')} ${c('c_light_cyan', bionic.name)} ${c(bionic.shots <= 1 ? 'c_yellow' : 'c_light_gray', bionic.detail)}`);
     const wt = p.inv.weightCarried(), cap = p.inv.weightCapacity();
     L.push(`${lbl('Weight:')} ${c(wt > cap ? 'c_red' : 'c_white', (wt / 1000).toFixed(1))}${c('c_light_gray', '/' + (cap / 1000).toFixed(1) + ' kg')}`);
 

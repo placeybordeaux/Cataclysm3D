@@ -20,7 +20,7 @@ import type { Renderer } from '../../render/renderer';
 import type { DebugApi } from '../../debug';
 import type { InventoryScope } from '../../game/inventory_view';
 import { LootMemory } from '../../game/loot';
-import { interactOverrides } from '../../game/interact';
+import { interactOverrides, aimedCreature } from '../../game/interact';
 import { registerSaveable } from '../../save/registry';
 import { registerOption } from '../../ui/options';
 import { settings, saveSettings, surfacesOpen } from '../host';
@@ -129,8 +129,9 @@ export function installLoot(game: Game, renderer: Renderer, api: DebugApi, inv: 
     // water), not take the firewood out of it (playtest).
     if (t && t.key.startsWith('ground:') && game.map.fieldsAt(t.x, t.y, t.z).some((f) => f.type === 'fd_fire')) t = null;
     // Someone standing in front of the pile: `e` talks to them (npcs.ts), so a loot card beside
-    // "[e] Talk to …" promised the wrong thing (playtest, round 6).
-    if (t && game.lookAt?.(3)?.kind === 'creature') t = null;
+    // "[e] Talk to …" promised the wrong thing (playtest, round 6). The same test `e` makes
+    // (interact.ts aimedCreature), so the panel and the key never disagree.
+    if (t && aimedCreature(game)) t = null;
     if (!t) {
       target = null;
       rows = [];
@@ -321,6 +322,7 @@ export function installLoot(game: Game, renderer: Renderer, api: DebugApi, inv: 
 
   // --- options
   registerOption({
+    category: 'Interface',
     name: 'Looting style',
     desc: 'Quick: look at a pile and its contents show at the crosshair ([e] take, [r] take all, wheel to pick). Area: g opens one list of everything within reach that stays open while you walk. Inventory tabs: e / g open the inventory on that place.',
     value: () => STYLE_NAMES[lootStyle()],
@@ -331,6 +333,7 @@ export function installLoot(game: Game, renderer: Renderer, api: DebugApi, inv: 
     },
   });
   registerOption({
+    category: 'Interface',
     name: 'Loot markers',
     desc: 'Badges over piles and containers in sight: the most notable item and how many things; "?" for containers you have not searched yet.',
     value: () => (settings.lootMarkers === false ? 'off' : 'on'),

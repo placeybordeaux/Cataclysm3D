@@ -2,6 +2,12 @@ import * as THREE from 'three';
 import type { PlayerAvatar } from '../game/player';
 import type { GameMap } from '../world/map';
 import { LEVEL_HEIGHT } from '../world/coords';
+
+/** Third person at a crew station (a tank's gunner, commander, hatch): how far back, how high
+ *  over the eye, and the furthest the camera looks out along the aim (m). */
+const STATION_BACK = 8;
+const STATION_RISE = 2.4;
+const STATION_AIM_M = 45;
 import { approachAngle, chaseOffsets, chasePose, chaseReach, DRIVE_CAMS, rideShake, speedFov, type DriveCam, type DriveView } from './driveCamera';
 
 // Camera modes (cycled with V):
@@ -85,6 +91,19 @@ export class CameraRig {
    * (VehicleRenderer sets it every frame).
    */
   eyeCap: number | null = null;
+  /**
+   * At a vehicle station (src/game/vehwalk.ts): the eye's absolute height (seated, standing on
+   * the drawn floor, head out of a hatch), set every frame by VehicleRenderer; null on foot.
+   */
+  stationEye: number | null = null;
+  /** At a crew station (tanks): the third-person camera stands well off the hull (vehicleMesh.ts sets it). */
+  stationWide = false;
+  /**
+   * At a vehicle station: tiles of the vehicle you're in, which the third-person camera doesn't
+   * pull in for (a tank's armour is opaque, so the camera used to end up a metre behind your
+   * head, looking at the turret roof). Set by VehicleRenderer; null on foot.
+   */
+  stationOwn: ((tx: number, ty: number) => boolean) | null = null;
   /** Aim-down-sights target 0..1 (src/feel.ts sets it while RMB is held with a gun) and its FOV. */
   ads = 0;
   adsFov = 50;
@@ -194,7 +213,8 @@ export class CameraRig {
       cam.fov = fovFirst;
       const bobY = Math.abs(Math.sin(this.bobPhase)) * this.bobAmp * 1.6 - this.bobAmp * 0.8;
       const bobX = Math.cos(this.bobPhase) * this.bobAmp * 0.6;
-      cam.position.set(p.x - fwdZ * bobX, Math.min(base + eyeH + bobY, this.eyeCap ?? Infinity), p.y + fwdX * bobX);
+      const y = this.stationEye ?? Math.min(base + eyeH + bobY, this.eyeCap ?? Infinity);
+      cam.position.set(p.x - fwdZ * bobX, y, p.y + fwdX * bobX);
       if (this.snapRotation) {
         const q = (2 * Math.tan((cam.fov * Math.PI) / 360)) / lowResHeight;
         cam.rotation.set(Math.round(p.pitch / q) * q + this.kickPitch + this.aimView.y, -Math.round(p.yaw / q) * q - this.kickYaw - this.aimView.x, 0, 'YXZ');
@@ -202,24 +222,37 @@ export class CameraRig {
       this.focus.copy(cam.position);
     } else if (this.mode === 'third') {
       cam.fov = fovFirst;
-      const eye = tmpEye.set(p.x, base + eyeH + 0.15, p.y);
+      const eye = tmpEye.set(p.x, (this.stationEye ?? base + eyeH) + 0.15, p.y);
       const cp = Math.cos(p.pitch), sp = Math.sin(p.pitch);
       const dir = tmpDir.set(fwdX * cp, sp, fwdZ * cp);
       const right = tmpRight.set(-fwdZ, 0, fwdX);
-      // pull in toward the player if a wall is between
-      let dist = this.thirdDistance;
-      for (let t = 0.3; t <= this.thirdDistance; t += 0.1) {
-        const x = eye.x - dir.x * t + right.x * 0.5 * (t / this.thirdDistance);
-        const z = eye.z - dir.z * t + right.z * 0.5 * (t / this.thirdDistance);
+      // pull in toward the player if a wall is between. At a vehicle station the camera stands
+      // further off and higher, so the hull and turret are in the shot rather than filling it.
+      const station = this.stationEye !== null && this.stationWide;
+      const reach = station ? Math.max(this.thirdDistance, STATION_BACK) : this.thirdDistance;
+      let dist = reach;
+      for (let t = 0.3; t <= reach; t += 0.1) {
+        const x = eye.x - dir.x * t + right.x * 0.5 * (t / reach);
+        const z = eye.z - dir.z * t + right.z * 0.5 * (t / reach);
+        if (station && this.stationOwn?.(Math.floor(x), Math.floor(z))) continue;
         if (map.opaque(Math.floor(x), Math.floor(z), p.z) && !map.passable(Math.floor(x), Math.floor(z), p.z)) {
           dist = Math.max(0.3, t - 0.3);
           break;
         }
       }
-      const k = dist / this.thirdDistance;
+      const k = dist / reach;
       cam.position.copy(eye).addScaledVector(dir, -dist).addScaledVector(right, 0.5 * k);
-      cam.position.y += 0.2 * k;
-      cam.rotation.set(p.pitch, -p.yaw, 0, 'YXZ');
+      cam.position.y += (station ? STATION_RISE : 0.2) * k;
+      if (station) {
+        // A gunner's over-the-turret view: parallel to the look ray, 2-3 m over it, the screen
+        // was mostly turret roof and the crosshair sat well above what the gun was laid on.
+        // Look from up here at the point the eye's ray reaches (the ground it meets, at most
+        // STATION_AIM_M out): the crosshair is on it and the turret drops to the bottom.
+        const down = -dir.y;
+        const t = down > 0.01 ? Math.min(STATION_AIM_M, (eye.y - base) / down) : STATION_AIM_M;
+        const ax = eye.x + dir.x * t - cam.position.x, ay = eye.y + dir.y * t - cam.position.y, az = eye.z + dir.z * t - cam.position.z;
+        cam.rotation.set(Math.atan2(ay, Math.hypot(ax, az)), Math.atan2(-ax, -az), 0, 'YXZ');
+      } else cam.rotation.set(p.pitch, -p.yaw, 0, 'YXZ');
       this.focus.set(p.x, base + eyeH, p.y);
     } else {
       const tf = this.topFocus;

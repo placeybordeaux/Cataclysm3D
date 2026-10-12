@@ -5,13 +5,36 @@ import { Character } from './character';
 // The avatar: a Character (stats, body, needs, inventory — src/game/character.ts) plus a
 // position and view direction in the 3D world.
 
+/** How far mouse-look tilts the view up or down (rad): a hair short of straight up/down. */
+export const PITCH_LIMIT = 1.5;
+
 export class PlayerAvatar extends Character {
   x = 9.5;
   y = 16.5;
   z = 0;
+  // The view angles are guarded where they are set: a NaN pitch/yaw used to reach every view-ray
+  // march (targeting.ts, the loot hover) as NaN tile coordinates, and generating a chunk and
+  // overmap region "at NaN" ran the road A* forever until the tab died of OOM. A bad value now
+  // throws at the assignment (the debug API caller, or the code that computed it), and pitch is
+  // held to the mouse-look limit so a debug write can't leave it past straight up/down either.
+  private _yaw = 0;
+  private _pitch = 0;
   /** yaw 0 looks north (-y); positive yaw turns clockwise (toward east). */
-  yaw = 0;
-  pitch = 0;
+  get yaw(): number {
+    return this._yaw;
+  }
+  set yaw(v: number) {
+    if (!Number.isFinite(v)) throw new Error(`player.yaw must be finite, got ${v}`);
+    this._yaw = v;
+  }
+  /** Radians, up positive, held to ±PITCH_LIMIT. */
+  get pitch(): number {
+    return this._pitch;
+  }
+  set pitch(v: number) {
+    if (!Number.isFinite(v)) throw new Error(`player.pitch must be finite, got ${v}`);
+    this._pitch = Math.max(-PITCH_LIMIT, Math.min(PITCH_LIMIT, v));
+  }
   /** Walk-speed multiplier from what the hands are doing (combat guard; set by PlayerCombat). */
   moveSpeedMul = 1;
 

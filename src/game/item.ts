@@ -699,7 +699,8 @@ export function defaultAmmoId(data: GameData, ammoType: string): string | undefi
  * Spawn-time loading: create up to `n` rounds of `ammoId` inside `it` (its integral magazine,
  * its magazine's contents, a bandolier), inserting the default magazine into an empty
  * magazine-fed gun or tool first. Creates the rounds out of nothing: only for new items (item
- * groups, NPC kits, debug), never for reloading, which moves real rounds (moves.ts).
+ * groups, NPC kits, debug), or converting electrical energy into battery charges
+ * (recharging.ts); never for reloading, which moves real rounds (moves.ts).
  */
 export function loadAmmo(it: Item, ammoId: string, n = Infinity): number {
   const data = it.data;

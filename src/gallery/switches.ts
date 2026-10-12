@@ -8,9 +8,10 @@ import { switchShadows } from '../render/shadowInstall';
 import { FLORA_NAMES, flora } from '../render/flora';
 import { furnitureState } from '../render/furniture/index';
 import { surfaceState } from '../render/surfaces';
+import { groundItemState } from '../render/furniture/groundHeld';
 import { cardSettings } from '../render/cards';
 import { charSettings, charsApi, setCharMode, setViewmodelMode } from '../render/chars/index';
-import { setCutoutMips } from '../render/cutoutMips';
+import { cutoutMipsOn, setCutoutMips } from '../render/cutoutMips';
 import { AIM_MODELS, aimModel, isAimModel, setAimModel } from '../game/aimmodel';
 import type { GradeMode } from '../render/post';
 import { storeGameOptions } from '../ui/options';
@@ -94,7 +95,6 @@ export function buildSwitches(renderer: Renderer, api: DebugApi): GallerySwitch[
   const check = (sw: GallerySwitch, v: string) => {
     if (!sw.values.some((x) => x.v === v)) throw new Error(`gallery: ${sw.id} has no value "${v}" (expected ${sw.values.map((x) => x.v).join('|')})`);
   };
-  let cutout = true;
   const radii = [5, 6, 8];
   const list: GallerySwitch[] = [
     {
@@ -138,14 +138,13 @@ export function buildSwitches(renderer: Renderer, api: DebugApi): GallerySwitch[
       persist: () => storeGameOptions({ grade: renderer.pipeline.options.grade }),
     },
     {
-      id: 'cutout', label: 'Cutout mips', group: 'Image', option: null,
+      id: 'cutout', label: 'Cutout mips', group: 'Image', option: 'Cutout mips', url: 'cutout',
       values: [{ v: 'on', label: 'stable' }, { v: 'off', label: 'off (v2)' }], def: 'on',
       note: 'Grass and leaf cards at distance; mostly visible in motion (shimmer). Needs a look with grass (Terrain or Full). Console: cdda.cutoutMips(false).',
       requires: { look: 'full' },
-      get: () => (cutout ? 'on' : 'off'),
+      get: () => (cutoutMipsOn() ? 'on' : 'off'),
       set: (v) => {
-        cutout = v === 'on';
-        setCutoutMips(cutout);
+        setCutoutMips(v === 'on');
       },
       proof: 'forest',
     },
@@ -155,7 +154,7 @@ export function buildSwitches(renderer: Renderer, api: DebugApi): GallerySwitch[
       get: () => charSettings.mode, set: (v) => setCharMode(v as 'model' | 'billboard'), proof: 'horde',
     },
     {
-      id: 'charpaint', label: 'Creature paint', group: 'Characters', option: null, url: 'charpaint',
+      id: 'charpaint', label: 'Creature paint', group: 'Characters', option: 'Creature paint', url: 'charpaint',
       values: [{ v: 'styled', label: 'styled skins' }, { v: 'sprite', label: 'projected sprite' }], def: 'styled',
       note: '3D creatures only.',
       get: () => charSettings.paint, set: (v) => void charsApi({ paint: v as 'styled' | 'sprite' }), proof: 'npcs',
@@ -166,14 +165,14 @@ export function buildSwitches(renderer: Renderer, api: DebugApi): GallerySwitch[
       get: () => charSettings.viewmodel, set: (v) => setViewmodelMode(v as 'model' | 'sprite'), proof: 'fp_pistol',
     },
     {
-      id: 'fpbow', label: 'First-person bow', group: 'Characters', option: null,
+      id: 'fpbow', label: 'First-person bow', group: 'Characters', option: 'First-person bow', url: 'fpbow',
       values: [{ v: 'sprite', label: '2D art' }, { v: 'model', label: '3D bow' }], def: 'sprite',
       note: 'Bows and slingshots; only with 3D first-person hands. Console: cdda.chars({ fpBow: true }).',
       requires: { viewmodel: 'model' },
       get: () => (charSettings.fpBow ? 'model' : 'sprite'), set: (v) => void (charSettings.fpBow = v === 'model'), proof: 'fp_bow',
     },
     {
-      id: 'props', label: 'Props', group: 'Characters', option: null, url: 'props',
+      id: 'props', label: 'Props', group: 'Characters', option: 'Props', url: 'props',
       values: [{ v: 'cards', label: 'world-fixed cards' }, { v: 'billboard', label: 'billboards (v2)' }], def: 'cards',
       note: 'Fire, far furniture, loot, mannequins. Projectile effects keep the mode they started with until reload.',
       get: () => cardSettings.mode,
@@ -190,13 +189,19 @@ export function buildSwitches(renderer: Renderer, api: DebugApi): GallerySwitch[
       get: () => furnitureState.style, set: (v) => void need<(s: string) => void>('setFurnitureStyle')(v), proof: 'kitchen',
     },
     {
+      id: 'grounditems', label: 'Dropped weapons', group: 'World', option: 'Dropped weapons', url: 'grounditems',
+      values: [{ v: 'held', label: '3D models' }, { v: 'shape', label: 'simple shapes (v2)' }], def: 'held',
+      note: 'Guns, melee weapons and tools on the floor. Full/Voxel: all of them; Crisp/Terrain: only items with no tileset sprite (else a glyph); Classic: unchanged.',
+      get: () => groundItemState.style, set: (v) => void need<(s: string) => void>('setGroundItemStyle')(v), proof: 'loot_weapons',
+    },
+    {
       id: 'surfaces', label: 'Surfaces', group: 'World', option: 'Surfaces', url: 'surfaces',
       values: [{ v: 'painted', label: 'Painted' }, { v: 'sprite', label: 'Tileset' }], def: 'painted',
       note: 'Needs the Full or Voxel style.',
       get: () => surfaceState.style, set: (v) => void need<(s: string) => void>('setSurfaceStyle')(v), proof: 'living',
     },
     {
-      id: 'dressing', label: 'Set dressing', group: 'World', option: null, url: 'dressing',
+      id: 'dressing', label: 'Set dressing', group: 'World', option: 'Set dressing', url: 'dressing',
       values: [{ v: 'on', label: 'on' }, { v: 'off', label: 'bare rooms' }], def: 'on',
       note: 'Pictures, grime, rugs, lamps, house numbers (painted surfaces only).',
       get: () => (need<() => boolean>('dressing')() ? 'on' : 'off'), set: (v) => void need<(on: boolean) => void>('setDressing')(v === 'on'), proof: 'living',

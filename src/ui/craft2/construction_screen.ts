@@ -6,6 +6,7 @@
 // builds there, right click or Bksp (or Esc) cancels. The work shows a progress bar over the site.
 
 import * as THREE from 'three';
+import { openVehicleChassisPanel } from '../../screens/vehicleChassis';
 import type { Game } from '../../game/game';
 import type { Renderer } from '../../render/renderer';
 import {
@@ -125,7 +126,8 @@ export function openConstructionScreen(game: Game, renderer: Renderer): Construc
     onClose: () => void (screen = null),
   });
   panel.body.classList.add('c2-build');
-  panel.body.append(h('div', { class: 'c2-top' }, search, hereBtn), catBar, h('div', { class: 'c2-main' }, h('div', { class: 'c2-left' }, list), detail));
+  const chassisButton = button('Build a vehicle chassis…', () => { panel.close(); openVehicleChassisPanel(game); });
+  panel.body.append(chassisButton, h('div', { class: 'c2-top' }, search, hereBtn), catBar, h('div', { class: 'c2-main' }, h('div', { class: 'c2-left' }, list), detail));
   if (!rememberedWindow(PANEL_ID)) {
     const r = panel.el.getBoundingClientRect();
     panel.moveTo(Math.max(8, (innerWidth - r.width) / 2), Math.max(8, (innerHeight - r.height) / 2));
@@ -216,6 +218,7 @@ export function openConstructionScreen(game: Game, renderer: Renderer): Construc
     if (onKey(e)) (e.preventDefault(), e.stopPropagation());
   });
   routeKeys = (e) => {
+    if (e.key === 'Enter' && document.activeElement === chassisButton) { chassisButton.click(); return true; }
     if (e.key.length === 1 && e.key !== '*' && !e.ctrlKey && !e.altKey && !(isCloseKey(e) && search.value === '')) {
       search.focus();
       search.value += e.key;

@@ -2,7 +2,7 @@ import type { GameData, RecipeDef, RequirementData } from '../data/types';
 import { abandonCraft, craftingInventory, craftState, exceedsRecipeRequirements, giveOrDrop, lightSpeedMultiplier, learnRecipe, meetsSkills, recipeIndex, type CraftHost } from './crafting';
 import type { CraftingInventory } from './crafting_inv';
 import { createItem, countByCharges, inNewContainer, Item } from './item';
-import { consumeItem, L, locate, unloadItem, type Loc } from './moves';
+import { consumeItem, L, locate, spawnItem, unloadItem, type Loc } from './moves';
 import { consumeRequirements, evaluateRequirements, itemDisplayName, type RequirementEval } from './requirements';
 import { disassemblyPractice, withPracticeSource } from './practice';
 
@@ -150,9 +150,16 @@ export function finishDisassembly(host: CraftHost, it: Item, r: RecipeDef): Item
   const loc = whereIs(host, it);
   if (!loc) return null;
   const p = host.player;
-  const ground = L.ground(host.map, Math.floor(p.x), Math.floor(p.y), p.z);
+  const sourceGround = p.inv.locOf(it) ? null : (() => {
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+      const tile = L.ground(host.map, Math.floor(p.x) + dx, Math.floor(p.y) + dy, p.z);
+      if (locate(it, [tile])) return tile;
+    }
+    return null;
+  })();
+  const ground = sourceGround ?? L.ground(host.map, Math.floor(p.x), Math.floor(p.y), p.z);
   // remove_ammo: contents, magazines and loaded rounds come out first.
-  if (it.hasContents() || it.magazine || (it.ammoRemaining() > 0 && !it.countByCharges)) unloadItem(it, [L.inv(p), ground], { actor: p, quiet: true, pourLiquids: true });
+  if (it.hasContents() || it.magazine || (it.ammoRemaining() > 0 && !it.countByCharges)) unloadItem(it, sourceGround ? [sourceGround] : [L.inv(p), ground], { actor: p, quiet: true, pourLiquids: true, force: !!sourceGround });
   const need = disassemblyRequirements(data, r);
   const inv = craftingInventory(host);
   if (need.tools.some((g) => g.some((t) => t.count > 0))) consumeRequirements({ tools: need.tools }, inv);
@@ -199,7 +206,8 @@ export function finishDisassembly(host: CraftHost, it: Item, r: RecipeDef): Item
   const got = new Map<string, number>();
   for (const o of out) got.set(o.baseName(), (got.get(o.baseName()) ?? 0) + o.count());
   if (got.size) host.message(`You recover ${[...got].map(([n, k]) => `${k} ${n}`).join(', ')}.`, 'c_light_green');
-  giveOrDrop(host, out);
+  if (sourceGround) for (const o of out) spawnItem(o, sourceGround, { force: true, quiet: true });
+  else giveOrDrop(host, out);
 
   // decomp_learn: learning the recipe (the one with the uncraft's id) by taking it apart.
   const learnable = recipeIndex(data).get(r.id);

@@ -1,3 +1,4 @@
+import { visualPreference } from './visualPreference';
 import * as THREE from 'three';
 
 // Stable cutout mips for alpha-tested pixel-art cards (grass blades, leaf clumps).
@@ -23,7 +24,7 @@ export function applyCutoutMips(t: THREE.DataTexture, minCover: 1 | 2 | 3 = 2): 
   const levels = buildCutoutMips(img.data, w0, minCover);
   t.mipmaps = levels.map((data, i) => ({ data, width: w0 >> i, height: w0 >> i })) as unknown as THREE.DataTexture['mipmaps'];
   t.generateMipmaps = false;
-  t.minFilter = THREE.NearestMipmapNearestFilter;
+  t.minFilter = cutoutMipsOn() ? THREE.NearestMipmapNearestFilter : THREE.NearestFilter;
   t.needsUpdate = true;
   registerCutout(t);
   return t;
@@ -57,13 +58,17 @@ export function buildCutoutMips(data: Uint8Array, size: number, minCover: number
   return out;
 }
 
+let enabled = visualPreference('cutout', ['on', 'off'], 'on') === 'on';
+export function cutoutMipsOn(): boolean { return enabled; }
 const registered: THREE.Texture[] = [];
 /** Textures using cutout mips (so `setCutoutMips` can switch them for comparison). */
 export function registerCutout(t: THREE.Texture): void {
   registered.push(t);
+  t.minFilter = enabled ? THREE.NearestMipmapNearestFilter : THREE.NearestFilter;
 }
 /** A/B switch (cdda.cutoutMips(false) = the old unmipped sampling). */
 export function setCutoutMips(on: boolean): void {
+  enabled = on;
   for (const t of registered) {
     t.minFilter = on ? THREE.NearestMipmapNearestFilter : THREE.NearestFilter;
     t.needsUpdate = true;

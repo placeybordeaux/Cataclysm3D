@@ -53,6 +53,8 @@ export interface RayOpts<C> {
   skipOrigin?: boolean;
   /** Treat see-through obstacles (fences, windows, railings, shrubs) as transparent. */
   throughTransparent?: boolean;
+  /** Solid height to use for a furniture piece instead of furnitureSolidHeight(). */
+  furnitureHeight?: (f: FurnitureDef) => number;
 }
 
 export const CREATURE_HEIGHT = 1.8;
@@ -185,7 +187,7 @@ export function raycastTiles<C = unknown>(
         if (t !== null) cands.push([t, 'vehicle', undefined]);
       }
       const f = map.furnAt(cx, cy, cz);
-      const tf = slab(tEnter, tExit, base, furnitureSolidHeight(f));
+      const tf = slab(tEnter, tExit, base, opts.furnitureHeight ? opts.furnitureHeight(f) : furnitureSolidHeight(f));
       if (tf !== null) cands.push([tf, 'furniture', undefined]);
       const ter = map.terAt(cx, cy, cz);
       if (!(opts.throughTransparent && seeThrough(ter))) {

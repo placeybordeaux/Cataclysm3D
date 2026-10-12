@@ -611,3 +611,15 @@ describe('traps & light items', () => {
     game.lightProvider = null;
   });
 });
+
+
+describe('furniture examine deconstruction', () => {
+  it('keeps examining first and exposes deconstruction as a separate choice', () => {
+    const { game } = makeGame();
+    place(game, 5, 5);
+    game.map.setFurn(6, 5, 0, 'f_chair');
+    const actions = interactionsAt(game, 6, 5, 0);
+    expect(actions[0].id).not.toBe('deconstruct_furniture');
+    expect(actions.find((a) => a.id === 'deconstruct_furniture')?.label).toContain('Deconstruct the');
+  });
+});

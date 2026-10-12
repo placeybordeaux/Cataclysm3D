@@ -21,7 +21,7 @@ import { createServer } from 'vite';
 import puppeteer, { type Page } from 'puppeteer-core';
 import { mkdirSync, utimesSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { fitWindow, launchBrowser, startXvfb, XInput, type BrowserKind } from './lib/realinput';
+import { fitWindow, launchBrowser, settleWorld, startXvfb, XInput, type BrowserKind } from './lib/realinput';
 import { screenScenarios } from './realinput_screens';
 import { lootScenarios } from './realinput_loot';
 import { archeryScenarios } from './realinput_archery';
@@ -35,11 +35,23 @@ import { chassisScenarios } from './realinput_chassis';
 import { stairsScenarios } from './realinput_stairs';
 import { grabScenarios } from './realinput_grab';
 import { curtainsScenarios } from './realinput_curtains';
+import { sewerScenarios } from './realinput_sewer';
 import { reloadScenarios } from './realinput_reload';
+import { upsScenarios } from './realinput_ups';
+import { powerArmorScenarios } from './realinput_powerarmor';
+import { siphonScenarios } from './realinput_siphon';
+import { npcFireScenarios } from './realinput_npcfire';
+import { enemyProjScenarios } from './realinput_enemyproj';
 import { skillsScenarios } from './realinput_skills';
 import { timewarpScenarios } from './realinput_timewarp';
 import { loadgateScenarios } from './realinput_loadgate';
 import { readquizScenarios } from './realinput_readquiz';
+import { toolGestureScenarios } from './realinput_toolgesture';
+import { achievementsScenarios } from './realinput_achievements';
+import { vehwalkScenarios } from './realinput_vehwalk';
+import { turretScenarios } from './realinput_turret';
+import { towingScenarios } from './realinput_towing';
+import { labEscapeScenarios } from './realinput_labescape';
 
 const argv = process.argv.slice(2);
 const opt = (n: string, d: string) => (argv.includes(n) ? argv[argv.indexOf(n) + 1] : d);
@@ -86,18 +98,20 @@ interface State {
 const state = (): Promise<State> =>
   page.evaluate(() => {
     const panelTitles = [...document.querySelectorAll('#ui2 .ui2-win .ui2-title-text')].map((t) => t.textContent ?? '');
+    // (the title bar also holds a × close button: read only the title's own text)
+    const winTitles = [...document.querySelectorAll('.cdda-window > .title')].map((t) => (t.querySelector('.window-title') ?? t).textContent ?? '');
     const g = (window as any).cdda?.game;
     const hint = document.querySelector('.resume-hint') as HTMLElement | null;
     return {
       lock: !!document.pointerLockElement, focus: document.hasFocus(), fullscreen: !!document.fullscreenElement,
-      windows: [...document.querySelectorAll('.cdda-window > .title')].map((t) => t.textContent ?? ''),
+      windows: winTitles,
       captured: !!g?.input.captured, held: g ? [...g.input.held] : [], lockPaused: !!g?.lockPaused,
       hint: !!hint && hint.style.display !== 'none',
       x: g?.player.x ?? 0, y: g?.player.y ?? 0, yaw: g?.player.yaw ?? 0, running: !!g?.player.running,
       deathScreen: !!document.querySelector('.death-screen'),
       panels: [...document.querySelectorAll('#ui2 .ui2-win .ui2-title-text')].map((t) => t.textContent ?? ''),
       toasts: [...document.querySelectorAll('#ui2 .ui2-toast:not(.leaving) .ui2-toast-title')].map((t) => t.textContent ?? ''),
-      menus: [...[...document.querySelectorAll('.cdda-window > .title')].map((t) => t.textContent ?? ''), ...panelTitles],
+      menus: [...winTitles, ...panelTitles],
       panelIds: [...document.querySelectorAll('#ui2 .ui2-win')].map((w) => (w as HTMLElement).dataset.id ?? ''),
       look: !!document.querySelector('#ui2 .lk-card.mode-look'),
     };
@@ -138,10 +152,11 @@ async function toGameplay(): Promise<State> {
   // The load gate (src/loadgate) holds the game and swallows gameplay keys under its loading
   // screen while the surroundings are built, e.g. right after a setup teleport: wait it out, as
   // a player would. (The loadgate scenario tests the gate itself.)
-  // (a frame or two first: a teleport made just before this is noticed on the next frame)
-  await sleep(120);
-  for (let i = 0; i < 300 && (await js<boolean>('!!window.cdda?.loadGate?.().closed')); i++) await sleep(100);
-  return s;
+  // settleWorld waits for the surroundings built and the gate open, steadily (the gate only
+  // closes after a debounce, so an open gate right after a teleport proves nothing).
+  const w = await settleWorld(js);
+  if (!w.ok) check('the surroundings finished loading (load gate open, chunks built)', false, w);
+  return state();
 }
 /** `sinceContact`: game seconds past the swing's contact point when a melee blow resolved
  *  (null = no phased swing running, i.e. it resolved instantly). */
@@ -654,7 +669,9 @@ const scenarios: Scenario[] = [
   }],
   ['craft', 'ui2 crafting: & opens with a free cursor, type to search, Enter crafts, stop/continue, * construction placement', async () => {
     await toGameplay();
-    // Setup only: materials for a wooden spear and a half wall.
+    // Setup only: materials for a wooden spear and a half wall. No zombies: by now one has
+    // usually wandered in from the street, and a hostile in view interrupts crafting (CDDA).
+    await js(`cdda.clearMonsters(60)`);
     await js(`(() => { const p = cdda.game.player; cdda.giveItem('backpack', { wear: true }); for (const id of ['knife_folding', 'sandpaper', 'rag', 'hammer', 'stick_long']) cdda.giveItem(id); cdda.giveItem('thread', { count: 50 }); cdda.giveItem('nail', { count: 40 }); for (let i = 0; i < 10; i++) cdda.placeItem('2x4', 0, 1); p.setSkill('fabrication', 3); p.setSkill('survival', 1); cdda.addFire(-1, 1); })()`);
     await x.key('ampersand');
     let s = await until((t) => t.panels.includes('Crafting'), 1500);
@@ -716,9 +733,16 @@ const scenarios: Scenario[] = [
     let s = await until((t) => t.panels.includes('Options'));
     check('pause menu → o opens Options', s.panels.includes('Options'), s.panels);
     await shot('options');
-    await x.key('Enter'); // first entry: Key bindings…
+    // Options are grouped in category tabs (src/ui/options.ts); Key bindings… heads Controls.
+    // Tab steps categories, as a player would, until it is the highlighted row.
+    const selRow = () => js<string>(`document.querySelector('#ui2 .ui2-list-row.selected')?.dataset.name ?? ''`);
+    for (let i = 0; i < 6 && !/^Key bindings/.test(await selRow()); i++) {
+      await x.key('Tab');
+      await sleep(150);
+    }
+    await x.key('Enter');
     s = await until((t) => t.panels.includes('Key bindings'));
-    check('Enter on the first entry opens Key bindings', s.panels.includes('Key bindings'), s.panels);
+    check('Tab to Controls, Enter on its first entry opens Key bindings', s.panels.includes('Key bindings'), s.panels);
     await shot('keybindings');
     const idx = await js<number>(`cdda.game.keys.actionList().findIndex((a) => a.id === 'wear')`);
     await x.key(`Down*${idx}`, 30);
@@ -792,6 +816,27 @@ const scenarios: Scenario[] = [
     const d1 = await js<number>(`cdda.renderer?.rig?.topDistance ?? -1`);
     check('wheel zooms in top-down view', mode !== 'top' || d1 !== d0, { mode, d0, d1 });
     await x.key('v');
+  }],
+  ['venom', 'unarmed LMB with venomous fangs: the bite poisons the zombie (BN message), which slows it', async () => {
+    await toGameplay();
+    // Setup only: bare hands, FANGS + POISONOUS2, high dexterity so the bite procs, a sturdy zombie in front.
+    await js(`(() => { const p = cdda.game.player; p.inv.unwield(); p.addTrait('FANGS'); p.addTrait('POISONOUS2'); p.dex_base = 40; cdda.clearMonsters(8); cdda.godMode(true); })()`);
+    const uid = await js<number>(`(() => { const uid = cdda.spawnMonster('mon_zombie', 0, -1.3); const m = cdda.game.monsters.all.find((z) => z.uid === uid); m.hp = 500; return uid; })()`);
+    const speed0 = await js<number>(`cdda.game.monsters.all.find((z) => z.uid === ${uid}).speed`);
+    const before = (await log()).length;
+    let msgs: string[] = [];
+    for (let i = 0; i < 12 && !msgs.some((m) => /inject your venom/.test(m)); i++) {
+      await js(`(() => { const m = cdda.game.monsters.all.find((z) => z.uid === ${uid}); const p = cdda.game.player; p.yaw = Math.atan2(m.x - p.x, -(m.y - p.y)); p.pitch = -0.1; })()`);
+      await x.clickHere(1);
+      await sleep(1200);
+      msgs = (await log()).slice(before);
+    }
+    const st = await js<{ poisoned: boolean; speed: number }>(`(() => { const m = cdda.game.monsters.all.find((z) => z.uid === ${uid}); return { poisoned: m.hasEffect('badpoison'), speed: m.speed }; })()`);
+    await shot('venom_bite');
+    check('a landed fang bite logs "You sink your fangs into the zombie" and "You inject your venom into the zombie!"',
+      msgs.some((m) => /sink your fangs into the zombie/.test(m)) && msgs.some((m) => /You inject your venom into the zombie!/.test(m)), msgs);
+    check('the zombie is badly poisoned and 10 speed slower', st.poisoned && st.speed === speed0 - 10, { speed0, ...st });
+    await js(`(() => { cdda.clearMonsters(8); cdda.godMode(false); const p = cdda.game.player; p.removeTrait('FANGS'); p.removeTrait('POISONOUS2'); })()`);
   }],
   ['firstfight', "first fight on Accessible: long pointy stick vs one zombie, LMB when in reach, mash e when grabbed: over in ~8–12 s; misses say why", async () => {
     await toGameplay();
@@ -1535,8 +1580,19 @@ scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...stairsScenar
 scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...grabScenarios({ x: () => x, js, check, shot, toGameplay, sleep }));
 // Curtained windows (docs/FURNITURE.md) and smash sounds (docs/AUDIO.md): e menu, light, sight, peek, doors heard.
 scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...curtainsScenarios({ x: () => x, js, check, shot, toGameplay, sleep }));
+scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...sewerScenarios({ x: () => x, js, check, shot, toGameplay, sleep }));
 // Reload help (src/game/reloadhelp.ts): a battery-less flashlight says what it takes and where you saw some.
 scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...reloadScenarios({ x: () => x, js, check, shot, toGameplay, sleep }));
+// Carried UPS charging (src/game/upsTransfer.ts): enable it from the item menu, wait, see it charge.
+scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...upsScenarios({ x: () => x, js, check, shot, toGameplay, sleep }));
+// Power armor (src/game/powerArmor.ts): Activate the worn exoskeleton, UPS then interface CBM draw, shutdown.
+scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...powerArmorScenarios({ x: () => x, js, check, shot, toGameplay, sleep }));
+// Siphoning and refilling (src/game/siphoning.ts, vehicleRefill.ts): the hose and pour drawn by src/render/hoseFx.ts.
+scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...siphonScenarios({ x: () => x, js, check, shot, toGameplay, sleep }));
+// NPCs in the line of fire (pellets, the attack question, arrows): hands out its own weapons.
+scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...npcFireScenarios({ x: () => x, js, check, shot, toGameplay, sleep }));
+// Enemy arrows on the arc, lobbed grenades and their blasts, BN's projectile dodge (realinput_enemyproj.ts).
+scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...enemyProjScenarios({ x: () => x, js, check, shot, toGameplay, sleep }));
 // Skills feedback (src/ui/practice_cue.ts): disassemble from the inventory, the practice cue, @ hints.
 scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...skillsScenarios({ x: () => x, js, check, shot, toGameplay, sleep }));
 // Fast-forward (reading, the Rest window's Fast pick, the cap measurement).
@@ -1544,6 +1600,19 @@ scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...timewarpScen
 scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...readquizScenarios({ x: () => x, js, check, shot, toGameplay, sleep }));
 // Load gate + creatures never before their walls (src/loadgate, render/surroundings.ts): reloads the page, ends in a car.
 scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...loadgateScenarios({ page: () => page, x: () => x, js, check, shot, toGameplay, sleep, quickStart, size: [W, H] }));
+// Deferred tool-use gestures (src/game/fire.ts, src/nature.ts, docs/CHARACTERS.md): an axe chop
+// only animates once the activity actually finishes, never on open or cancel.
+scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...toolGestureScenarios({ x: () => x, js, check, shot, toGameplay, sleep }));
+// Achievements/scores (src/game/achievements.ts): a real kill and real walking tracked end to end.
+scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...achievementsScenarios({ x: () => x, js, check, shot, toGameplay, sleep }));
+// Moving around inside vehicles (src/game/vehwalk.ts): deck walking, seat hops, crew stations.
+scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...vehwalkScenarios({ x: () => x, js, check, shot, toGameplay, sleep }));
+// Vehicle turrets (src/turrets.ts): man the Abrams' 120 mm and M2, load from the rack, fire at zombies.
+scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...turretScenarios({ x: () => x, js, check, shot, toGameplay, sleep }));
+// Tow cables (src/game/towing.ts): attach through the vehicle panel, a pickup and the Abrams tow a car through a turn.
+scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...towingScenarios({ x: () => x, js, check, shot, toGameplay, sleep }));
+// The lab escape start (lab_chal through the picker, waking in a lab_escape_cells cell): reloads the page.
+scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...labEscapeScenarios({ page: () => page, x: () => x, js, check, shot, toGameplay, sleep, size: [W, H] }));
 
 if (argv.includes('--list') || argv.includes('--dry-run')) {
   for (const [n, what] of scenarios) console.log(`${only && !only.has(n) ? '  (skip)' : '  run   '} ${n.padEnd(11)} ${what}`);

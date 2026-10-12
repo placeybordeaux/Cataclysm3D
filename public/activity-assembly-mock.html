@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Assembly workbench prototype</title>
+<style>
+:root {color-scheme:dark;font-family:system-ui,sans-serif;background:#151a17;color:#ddd6bd} *{box-sizing:border-box} body{margin:0} main{max-width:1120px;margin:36px auto;padding:0 24px} h1{font-size:32px;margin-bottom:8px} p{line-height:1.55;color:#aeb8a7} .tag{color:#d8bd76;text-transform:uppercase;letter-spacing:.15em;font-size:12px} .controls{display:flex;gap:16px;flex-wrap:wrap;margin:24px 0} label{display:grid;gap:6px;font-size:13px} select,button,input{font:inherit;background:#252d26;color:#ddd6bd;border:1px solid #69735d;padding:9px;border-radius:4px} button{cursor:pointer} button:focus-visible,select:focus-visible{outline:3px solid #d8bd76;outline-offset:2px} .workspace{display:grid;grid-template-columns:280px 1fr;gap:24px} .panel{background:#1b221d;border:1px solid #475340;border-radius:9px;padding:20px} h2{font-size:18px;margin:0 0 16px} .pile{display:flex;gap:9px;flex-wrap:wrap}.ingredient{width:100%;text-align:left;border-left:5px solid #a48f57;touch-action:none;user-select:none}.ingredient.selected{background:#495537}.ingredient:disabled{opacity:.35;cursor:default}.board{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;min-height:320px;align-content:center}.board.exploded{gap:28px;transform:rotate(-1deg)} .slot{min-height:104px;border:2px dashed #667358;background:#202720;position:relative;padding:14px;text-align:center;font-size:13px}.slot.filled{background:#455138;border-style:solid;border-color:#8ca470}.slot.auto{background:#30392b}.slot span{display:block;margin-top:7px;color:#b9c5a9}.ghost{position:fixed;z-index:5;pointer-events:none;opacity:.9;background:#a48f57;color:#151a17;max-width:240px;padding:12px;border-radius:5px;transform:translate(-50%,-50%)} progress{width:100%;height:17px;accent-color:#9dae76;margin-top:24px}.footer{display:flex;justify-content:space-between;gap:12px;align-items:center;margin-top:14px;flex-wrap:wrap}.tools{font-size:13px;line-height:1.6;color:#b6c0a9;padding-top:18px;border-top:1px solid #475340;margin-top:20px}.status{color:#d8bd76;font-size:14px;min-height:24px}.message{font-size:13px;min-height:22px;color:#c9be98}.key{color:#e2d6a7}.hidden{display:none}@media(max-width:760px){main{margin-top:20px;padding:0 14px}.workspace{grid-template-columns:1fr}.board{min-height:250px}.pile{display:grid;grid-template-columns:1fr 1fr}.slot{min-height:90px}.controls{gap:10px}}
+</style>
+</head>
+<body>
+<main>
+<div class="tag">Activity toy · standalone mock</div>
+<h1>Assembly workbench</h1>
+<p>Move ingredients into their outlines, or watch the work assemble itself. Try a loose exploded layout or a grid.<br>This prototype uses four real recipes; it does not change a game, inventory or saved character.</p>
+<div class="controls">
+<label>Recipe<select id="recipe"><option value="bandages">Bandages</option><option value="primitive_knife">Primitive knife</option><option value="flashlight">Flashlight</option><option value="fish_sandwich">Fish sandwich</option></select></label>
+<label>Layout<select id="layout"><option value="grid">Generated grid</option><option value="exploded">Exploded view</option></select></label>
+<label>Batch<select id="batch"><option>1</option><option>3</option><option>10</option></select></label>
+<label>Work duration<select id="duration"><option value="20">20 seconds</option><option value="120">2 minutes</option></select></label>
+<label>Optional assembly<select id="mode"><option value="assembly">On</option><option value="off">Off · automatic only</option></select></label>
+</div>
+<div class="workspace">
+<section class="panel"><h2>Ingredient pile</h2><div id="pile" class="pile"></div><div id="tools" class="tools"></div></section>
+<section class="panel"><h2 id="title">Loading recipes…</h2><div id="board" class="board" aria-label="Assembly slots"></div><div id="message" class="message" role="status"></div><progress id="progress" max="1" value="0" aria-label="Work progress"></progress><div class="footer"><span id="status" class="status" role="status"></span><div><button id="pause">Pause</button> <button id="restart">Restart</button> <button id="cancel">Cancel</button></div></div></section>
+</div>
+<p class="key">Drag a piece onto an outline, or click a piece then an outline. Keyboard: Tab to a piece, Enter, Tab to an outline, Enter.<br>Alternatives fit the same outline. Tools stay in reach. Ignoring or mismatching a piece costs nothing.</p>
+</main>
+<script type="module">
+const $ = id => document.getElementById(id);
+let recipes=[],items={},current,slots=[],elapsed=0,bonus=0,last=0,paused=false,cancelled=false,selected=null,drag=null,batchIndex=1;
+const name=id=>{const n=items[id]?.name;return typeof n==='string'?n:n?.str||n?.str_sp||id};
+const text=(tag,content,cls)=>{const e=document.createElement(tag);e.textContent=content;if(cls)e.className=cls;return e};
+const duration=()=>Number($('duration').value);
+const enabled=()=>$('mode').value!=='off';
+function clearDrag(){drag?.ghost.remove();drag=null;document.querySelectorAll('.ingredient.selected').forEach(e=>e.classList.remove('selected'));selected=null;}
+function place(id,index){
+ const slot=slots[index];if(paused||cancelled||!enabled()||!slot||slot.filled)return;
+ if(!slot.group.some(c=>c.id===id)){$('message').textContent='That piece fits another outline. Try again when you feel like it.';return;}
+ slot.filled=id;slot.manual=true;const gain=Math.min(duration()*.04,duration()*.2-bonus);bonus+=Math.max(0,gain);elapsed+=Math.max(0,gain);
+ $('message').textContent=`Placed ${name(id)}. ${bonus.toFixed(1)} seconds of work saved.`;clearDrag();renderParts();
+}
+function renderParts(){
+ const focused=document.activeElement?.dataset;const focusSlot=focused?.slot;const focusItem=focused?.item;
+ const board=$('board');board.replaceChildren();board.className='board '+($('layout').value==='exploded'?'exploded':'');
+ slots.forEach((s,i)=>{const b=text('button',s.filled?name(s.filled):s.group.map(c=>name(c.id)).slice(0,3).join(' / '),'slot'+(s.filled?' filled':'')+(s.filled&&!s.manual?' auto':''));b.dataset.slot=i;b.title=s.group.map(c=>`${c.count} × ${name(c.id)}`).join(' OR ');b.disabled=!!s.filled||!enabled()||paused||cancelled;
+ b.append(text('span',s.filled?(s.manual?'Placed by hand':'Assembled automatically'):`${s.group[0].count} × component`));b.onclick=()=>{if(selected)place(selected,i)};board.append(b)});
+ const pile=$('pile');pile.replaceChildren();slots.forEach((s,i)=>s.group.slice(0,3).forEach(c=>{const b=text('button',`${c.count} × ${name(c.id)}`,'ingredient');b.dataset.item=c.id;b.dataset.group=i;b.disabled=!!s.filled||!enabled()||paused||cancelled;
+ b.onclick=()=>{clearDrag();selected=c.id;b.classList.add('selected');$('message').textContent=`Choose an outline for ${name(c.id)}.`};
+ if(selected===c.id)b.classList.add('selected');
+ b.onpointerdown=e=>{if(e.button!==0||b.disabled)return;clearDrag();selected=c.id;const ghost=text('div',name(c.id),'ghost');ghost.style.left=e.clientX+'px';ghost.style.top=e.clientY+'px';document.body.append(ghost);drag={id:c.id,ghost,x:e.clientX,y:e.clientY,moved:false};b.setPointerCapture(e.pointerId)};pile.append(b)}));
+ slots.forEach((s,i)=>{if(s.group.length<=3||s.filled)return;const more=document.createElement('select');more.setAttribute('aria-label',`More alternatives for component ${i+1}`);more.append(text('option',`More alternatives for component ${i+1}…`));more.options[0].value='';s.group.slice(3).forEach(c=>{const o=text('option',`${c.count} × ${name(c.id)}`);o.value=c.id;more.append(o)});more.disabled=!enabled()||paused||cancelled;more.onchange=()=>{clearDrag();selected=more.value;$('message').textContent=`Choose an outline for ${name(selected)}.`};pile.append(more)});
+ if(focusSlot!==undefined){const next=board.querySelector(`[data-slot="${focusSlot}"]`);if(next&&!next.disabled)next.focus();else board.querySelector('button:not(:disabled)')?.focus();}
+ else if(focusItem){const next=[...pile.querySelectorAll('[data-item]')].find(e=>e.dataset.item===focusItem&&!e.disabled);next?.focus();}
+
+}
+function start(){
+ clearDrag();current=recipes.find(r=>r.id===$('recipe').value);if(!current)throw Error('Recipe unavailable');slots=current.components.map(group=>({group,filled:null,manual:false}));elapsed=0;bonus=0;paused=false;cancelled=false;batchIndex=1;last=performance.now();$('pause').textContent='Pause';$('message').textContent='Ghosts fill by themselves. Hand assembly is only a bonus.';$('title').textContent=name(current.result);$('progress').value=0;
+ const toolNames=current.tools.map(g=>g.map(c=>name(c.id)).join(' or ')).concat(current.qualities.map(g=>g.map(q=>`${q.id} ${q.level}`).join(' or ')));
+ $('tools').textContent='Tools in reach: '+(toolNames.join(' · ')||'none');renderParts();
+}
+window.addEventListener('pointermove',e=>{if(drag){drag.moved||=Math.hypot(e.clientX-drag.x,e.clientY-drag.y)>5;drag.ghost.style.left=e.clientX+'px';drag.ghost.style.top=e.clientY+'px'}});
+window.addEventListener('pointerup',e=>{if(!drag)return;const d=drag;d.ghost.remove();drag=null;if(d.moved){const target=document.elementFromPoint(e.clientX,e.clientY)?.closest('[data-slot]');if(target)place(d.id,Number(target.dataset.slot));else $('message').textContent='Piece returned to the pile. No work lost.';clearDrag();}});
+window.addEventListener('pointercancel',clearDrag);window.addEventListener('blur',()=>{clearDrag();paused=true;$('pause').textContent='Resume';renderParts()});
+$('restart').onclick=start;$('cancel').onclick=()=>{cancelled=true;clearDrag();$('message').textContent='Cancelled. This mock leaves all ingredients in the pile.';renderParts()};
+$('pause').onclick=()=>{paused=!paused;clearDrag();$('pause').textContent=paused?'Resume':'Pause';renderParts()};
+for(const id of ['recipe','batch','duration','mode'])$(id).onchange=start;$('layout').onchange=renderParts;
+function frame(now){requestAnimationFrame(frame);const dt=Math.min(.1,(now-last)/1000);last=now;if(!current)return;
+ if(!paused&&!cancelled&&elapsed<duration()){
+ elapsed=Math.min(duration(),elapsed+dt);const auto=Math.floor(elapsed/duration()*slots.length);let changed=false;slots.forEach((s,i)=>{if(i<auto&&!s.filled){s.filled=s.group[0].id;changed=true}});if(changed)renderParts();
+ if(elapsed>=duration()&&batchIndex<Number($('batch').value)){batchIndex++;slots=current.components.map(group=>({group,filled:null,manual:false}));elapsed=0;bonus=0;renderParts()}
+ }
+ $('progress').value=Math.min(1,elapsed/duration());$('status').textContent=cancelled?'Cancelled':paused?'Paused':elapsed>=duration()?`Finished ${$('batch').value} batch${Number($('batch').value)>1?'es':''}`:`Batch ${batchIndex}/${$('batch').value} · ${Math.ceil(duration()-elapsed)} s remaining`;
+}
+Promise.all([fetch('./data/recipes.json').then(r=>r.json()),fetch('./data/items.json').then(r=>r.json())]).then(([r,i])=>{recipes=r;items=i;start();requestAnimationFrame(frame)}).catch(e=>{$('title').textContent='Could not load recipes';$('message').textContent=e.message});
+// Read-only automation for prototype verification.
+window.assemblyMock={state:()=>({recipe:current?.id,slots:slots.map(s=>({alternatives:s.group.map(c=>c.id),filled:s.filled,manual:s.manual})),elapsed,bonus,paused,cancelled,batchIndex}),};
+</script>
+</body>
+</html>

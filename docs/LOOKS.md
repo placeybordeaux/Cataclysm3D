@@ -114,9 +114,16 @@ normal/height page for atlas sprites instead of luminance bump.
 - Furniture, fixtures, doors, windows and ground items are modelled (low-poly, 32 texels/m
   pixel textures from the sprite palette) by default in the volume looks; the voxel versions
   stay one switch away (Options > Furniture, `?furniture=voxel`): see `docs/FURNITURE.md`.
+  Dropped guns, melee weapons and tools are their held 3D mesh lying down (`furniture/groundHeld.ts`;
+  in Crisp/Terrain only items without a tileset sprite; Classic unchanged; Options > Dropped
+  weapons, `?grounditems=held|shape`): docs/CHARACTERS.md "Dropped weapons on the ground".
 - Volumes: `voxel.ts` (sprite inflation/extrusion), `trees.ts` (3D trees), `arch.ts`
   (frames, casings, bands, fences, hipped roofs), wired in `chunkMesh.ts`.
 - Ground: `ground.ts` (relief + curbs, `renderer.groundAt` for sprites and the eye),
   `grass.ts`, `props.ts` (props + puddle material), `skyline.ts`.
+  Puddles go on asphalt only (`surfaceKind`: painted as pavement, minus doors/gates/guardrails):
+  BN's ROAD flag means "smooth for vehicles" and is on most built floors, so keying puddles on it
+  put a dark sky-mirror puddle on wooden, metal and linoleum floors under open sky (roofless
+  ruins, decks, the gallery showroom); sidewalks and concrete now get their litter.
 - Fixed along the way: the first-person viewmodel pass cleared the depth buffer, so fog and
   outlines never applied in first person (post.ts now squeezes the viewmodel's depth).

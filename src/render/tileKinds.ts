@@ -28,6 +28,9 @@ export function terrainShape(t: TerrainDef): TerrainShape {
   const f = (flag: string) => hasFlag(t, flag);
   if (f('TREE')) return 'tree';
   if (f('SHRUB') || f('YOUNG')) return 'shrub';
+  // BN deep water permits diving with GOES_DOWN; that is a traversal flag, not
+  // staircase geometry. Keep its water surface/banks ahead of vertical connectors.
+  if (f('LIQUID')) return 'liquid';
   if (f('GOES_UP')) return 'stairs_up';
   if (f('GOES_DOWN')) return 'stairs_down';
   if (f('DOOR')) return 'door';
@@ -42,7 +45,6 @@ export function terrainShape(t: TerrainDef): TerrainShape {
   // every roof edge like barbed wire.
   if (/^t_gutter/.test(t.id)) return 'floor';
   if (f('THIN_OBSTACLE') || /fence|railing|_bars/.test(t.id)) return 'fence';
-  if (f('LIQUID')) return 'liquid';
   if (f('NO_FLOOR') && !f('WALL')) return 'none';
   const solid = (t.move_cost <= 0 && !f('TRANSPARENT')) || f('WALL') || f('CONNECT_WITH_WALL');
   if (solid) return f('SHORT') || /half|pony/.test(t.id) ? 'halfwall' : 'wall';

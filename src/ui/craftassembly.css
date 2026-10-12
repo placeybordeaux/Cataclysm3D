@@ -1,0 +1,9 @@
+.craft-assembly { position: absolute; left: calc(50% + 200px); top: 18%; width: min(340px, calc(50vw - 220px)); max-height: 68vh; overflow: auto; box-sizing: border-box; padding: 10px; background: rgba(15,18,16,.94); border: 1px solid #aaa; color: #ddd; font: 12px monospace; pointer-events: auto; }
+.craft-assembly[hidden] { display: none; }
+.craft-assembly strong, .craft-assembly small { display: block; margin-bottom: 6px; }
+.assembly-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 7px; margin: 8px 0; }
+.craft-assembly.exploded .assembly-grid { gap: 20px 12px; }
+.assembly-part { display: grid; gap: 4px; min-width: 0; }
+.assembly-part select, .assembly-part button { width: 100%; box-sizing: border-box; background: #202820; color: #ddd; border: 1px solid #758575; font: inherit; padding: 5px; white-space: normal; overflow-wrap: anywhere; }
+.assembly-slot { min-height: 42px; border-style: dashed !important; }
+.assembly-slot.done { color: #9bbd99; }

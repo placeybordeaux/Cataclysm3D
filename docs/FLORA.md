@@ -17,10 +17,11 @@ world material (toon bands, light map, sun shadows, fill light):
 | conifer | pine, juniper (spruce/fir/cedar ids too) | straight trunk, 5 star-edged drooping cone tiers with undersides; snow caps in winter |
 | birch | t_tree_birch | white bark with dark lenticels, slim trunk, narrow tall crown |
 | fruit | apple, pear, cherry, peach, plum, mulberry, almond... | short trunk, wide low dome; white/pink blossom in spring, fruit dots in summer/autumn (none when harvested) |
-| sapling | t_tree_young | thin stem, three small lumps |
+| sapling | t_tree_young | thin stem, three small summer crowns; all three forked branch clusters in winter |
 | dead | t_tree_dead, hickory_dead (and any deciduous tree in winter) | bare limbs with forks and twig cutouts |
 | deadconifer | t_tree_deadpine | straight trunk with short stubs |
-| bush / underbrush / fern | t_shrub_*, t_underbrush, t_fern | lumps on the ground; roses, hydrangea, lilac as 2x2 flower dots, blueberry/raspberry/blackberry/grape as berries (blossom in spring) |
+| bush / underbrush | t_shrub_*, t_underbrush | lumps on the ground; roses, hydrangea, lilac as 2x2 flower dots, blueberry/raspberry/blackberry/grape as berries (blossom in spring) |
+| fern | t_fern | six arching fronds with paired, tapered leaflet diamonds |
 
 * Colours come from the tree's own seasonal UltiCa sprite: a 4-step ramp from its crown pixels
   (gap, mid, light, highlight) and bark from its trunk rows, so species tint, autumn colours and
@@ -141,6 +142,93 @@ instead of hundreds of instanced clump cards per tree). Atlas: ~17 % of the 2048
 * Within ~2 m the 32 texel/m leaves are big (they dissolve from 2 m inward).
 * The middle ring -> impostor switch at ~80 m changes the crown outline a little (flat cards
   vs lumps); colours and proportions match.
-* t_fern renders as a low bush (no fronds); saplings in winter keep pale lumps.
-* The flora page re-uploads (2048^2) when a new palette is first painted; this settles after
-  the first few chunks of a new biome/season.
+* The flora page re-uploads only the rows a new palette actually painted, not the whole
+  2048^2 page (see "First-use palette upload" below); it is still one page shared by every
+  species, so a biome/season with many unseen combinations still paints many small rects in
+  the first few chunks.
+
+## Ferns and young winter trees
+
+Ferns now have six curved stems with five pairs of tapered leaflets per stem. The near
+and middle meshes and both far-card projections share the same seeded leaflet geometry,
+rather than projecting a bush silhouette. Leaflets have two visible faces. The normal
+world `t_tree_young` loses its crowns in winter even when the sampled seasonal sprite
+still has colored pixels; all three crown positions become forked branch clusters.
+Evergreen conifers keep their foliage.
+
+Inspected actual terrain captures: [summer fronds](screenshots/gaps/fern-fronds.png),
+[same young tree in winter](screenshots/gaps/winter-sapling.png).
+[LOD comparison](screenshots/gaps/fern-lod-comparison.png) places the same seed at equal
+apparent distance: near on the left, middle in the center, projected far card on the right.
+The comparison deliberately brings the far card close enough to inspect its silhouette.
+
+Measured in the Nix/heavy GPU browser with real summer fern sprite palettes: twelve
+alternating warm builds of 100 ferns (`height:1`, seeds17–116) versus `b537c50` source.
+Geometries were disposed after each build; medians exclude the initial atlas/layout warmup.
+
+| LOD | Baseline build ms | Fronds build ms | Baseline vertices / fern | Frond vertices / fern |
+| --- | ---: | ---: | ---: | ---: |
+| Near | 24.60 | 9.25 | 848 | 840 |
+| Middle | 10.00 | 8.00 | 288 | 696 |
+| Far | 0.40 | 0.70 | 16 | 16 |
+
+These are meshing costs, not GPU frame-rate measurements. The middle ring has more
+vertices to retain frond leaflets; the far build is slightly slower, though its geometry
+is unchanged. This package does not claim a general flora, streaming, worker, or palette
+upload optimization. Layout, both projected silhouettes, seasonal bare selection, and
+retaining all three winter branch clusters have regression coverage.
+
+## First-use palette upload (October 2026)
+
+docs/IMPLEMENTATION_GAPS.md: "first-use flora palette uploads can spike." Confirmed in
+`FloraAtlas.frame()` (src/render/floraArt.ts): every new leaf/bark/fringe/twig/impostor
+paint set `texture.needsUpdate = true` with no Three `updateRanges` queued. Three's
+`WebGLTextures.updateTexture` only does a partial `texSubImage2D` when ranges are queued;
+with none queued it re-uploads the *entire* 2048x2048 RGBA page (16,777,216 bytes) even
+though a paint only ever touches a tile a few dozen pixels square. Walking into a fresh
+biome/season paints many distinct palettes in the first few chunks (docs/FLORA.md: ~17% of
+the page used after a forest + town), so this was dozens of 16 MB page uploads, not one.
+
+Fix: `frame()` now queues one `addUpdateRange` per row of the painted (padded) rect instead
+of leaving `updateRanges` empty, so Three uploads only those rows. Ranges can't span rows
+(`WebGLTextures.updateTexture` rejects that), so a `W`x`H` paint queues `H` small ranges, one
+per row, each `W` pixels wide. The diagnostic `atlas.partialUpload = false` reproduces the
+pre-fix full-page request, for paired comparisons. No pixel, UV, or geometry change: the
+painted bytes and their destination in the page are identical, only what gets *requested*
+from the GPU changes.
+
+`tools/bench-flora-atlas.ts` drives `FloraAtlas.frame()` directly (the same code the fix
+touches) with a realistic first-encounter mix of species/season palettes (leaf + bark, plus
+fringe or twig per tree) and sums the requested upload bytes. This needs no WebGL context,
+so it runs in plain Node, not the browser/GPU harness. Two biome-entry sizes:
+
+| New palettes seen | Partial-upload requested bytes | Full-page, one render total | Full-page, one render per tree (realistic: `buildFloraSteps` yields once per tree) |
+| --- | ---: | ---: | ---: |
+| 12 | 230,400 | 16,777,216 | 201,326,592 |
+| 60 | 1,152,000 | 16,777,216 | 1,006,632,960 |
+
+Even against the most charitable old-code case (every new palette painted before a single
+render), requested bytes drop 93-99%; against the realistic case (the mesher's `buildFloraSteps`
+yields once per tree, and the main loop can render between yields, so each tree that
+introduces a new palette was its own separate full-page upload), the drop is >99.8% at both
+sizes. This is upload bytes *requested* of Three/WebGL, not measured GPU time or FPS; actual
+`texSubImage2D` cost scales with bytes transferred, but no live WebGL/GPU timing was taken
+for this package (the shared GPU was held by another long job throughout). `npm run
+typecheck`, `tests/render/floraAtlasUpload.test.ts`, and `tests/flora.test.ts` all pass.
+
+No visual change: `tools/look-shots.ts full --views forest,lineup` was captured with the
+fix, then again with `partialUpload` temporarily forced to the pre-fix default, and both
+pairs were inspected side by side (species, colours, silhouettes, foliage all matched).
+Pixel-exact diffing (`compare -metric AE`) was not useful here -- two runs of the *same*
+fixed code already differ by ~150-200k pixels (clouds, traffic, and other non-deterministic
+scene elements vary per boot even at a fixed seed+view), confirmed with a same-code control
+comparison before concluding the fix was visually clean. Shots:
+[forest](screenshots/gaps/flora-atlas-upload-forest.jpg),
+[lineup](screenshots/gaps/flora-atlas-upload-lineup.jpg).
+
+Regression coverage (`tests/render/floraAtlasUpload.test.ts`): a new paint queues bytes far
+below the full page; a cache hit on an existing key queues nothing; distinct paints' ranges
+accumulate independently; the painted pixels land exactly where the returned UV rect says;
+and the `partialUpload = false` diagnostic reproduces the old no-ranges behavior. This package
+does not touch chunk meshing, the middle-ring/impostor LOD switch, or the shared procedural
+page used by other world materials -- only `FloraAtlas`'s own texture upload.

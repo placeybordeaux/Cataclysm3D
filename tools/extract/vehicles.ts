@@ -17,6 +17,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { defaultCddaDir, FAMILY_HOOKS, familyOf, familyTypes, loadCddaObjects, objectIds, resolveFamily, type CddaObject } from './cdda';
 import { prepareObject } from './prepare';
+import { RequirementResolver, parseRequirementLists, parseUsing } from './requirements';
 import { parseQuantity } from './units';
 import type { VehicleDataFile, VPartDef, VProtoDef, VProtoPart, VItemSpawn } from '../../src/game/vehicle_data';
 
@@ -50,10 +51,11 @@ const t0 = performance.now();
 // Not loadResolved: vpart shapes must be expanded on the raw objects before copy-from.
 const res = new Map<string, Map<string, CddaObject>>();
 {
-  const raw = loadCddaObjects(args.cdda, { types: ['vehicle', 'vehicle_part', 'vehicle_group', 'material', ...familyTypes('ITEM')] });
+  const raw = loadCddaObjects(args.cdda, { types: ['vehicle', 'vehicle_part', 'vehicle_group', 'material', 'requirement', 'json_flag', ...familyTypes('ITEM')] });
   // BN vpart "shapes": each {direction, symbol} entry defines another part "<id>_<direction>"
   // (frame_vertical, windshield_ne...) copying the one that lists them (veh_type.cpp).
   const vparts = raw.get('vehicle_part') ?? [];
+  for (const p of vparts) for (const r of Object.values(p.requirements ?? {}) as any[]) if (typeof r.time === 'number') r.time /= 100;
   for (const o of [...vparts]) {
     const base = o.abstract ?? o.id;
     for (const sh of Array.isArray(o.shapes) ? o.shapes : []) {
@@ -77,6 +79,7 @@ const res = new Map<string, Map<string, CddaObject>>();
 const fam = (t: string) => res.get(t) ?? new Map<string, CddaObject>();
 const items = fam('ITEM');
 const materials = fam('material');
+const requirements = new RequirementResolver(new Map([...fam('requirement')].map(([id, def]) => [id, parseRequirementLists(def, id)])), msg => { throw new Error(msg); });
 
 const num = (v: unknown): number | undefined => (typeof v === 'number' ? v : undefined);
 const asArr = <T>(v: T | T[] | undefined): T[] => (v === undefined ? [] : Array.isArray(v) ? v : [v]);
@@ -129,12 +132,23 @@ for (const [id, p] of fam('vehicle_part')) {
     looks_like: p.looks_like,
     categories: p.categories,
   };
-  for (const k of ['power', 'epower', 'energy_consumption', 'noise_factor', 'bonus', 'size', 'm2c', 'damage_modifier', 'comfort',
+  for (const k of ['power', 'epower', 'energy_consumption', 'noise_factor', 'bonus', 'size', 'm2c', 'damage_modifier', 'comfort', 'floor_bedding_warmth',
     'contact_area', 'backfire_threshold', 'damaged_power_factor'] as const) {
     const v = num(p[k]);
     if (v !== undefined) (def as any)[k] = v;
   }
   if (typeof p.fuel_type === 'string') def.fuel_type = p.fuel_type;
+  if(flags.includes('ENGINE') && Array.isArray(p.exclusions) && p.exclusions.length) def.engineExcludes=p.exclusions.filter((x:unknown):x is string=>typeof x==='string');
+  if (flags.includes('CRAFTER') && Array.isArray(p.integrated_tools)) def.integratedTools = p.integrated_tools.filter((x: unknown): x is string => typeof x === 'string');
+  if (flags.includes('WORKBENCH')) {
+    // veh_type.cpp load_workbench: vpslot_workbench defaults are multiplier 1, 0 g, 0 ml
+    // (unlike furniture, whose defaults are unlimited). Mass/volume strings are g/ml after prepare.
+    const wb = p.workbench;
+    if (!wb || typeof wb !== 'object') throw new Error(`vehicle part ${id}: WORKBENCH without "workbench" data`);
+    const mass = wb.mass === undefined ? 0 : num(wb.mass), volume = wb.volume === undefined ? 0 : volumeMl(wb.volume);
+    if (mass === undefined || volume === undefined) throw new Error(`vehicle part ${id}: unparsed workbench ${JSON.stringify(wb)}`);
+    def.workbench = { multiplier: num(wb.multiplier) ?? 1, mass, volume };
+  }
   if (p.damage_reduction) def.damage_reduction = p.damage_reduction;
   if (p.wheel_terrain_modifiers) def.wheel_terrain_modifiers = p.wheel_terrain_modifiers;
   // Symbols per variant for glyph fallbacks (first char of "symbols" = facing north).
@@ -151,15 +165,57 @@ for (const [id, p] of fam('vehicle_part')) {
   if (flags.includes('BATTERY')) {
     def.capacity = pocket?.ammo_restriction ? num(pocket.ammo_restriction.battery) : num(it?.capacity);
   }
+  if (flags.includes('REACTOR')) def.capacity = num(it?.max_charges) ?? num(it?.capacity);
   if (def.fuel_type) fuelInfo(def.fuel_type);
+  // veh_type.cpp load_engine: "fuel_options" (inherited, e.g. from gas_turbine_engine), else
+  // just the fuel_type. vehicle::start_engine falls back through these when the current one is dry.
+  if (flags.includes('ENGINE')) {
+    const opts = asArr<string>(p.fuel_options).filter((x): x is string => typeof x === 'string');
+    const list = opts.length ? opts : def.fuel_type && def.fuel_type !== 'null' ? [def.fuel_type] : [];
+    if (list.length > 1) {
+      def.fuel_options = list;
+      for (const f of list) fuelInfo(f);
+    }
+  }
   // Wheel size (inches, like CDDA's wheel items) for rendering and ground clearance.
   if (flags.includes('WHEEL') && num(it?.diameter) !== undefined) def.wheel = { diameter: num(it!.diameter)!, width: num(it!.width) ?? 6 };
+  const reqs = p.requirements ?? {};
+  def.requirements = {};
+  for (const kind of ['install', 'removal', 'repair'] as const) {
+    const raw = reqs[kind] ?? {};
+    const expanded = requirements.expand(parseRequirementLists(raw.using === undefined ? raw : {}, `${id}.${kind}`), parseUsing(raw.using, `${id}.${kind}`), `${id}.${kind}`);
+    if (kind === 'install') expanded.components.push([{ id: p.item, count: 1 }]);
+    if (kind === 'repair' && !expanded.components.length && !expanded.tools.length && !expanded.qualities.length) continue;
+    def.requirements[kind] = { ...expanded, skills: raw.skills ?? [], seconds: raw.time ?? (kind === 'removal' ? (reqs.install?.time ?? 3600) / 2 : 3600) };
+  }
+  const anchors = [...new Set(flags.map(f => fam('json_flag').get(f)?.requires_flag).filter((f): f is string => typeof f === 'string'))];
+  if (anchors.length) def.anchors = anchors;
+  if (Array.isArray(p.breaks_into)) def.breaksInto = p.breaks_into.filter((x: any) => x.item).map((x: any) => ({ item: x.item, count: Array.isArray(x.count) ? x.count : [x.count ?? 1, x.count ?? 1] }));
   parts[id] = def;
 }
 
 // --- prototypes
 const vehicles: Record<string, VProtoDef> = {};
 const missingParts = new Set<string>();
+/**
+ * Turret spawn ammo on a prototype part (veh_type.cpp vehicle_prototype::load, part object):
+ * "ammo" is the percent chance the turret spawns loaded (clamped 0..100), "ammo_types" the
+ * rounds it may hold (empty = the gun's default, resolved at spawn), "ammo_qty" [min, max]
+ * rounds (BN default {-1, -1}: ammo_set with a negative count fills it to capacity).
+ */
+function turretAmmo(pp: VProtoPart, e: unknown): void {
+  if (!e || typeof e !== 'object') return;
+  const o = e as { ammo?: unknown; ammo_types?: unknown; ammo_qty?: unknown };
+  if (o.ammo === undefined) return;
+  if (typeof o.ammo !== 'number') throw new Error(`vehicle part ${pp.part}: "ammo" is not a number: ${JSON.stringify(o.ammo)}`);
+  pp.ammo = Math.max(0, Math.min(100, o.ammo));
+  if (o.ammo_types !== undefined) pp.ammo_types = asArr<string>(o.ammo_types as string | string[]);
+  if (o.ammo_qty !== undefined) {
+    if (!Array.isArray(o.ammo_qty) || o.ammo_qty.length !== 2 || o.ammo_qty.some((n) => typeof n !== 'number')) throw new Error(`vehicle part ${pp.part}: bad "ammo_qty" ${JSON.stringify(o.ammo_qty)}`);
+    pp.ammo_qty = [o.ammo_qty[0], o.ammo_qty[1]];
+  }
+}
+
 for (const [id, v] of fam('vehicle')) {
   const out: VProtoPart[] = [];
   // BN "blueprint" prototypes (veh_type.cpp vehicle_prototype::load): an ASCII picture whose
@@ -188,6 +244,7 @@ for (const [id, v] of fam('vehicle')) {
             pp.fuel = e.fuel;
             fuelInfo(e.fuel, false);
           }
+          turretAmmo(pp, e);
           out.push(pp);
         }
       }
@@ -211,6 +268,7 @@ for (const [id, v] of fam('vehicle')) {
         pp.fuel = e.fuel;
         fuelInfo(e.fuel, false);
       }
+      turretAmmo(pp, e);
       out.push(pp);
     }
   }

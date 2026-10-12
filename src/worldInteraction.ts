@@ -8,7 +8,7 @@ import { installSound, emitSound, recentSounds, soundsHeardAt, type SoundOpts } 
 import { installWeather, forceWeather, refreshWeather } from './game/weather';
 import { installFields, ignite, addField, fieldDamageAt } from './game/fields';
 import { installZLevels, goStairs } from './game/zlevels';
-import { installRest, goToSleep, waitFor, WAIT_OPTIONS, comfortAt } from './game/rest';
+import { installRest, goToSleep, waitFor, WAIT_OPTIONS, playerComfort } from './game/rest';
 import { installTraps, setTrap, trapAt, triggerTrap } from './game/traps';
 import { bash, playerSmash, smashUntilBroken, smashAbility } from './game/bash';
 import { interact, interactionPrompt, interactionsAt, setInteractUi, describeText } from './game/interact';
@@ -16,6 +16,7 @@ import { targetTile, frontTile } from './game/targeting';
 import { toggleLight, playerLightState } from './game/lightitems';
 import { lightAt, playerCanSee, naturalLight, sunAltitude, tooDarkReason } from './game/vision';
 import { installWorldFx } from './render/worldFx';
+import { installHoseFx } from './render/hoseFx';
 import { openMenu, openWindow, colorize, c } from './ui/framework';
 import { worldContextProviders } from './ui2/world';
 import { installTimeWarp } from './game/timewarp';
@@ -34,6 +35,7 @@ export function installWorldInteraction(game: Game, renderer: Renderer, api: Deb
   installTimeWarp(game);
   installTraps(game);
   installWorldFx(game, renderer);
+  installHoseFx(game, renderer);
 
   setInteractUi({
     menu: (title, entries) => {
@@ -66,7 +68,8 @@ export function installWorldInteraction(game: Game, renderer: Renderer, api: Deb
     const pl = game.player;
     const near = Math.max(Math.abs(t.x - pl.tileX), Math.abs(t.y - pl.tileY)) <= 1;
     return interactionsAt(game, t.x, t.y, t.z)
-      .filter((i) => i.id !== 'pickup' && i.id !== 'describe')
+      // (grab: src/grab.ts adds its own "Grab the … (drag it)" entry)
+      .filter((i) => i.id !== 'pickup' && i.id !== 'describe' && i.id !== 'grab')
       .map((i) => ({ label: i.label, disabled: near ? undefined : 'Step closer', action: i.run }));
   });
 
@@ -82,7 +85,7 @@ export function installWorldInteraction(game: Game, renderer: Renderer, api: Deb
   game.keys.register('flashlight', 'Toggle light (flashlight, lantern)', () => void toggleLight(game));
   game.keys.register('sleep', 'Sleep', () => {
     const p = game.player;
-    const ci = comfortAt(game, p.tileX, p.tileY, p.z);
+    const ci = playerComfort(game);
     // Words, not CDDA's raw "comfort 0" (docs/ADAPTATION.md).
     const st = sleepSpotText(ci.comfort, ci.on, p.sleepinessDescription());
     openMenu({
@@ -102,18 +105,18 @@ export function installWorldInteraction(game: Game, renderer: Renderer, api: Deb
     });
   });
 
-  // HUD hint: pushed to the UI agent's hud.setPrompt when it exists.
-  let promptT = 0, lastPrompt: string | null | undefined;
-  game.systems.push({
-    name: 'interactPrompt',
-    update(g, realDt) {
-      if ((promptT -= realDt) > 0) return;
-      promptT = 0.15;
-      const text = interactionPrompt(g);
-      if (text === lastPrompt) return;
-      lastPrompt = text;
-      (window as any).cdda?.hud?.setPrompt?.(text);
-    },
+  // HUD hint: pushed to the UI agent's hud.setPrompt when it exists. Refreshed per drawn frame
+  // (throttled), not as a game system: those don't run while the game is held (load gate,
+  // pause), and the prompt then went on naming what was aimed at before a teleport or a turn.
+  let promptAt = -Infinity, lastPrompt: string | null | undefined;
+  renderer.beforeRender.push(() => {
+    const now = performance.now();
+    if (now - promptAt < 150) return;
+    promptAt = now;
+    const text = interactionPrompt(game);
+    if (text === lastPrompt) return;
+    lastPrompt = text;
+    (window as any).cdda?.hud?.setPrompt?.(text);
   });
 
   // ---- window.cdda helpers
@@ -124,7 +127,7 @@ export function installWorldInteraction(game: Game, renderer: Renderer, api: Deb
   };
   Object.assign(api, {
     /** Examine/interact with the aimed tile (or tile x,y,z). */
-    interact: (x?: number, y?: number, z?: number) => interact(game, x === undefined ? targetTile(game) : { x, y: y!, z: z ?? p().z, dist: 1 }),
+    interact: (x?: number, y?: number, z?: number) => interact(game, x === undefined ? undefined : { x, y: y!, z: z ?? p().z, dist: 1 }),
     /** Interactions available at a tile: labels. */
     interactions: (x: number, y: number, z = p().z) => interactionsAt(game, x, y, z).map((i) => i.label),
     examineText: (x: number, y: number, z = p().z) => describeText(game, x, y, z),

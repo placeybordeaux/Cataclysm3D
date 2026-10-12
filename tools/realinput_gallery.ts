@@ -147,10 +147,18 @@ export function galleryScenarios(c: GalleryCtx): Scenario[] {
         await idle();
         await x.key('2');
         await pick('ab-switch', sw);
+        // B defaults to the value after the current one; for the aim model that can be sway vs
+        // sway + timing, which draw the same path. Compare a path against dice (no path).
+        if (sw === 'aim') {
+          await pick('ab-a', 'sway');
+          await pick('ab-b', 'dice');
+        }
         await click('.gal-ab .ui2-btn.tone-accent');
         await idle();
         s = await st();
-        check(`A/B ${sw} in ${scene}: two captures that differ`, !!s.ab && s.ab.sw === sw && s.ab.diff > 0.002 && !s.errors.length, s.ab ?? s.errors);
+        // (the aim model shows only as a thin 2 s crosshair path: the 0.1% bar galleryproof uses)
+        const minDiff = sw === 'aim' ? 0.001 : 0.002;
+        check(`A/B ${sw} in ${scene}: two captures that differ`, !!s.ab && s.ab.sw === sw && s.ab.diff > minDiff && !s.errors.length, s.ab ?? s.errors);
         await shot(`gallery-ab-${sw}`);
       }
       await click('.gal-segbtn[data-abview="flicker"]');
@@ -216,8 +224,14 @@ export function galleryScenarios(c: GalleryCtx): Scenario[] {
       await c.page().waitForFunction('window.cdda?.ready || window.cddaError', { timeout: 240_000 });
       await idle();
       const r = await js<{ id: string; scene: string; diffs: Record<string, number> }[]>('cdda.gallery.proof()');
+      // 'sway' and 'sway + timing' draw the same 2 s crosshair path by design (the timing model only
+      // adds the interactive games: breath flash, release ring, reload band), so a still capture
+      // can only tell either of them from dice. Diffs are against the current value, so drop the
+      // other one of the pair.
+      const lookAlike: Record<string, string[]> = { aim: ['sway', 'timing'] };
       for (const p of r) {
-        const worst = Math.min(...Object.values(p.diffs));
+        const vals = Object.entries(p.diffs).filter(([v]) => !lookAlike[p.id]?.includes(v)).map(([, d]) => d);
+        const worst = Math.min(...vals);
         console.log(`    ${p.id.padEnd(10)} @${p.scene.padEnd(10)} ${JSON.stringify(p.diffs)}`);
         check(`${p.id} visibly changes the ${p.scene} scene (every value, >0.1% of pixels)`, worst > 0.1, p.diffs);
       }

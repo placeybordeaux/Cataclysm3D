@@ -147,12 +147,14 @@ export function installScreens(game: Game, renderer: Renderer, deps: ScreensDeps
   // ---------------------------------------------------------------- options
   const speeds: TextSpeed[] = ['instant', 'fast', 'normal', 'slow'];
   registerOption({
+    category: 'Interface',
     name: 'Dialogue text speed',
     desc: 'How fast NPC lines type themselves out (any key or click completes a line).',
     value: () => dialoguePrefs.speed.replace(/^./, (c) => c.toUpperCase()),
     change: (dir) => (dialoguePrefs.speed = speeds[(speeds.indexOf(dialoguePrefs.speed) + dir + speeds.length) % speeds.length]),
   });
   registerOption({
+    category: 'Interface',
     name: 'Dialogue layout',
     desc: 'Scene: docked low and wide, the world stays visible. Book: a tall window with the history beside the answers.',
     value: () => (dialoguePrefs.layout === 'scene' ? 'Scene' : 'Book'),

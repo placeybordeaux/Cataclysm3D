@@ -11,6 +11,9 @@ import { buildItem, itemHeight, itemShape, itemSize } from './items';
 import { buildDoorLeaf, buildWindow, curtainColour, doorKind, windowState } from './openings';
 import { buildFence, buildGateLeaf, fenceKind } from './fences';
 import type { ItemDef } from '../../data/types';
+import { buildHeld } from '../chars/held';
+import { analyseSprite } from '../chars/paint';
+import { buildGroundHeld, groundHeldClass, groundItemState } from './groundHeld';
 
 // Modelled furniture (docs/FURNITURE.md): low-poly pieces with per-face pixel textures in
 // place of voxel-inflated sprites. The chunk mesher asks `furniture()` first; a null answer
@@ -56,6 +59,9 @@ export interface Around {
   wreck?: number;
 }
 
+/** Rise (m) per pile slot for held meshes: about a rifle lying on its side. */
+const HELD_PILE_STEP = 0.045;
+
 /** Cost counters (cdda.furnitureStats): models built, placements, quads baked. */
 export const modelStats = { built: 0, buildMs: 0, placed: 0, placeMs: 0, quads: 0 };
 
@@ -91,26 +97,42 @@ export class ModelFactory {
 
   /**
    * Bake ground item `typeId` (the k-th from the top of its pile) on tile (x, y) resting at
-   * height `y0`. Returns false when there is no definition (caller falls back).
+   * height `y0`. Returns false when there is no definition (caller falls back). Weapons and
+   * tools with a held mesh (groundHeld.ts) lie on the floor as that mesh unless the Dropped
+   * weapons switch says 'shape'; `heldOnly` (the billboard looks, for items the tileset never
+   * drew) bakes only those and returns false for the rest. `below` = how many drawn pile
+   * slots lie under this one.
    */
-  item(geo: (f: TileFrame) => GeomBuilder, src: TileTextureSource, typeId: string, x: number, y: number, y0: number, seed: number, k: number): boolean {
-    let e = this.itemMeshes.get(typeId);
+  item(geo: (f: TileFrame) => GeomBuilder, src: TileTextureSource, typeId: string, x: number, y: number, y0: number, seed: number, k: number, heldOnly = false, below = 0): boolean {
+    const d = this.itemDefs[typeId];
+    const hc = d && groundItemState.style === 'held' ? groundHeldClass(d) : null;
+    if (heldOnly && !hc) return false;
+    // which side faces up: per pile slot, so two of the same rifle in a heap differ
+    const side: 1 | -1 = (seed >>> (13 + k)) & 1 ? 1 : -1;
+    const key = hc ? `${typeId}|h${side}` : typeId;
+    let e = this.itemMeshes.get(key);
     if (e === undefined) {
-      const d = this.itemDefs[typeId];
       if (!d) e = null;
       else {
         const tb = performance.now();
-        const shape = itemShape(d);
-        const s = itemSize(d.volume);
         const px = framePixels(src.item(typeId));
-        const pal = (px && spritePalette(px)) ?? flatPalette([150, 140, 120]);
         const b = new ModelBuilder(this.atlas);
-        buildItem(b, shape, s, pal, hashString(typeId));
-        e = { m: b.done(), h: itemHeight(shape, s) };
+        if (hc) {
+          // the same parts and sprite palette as in the hands (fpView / npcView / playerModel)
+          const pal = analyseSprite(px ?? { w: 1, h: 1, data: new Uint8ClampedArray([128, 128, 128, 255]) }).pal;
+          const h = buildGroundHeld(b, buildHeld(hc.cls, pal, d.volume, hc.variant), side).h;
+          e = { m: b.done(), h };
+        } else {
+          const shape = itemShape(d);
+          const s = itemSize(d.volume);
+          const pal = (px && spritePalette(px)) ?? flatPalette([150, 140, 120]);
+          buildItem(b, shape, s, pal, hashString(typeId));
+          e = { m: b.done(), h: itemHeight(shape, s) };
+        }
         modelStats.built++;
         { const dt = performance.now() - tb; modelStats.buildMs += dt; this.sinceYield += dt; }
       }
-      this.itemMeshes.set(typeId, e);
+      this.itemMeshes.set(key, e);
     }
     if (!e) return false;
     const t0 = performance.now();
@@ -118,7 +140,10 @@ export class ModelFactory {
     const a = ((seed >>> (k * 3)) & 7) * 0.785 + k * 2.1;
     const r = k === 0 ? ((seed >>> 20) & 7) * 0.02 : 0.2 + ((seed >>> (k + 9)) & 3) * 0.03;
     const yaw = (((seed >>> (5 + k * 4)) & 15) / 16) * Math.PI * 2;
-    placeModel(geo, e.m, { x: x + 0.5 + Math.cos(a) * r, y: y0 + 0.002, z: y + 0.5 + Math.sin(a) * r, yaw });
+    // long held meshes in a pile cross each other: each lies a gun's thickness above the
+    // `below` pile slots drawn under it instead of through them (k = 0, the top, is highest)
+    const lift = hc ? below * HELD_PILE_STEP : 0;
+    placeModel(geo, e.m, { x: x + 0.5 + Math.cos(a) * r, y: y0 + 0.002 + lift, z: y + 0.5 + Math.sin(a) * r, yaw });
     modelStats.placed++;
     modelStats.quads += e.m.quads;
     modelStats.placeMs += performance.now() - t0;

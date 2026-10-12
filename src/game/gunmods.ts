@@ -48,7 +48,17 @@ export function gunmodCompatible(gun: Item, mod: Item): { ok: boolean; reason?: 
   if (!modLocations(gun).has(loc)) return fail("doesn't have a slot for this mod");
   if (freeModSlots(gun, loc) <= 0) return fail(`doesn't have enough room for another ${loc} mod`);
   const targets = asArray(mod.def.mod_targets as string[] | string | undefined);
-  if (!targets.includes(gun.def.skill ?? '') && !targets.includes(gun.typeId)) return fail(`cannot have a ${mod.baseName()}`);
+  const categories = asArray(gun.def.weapon_category as string[] | undefined);
+  const groups = (key: string): string[][] => (mod.def[key] as string[][] | undefined) ?? [];
+  const included = groups('mod_target_category');
+  const excludedIds = asArray(mod.def.mod_exclusions as string[] | undefined);
+  const excludedGroups = groups('mod_exclusion_category');
+  const byId = targets.includes(gun.typeId);
+  const excluded = !byId && (excludedIds.includes(gun.typeId) || excludedGroups.some((group) => group.every((cat) => categories.includes(cat))));
+  if (targets.length || included.length || excludedIds.length || excludedGroups.length) {
+    const usable = byId || targets.includes(gun.def.skill ?? '') || included.some((group) => group.every((cat) => categories.includes(cat)));
+    if (!usable || excluded) return fail(`cannot have a ${mod.baseName()}`);
+  }
   if (loc === 'underbarrel' && !mod.hasFlag('PUMP_RAIL_COMPATIBLE') && gun.hasFlag('PUMP_RAIL')) return fail('can only accept small mods on that slot');
   if (['magazine', 'mechanism', 'loading port', 'bore'].includes(loc) && (gun.ammoRemaining() > 0 || gun.magazineCurrent()))
     return fail('must be unloaded before installing this mod');
@@ -130,21 +140,76 @@ export function modSum(gun: Item, field: string): number {
   return s;
 }
 
+/**
+ * BN item::ammo_required (item.cpp) for guns: rounds (or charges) one shot uses. A gun with no
+ * ammo types (bionic fake guns such as bio_laser_gun) needs none; FIRE_100/50/20 override;
+ * otherwise ammo_to_fire (loader default 1) × the mods' ammo_to_fire_multiplier plus their
+ * ammo_to_fire_modifier, truncated to int as the C++ return does.
+ */
+export function ammoRequired(gun: Item): number {
+  if (!gun.isGun() || gun.ammoTypes().length === 0) return 0;
+  if (gun.hasFlag('FIRE_100')) return 100;
+  if (gun.hasFlag('FIRE_50')) return 50;
+  if (gun.hasFlag('FIRE_20')) return 20;
+  let modifier = 0;
+  let multiplier = 1;
+  for (const m of gun.gunmods) {
+    modifier += num(m.def.ammo_to_fire_modifier);
+    if (typeof m.def.ammo_to_fire_multiplier === 'number') multiplier *= m.def.ammo_to_fire_multiplier;
+  }
+  const base = typeof gun.def.ammo_to_fire === 'number' ? gun.def.ammo_to_fire : 1;
+  return Math.trunc(base * multiplier + modifier);
+}
+
+/**
+ * BN item::get_gun_ups_drain (item.cpp): UPS charges one shot draws, ups_charges × the mods'
+ * ups_charges_multiplier plus their ups_charges_modifier, truncated to int like the C++.
+ */
+export function upsDrain(gun: Item): number {
+  if (!gun.isGun()) return 0;
+  let modifier = 0;
+  let multiplier = 1;
+  for (const m of gun.gunmods) {
+    modifier += num(m.def.ups_charges_modifier);
+    if (typeof m.def.ups_charges_multiplier === 'number') multiplier *= m.def.ups_charges_multiplier;
+  }
+  return Math.trunc(num(gun.def.ups_charges) * multiplier + modifier);
+}
+
+/**
+ * Shots a character can fire from `gun` before UPS charge runs out (BN fire_gun's burst cap:
+ * charges_of(UPS) / get_gun_ups_drain), Infinity for guns that draw none. VEHICLE guns run on
+ * the vehicle's power, not the shooter's UPS.
+ */
+export function upsShots(c: Character, gun: Item): number {
+  const drain = upsDrain(gun);
+  if (drain <= 0 || gun.hasFlag('VEHICLE')) return Infinity;
+  return Math.floor(c.inv.upsCharges() / drain);
+}
+
+/** What stops `c` firing `gun` right now for lack of rounds or UPS charge (BN gunmode_checks_weapon), else null. */
+export function gunShortfall(c: Character, gun: Item): 'ammo' | 'ups' | null {
+  const need = ammoRequired(gun);
+  if (need > 0 && gun.ammoRemaining() < need) return 'ammo';
+  if (upsShots(c, gun) < 1) return 'ups';
+  return null;
+}
+
 /** item::gun_shot_spread_multiplier. */
 export function shotSpreadMultiplier(gun: Item): number {
   return Math.max(0, 1 + modSum(gun, 'shot_spread_multiplier_modifier'));
 }
 
 /**
- * item::sight_dispersion: the gun's iron sights (300 when a mod has DISABLE_SIGHTS) or the
- * best installed sight (a mod with sight_dispersion >= 0 and field_of_view > 0).
+ * BN item.cpp:8350 sight_dispersion: iron sights (90 with DISABLE_SIGHTS) or
+ * best installed sight with nonnegative sight_dispersion and aim_speed.
  */
 export function sightDispersion(gun: Item): number {
   const disabled = gun.hasFlag('DISABLE_SIGHTS') || gun.gunmods.some((m) => m.hasFlag('DISABLE_SIGHTS'));
-  let best = disabled ? 300 : typeof gun.def.sight_dispersion === 'number' ? gun.def.sight_dispersion : 90;
+  let best = disabled ? 90 : typeof gun.def.sight_dispersion === 'number' ? gun.def.sight_dispersion : 90;
   for (const m of gun.gunmods) {
-    const sd = m.def.sight_dispersion, fov = m.def.field_of_view;
-    if (typeof sd !== 'number' || sd < 0 || typeof fov !== 'number' || fov <= 0) continue;
+    const sd = m.def.sight_dispersion, speed = m.def.aim_speed;
+    if (typeof sd !== 'number' || sd < 0 || typeof speed !== 'number' || speed < 0) continue;
     best = Math.min(best, sd);
   }
   return best;

@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { Game } from '../game/game';
+import { activeWeapon } from '../game/bionicguns';
 import type { Renderer } from './renderer';
 import type { SpriteHandle } from './sprites';
 import type { TileFrame } from './textureSource';
@@ -65,7 +66,7 @@ export class TopAimFx {
     const top = aimHooks.topView?.() ?? null;
     this.last = null;
     if (top && !p.dead && !game.input.captured) {
-      const w = p.inv.wielded;
+      const w = activeWeapon(game);
       const c = this.combat;
       const floor = p.z * LEVEL_HEIGHT;
       if (w?.isGun() && freeAim()) {

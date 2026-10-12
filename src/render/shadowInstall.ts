@@ -42,6 +42,7 @@ export function installShadows(game: Game, renderer: Renderer, api: DebugApi): v
   syncShadowType(renderer);
   const rig = renderer.lights.shadows;
   registerOption({
+    category: 'World',
     name: 'Shadows',
     value: () => SHADOW_MODES[rig.name].label,
     change: (d) => {

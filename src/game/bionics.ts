@@ -193,6 +193,8 @@ export class BionicState {
   private pseudoCache: { key: string; items: Item[] } = { key: '', items: [] };
   /** Called after install/remove/toggle so views can refresh. */
   onChanged: (() => void) | null = null;
+  /** Enter detached bionic-gun aiming; the world charges only actual fired shots. */
+  onGunActivation: ((id: string, gun: Item, costPerShot: number) => boolean) | null = null;
   /** Removes a mutation canceled by a new bionic (set by the installer to MutationState). */
   cancelMutation: ((id: string) => void) | null = null;
 
@@ -437,6 +439,23 @@ export class BionicState {
     if (!free && d.fuel_options?.length && !d.fuel_options.includes('muscle') && !this.hasFuel(d)) {
       this.msg(`Your ${this.name(id)} does not have enough fuel to start.`, 'c_light_red');
       return false;
+    }
+    if (d.flags?.includes('BIONIC_GUN')) {
+      if (!d.fake_item || !this.c.data.items[d.fake_item] || !this.onGunActivation) {
+        this.msg(`Your ${this.name(id)} cannot be aimed here.`, 'c_light_red');
+        return false;
+      }
+      const gun = createItem(this.c.data, d.fake_item);
+      if (!gun.isGun()) {
+        console.warn(`fake_item ${d.fake_item} of BIONIC_GUN ${id} is not a gun`);
+        return false;
+      }
+      // BN activate_bionic: the activation is announced, its power refunded, and aiming starts
+      // (aim_activity_actor::use_bionic); each shot actually fired pays act_cost later.
+      if (!free) this.msg(`You activate your ${this.name(id)}.`);
+      if (!this.onGunActivation(id, gun, cost)) return false;
+      this.onChanged?.();
+      return true;
     }
     const weapon = !!(d.flags?.includes('BIONIC_WEAPON') && d.fake_item);
     if (weapon) {

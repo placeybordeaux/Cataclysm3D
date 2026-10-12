@@ -309,10 +309,9 @@ export function installBnInventory(game: Game, ctx: UiContext, api: DebugApi, ca
         return per > 0 && it.ammoCapacity() > 0 && it.ammoRemaining() < per ? `Empty (${it.ammoRemaining()}/${it.ammoCapacity()}): it needs charges to use.` : false;
       }),
       run: (r) => {
-        const acts = model.actions(r.view, r.loc);
-        const use = acts.find((m) => 'label' in m && ('submenu' in m ? m.label === 'Use' : 'key' in m && m.key === 'A'));
-        if (use && 'submenu' in use && use.submenu) openMenuAt(model.actions(r.view, r.loc).filter((m) => m === use).flatMap((m) => ('submenu' in m && Array.isArray(m.submenu) ? m.submenu : [])), r.view.name);
-        else if (use && 'action' in use && use.action) void use.action();
+        const choice = applyPickerChoice(model, r.view, r.loc);
+        if (choice?.kind === 'submenu') openMenuAt(choice.items, choice.title);
+        else if (choice?.kind === 'action') choice.run();
       },
     });
   });
@@ -391,6 +390,7 @@ export function installBnInventory(game: Game, ctx: UiContext, api: DebugApi, ca
   });
 
   registerOption({
+    category: 'Interface',
     name: 'Inventory screens',
     desc: 'New: drag & drop windows (i / Tab). Classic: the v1 letter lists for i, z, O, E, q, g…',
     value: () => (classic() ? 'Classic (v1)' : 'New'),
@@ -456,6 +456,25 @@ export function installBnInventory(game: Game, ctx: UiContext, api: DebugApi, ca
 }
 
 const ground = (g: Loc) => (g.kind === 'ground' ? `ground:${g.x},${g.y},${g.z}` : 'inv');
+
+/**
+ * What choosing a row in the `u` apply picker should do with it: open its actions submenu
+ * (several use_actions — an axe's chop tree/chop logs/lumber, a refillable lighter's light
+ * up/start a fire…) or run its one direct action (a single use_action, e.g. flint and
+ * steel's firestarter). Exported standalone (not a closure over one model.actions() call) so
+ * a regression test can call it without the DOM the picker itself needs: a submenu must come
+ * from the *same* model.actions() computation that found `use` — a second, fresh call builds
+ * new object literals, and filtering it by `=== use` (a previous call's objects) is always
+ * empty, which is how the axe/shovel/rod "Use" submenu silently opened nothing.
+ */
+export function applyPickerChoice(model: BnInventoryModel, view: ItemView, loc: string):
+  { kind: 'submenu'; items: MenuItem[]; title: string } | { kind: 'action'; run: () => void } | null {
+  const acts = model.actions(view, loc);
+  const use = acts.find((m) => 'label' in m && ('submenu' in m ? m.label === 'Use' : 'key' in m && m.key === 'A'));
+  if (use && 'submenu' in use && use.submenu) return { kind: 'submenu', items: typeof use.submenu === 'function' ? use.submenu() : use.submenu, title: view.name };
+  if (use && 'action' in use && use.action) return { kind: 'action', run: use.action };
+  return null;
+}
 
 /** CARGO parts within reach that are open (a closed trunk lid keeps them in). */
 export function nearbyCargo(game: Game): { part: Cargo; vehicle?: { version: number; name?: string }; label: string }[] {

@@ -1,0 +1,55 @@
+/* Shared treatment for every framework window, including nested action menus. */
+#ui .cdda-window {
+  --c-light_gray: var(--p-text); --c-dark_gray: var(--p-text-dim);
+  --c-white: var(--p-text-bright); --c-light_green: var(--p-good);
+  --c-light_red: var(--p-bad); --c-red: var(--p-bad);
+  --c-light_blue: var(--p-info); --c-light_cyan: var(--p-info);
+  --c-yellow: var(--p-warn); --c-blue: var(--p-accent-dim);
+  background: var(--p-bg); color: var(--p-text);
+  border: calc(var(--u) * 3) solid transparent; border-image: var(--skin-panel);
+  box-shadow: calc(var(--u) * 3) calc(var(--u) * 3) 0 #0008;
+  font-size: var(--fs); line-height: 1.3;
+  min-width: min(28ch, 94vw); max-width: 96vw; max-height: 92vh;
+}
+#ui .cdda-window > .title {
+  display: flex; align-items: center; gap: calc(var(--u) * 4);
+  background: var(--p-bg-raised); color: var(--p-accent);
+  border-bottom: var(--u) solid var(--p-outline); text-align: left;
+  padding: calc(var(--u) * 2) calc(var(--u) * 4);
+  font-size: var(--fs-l); white-space: normal; cursor: grab; touch-action: none;
+}
+#ui .window-title { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+#ui .window-close {
+  font: inherit; color: var(--p-text-dim); background: var(--p-bg-deep);
+  border: var(--u) solid var(--p-bevel-hi); cursor: pointer;
+  padding: 0 calc(var(--u) * 3); flex: none;
+}
+#ui .window-close:hover, #ui .window-close:focus-visible { color: var(--p-accent); outline: var(--u) solid var(--p-accent); }
+#ui .cdda-window > .body { min-height: 0; padding: calc(var(--u) * 6); }
+#ui .cdda-window > .footer {
+  border-top: var(--u) solid var(--p-bevel-hi); color: var(--p-text-dim);
+  font-size: var(--fs-s); padding: calc(var(--u) * 3) calc(var(--u) * 6);
+}
+#ui .cdda-window.inactive > .title { color: var(--p-text-dim); }
+#ui .cdda-window .menu-entry {
+  padding: calc(var(--u) * 3) calc(var(--u) * 4);
+  border-left: calc(var(--u) * 2) solid transparent;
+  white-space: pre-wrap; overflow-wrap: anywhere;
+}
+#ui .cdda-window .menu-entry:hover { background: var(--p-bg-hover); }
+#ui .cdda-window .menu-entry.sel { background: var(--p-accent-dim); border-left-color: var(--p-accent); color: var(--p-text-bright); }
+#ui .cdda-window .menu-entry.disabled { color: var(--p-text-dim); }
+#ui .cdda-window .hotkey { display: inline-block; min-width: 1.4em; color: var(--p-accent); }
+#ui .cdda-window .menu-header { color: var(--p-accent); padding: calc(var(--u) * 3) calc(var(--u) * 4); border-bottom: var(--u) solid var(--p-bevel-hi); }
+#ui .cdda-window .cols { gap: calc(var(--u) * 6); }
+#ui .cdda-window .confirm-buttons { display: flex; gap: calc(var(--u) * 4); margin-top: calc(var(--u) * 6); }
+#ui .cdda-window .btn { font: inherit; background: var(--p-bg-raised); color: var(--p-text); border: var(--u) solid var(--p-bevel-hi); padding: calc(var(--u) * 3) calc(var(--u) * 6); cursor: pointer; }
+#ui .cdda-window .btn:hover { background: var(--p-bg-hover); }
+#ui .cdda-window input { max-width: 100%; box-sizing: border-box; }
+#ui .cdda-window ::-webkit-scrollbar-thumb { background: var(--p-bevel-hi); }
+@media (max-width: 640px) {
+  #ui .cdda-window .cols { flex-direction: column; }
+}
+/* A framework dialog opened by a modern panel must appear above its owner. */
+#ui.framework-window-open { z-index: 6; }
+#ui .cdda-window, #ui .cdda-window * { box-sizing: border-box; }

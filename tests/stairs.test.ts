@@ -17,6 +17,9 @@ import { MonsterSystem } from '../src/game/monai';
 import { NpcSystem } from '../src/game/npcai';
 import { Dialogue } from '../src/game/talk';
 import { installStairNpcs } from '../src/stairs';
+import { Grid } from '../src/game/los';
+import { routeToStair } from '../src/game/stairroute';
+import { monsterToJSON, restoreMonster } from '../src/game/monster_json';
 
 const dir = path.join(__dirname, '../public/data');
 const load = (f: string) => JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8'));
@@ -404,6 +407,80 @@ describe('walking the stairs', () => {
 });
 
 describe('monsters on the stairs', () => {
+  it('cross-level noise coordinates survive monster save/stash records and legacy records', () => {
+    const { sys } = world(HALL, 'flight');
+    const m = sys.spawnById('mon_zombie', 3.5, 2.5, 0)!;
+    m.wanderTo(7, 2, 10, 1);
+    const saved = JSON.parse(JSON.stringify(monsterToJSON(m)));
+    const again = restoreMonster(sys, saved, () => {})!;
+    expect([again.wanderX, again.wanderY, again.wanderTime, again.wanderZ]).toEqual([7, 2, 10, 1]);
+    saved.wander.pop();
+    const legacy = restoreMonster(sys, saved, () => {})!;
+    expect(legacy.wanderZ).toBe(legacy.z);
+  });
+
+  it('a crowd shares a bounded routing budget', () => {
+    const { game, walker } = world(HALL, 'flight');
+    const link = standAt(game, walker, 4, 2);
+    const from = { ...link.path.at(0), z: 0 }, to = { ...link.path.at(link.path.len), z: 1 };
+    const budget = { remaining: 1000 }, grid = new Grid(game.map);
+    let completed = 0;
+    for (let i = 0; i < 500; i++) if (routeToStair(grid, [link], from, to, budget)) completed++;
+    expect(completed).toBeGreaterThan(0);
+    expect(budget.remaining).toBeGreaterThanOrEqual(0);
+    expect(budget.remaining).toBeLessThan(1000);
+  });
+  it('caches a 500-monster planning burst within the shared node budget', () => {
+    const { game, sys, walker } = world(HALL, 'flight');
+    const link = standAt(game, walker, 4, 2);
+    const bottom = link.path.at(0), top = link.path.at(link.path.len);
+    const crowd = Array.from({ length: 500 }, () => {
+      const monster = sys.spawnById('mon_zombie', Math.floor(bottom.x), Math.floor(bottom.y), 0)!;
+      monster.wanderTo(top.x, top.y, 20, 1);
+      return monster;
+    });
+    const plan = () => {
+      for (const monster of crowd) sys.stairs!.plan(monster, { goal: 'none', gx: 0, gy: 0, speedMul: 1 });
+    };
+    const start = performance.now();
+    plan();
+    const cold = performance.now() - start;
+    const cachedStart = performance.now();
+    for (let i = 0; i < 20; i++) plan();
+    const cached = (performance.now() - cachedStart) / 20;
+    console.log(JSON.stringify({ stairRouting: { monsters: 500, coldMs: cold, cachedMsPerTick: cached, worldSetupExcluded: true } }));
+  });
+  it('routing rejects a blocked destination and does not generate unknown chunks', () => {
+    const { game, walker } = world(HALL, 'flight');
+    const link = standAt(game, walker, 4, 2);
+    const bottom = link.path.at(0), top = link.path.at(link.path.len);
+    const grid = new Grid(game.map);
+    const count = [...game.map.loadedChunks()].length;
+    expect(routeToStair(grid, [link], { ...bottom, z: 0 }, { ...top, z: 1 })?.link).toBe(link);
+    game.map.setTer(Math.floor(top.x), Math.floor(top.y), 1, 't_wall');
+    grid.reset();
+    expect(routeToStair(grid, [link], { ...bottom, z: 0 }, { ...top, z: 1 })).toBeNull();
+    expect(routeToStair(grid, [link], { ...bottom, z: 0 }, { x: 9000, y: 9000, z: 1 })).toBeNull();
+    expect([...game.map.loadedChunks()].length).toBe(count);
+  });
+  it('a zombie investigates a noise upstairs without a previous survivor stair trip', () => {
+    const { game, sys, walker } = world(HALL, 'flight');
+    const l = standAt(game, walker, 4, 2);
+    const b = l.path.at(0), top = l.path.at(l.path.len);
+    const z = sys.spawnById('mon_zombie', Math.floor(b.x), Math.floor(b.y), 0)!;
+    game.player.x = b.x + 8;
+    game.player.y = b.y + 8;
+    game.player.debugInvulnerable = true;
+    expect(walker.lastTrip).toBeNull();
+    sys.update(game, 0.01, 0.01);
+    sys.hear(top.x, top.y, 1, 300);
+    expect(z.wanderZ).toBe(1);
+    let rode = false;
+    step(game, 15, () => (rode ||= !!climbOf(z)));
+    expect(rode).toBe(true);
+    expect(z.z).toBe(1);
+    expect(walker.lastTrip).toBeNull();
+  });
   it('a zombie chasing you follows you up the flight and arrives upstairs', () => {
     const { game, sys, walker } = world(HALL, 'flight');
     const l = standAt(game, walker, 4, 2);

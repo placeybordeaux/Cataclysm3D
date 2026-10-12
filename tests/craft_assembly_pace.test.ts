@@ -1,0 +1,27 @@
+import { expect, it } from 'vitest';
+import { Activity } from '../src/game/activity';
+import { assemblyHandWarp, AssemblyPace } from '../src/game/activitytoys/assemblyPace';
+it('offers a slower explicit per-batch pace without changing ignored/off speed', () => {
+  expect(assemblyHandWarp(6000, 10, 24, 31.25)).toBeCloseTo(600 / 12 / 24);
+  expect(assemblyHandWarp(30, 1, 24, 1)).toBe(1);
+  const a = new Activity({ kind: 'craft', name: 'crafting', duration: 6000, onComplete() {} });
+  const host = { clock: { warp: 31.25 }, activities: { current: a as Activity | null } };
+  const pace = new AssemblyPace(host);
+  expect(host.clock.warp).toBe(31.25);
+  pace.begin(a, 10, 24);
+  expect(host.clock.warp).toBeCloseTo(600 / 12 / 24);
+  pace.end(); expect(host.clock.warp).toBe(31.25);
+  a.elapsed = 3000;
+  pace.begin(a, 5, 24);
+  expect(host.clock.warp).toBeCloseTo(600 / 12 / 24);
+  pace.end(); expect(host.clock.warp).toBe(31.25);
+  a.elapsed = 0;
+  pace.begin(a, 10, 24);
+  host.activities.current = null; host.clock.warp = 1;
+  pace.end(); expect(host.clock.warp).toBe(1);
+  host.activities.current = a;
+  pace.begin(a, 10, 24);
+  host.activities.current = new Activity({ ...a.spec, duration: 200 }); host.clock.warp = 2;
+  pace.end(); expect(host.clock.warp).toBe(2);
+  pace.begin(a, 10, 24); expect(host.clock.warp).toBe(2);
+});

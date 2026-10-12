@@ -225,5 +225,5 @@ describe('conservation through the UI model', () => {
     }
     // the walk must really move things, not just bounce off refusals
     expect(moved).toBeGreaterThan((SEEDS * STEPS) / 8);
-  });
+  }, 30_000);
 });

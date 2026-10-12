@@ -6,11 +6,14 @@ import type { ActivityManager } from './activity';
 import type { Character } from './character';
 import type { PlayerAvatar } from './player';
 import { CraftingInventory } from './crafting_inv';
+import { addVehicleCraftingSources } from './vehicleFacilities';
+import type { VehicleSystem } from './vehicles';
 import { asArray, countByCharges, createItem, inNewContainer, Item } from './item';
 import { consumeItem, L, locate, moveItem, spawnItem, spawnSome, transaction, type Loc } from './moves';
 import { consumeRequirements, evaluateRequirements, itemDisplayName, type RequirementEval } from './requirements';
 import { cddaText } from './units';
 import { withPracticeSource } from './practice';
+import { benchTooSlow, canLiftCraft, craftBench, findBestBench, type Bench } from './workbench';
 
 // Crafting after Cataclysm: Bright Nights (crafting.cpp, recipe.cpp, craft_command.cpp):
 //  - which recipes you know: learned (books, profession, disassembly, crafting from a book) or
@@ -28,6 +31,7 @@ import { withPracticeSource } from './practice';
 
 /** What crafting/construction/reading need from Game (so tests can pass a light stand-in). */
 export interface CraftHost {
+  vehicles?: VehicleSystem | null;
   data: GameData;
   map: GameMap;
   player: PlayerAvatar;
@@ -132,11 +136,27 @@ export function moraleSpeedMultiplier(c: Character, r: RecipeDef): number {
   return 1 / (1 + (mult * morale) / -50);
 }
 
-/** BN crafting_speed_multiplier (no workbench/tool-speed/assistant terms). 0 = can't work. */
-export function craftSpeed(host: CraftHost, r: RecipeDef, lightMult = lightSpeedMultiplier(host, r)): number {
+/**
+ * BN crafting_speed_multiplier (no tool-speed/assistant terms). 0 = can't work. `benchMult` is
+ * workbench_crafting_speed_multiplier for the chosen bench (src/game/workbench.ts); recipe
+ * listings leave it at 1 and show the bench separately.
+ */
+export function craftSpeed(host: CraftHost, r: RecipeDef, lightMult = lightSpeedMultiplier(host, r), benchMult = 1): number {
   const c = host.player;
-  const m = moraleSpeedMultiplier(c, r) * lightMult * c.mutationValue('crafting_speed_modifier');
+  const m = moraleSpeedMultiplier(c, r) * lightMult * benchMult * c.mutationValue('crafting_speed_modifier');
   return m + c.enchantBonus('CRAFTING_SPEED', m);
+}
+
+/** crafting_gui's preview: the best bench for one finished result (recipe::create_result). */
+export function previewBench(host: CraftHost, r: RecipeDef): Bench {
+  const it = createResults(host.data, r, 1)[0] ?? createItem(host.data, r.result);
+  return findBestBench(host, { mass: it.weight(), volume: it.volume() }, canLiftCraft(host, it));
+}
+
+/** BN's refusal when the best bench can't take the craft (crafting_speed_multiplier). */
+function benchRefusal(host: CraftHost, craft: Item, r: RecipeDef, bench: Bench): string | null {
+  if (!benchTooSlow(bench.multiplier, craftSpeed(host, r, undefined, bench.multiplier))) return null;
+  return `The ${craft.baseName()} is too large and/or heavy to work on.  You may want to use a workbench or a smaller batch size`;
 }
 
 // ------------------------------------------------------------------ knowledge
@@ -287,7 +307,7 @@ export interface CraftCheck {
 
 export function craftingInventory(host: CraftHost): CraftingInventory {
   const p = host.player;
-  return CraftingInventory.gather(host.data, p, host.map, { x: p.x, y: p.y, z: p.z });
+  return addVehicleCraftingSources(host, CraftingInventory.gather(host.data, p, host.map, { x: p.x, y: p.y, z: p.z }));
 }
 
 /**
@@ -650,6 +670,8 @@ export function cantContinue(host: CraftHost, craft: Item, inv = craftingInvento
   if (!st) return `The ${craft.baseName()} isn't something you can work on.`;
   if (!craftLoc(host, craft)) return `The ${craft.baseName()} is out of reach.`;
   if (lightSpeedMultiplier(host, st.recipe) <= 0) return "You can't see to craft!";
+  const tooBig = benchRefusal(host, craft, st.recipe, craftBench(host, craft));
+  if (tooBig) return tooBig;
   const ev = evaluateRequirements(host.data, continueRequirements(craft, st), inv, 1);
   return ev.ok ? null : `You can no longer make that craft: missing ${ev.missing.join('; ')}.`;
 }
@@ -676,7 +698,10 @@ export function continueCraft(host: CraftHost, craft: Item, opts: { instant?: bo
 
   const batch = st0.batch;
   const state = { progress: st0.progress, nextFailure: st0.nextFailure, practiced: st0.practiced };
-  const total = () => craftTime(c, r, batch, craftSpeed(host, r) || 1);
+  // craft_activity_actor refreshes the best bench every turn: a vehicle driving off or a bench
+  // breaking changes the pace from then on (onProgress below rebases the remaining time).
+  let bench = craftBench(host, craft);
+  const total = () => craftTime(c, r, batch, craftSpeed(host, r, undefined, bench.multiplier) || 1);
   const save = () => writeState(craft, state);
 
   // BN craft_skill_gain every 5% of progress: (difficulty × 15 + 10) × batch_mult / 20.
@@ -724,6 +749,17 @@ export function continueCraft(host: CraftHost, craft: Item, opts: { instant?: bo
         practiceTo(state.progress);
         if (state.progress >= state.nextFailure && fraction < 1) handleFailure();
         save();
+        if (fraction >= 1 || host.activities.current?.spec.target !== craft) return;
+        const now = craftBench(host, craft);
+        if (now.multiplier === bench.multiplier && now.type === bench.type) return;
+        bench = now;
+        const tooBig = benchRefusal(host, craft, r, bench);
+        if (tooBig) {
+          host.message(tooBig, 'c_light_red');
+          host.activities.cancel('You cannot continue crafting.');
+          return;
+        }
+        rebase();
       },
       onComplete: finish,
       onCancel: (_f, reason) => {
@@ -732,6 +768,16 @@ export function continueCraft(host: CraftHost, craft: Item, opts: { instant?: bo
         for (const h of craftStoppedHooks) h(r, reason);
       },
     });
+  };
+
+  // Restart the clock from the current progress at the current pace (the activity's own bookkeeping).
+  const rebase = () => {
+    const act = host.activities.current;
+    base = state.progress;
+    if (act) {
+      act.elapsed = 0;
+      act.spec.duration = Math.max(1, Math.round(total() * (1 - base)));
+    }
   };
 
   // item::handle_craft_failure: destroy some components (each saved by a success roll), lose
@@ -761,13 +807,7 @@ export function continueCraft(host: CraftHost, craft: Item, opts: { instant?: bo
     else host.message('You mess up, but catch it in time.', 'c_yellow');
     state.nextFailure = nextFailurePoint(c, r, state.progress);
     save();
-    // Restart the clock from the new progress (the activity's own bookkeeping).
-    const act = host.activities.current;
-    base = state.progress;
-    if (act) {
-      act.elapsed = 0;
-      act.spec.duration = Math.max(1, Math.round(total() * (1 - base)));
-    }
+    rebase();
     if (missingComponents(craft, craftState(host.data, craft)!).length) {
       const inv2 = craftingInventory(host);
       const need = continueRequirements(craft, craftState(host.data, craft)!);
@@ -777,6 +817,8 @@ export function continueCraft(host: CraftHost, craft: Item, opts: { instant?: bo
     }
   };
 
+  // Character::start_craft: BN still crafts in your inventory or at your feet, just slower.
+  if (opts.starting && bench.multiplier < 1) host.message(`You can't hold ${craft.name()} in your hands and there is no good work surface nearby.`, 'c_light_gray');
   if (!opts.starting) host.message(`You continue working on the ${name}.`);
   else host.message(`You start working on the ${name}.`);
   if (!startAct()) return { ok: false, msg: 'Interrupted.', craft };
@@ -833,9 +875,20 @@ export function abandonCraft(host: CraftHost, craft: Item): boolean {
   if (!where || !craftState(host.data, craft)) return false;
   if (host.activities.current?.spec.target === craft) host.activities.cancel('You stop crafting.');
   const p = host.player;
-  const ground = L.ground(host.map, Math.floor(p.x), Math.floor(p.y), p.z);
+  const sourceGround = p.inv.locOf(craft) ? null : (() => {
+    for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) {
+      const tile = L.ground(host.map, Math.floor(p.x) + dx, Math.floor(p.y) + dy, p.z);
+      if (locate(craft, [tile])) return tile;
+    }
+    return null;
+  })();
+  const ground = sourceGround ?? L.ground(host.map, Math.floor(p.x), Math.floor(p.y), p.z);
   const from = L.in(craft);
   for (const comp of [...craft.contents]) {
+    if (sourceGround) {
+      moveItem(comp, from, sourceGround, { actor: p, quiet: true, force: true });
+      continue;
+    }
     if (comp.isLiquid()) {
       // Back into a container (carried sealed ones first), else it spills where you stand.
       const holders = p.inv.allItems().filter((h) => h.isContainer() && h !== craft).sort((a, b) => Number(!a.isWatertight()) - Number(!b.isWatertight()));

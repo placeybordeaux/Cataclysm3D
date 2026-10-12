@@ -1,11 +1,12 @@
-import type { ArmorPortion, ItemDef } from '../data/types';
+import type { ArmorPortion, GameData, ItemDef } from '../data/types';
 import { applyHealActor, type HealActor } from './healing';
 import type { Rng } from '../core/rng';
 import { ALL_PARTS, BODY_PARTS, isBodyPart, MAIN_PARTS, type BodyPartId, type MainPartId } from './bodyparts';
 import type { Character } from './character';
-import { asArray, Item, type ItemJSON } from './item';
+import { asArray, Item, loadAmmo, type ItemJSON } from './item';
 import { cddaText, toSeconds } from './units';
 import { unwieldyWarning } from './combat';
+import { carriedUpsCharges, drawCarriedUps, transferCarriedUps, usableBelongings } from './upsTransfer';
 import { explainNoPower, explainNoReload, plainName, reloadHintsFor, reloadNeeds } from './reloadhelp';
 import {
   bodyLocs, canMove, carriedAs, consumeItem, consumeNew, handlingCost, L, locate, moveItem, registerInventorySlots, spawnItem, transaction,
@@ -26,6 +27,13 @@ import {
 // (pick up, wield, wear, eat, reload...) are the BN actions built on those moves, returning
 // {ok, msg, moves} with BN's wording; the message is also sent to the owner.
 
+export interface ItemPresentation {
+  kind: 'eat' | 'drink' | 'use';
+  /** The actual portion/used item, including its pre-transform identity. */
+  item: Pick<Item, 'typeId' | 'def' | 'isGun'>;
+  moves: number;
+}
+
 export interface ActionResult {
   ok: boolean;
   msg: string;
@@ -33,6 +41,13 @@ export interface ActionResult {
   moves: number;
   /** Machine-readable reason when !ok (see moves.ts WhyNot). */
   code?: string;
+  /**
+   * The action opened a menu/target picker or started an activity rather than finishing on
+   * the spot: `ok` only means "accepted so far", not "succeeded". use() skips its own
+   * immediate success gesture for these; the handler fires one itself, from the action's own
+   * completion, via Inventory.presentDeferredUse (never on open, cancel, or refusal).
+   */
+  deferred?: boolean;
 }
 
 /** BN layer_level order, innermost first. */
@@ -61,11 +76,40 @@ export function useActions(def: ItemDef): { type: string; [k: string]: any }[] {
   const raw = def.use_action;
   const list = raw ? (Array.isArray(raw) ? raw : [raw]) : [];
   const out = list.map((u) => (typeof u === 'string' ? { type: u } : (u as { type: string })));
+  // BN's item_factory loads "repair_item" as JSON shorthand: the actual registered action id
+  // (and its item_actions.json name) is its item_action_type, e.g. "repair_metal" for a
+  // forge/3D printer, "repair_fabric" for a sewing kit (item_factory.cpp usage_from_object).
+  for (const u of out) {
+    const iat = (u as { item_action_type?: unknown }).item_action_type;
+    if (u.type === 'repair_item' && typeof iat === 'string') u.type = iat;
+  }
   if (qualityUsages.length && def.qualities?.length) {
     for (const [q, lvl] of def.qualities as [string, number][])
       for (const u of qualityUsages) if (u.quality === q && lvl >= u.level && !out.some((o) => o.type === u.type)) out.push({ type: u.type });
   }
   return out;
+}
+
+/**
+ * Action ids whose BN item_actions.json name was missing, so itemActionName() fell back to a
+ * humanized id. Kept so a sweep test can fail loudly on an unnamed action instead of it just
+ * quietly showing up in a Use submenu (tests/item_actions.test.ts).
+ */
+export const itemActionNameFallbacks = new Set<string>();
+
+/**
+ * BN's display name for a use_action id (item_action_generator::get_action_name:
+ * item_actions.json's "name", data.misc.item_action here). Callers must check the
+ * use_action's own menu_text override first (iuse_actor::get_name) — that's per use_action,
+ * not per type, so it can't live here. Missing names fall back to a readable form and are
+ * recorded in itemActionNameFallbacks rather than showing the raw id.
+ */
+export function itemActionName(data: GameData, type: string): string {
+  const name = cddaText((data.misc.item_action?.[type] as { name?: unknown } | undefined)?.name);
+  if (name) return name;
+  itemActionNameFallbacks.add(type);
+  const readable = type.replace(/_/g, ' ').toLowerCase();
+  return readable.charAt(0).toUpperCase() + readable.slice(1);
 }
 
 /** material ids of an item (["steel"] or [{type, portion}]). */
@@ -109,7 +153,7 @@ function isNonRigidArmor(it: Item): boolean {
  * mW / 1000000 to give kJ (battery unit) per second"); strings like "1560 mW" also parse.
  * Reading the integer as watts drained a flashlight's battery ~1000× too fast.
  */
-function powerDrawW(v: unknown): number {
+export function powerDrawW(v: unknown): number {
   if (typeof v === 'number') return v * 0.001;
   if (typeof v !== 'string') return 0;
   const m = /^\s*([\d.]+)\s*(mW|W|kW)\s*$/.exec(v);
@@ -125,6 +169,8 @@ export class Inventory {
    * registers 'firestarter', which needs the map). Consulted for types use() doesn't know.
    */
   readonly useHandlers = new Map<string, (it: Item, ua: { type: string; [k: string]: any }) => ActionResult>();
+  /** Was a carried UPS charging something last update? (Transient: only for the "out of charge" message.) */
+  private upsWasCharging = false;
   /**
    * Hooks for body modifications (src/game/mutations.ts, bionics.ts): extra reasons an item
    * can't be worn (restricts_gear), extra encumbrance per part, flat natural armor, extra
@@ -137,7 +183,24 @@ export class Inventory {
   readonly qualityProviders: (() => Item[])[] = [];
   readonly consumeChecks: ((food: Item) => string | null)[] = [];
   readonly onConsume: ((portion: Item) => string | void)[] = [];
+  readonly onItemPresentation: ((action: ItemPresentation) => void)[] = [];
+  /**
+   * Fire the successful-use presentation fact for a deferred (menu/picker/activity-based)
+   * tool action, once it actually completes — never on open, cancel, or refusal. Handlers
+   * for such actions (firestarter, axe/shovel/rod tool uses, bionic self-install) call this
+   * from the action's own completion signal (an activity's onComplete, never its start),
+   * passing a snapshot of the tool taken before the deferred work ran, so a later charge
+   * burn or type change doesn't retroactively alter what's shown.
+   */
+  presentDeferredUse(item: Pick<Item, 'typeId' | 'def' | 'isGun'>, moves = 0): void {
+    for (const present of this.onItemPresentation) present({ kind: 'use', item, moves });
+  }
   readonly carryModifiers: (() => { volume?: number; weight?: number; weightBonus?: number })[] = [];
+  /**
+   * Per-frame processing for active items owned by another system (power armor: src/game/powerArmor.ts).
+   * Returning true means the item was handled and the generic power_draw drain below must skip it.
+   */
+  readonly activeProcessors: ((it: Item, dt: number) => boolean)[] = [];
 
   constructor(readonly owner: Character) {
     const s: InvSlots = { wielded: null, worn: [], items: [], sortWorn: () => this.sortWorn() };
@@ -368,11 +431,13 @@ export class Inventory {
     const exempt = (f: string[]) => f.some((x) => it.hasFlag(x));
     const shoeLike = (x: Item, bp: BodyPartId) => covers(x, bp) && !['BELTED', 'PERSONAL', 'AURA', 'SEMITANGIBLE', 'SKINTIGHT'].some((f) => x.hasFlag(f)) && !(x.hasFlag('OVERSIZE') && x.hasFlag('OUTER'));
     for (const foot of ['foot_l', 'foot_r'] as const) {
-      if (covers(it, foot) && this.s.worn.some((x) => shoeLike(x, foot)) && !(it.hasFlag('OVERSIZE') && it.hasFlag('OUTER')) && !exempt(['SKINTIGHT', 'BELTED', 'PERSONAL', 'AURA', 'SEMITANGIBLE']))
+      if (covers(it, foot) && this.s.worn.some((x) => shoeLike(x, foot)) && !(it.hasFlag('OVERSIZE') && it.hasFlag('OUTER')) && !exempt(['SKINTIGHT', 'BELTED', 'PERSONAL', 'AURA', 'SEMITANGIBLE', 'POWERARMOR_PLATING']))
         return { ok: false, reason: "You're already wearing footwear!" };
     }
     const helmet = (x: Item) => covers(x, 'head') && !['HELMET_COMPAT', 'SKINTIGHT', 'PERSONAL', 'AURA', 'SEMITANGIBLE', 'OVERSIZE'].some((f) => x.hasFlag(f));
-    if (helmet(it) && this.s.worn.some(helmet)) return { ok: false, reason: "You can't wear that with other headgear!" };
+    // BN exempts power armor (item::is_power_armor) from the other-headgear rule.
+    const powerArmor = exempt(['POWERARMOR_EXO', 'POWERARMOR_EXTERNAL', 'POWERARMOR_MOD']);
+    if (helmet(it) && !powerArmor && this.s.worn.some(helmet)) return { ok: false, reason: "You can't wear that with other headgear!" };
     return { ok: true };
   }
 
@@ -510,10 +575,11 @@ export class Inventory {
   /**
    * Character::absorb_hit: each worn item covering the part, outermost first, gets a
    * coverage roll; if it's hit it removes max(resist - penetration, 0) * armor_mult.
+   * amount already includes damage_multiplier, so mitigation scales by it too.
    */
   absorbHit(
     bp: BodyPartId,
-    units: { type: string; amount: number; armor_penetration?: number; armor_multiplier?: number }[],
+    units: { type: string; amount: number; armor_penetration?: number; armor_multiplier?: number; multiplier?: number }[],
     rng: Rng,
   ): { type: string; amount: number }[] {
     const out = units.map((u) => ({ ...u, armor_penetration: u.armor_penetration ?? 0 }));
@@ -523,7 +589,7 @@ export class Inventory {
       for (const u of out) {
         if (u.amount <= 0) continue;
         const res = this.armorResist(it, bp, u.type, rng);
-        const mitigation = Math.max(res - u.armor_penetration, 0) * (u.armor_multiplier ?? 1);
+        const mitigation = Math.max(res - u.armor_penetration, 0) * (u.armor_multiplier ?? 1) * (u.multiplier ?? 1);
         u.armor_penetration = Math.max(0, u.armor_penetration - res);
         u.amount = Math.max(0, u.amount - mitigation);
       }
@@ -534,7 +600,7 @@ export class Inventory {
         if (u.amount <= 0) continue;
         const res = f(bp, u.type);
         if (res <= 0) continue;
-        u.amount = Math.max(0, u.amount - Math.max(res - u.armor_penetration, 0) * (u.armor_multiplier ?? 1));
+        u.amount = Math.max(0, u.amount - Math.max(res - u.armor_penetration, 0) * (u.armor_multiplier ?? 1) * (u.multiplier ?? 1));
         u.armor_penetration = Math.max(0, u.armor_penetration - res);
       }
     }
@@ -667,6 +733,7 @@ export class Inventory {
     if (!msg) msg = `You ${liquid ? 'drink' : 'eat'} your ${portion.name()}${portion.rotten() ? ' (rotten)' : ''}.`;
     if (extra.length) msg = [msg, ...extra].join('  ');
     const moves = liquid ? 100 : Math.max(100, Math.min(1000, Math.floor(unitVol / 5) * 10));
+    for (const present of this.onItemPresentation) present({ kind: liquid ? 'drink' : 'eat', item: portion, moves });
     return this.say(true, msg, moves);
   }
 
@@ -677,7 +744,12 @@ export class Inventory {
    */
   use(it: Item, bp?: BodyPartId, actionIndex = 0, from?: Loc | null): ActionResult {
     const src = this.source(it, from);
-    return this.useFrom(it, bp, actionIndex, src === 'missing' ? null : src);
+    const gun = it.isGun();
+    const shown = { typeId: it.typeId, def: it.def, isGun: () => gun };
+    const consumes = useActions(it.def)[Math.min(actionIndex, useActions(it.def).length - 1)]?.type === 'consume_drug';
+    const result = this.useFrom(it, bp, actionIndex, src === 'missing' ? null : src);
+    if (result.ok && !consumes && !result.deferred) this.presentDeferredUse(shown, result.moves);
+    return result;
   }
   private useFrom(it: Item, bp: BodyPartId | undefined, actionIndex: number, from: Loc | null): ActionResult {
     const acts = useActions(it.def);
@@ -692,6 +764,8 @@ export class Inventory {
         return this.useTransform(it, ua);
       case 'consume_drug':
         return this.consume(it, from);
+      case 'TOGGLE_UPS_CHARGING':
+        return this.toggleUpsCharging(it);
       default: {
         for (const a of [ua, ...acts]) {
           const h = this.useHandlers.get(a.type);
@@ -702,7 +776,23 @@ export class Inventory {
     }
   }
 
+  /** BN iuse::toggle_ups_charging: the item's own USE_UPS tag decides whether a carried UPS
+   * recharges it (upsTransfer.ts). A type-level USE_UPS can't be switched off, as in BN. */
+  private toggleUpsCharging(it: Item): ActionResult {
+    const i = it.flags.indexOf('USE_UPS');
+    if (i < 0) {
+      it.flags.push('USE_UPS');
+      return this.say(true, `You will recharge the ${it.baseName()} using any available Unified Power System.`);
+    }
+    it.flags.splice(i, 1);
+    return this.say(true, `You will no longer recharge the ${it.baseName()} via UPS.`);
+  }
+
   private useTransform(it: Item, ua: { [k: string]: any }): ActionResult {
+    // BN iuse_transform::use checks wearing/wielding before power, and only for items you have.
+    const possess = this.has(it);
+    if (possess && ua.need_worn && !this.s.worn.includes(it)) return this.say(false, `You need to wear the ${it.name()} before activating it.`);
+    if (possess && ua.need_wielding && this.s.wielded !== it) return this.say(false, `You need to wield the ${it.name()} before activating it.`);
     const need = (ua.need_charges as number | undefined) ?? 0;
     if (need > 0 && it.ammoRemaining() + (it.hasFlag('USE_UPS') ? this.upsCharges() : 0) < need) {
       // What it takes and where you saw some (reloadhelp.ts), not just "the batteries are dead".
@@ -711,9 +801,26 @@ export class Inventory {
     }
     const target = ua.target as string;
     if (!this.owner.data.items[target]) throw new Error(`transform target ${target} missing for ${it.typeId}`);
+    // BN msg_transform names the item before it changes ("The %s engages.").
+    const before = it.name();
     it.convert(target);
+    // BN iuse_transform::use: target_charges (or a roll between consecutive rand_target_charges)
+    // sets the new item's load: ammo_set with target_ammo or its current ammo, else set_charges
+    // (a grenade's pin pulled: 5 turns of fuse).
+    const rand = ua.rand_target_charges as number[] | undefined;
+    let qty = typeof ua.target_charges === 'number' ? (ua.target_charges as number) : -1;
+    if (Array.isArray(rand) && rand.length >= 2) {
+      const i = this.owner.rng.int(1, rand.length - 1);
+      qty = this.owner.rng.int(rand[i - 1], rand[i]);
+    }
+    if (qty >= 0) {
+      const ammo = typeof ua.target_ammo === 'string' ? (ua.target_ammo as string) : it.ammoData()?.id;
+      if (ammo) {
+        if (loadAmmo(it, ammo, qty) !== qty) throw new Error(`transform ${it.typeId}: could not load ${qty} ${ammo}`);
+      } else it.charges = qty;
+    }
     it.active = !!(ua.active || it.def.power_draw || it.def.turns_per_charge || it.hasFlag('SPAWN_ACTIVE'));
-    return this.say(true, cddaText(ua.msg) || `You activate your ${it.name()}.`, (ua.moves as number | undefined) ?? 0);
+    return this.say(true, cddaText(ua.msg).replace(/%1\$s|%s/g, before) || `You activate your ${it.name()}.`, (ua.moves as number | undefined) ?? 0);
   }
 
   /** heal_actor (src/game/healing.ts): treat yourself, then use up the item. */
@@ -869,21 +976,19 @@ export class Inventory {
     return canMove(it, from, to, { actor: this.owner });
   }
 
-  /** Charge in the UPSes you carry (BN Character::charges_of(itype_UPS): IS_UPS items). */
+  /** Useful charge in the UPSes you carry (BN Character::charges_of(itype_UPS): IS_UPS items,
+   * `ammo_remaining * ups_eff_mult`), rounded down. UPSes escrowed in an unfinished craft don't count. */
   upsCharges(): number {
-    let n = 0;
-    for (const it of this.allItems()) if (it.hasFlag('IS_UPS')) n += it.ammoRemaining();
-    return n;
+    return carriedUpsCharges(this.upsBelongings());
   }
 
-  /** Draw up to n charges from carried UPSes (BN use_charges(itype_UPS)); returns how many. */
+  /** Draw up to n useful charges from carried UPSes (BN use_charges(itype_UPS): each UPS gives up
+   * n / ups_eff_mult of its own charge; the fraction is kept as battery credit, see upsTransfer.ts). */
   useUpsCharges(n: number): number {
-    let left = n;
-    for (const it of this.allItems()) {
-      if (left <= 0) break;
-      if (it.hasFlag('IS_UPS') && it.ammoRemaining() > 0) left -= it.ammoConsume(Math.min(left, it.ammoRemaining()));
-    }
-    return n - left;
+    return drawCarriedUps(this.upsBelongings(), n);
+  }
+  private upsBelongings(): Item[] {
+    return usableBelongings({ wielded: this.s.wielded, carried: this.s.items, worn: this.s.worn });
   }
 
   // ------------------------------------------------------------ time
@@ -891,6 +996,7 @@ export class Inventory {
   update(dt: number): void {
     for (const it of this.allItems()) {
       if (!it.active) continue;
+      if (this.activeProcessors.some((p) => p(it, dt))) continue;
       const w = powerDrawW(it.def.power_draw);
       const perCharge = w > 0 ? 1000 / w : (it.def.turns_per_charge ?? 0);
       if (perCharge <= 0) continue;
@@ -900,7 +1006,8 @@ export class Inventory {
         // Turns off as soon as the last charge is spent (or if it had none to begin with).
         // USE_UPS items (exo-suits, power armor) run on the UPS you carry once their own is gone.
         const ups = it.hasFlag('USE_UPS');
-        const used = it.ammoRemaining() > 0 ? it.ammoConsume(1) : ups ? this.useUpsCharges(1) : 0;
+        // A UPS holding less than one useful charge can't pay for a whole one.
+        const used = it.ammoRemaining() > 0 ? it.ammoConsume(1) : ups && this.upsCharges() >= 1 ? this.useUpsCharges(1) : 0;
         if (used === 0 || (it.ammoRemaining() === 0 && !(ups && this.upsCharges() > 0))) {
           const revert = it.def.revert_to;
           const name = it.label();
@@ -913,6 +1020,16 @@ export class Inventory {
       }
       this.activeAcc.set(it, acc);
     }
+    this.updateUpsTransfer(dt);
+  }
+
+  /** BN process_items: carried UPSes top up carried USE_UPS devices (src/game/upsTransfer.ts). */
+  private updateUpsTransfer(dt: number): void {
+    const r = transferCarriedUps({ wielded: this.s.wielded, carried: this.s.items, worn: this.s.worn }, dt);
+    // Say so once when charging stops for lack of UPS power, not every frame.
+    const starved = r.wanting.length > 0 && r.charged.length === 0 && this.upsWasCharging;
+    if (starved) this.owner.msg(`Your UPS has no charge left for your ${r.wanting[0].baseName()}.`, 'c_yellow');
+    this.upsWasCharging = r.charged.length > 0 || (this.upsWasCharging && r.wanting.length === 0);
   }
 
   /** Rot carried food (caller supplies the ambient temperature). */

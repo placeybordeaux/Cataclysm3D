@@ -128,6 +128,11 @@ export class AtlasTextureSource implements TileTextureSource {
     return it ? this.glyph(it.symbol, it.color) : this.fallback.item(id);
   }
 
+  /** Whether the tileset draws this item (itself or via looks_like); false = item() is its map glyph. */
+  hasItemArt(id: string): boolean {
+    return !!this.conv(this.atlas.lookupWithLooksLike(id, this.looksLike)?.fg, false);
+  }
+
   glyph(symbol: string, color: string): TileFrame {
     return this.conv(this.atlas.glyph(symbol, color), false)!;
   }

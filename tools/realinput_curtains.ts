@@ -10,7 +10,7 @@
 // Keys and clicks are OS-level input; cdda.* only teleports, sets the hour, hands out a bat and
 // reads state. Seed 1: the evac shelter's curtained windows and doors.
 
-import type { XInput } from './lib/realinput';
+import { settleWorld, type XInput } from './lib/realinput';
 
 export interface CurtainsCtx {
   x: () => XInput;
@@ -67,7 +67,10 @@ export function curtainsScenarios(c: CurtainsCtx): Scenario[] {
   /** Stand on (sx, sy) looking level at (tx, ty) (setup only). */
   const stand = async (sx: number, sy: number, tx: number, ty: number) => {
     await js(`(() => { cdda.teleport(${sx} + 0.5, ${sy} + 0.5, 0); cdda.faceTile(${tx}, ${ty}); cdda.game.player.pitch = 0; cdda.step(0.05); })()`);
-    await sleep(300);
+    // A teleport into town closes the load gate, which swallows `e` under its loading screen:
+    // wait for the surroundings rather than a fixed pause.
+    const w = await settleWorld(js);
+    if (!w.ok) check('the surroundings finished loading (load gate open, chunks built)', false, w);
   };
   const menuText = () => js<string>(`[...document.querySelectorAll('.cdda-window')].map((w) => w.textContent).join(' | ')`);
   const logTail = (n = 4) => js<string[]>(`cdda.ui.log().slice(-${n})`);

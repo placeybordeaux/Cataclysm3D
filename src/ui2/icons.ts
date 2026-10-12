@@ -3,7 +3,8 @@
 // so a 32px sprite is exactly 32/64/96 px and never smeared.
 //
 // Lookup order: the id, its first looks_like, the looks_like chain from game data (set with
-// setLooksLike), then CDDA's ASCII glyph in the item's colour. Icons requested before the
+// setLooksLike), then a picture of the item's held 3D model (weapons and tools, set with
+// setModelIconSource: render/heldIcon.ts), then CDDA's ASCII glyph in the item's colour. Icons requested before the
 // atlas has loaded fill themselves in when it arrives.
 
 import { loadAtlas, type Atlas } from '../render/atlas';
@@ -38,20 +39,29 @@ export function setLooksLike(fn: (id: string) => string | undefined): void {
 
 const cache = new Map<string, { url: string; w: number; h: number } | null>();
 
+let modelIcon: ((typeId: string) => HTMLCanvasElement | null) | null = null;
+/**
+ * Icons for ids the tileset has no art for (before the glyph fallback). Setting it drops the
+ * cached icons, so elements built from now on use it (open lists keep theirs until redrawn).
+ */
+export function setModelIconSource(fn: ((typeId: string) => HTMLCanvasElement | null) | null): void {
+  modelIcon = fn;
+  cache.clear();
+}
+
 function render(ref: IconRef): { url: string; w: number; h: number } | null {
   const key = `${ref.typeId}|${ref.looksLike ?? ''}|${ref.symbol ?? ''}|${ref.color ?? ''}`;
   if (cache.has(key)) return cache.get(key)!;
   let out: { url: string; w: number; h: number } | null = null;
   if (atlas) {
-    const hit =
+    const art =
       atlas.lookup(ref.typeId) ??
       (ref.looksLike ? atlas.lookupWithLooksLike(ref.looksLike, looksLike) : null) ??
-      atlas.lookupWithLooksLike(ref.typeId, looksLike) ??
-      (ref.symbol ? { id: ref.typeId, fg: atlas.glyph(ref.symbol, ref.color ?? 'light_gray') } : null);
-    if (hit) {
-      const c = atlas.spriteCanvas(hit, 1);
-      out = { url: c.toDataURL(), w: c.width, h: c.height };
-    }
+      atlas.lookupWithLooksLike(ref.typeId, looksLike);
+    const model = art ? null : modelIcon?.(ref.typeId) ?? null;
+    const hit = art ?? (!model && ref.symbol ? { id: ref.typeId, fg: atlas.glyph(ref.symbol, ref.color ?? 'light_gray') } : null);
+    const c = model ?? (hit ? atlas.spriteCanvas(hit, 1) : null);
+    if (c) out = { url: c.toDataURL(), w: c.width, h: c.height };
   }
   cache.set(key, out);
   return out;

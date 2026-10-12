@@ -116,7 +116,7 @@ export function meleeActor(sys: MonsterSystem, m: Monster, sa: SpecialAttackStat
   const units = (asUnits(d.damage_max_instance) ?? [{ damage_type: 'bash', amount: 9 }]).map((u) => ({ ...u, amount: u.amount * mul }));
   const bp: BodyPartId = pickBodyPart(sys, d.body_parts) ?? selectBodyPart(sys.rng, { canAttackHigh: monsterCanAttackHigh(m.type) });
   const res: MonsterAttackResult = quiet(sys, () =>
-    monsterMeleeAttack(m.type, p, sys.rng, { accuracy: typeof d.accuracy === 'number' ? d.accuracy : m.type.melee_skill, damage: units, bp, name: m.TheName() }),
+    monsterMeleeAttack(m.type, p, sys.rng, { accuracy: typeof d.accuracy === 'number' ? d.accuracy : m.type.melee_skill + m.hitBonus(), damage: units, bp, name: m.TheName() }),
   );
   const hitBp = res.bp ?? bp;
   const part = BODY_PARTS[hitBp].name;
@@ -215,7 +215,7 @@ function grab(sys: MonsterSystem, m: Monster): boolean {
     return true;
   }
   // "A hit to use up our moves" — resolved first here so a parry can stop the grab.
-  const res = quiet(sys, () => monsterMeleeAttack(m.type, p, sys.rng, { name: m.TheName() }));
+  const res = quiet(sys, () => monsterMeleeAttack(m.type, p, sys.rng, { name: m.TheName(), accuracy: m.type.melee_skill + m.hitBonus() }));
   if (res.block?.parry) {
     sys.message(fmt('The %s grabs at you, but you knock its arms aside!', name));
     parried(sys, m);
@@ -272,7 +272,7 @@ export function defaultMelee(sys: MonsterSystem, m: Monster): void {
   const p = sys.game.player;
   const hasDamage = m.type.melee_dice > 0 || (m.type.melee_damage ?? []).some((u) => u.amount > 0);
   if (!hasDamage) return;
-  const res = monsterMeleeAttack(m.type, p, sys.rng, { name: m.TheName() });
+  const res = monsterMeleeAttack(m.type, p, sys.rng, { name: m.TheName(), accuracy: m.type.melee_skill + m.hitBonus() });
   if (res.hit) {
     sfx.monsterHit(m);
     sys.onPlayerHurt(m, res.result?.damage ?? 0, res.bp);

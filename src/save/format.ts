@@ -1,4 +1,5 @@
 import type { Game } from '../game/game';
+import { WORLDGEN_VERSION } from '../world/overmap/overmap';
 import { saveRegistry, type LoadContext } from './registry';
 
 // The save file: versioned JSON, one section per registered saveable (src/save/registry.ts),
@@ -20,6 +21,8 @@ export interface SaveMeta {
   male?: boolean;
   seed: number;
   gen: string;
+  /** Overmap generation version (world/overmap/overmap.ts WORLDGEN_VERSION); absent = 1. */
+  genVersion?: number;
   /** Days since the cataclysm (game clock). */
   day: number;
   /** "Spring, day 3 14:05" */
@@ -37,7 +40,7 @@ export interface SaveFile {
   format: typeof SAVE_FORMAT;
   version: number;
   meta: SaveMeta;
-  world: { seed: number; gen: string };
+  world: { seed: number; gen: string; genVersion?: number };
   sections: Record<string, unknown>;
 }
 
@@ -57,7 +60,7 @@ export function serializeGame(game: Game, meta: Omit<SaveMeta, 'version' | 'save
     format: SAVE_FORMAT,
     version: SAVE_VERSION,
     meta: { ...meta, seed: game.seed, day: clock.day, time: clock.format(), savedAt: meta.savedAt ?? Date.now(), version: SAVE_VERSION },
-    world: { seed: game.seed, gen: meta.gen },
+    world: { seed: game.seed, gen: meta.gen, genVersion: meta.genVersion },
     sections,
   };
 }
@@ -73,6 +76,10 @@ export function validateSaveFile(f: unknown): SaveFile {
   if (s.version < MIN_SAVE_VERSION)
     throw new SaveError(`This save is too old to load (save format v${s.version}; oldest supported is v${MIN_SAVE_VERSION}).`, 'version');
   if (!s.world || typeof s.world.seed !== 'number' || typeof s.world.gen !== 'string') throw new SaveError('The save file has no world information.');
+  const gv = s.world.genVersion;
+  if (gv !== undefined && (!Number.isInteger(gv) || gv < 1)) throw new SaveError('The save file has a broken world version.');
+  if (gv !== undefined && gv > WORLDGEN_VERSION)
+    throw new SaveError(`This save's world was made by a newer version of the game (world v${gv}; this build makes up to v${WORLDGEN_VERSION}).`, 'version');
   if (!s.sections || typeof s.sections !== 'object') throw new SaveError('The save file has no game data.');
   if (!s.meta || typeof s.meta.slot !== 'string') throw new SaveError('The save file has no slot information.');
   return s as SaveFile;

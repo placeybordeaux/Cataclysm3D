@@ -1,3 +1,4 @@
+import { withSceneAppearance } from './appearance';
 import type { DebugApi } from '../debug';
 import type { Game } from '../game/game';
 import type { Renderer } from '../render/renderer';
@@ -309,7 +310,7 @@ export async function runGallery({ game, renderer, api }: GalleryDeps): Promise<
       // stops once the picture has settled.
       game.paused = false;
       try {
-        await s.run(api, ctx);
+        await withSceneAppearance(api, id, () => s.run(api, ctx));
         if (s.gun) api.step(0.6);
       } finally {
         game.paused = true;

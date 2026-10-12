@@ -105,6 +105,7 @@ export function installLoadGate(game: Game, renderer: Renderer, api: DebugApi, o
   });
 
   registerOption({
+    category: 'Display',
     name: 'Load gate',
     value: () => gate.mode,
     change: (d) => {

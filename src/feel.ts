@@ -1,4 +1,5 @@
 import type { Game } from './game/game';
+import { activeWeapon } from './game/bionicguns';
 import type { Renderer } from './render/renderer';
 import type { DebugApi } from './debug';
 import type { MonstersHandle } from './monsters';
@@ -96,7 +97,7 @@ export function installCombatFeel(game: Game, renderer: Renderer | null, monster
     game.systems.push({
       name: 'combat-feel-ads',
       update() {
-        const aiming = !!p.inv.wielded?.isGun() && (game.input.mouseButtons & 4) !== 0 && !game.input.captured && !p.dead;
+        const aiming = !!activeWeapon(game)?.isGun() && (game.input.mouseButtons & 4) !== 0 && !game.input.captured && !p.dead;
         renderer.rig.ads = aiming ? 1 : 0;
         renderer.rig.adsFov = FEEL.adsFov;
         if (renderer.viewmodel) renderer.viewmodel.ads = aiming;

@@ -3,11 +3,12 @@
 // street viewpoint, spawns the subject(s) ahead of the camera and waits for the pose asked for.
 // Returns a short list of what is standing where. Plain JS so it can be pasted into
 // `drive.ts eval` too.
-window.charViews = ['horde_near', 'horde_mid', 'horde_far', 'horde_road', 'horde_dusk', 'dog', 'npc', 'windup', 'critters', 'zoo', 'night', 'third', 'props', 'bugs', 'zombies2', 'crawlers', 'crawl_move', 'crowd', 'fire', 'corpse', 'bench', 'fp_fists', 'fp_punch', 'fp_pistol', 'fp_pistol_fire', 'fp_rifle', 'fp_rifle_ads', 'fp_shotgun', 'fp_reload', 'fp_bat', 'fp_bat_swing', 'fp_guard', 'fp_knife', 'fp_axe', 'fp_spear', 'fp_katana', 'fp_flashlight', 'fp_bow', 'fp_revolver', 'fp_1911', 'fp_double', 'fp_ak', 'fp_hunting', 'fp_crowbar', 'fp_kitchen', 'fp_sledge'];
+window.charViews = ['horde_near', 'horde_mid', 'horde_far', 'horde_road', 'horde_dusk', 'dog', 'npc', 'windup', 'critters', 'zoo', 'night', 'third', 'props', 'bugs', 'zombies2', 'crawlers', 'crawl_move', 'crowd', 'fire', 'corpse', 'bench', 'fp_fists', 'fp_punch', 'fp_pistol', 'fp_pistol_fire', 'fp_rifle', 'fp_rifle_ads', 'fp_shotgun', 'fp_reload', 'fp_bat', 'fp_bat_swing', 'fp_guard', 'fp_knife', 'fp_axe', 'fp_spear', 'fp_katana', 'fp_flashlight', 'fp_bow', 'fp_revolver', 'fp_1911', 'fp_double', 'fp_ak', 'fp_hunting', 'fp_crowbar', 'fp_kitchen', 'fp_sledge', 'fp_lever', 'fp_lever_ads', 'fp_lever_fire', 'third_lever', 'npc_lever'];
 window.charView = async (name) => {
   const c = window.cdda;
   const wait = (ms) => new Promise((r) => setTimeout(r, ms));
   const dusk = name === 'horde_dusk';
+  c.game.paused = false;
   await window.lookView('street');
   c.clearMonsters();
   for (const n of c.npcs(true)) if (n.dist < 80) c.npcSystem.remove?.(c.npcSystem.npcByUid(n.uid));
@@ -81,6 +82,54 @@ window.charView = async (name) => {
     spawnAt('mon_zombie_cop', 7, 2, {});
     spawnAt('mon_zombie_dog', 9, 0.5, {});
     lookAt(1, 0, -12);
+  } else if (name === 'third_lever') {
+    // the survivor's own held mesh (playerModel.ts → held.ts) in the shoulder camera: a lever gun
+    const p0 = c.game.player;
+    if (p0.inv.wielded) p0.inv.unwield();
+    c.giveItem('marlin_1894c', { wield: true });
+    c.setCameraMode('third');
+    lookAt(1, 0, -8);
+  } else if (name === 'npc_lever') {
+    // held meshes side by side at conversation range, broadside: Marlin 1894C (lever), Henry
+    // (brass lever), Remington 700 (bolt hunting rifle) for contrast. The simulation is paused
+    // for the shot so they stay broadside (the next view unpauses).
+    const p0 = c.game.player;
+    c.renderer.viewmodel.freeze(null);
+    const guns = window.npcLeverGuns ?? ['marlin_1894c', 'henry_big_boy', 'remington_700'];
+    const spawned = [];
+    if (p0.inv.wielded) p0.inv.unwield();
+    guns.forEach((id, i) => {
+      const [dx, dy] = at(2.5 + i * 1.2, 0);
+      const n = c.npcSystem.npcByUid(c.spawnNpc('NC_SCAVENGER', dx, dy, { attitude: 0 }));
+      if (!n) return;
+      c.giveItem(id, { wield: true });
+      const it = p0.inv.wielded;
+      // straight from the hands: unwield() can fail on a full inventory
+      p0.inv.s.wielded = null;
+      if (n.inv.wielded) n.inv.s.wielded = null;
+      n.inv.wield(it, null);
+      spawned.push(n);
+    });
+    // one tick so the NPC views exist; then stop the clock, point them all the same way with a
+    // gun at the ready (a fight target), refresh their views by hand, and step the camera out
+    // to the side so the guns are seen broadside
+    c.step(1 / 30);
+    c.game.paused = true;
+    const view = c.game.systems.find((s) => s.name === 'npc-view');
+    const fx = Math.sin(yaw0), fy = -Math.cos(yaw0);
+    for (const n of spawned) {
+      n.facing = yaw0 + Math.PI;
+      n.goal = { kind: 'fight', x: n.x - fx * 10, y: n.y - fy * 10 };
+    }
+    const mid = spawned[1] ?? spawned[0];
+    const sx = fy, sy = -fx; // to the left of the original view: the NPCs' right (gun) side
+    const d = window.npcLeverDist ?? 2.6;
+    c.teleport(mid.x + sx * d, mid.y + sy * d);
+    c.look((Math.atan2(-sx, sy)) * 180 / Math.PI, window.npcLeverPitch ?? -14);
+    for (let i = 0; i < 4; i++) { view?.update(c.game, 1 / 30, 1 / 30); c.renderer.render(); await wait(50); }
+    c.settle();
+    await wait(400);
+    return name;
   } else if (name === 'bugs') {
     // round 6 body plans: wasp, bee, ant, spider, fly, mosquito, dragonfly, crow, bat
     const ids = ['mon_wasp', 'mon_bee', 'mon_ant', 'mon_spider_wolf_giant', 'mon_fly', 'mon_mosquito_giant', 'mon_dragonfly_giant', 'mon_crow', 'mon_bat'];
@@ -156,6 +205,7 @@ window.charView = async (name) => {
       fp_katana: ['katana'], fp_flashlight: ['flashlight'], fp_bow: ['longbow', 'draw'], fp_guard: ['bat', 'guard'],
       fp_revolver: ['model_10_revolver'], fp_1911: ['m1911'], fp_double: ['shotgun_d'], fp_ak: ['ak47'], fp_hunting: ['remington_700'],
       fp_crowbar: ['crowbar'], fp_kitchen: ['knife_chef'], fp_sledge: ['hammer_sledge'],
+      fp_lever: ['marlin_1894c'], fp_lever_ads: ['marlin_1894c', 'ads'], fp_lever_fire: ['marlin_1894c', 'fire', 0.5],
     }[name];
     if (!spec) throw new Error(`unknown view ${name}`);
     const [id, act, t] = spec;

@@ -7,17 +7,21 @@ import { EnemyFire, type EnemyRound } from '../game/enemyfire';
 import { LEVEL_HEIGHT } from '../world/coords';
 
 // Enemy rounds in flight (src/game/enemyfire.ts), drawn so you can read them: a bullet is a
-// short streak of hot pixels, an arrow a dark shaft with a pale head, a stone a grey dot. They
+// short streak of hot pixels, an arrow a dark shaft with a pale head, a stone a grey dot, a
+// grenade or rocket a fat olive-drab dot with a pale smoke trail (arrows, stones and grenades on
+// their gravity arc: EnemyFire.at). They
 // move smoothly between simulation ticks and vanish where the round stopped — a miss visibly
 // flies on past you and into the distance. Dots are pixel-sized billboards (like hitFx tracers).
 
-const COLORS = { hot: 0xfff2b0, warm: 0xffb040, shaft: 0x5a3a1c, head: 0xd8d8d0, stone: 0x9a968c };
+const COLORS = { hot: 0xfff2b0, warm: 0xffb040, shaft: 0x5a3a1c, head: 0xd8d8d0, stone: 0x9a968c, shell: 0x3d4a22, smoke: 0xb8b6ae };
 
 /** Per kind: dot count, streak length (m) and colour of each dot from the tail to the tip. */
 const LOOK: Record<EnemyRound['kind'], { n: number; len: number; col: (i: number, n: number) => number; px: number }> = {
   bullet: { n: 10, len: 3.2, col: (i, n) => (i >= n - 3 ? COLORS.hot : COLORS.warm), px: 2.2 },
-  arrow: { n: 6, len: 0.75, col: (i, n) => (i === n - 1 ? COLORS.head : COLORS.shaft), px: 1.6 },
+  arrow: { n: 6, len: 0.75, col: (i, n) => (i === n - 1 ? COLORS.head : COLORS.shaft), px: 2.2 },
   stone: { n: 1, len: 0, col: () => COLORS.stone, px: 3 },
+  // A grenade or rocket: a fat olive-drab body with a short pale trail of smoke behind it on its arc.
+  grenade: { n: 12, len: 3, col: (i, n) => (i === n - 1 ? COLORS.shell : COLORS.smoke), px: 4 },
 };
 
 export class EnemyFireFx {
@@ -80,7 +84,8 @@ export class EnemyFireFx {
         const s = Math.max(0, head - look.len * (1 - (i + 1) / look.n));
         const p = EnemyFire.at(r, s);
         const dist = Math.hypot(p.x - cam.x, p.y - cam.z, p.h - cam.y);
-        const size = this.pixel(dist, look.px);
+        // A grenade's body is drawn fat and its smoke thins toward the tail.
+        const size = this.pixel(dist, r.kind === 'grenade' ? (i === look.n - 1 ? look.px * 2 : look.px * (0.4 + (0.6 * (i + 1)) / look.n)) : look.px);
         const h = d.dots[i];
         h.set(p.x, p.y, p.h / LEVEL_HEIGHT);
         h.setSize(size, size);

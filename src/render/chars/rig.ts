@@ -13,6 +13,7 @@
 // sprites are drawn facing us) or right side (animals: drawn in profile, head to the right),
 // or a flat palette role for thin bits (insect legs, wings).
 
+import type { HeldBuild } from './held';
 import type { BodyShape, Weapon } from './archetype';
 import { CRAWL_HEIGHT, type CrawlPlan } from '../../game/crawl';
 import { ridePose, type HumanDims, type RideIn } from './ridePose';
@@ -176,7 +177,7 @@ const WEAPON: Record<Exclude<Weapon, 'none'>, { len: number; w: number; d: numbe
   short: { len: 0.3, w: 0.03, d: 0.05, color: [150, 152, 158] },
 };
 
-function humanoid(sh: BodyShape): Rig {
+function humanoid(sh: BodyShape, held?: HeldBuild): Rig {
   const g = sh.girth, hd = sh.head;
   const hipY = 0.92;
   const torsoW = 0.38 * g, torsoD = 0.22 * Math.sqrt(g) * (g > 1.3 ? 1.25 : 1);
@@ -222,7 +223,16 @@ function humanoid(sh: BodyShape): Rig {
     const wd = WEAPON[weapon];
     weaponI = parts.length;
     // along the fist's -y (the forearm's line): a gun held out points forward, a bat hangs
-    parts.push({ name: 'weapon', parent: HUM.handR, joint: [0, -hand * 0.6, 0], size: [wd.w, wd.len, wd.d], center: [0, -wd.len / 2 + (weapon === 'long' ? 0.15 : 0.04), 0], src: { color: wd.color }, kind: 'thin' });
+    if (held) {
+      // Separate grip pivot keeps the complete item under the existing weapon pose/stow
+      // transform. Guns point -z; melee items grow +y, unlike the old hanging -y box.
+      const gunPose = weapon === 'rifle' || weapon === 'pistol';
+      parts.push({ name: 'weapon', parent: HUM.handR, joint: [0, -hand * 0.6, 0], size: [0.005, 0.005, 0.005], center: [0, 0, 0], rest: [gunPose ? -Math.PI / 2 : Math.PI, 0, 0], src: { color: wd.color }, kind: 'thin' });
+      const offset = parts.length;
+      for (const part of held.parts) parts.push({ ...part, name: `weapon:${part.name}`, parent: part.parent < 0 ? weaponI : offset + part.parent });
+    } else {
+      parts.push({ name: 'weapon', parent: HUM.handR, joint: [0, -hand * 0.6, 0], size: [wd.w, wd.len, wd.d], center: [0, -wd.len / 2 + (weapon === 'long' ? 0.15 : 0.04), 0], src: { color: wd.color }, kind: 'thin' });
+    }
   }
   // Zombie variants that should read at a glance (docs/CHARACTERS.md round 6)
   const feat = sh.variant ?? '';
@@ -297,12 +307,13 @@ function humanoid(sh: BodyShape): Rig {
       const H = HUM;
       if (crawl && !p.ride) {
         crawlPose(crawl, p, o, s, hipY, weaponI);
+        if (weaponI >= 0) o.scl.fill(0, weaponI * 3, (weaponI + 1 + (held?.parts.length ?? 0)) * 3);
         return;
       }
       if (p.ride) {
         ridePose(p.ride, dims, H, o.rot);
         // both hands are on the controls: the weapon is stowed (not drawn) while riding
-        if (weaponI >= 0) o.scl.fill(0, weaponI * 3, weaponI * 3 + 3);
+        if (weaponI >= 0) o.scl.fill(0, weaponI * 3, (weaponI + 1 + (held?.parts.length ?? 0)) * 3);
         return;
       }
       const ph = p.phase * TAU;
@@ -604,9 +615,48 @@ function quadruped(sh: BodyShape, critter: boolean): Rig {
     // a tapered muzzle with a dark nose (dogs, deer, bears; short on critters)
     { name: 'snout', parent: 1, joint: [0, hs * 0.18, -hs * 0.8], size: [hs * 0.55, hs * 0.5, hs * (critter ? 0.35 : 0.6)], center: [0, 0, -hs * (critter ? 0.17 : 0.3)], taper: [0.7, 0.75, 1, 1], taperAxis: 'z', src: { rect: [0.85, 0.12, 1, 0.45], proj: 'side', core: true, nose: true }, kind: 'core' },
   ];
+  const family = critter ? '' : sh.variant;
+  const append = (name: string, parent: number, joint: PartDef['joint'], size: PartDef['size'], center: PartDef['center'], opts: Partial<PartDef> = {}) => {
+    parts.push({ name, parent, joint, size, center, src: { rect: [0.15, 0.2, 0.8, 0.65], proj: 'side', core: true }, kind: 'core', ...opts });
+  };
+  if (family === 'equine' || family === 'cervid') {
+    const equine = family === 'equine';
+    const neck = equine ? 0.20 : 0.15;
+    parts[1].joint = [0, bh * 0.35 + neck, -bl / 2 - 0.06];
+    parts[1].size = [hs * 0.72, hs * (equine ? 1.2 : 0.95), hs * 1.15];
+    append('neck', 0, [0, bh * 0.3, -bl * 0.46], [bw * 0.65, neck + 0.1, 0.19], [0, neck * 0.5, -0.015], { rest: [-0.3, 0, 0] });
+    for (const i of [7,8]) parts[i] = { ...parts[i], size: [hs * 0.25, hs * 0.65, hs * 0.12], center: [0, hs * 0.32, 0], taper: [0.1, 0.3, 1, 1], taperAxis: 'y' };
+    parts[6] = { ...parts[6], size: [legW * 0.65, legW * 0.65, equine ? 0.42 : 0.10], center: [0, 0, equine ? 0.19 : 0.04], rest: [equine ? 1.15 : 0.45,0,0] };
+    if (equine) append('mane', 0, [0, bh * 0.38, -bl * 0.38], [0.065, neck + 0.1, 0.05], [0, neck * 0.5, 0.02], { src: { color: [48,42,34] }, rest: [-0.3,0,0], kind: 'thin' });
+  } else if (family === 'bear') {
+    parts[6] = { ...parts[6], size: [0.045,0.045,0.07], center: [0,0,0.03], rest: [0.2,0,0] };
+    for (const i of [7,8]) parts[i] = { ...parts[i], size: [hs * 0.36,hs * 0.32,hs * 0.24], center: [0,hs * 0.12,0], rest: [0,0,0] };
+    append('shoulderHump',0,[0,bh * 0.42,-bl * 0.20],[bw * 0.92,0.16,0.26],[0,0.02,0],{ taper: [0.8,0.8,1,1], taperAxis:'y' });
+  } else if (family === 'pig') {
+    parts[9] = { ...parts[9], size:[hs * 0.85,hs * 0.6,hs * 0.5], center:[0,0,-hs * 0.22] };
+    append('nosePad',9,[0,0,-hs * 0.50],[hs * 0.86,hs * 0.55,0.015],[0,0,0],{src:{color:[170,112,102]}});
+    parts[6] = { ...parts[6], size:[0.028,0.028,0.075], center:[0,0,0.035], rest:[0.2,0,0] };
+    append('tailCurl',6,[0,0,0.07],[0.025,0.07,0.025],[0,0.025,0],{kind:'thin'});
+  } else if (family === 'reptile') {
+    parts[1] = { ...parts[1], joint:[0,bh * 0.10,-bl * 0.48], size:[hs * 1.05,hs * 0.50,hs * 1.5], center:[0,0,-hs * 0.5] };
+    parts[9] = { ...parts[9], joint:[0,-hs * 0.05,-hs * 1.1], size:[hs * 0.85,hs * 0.35,hs * 1.2], center:[0,0,-hs * 0.55] };
+    for (const i of [7,8]) parts[i].size = [0.001,0.001,0.001];
+    parts[6] = { ...parts[6], joint:[0,0,bl / 2], size:[bw * 0.75,bh * 0.7,bl * 0.7], center:[0,0,bl * 0.32], rest:[0,0,0] };
+    append('tailTip',6,[0,0,bl * 0.64],[bw * 0.30,bh * 0.3,bl * 0.5],[0,0,bl * 0.22],{taper:[1,1,0.05,0.05],taperAxis:'z',kind:'thin'});
+    for (let i=2;i<6;i++) parts[i].joint[0] *= 1.35;
+    for (let i=0;i<5;i++) append(`backPlate${i}`,0,[0,bh * 0.55,-bl * 0.35+i * bl * 0.16],[bw * 0.6,0.045,0.045],[0,0,0],{taper:[0.2,0.3,1,1],taperAxis:'y',kind:'thin'});
+  } else if (family === 'feline') {
+    parts[9] = { ...parts[9], size:[hs * 0.6,hs * 0.4,hs * 0.22], center:[0,0,-hs * 0.10] };
+    parts[6] = { ...parts[6], size:[legW * 0.45,legW * 0.45,bl * 0.65], center:[0,0,bl * 0.31], rest:[0.1,0,0] };
+  }
+  const hooved = family === 'equine' || family === 'cervid' || family === 'pig';
+  if (hooved || family === 'bear' || family === 'feline') for (let i=2;i<6;i++) {
+    const split = family === 'cervid' || family === 'pig';
+    for (const side of split ? [-1,1] : [0]) append(`${split ? 'clovenHoof' : hooved ? 'hoof' : 'paw'}${i}:${side}`,i,[side * legW * 0.23,-leg+0.028,-0.025],[legW * (split ? 0.4 : 1.1),0.055,legW * 1.3],[0,0,0],hooved ? {src:{color:[48,44,38]}} : {});
+  }
   const s = sh.scale;
   return {
-    shape: sh, parts: scaleParts(parts, s), height: (bodyY + bh * 0.35 + hs * 1.1) * s, hover: 0, lie: { angle: Math.PI / 2, lift: bw * 0.5 * s, side: true },
+    shape: sh, parts: scaleParts(parts, s), height: (bodyY + parts[1].joint[1] + hs * 1.1) * s, hover: 0, lie: { angle: Math.PI / 2, lift: bw * 0.5 * s, side: true },
     pose(p, o) {
       const ph = p.phase * TAU;
       const amp = Math.min(1, p.gait) * 0.5 + Math.max(0, p.gait - 1) * 0.3;
@@ -1036,9 +1086,9 @@ function lump(sh: BodyShape): Rig {
   };
 }
 
-export function makeRig(sh: BodyShape, opts: { turret?: boolean } = {}): Rig {
+export function makeRig(sh: BodyShape, opts: { turret?: boolean; held?: HeldBuild } = {}): Rig {
   switch (sh.arch) {
-    case 'humanoid': return humanoid(sh);
+    case 'humanoid': return humanoid(sh, opts.held);
     case 'quadruped': return quadruped(sh, false);
     case 'critter': return quadruped(sh, true);
     case 'insect': return insect(sh);

@@ -28,7 +28,17 @@ export interface MapgenData {
   /** mapgen id -> builtin generator name (BN C++ mapgen_functions.cpp names such as "field",
    *  "road_straight", "forest", or "lua:lab" for BN's Lua mapgen). JSON mapgen wins when both exist. */
   builtin?: Record<string, string>;
+  /** BN region_settings map_extras, only for the oter "extras" keys our builtins apply them for
+   *  (sewer, subway; see applyMapExtra in worldgen.ts): one_in(chance) picks one weighted extra. */
+  extras?: Record<string, MapExtraTable>;
   objects: Json[];
+}
+
+export interface MapExtraTable {
+  chance: number;
+  /** `o` = update_mapgen object index for JSON extras; `fn` = a BN C++ map_extra_function we
+   *  don't port (picked like the others so the odds stay BN's, then reported as unsupported). */
+  values: { id: string; w: number; o?: number; fn?: string }[];
 }
 
 export type PaletteData = Record<string, Json>;
@@ -77,6 +87,84 @@ export interface SpecialDef {
   flags: string[];
   /** BN place_nested: specials grown from a point of this one (e.g. Lab -> lab_basement). */
   nested?: { p: [number, number, number]; special: string }[];
+}
+
+// --- BN "subtype": "mutable" overmap specials (overmap.cpp mutable_overmap_special_data),
+// normalized by tools/extract/mapgen.ts and grown by src/world/overmap/mutable.ts.
+
+export type CubeDir = 'north' | 'east' | 'south' | 'west' | 'above' | 'below';
+/** BN join_type */
+export type MutableJoinType = 'mandatory' | 'optional' | 'available' | 'reject';
+/** BN int_distribution: fixed, [min, max] range, {poisson: mean} or {chance: p}. */
+export type IntDistribution = number | [number, number] | { poisson: number } | { chance: number };
+/** BN z_constraints: a level, [min, max], "top"/"bottom", or {top?, bottom?} offsets. */
+export type ZConstraint = number | [number, number] | 'top' | 'bottom' | { top?: number; bottom?: number };
+
+export interface MutableJoinDef {
+  id: string;
+  /** absent: the join is its own opposite */
+  opposite?: string;
+  /** absent: the special's default locations */
+  into_locations?: string[];
+}
+
+export interface MutableTerrainJoin {
+  id: string;
+  type: MutableJoinType;
+  alternatives?: string[];
+}
+
+export interface MutableOvermapDef {
+  /** oter id as written in BN (direction suffix allowed, e.g. "anthill_north", "ants_ns") */
+  overmap: string;
+  /** absent: the special's default locations */
+  locations?: string[];
+  joins: Partial<Record<CubeDir, MutableTerrainJoin>>;
+  /** direction -> BN overmap_connection id (e.g. lab_train_depot north: subway_tunnel) */
+  connections?: Partial<Record<CubeDir, string>>;
+}
+
+export interface MutableRulePiece {
+  overmap: string;
+  pos: [number, number, number];
+  /** 0..3 = north/east/south/west */
+  rot: number;
+}
+
+export interface MutablePlacementRule {
+  name?: string;
+  pieces: MutableRulePiece[];
+  /** BN "join": the rule only applies where it can match this join */
+  join?: string;
+  /** shared multiplier name scaling max */
+  scale?: string;
+  z?: ZConstraint;
+  rotate?: boolean;
+  /** absent = INT_MAX (unlimited) */
+  max?: IntDistribution;
+  /** absent = INT_MAX */
+  weight?: number;
+}
+
+export interface MutableSpecialDef {
+  id: string;
+  locations: string[];
+  cityDistance: [number, number];
+  citySizes: [number, number];
+  occurrences: [number, number];
+  flags: string[];
+  /** BN "rotate" (default true) */
+  rotate: boolean;
+  connections: SpecialConnection[];
+  nested?: { p: [number, number, number]; special: string }[];
+  /** BN check_for_locations (+ check_for_locations_area expanded); empty = the root at [0,0,0] */
+  checkForLocations: { p: [number, number, number]; locations: string[] }[];
+  joins: MutableJoinDef[];
+  overmaps: Record<string, MutableOvermapDef>;
+  root: string;
+  shared: Record<string, IntDistribution>;
+  phases: MutablePlacementRule[][];
+  spawns?: { group: string; population: [number, number]; radius: [number, number] };
 }
 
 export interface ForestBiome {
@@ -135,6 +223,27 @@ export interface RegionSettings {
   };
 }
 
+/** BN overmap_connection subtype (overmap_connection.h). */
+export interface ConnectionSubtype {
+  /** oter type it lays down */
+  terrain: string;
+  /** overmap_location ids it may be laid over (empty: only where this terrain already is) */
+  locations: string[];
+  basicCost: number;
+  weight: number;
+  /** BN ORTHOGONAL: Manhattan distance estimate instead of trig */
+  orthogonal: boolean;
+}
+
+/** BN overmap_connection: how a road/sewer/subway connection is laid out (overmap_connections.json). */
+export interface OvermapConnectionDef {
+  id: string;
+  defaultTerrain: string;
+  /** "city": link to the owning city's centre first; "p2p": to the nearest earlier connection */
+  layout: 'city' | 'p2p';
+  subtypes: ConnectionSubtype[];
+}
+
 export interface OvermapData {
   terrains: Record<string, OterDef>;
   specials: Record<string, SpecialDef>;
@@ -143,7 +252,21 @@ export interface OvermapData {
   region: RegionSettings;
   /** Wilderness specials this build scatters (subset chosen by the extractor). */
   wildSpecials: string[];
+  /** BN overmap_connections by id (absent in data extracted before genVersion 2). */
+  connections?: Record<string, OvermapConnectionDef>;
+  /**
+   * Specials placed from genVersion 2 by Overmap.placeMutableSpecials, in this order: the
+   * mutable wilderness specials plus the fixed specials that only exist to host a nested
+   * mutable one (the mines and their mine_tunnel). Ids name `mutables` or `specials`.
+   */
+  mutableWildSpecials?: string[];
   names: { city: string[]; given: string[]; family: string[] };
+  /** BN mutable overmap specials ("subtype": "mutable") we grow, by id: lab_basement (Overmap.
+   *  placeLabBasement), the mutableWildSpecials and what they nest (mine_tunnel); all grown by
+   *  src/world/overmap/mutable.ts. Absent in data extracted before they were kept. */
+  mutables?: Record<string, MutableSpecialDef>;
+  /** BN overmap_connection id -> oter types it is made of (its subtypes' terrains). */
+  connectionTerrains?: Record<string, string[]>;
 }
 
 export interface WorldgenData {

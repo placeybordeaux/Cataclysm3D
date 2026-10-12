@@ -152,10 +152,12 @@ describe("the survivor's arrows hit NPCs", () => {
     const z = sys.spawnById('mon_zombie', p.x, p.y - 12, 0)!;
     z.hp = 10000;
     z.addEffect('stunned', 100);
-    const npc = { x: p.x, y: p.y - 6, z: 0, dead: false, name: 'Follower' };
-    (game as unknown as { npcs: { npcs: unknown[] } }).npcs = { npcs: [npc] };
+    const npc = { x: p.x, y: p.y - 6, z: 0, dead: false, name: 'Follower', isFriendly: () => true };
     const hits: unknown[] = [];
-    combat.npcRound = (n) => hits.push(n);
+    combat.npcFire = {
+      bodies: () => [npc],
+      hit: (n) => (hits.push(n), { total: 3, landed: 1, dodged: 0, head: false, dead: false }),
+    };
     p.yaw = 0;
     p.pitch = Math.atan2(1.1 - 1.6, 12);
     const d = combat.startDraw(bow, 'draw', true)!;

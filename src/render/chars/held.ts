@@ -33,12 +33,19 @@ export function heldVariant(item: HeldItemLike, cls: HeldClass): string {
       if (/1911/.test(id)) return '1911';
       return 'auto';
     case 'shotgun':
+      if (/1887|lever/.test(id)) return 'lever';
       if (/shotgun_d|double|coach/.test(id)) return 'double';
       if (/shotgun_s|single|shotgun_410|pipe_shotgun/.test(id)) return 'single';
       return 'pump';
     case 'rifle':
       if (/ak47|akm|ak74|rpk/.test(id)) return 'ak';
-      if (cat.includes('MANUAL_ACTION') || /win70|remington_700|mosin|garand|m1a|sks|hunting|flintlock|blr|marlin|henry/.test(id)) return 'hunting';
+      // lever actions by id (BN files them under MANUAL_ACTION with the bolt guns, looks_like ar15);
+      // the improvised "lever-action" pipe carbines keep the hunting look
+      if (/henry|colt_ring/.test(id)) return 'lever_brass';
+      if (/1895sbl/.test(id)) return 'lever_stainless';
+      if (/browning_blr/.test(id)) return 'lever_box';
+      if (/marlin|lever|win(chester)?_?(94|1873|1892|1886)|rossi_92/.test(id)) return 'lever';
+      if (cat.includes('MANUAL_ACTION') || /win70|remington_700|mosin|garand|m1a|sks|hunting|flintlock/.test(id)) return 'hunting';
       return 'ar';
     case 'pipe':
       return /crowbar|halligan|prybar/.test(id) ? 'crowbar' : 'pipe';
@@ -65,14 +72,15 @@ export function heldClass(item: HeldItemLike): HeldClass {
   }
   const rules: [RegExp, HeldClass][] = [
     [/flashlight|torch|lantern|glowstick/, 'flashlight'],
-    [/spear|pike|lance|pitchfork|glaive|halberd|naginata|javelin|qiang/, 'spear'],
+    [/spear|pike|lance|pitchfork|glaive|halberd|naginata|javelin|qiang|\bji\b|scythe_war|lajatang/, 'spear'],
     [/machete|kukri|cleaver|bolo/, 'machete'],
-    [/sword|katana|sabre|saber|rapier|scimitar|cutlass|zweihander|wakizashi|blade/, 'sword'],
-    [/knife|dagger|shiv|scalpel|bayonet|tanto|kris|switchblade/, 'knife'],
+    [/switchblade/, 'knife'],
+    [/sword|katana|sabre|saber|rapier|scimitar|cutlass|zweihander|wakizashi|blade|jian|estoc|nodachi|khopesh|\bdao\b|fencing_(foil|epee)|shock_(foil|epee)|bokken/, 'sword'],
+    [/knife|dagger|shiv|scalpel|bayonet|tanto|kris|kirpan|katar|jamadhar/, 'knife'],
     [/axe|_ax\b|\bax\b|hatchet|tomahawk|halligan/, 'axe'],
-    [/sledge|hammer|mallet|maul/, 'hammer'],
+    [/sledge|hammer|mallet|maul|mjolnir|homewrecker/, 'hammer'],
     [/pipe|crowbar|rebar|wrench|tire_iron|\bbar\b|golf|shovel|broom|rake/, 'pipe'],
-    [/bat\b|_bat|baseball|club|cudgel|baton|nightstick|mace|morningstar|stick|cane|2x4|plank/, 'bat'],
+    [/bat\b|_bat|baseball|club|cudgel|baton|nightstick|mace|morningstar|stick|cane|2x4|plank|staff|tonfa|shillelagh|pool_cue|blackjack|_sap\b|nailboard|bowling_pin/, 'bat'],
   ];
   for (const [re, c] of rules) if (re.test(t)) return c;
   return 'generic';
@@ -180,6 +188,7 @@ export function buildHeld(cls: HeldClass, pal: Palette, volume = 500, variant = 
         add('bead', act, [0, 0.03, -0.6], [0.006, 0.006, 0.006], [0, 0, 0], [220, 210, 160]);
         return { parts: P, hold: [0, 0, 0], support: [0, -0.03, -0.24], muzzle: [0, 0.046, -0.65], gun: true };
       }
+      if ((cls === 'rifle' || cls === 'shotgun') && variant.startsWith('lever')) return leverGun(P, add, round, cls === 'shotgun', variant);
       if (cls === 'rifle' && variant === 'hunting') {
         // a wooden stock the full length, a bolt handle, a scope on rings, no pistol grip or mag
         const recv = add('receiver', -1, [0, 0.035, -0.07], [0.036, 0.042, 0.2], [0, 0, 0], [70, 72, 78], { kind: 'core', detail: 'metal' });
@@ -330,4 +339,83 @@ export function buildHeld(cls: HeldClass, pal: Palette, volume = 500, variant = 
       return { parts: P, hold: [-0.2, 0, 0.2], support: null, muzzle: null, gun: false };
     }
   }
+}
+
+type AddPart = (name: string, parent: number, joint: [number, number, number], size: [number, number, number], center: [number, number, number], color: RGB, o?: Partial<PartDef> & { detail?: Detail }) => number;
+
+const WALNUT: RGB = [116, 72, 42];
+const BLUED: RGB = [56, 60, 72];
+const BRASS: RGB = [186, 150, 72];
+const LAMINATE: RGB = [92, 90, 88];
+
+/**
+ * Lever actions (Marlin 1894 / 336 / 39A / 1895, Henry, Browning BLR, Winchester 1887): what
+ * tells one from a bolt gun at a glance is the tube magazine under the barrel, the lever loop
+ * hanging under the wrist and the exposed hammer, so those are oversized a touch; there's no
+ * bolt handle, scope or box magazine (except the BLR's). Straight-grip walnut stock, a short
+ * forend with a cap, a barrel band near the muzzle.
+ *
+ * The lever and its loop all hang off the 'lever' part (pivot at the front of the receiver),
+ * so rotating that one part about x swings the whole loop down to cycle (fpView does on fire).
+ * The buttstock is named 'stock' and its pad 'butt' so first person hides them like the others.
+ *
+ * `variant`: 'lever' (blued + walnut), 'lever_brass' (Henry: brass receiver), 'lever_stainless'
+ * (1895 SBL: stainless + grey laminate), 'lever_box' (BLR: box magazine, no tube).
+ */
+function leverGun(P: PartDef[], add: AddPart, round: AddPart, shotgun: boolean, variant: string): HeldBuild {
+  const brass = variant === 'lever_brass', stainless = variant === 'lever_stainless', box = variant === 'lever_box';
+  const recvCol: RGB = brass ? BRASS : stainless ? [150, 154, 160] : BLUED;
+  const steel: RGB = stainless ? [160, 164, 170] : GUNMETAL;
+  const wood: RGB = stainless ? LAMINATE : WALNUT;
+  const bore = shotgun ? 0.024 : 0.018;
+  const tubeD = shotgun ? 0.02 : 0.015;
+  const bl = shotgun ? 0.5 : 0.47;
+  // receiver: flat-sided, flat-topped, its rear end just ahead of the fist
+  const rz = -0.1, rl = 0.17, rh = shotgun ? 0.066 : 0.058;
+  const recv = add('receiver', -1, [0, 0.03, rz], [0.03, rh, rl], [0, 0, 0], recvCol, { kind: 'core', detail: 'metal' });
+  const front = -rl / 2; // receiver-local z of its front face
+  // straight-grip wrist through the fist, dropping toward the butt; the stock carries the drop on
+  const grip = add('grip', recv, [0, -0.006, rl / 2 - 0.004], [0.03, 0.042, 0.14], [0, 0, 0.068], wood, { rest: [0.2, 0, 0], detail: 'grain' });
+  const stock = add('stock', grip, [0, 0, 0.13], [0.034, 0.05, 0.27], [0, -0.014, 0.135], wood, { rest: [-0.12, 0, 0], taper: [0.95, 0.9, 1.15, 2.4], taperAxis: 'z', detail: 'grain' });
+  add('butt', stock, [0, -0.014, 0.272], [0.04, 0.122, 0.012], [0, 0, 0], [34, 30, 28]);
+  // barrel on top, magazine tube touching it underneath (the BLR has neither tube nor band)
+  const by = rh / 2 - 0.013;
+  round('barrel', recv, [0, by, front], [bore, bore, bl], [0, 0, -bl / 2], steel, { detail: 'metal' });
+  const ty = by - bore / 2 - tubeD / 2 + 0.001;
+  if (!box) {
+    round('tube', recv, [0, ty, front], [tubeD, tubeD, bl - 0.03], [0, 0, -(bl - 0.03) / 2], steel, { detail: 'metal' });
+    round('tubecap', recv, [0, ty, front - bl + 0.024], [tubeD + 0.003, tubeD + 0.003, 0.012], [0, 0, 0], [96, 100, 108]);
+    add('band', recv, [0, (by + ty) / 2, front - bl + 0.05], [bore + 0.006, bore + tubeD + 0.006, 0.012], [0, 0, 0], [40, 42, 48]);
+  } else {
+    add('mag', recv, [0, -rh / 2 - 0.012, -0.01], [0.026, 0.03, 0.07], [0, 0, 0], [40, 42, 48], { detail: 'metal' });
+  }
+  // short forend wrapping the tube and the lower barrel, a steel cap at its front
+  const fl = shotgun ? 0.2 : 0.22;
+  const fy = (by + bore / 2 - 0.003 + ty - tubeD / 2 - 0.006) / 2;
+  const fh = by + bore / 2 - 0.003 - (ty - tubeD / 2 - 0.006);
+  add('forend', recv, [0, fy, front - fl / 2], [0.034, fh, fl], [0, 0, 0], wood, { taper: [0.85, 0.85, 1, 1], taperAxis: 'z', detail: 'grain' });
+  add('fcap', recv, [0, fy, front - fl - 0.006], [0.03, fh * 0.9, 0.012], [0, 0, 0], [40, 42, 48]);
+  // sights: a buckhorn rear on the barrel, a ramp and brass bead at the muzzle (shotguns: just the bead)
+  const top = by + bore / 2;
+  if (!shotgun) {
+    add('rear', recv, [0, top + 0.005, front - 0.13], [0.022, 0.012, 0.01], [0, 0, 0], [26, 26, 28]);
+    add('ramp', recv, [0, top + 0.004, front - bl + 0.025], [0.006, 0.008, 0.024], [0, 0, 0], [26, 26, 28], { taper: [1, 0.4, 1, 1], taperAxis: 'z' });
+  }
+  add('bead', recv, [0, top + (shotgun ? 0.004 : 0.011), front - bl + 0.022], [0.006, 0.007, 0.006], [0, 0, 0], [222, 190, 110]);
+  // exposed hammer at the rear of the flat top, cocked back, with a spur
+  // (kept under the sight line: fpView puts the eye 3 cm over the muzzle axis down the sights)
+  const ham = add('hammer', recv, [0, rh / 2 - 0.008, rl / 2 - 0.014], [0.01, 0.022, 0.011], [0, 0.01, 0], [44, 44, 48], { rest: [0.6, 0, 0] });
+  add('spur', ham, [0, 0.02, 0], [0.012, 0.006, 0.016], [0, 0, 0.005], [44, 44, 48]);
+  // right side: the loading gate (a brighter plate) and the bolt sliding in the upper rear
+  add('gate', recv, [0.0155, -0.008, -0.01], [0.004, 0.016, 0.042], [0, 0, 0], [118, 122, 130]);
+  add('bolt', recv, [0.0155, rh / 2 - 0.013, 0.035], [0.004, 0.012, 0.07], [0, 0, 0], [136, 140, 148], { detail: 'metal' });
+  add('trigger', recv, [0, -rh / 2 - 0.002, rl / 2 - 0.035], [0.005, 0.016, 0.006], [0, -0.006, 0], [30, 30, 32], { rest: [0.25, 0, 0] });
+  // the lever: a bar under the receiver from the pivot back to the trigger, then the finger loop
+  // (front leg, bottom, rear leg) wrapping under the wrist; all one subtree off the pivot
+  const lv = add('lever', recv, [0, -rh / 2 + 0.002, front + 0.012], [0.009, 0.01, 0.13], [0, -0.005, 0.065], steel, { detail: 'metal' });
+  const lz = 0.128, drop = 0.08, loopL = 0.1;
+  add('loopF', lv, [0, -0.005, lz], [0.009, drop, 0.01], [0, -drop / 2, 0], steel);
+  add('loopB', lv, [0, -drop, lz], [0.009, 0.01, loopL], [0, 0, loopL / 2], steel);
+  add('loopR', lv, [0, -drop, lz + loopL], [0.009, 0.07, 0.01], [0, 0.035, 0], steel, { rest: [0.6, 0, 0] });
+  return { parts: P, hold: [0, 0, 0], support: [0, fy - 0.04, front + rz - fl * 0.55], muzzle: [0, 0.03 + by, rz + front - bl - 0.005], gun: true };
 }

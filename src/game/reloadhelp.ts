@@ -241,10 +241,10 @@ export function takesLine(it: Item): string | null {
   const p = takesPhrase(it);
   if (!p) return null;
   if (n.kind === 'ups') return `Runs on a UPS you carry (it can't be reloaded). ${upsBatteryNote(it.data)}`;
-  if (n.kind === 'recharge') return "Recharged, not reloaded (a battery charger or a UPS; there's no charging in this version yet).";
+  if (n.kind === 'recharge') return "Recharged, not reloaded (an enabled vehicle battery charger or recharging station).";
   // A battery's own "ammo" is loose battery charge nobody carries: say how it gets charge instead.
   if (it.isMagazine() && n.ammoTypes.includes('battery')) {
-    return it.hasFlag('RECHARGE') ? "Rechargeable: it needs a battery charger (there's no charging in this version yet)." : null;
+    return it.hasFlag('RECHARGE') ? "Rechargeable: it needs an enabled vehicle battery charger or recharging station." : null;
   }
   return `Takes: ${p}.`;
 }
@@ -384,12 +384,14 @@ export function explainNoReload(target: Item, carried: readonly Item[], hints: R
     case 'none':
       return `You can't reload the ${name}.`;
     case 'recharge':
-      return `Your ${name} can't be reloaded: it's recharged from a battery charger or a UPS, and there's no charging in this version yet.`;
+      return `Your ${name} can't be reloaded: put it in cargo with an enabled vehicle battery charger or recharging station.`;
     case 'ups': {
       const ups = carried.filter((c) => c.hasFlag('IS_UPS'));
       if (ups.length) {
         const flat = ups.every((u) => u.ammoRemaining() <= 0);
         if (flat) return join(`Your ${name} runs on your UPS, and the UPS is flat.`, upsBatteryNote(data), ex(data.items.UPS_off?.magazines?.battery ?? []));
+        // A charged UPS is on you: it powers (and tops up) the item, there's nothing to reload.
+        return `Your ${name} can't be reloaded: it runs on the UPS you carry.`;
       }
       return join(`Your ${name} can't be reloaded: it runs on a UPS you carry. You don't have one.`, ex(need.ids), upsBatteryNote(data));
     }
@@ -403,9 +405,9 @@ export function explainNoReload(target: Item, carried: readonly Item[], hints: R
         const state = bat ? 'flat' : 'empty';
         const head = compat.length === 1 ? `Your ${nm} is ${state}.` : `Your ${nm} are all ${state}.`;
         if (bat) {
-          // Rechargeables spawn flat and can't be charged here yet; disposables come full.
+          // Rechargeables spawn flat; disposables come full.
           const disposable = need.ids.filter((id) => (data.items[id]?.magazine?.count ?? 0) > 0);
-          const charge = compat.some((m) => m.hasFlag('RECHARGE')) ? "Rechargeable ones need a battery charger, and there's no charging in this version yet." : '';
+          const charge = compat.some((m) => m.hasFlag('RECHARGE')) ? "Put rechargeable ones in cargo with an enabled vehicle battery charger or recharging station." : '';
           const tip = disposable.length ? chargedTip(data, disposable, hints) : ex(need.ids);
           return join(head, charge, tip);
         }
@@ -425,7 +427,7 @@ export function explainNoReload(target: Item, carried: readonly Item[], hints: R
       if (target.isMagazine() && need.ammoTypes.includes('battery')) {
         // A battery is filled by charging, not by loose "battery" charges a player never sees.
         const disposable = sameSizeDisposables(target);
-        return join(`Your ${name} is flat. Rechargeable batteries need a battery charger, and there's no charging in this version yet.`,
+        return join(`Your ${name} is flat. Put rechargeable batteries in cargo with an enabled vehicle battery charger or recharging station.`,
           disposable.length ? chargedTip(data, disposable, hints) : '');
       }
       const loaded = target.ammoData();

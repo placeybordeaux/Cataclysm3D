@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { ItemGesture, gestureClass } from './itemGesture';
 import type { Game } from '../../game/game';
 import type { Renderer } from '../renderer';
 import type { Viewmodel, ViewmodelItem, ViewmodelState } from '../viewmodel';
@@ -145,6 +146,7 @@ export class FpView {
   private flash: CharInstance | null = null;
   private bow: CharInstance | null = null;
   private key = '';
+  private gesture = new ItemGesture();
   private held: HeldBuild | null = null;
   private pivot = -1;
   private cls: HeldClass | null = null;
@@ -154,6 +156,8 @@ export class FpView {
 
   constructor(readonly game: Game, readonly renderer: Renderer, readonly vm: Viewmodel) {
     this.scene.name = 'viewmodel-3d';
+    game.player.inv.onItemPresentation.push((action) => this.gesture.start(action));
+    game.events.on('gameLoaded', () => this.gesture.clear());
     this.layer = new CharLayer(false, 'fp', (page) => fpMaterial(page, vm.tint));
     this.scene.add(this.layer.group);
     // the renderer asks for the overlay after the sprite viewmodel has updated its poses
@@ -161,7 +165,26 @@ export class FpView {
   }
 
   private get active(): boolean {
-    return charSettings.viewmodel === 'model';
+    return charSettings.viewmodel === 'model' || this.artless();
+  }
+
+  private artlessId = '';
+  private artlessHit = false;
+  /**
+   * Sprite hands are the default, but an item the tileset never drew (the Marlin 1894C has no
+   * UltiCa sprite; its looks_like ar15 has none either) would be held as its map glyph, a
+   * brown "(". Weapons with a modelled shape (held.ts) are drawn in 3D instead, for as long as
+   * they're wielded; everything else keeps the sprite hands.
+   */
+  private artless(): boolean {
+    const it = this.game.player.inv.wielded;
+    const id = it?.typeId ?? '';
+    if (id !== this.artlessId) {
+      this.artlessId = id;
+      const src = this.renderer.source;
+      this.artlessHit = !!it && src instanceof AtlasTextureSource && !src.hasItemArt(id) && heldClass(it) !== 'generic';
+    }
+    return this.artlessHit;
   }
 
   /** The player's outfit composite (body + worn, no wielded overlay) for the sleeves and skin. */
@@ -181,7 +204,7 @@ export class FpView {
     this.right = this.left = this.flash = this.bow = null;
   }
 
-  private rebuild(item: ViewmodelItem | null, st: ViewmodelState): void {
+  private rebuild(item: ViewmodelItem | null, st: ViewmodelState, consume = false): void {
     const store = charLayers(this.renderer).store;
     const outfit = this.outfitFrame();
     const skinKey = frameKey(outfit);
@@ -203,9 +226,13 @@ export class FpView {
       this.held = null;
       return;
     }
-    const cls = item ? heldClass(item as never) : null;
+    const cls = item ? gestureClass(item, consume ? 'eat' : undefined) : null;
     this.cls = cls;
-    this.held = item && cls ? buildHeld(cls, pal!, item.def?.volume, heldVariant(item as never, cls)) : null;
+    this.held = item && cls ? buildHeld(cls, pal!, consume ? Math.min(item.def?.volume ?? 250, 250) : item.def?.volume, heldVariant(item as never, cls)) : null;
+    if (consume && this.held) {
+      // A portion sits above the curled grip rather than disappearing inside the fist.
+      this.held = { ...this.held, parts: this.held.parts.map((p) => p.parent < 0 ? { ...p, joint: [p.joint[0], p.joint[1] + 0.065, p.joint[2]] as [number, number, number] } : p) };
+    }
     const hr = heldRig(this.held);
     this.pivot = hr.pivot;
     this.right = add(hr.rig, `R:${item?.typeId ?? ''}`);
@@ -221,11 +248,14 @@ export class FpView {
     const vm = this.vm;
     vm.hide2d = this.active;
     if (!this.active) {
+      this.gesture.clear();
       if (this.right) this.drop();
       this.key = '';
       return null;
     }
-    const st = vm.state;
+    const paused = this.game.paused || this.game.lockPaused || this.game.tacticalPause || this.game.input.captured;
+    const action = this.gesture.update(dt, paused);
+    const st = action ? { ...vm.state, mode: 'item' as const } : vm.state;
     // Drawn bows/slingshots stay 2D: bowArt's hand-drawn bend and string read better than the
     // 3D bow in side-by-side shots (docs/CHARACTERS.md round 4), so hand that pose back (cdda.chars({ fpBow: true }) shows the 3D bow).
     if (st.mode === 'drawn' && !charSettings.fpBow) {
@@ -234,14 +264,14 @@ export class FpView {
       this.key = '';
       return null;
     }
-    const item = this.game.player.inv.wielded as unknown as ViewmodelItem | null;
+    const item = (action?.item ?? this.game.player.inv.wielded) as unknown as ViewmodelItem | null;
     const W = st.lowW, H = st.lowH;
     this.camera.aspect = W / H;
     this.camera.updateProjectionMatrix();
-    const key = `${st.mode === 'drawn' ? `drawn:${st.drawn?.kind}` : st.mode}|${item?.typeId ?? ''}|${frameKey(this.outfitFrame())}`;
+    const key = `${action?.kind ?? ''}|${st.mode === 'drawn' ? `drawn:${st.drawn?.kind}` : st.mode}|${item?.typeId ?? ''}|${frameKey(this.outfitFrame())}`;
     if (key !== this.key || !this.right) {
       this.key = key;
-      this.rebuild(st.mode === 'none' ? null : item, st);
+      this.rebuild(st.mode === 'none' ? null : item, st, action?.kind === 'eat' || action?.kind === 'drink');
     }
     const tanH = Math.tan((FOV * Math.PI) / 360);
     // a screen point (low-res px from the bottom-left) at depth d in front of the camera
@@ -249,6 +279,21 @@ export class FpView {
       [((px - W / 2) / (H / 2)) * d * tanH, ((py - H / 2) / (H / 2)) * d * tanH, -d];
     const R = this.right!, L = this.left, F = this.flash;
     const show = (i: CharInstance | null, v: boolean) => i?.setVisible(v);
+
+    if (action) {
+      const lift = this.gesture.lift;
+      const drinking = action.kind === 'drink';
+      const using = action.kind === 'use';
+      // Bring food to the mouth, tip a drink, or present and turn the actual used item.
+      place(this.rootR, [0.18 - lift * 0.09, -0.25 + lift * (using ? 0.14 : 0.30), -0.42 + lift * 0.14],
+        [using ? lift * 0.25 : -lift * 0.15, -0.15, -lift * 0.25]);
+      // Tip the drink itself; rotating the complete forearm would sweep it across the eye.
+      if (this.pivot >= 0) R.pose.rot[this.pivot * 3] = drinking ? -lift * 0.8 : 0;
+      this.setRoot(R, this.rootR);
+      show(R, true); show(L, false); show(F, false); show(this.bow, false);
+      this.layer.flush(dt, charLayers(this.renderer).store);
+      return this;
+    }
 
     if (st.mode === 'drawn' && st.drawn && this.bow) {
       const b = st.drawn;
@@ -334,6 +379,10 @@ export class FpView {
         if (stock >= 0) R.pose.scl.set([0.0001, 0.0001, 0.0001], stock * 3);
         const butt = R.rig.parts.findIndex((q) => q.name === 'butt');
         if (butt >= 0) R.pose.scl.set([0.0001, 0.0001, 0.0001], butt * 3);
+        // lever actions (held.ts leverGun) work the lever through the recoil: the loop swings
+        // down and back up over the kick, so a lever gun reads as one even mid-fight
+        const lever = R.rig.parts.findIndex((q) => q.name === 'lever');
+        if (lever >= 0) R.pose.rot[lever * 3] = st.anim === 'fire' ? 0.55 * Math.sin(Math.PI * Math.min(1, st.animT)) : 0;
       } else if (st.mode === 'whirl') {
         place(this.rootR, at(it.x, it.y, 0.42), [0, 0, it.rot]);
       } else {

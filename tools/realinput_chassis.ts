@@ -16,6 +16,24 @@ const CASES: [proto: string, template: string, holdMs: number][] = [
   ['bus', 'bus', 6500],
 ];
 
+// The W/A/S/D key that points from your station toward the nearest station with a door (or,
+// standing at one, out through it), relative to where you look; null when not at a station.
+// (the same rule as tools/realinput_vehwalk.ts's keyToDoor)
+const KEY_TO_DOOR = `(() => {
+  const vs = cdda.vehicleSystem, at = vs.stations.view(); if (!at) return null;
+  const v = at.v, s = at.station, list = vs.stations.stations(v), p = cdda.game.player;
+  let tx, ty;
+  if (s.exits.length) { [tx, ty] = [s.x + s.exits[0].out[0], s.y + s.exits[0].out[1]]; }
+  else {
+    const t = list.filter((q) => q.exits.length && q.kind !== 'driver').sort((a, b) => Math.hypot(a.x - s.x, a.y - s.y) - Math.hypot(b.x - s.x, b.y - s.y))[0];
+    if (!t) return null; [tx, ty] = [t.x, t.y];
+  }
+  const [ax, ay] = v.mountToWorld(s.x, s.y), [bx, by] = v.mountToWorld(tx, ty);
+  const dx = bx - ax, dy = by - ay, sin = Math.sin(p.yaw), cos = Math.cos(p.yaw);
+  const fwd = dx * sin - dy * cos, right = dx * cos + dy * sin;
+  return Math.abs(fwd) >= Math.abs(right) ? (fwd > 0 ? 'w' : 's') : right > 0 ? 'd' : 'a';
+})()`;
+
 export function chassisScenarios(c: DriveCtx): Scenario[] {
   const { js, check, shot, sleep } = c;
   const camera = async (mode: 'first' | 'third' | 'top') => {
@@ -56,6 +74,14 @@ export function chassisScenarios(c: DriveCtx): Scenario[] {
               const ox0 = Math.min(...pts.map((q) => q[0])), ox1 = Math.max(...pts.map((q) => q[0])), oy1 = Math.max(...pts.map((q) => q[1])), oy0 = Math.min(...pts.map((q) => q[1]));
               if (ox1 > w0 && ox0 < w1 && oy1 > window.__cd.y0 - 80 && oy0 < window.__cd.y0 + 8) vs.remove(o);
             }
+            window.__cdLane = [w0, w1];
+            window.__cdPeople();
+          };
+          // Town survivors on the road (a bus ran one over): the same lane, kept clear of people.
+          // Kept clear during the drive too: the chunks ahead spawn theirs as they generate.
+          window.__cdPeople = () => {
+            const ns = cdda.npcSystem, [w0, w1] = window.__cdLane;
+            for (const n of [...ns.npcs]) if (n.x > w0 - 1 && n.x < w1 + 1 && n.y > window.__cd.y0 - 120 && n.y < window.__cd.y0 + 8) ns.remove(n);
           };
           window.__cdClear();
           const ch = cdda.chassis(v.uid);
@@ -83,11 +109,12 @@ export function chassisScenarios(c: DriveCtx): Scenario[] {
         // --- drive: W held (engine on from roadTrip), then brake ------------------------------
         await camera('third');
         // (chunks streamed in meanwhile may have placed more wrecks)
-        await js(`window.__cdClear()`);
+        await js(`window.__cdClear(); clearInterval(window.__cdKeep); window.__cdKeep = setInterval(window.__cdPeople, 50)`);
         await c.x().hold('w', holdMs);
         await shot(`chassisdrive_${proto}_chase`);
         // Space: the brakes (S would brake and then reverse once stopped)
         for (let i = 0; i < 12 && Math.abs(await js<number>(`cdda.vehicleSystem.driving?.velocity ?? 0`)) > 0.2; i++) await c.x().hold('space', 400);
+        await js(`clearInterval(window.__cdKeep)`);
         const r = await js<Record<string, any>>(`(() => { const vs = cdda.vehicleSystem, v = vs.list.find((q) => q.uid === ${s.uid});
           return { dist: window.__cd.y0 - v.y, v: v.velocity, hp: v.parts.reduce((a, q) => a + q.hp, 0), log: cdda.ui.log().slice(-3) }; })()`);
         check(`${proto}: drove ~40+ m up the road through town without a scratch`, r.dist > 35 && r.hp === s.hp && Math.abs(r.v) < 0.5, r);
@@ -96,10 +123,19 @@ export function chassisScenarios(c: DriveCtx): Scenario[] {
         // --- e: climb out through a door, standing outside the template body ------------------
         await c.x().key('e');
         await sleep(500);
+        // Vans and buses have a deck (src/game/vehwalk.ts, docs/VEHICLES.md "Inside vehicles"): e
+        // at the wheel leaves you in the driver's seat, and you hop W/A/S/D station to station to
+        // a door and on through it, the key chosen as a player looking ahead would choose it.
+        for (let i = 0; i < 10 && (await js<boolean>(`!!cdda.vehicleSystem.stations.view()`)); i++) {
+          const k = await js<string | null>(KEY_TO_DOOR);
+          if (!k) break;
+          await c.x().key(k);
+          await sleep(900);
+        }
         const out = await js<Record<string, any>>(`(() => { const vs = cdda.vehicleSystem, v = vs.list.find((q) => q.uid === ${s.uid}), p = cdda.game.player;
           const b = vs.bodyRect(v), [lx, ly] = v.worldToMount(p.x, p.y);
           return { driving: !!vs.driving, inside: lx >= b.x0 && lx <= b.x1 && ly >= b.y0 && ly <= b.y1, on: vs.playerOn()?.v?.uid ?? null, log: cdda.ui.log().slice(-2) }; })()`);
-        check(`${proto}: e climbs out through a door and you stand outside the body`, !out.driving && !out.inside && out.on === null, out);
+        check(`${proto}: e (and for a deck, hops to a door) climbs out and you stand outside the body`, !out.driving && !out.inside && out.on === null, out);
       }
     }],
   ];

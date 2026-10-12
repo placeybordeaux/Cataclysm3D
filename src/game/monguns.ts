@@ -13,7 +13,8 @@ import { GUN_PROJECTILE_SPEED, projectileHit } from './projectile';
 import { CREATURE_RADIUS } from './physics';
 import { sfx } from '../audio/sfx';
 import { flightSpeed, fliesVisibly, rangedClass } from './rangedfeel';
-import { enemyFireOf } from './enemyfire';
+import { enemyFireOf, lobOf, lobSpeed } from './enemyfire';
+import { landsWithEffect, roundEndsAt } from './blast';
 import { bodyHeightOf } from './aimmodel';
 import { LEVEL_HEIGHT } from '../world/coords';
 
@@ -205,15 +206,27 @@ function shootAt(sys: MonsterSystem, m: Monster, gun: ItemDef, ammo: ItemDef | n
   // what it meets — the survivor, an NPC in the way, or the wall you ducked behind.
   const flies = fliesVisibly(cls);
   const units = damageOf(gun, ammo);
+  // Grenade launchers lob (enemyfire.lobOf); anything whose round does something where it lands
+  // (BN apply_ammo_effects: a blast, fire, a gas canister) sets it off there, wherever it ends.
+  const lob = lobOf(gun, ammo, cls);
+  const lands = landsWithEffect(sys.game, ammo);
+  const heavy = lob !== null || (cls === 'launcher' && lands);
+  const dist = Math.hypot(p.x - m.x, p.y - m.y);
+  // BN item::gun_speed (the dodge roll's projectile speed): the ammo's speed (default 1000) plus
+  // the gun's. Powder guns keep the port's flat 1000, as before.
+  const bnSpeed = flies || heavy ? Math.max(0, (typeof ammo?.speed === 'number' ? ammo.speed : 1000) + (Number(gun.speed) || 0)) : GUN_PROJECTILE_SPEED;
   enemyFireOf(sys.game).fire({
-    kind: flies ? (cls === 'sling' ? 'stone' : 'arrow') : 'bullet', speed: flies ? flightSpeed(cls, Number(ammo?.speed) || 100) : undefined,
+    kind: heavy ? 'grenade' : flies ? (cls === 'sling' ? 'stone' : 'arrow') : 'bullet',
+    speed: lob ? lobSpeed(lob, dist) : heavy ? 45 : flies ? flightSpeed(cls, Number(ammo?.speed) || 100) : undefined,
+    arc: flies || lob !== null,
     x: m.x, y: m.y, h: m.z * LEVEL_HEIGHT + muzzleHeight(m), tx: p.x, ty: p.y, th: p.z * LEVEL_HEIGHT + (p.crouching ? 0.8 : 1.2),
     yawOff: off, range, z: m.z, from: m,
-    onPlayer: (mb) => hitSurvivor(sys, m, units, mb, noCrit, flies ? Number(ammo?.speed) || 100 : GUN_PROJECTILE_SPEED),
+    onPlayer: (mb) => hitSurvivor(sys, m, units, mb, noCrit, bnSpeed),
     onNpc: (n, mb) => roundHitsNpc(sys, n, units, mb, m),
     onStop: (x, y, what) => {
-      if (what === 'wall') (flies ? sfx.arrowHit('wall', { x, y, z: m.z }) : sfx.bulletHit('wall', { x, y, z: m.z }));
+      if (what === 'wall' && !lands) (flies ? sfx.arrowHit('wall', { x, y, z: m.z }) : sfx.bulletHit('wall', { x, y, z: m.z }));
     },
+    onEnd: lands ? (x, y, _h, _what, z) => void roundEndsAt(sys.game, sys, x, y, z, ammo, asArray(gun.ammo_effects as string[] | undefined), m) : undefined,
   });
 }
 
@@ -273,11 +286,16 @@ function throwAt(sys: MonsterSystem, m: Monster, gun: ItemDef, ammo: ItemDef | n
   void yaw;
   const units = damageOf(gun, ammo);
   if (!units.length) units.push({ type: 'bash', amount: Math.min(ammo ? ammo.weight / 100 + 4 : 5, 16), armor_penetration: 0 });
-  // Thrown rocks fly slowly (BN thrown projectile speed ~ 10-20 m/s): dodging matters.
+  // Thrown rocks fly slowly (BN thrown projectile speed ~ 10-20 m/s): dodging matters. They and
+  // thrown grenades fly a gravity arc like the survivor's arrows; a grenade (a round with an
+  // effect where it lands: the SWAT zombie's tear gas) is lobbed and goes off where it ends.
+  const lands = landsWithEffect(sys.game, ammo);
   enemyFireOf(sys.game).fire({
-    kind: 'stone', x: m.x, y: m.y, h: m.z * LEVEL_HEIGHT + muzzleHeight(m), tx: p.x, ty: p.y, th: p.z * LEVEL_HEIGHT + 1.2,
+    kind: lands ? 'grenade' : 'stone', speed: lands ? lobSpeed('thrown', d) : undefined, arc: true,
+    x: m.x, y: m.y, h: m.z * LEVEL_HEIGHT + muzzleHeight(m), tx: p.x, ty: p.y, th: p.z * LEVEL_HEIGHT + 1.2,
     yawOff: off, range: d + 4, z: m.z, from: m,
-    onPlayer: (mb) => hitSurvivor(sys, m, units, Math.min(0.99, mb), false, 15),
+    onPlayer: (mb) => hitSurvivor(sys, m, units, Math.min(0.99, mb), false, lands ? Number(ammo?.speed) || 15 : 15),
     onNpc: (n, mb) => roundHitsNpc(sys, n, units, mb, m),
+    onEnd: lands ? (x, y, _h, _what, z) => void roundEndsAt(sys.game, sys, x, y, z, ammo, asArray(gun.ammo_effects as string[] | undefined), m) : undefined,
   });
 }

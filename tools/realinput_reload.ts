@@ -7,7 +7,7 @@
 // Keys and mouse are OS-level input; cdda.* only hands out the flashlight, drops the pile,
 // clears monsters and reads the log.
 
-import type { XInput } from './lib/realinput';
+import { settleWorld, type XInput } from './lib/realinput';
 
 export interface ReloadCtx {
   x: () => XInput;
@@ -84,6 +84,13 @@ export function reloadScenarios(c: ReloadCtx): Scenario[] {
         return cdda.giveItem('flashlight', { wield: true });
       })()`);
       check('wielding a flashlight with no battery in it', /flashlight/.test(setup) && (await js<boolean>(`!cdda.game.player.inv.wielded.magazine`)), setup);
+      // Out under the sky (setup): looking up must meet nothing. The scenario before this one
+      // may leave you indoors by a wardrobe, whose quick-loot card turns the reload key into
+      // "Take all" (it took a sleeping bag instead of answering).
+      const open = await js<{ x: number; y: number } | null>(`(() => { const o = cdda.findOpenGround(7); if (!o) return null; cdda.teleport(o.x + 3.5, o.y + 3.5, cdda.game.player.z); return o; })()`);
+      check('setup: open ground under the sky', !!open, open);
+      const w = await settleWorld(js);
+      if (!w.ok) check('the surroundings finished loading (load gate open, chunks built)', false, w);
       await lookUp();
       const before = await pressReload();
       await shot('reloadhelp_1_no_battery');
@@ -108,6 +115,21 @@ export function reloadScenarios(c: ReloadCtx): Scenario[] {
       // flashlight's hotbar slot with the real mouse.
       await c.x().key(await js<string>(`cdda.game.keys.keysFor('inventory2')[0]`));
       await sleep(700);
+      // The hotbar binds only what you drag onto it (its first-run fill happened at the quick
+      // start, before the flashlight was handed out): drag it onto an empty slot, as a player does.
+      const slotXY = (sel: string) => js<{ x: number; y: number } | null>(`(() => { const e = document.querySelector(${JSON.stringify(sel)}); if (!e) return null; const b = e.getBoundingClientRect(); return { x: Math.round(b.left + b.width / 2), y: Math.round(b.top + b.height / 2) }; })()`);
+      const bound = await js<boolean>(`[0,1,2,3,4,5,6,7,8,9].some((i) => cdda.inv2.hotbar.binding(i)?.typeId === 'flashlight')`);
+      const free = await js<number>(`[0,1,2,3,4,5,6,7,8,9].find((i) => !cdda.inv2.hotbar.binding(i)) ?? -1`);
+      const from = await js<{ x: number; y: number } | null>(`cdda.inv2.rectOf('flashlight')`);
+      const to = free >= 0 ? await slotXY(`#ui2 .ui2-hot-slot[data-slot="${free}"]`) : null;
+      if (!bound && from && to) {
+        await c.x().moveTo(from.x, from.y, 2);
+        await c.x().buttonDown(1);
+        await c.x().moveTo(to.x, to.y, 14);
+        await sleep(120);
+        await c.x().buttonUp(1);
+        await sleep(400);
+      }
       const slot = await js<{ x: number; y: number } | null>(`(() => {
         const el = [...document.querySelectorAll('.ui2-hot-slot')].find((s) => /flashl/.test(s.textContent || ''));
         if (!el) return null;

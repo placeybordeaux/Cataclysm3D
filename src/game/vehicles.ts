@@ -28,7 +28,14 @@ import {
 } from './vehicle';
 import { pickVehicleProto, type VehicleDataFile } from './vehicle_data';
 import { chassisOf, hitMount, seatPoint } from './chassis';
+import { VehicleStations, type Station } from './vehwalk';
 import { warnOnce } from '../data/warn';
+import { updateVehiclePower } from './vehiclePower';
+import { TowSystem, type TowLinkJSON } from './towing';
+import {
+  boxInertia, contactImpulse, crashDamage, SKID_COUNTER, SKID_MIN_MPH, SKID_MIN_SPIN, SKID_TIME, damageShare, decayMotion, handlingFor, MAX_SLIDE, MAX_SPIN, motionOf, obbNormal, settled, stopMotion, tileObb, trackTopSpeed,
+  VEHICLE_FRICTION, VEHICLE_RESTITUTION, WALL_FRICTION, WALL_RESTITUTION, type ContactBody, type CrashModel, type Handling, type HandlingMode,
+} from './vehicleImpact';
 
 // The vehicle system: owns every vehicle in the world, spawns mapgen vehicle requests,
 // keeps a tile index the map consults for passability/sight (GameMap.overlays), and runs
@@ -79,6 +86,14 @@ const LAT_ACC_MAX = 5.5;
 /** Seconds to reach full available lock / to recentre. */
 const STEER_IN_TIME = 0.45;
 const STEER_OUT_TIME = 0.25;
+/**
+ * Skid-steer pivot for tracked vehicles. BN only turns a vehicle as it moves; a tank that
+ * can't spin on the spot feels broken (and the driving brief is arcade feel over fidelity),
+ * so tracks add a pivot that fades out by PIVOT_FADE m/s, where the bicycle model's turning
+ * takes over. Its rate and spool-up come from power-to-weight and mass (vehicleImpact.ts
+ * handlingFor: ~32 deg/s after ~1.3 s on an Abrams; a flat 40 deg/s with handling 'light').
+ */
+const PIVOT_FADE = 6;
 
 /**
  * Launch acceleration the driver feels for a vehicle whose CDDA acceleration at rest is
@@ -92,10 +107,10 @@ export function feltAcceleration(cddaAcc: number): number {
 
 /** Largest front-wheel angle (rad) at `speed` m/s for a wheelbase: full lock when slow,
  *  narrowing so the lateral acceleration stays under LAT_ACC_MAX (no twitchiness at speed). */
-export function maxSteerAt(speed: number, wheelbase: number): number {
+export function maxSteerAt(speed: number, wheelbase: number, latScale = 1): number {
   const v2 = speed * speed;
   if (v2 < 1e-6) return MAX_STEER;
-  return Math.min(MAX_STEER, Math.atan((LAT_ACC_MAX * Math.max(0.5, wheelbase)) / v2));
+  return Math.min(MAX_STEER, Math.atan((LAT_ACC_MAX * latScale * Math.max(0.5, wheelbase)) / v2));
 }
 
 /**
@@ -127,6 +142,12 @@ export interface VehicleOccupant {
   my: number;
 }
 
+/** A vehicle's whole grid as a mount-space box (its cells' outer edges). */
+function gridRect(v: Vehicle): BodyRect {
+  const [x0, y0, x1, y1] = v.bounds();
+  return { x0: x0 - 0.5, x1: x1 + 0.5, y0: y0 - 0.5, y1: y1 + 0.5 };
+}
+
 /** The body outline shrunk to one mount's cell (so circleHitsBody tests only that door). */
 function doorOnly(b: BodyRect, mx: number, my: number): BodyRect {
   return mountSolid(b, mx, my) ?? { x0: mx, x1: mx, y0: my, y1: my };
@@ -152,6 +173,14 @@ interface Pusher {
 }
 /** Brake deceleration, m/s^2 (CDDA brakes shed ~30% of max speed per turn; 30 mph to 0 in ~1.7 s). */
 const BRAKE_DECEL = 8;
+/** Momentum crashes: a contact closing slower than this (m/s) is resting, not a hit. */
+const CLOSING_MIN = 0.05;
+/** Momentum crashes: share of a crash's spin the vehicle you drive actually takes. */
+const DRIVER_SPIN_SCALE = 0.5;
+/** Momentum crashes: closing slower than this (mph) is pushing, not a crash: no message or bang. */
+const PUSH_QUIET_MPH = 4;
+/** Momentum crashes: below this change in your own speed (mph) a jolt never kills. */
+const LETHAL_JOLT_MPH = 35;
 
 /** How far from the driver's seat "take the controls" still climbs you in (tiles). */
 export const GET_IN_RANGE = 3.2;
@@ -178,6 +207,12 @@ export class VehicleSystem implements GameSystem, MapOverlay {
   private pending: VehicleRequest[] = [];
   /** Vehicle the player is driving (at the controls), if any. */
   driving: Vehicle | null = null;
+  /** Inside a vehicle without driving it: its seats / aisle / doors / hatches (src/game/vehwalk.ts). */
+  readonly stations = new VehicleStations(this);
+  /** Tow cables between vehicles (src/game/towing.ts): a rope constraint applied after every vehicle moves. */
+  readonly towing = new TowSystem(this);
+  /** WASD doesn't walk while driving or at a station (the stations read the keys for hops). */
+  private readonly holdMove = () => this.driving !== null || this.stations.at !== null;
   /** Latest driving input (read from held keys each tick while driving; tests set it). */
   input: DriveInput = { throttle: 0, steer: 0, brake: false };
   /** When true, `input` is not overwritten from the keyboard (cdda.drive, tests). */
@@ -204,7 +239,7 @@ export class VehicleSystem implements GameSystem, MapOverlay {
   readonly onRemoved: ((v: Vehicle) => void)[] = [];
   private soundAcc = new Map<Vehicle, number>();
   /** Running-engine loops that follow the vehicles (no-op without audio). */
-  readonly engineSounds = new EngineSounds();
+  readonly engineSounds = new EngineSounds((v) => this.speedLimits(v as Vehicle).safe);
   /** Last engine load per vehicle (0..1), for sound/fuel/HUD. */
   readonly load = new Map<Vehicle, number>();
 
@@ -271,9 +306,38 @@ export class VehicleSystem implements GameSystem, MapOverlay {
    * run-overs and `playerOn` follow the body either way.
    */
   crashGeometry: 'body' | 'tiles' = 'body';
+  /**
+   * What a vehicle-vs-vehicle crash does (vehicleImpact.ts): 'momentum' (default) exchanges an
+   * impulse, pushing and spinning both; 'immovable' is the old model (the other vehicle stops
+   * you like a wall; light ones are teleport-shoved). Options > Vehicle crashes, ?vehcrash=.
+   */
+  crashModel: CrashModel = 'momentum';
+  /** Heavy / tracked handling (vehicleImpact.ts handlingFor): Options > Heavy vehicles, ?vehheft=. */
+  handlingMode: HandlingMode = 'weighty';
+  /** Vehicles already moved this frame (a crash can move the one it hit early: advanceStruck). */
+  private moved = new Set<Vehicle>();
+  /** This frame's dt (s), for moving a struck vehicle out of the way mid-frame. */
+  private frameDt = 1 / 60;
+  /** The normal of the momentum contact that just stopped a substep (move slides along it). */
+  private contactN: [number, number] | null = null;
   private crashBody(v: Vehicle): BodyRect | null {
-    return this.crashGeometry === 'body' ? this.bodyRect(v) : null;
+    if (this.crashGeometry !== 'body') return null;
+    const b = this.bodyRect(v);
+    if (b || !this.bodyShape || this.crashModel !== 'momentum') return b;
+    // No drawn outline (tanks, APCs, frame builds collide on their cells): momentum crashes
+    // still want a box to bisect to the touch and take contact normals from, so a grid that's
+    // nearly full (armoured hulls ~0.85-0.95) crashes as its outline. Sparse ones (aircraft,
+    // L-shaped rigs) keep whole tiles rather than hit with empty corners.
+    let full = this.fullGrid.get(v);
+    if (!full || full.version !== v.version) {
+      const [x0, y0, x1, y1] = v.bounds();
+      const cells = new Set<number>();
+      for (const p of v.parts) cells.add((p.mx + 512) * 1024 + p.my + 512);
+      this.fullGrid.set(v, (full = { version: v.version, full: cells.size >= 0.8 * (x1 - x0 + 1) * (y1 - y0 + 1) }));
+    }
+    return full.full ? gridRect(v) : null;
   }
+  private fullGrid = new WeakMap<Vehicle, { version: number; full: boolean }>();
 
   /** The body outline collision uses for `v`, or null for whole tiles. */
   bodyRect(v: Vehicle): BodyRect | null {
@@ -563,10 +627,21 @@ export class VehicleSystem implements GameSystem, MapOverlay {
     if (!c) return { ok: false, msg: `The ${v.name} has no controls.` };
     if (c.hp <= 0) return { ok: false, msg: `The ${v.name}'s controls are broken.` };
     this.driving = v;
+    this.stations.leave();
     this.seatPlayer(v);
-    this.game.movementOverride = () => this.driving !== null;
+    this.claimMovement();
     const msg = v.locked ? `You take the controls of the ${v.name}. It's locked: you'll need to hotwire it.` : `You take the controls of the ${v.name}.`;
     return { ok: true, msg };
+  }
+
+  /** Take over WASD (driving / stations); composes with grab.ts's wrapper of movementOverride. */
+  claimMovement(): void {
+    this.game.movementOverride = this.holdMove;
+  }
+
+  /** How being inside a vehicle works (src/game/vehwalk.ts): 'stations' (default), 'allstations', 'free'. */
+  walkMode(): string {
+    return this.stations.mode;
   }
 
   releaseControls(): string {
@@ -658,9 +733,9 @@ export class VehicleSystem implements GameSystem, MapOverlay {
     if (v.locked) return { ok: false, msg: `The ${v.name} is locked. You'll need to hotwire it first.` };
     const working = engines.filter((e) => e.hp > 0);
     if (!working.length) return { ok: false, msg: `The ${v.name}'s engine is destroyed.` };
-    const fueled = working.filter((e) => v.engineHasFuel(e));
+    const fueled = working.filter((e) => v.selectEngineFuel(e));
     if (!fueled.length) {
-      const ft = working[0].def.fuel_type ?? 'fuel';
+      const ft = v.engineFuel(working[0]) ?? 'fuel';
       return { ok: false, msg: `Looks like the ${working[0].def.name} is out of ${this.vdata.fuels[ft]?.name ?? ft}.` };
     }
     // Cranking a combustion engine costs battery (CDDA: start energy ~ power x start time).
@@ -780,16 +855,21 @@ export class VehicleSystem implements GameSystem, MapOverlay {
 
   // --- simulation ---------------------------------------------------------------------
 
-  update(game: Game, realDt: number): void {
+  update(game: Game, realDt: number, gameDt = realDt): void {
     this.simTime += realDt;
+    this.moved.clear();
+    this.frameDt = realDt;
     if ((this.rescanAcc += realDt) > 2) {
       this.rescanAcc = 0;
       this.rescan();
     }
     if (this.pending.length) this.flushPending();
     if (this.driving && !this.scriptedInput) this.readKeys();
+    this.stations.update(realDt);
     if (this.driving && this.driveMode === 'cruise') this.updateCruise(this.driving, realDt);
     for (const v of this.list) this.simulate(v, realDt);
+    this.towing.step(realDt);
+    for (const v of this.list) updateVehiclePower(game, v, gameDt);
     if (this.driving) this.closeDoorsUnderway(this.driving);
     const p = game.player;
     this.engineSounds.update(this.list, { x: p.x, y: p.y, z: p.z }, this.driving, realDt);
@@ -893,7 +973,9 @@ export class VehicleSystem implements GameSystem, MapOverlay {
         this.soundAcc.set(v, 0);
       } else if (!v.engineOn) this.soundAcc.set(v, acc);
     }
-    if (!v.engineOn && Math.abs(v.velocity) < STOP_EPS && inp.throttle === 0 && inp.steer === 0) {
+    const motion = motionOf(v);
+    if (!v.engineOn && Math.abs(v.velocity) < STOP_EPS && inp.throttle === 0 && inp.steer === 0 && settled(motion)) {
+      motion.yaw = motion.pivot = 0;
       v.velocity = 0;
       // CDDA: thrusting with the engine off fails and zeroes cruise control.
       v.cruiseVelocity = 0;
@@ -903,6 +985,7 @@ export class VehicleSystem implements GameSystem, MapOverlay {
     const offroad = this.offroad(v);
     const mass = v.mass();
     const wheelsOk = v.validWheelConfig();
+    const hd = this.handling(v);
     let load = 0.05;
     const vel = v.velocity;
     // Drag: CDDA's F = c_air v^2 + c_roll (33.3 + v); without intact wheels the vehicle
@@ -911,12 +994,14 @@ export class VehicleSystem implements GameSystem, MapOverlay {
     const cRoll = wheelsOk ? v.coeffRollingDrag(offroad) : v.coeffRollingDrag(offroad) * 20;
     const dragDv = ((cAir * vel * vel + cRoll * (33.3 + Math.abs(vel))) / mass) * dt;
     let nv: number;
+    // BN vehicle::thrust: a tower too weak for its load can't push while rolling (towing.ts).
+    const canPull = !driven || this.towing.canPull(v, offroad, this.driveMode === 'cruise' ? Math.sign(v.cruiseVelocity / VMIPH_PER_MS - vel) : inp.throttle, dt);
     if (driven && this.driveMode === 'cruise') {
-      const r = this.cruiseStep(v, dt, offroad, dragDv, wheelsOk && hasPower);
+      const r = this.cruiseStep(v, dt, offroad, dragDv, wheelsOk && hasPower && canPull);
       nv = r.nv;
       load = Math.max(load, r.load);
     } else if (driven) {
-      const r = this.directStep(v, inp, dt, offroad, dragDv, wheelsOk && hasPower);
+      const r = this.directStep(v, inp, dt, offroad, dragDv, wheelsOk && hasPower && canPull, hd);
       nv = r.nv;
       load = Math.max(load, r.load);
     } else {
@@ -933,17 +1018,39 @@ export class VehicleSystem implements GameSystem, MapOverlay {
     // to full lock, quicker back to centre) and the lock narrows with speed so a held A/D at
     // 50 mph is a firm curve, not a spin.
     const steerable = v.steerable() && wheelsOk;
-    const maxSteer = maxSteerAt(Math.abs(nv), v.wheelbase());
+    const maxSteer = maxSteerAt(Math.abs(nv), v.wheelbase(), hd.latAcc);
     const target = steerable ? inp.steer * maxSteer : 0;
     const outward = Math.abs(target) > Math.abs(v.steer) && Math.sign(target) === Math.sign(v.steer || target);
-    const rate = (maxSteer / (outward ? STEER_IN_TIME : STEER_OUT_TIME)) * dt;
+    const rate = (maxSteer / (outward ? STEER_IN_TIME * hd.steerIn : STEER_OUT_TIME * hd.steerOut)) * dt;
     v.steer += Math.max(-rate, Math.min(rate, target - v.steer));
     // The lock shrinks as speed builds even with the key held.
     v.steer = Math.max(-maxSteer, Math.min(maxSteer, v.steer));
     const yawRate = (nv * Math.tan(v.steer)) / v.wheelbase();
-    const dFacing = (yawRate * dt * 180) / Math.PI;
+    let dFacing = (yawRate * dt * 180) / Math.PI;
+    // Tracks pivot under power, turning the way the held key points (A left, D right). Heavy
+    // ones spool the pivot up (hd.pivotSpool s to full rate) and wind it down twice as fast.
+    if (steerable && driven && v.engineOn && hasPower && maxSteer > 0 && v.skidSteers()) {
+      const fade = Math.max(0, 1 - Math.abs(nv) / PIVOT_FADE);
+      if (hd.pivotSpool > 0) {
+        const want = inp.steer * hd.pivotRate;
+        const easing = motion.pivot !== 0 && (Math.abs(want) < Math.abs(motion.pivot) || Math.sign(want) === -Math.sign(motion.pivot));
+        const r = ((hd.pivotRate / hd.pivotSpool) * (easing ? 2 : 1)) * dt;
+        motion.pivot += Math.max(-r, Math.min(r, want - motion.pivot));
+      } else motion.pivot = (v.steer / maxSteer) * hd.pivotRate;
+      dFacing += motion.pivot * fade * dt;
+    } else motion.pivot = 0;
+    motion.yaw = dt > 0 ? dFacing / dt : 0;
 
-    if (nv !== 0 || dFacing !== 0) this.move(v, nv * dt, dFacing);
+    // Momentum crashes: whatever slide / spin a crash left integrates through the same
+    // collision-checked move, then decays like tyres (vehicleImpact.ts).
+    // A towed vehicle is pulled through the same slide / spin whatever the crash model.
+    const momentum = this.crashModel === 'momentum' || this.towing.isTowed(v);
+    const [sx, sy, spin] = momentum && !settled(motion) ? [motion.sx * dt, motion.sy * dt, motion.spin * dt] : [0, 0, 0];
+    if (!this.moved.has(v) && (nv !== 0 || dFacing !== 0 || sx !== 0 || sy !== 0 || spin !== 0)) {
+      this.moved.add(v);
+      this.move(v, nv * dt, dFacing, sx, sy, spin);
+    }
+    if (momentum && !settled(motion)) decayMotion(v, motion, dt, this.rolling(v), v.skidSteers(), !driven && this.towing.isTowed(v));
 
     // Fuel: CDDA consume_fuel at the engine load; idling burns a little.
     if (v.engineOn) {
@@ -971,10 +1078,10 @@ export class VehicleSystem implements GameSystem, MapOverlay {
    * no pedal input the engine holds `v.cruiseVelocity`; W past it raises the set speed on
    * release, S or Space cancel it.
    */
-  private directStep(v: Vehicle, inp: DriveInput, dt: number, offroad: number, dragDv: number, canThrust: boolean): { nv: number; load: number } {
+  private directStep(v: Vehicle, inp: DriveInput, dt: number, offroad: number, dragDv: number, canThrust: boolean, hd: Handling = this.handling(v)): { nv: number; load: number } {
     const vel = v.velocity;
     const want = Math.max(0, inp.throttle);
-    this.pedal += Math.max(-THROTTLE_RAMP_DOWN * dt, Math.min(THROTTLE_RAMP_UP * dt, want - this.pedal));
+    this.pedal += Math.max(-THROTTLE_RAMP_DOWN * dt, Math.min(THROTTLE_RAMP_UP * hd.throttleRamp * dt, want - this.pedal));
     if (this.cruiseOn && (inp.throttle < 0 || inp.brake || !canThrust)) {
       this.cruiseOn = false;
       v.cruiseVelocity = 0;
@@ -985,19 +1092,23 @@ export class VehicleSystem implements GameSystem, MapOverlay {
     if (this.cruiseOn && inp.throttle > 0) v.cruiseVelocity = Math.max(v.cruiseVelocity, Math.round(vel * VMIPH_PER_MS));
     const scale = (() => {
       const a0 = v.acceleration(0, offroad);
-      return a0 > 0 ? feltAcceleration(a0) / a0 : 0;
+      return a0 > 0 ? (feltAcceleration(a0) * hd.accel) / a0 : 0;
     })();
+    // Tracks are governed: thrust fades over the last 20% below the top speed.
+    const top = trackTopSpeed(hd, offroad);
+    const governor = (s: number) => (Number.isFinite(top) ? Math.max(0, Math.min(1, (top - Math.abs(s)) / (0.2 * top))) : 1);
+    const brakeDecel = BRAKE_DECEL * hd.brake;
     let a = 0, load = 0;
     let braking = false;
     if (inp.throttle < 0 && vel > STOP_EPS) {
-      a -= BRAKE_DECEL;
+      a -= brakeDecel;
       braking = true;
       this.reverseHeld = 0;
     } else if (inp.throttle < 0) {
       this.reverseHeld += dt;
       if (canThrust && this.reverseHeld >= REVERSE_DELAY) {
         const electric = v.engines.some((e) => e.enabled && e.hp > 0 && e.def.fuel_type === 'battery');
-        const maxRev = -v.maxReverseVelocity(offroad);
+        const maxRev = Math.min(-v.maxReverseVelocity(offroad), top * 0.5);
         if (-vel < maxRev) a -= v.acceleration(vel, offroad) * scale * (electric ? 1 : 0.6);
         load = 0.5;
       }
@@ -1005,20 +1116,22 @@ export class VehicleSystem implements GameSystem, MapOverlay {
       this.reverseHeld = 0;
       if (this.pedal > 0 && vel < -0.3) {
         // W while rolling backwards: brake first.
-        a += BRAKE_DECEL;
+        a += brakeDecel;
         braking = true;
       } else if (this.pedal > 0 && canThrust) {
-        a += this.pedal * v.acceleration(vel, offroad) * scale;
+        a += this.pedal * v.acceleration(vel, offroad) * scale * governor(vel);
         load = Math.min(1, this.pedal);
       }
     }
     if (inp.brake) {
-      a -= Math.sign(vel) * BRAKE_DECEL * 1.3;
+      a -= Math.sign(vel) * brakeDecel * 1.3;
       braking = true;
     }
     let nv = vel + a * dt;
-    // Drag and, off the pedal, engine braking: always toward zero.
-    const coast = dragDv + (this.pedal < 0.05 && !braking && inp.throttle >= 0 ? COAST_DECEL * dt : 0);
+    // Drag and, off the pedal, engine braking: always toward zero. Over the governed speed
+    // (shoved, downhill) the tracks drag it back down.
+    const over = Number.isFinite(top) && Math.abs(vel) > top ? 1.5 * dt : 0;
+    const coast = dragDv + over + (this.pedal < 0.05 && !braking && inp.throttle >= 0 ? COAST_DECEL * hd.coast * dt : 0);
     if (nv > 0) nv = Math.max(0, nv - coast);
     else if (nv < 0) nv = Math.min(0, nv + coast);
     // Brakes (and the handbrake) only ever bring the vehicle to a stop, never reverse it.
@@ -1092,19 +1205,29 @@ export class VehicleSystem implements GameSystem, MapOverlay {
    * substeps, colliding with anything in the tiles it newly enters (whole tiles) or its drawn
    * body newly touches (shaped bodies). The driver (and anyone standing inside) moves along.
    */
-  move(v: Vehicle, dist: number, dFacing: number): void {
+  move(v: Vehicle, dist: number, dFacing: number, sx = 0, sy = 0, spin = 0, slide = true): void {
     const body = this.crashBody(v);
     // A drawn body is thinner than a tile row (a bike is ~0.6 m across), so it steps finer to
     // never skip over one at speed, and turns in smaller steps so a swinging corner is caught
     // near where it touches. Whole tiles keep CDDA-ish tile stepping.
     const [stepLen, stepTurn] = body ? [BODY_STEP, BODY_TURN_STEP] : [0.3, 8];
-    const steps = Math.max(1, Math.ceil(Math.max(Math.abs(dist) / stepLen, Math.abs(dFacing) / stepTurn)));
+    // A crash spin turns the body about its centre, not about mount (0, 0) like the steering:
+    // the mount origin swings round the centre, which is a translation on top.
+    if (spin) {
+      const [cx, cy] = this.centreWorld(v);
+      const a = (spin * Math.PI) / 180, ox = v.x - cx, oy = v.y - cy;
+      sx += cx + ox * Math.cos(a) - oy * Math.sin(a) - v.x;
+      sy += cy + ox * Math.sin(a) + oy * Math.cos(a) - v.y;
+    }
+    const turn = dFacing + spin;
+    const steps = Math.max(1, Math.ceil(Math.max((Math.abs(dist) + Math.hypot(sx, sy)) / stepLen, Math.abs(turn) / stepTurn)));
     const p = this.game.player;
+    let retries = 0;
     for (let i = 0; i < steps; i++) {
       const rad = (v.facing * Math.PI) / 180;
       const d = dist / steps;
-      const nx = v.x + Math.cos(rad) * d, ny = v.y + Math.sin(rad) * d;
-      const nf = v.facing + dFacing / steps;
+      const nx = v.x + Math.cos(rad) * d + sx / steps, ny = v.y + Math.sin(rad) * d + sy / steps;
+      const nf = v.facing + turn / steps;
       const before = new Set(this.tilesOf.get(v) ?? []);
       const on = this.playerOn();
       const riding = this.driving === v || (!!on && on.v === v);
@@ -1123,14 +1246,34 @@ export class VehicleSystem implements GameSystem, MapOverlay {
           p.yaw += ((v.facing - oldFacing + 540) % 360 - 180) * (Math.PI / 180);
         }
       };
-      const stopped = this.collidePose(v, nx, ny, nf, before, riding);
+      this.contactN = null;
+      const res = this.collidePose(v, nx, ny, nf, before, riding);
+      // The vehicle in the way just moved off (momentum crashes): try the same substep again.
+      if (res === 'retry' && retries++ < 3) {
+        i--;
+        continue;
+      }
+      const stopped = res === 'retry' ? 'solid' : res;
       if (stopped) {
         // Shaped bodies: close the last gap so the crash happens where the paint touches, not
         // up to a substep short of it.
+        const n = this.contactN;
+        let f = 0;
         if (stopped === 'solid' && body) {
           const [x0, y0, f0] = [v.x, v.y, v.facing];
-          const f = this.contactFraction(v, body, nx, ny, nf);
+          f = this.contactFraction(v, body, nx, ny, nf);
           if (f > 0) place(x0 + (nx - x0) * f, y0 + (ny - y0) * f, f0 + (nf - f0) * f);
+        }
+        // Momentum crashes: the rest of this frame's travel slides along what was hit (its
+        // face's tangent, the turn dropped), so a car steering into a wall scrapes along it and a
+        // glancing hit carries on instead of sticking. A velocity-only model can't do this by
+        // itself: the wheels keep pointing into the wall every frame.
+        if (slide && n && stopped === 'solid') {
+          const left = steps - i - f;
+          let rx = (Math.cos(rad) * d + sx / steps) * left, ry = (Math.sin(rad) * d + sy / steps) * left;
+          const into = rx * n[0] + ry * n[1];
+          if (into < 0) (rx -= into * n[0]), (ry -= into * n[1]);
+          if (Math.hypot(rx, ry) > 1e-3) this.move(v, 0, 0, rx, ry, 0, false);
         }
         // Stopped dead against something: drop the cruise target. CDDA keeps it, but there the
         // driver gets a turn to react; in real time the engine would ram the obstacle again
@@ -1265,12 +1408,14 @@ export class VehicleSystem implements GameSystem, MapOverlay {
    * keeps its old pose): 'solid' (terrain, another vehicle) or 'creature' (a body it couldn't
    * fling). Smashed obstacles and knocked-down creatures let it through.
    */
-  private collidePose(v: Vehicle, nx: number, ny: number, nf: number, before: Set<number>, riding: boolean): false | 'solid' | 'creature' {
+  private collidePose(v: Vehicle, nx: number, ny: number, nf: number, before: Set<number>, riding: boolean): false | 'solid' | 'creature' | 'retry' {
     const map = this.game.map;
     const p = this.game.player;
     const z = v.z;
     const mass = v.mass();
     const velBefore = v.velocity;
+    const momentum = this.crashModel === 'momentum';
+    const planarBefore = this.planarVelocity(v);
     let stopped: false | 'solid' | 'creature' = false;
     const pose = v.occupiedTiles(nf, nx, ny);
     const poseKeys = new Set(pose.map((t) => tileKey(t.tx, t.ty, z)));
@@ -1287,7 +1432,10 @@ export class VehicleSystem implements GameSystem, MapOverlay {
     };
     const dir = Math.sign(v.velocity) || 1;
     const rad = (nf * Math.PI) / 180;
-    const fdx = Math.cos(rad) * dir, fdy = Math.sin(rad) * dir;
+    let fdx = Math.cos(rad) * dir, fdy = Math.sin(rad) * dir;
+    // A slide moves the body sideways: things are knocked the way it's actually going.
+    const mlen = Math.hypot(nx - v.x, ny - v.y);
+    if (momentum && mlen > 1e-6 && !settled(motionOf(v))) [fdx, fdy] = [(nx - v.x) / mlen, (ny - v.y) / mlen];
     // Crashes may stay on whole tiles (crashGeometry 'tiles') while creatures use the body.
     const solidBody = this.crashBody(v);
     if (solidBody) {
@@ -1296,6 +1444,15 @@ export class VehicleSystem implements GameSystem, MapOverlay {
       const pusher = { v, obb: rectObb(v, solidBody, nf, nx, ny) };
       for (const c of this.bodyContacts(v, solidBody, nx, ny, nf)) {
         const part = collisionPart(v, c.mount[0], c.mount[1]);
+        if (momentum) {
+          const res = this.momentumContact(v, part, c, solidBody, nx, ny, nf, fdx, fdy, pusher);
+          if (res === 'retry') return 'retry';
+          if (res) {
+            stopped = 'solid';
+            break;
+          }
+          continue;
+        }
         const hit = c.kind === 'vehicle'
           ? this.crashVehicle(v, part, c.other, fdx, fdy, new Set(), pusher)
           : this.crashTerrain(v, part, c.tx, c.ty, c.ob, velBefore);
@@ -1333,6 +1490,17 @@ export class VehicleSystem implements GameSystem, MapOverlay {
       const part = collisionPart(v, t.mx, t.my);
       // Another vehicle (whole tiles; shaped bodies did theirs above).
       const other = isNew && !solidBody ? [...(this.index.get(k) ?? [])].reverse().find((o) => o.v !== v) : undefined;
+      if (other && momentum) {
+        // Whole tiles: the contact is the tile, the normal from the two grids' outlines where
+        // they are now (clear of each other: the separating side is the one being met).
+        const res = this.vehicleContactM(v, part, other, t.tx + 0.5, t.ty + 0.5, obbNormal(rectObb(v, gridRect(v)), rectObb(other.v, gridRect(other.v))), fdx, fdy, poseKeys, null);
+        if (res === 'retry') return 'retry';
+        if (res) {
+          stopped = 'solid';
+          break;
+        }
+        continue;
+      }
       if (other && this.crashVehicle(v, part, other, fdx, fdy, poseKeys, null)) {
         stopped = 'solid';
         break;
@@ -1381,15 +1549,285 @@ export class VehicleSystem implements GameSystem, MapOverlay {
       if (!isNew || solidBody) continue;
       const ob = this.obstacle(t.tx, t.ty, z, v.partsAt(t.mx, t.my).some((q) => has(q, 'WHEEL')));
       if (!ob) continue;
+      // Whole tiles have no reliable contact normal: BN's stop, and any crash slide dies on it.
       if (this.crashTerrain(v, part, t.tx, t.ty, ob, velBefore)) {
+        if (momentum) stopMotion(v);
         stopped = 'solid';
         break;
       }
     }
-    // The driver feels the jolt (vehicle_move.cpp throw_passenger).
-    const dVel = Math.abs(velBefore - v.velocity) * MPH_PER_MS;
-    if (dVel > 1 && this.driving === v) this.jolt(v, dVel);
+    // The driver feels the jolt (vehicle_move.cpp throw_passenger). Momentum crashes: whoever
+    // rides this vehicle feels its own velocity change, so a tank clipping a car barely notices.
+    if (momentum) {
+      const [ax, ay] = this.planarVelocity(v);
+      this.joltRiders(v, Math.hypot(ax - planarBefore[0], ay - planarBefore[1]) * MPH_PER_MS);
+    } else {
+      const dVel = Math.abs(velBefore - v.velocity) * MPH_PER_MS;
+      if (dVel > 1 && this.driving === v) this.jolt(v, dVel);
+    }
     return stopped;
+  }
+
+  // --- momentum crashes (vehicleImpact.ts) -----------------------------------------------
+
+  /** Heavy / tracked handling factors for `v` (handlingMode 'light' = the car tuning for all). */
+  handling(v: Vehicle): Handling {
+    return handlingFor(v.mass(), v.totalPower(), v.skidSteers(), this.handlingMode);
+  }
+
+  /**
+   * Safe and top speed (m/s, on road) as this port drives them: CDDA's power/drag figures
+   * (maxVelocity), capped by the track governor (handlingFor: the Abrams' turbine gives CDDA
+   * 122 / 150 mph, the governor ~45). For the dashboard, the vehicle screens and the engine's
+   * gear pitch. `engineOn` false gives the figures as if it were running (BN's vehicle info).
+   */
+  speedLimits(v: Vehicle, offroad = 1): { safe: number; top: number } {
+    const wasOn = v.engineOn;
+    v.engineOn = true;
+    const cddaSafe = v.maxVelocity(true, offroad), cddaTop = v.maxVelocity(false, offroad);
+    v.engineOn = wasOn;
+    const gov = trackTopSpeed(this.handling(v), offroad);
+    const top = Math.min(cddaTop, gov);
+    return { safe: Math.min(cddaSafe, top), top };
+  }
+
+  /** Rolling freely on its wheels: someone drives it, its engine runs, or it's already moving. */
+  private rolling(v: Vehicle): boolean {
+    // BN vehicle::slowdown: no parking brake on a towed vehicle (`!is_towed() && brake_hold`).
+    return this.driving === v || v.engineOn || Math.abs(v.velocity) > STOP_EPS || this.towing.isTowed(v);
+  }
+
+  /** World velocity of the body (along the wheels + any slide), m/s. */
+  planarVelocity(v: Vehicle): [number, number] {
+    const m = motionOf(v);
+    const rad = (v.facing * Math.PI) / 180;
+    return [v.velocity * Math.cos(rad) + m.sx, v.velocity * Math.sin(rad) + m.sy];
+  }
+
+  /** The box physics uses: the drawn body, else the grid's outline (mount space). */
+  physRect(v: Vehicle): BodyRect {
+    return this.bodyRect(v) ?? gridRect(v);
+  }
+
+  /** World position of the body's centre (where a crash spin turns it about). */
+  private centreWorld(v: Vehicle): [number, number] {
+    const b = this.physRect(v);
+    return v.mountToWorld((b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2);
+  }
+
+  /** `v` as a rigid body for a contact at world (px, py): its point velocity there includes the
+   *  steering / pivot yaw (about mount 0,0) and any crash spin (about the centre). */
+  contactBody(v: Vehicle, px: number, py: number): ContactBody {
+    const m = motionOf(v);
+    const [cx, cy] = this.centreWorld(v);
+    const [vx, vy] = this.planarVelocity(v);
+    const wk = (m.yaw * Math.PI) / 180, ws = (m.spin * Math.PI) / 180;
+    const mass = v.mass();
+    return {
+      m: mass, I: boxInertia(mass, this.physRect(v)), cx, cy,
+      pvx: vx - wk * (py - v.y) - ws * (py - cy), pvy: vy + wk * (px - v.x) + ws * (px - cx),
+    };
+  }
+
+  /**
+   * Give `v` impulse (jx, jy) N·s at world (px, py). The part along the wheels goes into
+   * `velocity` when it's rolling (the wheels just roll; the drive model owns that speed), the
+   * rest into the slide; the torque into the spin. Returns its velocity change (m/s).
+   */
+  applyImpulse(v: Vehicle, jx: number, jy: number, px: number, py: number, vehicleHit = false): [number, number] {
+    const mass = v.mass(), m = motionOf(v);
+    const [cx, cy] = this.centreWorld(v);
+    const dvx = jx / mass, dvy = jy / mass;
+    const dw = ((px - cx) * jy - (py - cy) * jx) / boxInertia(mass, this.physRect(v));
+    const rad = (v.facing * Math.PI) / 180, fx = Math.cos(rad), fy = Math.sin(rad);
+    if (this.rolling(v)) {
+      const along = dvx * fx + dvy * fy;
+      v.velocity += along;
+      m.sx += dvx - along * fx;
+      m.sy += dvy - along * fy;
+    } else {
+      m.sx += dvx;
+      m.sy += dvy;
+    }
+    const s = Math.hypot(m.sx, m.sy);
+    if (s > MAX_SLIDE) (m.sx *= MAX_SLIDE / s), (m.sy *= MAX_SLIDE / s);
+    // Arcade stability: the driver half-catches a spin (GTA keeps you pointing roughly where you
+    // were going; the car you hit is the one that swaps ends).
+    const catchSpin = this.driving === v ? DRIVER_SPIN_SCALE : 1;
+    let dSpin = ((dw * 180) / Math.PI) * catchSpin;
+    // Spun out: another vehicle that would check the spin (the rammer's nose catching the
+    // swinging tail) only takes SKID_COUNTER of it; the rest of the impulse still shoves it.
+    // Walls check it in full.
+    if (vehicleHit && m.skid > 0 && m.spin * dSpin < 0) dSpin *= SKID_COUNTER;
+    m.spin = Math.max(-MAX_SPIN, Math.min(MAX_SPIN, m.spin + dSpin));
+    return [dvx, dvy];
+  }
+
+  /**
+   * A shaped body's contact (bodyContacts) under momentum crashes: find where and along which
+   * normal the paint actually touches (the pose bisected to first contact), then hand it to
+   * the vehicle or terrain response. Truthy = `v` stops this substep; 'retry' = the vehicle in
+   * the way moved off, try the substep again.
+   */
+  private momentumContact(
+    v: Vehicle, part: VehiclePart,
+    c: { kind: 'vehicle'; other: VehicleOccupant } | { kind: 'tile'; tx: number; ty: number; ob: Obstacle },
+    body: BodyRect, nx: number, ny: number, nf: number, fdx: number, fdy: number, pusher: Pusher,
+  ): boolean | 'retry' {
+    // The contact point from the first touching pose; the normal from the last free one (a
+    // separating axis is exactly the face being met, where a penetrating pose can mislead).
+    const lo = this.contactFraction(v, body, nx, ny, nf), hi = Math.min(1, lo + 1 / 64);
+    const pose = (f: number) => rectObb(v, body, v.facing + (nf - v.facing) * f, v.x + (nx - v.x) * f, v.y + (ny - v.y) * f);
+    const free = pose(lo), at = pose(hi), full = pose(1);
+    if (c.kind === 'tile') {
+      // A wall is many tiles: average every blocking tile the body meets at this pose, so a
+      // square hit lands on the middle of the bumper instead of spinning off one tile's edge.
+      const now = rectObb(v, body);
+      let px = 0, py = 0, sx = 0, sy = 0, n = 0;
+      const [x0, y0, x1, y1] = obbBounds(at);
+      for (let ty = Math.floor(y0); ty <= Math.floor(y1); ty++)
+        for (let tx = Math.floor(x0); tx <= Math.floor(x1); tx++) {
+          const mine = tx === c.tx && ty === c.ty;
+          if (!mine && (!obbHitsTile(at, tx, ty) || obbHitsTile(now, tx, ty) || !this.obstacle(tx, ty, v.z, false))) continue;
+          const t = tileObb(tx, ty);
+          const [cx, cy] = obbContact(obbHitsObb(at, t) ? at : full, t);
+          const [ux, uy] = this.tileNormal(free, tx, ty, v.z);
+          (px += cx), (py += cy), (sx += ux), (sy += uy), n++;
+        }
+      const len = Math.hypot(sx, sy) || 1;
+      return this.terrainContactM(v, part, c.tx, c.ty, c.ob, px / n, py / n, [sx / len, sy / len]);
+    }
+    const o = c.other.v;
+    const shapes = vehicleObbs(o, this.bodyRect(o));
+    const s = shapes.find((q) => obbHitsObb(at, q)) ?? shapes.find((q) => obbHitsObb(full, q)) ?? shapes[0];
+    const [px, py] = obbContact(obbHitsObb(at, s) ? at : full, s);
+    return this.vehicleContactM(v, part, c.other, px, py, obbNormal(free, s), fdx, fdy, new Set(), pusher);
+  }
+
+  /**
+   * The face of blocking tile (tx, ty) a box at `o` (just clear of it) is meeting: of the
+   * tile's four faces, those not buried against another blocking tile, the one the box is
+   * furthest out from. A wall is a row of tiles; its tiles' shared sides aren't faces, so a
+   * corner sliding past a seam still meets the wall's face, not the seam.
+   */
+  private tileNormal(o: Obb, tx: number, ty: number, z: number): [number, number] {
+    let best: [number, number] | null = null, bestSep = -Infinity;
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+      if (this.obstacle(tx + dx, ty + dy, z, false)) continue;
+      const reach = o.hx * Math.abs(o.ux * dx + o.uy * dy) + o.hy * Math.abs(o.wx * dx + o.wy * dy);
+      const sep = o.cx * dx + o.cy * dy - reach - ((tx + 0.5) * dx + (ty + 0.5) * dy + 0.5);
+      if (sep > bestSep) (bestSep = sep), (best = [dx, dy]);
+    }
+    return best ?? obbNormal(o, tileObb(tx, ty));
+  }
+
+  /**
+   * `v`'s `part` meets another vehicle at world (px, py), normal (nx, ny) pointing from it to
+   * `v`: exchange the impulse (both slow / shove / spin), damage both by the energy it took,
+   * jolt whoever rides the struck one. When they aren't closing (it's already moving off) the
+   * struck one is moved now, if it hasn't been this frame ('retry'); a light one pinned in
+   * place is shoved aside as the old model did.
+   */
+  private vehicleContactM(v: Vehicle, part: VehiclePart, other: VehicleOccupant, px: number, py: number, [nx, ny]: [number, number], fdx: number, fdy: number, blocked: Set<number>, pusher: Pusher | null): boolean | 'retry' {
+    const o = other.v;
+    const a = this.contactBody(v, px, py), b = this.contactBody(o, px, py);
+    const r = contactImpulse(a, b, px, py, nx, ny, VEHICLE_RESTITUTION, VEHICLE_FRICTION);
+    if (r.closing < CLOSING_MIN) {
+      if (this.advanceStruck(o)) return 'retry';
+      const [vx, vy] = this.planarVelocity(v);
+      if (o !== this.driving && o.mass() < a.m * 0.2 && Math.hypot(vx, vy) > 0.5 && this.shove(o, fdx, fdy, blocked, pusher)) {
+        // A spun-out one keeps spinning (vehicleImpact SKID_*): it was swatted, not parked.
+        const mo = motionOf(o), keep = mo.skid > 0 ? [mo.spin, mo.skid] : null;
+        stopMotion(o);
+        if (keep) [mo.spin, mo.skid] = keep;
+        return 'retry';
+      }
+      this.contactN = [nx, ny];
+      return true;
+    }
+    this.contactN = [nx, ny];
+    this.applyImpulse(v, r.jx, r.jy, px, py, true);
+    const [dvx, dvy] = this.applyImpulse(o, -r.jx, -r.jy, px, py, true);
+    // A real hit that spins something you aren't driving breaks its tyres loose (vehicleImpact
+    // SKID_*). A square shunt doesn't: that one is braked as before.
+    if (r.closing * MPH_PER_MS > SKID_MIN_MPH) for (const w of [v, o]) if (w !== this.driving && Math.abs(motionOf(w).spin) > SKID_MIN_SPIN) motionOf(w).skid = SKID_TIME;
+    const total = crashDamage(r.lost, MPH_PER_MS);
+    const share = damageShare(a.m, b.m);
+    this.damagePart(v, part, total * share);
+    this.damagePart(o, collisionPart(o, other.mx, other.my), total * (1 - share));
+    const mph = r.closing * MPH_PER_MS;
+    // A real hit is told and heard; leaning on it (plowing a car along, nudging) just scrapes.
+    if (mph > PUSH_QUIET_MPH) {
+      const snd = mph > 15 ? 'smash!' : 'crunch!';
+      this.impactMessage(v, part, `the ${o.name}`, snd);
+      this.emitSound(v, Math.round(Math.min(90, 30 + mph * 1.5)), snd, ['smash_success', 'hit_vehicle'], 'combat');
+    }
+    this.joltRiders(o, Math.hypot(dvx, dvy) * MPH_PER_MS);
+    return true;
+  }
+
+  /**
+   * `v`'s `part` meets terrain obstacle `ob` at tile (tx, ty), touching at (px, py) with normal
+   * (nx, ny) out of the obstacle. Only the speed *into* it counts: BN part_collision bashes it
+   * with that (it may break and let `v` through, slower); otherwise the wall takes the normal
+   * speed (no bounce) and some scrape, so a glancing hit slides along it and an off-centre one
+   * swings the body round. True = held, `v` stops this substep.
+   */
+  private terrainContactM(v: Vehicle, part: VehiclePart, tx: number, ty: number, ob: Obstacle, px: number, py: number, [nx, ny]: [number, number]): boolean {
+    const map = this.game.map, z = v.z;
+    const a = this.contactBody(v, px, py);
+    const into = -(a.pvx * nx + a.pvy * ny);
+    this.contactN = [nx, ny];
+    // Touching, not driving into it (a corner resting on a wall while turning away): blocked.
+    if (into < CLOSING_MIN) return true;
+    let smashedAny = false;
+    const r = resolveCollision({
+      mass: a.m, velocity: into, mass2: ob.mass2, e: ob.e, partDens: ob.dens,
+      smash: ob.bashable ? (objDmg) => {
+        if (!this.onBash(tx, ty, z, objDmg)) return false;
+        smashedAny = true;
+        return !obstacleAt(map, tx, ty, z, false);
+      } : undefined,
+    });
+    this.damagePart(v, part, r.partDmg);
+    this.impactMessage(v, part, ob.name, 'smash!');
+    this.emitSound(v, r.smashed ? 80 : 50, 'smash!', ['smash_success', 'hit_vehicle'], 'combat');
+    if (smashedAny) v.version++;
+    if (r.smashed) {
+      // Through it, minus the speed the smash took (along the normal only).
+      const lost = Math.max(0, into - Math.max(0, r.velocity));
+      this.applyImpulse(v, nx * lost * a.m, ny * lost * a.m, a.cx, a.cy);
+      return false;
+    }
+    const wall: ContactBody = { m: Infinity, I: Infinity, cx: px, cy: py, pvx: 0, pvy: 0 };
+    const j = contactImpulse(a, wall, px, py, nx, ny, WALL_RESTITUTION, WALL_FRICTION);
+    const before = v.velocity;
+    this.applyImpulse(v, j.jx, j.jy, px, py);
+    // A wall doesn't throw you backwards (CDDA stops you): no reversing off it, nor creeping.
+    if (Math.abs(v.velocity) < 0.5 || Math.sign(v.velocity) !== Math.sign(before)) v.velocity = 0;
+    return true;
+  }
+
+  /**
+   * Move a struck vehicle now by its own velocity for this frame (if it hasn't moved yet), so
+   * whatever pushes it isn't held up a frame by its turn order in `list`. Collision-checked
+   * like any move: it can push the next one along (chains) or be pinned. True if it moved.
+   */
+  private advanceStruck(o: Vehicle): boolean {
+    if (this.moved.has(o)) return false;
+    const m = motionOf(o);
+    if (settled(m) && Math.abs(o.velocity) < STOP_EPS) return false;
+    this.moved.add(o);
+    const [x0, y0, f0] = [o.x, o.y, o.facing];
+    const dt = this.frameDt;
+    this.move(o, o.velocity * dt, m.yaw * dt, m.sx * dt, m.sy * dt, m.spin * dt);
+    return o.x !== x0 || o.y !== y0 || o.facing !== f0;
+  }
+
+  /** Jolt the player if they ride `v` (driving it or inside it) by `dVelMph` of velocity change. */
+  private joltRiders(v: Vehicle, dVelMph: number): void {
+    if (dVelMph <= 1) return;
+    if (this.driving === v || this.playerOn()?.v === v) this.jolt(v, dVelMph);
   }
 
   /**
@@ -1514,14 +1952,18 @@ export class VehicleSystem implements GameSystem, MapOverlay {
 
   private hitBody(v: Vehicle, part: VehiclePart, target: { name: string; mass: number; hpMax?: number; damage: (dmg: number) => boolean; fling: (force: number) => boolean }): boolean {
     let dead = false, flung = false;
+    // A vehicle sliding from a crash hits with its whole speed, not just the part along its wheels.
+    const m = motionOf(v);
+    const sliding = this.crashModel === 'momentum' && !settled(m);
+    const speed = sliding ? Math.hypot(...this.planarVelocity(v)) : v.velocity;
     // BN's impulse model (resolveBodyCollision); the part's damage_modifier is applied inside.
     const r = resolveBodyCollision({
-      mass: v.mass(), velocity: v.velocity, mass2: target.mass, damageModifier: part.def.damage_modifier, hpMax: target.hpMax ?? 100,
+      mass: v.mass(), velocity: speed, mass2: target.mass, damageModifier: part.def.damage_modifier, hpMax: target.hpMax ?? 100,
       hit: (objDmg) => {
         const dam = Math.round(objDmg);
         if (dam > 0) dead = target.damage(dam) || dead;
         // Fling when the vehicle hits hard enough (CDDA: |vel2_a| > 10 mph or momentum).
-        const vmph = Math.abs(v.velocity) * MPH_PER_MS;
+        const vmph = Math.abs(speed) * MPH_PER_MS;
         if (!dead && vmph > 5) flung = target.fling(vmph);
         return dead || flung;
       },
@@ -1530,9 +1972,15 @@ export class VehicleSystem implements GameSystem, MapOverlay {
     if (r.objDmg > 20) part.blood = Math.min(600, part.blood + 50 + r.objDmg * 2.5);
     if (this.driving === v) this.say(`Your ${v.name}'s ${part.def.name} rams into ${target.name}${dead ? ', killing it' : ''}!`, dead ? 'c_light_green' : 'c_yellow');
     this.emitSound(v, 20, 'smash!', ['smash_success', 'hit_vehicle'], 'combat');
-    v.velocity = r.velocity;
+    if (sliding) {
+      const k = speed > 0 ? Math.max(0, r.velocity) / speed : 0;
+      v.velocity *= k;
+      m.sx *= k;
+      m.sy *= k;
+    } else v.velocity = r.velocity;
     if (!(dead || flung)) {
       v.velocity = 0;
+      m.sx = m.sy = 0;
       return false;
     }
     return true;
@@ -1552,9 +2000,15 @@ export class VehicleSystem implements GameSystem, MapOverlay {
   }
 
   private jolt(v: Vehicle, dVelMph: number): void {
-    const seat = v.driverSeat();
+    const p = this.game.player;
+    // The belt of the seat you're in: the driver's, or (riding along) the one under you.
+    const [lx, ly] = v.worldToMount(p.x, p.y);
+    const seat = this.driving === v ? v.driverSeat() : { mx: Math.round(lx), my: Math.round(ly) };
     const belt = seat ? v.partsAt(seat.mx, seat.my).find((q) => has(q, 'SEATBELT') && q.hp > 0) : undefined;
-    const dmg = Math.round(passengerImpactDamage(dVelMph, belt?.def.bonus ?? 0, this.rng) * BALANCE.crashDamage);
+    let dmg = Math.round(passengerImpactDamage(dVelMph, belt?.def.bonus ?? 0, this.rng) * BALANCE.crashDamage);
+    // Momentum crashes: only a real wreck (your own vehicle's speed changing by LETHAL_JOLT_MPH
+    // or more) can kill you outright; anything less leaves the torso on 1 HP at worst.
+    if (this.crashModel === 'momentum' && dVelMph < LETHAL_JOLT_MPH) dmg = Math.min(dmg, Math.max(0, p.hp.torso.cur - 1));
     if (dmg > 0) {
       this.game.player.takeHit('torso', [{ type: 'bash', amount: dmg }]);
       this.game.message(`You take ${dmg} damage by the power of the impact!`, 'c_red');
@@ -1585,7 +2039,12 @@ export class VehicleSystem implements GameSystem, MapOverlay {
   // --- persistence ----------------------------------------------------------------------
 
   toJSON(): VehicleSaveJSON {
-    return { vehicles: this.list.map((v) => v.toJSON()), driving: this.driving?.uid ?? null, pending: [...this.pending] };
+    const at = this.stations.at, st = this.stations.current();
+    return {
+      vehicles: this.list.map((v) => v.toJSON()), driving: this.driving?.uid ?? null, pending: [...this.pending],
+      ...(this.towing.links.length ? { tows: this.towing.toJSON() } : {}),
+      ...(at && st && !this.driving ? { station: { uid: at.v.uid, i: at.i, kind: st.kind, mx: st.mx, my: st.my } } : {}),
+    };
   }
 
   /** Replace all vehicle state (save/load). Unknown prototypes/parts are dropped via `warn`. */
@@ -1604,8 +2063,20 @@ export class VehicleSystem implements GameSystem, MapOverlay {
     }
     if (this.migrated) console.info(`[chassis] mapped ${this.migrated} saved grid vehicle(s) onto chassis templates`);
     this.pending = [...(j.pending ?? [])];
+    this.towing.fromJSON(j.tows ?? [], opts.warn ?? console.warn);
     this.driving = this.list.find((v) => v.uid === j.driving) ?? null;
-    if (this.driving) this.game.movementOverride = () => this.driving !== null;
+    if (this.driving) this.claimMovement();
+    this.stations.leave();
+    // Back at the station you saved at (the nearest-station fallback picked the gunner's seat
+    // when you saved at the hatch on the same cell). Checked against its cell and kind, so a
+    // station list that changed since (another walk mode, a part gone) finds it by those.
+    const sj = j.station, sv = sj && !this.driving ? this.list.find((v) => v.uid === sj.uid) : undefined;
+    if (sj && sv) {
+      const list = this.stations.stations(sv);
+      const same = (s: Station | undefined) => !!s && s.kind === sj.kind && s.mx === sj.mx && s.my === sj.my;
+      const i = same(list[sj.i]) ? sj.i : list.findIndex(same);
+      if (i >= 0) this.stations.enter(sv, i);
+    }
   }
 
   /** Remove every vehicle and forget queued requests. */
@@ -1616,6 +2087,7 @@ export class VehicleSystem implements GameSystem, MapOverlay {
     this.driving = null;
     this.input = { throttle: 0, steer: 0, brake: false };
     this.soundAcc.clear();
+    this.towing.clear();
     this.engineSounds.stopAll();
     this.load.clear();
   }
@@ -1729,6 +2201,10 @@ export interface VehicleSaveJSON {
   driving: number | null;
   /** mapgen requests queued but not yet placed */
   pending: VehicleRequest[];
+  /** The vehicle station you're at (vehwalk.ts), when not driving. */
+  station?: { uid: number; i: number; kind: string; mx: number; my: number };
+  /** Tow cables between vehicles (towing.ts), by vehicle uid and cable-part mount. */
+  tows?: TowLinkJSON[];
 }
 
 /**

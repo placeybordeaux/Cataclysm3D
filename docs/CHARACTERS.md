@@ -25,7 +25,7 @@ The billboards are still there as a variant.
 | File | What |
 |---|---|
 | `archetype.ts` | Body plan from BN data: `bodytype` first (human, quadruped, dog, pig, bear, horse, gator, insect, spider, crab, bird, "flying insect", blob, snake, fish, frog, migo, angel), then species/flags/symbol for the ~120 without one (robots, plants, fungi, nether). Size from BN `volume` (ml), clamped. Zombie builds (fat, brute, hulk, child, skeleton…) from the id. Pure. |
-| `rig.ts` | Rigid-part skeletons + poses per archetype: **humanoid** (hips, torso, head, two-segment arms and legs, feet; optional wings), **quadruped**/**critter** (body, head, 4 legs, tail, ears), **insect** (thorax, abdomen, head, 6 or 8 two-segment legs, antennae or fangs), **flyer** (body, head, wings, tail/abdomen), **blob** (mass + lumps, squash & stretch), **serpent** (7-segment chain), **plant** (base, stalk, bulb, leaves), **machine** (tracked body + turret head, or a turret), **lump** (fallback). Each pose function covers idle, walk/run, wind-up (melee/heavy/leap), strike follow-through, flinch, downed and dead. Pure. |
+| `rig.ts` | Rigid-part skeletons + poses per archetype: **humanoid** (hips, torso, head, two-segment arms and legs, feet; optional wings), **quadruped**/**critter** (body, head, 4 legs, tail, ears; common quadruped family anatomy, below), **insect** (thorax, abdomen, head, 6 or 8 two-segment legs, antennae or fangs), **flyer** (body, head, wings, tail/abdomen), **blob** (mass + lumps, squash & stretch), **serpent** (7-segment chain), **plant** (base, stalk, bulb, leaves), **machine** (tracked body + turret head, or a turret), **lump** (fallback). Each pose function covers idle, walk/run, wind-up (melee/heavy/leap), strike follow-through, flinch, downed and dead. Pure. |
 | `paint.ts` | Skins. Each box gets a Minecraft-style net; the part's rect of the sprite (opaque box, v down) is projected onto its front (people: drawn facing us) or right side (animals: drawn in profile, head to the right); other faces reuse the crop mirrored / its edge columns / hair rows for the back of heads. Sprite outlines are removed first (they would stripe every box edge), texels take the most common sprite colour in their footprint snapped to the sprite's own 16-colour ramp (a pixel-art downsample, not a blur), and every face gets a 1-texel darker rim. Pure (RGBA arrays), unit-tested. |
 | `charLayer.ts` | Rendering: one `InstancedMesh` of a unit cube per skin page (1024², shelf-packed), one instance per body part. Per-instance face rects (the vertex shader picks the net rect from the face id), flash colour, sky visibility and the creature root (light-map sample, distance). Banded Lambert + light map + MRT normals like everything else, so outlines, flashlight, lamps and shadow maps just work. Two layers: live creatures (rewritten every frame) and bodies (rewritten only when one is added, removed or still falling). |
 | `creature.ts` | Animation driver: stepped pose clock, gait from actual speed, facing that turns toward movement or the target it fights (9 rad/s), downed topple, and `FallingBody` (death: stagger along the killing blow, topple — backwards for people, onto a side for animals, onto the back for bugs — bounce, lie). |
@@ -94,9 +94,21 @@ billboard path still uses the sprite's art span). The point-blank sprite hacks (
   dome, red visor and antenna.
 - **Corpses** fall flat on their back or front (never sideways), arms flung out, feet pointed
   along the legs; nothing sticks up.
-- **Weapons**: NPCs (and the survivor in third person) hold a mesh for what they wield
-  (`weaponOf`: long guns / handguns by skill, bats and spears vs knives by volume). Guns are
-  held at the ready with the off hand supporting; melee weapons hang from the fist.
+- **Weapons**: NPCs use the detailed `buildHeld` item meshes already used in first person,
+  with the actual item variant and sprite palette: rifle receivers/stocks/magazines, pistol
+  slides, knife blades, axe heads, and shaped melee handles. Guns remain held at the ready
+  with the off hand supporting; melee weapons hang from the fist. The third-person survivor
+  holds the same meshes. Held descendants all disappear when
+  crawling or riding; changing items rebuilds even when two items share an overlay or have
+  no overlay. NPC reload currently has no separate animation phase in simulation.
+  [Inspected six-item lineup](screenshots/gaps/npc-held-lineup-final.png).
+
+  Validation: cold atlas-backed boot supplied real palettes for M4A1, AK-47, Glock 19, combat
+  knife, fire axe and bat. `main.ts` awaits `renderer.ready` before installing NPC rendering;
+  the procedural fallback is also synchronous. Normal inventory hands-to-ground moves and
+  regaining each item, followed by ordinary outfit checks, gave weapon-part counts
+  14/14/10/5/6/9 → 0 → their original counts, without forced refresh. Rig regressions cover
+  descendant attachment and crawling/riding stow; identity regression covers missing overlays.
 - **Far figures**: monsters outside monai's 60-tile reality bubble aren't simulated, but
   dormant ones within the draw distance (≤130 m) are now drawn where they stand, idling, with
   the far-LOD thickening and hostile emphasis — a horde down a long road is visible
@@ -188,7 +200,11 @@ Audit of what still turned to face you in the default `full` look (code search f
 (cylinder, round barrel, wooden grip, hammer) / M1911 (steel slide, wooden checkered grip,
 hammer) / polymer autos; pump vs double- and single-barrel break-action shotguns; AR (carry
 rail, straight mag) vs AK (wooden furniture, banana mag) vs bolt/lever hunting rifles (full
-wooden stock, bolt handle, scope); crowbar (claw, chisel) vs pipe; kitchen knife (riveted
+wooden stock, bolt handle, scope) vs lever actions (`leverGun`: tube magazine under the barrel,
+forend with cap, barrel band, lever loop hanging under the wrist, exposed hammer, loading gate;
+Marlin 1894C / 39A / 1895 SBL (stainless + grey laminate), Henry and Colt ring lever (brass
+receiver), Browning BLR (box magazine, no tube), Winchester 1887 (shotgun bore); the lever swings
+through the recoil in first person); crowbar (claw, chisel) vs pipe; kitchen knife (riveted
 handle, wide thin blade) vs combat knife; sledgehammer vs hammer; hatchet vs red fire axe vs
 axe.
 
@@ -251,14 +267,235 @@ Regenerate with
     ~/claude-stuff/bin/heavy --kind gpu --mem 2 -- nix-shell --run 'npx tsx tools/char-shots.ts --gpu --prefix after'
     ~/claude-stuff/bin/heavy --kind gpu --mem 2 -- nix-shell --run 'npx tsx tools/char-shots.ts --gpu --prefix before --params chars=billboard'
 
+## Dropped weapons on the ground
+
+The held meshes (`held.ts`) also lie on the floor. Before, ground items in the modelled looks
+were one of 16 generic shapes (`furniture/items.ts`): every gun was the same plank with a stock
+block, so a dropped Marlin 1894C read as "a brown stick"; in the billboard looks an item with no
+UltiCa sprite (the Marlin, ~17 % of guns, ~39 % of melee weapons) was its map glyph.
+
+- `src/render/furniture/groundHeld.ts`: `groundHeldClass(def)` (heldClass/heldVariant on the
+  ItemDef, gated to weapons/tools/scrap categories with a keyword blacklist, since heldClass's
+  keywords also catch soap "bars", battery cells and tobacco pipes; bows/slings stay generic) and
+  `buildGroundHeld` (the part list evaluated like charLayer, rolled a quarter turn about its
+  length: guns on a side, blades and tools on their flat; lowest point on the surface, centred;
+  small things up to 1.6x toward 0.34 m, long ones down to 1.3 m). Faces are painted by the
+  furniture painter at 32 texels/m (wood grain, rubber, steel, chrome), so they sit next to
+  sprite items and furniture in the same pixel style.
+- Baked into the chunk geometry by `ModelFactory.item` (cached per id and side up; piles lift
+  each held mesh 4.5 cm per slot so crossing rifles lie on each other). No extra draw calls: a
+  50-gun room is ~3000 quads, ~0.8 ms to bake, 0.7 ms per new model the first time.
+- Full/Voxel: every weapon with a held class. Crisp/Terrain (billboards): only items the tileset
+  never drew (`MeshExtras.heldItems`), the rest keep their sprite. Classic is unchanged.
+- Switch: Options > World > **Dropped weapons** (Modelled / Simple shapes), `?grounditems=held|shape`,
+  `cdda.setGroundItemStyle()`, gallery switch + "Dropped weapons" scene (`loot_weapons`).
+- Coverage: `npx tsx tools/ground-item-coverage.ts` (catalog and a world sample around the start).
+  Catalog: guns 93 % / melee 67 % / tools 9 % get a held mesh (before: 0 %, all generic shapes);
+  glyph-only in the billboard looks: guns 17 % -> 1 %, melee 39 % -> 18 %, tools 40 % -> 37 %.
+  heldClass gained jian/estoc/nodachi/khopesh/dao/fencing blades (sword), switchblade/kirpan/
+  katar (knife), staffs/tonfa/shillelagh/pool cue (bat), ji/war scythe/lajatang (spear).
+
+| | v2 (simple shapes) | now |
+| --- | --- | --- |
+| Marlin 1894C | ![](screenshots/grounditems/marlin_shape.jpg) | ![](screenshots/grounditems/marlin_held.jpg) |
+| guns and melee, close | ![](screenshots/grounditems/close_shape_v2.jpg) | ![](screenshots/grounditems/close_held.jpg) |
+| top-down | ![](screenshots/grounditems/showroom_top_shape_v2.jpg) | ![](screenshots/grounditems/showroom_top_held.jpg) |
+| Crisp look (artless Marlin, far right) | ![](screenshots/grounditems/crisp_shape_v2.jpg) | ![](screenshots/grounditems/crisp_held.jpg) |
+
+A pile dropped with real keys (q, Enter): ![](screenshots/grounditems/drop_pile_fp.jpg)
+
+### Icons for weapons without tileset art
+
+The same meshes draw the inventory, pile-list, hotbar and every other ui2 icon (`iconEl`) of an
+item UltiCa never drew, which used to be its glyph (the Marlin 1894C was a brown "("). 145 BN
+items qualify: the ones that pass `groundHeldClass` and have no sprite of their own or through
+looks_like (tileset art, including a looks_like sprite, always wins).
+
+- `src/render/heldIcon.ts` `heldIconPixels(held)`: a small software rasterizer, no WebGL. The
+  part boxes (`heldPartBoxes`, shared with `buildGroundHeld`) are projected orthographically at
+  4x4 supersampling with a depth buffer, flat-shaded from the upper left in a few steps, and
+  downsampled to 32x32: a pixel needs 3 of its 16 samples covered (so 2 cm barrels survive),
+  takes its most common colour (a flat palette, no blended edges), and gets a dark outline like
+  UltiCa's sprites. Guns are side-on with the muzzle right (rifles about 24 px, pistols at least
+  10); melee weapons and tools lie on the diagonal, grip bottom-left. Colours come from the
+  same sprite palette as in the hands.
+- `src/render/heldIconInstall.ts` plugs it into `ui2/icons.ts` (`setModelIconSource`, tried after
+  the atlas and looks_like, before the glyph) once the renderer's sprite source is up; ui2 caches
+  the data URL per item id.
+- Cost (headful Chromium, GPU): ~0.8 ms per icon to draw (all 145: 112 ms), plus ~1.6 ms PNG
+  encoding in ui2's existing `toDataURL`; the first icon of a session takes ~30-40 ms (canvas and
+  JIT warm-up). Cached icons cost a Map lookup.
+- Switch: Options > Interface > **Icons without art** (Modelled / Glyph), `?itemicons=model|glyph`,
+  `cdda.setItemIcons()`, `cdda.itemIconStats()`, `cdda.heldIcon(id)` (a fresh data URL). No
+  gallery switch: the gallery captures the 3D canvas without the HUD.
+- Tests: `tests/render/heldIcon.test.ts`.
+
+| glyph (before) | modelled |
+| --- | --- |
+| ![](screenshots/grounditems/icons_glyph.png) | ![](screenshots/grounditems/icons_model.png) |
+
 ## Known gaps
 
-- One body plan per archetype: a moose and a dog differ in proportions, not anatomy; spiders
-  and ants share the insect plan; robots are a generic tracked machine.
-- NPC weapons (third person) are simple boxes by kind; the first-person items are per class,
-  not per item model.
-- The first-person view has no separate eat/use pose: those use the 2D viewmodel's generic
-  poses, mapped the same way.
+- Common quadruped families now differ in anatomy, but cattle, many unusual creatures,
+  and unique species art still reuse broader plans. Insects retain their shared segmented
+  skeleton with variants; robots remain a generic tracked machine.
+- NPC held meshes and the third-person survivor (`playerModel.ts`) use detailed
+  classes/variants. With the default sprite hands, an item the tileset never drew (e.g. the
+  Marlin 1894C, otherwise held as its map glyph) switches first person to the 3D hands while
+  wielded (`FpView.artless`). NPC simulation has no separate reload-animation phase. Bespoke
+  geometry for every item remains outside the current class/variant system. Dropped weapons use
+  the same meshes on the ground (above); bows, grenades and most tools (pans, brushes, scissors,
+  screwdrivers) remain generic, and so do their inventory icons when the tileset has no art
+  (weapons get a held-mesh icon, above).
+- First-person 3D eat/drink/direct-use gestures now show successful actions; food and liquid
+  use a generic palette-colored portion, rather than bespoke food or container geometry.
+  Deferred tool uses (an axe/shovel/rod activity, lighting a fire, self-installing a CBM) now
+  gesture too, but only from each action's own completion signal, never on open or cancel;
+  resuming an in-progress craft is excluded (see "Deferred tool-use gestures" below). The
+  sprite view retains its poses.
 - At 90–110 m a zombie is a few pixels tall; far figures are idle (dormant monsters only
   drift), and they appear/disappear at the draw distance.
-- Hordes of hundreds: every live part is re-uploaded each frame (fine for dozens; see perf).
+- Hordes of hundreds: transforms and dynamic attributes still upload for every live part
+  each animated frame. Texture/taper attributes now upload on layout changes (see PERF);
+  crowd simulation and sparse transform uploads remain open.
+
+## Successful item gestures
+
+`Inventory.onItemPresentation` reports the actual consumed portion or a snapshot of the
+used item's identity before transformation, only after success. The 3D first-person view
+raises food, tips the drink portion, or turns the used item for 1.2 real seconds, then
+restores the currently wielded item. Menus/pause retain a pending gesture; loading clears
+it, and sprite mode clears pending 3D gestures. No materials, charges, wield state, action
+duration, or simulation activity are changed by the renderer. Food names bypass weapon
+keywords (a chocolate bar is not a pipe).
+
+Native OS picker input selected chocolate, water, and a charged flashlight in the normal
+world. Midpoint screenshots were scheduled by successful-action facts, after the normal
+consume activity completed; timing was not slowed or overridden. The knife remained
+wielded throughout and returned after each gesture. Inspected captures:
+[eat](screenshots/gaps/fp-eat.png), [drink](screenshots/gaps/fp-drink.png),
+[use](screenshots/gaps/fp-use.png), [restored knife](screenshots/gaps/fp-restored.png).
+
+Regression checks cover rejected consumption/no power, pre-transform item identity,
+menu-only successful results staying silent, pause/expiry/replacement/load cleanup, and
+food-name classification. Deferred handlers returning action choices are deliberately
+excluded; this does not claim their eventual selected action has a rendering hook.
+
+## Deferred tool-use gestures
+
+The gap above is closed for every deferred tool use that actually completes while applying
+an item: `use()` itself only knows "accepted" from a handler's `ActionResult.deferred` flag
+(true means "say nothing yet"), and the handler fires `Inventory.presentDeferredUse` itself
+from the action's own completion signal — an activity's `onComplete` (never its start, and
+never `onCancel`) — not from a guess at open time:
+
+- **Axe/shovel/fishing-rod tool-quality uses** (`src/nature.ts` `toolActions`/
+  `withDeferredGesture`): chop tree/logs, cut planks, clear rubble, till, dig a pit, cast a
+  line. `withDeferredGesture` wraps the one `game.activities.start()` call the chosen action
+  makes (even across clearing an occupied rubble tile's own confirm dialog) so only *that*
+  activity's completion fires the gesture with the real tool.
+- **Lighting a fire** (`src/game/fire.ts` `useFirestarter`): the gesture fires from `light()`,
+  the activity's `onComplete`, with a snapshot of the lighter/matches taken before the wait
+  (its ammo is spent there too, after the snapshot).
+- **Self-installing a CBM** (`src/mutbio.ts` + `src/ui/mutbio_ui.ts` `beginInstall`): a new
+  `InstallFlowOpts.onInstalled` hook fires after the uninterruptible install activity
+  completes (with or without complications — BN always installs), not after any of the
+  confirm dialogs the flow asks first. The Autodoc flow (`src/screens/bodymods.ts`) doesn't
+  pass it: there's no held item to show for an operation performed on a couch.
+
+Excluded, deliberately:
+
+- **Resuming an in-progress craft** (the `CRAFT` use_action, `src/ui/crafting_install.ts`):
+  the held item is an abstract WIP placeholder that turns into an unrelated finished item on
+  completion, so there's nothing sensible to show. `deferred` is still set on its result so
+  `use()` no longer fires its own premature gesture the moment the craft is merely resumed —
+  that bug is fixed even though no completion gesture replaces it.
+- **Reading a martial arts manual** (`MA_MANUAL`) and the **heal/transform/UPS-toggle**
+  use_actions are synchronous (they finish inside the `A`pply call itself), so they already
+  got use()'s own immediate gesture correctly and needed no change.
+
+Real-input evidence (`tools/realinput.ts --only toolgesture --params "look=classic&viewmodel=model"`,
+`tools/realinput_toolgesture.ts`): a wielded high-quality lens, `u` → the picker → lighting a
+patch of underbrush (an activity; of the firestarter tools the lens's slow case runs longest,
+but `src/game/activity.ts`'s warp still caps any activity at ~8 real s, so this one only gets
+~3.5 — see the scenario's own comments for why the cancel step has no slack to spare under
+load). `?viewmodel=model` forces the 3D hands on (the default is the flat sprite viewmodel,
+which never animates — see above). Inspected captures: [opening the
+picker](screenshots/gaps/toolgesture-apply-picker.png) (no gesture yet), [cancelled by
+walking away](screenshots/gaps/toolgesture-cancelled-no-gesture.png) ("You stop lighting the
+fire," never animated, nothing lit), [the gesture right as the fire
+catches](screenshots/gaps/toolgesture-gesture-on-completion.png),
+[restored](screenshots/gaps/toolgesture-restored.png) to the normal held tool past the 1.2 s
+window. `src/monsters.ts` exposes the installed `FpView` on `window.cdda.fpView` read-only,
+purely so this (and future) real-input evidence can check the pending gesture without ever
+driving the action itself through a debug call.
+
+The scenario uses a lens rather than an axe because it's the simpler demonstration (one
+use_action, no submenu, keeps the cancel/completion timing the focus) — not because the axe
+path didn't work. It didn't, until now: writing this evidence found a pre-existing,
+unrelated ui2 bug — `src/ui2/bn/install.ts`'s `reg('apply', …)` recomputed `model.actions()`
+a second time and filtered its own `use` entry out of it by reference equality against the
+*first* call's objects, so the "Use" submenu for any multi-use_action tool (axe, shovel,
+fishing rod) always built empty and nothing was ever chosen (no error, no message — the
+picker just closed). Fixed by factoring the decision into a standalone
+`applyPickerChoice(model, view, loc)` that reuses the one `model.actions()` computation
+instead of recomputing and comparing against it; the other `model.actions()` call sites in
+`src/ui2/` (`lists.ts`, `containers.ts`, the loot screens) each call it once and don't have
+this pattern. Unit regression: `tests/nature.test.ts` ("the \`u\` apply picker's Use
+submenu…") calls `applyPickerChoice` directly for a wielded axe, asserts the submenu lists
+Chop tree/Chop logs/Lumber, and that choosing Chop tree starts and (after
+`onComplete`) completes the real activity, firing the deferred gesture.
+
+Real-input evidence for the fix (`--only toolgestureaxe`): `u` → the picker → a wielded wood
+axe → its "Use" submenu (previously always empty) → Chop tree → the chop starts, runs with
+no gesture, finishes, and gestures. Inspected captures:
+[the picker](screenshots/gaps/toolgestureaxe-apply-picker.png),
+[the Use submenu, now populated with Chop tree/Chop logs/Lumber](screenshots/gaps/toolgestureaxe-use-submenu.png),
+[chopping, no gesture](screenshots/gaps/toolgestureaxe-chopping-no-gesture.png),
+["You finish chopping down a tree," gesturing](screenshots/gaps/toolgestureaxe-gesture-on-completion.png),
+[restored](screenshots/gaps/toolgestureaxe-restored.png).
+
+Unit coverage for success/cancel/ordering: `tests/nature.test.ts` ("a tool-quality use" and
+"the \`u\` apply picker's Use submenu…"), `tests/crafting.test.ts` ("fire"),
+`tests/mutbio.test.ts` ("bionics in a game"), and `tests/inventory.test.ts` ("deferred tool
+presentation") for `use()`'s own `deferred` check.
+
+Both real-input scenarios were flaky under heavier machine load (merge-integration review),
+all in `tools/realinput_toolgesture.ts` — never in the game code they exercise. Each failure
+was a scenario check racing a short real-time window rather than waiting on the actual state
+transition: "walking away cancels it" checked `!activityName()` exactly once right after the
+key hold, before slow frame delivery had given `ActivityManager`'s own per-tick movement-cancel
+check (and `ItemGesture`'s per-frame elapsed-time tick) a chance to run; the "restored" checks
+did the same after one fixed sleep. Fixed by polling the real condition instead of a single
+check or a bare sleep (`waitUntil`/`waitNoGesture`), and — since "the activity is no longer
+running" is ambiguous between "cancelled" and "it simply finished in the meantime" — by
+reading BN's own outcome message ("You stop lighting the fire." vs. "You successfully light a
+fire.") to tell which actually happened, rather than inferring it from timing. The lens
+replaced flint and steel for extra cancel-timing margin (every firestarter tool's slow case
+falls well short of the ~8 real s `defaultWarp` caps activities at, so none of them gives much
+room; the lens's is the longest available). A combined `--only toolgestureaxe,toolgesture` run
+is green 3 consecutive times under `heavy` as part of this fix's own verification.
+
+## Common quadruped family anatomy
+
+The existing BN volume and proportion rules still set body size. Quadruped bodytype and
+identity now select a canine baseline or equine, cervid, bear, pig, reptile, or feline
+variant. Horses add a raised neck, mane, hanging tail and hooves; deer and moose add a
+neck, pointed ears, short tail and split hooves. Bears add round ears, short tails,
+shoulder bulk and paws. Pigs add a broad nose pad, curled tail and split hooves. Gators
+add a flattened long muzzle, widening legs, back plates and a tapered extended tail.
+Cats use a short muzzle, thin long tail and paws. These additions inherit the existing
+parent animation, skin palette and saved appearance seed. Generic cervid identity
+does not imply sex-specific antlers. Creature hitboxes and balance are unchanged.
+
+Inspected paired captures use actual BN monsters spawned in the paused seeded gallery,
+broadside at five metres, through the normal monster view. The focused gallery is at
+noon, on cleared grass, with model characters and styled sprite-derived palettes:
+[horse/deer](screenshots/gaps/species-hooved.png),
+[bear/pig](screenshots/gaps/species-bear-pig.png), and
+[gator/cougar](screenshots/gaps/species-gator-cat.png).
+The 29 character tests include BN family selection, parent order, named anatomy,
+standing floor/height bounds, finite walking/attack/death transforms, and finite
+toppled corpse bounds. The shared side-fall contact estimate is retained; these tests
+do not claim every limb rests precisely on the floor. This is family-level geometry,
+not a complete bespoke species-art pass.

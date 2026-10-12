@@ -416,8 +416,7 @@ describe('ranged depth', () => {
     for (let i = 1; i < distinct.length; i++) expect(distinct[i]).toBeGreaterThan(distinct[i - 1]);
   });
 
-  // TODO(BN): written for DDA data/behaviour; fails on Bright Nights core data (AssertionError: expected false to be true // Object.is equality). Port with its system.
-  it.skip('a suppressor cuts the noise by its loudness_multiplier; it needs a muzzle slot', () => {
+  it('a BN suppressor reduces report by its additive modifier and requires a compatible muzzle slot', () => {
     const { c } = survivor();
     c.setSkill('gun', 5);
     c.setSkill('rifle', 5);
@@ -425,27 +424,35 @@ describe('ranged depth', () => {
     const loud = gun.gunNoise().volume;
     const sup = createItem(data, 'suppressor');
     expect(installGunmod(c, gun, sup, null).ok).toBe(true);
-    expect(gun.gunNoise().volume).toBe(Math.trunc(loud * 0.7));
+    expect(gun.gunNoise().volume).toBe(loud - 45);
     expect(gunmodCompatible(gun, createItem(data, 'suppressor')).reason).toMatch(/already has/);
-    // A Glock has no muzzle slot.
-    const glock = createItem(data, 'glock_19');
-    expect(gunmodCompatible(glock, createItem(data, 'suppressor')).ok).toBe(false);
+    // BN Glock has a muzzle slot and a compatible PISTOLS category; shotguns are excluded.
+    expect(gunmodCompatible(createItem(data, 'glock_19'), createItem(data, 'suppressor')).ok).toBe(true);
+    expect(gunmodCompatible(createItem(data, 'mossberg_500'), createItem(data, 'suppressor')).ok).toBe(false);
     // onto a workbench (any place that takes it)
     expect(removeGunmod(c, gun, sup, [L.stock({ stock: [], name: 'bench' })]).ok).toBe(true);
     expect(gun.gunNoise().volume).toBe(loud);
   });
 
-  // TODO(BN): written for DDA data/behaviour; fails on Bright Nights core data (AssertionError: expected 90 to be NaN // Object.is equality). Port with its system.
-  it.skip('sights: a red dot on a sights mount replaces the iron sights; gunmods survive save/load', () => {
+  it('BN gunmod category groups require every member and explicit IDs override exclusions', () => {
+    const gun = loadedScar();
+    const modData = (overrides: Record<string, unknown>) => ({ ...data, items: { ...data.items, suppressor: { ...data.items.suppressor, ...overrides } } });
+    expect(gunmodCompatible(gun, createItem(modData({ mod_target_category: [['RIFLES', 'AUTOLOADING']] }), 'suppressor')).ok).toBe(true);
+    expect(gunmodCompatible(gun, createItem(modData({ mod_target_category: [['RIFLES', 'SHOTGUNS']] }), 'suppressor')).ok).toBe(false);
+    expect(gunmodCompatible(gun, createItem(modData({ mod_exclusion_category: [['RIFLES', 'AUTOLOADING']] }), 'suppressor')).ok).toBe(false);
+    expect(gunmodCompatible(gun, createItem(modData({ mod_targets: ['scar_l'], mod_exclusion_category: [['RIFLES']] }), 'suppressor')).ok).toBe(true);
+  });
+  it('sights: a red dot on a sights mount replaces the iron sights; gunmods survive save/load', () => {
     const { c } = survivor();
     c.setSkill('gun', 5);
     c.setSkill('rifle', 5);
     const gun = loadedScar();
-    expect(sightDispersion(gun)).toBe(Number(gun.def.sight_dispersion));
+    expect(sightDispersion(gun)).toBe(90);
     expect(installGunmod(c, gun, createItem(data, 'red_dot_sight'), null).ok).toBe(true);
-    expect(sightDispersion(gun)).toBe(27);
+    expect(sightDispersion(gun)).toBe(26);
     const again = Item.fromJSON(data, JSON.parse(JSON.stringify(gun.toJSON())));
     expect(again.gunmods.map((m) => m.typeId)).toEqual(['red_dot_sight']);
+    expect(sightDispersion(again)).toBe(26);
     // Mods with a dispersion_modifier widen the gun's dispersion.
     const base = gunDispersion(gun);
     installGunmod(c, gun, createItem(data, 'muzzle_brake'), null);
@@ -463,14 +470,16 @@ describe('ranged depth', () => {
     expect(aimState(c, loadedScar())).toBe('Immediate');
   });
 
-  // TODO(BN): written for DDA data/behaviour; fails on Bright Nights core data (AssertionError: expected 1 to be 9 // Object.is equality). Port with its system.
-  it.skip('shotgun buckshot: 9 pellets of shot_damage beyond point-blank, spread over several zombies', () => {
+  it('BN buckshot fires five normal-damage pellets across the extracted three-degree half-angle', () => {
     const { c } = survivor();
     const gun = createItem(data, 'mossberg_500', { ammo: 'shot_00' });
     const shot = fireGun(c, gun, new Rng(5));
-    expect(shot.pellets).toBe(9);
-    expect(shot.shotDamage).toEqual([{ type: 'bullet', amount: 16, armor_penetration: 0 }]);
-    expect(shot.shotSpreadMoa).toBe(300);
+    expect(shot.pellets).toBe(5);
+    expect(shot.shotDamage).toEqual(shot.damage);
+    expect(shot.shotDamage?.[0].armor_penetration).toBe(24);
+    expect(shot.shotHalfAngle).toBe(3);
+    expect(gun.ammoRemaining()).toBe(5);
+    expect(shot.shotSpreadMoa).toBe(180);
     const { game, sys, combat, msgs } = world();
     game.player.inv.wield(createItem(data, 'mossberg_500', { ammo: 'shot_00' }), null);
     game.player.recoil = 0;
@@ -480,12 +489,24 @@ describe('ranged depth', () => {
       game.player.recoil = 0;
       combat.cooldown = 0;
       combat.fire();
-      hitMsgs += msgs.filter((m) => / is hit by .* projectiles?, /.test(m)).length;
+      hitMsgs += msgs.filter((m) => / is hit by .* (?:projectiles?|pellets)/.test(m)).length;
       msgs.length = 0;
     }
     expect(hitMsgs).toBeGreaterThan(0);
   });
 
+  it('BN buckshot retains five pellets at point-blank instead of collapsing to a single bullet', () => {
+    const { game, sys, combat, msgs } = world();
+    game.player.inv.wield(createItem(data, 'mossberg_500', { ammo: 'shot_00' }), null);
+    game.player.recoil = 0;
+    const m = sys.spawnById('mon_zombie', 12.5, 11.3, 0)!;
+    const before = m.hp;
+    const perPellet = game.player.inv.wielded!.gunDamage().reduce((n, d) => n + d.amount, 0);
+    expect(combat.fire()).toBe(true);
+    // Free aim applies hit-quality multipliers; a collapsed point-blank projectile cannot reach this damage.
+    expect(before - m.hp).toBeGreaterThan(perPellet * 2);
+    expect(msgs.join(' ')).toMatch(/many projectiles/);
+  });
   it('damaged guns jam; a jammed gun refuses to fire until cleared', () => {
     const { c } = survivor();
     const gun = loadedScar();
@@ -517,7 +538,7 @@ describe('monster guns (gun_actor)', () => {
     for (let i = 0; i < Math.round(seconds * 30); i++) game.tick(1 / 30);
   };
 
-  // TODO(BN): written for DDA data/behaviour; fails on Bright Nights core data (AssertionError: expected -1 to be greater than 1). Port with its system.
+  // Extracted BN mon_turret gun actor: hk_mp5,9mm, Hostile detected targeting sound, no_crits.
   it('a turret announces its target lock, then fires from its starting_ammo', () => {
     const { game, sys, msgs } = world(11);
     const t = sys.spawnById('mon_turret', 12.5, 6.5, 0)!;

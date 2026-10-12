@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { Game } from '../game/game';
 import { has, type Vehicle, type VehiclePart } from '../game/vehicle';
 import type { VehicleSystem } from '../game/vehicles';
+import type { Station, StationView } from '../game/vehwalk';
 import { LEVEL_HEIGHT } from '../world/coords';
 import { hasFlag } from '../world/registry';
 import { setupPixelTexture } from './atlas';
@@ -20,12 +21,17 @@ import { Cockpit, type HandColors } from './vehicleCockpit';
 import { makeWheelHands } from './vehicleHands';
 import { AtlasTextureSource } from './atlasSource';
 import { charLayers, charSettings, spriteInfo } from './chars/index';
-import { CRANK_M_PER_TURN, genericAnchors, riderSlot, type RideAnchors } from './vehicleRider';
+import { CRANK_M_PER_TURN, genericAnchors, riderSlot, stationAnchors, type RideAnchors } from './vehicleRider';
 import type { V3 } from './geometry';
 import { bodyRectFor, setVehicleWidth, vehicleWidth, type VehicleWidth } from './vehicleLayout';
 import { noseX } from '../game/chassis';
 import { liveryBody } from './vehicleSkin';
 import { createHeadlight, prepareHeadlightShadow } from './headlightShadow';
+import type { TurretBuild } from './vehicleTank';
+import { hullYaw, turretAim, turretHooks } from '../game/turret';
+
+/** Standing eye above the floor at a deck station (the on-foot camera's EYE). */
+const STAND_EYE = 1.6;
 
 // 3D meshes for vehicles, built from their parts mount by mount, as low-poly boxes wearing
 // small procedural pixel-art swatches (UltiCa's vp_* sprites are 3/4-view drawings for a
@@ -528,6 +534,11 @@ interface Entry {
   cockpit: Cockpit | null;
   /** Model look: roof height above the floor level (m), null without a roof. */
   roofY: number | null;
+  /** Model look: the floor you stand on inside (cabin floor, a hull's deck) and a turret's
+   *  roof, above the floor level (m); null when the build doesn't say (station eyes, vehwalk). */
+  deckY: number | null;
+  turretTop: number | null;
+  turretFoot: { x: number; z: number; r: number } | null;
   /** Built at the distance LOD (no interior, no shadow casting). */
   far: boolean;
   wheels: { mesh: THREE.Mesh; r: number; steer: boolean; spin: number }[];
@@ -554,6 +565,27 @@ interface Entry {
   pivot: THREE.Group;
   /** Model look: the glass seen from outside (lighter while your body sits behind it). */
   glassOut: THREE.Mesh | null;
+  /** Armoured hulls: the turret, gun and MG pieces that traverse and elevate (src/game/turret.ts aims them). */
+  turrets: TurretView[];
+}
+
+/** A built turret's moving pieces (vehicleTank.ts TurretBuild): yaw on the ring, pitch on the trunnion / pintle. */
+interface TurretView {
+  part: VehiclePart | null;
+  /** The turret body, turned about +Y (null geometry = hull MGs only, the group is the hull frame). */
+  group: THREE.Group;
+  hasTurret: boolean;
+  gun: { group: THREE.Group; mesh: THREE.Mesh | null; len: number } | null;
+  mgs: { part: VehiclePart; group: THREE.Group; mesh: THREE.Mesh | null; len: number; onTurret: boolean }[];
+}
+
+const wrapAngle = (a: number) => Math.atan2(Math.sin(a), Math.cos(a));
+
+/** How far (m) a barrel runs back after a shot, `t` s ago: slammed back, then eased home. */
+function barrelRecoil(t: number, travel: number): number {
+  if (!Number.isFinite(t) || t < 0) return 0;
+  if (t < 0.04) return (travel * t) / 0.04;
+  return travel * Math.exp(-(t - 0.04) * 6);
 }
 
 /** Distance LOD thresholds (m): simplified beyond LOD_FAR, detailed again inside LOD_NEAR. */
@@ -602,6 +634,8 @@ export class VehicleRenderer {
     for (const m of [this.glassMat, this.glassOut, this.glassOutRider, this.glassIn, this.lampOn, this.lampOff, this.tailOn, this.tailOff, this.beaconMat]) patchNormalOutput(m, false);
     renderer.scene.add(this.group, this.headlight, this.headlight.target);
     renderer.vehicleView = this;
+    // Turret shots leave the drawn muzzle (src/game/turret.ts muzzleOf falls back to an estimate).
+    turretHooks.muzzle = (v, part) => this.muzzleOf(v, part);
     system.onRemoved.push((v) => this.drop(v));
     renderer.beforeRender.push((dt) => this.update(dt));
     // The character layers flush in their own beforeRender step: make sure it comes after
@@ -734,9 +768,9 @@ export class VehicleRenderer {
     };
     const next: Entry = {
       obj, lean, meshes, roof: null, lamps: null, tails: null, beacons: null, skin: null, skinMeshes: [], pending: null,
-      driven: v === this.system.driving, wheels: [], bike: false, far, roofY: null, cockpit: null,
+      driven: v === this.system.driving, wheels: [], bike: false, far, roofY: null, deckY: null, turretTop: null, turretFoot: null, cockpit: null,
       version: v.version, z: v.z, look: this.lookMode, eyeH: null, driverZ: null, driverX: null, eyeX: null, parkedLean: 0, beam: e?.beam ?? [],
-      ride: null, crank: null, pedal: e?.pedal ?? 0, pedalShown: e?.pedalShown ?? 0, pedalTick: 0, pivot, glassOut: null,
+      ride: null, crank: null, pedal: e?.pedal ?? 0, pedalShown: e?.pedalShown ?? 0, pedalTick: 0, pivot, glassOut: null, turrets: [],
     };
     const t0 = performance.now();
     const worker = this.lookMode === 'model' ? this.skinWorker() : null;
@@ -759,6 +793,7 @@ export class VehicleRenderer {
       next.roof = mk(model.roof, bodyMat.mat, bodyMat.depth);
       next.skinMeshes = model.bodyUsesParts ? [] : [b, next.roof].filter((m): m is THREE.Mesh => !!m);
       mk(model.parts, parts.mat, parts.depth);
+      for (const t of model.turrets ?? []) next.turrets.push(this.turretView(t, pivot, meshes, parts.mat, parts.depth, far));
       if (model.glass) {
         next.glassOut = mk(model.glass, this.glassOut, null);
         mk(model.glass, this.glassIn, null);
@@ -784,6 +819,9 @@ export class VehicleRenderer {
       }
       next.eyeH = model.eyeH;
       next.roofY = model.layout.cabin && model.body ? model.layout.p.roof : null;
+      next.deckY = model.deckY ?? null;
+      next.turretTop = model.turretTop ?? null;
+      next.turretFoot = model.turretFoot ?? null;
       next.driverX = model.driverX ?? null;
       next.eyeX = model.eyeX ?? null;
       next.driverZ = model.driverZ;
@@ -814,7 +852,8 @@ export class VehicleRenderer {
     const p = this.game.player;
     const rig = this.renderer.rig;
     const driving = this.system.driving;
-    rig.suppressBob = !!driving;
+    const station = driving ? null : this.system.stations.view();
+    rig.suppressBob = !!driving || !!station;
     this.renderer.handsBusy = !!driving;
     if (driving && driving !== this.lastDriving) {
       // Taking the wheel: look where the car points (the cameras are relative to it from here).
@@ -867,6 +906,7 @@ export class VehicleRenderer {
         w.mesh.rotation.set(0, w.steer ? -v.steer : 0, w.spin);
       }
       if (e.crank) this.pedal(e, v, dt);
+      if (e.turrets.length) this.aimTurrets(e, v);
       // Top-down hides roofs (and anything above your level) so you can see inside.
       if (e.roof) e.roof.visible = !top || v.z < p.z;
       if (e.lamps) e.lamps.material = v.lightsOn ? this.lampOn : this.lampOff;
@@ -895,9 +935,13 @@ export class VehicleRenderer {
       });
     }
     for (const v of [...this.entries.keys()]) if (!seen.has(v)) this.drop(v);
-    this.placeRider(driving, now);
+    this.placeRider(driving, station, now);
     rig.drive = driving ? this.driveView(driving) : null;
-    rig.eyeCap = driving ? null : this.doorwayEyeCap();
+    rig.stationEye = station ? this.stationEye(station) : null;
+    rig.stationWide = station?.cabin === 'crew';
+    const own = station?.v ?? null;
+    rig.stationOwn = own ? (tx, ty) => this.system.at(tx, ty, own.z)?.v === own : null;
+    rig.eyeCap = driving || station ? null : this.doorwayEyeCap();
     // no rain inside the cabin in the cockpit view (the glass is ~1 m ahead)
     this.renderer.weather.clearRadius = driving && rig.driveCam === 'cockpit' && !this.entries.get(driving)?.bike ? 1.1 : 0;
 
@@ -914,6 +958,122 @@ export class VehicleRenderer {
       s.intensity = this.headlightIntensity;
     } else s.intensity = 0;
     prepareHeadlightShadow(s, this.renderer.three.shadowMap.type);
+  }
+
+  /** The moving pieces of a hull's turret (vehicleTank.ts TurretBuild) under the vehicle's mount frame. */
+  private turretView(t: TurretBuild, parent: THREE.Group, meshes: THREE.Mesh[], mat: THREE.Material, depth: THREE.MeshDepthMaterial, far: boolean): TurretView {
+    const mesh = (geo: THREE.BufferGeometry | null): THREE.Mesh | null => {
+      if (!geo) return null;
+      const m = new THREE.Mesh(geo, mat);
+      m.customDepthMaterial = depth;
+      m.castShadow = !far;
+      m.receiveShadow = true;
+      meshes.push(m);
+      return m;
+    };
+    const group = new THREE.Group();
+    group.position.set(...t.pivot);
+    parent.add(group);
+    const body = mesh(t.geo);
+    if (body) group.add(body);
+    let gun: TurretView['gun'] = null;
+    if (t.gun) {
+      const g = new THREE.Group();
+      g.position.set(...t.gun.pivot);
+      group.add(g);
+      const m = mesh(t.gun.geo);
+      if (m) g.add(m);
+      gun = { group: g, mesh: m, len: t.gun.len };
+    }
+    const mgs = t.mgs.map((mg) => {
+      const g = new THREE.Group();
+      g.position.set(...mg.pivot);
+      (mg.onTurret ? group : parent).add(g);
+      const m = mesh(mg.geo);
+      if (m) g.add(m);
+      return { part: mg.part, group: g, mesh: m, len: mg.len, onTurret: mg.onTurret };
+    });
+    return { part: t.part, group, hasTurret: !!t.geo, gun, mgs };
+  }
+
+  /**
+   * Turn the turret and its guns to where src/game/turret.ts says they point. The local frame is
+   * the hull's (X forward, Z right), so a yaw `rel` clockwise from the hull's heading is a
+   * rotation of -rel about +Y; elevation is a rotation about +Z. An unmanned MG riding on the
+   * turret just turns with it. Barrels run back after a shot.
+   */
+  private aimTurrets(e: Entry, v: Vehicle): void {
+    const hull = hullYaw(v);
+    for (const t of e.turrets) {
+      let tYaw = hull;
+      if (t.part && t.hasTurret) {
+        const a = turretAim(v, t.part);
+        tYaw = a.yaw;
+        t.group.rotation.y = -wrapAngle(a.yaw - hull);
+        if (t.gun) {
+          t.gun.group.rotation.z = a.pitch;
+          if (t.gun.mesh) t.gun.mesh.position.x = -barrelRecoil(a.sinceShot, 0.55);
+        }
+      }
+      for (const mg of t.mgs) {
+        const a = turretAim(v, mg.part);
+        if (mg.onTurret && !a.want) {
+          // riding along: points where the turret points (and starts from there when manned)
+          mg.group.rotation.set(0, 0, 0);
+          a.yaw = tYaw;
+          a.pitch = 0;
+        } else {
+          mg.group.rotation.y = -wrapAngle(a.yaw - (mg.onTurret ? tYaw : hull));
+          mg.group.rotation.z = a.pitch;
+        }
+        if (mg.mesh) mg.mesh.position.x = -barrelRecoil(a.sinceShot, 0.05);
+      }
+    }
+  }
+
+  /** The drawn muzzle of a turret's gun in game coordinates (x, y tiles; h absolute metres), or null if not built. */
+  muzzleOf(v: Vehicle, part: VehiclePart): { x: number; y: number; h: number } | null {
+    const e = this.entries.get(v);
+    if (!e) return null;
+    for (const t of e.turrets) {
+      const g = t.part === part && t.gun ? { group: t.gun.group, len: t.gun.len } : t.mgs.find((m) => m.part === part) ?? null;
+      if (!g) continue;
+      g.group.updateWorldMatrix(true, false);
+      const w = new THREE.Vector3(g.len, 0, 0).applyMatrix4(g.group.matrixWorld);
+      return { x: w.x, y: w.z, h: w.y };
+    }
+    return null;
+  }
+
+  /**
+   * The eye at a vehicle station (src/game/vehwalk.ts): seated at the drawn driver's eye
+   * height, standing on the drawn floor under the roof, head out of a hatch over a hull, and
+   * between two stations mid-hop with a small step in it. Absolute metres.
+   */
+  private stationEye(s: StationView): number {
+    const e = this.entries.get(s.v);
+    const eye = (st: Station): number => {
+      const deck = e?.deckY ?? 0.55;
+      const seatEye = e?.eyeH ?? deck + 0.75;
+      // a hatch: head and shoulders out over the turret; a turret seat: head over its cupola
+      // and machine gun (the M1's M240 sits ~0.4 m above the turret roof, right at the seat)
+      if (st.posture === 'hatch') {
+        // a hatch on the turret puts your head out over its roof; one on the hull deck (the
+        // M1's driver's, a hull hatch behind the turret) over the deck
+        const f = e?.turretFoot;
+        const onTurret = !f || Math.hypot(st.x - f.x, st.y - f.z) <= f.r;
+        return (onTurret ? e?.turretTop ?? deck : deck) + 0.9;
+      }
+      if (s.cabin === 'crew') return st.turret ? (e?.turretTop ?? deck) + 0.75 : seatEye;
+      if (st.posture === 'standing') return Math.min(deck + STAND_EYE, (e?.roofY ?? Infinity) - 0.15);
+      if (st.kind === 'bed') return deck + 0.6;
+      return seatEye;
+    };
+    const base = s.v.z * LEVEL_HEIGHT;
+    const to = eye(s.station);
+    if (!s.from || s.t >= 1) return base + to;
+    const k = s.t * s.t * (3 - 2 * s.t);
+    return base + eye(s.from) + (to - eye(s.from)) * k + Math.sin(Math.PI * s.t) * 0.05;
   }
 
   /**
@@ -963,7 +1123,7 @@ export class VehicleRenderer {
    * 3D characters: the player model puts itself in riderSlot). Runs after the vehicle's own
    * placement this frame, so the body never trails the vehicle.
    */
-  private placeRider(driving: Vehicle | null, now: number): void {
+  private placeRider(driving: Vehicle | null, station: StationView | null, now: number): void {
     const rider = riderSlot(this.renderer).rider;
     const e = driving ? this.entries.get(driving) : undefined;
     for (const [v, en] of this.entries) {
@@ -971,6 +1131,7 @@ export class VehicleRenderer {
       if (en.cockpit) en.cockpit.handsVisible = !seated;
       if (en.glassOut) en.glassOut.material = seated ? this.glassOutRider : this.glassOut;
     }
+    if (rider && !driving && station && station.station.posture !== 'standing') return this.placeStationRider(station, now);
     if (!rider || !driving || !e) return;
     let a = e.ride;
     if (!a) {
@@ -986,6 +1147,29 @@ export class VehicleRenderer {
     const f = charSettings.fps;
     this.riderClock = f > 0 ? Math.floor(now * f) / f : now;
     rider.place(a, e.pivot.matrixWorld, grips, e.pedalShown, this.riderClock, this.riderWorld);
+  }
+
+  /**
+   * The body at a seated or hatch station (vehwalk.ts) outside first person: in the seat, or
+   * standing in the hatch with its forearms on the rim, instead of the standing body lifted to
+   * the station's eye with its legs through the seat. A commander in a hatch and a gunner in a
+   * turret face where you look; everyone else faces forward.
+   */
+  private placeStationRider(s: StationView, now: number): void {
+    const rider = riderSlot(this.renderer).rider;
+    const e = this.entries.get(s.v);
+    if (!rider || !e) return;
+    const st = s.station;
+    const p = this.game.player;
+    const rel = p.yaw - hullYaw(s.v);
+    const turn = st.posture === 'hatch' || st.turret ? Math.atan2(Math.sin(rel), Math.cos(rel)) : 0;
+    const a = stationAnchors(st.posture === 'hatch' ? 'hatch' : 'seated', st.x, st.y, this.stationEye(s), turn);
+    e.pivot.updateWorldMatrix(true, false);
+    const [wx, wy] = s.v.mountToWorld(a.hip[0], a.hip[2]);
+    Object.assign(this.riderWorld, { x: wx, y: wy, z: s.v.z });
+    const f = charSettings.fps;
+    this.riderClock = f > 0 ? Math.floor(now * f) / f : now;
+    rider.place(a, e.pivot.matrixWorld, null, 0, this.riderClock, this.riderWorld);
   }
 
   /** Wipers: 0 off, 1 rain / drizzle, 2 storm (the weather you see falling). */
@@ -1062,7 +1246,7 @@ export class VehicleRenderer {
 
 /** Fraction of the main (non-battery) fuel left, for the fuel gauge; the battery for EVs. */
 function fuelFraction(v: Vehicle): number {
-  const fuels = v.engineFuels();
+  const fuels = v.runningFuels();
   const gas = fuels.filter((f) => f !== 'battery' && f !== 'muscle')[0] ?? (fuels.includes('battery') ? 'battery' : null);
   if (!gas) return 0;
   const cap = v.fuelCapacity(gas);

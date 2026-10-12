@@ -170,7 +170,7 @@ differences.)
 3. **The start is always BN's Evac Shelter**, and hostiles within 10 tiles are removed in the first second of a new game. *[new-player design]* — ARCHITECTURE.md "Progression"; `placement.ts`
 4. **A refugee center is always placed near the start town.** *[new-player design]* — ARCHITECTURE.md "NPCs"
 5. **One modular mutagen lab and one microlab are always placed** in the start region. *[simplification]* — ARCHITECTURE.md "Underground labs"
-6. **Mutable specials are simplified**. The classic Lab grows a simplified `lab_basement`. There are no subways, sewers or railroads near the start. *[simplification]* — ARCHITECTURE.md; STATUS.md backlog
+6. **Mutable specials are simplified**. The classic Lab grows a simplified `lab_basement`. Railroad and subway stations generate in towns, but no tunnels join them and there are no sewers (BN itself lays no railroad track). *[simplification]* — ARCHITECTURE.md; docs/WORLD_TRANSPORT.md
 7. **Ground relief, curbs and ditches are visual only**; gameplay stays on the flat grid. *[engine limitation]* — ARCHITECTURE.md "Visual styles"
 8. **No scent map**. A survivor very close by is noticed by "sound/smell" proximity instead of BN's scent tracking. *[simplification]* — src/game/monai.ts; ARCHITECTURE.md "Game design conversion rules"
 9. **Dormant monsters are stashed per OMT column** beyond 7 OMTs and restored within 6. Clean chunks are evicted and regenerated when you return. *[engine limitation]* — ARCHITECTURE.md
@@ -289,7 +289,7 @@ differences.)
 ## 12. Content gaps / not yet implemented
 
 1. **Vehicle building, repair, towing, turrets and siphoning.** — VEHICLE_BUILDING.md §1.9; STATUS.md
-2. **Subways, sewers and railroads near the start; lab escape cells; train depots.** — STATUS.md backlog
+2. **Subway tunnels and sewers; lab escape cells and the lab train depot.** — docs/WORLD_TRANSPORT.md
 3. **Mutation special attacks and bionic guns.** — STATUS.md backlog
 4. **Frostbite and blisters.** — STATUS.md backlog
 5. **NPC needs and schedules.** — STATUS.md backlog

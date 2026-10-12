@@ -3,11 +3,15 @@ import { DAYS_PER_SEASON, SECONDS_PER_DAY } from '../core/time';
 import type { GameData } from '../data/types';
 import { expandItemGroup, itemName } from '../data/index';
 import { warnOnce } from '../data/warn';
-import type { Character } from './character';
+import { SLEEPINESS, type Character } from './character';
 import { createItem, fromSpawned, inNewContainer, type Item } from './item';
 import { bodyLocs, canMove, consumeItem, isAt, L, moveItem, spawnItem, walkLocs } from './moves';
 import { FACTION_FOLLOWERS, FACTION_NONE, type Npc, type NpcData, type TalkTopicDef } from './npc';
 import type { MissionHost, MissionInstance, MissionSystem } from './missions';
+import { isAllyRule, type AllyRule, noteStoredOnly, ENGAGEMENT_RULES, AIM_RULES, CBM_RECHARGE_RULES, CBM_RESERVE_RULES } from './npcrules';
+import { bodyMods } from './bodymods';
+import { learnRecipe, recipeIndex } from './crafting';
+import { marketPrice } from './trade';
 import { evalMath, evalMathArray, type MathHost, type MathValue, type VarScope } from './talkmath';
 import type { BodyPartId } from './bodyparts';
 import { MAIN_PARTS } from './bodyparts';
@@ -69,6 +73,14 @@ export interface TalkWorld {
   safeSpace?(): boolean;
   /** An NPC turned hostile (effect hostile/insult_combat, or anger past its limit). */
   onHostile?(npc: Npc): void;
+  /** Let the survivor pick one of several labelled options (barber styles, copy_npc_rules); null = cancelled. */
+  pickOption?(title: string, options: string[], onPick: (index: number | null) => void): void;
+  /** The survivor is at the controls of a moving vehicle (BN conditional_t::set_is_driving). */
+  playerDriving?(): boolean;
+  /** talk_function::go_to_sleep (npc_sleep): the NPC lies down to sleep. */
+  npcGoToSleep?(npc: Npc): void;
+  /** u_buy_monster / buy_cow…: tame monsters placed around a spot; returns how many fit. */
+  spawnPets?(monId: string, count: number, at: { x: number; y: number; z: number }, opts: { pacified: boolean; name?: string }): number;
 }
 
 // ------------------------------------------------------------------ views for the UI
@@ -148,6 +160,8 @@ export class Dialogue implements MathHost {
   private lineCache: { topic: string; line: string } | null = null;
   private reason = '';
   private topicItem: string | undefined;
+  /** BN dialogue::cur_item: the item type the last item-carrying topic was about (bulk trades). */
+  curItem: string | undefined;
   /** Effects queued to run after the dialogue window closes (start_trade opens a window). */
   readonly after: (() => void)[] = [];
 
@@ -298,8 +312,8 @@ export class Dialogue implements MathHost {
   }
 
   /**
-   * dialog_helper::bye_message: the class's bye_message_override is a snippet *category*
-   * ("null" = say nothing); otherwise the template's snip_bye, default "<end_talking_bye>".
+   * BN npctalk.cpp:1371–1372 says "Bye." for TALK_DONE/TALK_NONE.
+   * Optional custom class/template snippet overrides remain supported.
    */
   private byeMessage(): string {
     const cls = this.w.nd.classes[this.npc.classId];
@@ -308,7 +322,7 @@ export class Dialogue implements MathHost {
     if (typeof o === 'string') return this.parseTags(o.startsWith('<') ? o : `<${o}>`);
     const tem = this.npc.templateId ? this.w.nd.templates[this.npc.templateId] : undefined;
     const snip = tem?.snip_bye;
-    return this.parseTags(typeof snip === 'string' ? snip : '<end_talking_bye>');
+    return typeof snip === 'string' ? this.parseTags(snip) : 'Bye.';
   }
 
   private describeMission(): string {
@@ -335,6 +349,8 @@ export class Dialogue implements MathHost {
     const o = dl as Record<string, any>;
     if (typeof o.str === 'string') return o.str;
     if (typeof o.gendered_line === 'string') return o.gendered_line;
+    // BN dynamic_line_t {"and": [...]} concatenates its parts (DDA spells it "concatenate").
+    if (Array.isArray(o.and)) return o.and.map((x: unknown) => this.evalDynamicLine(x)).join('');
     if (Array.isArray(o.concatenate)) return o.concatenate.map((x: unknown) => this.evalDynamicLine(x)).join('');
     if (o.give_hint) return this.parseTags('<hint>') || 'Keep your weapon close and your head down.';
     if (o.use_reason === true) {
@@ -372,19 +388,22 @@ export class Dialogue implements MathHost {
     const out: Resp[] = [];
     const def = this.topicDef(id);
     let switched = false;
+    // BN json_talk_response::gen_repeat_response inserts repeat responses at the front.
+    let front = false;
+    const push = (r: Resp) => (front ? out.unshift(r) : out.push(r));
     const add = (raw: any, extra: Partial<Resp> = {}) => {
       if (!raw || typeof raw !== 'object') return;
       const isSwitch = !!raw.switch, isDefault = !!raw.default;
       if (isSwitch && switched) return;
       const ok = raw.condition === undefined || this.cond(raw.condition);
       if (ok) {
-        out.push({ raw, available: true, ...extra });
+        push({ raw, available: true, ...extra });
         if (isSwitch && !isDefault) switched = true;
         return;
       }
       const showCond = raw.show_always === true || (raw.show_condition !== undefined && this.cond(raw.show_condition));
-      if (showCond || raw.failure_explanation || raw.failure_topic) out.push({ raw, available: !!raw.failure_topic, reason: raw.show_reason ?? raw.failure_explanation, ...extra });
-      else out.push({ raw, available: false, hidden: true, ...extra });
+      if (showCond || raw.failure_explanation || raw.failure_topic) push({ raw, available: !!raw.failure_topic, reason: raw.show_reason ?? raw.failure_explanation, ...extra });
+      else push({ raw, available: false, hidden: true, ...extra });
     };
     const responses = [...(def?.responses ?? [])];
     // insert_before_standard_exits: above a trailing TALK_NONE/TALK_DONE pair.
@@ -395,12 +414,26 @@ export class Dialogue implements MathHost {
       responses.splice(at, 0, ...def.insert_before_exits);
     }
     for (const r of responses) add(r);
+    front = true;
     for (const rr of def?.repeat_responses ?? []) {
       const list: string[] = rr.for_item ? (Array.isArray(rr.for_item) ? rr.for_item : [rr.for_item]) : [];
       const owner: Character = rr.is_npc ? this.npc : this.u;
       for (const itemId of list) if (owner.inv.countOf(itemId) > 0) add(rr.response, { topicItem: itemId });
-      if (rr.for_category) warnOnce('talk', 'repeat_responses.for_category', '[talk] repeat_responses for_category is unsupported');
+      // BN for_category: every carried item whose own category (include_containers: its
+      // effective category) matches. BN repeats the response per item instance; one per item
+      // type here, so five loose apples don't list "Here, you can have this apple." five times.
+      const cats: string[] = rr.for_category ? (Array.isArray(rr.for_category) ? rr.for_category : [rr.for_category]) : [];
+      if (cats.length) {
+        const seen = new Set<string>();
+        for (const it of owner.inv.allItems()) {
+          const cat = rr.include_containers ? itemCategory(it) : it.def.category;
+          if (!cat || !cats.includes(cat) || seen.has(it.typeId)) continue;
+          seen.add(it.typeId);
+          add(rr.response, { topicItem: it.typeId });
+        }
+      }
     }
+    front = false;
     this.builtinResponses(id, out);
     this.resps = out;
   }
@@ -518,6 +551,7 @@ export class Dialogue implements MathHost {
     this.log.push({ who: 'u', text: said });
     if (r.mission) this.npc.missionSelected = r.mission.uid;
     this.topicItem = r.topicItem;
+    if (r.topicItem) this.curItem = r.topicItem;
     if (!r.available) {
       if (raw.failure_topic) this.addTopic(typeof raw.failure_topic === 'string' ? raw.failure_topic : raw.failure_topic.id);
       return { said, done: this.done };
@@ -809,29 +843,48 @@ export class Dialogue implements MathHost {
       case 'u_has_weapon': return !!u.inv.wielded;
       case 'npc_has_weapon': return !!n.inv.wielded;
       case 'u_can_stow_weapon': return !!u.inv.wielded && canMove(u.inv.wielded, L.hands(u), L.inv(u), { actor: u }).ok;
+      case 'npc_can_stow_weapon': return !!n.inv.wielded && canMove(n.inv.wielded, L.hands(n), L.inv(n), { actor: n }).ok;
       case 'u_can_drop_weapon': return !!u.inv.wielded;
       case 'is_day': return this.w.isDay?.() ?? true;
-      case 'is_outside': case 'u_is_outside': return this.w.isOutside?.(u.x | 0, u.y | 0, u.z) ?? true;
+      // BN conditional_t::set_is_outside tests the NPC's tile (d.beta), not the survivor's.
+      case 'is_outside': return this.w.isOutside?.(n.tileX, n.tileY, n.z) ?? true;
+      case 'u_is_outside': return this.w.isOutside?.(u.x | 0, u.y | 0, u.z) ?? true;
+      // BN set_npc_is_sleepy: fatigue >= fatigue_levels::tired (191).
+      case 'npc_is_sleepy': return n.sleepiness >= SLEEPINESS.TIRED;
+      // BN has_pickup_list: the NPC's auto-pickup whitelist is non-empty. The port has no
+      // whitelist (set_npc_pickup warns), so no NPC can have one.
+      case 'has_pickup_list': return false;
+      // BN's conditional_t(string) turns an unknown string into `false` (condition.cpp, the final
+      // else): talk_topic TALK_SHARE_EQUIPMENT writes the effect id "asked_for_item" where it
+      // meant {"npc_has_effect": "asked_for_item"}, so in BN that branch never shows.
+      case 'asked_for_item': return false;
       case 'npc_is_outside': return this.w.isOutside?.(n.tileX, n.tileY, n.z) ?? true;
-      case 'npc_train_skills': return false;
-      case 'npc_train_styles': return false;
+      case 'npc_train_skills': case 'npc_train_styles': return unsupportedCond(c, 'NPC training (start_training) is not implemented');
+      // BN dialogue::by_radio: the port only talks face to face, so this is truthfully false.
       case 'is_by_radio': return false;
-      case 'u_has_camp': return false;
-      case 'u_driving': case 'npc_driving': case 'npc_is_riding': case 'u_is_riding': return false;
-      case 'npc_has_activity': case 'u_has_activity': return false;
-      case 'npc_is_travelling': case 'u_is_travelling': return false;
+      case 'u_has_camp': case 'npc_has_assigned_camp': return unsupportedCond(c, 'faction camps are not implemented');
+      case 'u_driving':
+        if (!this.w.playerDriving) return unsupportedCond(c, 'no vehicle hook in this dialogue world');
+        return this.w.playerDriving();
+      // NPCs never take the wheel, ride mounts or run activities in the port (the effects that
+      // would start them warn as unsupported), so these are truthfully false.
+      case 'npc_driving': return false;
+      case 'npc_is_riding': return false;
+      case 'npc_has_activity': return false;
+      case 'u_is_riding': return unsupportedCond(c, 'mounts are not implemented');
+      case 'u_has_activity': return unsupportedCond(c, 'not wired to the activity system (DDA-only kind)');
+      case 'npc_is_travelling': case 'u_is_travelling': return unsupportedCond(c, 'NPC overmap travel is not implemented (DDA-only kind)');
+      // Not a BN condition: conditional_t(string) makes unknown strings false (TALK_LEADER uses it).
       case 'npc_has_destination': return false;
-      case 'npc_has_assigned_camp': return false;
-      case 'u_has_stolen_item': return false;
+      case 'u_has_stolen_item': return unsupportedCond(c, 'item ownership (stolen items) is not implemented');
       case 'at_safe_space': case 'u_at_safe_space': case 'npc_at_safe_space': return this.w.safeSpace?.() ?? true;
-      case 'u_is_deaf': case 'u_is_mute': case 'npc_is_deaf': return false;
+      case 'u_is_deaf': case 'u_is_mute': case 'npc_is_deaf': return unsupportedCond(c, 'deafness/muteness checks are not implemented (DDA-only kind)');
       case 'has_reason': return !!this.reason;
       case 'u_is_alive': return !u.dead;
       case 'npc_is_alive': return !n.dead;
       case 'u_can_see': case 'npc_can_see': return true;
     }
-    warnOnce('talk_cond', c, `[talk] unsupported condition "${c}" (treated as false)`);
-    return false;
+    return unsupportedCond(c, 'unknown condition');
   }
 
   private varFrom(v: unknown): string | undefined {
@@ -876,9 +929,39 @@ export class Dialogue implements MathHost {
         return evalMath(`${a} ${v[1]} ${b}`, this) !== 0;
       }
       case 'u_has_var': case 'npc_has_var': {
+        // BN set_has_var: the stored value (under get_talk_varname) equals "value".
         const m = k === 'u_has_var' ? this.w.playerVars : n.vars;
-        const val = m.get(String(v));
+        const val = m.get(talkVarName(o, k));
         return o.value === undefined ? val !== undefined : val === String(o.value);
+      }
+      case 'u_compare_var': case 'npc_compare_var': {
+        // BN set_compare_var: missing var = 0, std::stoi of the stored string, then op/value.
+        const raw = (k === 'u_compare_var' ? this.w.playerVars : n.vars).get(talkVarName(o, k));
+        const have = raw ? parseInt(raw, 10) : 0;
+        if (raw && Number.isNaN(have)) throw new Error(`${k}: variable ${talkVarName(o, k)} holds "${raw}", not an integer`);
+        const want = Number(o.value);
+        switch (o.op) {
+          case '==': return have === want;
+          case '!=': return have !== want;
+          case '<=': return have <= want;
+          case '>=': return have >= want;
+          case '<': return have < want;
+          case '>': return have > want;
+        }
+        warnOnce('talk_compare_op', String(o.op), `[talk] ${k} with op "${o.op}" is false in BN too`);
+        return false;
+      }
+      case 'u_has_skill': case 'npc_has_skill': {
+        // BN set_has_skill: {skill, level}; a malformed object is false.
+        if (!v || typeof v !== 'object' || typeof v.skill !== 'string' || typeof v.level !== 'number') return false;
+        return who(k.split('_')[0])!.getSkill(v.skill) >= v.level;
+      }
+      case 'u_has_trait_flag': case 'npc_has_trait_flag': {
+        // BN set_has_trait_flag: MUTATION_THRESHOLD means crossed_threshold(), else any trait's flags.
+        const c = who(k.split('_')[0])!;
+        const flag = String(v);
+        if (flag === 'MUTATION_THRESHOLD') return bodyMods(c)?.mut.crossedThreshold() ?? [...c.traits].some((t) => !!c.traitDef(t)?.threshold);
+        return [...c.traits].some((t) => (c.traitDef(t)?.flags ?? []).includes(flag));
       }
       case 'u_has_mission': return this.w.missions.playerHasMission(String(this.varFrom(v) ?? v));
       case 'u_has_trait': case 'npc_has_trait': return who(k.split('_')[0])!.hasTrait(String(this.varFrom(v) ?? v));
@@ -911,12 +994,23 @@ export class Dialogue implements MathHost {
       case 'u_has_dexterity': case 'npc_has_dexterity': return who(k.split('_')[0])!.dex >= this.num(v);
       case 'u_has_intelligence': case 'npc_has_intelligence': return who(k.split('_')[0])!.int >= this.num(v);
       case 'u_has_perception': case 'npc_has_perception': return who(k.split('_')[0])!.per >= this.num(v);
-      case 'u_has_bionics': case 'npc_has_bionics': return false;
-      case 'u_has_flag': case 'npc_has_flag': return false;
+      case 'u_has_bionics': case 'npc_has_bionics': {
+        // BN set_has_bionics: "ANY" = has any CBM, else has that bionic id.
+        const c = who(k.split('_')[0])!;
+        const bio = bodyMods(c)?.bio;
+        if (!bio) {
+          // Only the survivor gets a bionics system (mutbio.ts); NPC class CBMs aren't installed.
+          if (c === n && ((this.w.nd.classes[n.classId] as { bionics?: unknown[] } | undefined)?.bionics ?? []).length) return unsupportedCond(k, 'NPC class bionics are not installed on NPCs');
+          return false;
+        }
+        return String(v) === 'ANY' ? bio.bionics.length > 0 : bio.has(String(v));
+      }
+      case 'u_has_flag': case 'npc_has_flag': return unsupportedCond(k, 'character flags are not implemented (DDA-only kind)');
       case 'npc_has_class': return n.classId === String(v);
-      case 'u_has_cash': return this.w.cash >= this.num(v);
+      case 'u_has_cash': case 'u_has_ecash': return this.w.cash >= this.num(v);
       case 'u_are_owed': return n.op.owed >= this.num(v);
-      case 'npc_service': return !n.hasTalkEffect('currently_busy', this.w.now()) && this.w.cash >= this.num(v);
+      // BN: {"npc_service": true} is set_npc_available (not currently_busy); DDA's number form adds a cash check.
+      case 'npc_service': return !n.hasTalkEffect('currently_busy', this.w.now()) && (typeof v !== 'number' || this.w.cash >= v);
       case 'u_has_faction_trust': return (this.w.factionTrust.get(n.faction) ?? 0) >= this.num(v);
       case 'mission_goal': case 'npc_mission_goal': case 'u_mission_goal': {
         const m = this.selectedMission();
@@ -929,12 +1023,17 @@ export class Dialogue implements MathHost {
       case 'one_in_chance': return this.w.rng.oneIn(this.num(v, 1));
       case 'x_in_y_chance': return this.w.rng.next() * this.num(v.y, 1) < this.num(v.x);
       case 'npc_need': case 'u_need': {
+        // BN set_need: "amount" (int) or a fatigue "level" name (else 0); strictly greater than it.
+        // Hunger is the calorie shortfall: (max_stored_kcal - stored_kcal) / 10.
         const c = who(k.split('_')[0])!;
         const need = String(v);
-        const cur = need === 'thirst' ? c.thirst : need === 'hunger' ? c.hunger : need === 'sleepiness' || need === 'fatigue' ? c.sleepiness : 0;
-        if (o.amount !== undefined) return cur >= this.num(o.amount);
-        const levels: Record<string, number> = { TIRED: 191, DEAD_TIRED: 383, EXHAUSTED: 575, MASSIVE_FATIGUE: 1000 };
-        return o.level !== undefined ? cur >= (levels[o.level] ?? 0) : false;
+        const levels: Record<string, number> = { TIRED: SLEEPINESS.TIRED, DEAD_TIRED: SLEEPINESS.DEAD_TIRED, EXHAUSTED: SLEEPINESS.EXHAUSTED, MASSIVE_FATIGUE: SLEEPINESS.MASSIVE };
+        const amount = typeof o.amount === 'number' ? o.amount : typeof o.level === 'string' ? levels[o.level] ?? 0 : 0;
+        if (need === 'fatigue' || need === 'sleepiness') return c.sleepiness > amount;
+        if (need === 'hunger') return Math.trunc((c.maxStoredKcal() - c.storedKcal) / 10) > amount;
+        if (need === 'thirst') return c.thirst > amount;
+        warnOnce('talk_need', need, `[talk] ${k} "${need}" is false in BN too (fatigue, hunger or thirst)`);
+        return false;
       }
       case 'u_at_om_location': case 'npc_at_om_location': case 'npc_near_om_location': case 'u_near_om_location': {
         const c = k.startsWith('u_') ? { x: u.x, y: u.y, z: u.z } : { x: n.x, y: n.y, z: n.z };
@@ -953,21 +1052,28 @@ export class Dialogue implements MathHost {
         const e = this.w.nd.eocs[String(v)];
         return !!e && this.cond(e.condition);
       }
-      case 'npc_role_nearby': return false;
+      case 'npc_role_nearby': return unsupportedCond(k, 'companion mission roles (faction camps) are not implemented');
       case 'follower_present': return (this.w.alliesNear?.() ?? []).some((a) => a.templateId === String(v) || a.name === String(v));
       case 'u_has_wielded_with_weapon_category': case 'npc_has_wielded_with_weapon_category': {
         const w = who(k.split('_')[0])!.inv.wielded;
         return !!w && ((w.def as { weapon_category?: string[] }).weapon_category ?? []).includes(String(v));
       }
-      case 'npc_aim_rule': case 'npc_engagement_rule': case 'npc_rule': case 'npc_override': return false;
+      // BN npc_rule / npc_override / npc_*_rule (condition.cpp): the NPC's follower rules
+      // (npcrules.ts); a name BN doesn't know is false there too.
+      case 'npc_rule': return isAllyRule(String(v)) ? n.rules.hasFlag(String(v) as AllyRule) : unknownRule(k, String(v));
+      case 'npc_override': return isAllyRule(String(v)) ? n.rules.hasOverrideEnable(String(v) as AllyRule) : unknownRule(k, String(v));
+      case 'npc_engagement_rule': return n.rules.engagement === String(v);
+      case 'npc_aim_rule': return n.rules.aim === String(v);
+      case 'npc_cbm_reserve_rule': return n.rules.cbmReserve === String(v);
+      case 'npc_cbm_recharge_rule': return n.rules.cbmRecharge === String(v);
       case 'u_has_worn_with_flag': case 'npc_has_worn_with_flag': return who(k.split('_')[0])!.inv.worn.some((it) => it.hasFlag(String(v)));
       case 'u_can_see': case 'npc_can_see': return true;
+      // The port loads no mods, so this is truthfully false.
       case 'mod_is_loaded': return false;
       case 'u_has_proficiency': case 'npc_has_proficiency': return who(k.split('_')[0])!.proficiencies.has(String(v));
       case 'u_know_recipe': return u.learnedRecipes.has(String(v));
     }
-    warnOnce('talk_cond', k, `[talk] unsupported condition "${k}" (treated as false)`);
-    return false;
+    return unsupportedCond(k, 'unknown condition');
   }
 
   private hasTalkEffect(who: 'u' | 'npc', id: string): boolean {
@@ -1058,9 +1164,16 @@ export class Dialogue implements MathHost {
         this.done = true;
         return;
       case 'end_conversation':
+        // BN talk_function::end_conversation: they won't talk to you again (first_topic TALK_DONE).
         n.attitude = 'NULL';
+        n.chat.first_topic = 'TALK_DONE';
         this.w.message(`${n.name} starts ignoring you.`);
         this.done = true;
+        return;
+      case 'player_leaving':
+        // BN talk_function::player_leaving: they give you `patience` turns to leave, then attack.
+        n.attitude = 'WAIT_FOR_LEAVE';
+        n.patience = 15 - n.personality.aggression;
         return;
       case 'stranger_neutral':
         n.attitude = 'NULL';
@@ -1119,7 +1232,9 @@ export class Dialogue implements MathHost {
         this.after.push(() => this.w.startTrade?.(n));
         return;
       }
-      case 'give_aid': case 'lesser_give_aid': case 'give_aid_all': case 'lesser_give_aid_all': {
+      case 'give_aid': case 'lesser_give_aid': case 'give_aid_all': case 'lesser_give_aid_all': case 'give_all_aid': {
+        // BN spells the group version give_all_aid (talk_function::give_all_aid).
+        if (e === 'give_all_aid') e = 'give_aid_all';
         const targets: Character[] = e.endsWith('_all') ? [u, ...(this.w.alliesNear?.() ?? [])] : [u];
         const [lo, hi] = e.startsWith('lesser') ? [5, 15] : [10, 25];
         for (const c of targets) {
@@ -1139,8 +1254,71 @@ export class Dialogue implements MathHost {
         u.morale.add('chat', 10, 10, 6 * 3600, 3 * 3600, true);
         this.w.message(`You have a pleasant chat with ${n.name}.`, 'c_light_green');
         return;
-      case 'deny_follow': case 'deny_lead': case 'deny_train': case 'deny_personal_info':
-        n.talkEffects.set({ deny_follow: 'asked_to_follow', deny_lead: 'asked_to_lead', deny_train: 'asked_to_train', deny_personal_info: 'asked_personal_info' }[e]!, now + 6 * 3600);
+      case 'deny_follow': case 'deny_lead': case 'deny_train': case 'deny_personal_info': case 'deny_equipment':
+        // BN talk_function::deny_*: 6 hours, except personal info (3 hours).
+        n.talkEffects.set({ deny_follow: 'asked_to_follow', deny_lead: 'asked_to_lead', deny_train: 'asked_to_train', deny_personal_info: 'asked_personal_info', deny_equipment: 'asked_for_item' }[e]!, now + (e === 'deny_personal_info' ? 3 : 6) * 3600);
+        return;
+      case 'goto_location': {
+        // BN talk_function::goto_location offers "My current location" / "Cancel"; picking the
+        // first leaves the destination unset, so BN always answers that it isn't valid.
+        if (!this.w.pickOption) return unsupportedEffect(e, 'no option picker in this dialogue world');
+        this.w.pickOption('Select a destination', ['My current location', 'Cancel'], (i) => {
+          if (i === 0) this.w.message(`That is not a valid destination for ${n.name}.`, 'c_light_cyan');
+        });
+        return;
+      }
+      case 'go_to_sleep':
+        if (!this.w.npcGoToSleep) return unsupportedEffect(e, 'no NPC sleep hook in this dialogue world');
+        this.w.npcGoToSleep(n);
+        return;
+      case 'clear_overrides': n.rules.clearOverrides(); return;
+      case 'copy_npc_rules': {
+        // BN: pick another follower and take over their rules wholesale.
+        const others = (this.w.alliesNear?.() ?? []).filter((a) => a !== n);
+        if (!others.length) return;
+        if (!this.w.pickOption) return unsupportedEffect(e, 'no option picker in this dialogue world');
+        this.w.pickOption(`Copy the rules of which follower?`, others.map((a) => a.name), (i) => {
+          if (i !== null && others[i]) n.rules.copyFrom(others[i].rules);
+        });
+        return;
+      }
+      case 'barber_hair': case 'barber_beard': {
+        // BN generic_barber: choose any hair_style / facial_hair mutation; it replaces yours.
+        const type = e === 'barber_hair' ? 'hair_style' : 'facial_hair';
+        const muts = Object.values((this.data.misc.mutation ?? {}) as Record<string, { id: string; name?: unknown; types?: string[] }>).filter((m) => (m.types ?? []).includes(type));
+        if (!this.w.pickOption) return unsupportedEffect(e, 'no option picker in this dialogue world');
+        this.w.pickOption(type === 'hair_style' ? 'Choose a new hairstyle' : 'Choose a new facial hair style', muts.map((m) => u.traitName(m.id)), (i) => {
+          if (i === null || !muts[i]) return;
+          for (const m of muts) u.traits.delete(m.id);
+          u.traits.add(muts[i].id);
+          this.w.message('You get a trendy new cut!', 'c_light_cyan');
+        });
+        return;
+      }
+      case 'buy_cow': case 'buy_chicken': case 'buy_horse': {
+        // BN spawn_animal: a pet placed next to the NPC (no payment in the effect itself).
+        const mon = { buy_cow: 'mon_cow', buy_chicken: 'mon_chicken', buy_horse: 'mon_horse' }[e]!;
+        if (!this.w.spawnPets) return unsupportedEffect(e, 'no monster placement hook in this dialogue world');
+        if (!this.w.spawnPets(mon, 1, { x: n.tileX, y: n.tileY, z: n.z }, { pacified: false })) this.w.message('There is no room for the animal.', 'c_light_red');
+        return;
+      }
+      case 'buy_10_logs': case 'buy_100_logs': {
+        // BN: logs are delivered to a ranch_camp_67 within one OMT of you (local tile 7,15); the
+        // NPC is busy for a day (10 logs) or a week (100).
+        const count = e === 'buy_10_logs' ? 10 : 100;
+        if (!this.w.omtAt || !this.w.dropItem) return unsupportedEffect(e, 'no overmap/map hooks in this dialogue world');
+        const ox = Math.floor(u.x / 24), oy = Math.floor(u.y / 24);
+        const sites: [number, number][] = [];
+        for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) if (omtMatches(this.w.omtAt(ox + dx, oy + dy, 0) ?? '', 'ranch_camp_67')) sites.push([ox + dx, oy + dy]);
+        if (!sites.length) return void warnOnce('talk_logs', e, `[talk] ${e}: no ranch_camp_67 within one OMT (BN debugmsg "Couldn't find ranch_camp_67")`);
+        const [sx, sy] = this.w.rng.pick(sites);
+        for (const it of this.makeItems('log', count, false)) this.w.dropItem(it, sx * 24 + 7, sy * 24 + 15, 0);
+        n.talkEffects.set('currently_busy', now + (count === 10 ? 1 : 7) * SECONDS_PER_DAY);
+        this.w.message(`${n.name} drops the logs off in the garage…`, 'c_light_green');
+        return;
+      }
+      case 'u_bulk_trade_accept': case 'npc_bulk_trade_accept': case 'u_bulk_donate': case 'npc_bulk_donate':
+        this.bulkTrade(e.includes('trade'), e.startsWith('npc'));
         return;
       case 'wake_up':
         n.wakeUp();
@@ -1184,8 +1362,9 @@ export class Dialogue implements MathHost {
         this.after.push(() => this.w.startTrade?.(n, 0));
         return;
     }
-    if (IGNORED_EFFECTS.has(e)) return;
-    warnOnce('talk_effect', e, `[talk] unsupported effect "${e}" (no-op)`);
+    // BN talk_function::nothing: a deliberate no-op.
+    if (e === 'nothing') return;
+    unsupportedEffect(e, MISSING_EFFECTS[e] ?? 'unknown effect');
   }
 
   private objectEffect(k: string, v: any, o: Record<string, any>): void {
@@ -1196,12 +1375,24 @@ export class Dialogue implements MathHost {
     };
     switch (k) {
       case 'u_add_var': case 'npc_add_var': {
+        // BN set_add_var stores "value" under get_talk_varname (type/context prefixed).
         const m = k === 'u_add_var' ? this.w.playerVars : n.vars;
         const val = o.possible_values ? this.w.rng.pick(o.possible_values as string[]) : o.time ? String(now) : String(o.value ?? 'yes');
-        m.set(String(v), val);
+        m.set(talkVarName(o, k), val);
         return;
       }
-      case 'u_lose_var': case 'npc_lose_var': (k === 'u_lose_var' ? this.w.playerVars : n.vars).delete(String(v)); return;
+      case 'u_lose_var': case 'npc_lose_var': (k === 'u_lose_var' ? this.w.playerVars : n.vars).delete(talkVarName(o, k)); return;
+      case 'u_adjust_var': case 'npc_adjust_var': {
+        // BN set_adjust_var: stoi(current, or 0) + "adjustment", stored back as a string.
+        const m = k === 'u_adjust_var' ? this.w.playerVars : n.vars;
+        const name = talkVarName(o, k);
+        if (typeof o.adjustment !== 'number') throw new Error(`${k} ${name}: "adjustment" must be an integer`);
+        const raw = m.get(name);
+        const cur = raw ? parseInt(raw, 10) : 0;
+        if (raw && Number.isNaN(cur)) throw new Error(`${k}: variable ${name} holds "${raw}", not an integer`);
+        m.set(name, String(cur + o.adjustment));
+        return;
+      }
       case 'set_string_var': {
         const target = o.target_var;
         const val = Array.isArray(v) ? String(this.w.rng.pick(v)) : this.varFrom(v) ?? String(v);
@@ -1225,6 +1416,7 @@ export class Dialogue implements MathHost {
         return;
       }
       case 'u_buy_item': {
+        // BN set_u_buy_item -> npc_trading::pay_npc (owed first, else a trade for the rest).
         const id = String(this.varFrom(v) ?? v);
         const cost = this.num(o.cost, 0), count = Math.max(1, this.num(o.count, 1));
         const give = () => {
@@ -1233,19 +1425,7 @@ export class Dialogue implements MathHost {
           if (!o.suppress_message && items.length) this.w.message(`You buy ${count > 1 ? `${count} ` : ''}${items[0].baseName(count)} from ${n.name}.`, 'c_light_green');
           eocs(o.true_eocs);
         };
-        if (cost <= 0 || n.op.owed >= cost) {
-          n.op.owed -= Math.max(0, cost);
-          give();
-        } else if (this.w.startTrade) {
-          this.after.push(() => this.w.startTrade!(n, cost - Math.max(0, n.op.owed), (ok) => {
-            if (!ok) return eocs(o.false_eocs);
-            n.op.owed = 0;
-            give();
-          }));
-        } else {
-          this.w.message("You can't afford it!", 'c_light_red');
-          eocs(o.false_eocs);
-        }
+        this.payNpc(cost, give, () => eocs(o.false_eocs));
         return;
       }
       case 'u_sell_item': {
@@ -1292,6 +1472,8 @@ export class Dialogue implements MathHost {
         for (const { item, loc } of walkLocs(bodyLocs(c))) if (item.typeId === id && isAt(item, loc)) consumeItem(item, loc);
         return;
       }
+      // BN set_u_spend_ecash: e-cash goes down by the amount, unconditionally (can go negative).
+      case 'u_spend_ecash': this.w.cash -= this.num(v); return;
       case 'u_spend_cash': {
         const cost = this.num(v);
         if (cost <= this.w.cash) {
@@ -1302,7 +1484,8 @@ export class Dialogue implements MathHost {
       }
       case 'u_add_effect': case 'npc_add_effect': {
         const id = String(this.varFrom(v) ?? v);
-        const dur = o.duration === 'PERMANENT' ? Infinity : typeof o.duration === 'number' ? o.duration : this.num(o.duration, 60);
+        // BN set_add_effect: "duration" in turns (= game seconds here), default 1 turn; "PERMANENT".
+        const dur = o.duration === 'PERMANENT' ? Infinity : typeof o.duration === 'number' ? o.duration : Math.max(1, this.num(o.duration, 1));
         const c = who(k.split('_')[0]);
         if (c.effectTypes.has?.(id)) c.addEffect(id, dur === Infinity ? 1e9 : dur, { intensity: typeof o.intensity === 'number' ? o.intensity : undefined, permanent: dur === Infinity });
         else (k === 'u_add_effect' ? this.w.playerTalkEffects : n.talkEffects).set(id, now + dur);
@@ -1325,7 +1508,62 @@ export class Dialogue implements MathHost {
         return;
       }
       case 'u_add_faction_trust': case 'u_faction_rep': {
+        // BN set_change_faction_rep: the NPC's faction (not no_faction) likes you more.
+        if (n.faction === FACTION_NONE) return;
         this.w.factionTrust.set(n.faction, (this.w.factionTrust.get(n.faction) ?? 0) + this.num(v));
+        return;
+      }
+      case 'add_debt': {
+        // BN set_add_debt: sum parse_mod terms; "TOTAL" multiplies the running sum; added to owed.
+        let debt = 0;
+        for (const m of Array.isArray(v) ? v : []) {
+          if (!Array.isArray(m)) continue;
+          if (m[0] === 'TOTAL') debt *= Number(m[1]);
+          else debt += this.parseMod(String(m[0]), Number(m[1]) || 0);
+        }
+        n.op.owed += debt;
+        return;
+      }
+      case 'u_learn_recipe': {
+        const id = String(v);
+        const r = recipeIndex(this.data).get(id);
+        if (!r) return void warnOnce('recipe', id);
+        learnRecipe(u, id);
+        const def = this.data.items[r.result];
+        this.w.message(`You learn how to craft ${def ? itemName(def) : r.result}.`, 'c_light_green');
+        return;
+      }
+      case 'toggle_npc_rule': case 'set_npc_rule': case 'clear_npc_rule': {
+        // BN set_toggle/set/clear_npc_rule; an unknown rule name is a no-op in BN too.
+        const r = String(v);
+        if (!isAllyRule(r)) return void unknownRule(k, r);
+        if (k === 'toggle_npc_rule') n.rules.toggleFlag(r);
+        else if (k === 'set_npc_rule') n.rules.setFlag(r);
+        else n.rules.clearFlag(r);
+        return;
+      }
+      case 'set_npc_engagement_rule': case 'set_npc_aim_rule': case 'set_npc_cbm_reserve_rule': case 'set_npc_cbm_recharge_rule': {
+        const field = { set_npc_engagement_rule: 'engagement', set_npc_aim_rule: 'aim', set_npc_cbm_reserve_rule: 'cbmReserve', set_npc_cbm_recharge_rule: 'cbmRecharge' }[k] as 'engagement' | 'aim' | 'cbmReserve' | 'cbmRecharge';
+        const valid: readonly string[] = { engagement: ENGAGEMENT_RULES, aim: AIM_RULES, cbmReserve: CBM_RESERVE_RULES, cbmRecharge: CBM_RECHARGE_RULES }[field];
+        // BN: a setting outside the *_strs table leaves the rule as it was.
+        if (!valid.includes(String(v))) return void unknownRule(k, String(v));
+        n.rules[field] = String(v);
+        noteStoredOnly(field);
+        return;
+      }
+      case 'u_buy_monster': {
+        // BN set_u_buy_monster: pay (owed first, else a trade), then tame monsters around you.
+        const mon = String(v);
+        if (!this.data.monsters[mon]) return void warnOnce('monster', mon);
+        if (!this.w.spawnPets) return unsupportedEffect(k, 'no monster placement hook in this dialogue world');
+        const count = typeof o.count === 'number' ? o.count : 1;
+        const name = typeof o.name === 'string' ? o.name : (o.name as { str?: string } | undefined)?.str;
+        const give = () => {
+          const placed = this.w.spawnPets!(mon, count, { x: Math.floor(u.x), y: Math.floor(u.y), z: u.z }, { pacified: !!o.pacified, name });
+          const mname = String((this.data.monsters[mon] as { name?: unknown }).name ?? mon);
+          this.w.message(name ? `${n.name} gives you ${name}.` : `${n.name} gives you ${placed} ${mname}.`, 'c_light_green');
+        };
+        this.payNpc(typeof o.cost === 'number' ? o.cost : 0, give);
         return;
       }
       case 'npc_first_topic': n.chat.first_topic = String(v); return;
@@ -1375,13 +1613,72 @@ export class Dialogue implements MathHost {
       case 'u_set_guard_pos': case 'npc_set_guard_pos': n.guardPos = { x: n.tileX, y: n.tileY, z: n.z }; return;
       case 'give_equipment': this.after.push(() => this.w.startTrade?.(n, 0)); return;
       case 'npc_die': this.simpleEffect('npc_die'); return;
-      case 'arithmetic': case 'u_adjust_var': case 'npc_adjust_var': {
-        warnOnce('talk_effect', k, `[talk] deprecated effect "${k}" (no-op)`);
-        return;
+      case 'arithmetic': unsupportedEffect(k, 'DDA-only deprecated effect, not in BN (use math)'); return;
+    }
+    unsupportedEffect(k, MISSING_EFFECTS[k] ?? 'unknown effect');
+  }
+
+  /**
+   * npc_trading::pay_npc: free things never trade; what the NPC owes you pays first; otherwise
+   * a trade window asks for the rest in goods ("You can't afford it!" when that fails).
+   */
+  private payNpc(cost: number, onPaid: () => void, onFail?: () => void): void {
+    const n = this.npc;
+    if (cost <= 0 || n.op.owed >= cost) {
+      n.op.owed -= Math.max(0, cost);
+      onPaid();
+    } else if (this.w.startTrade) {
+      this.after.push(() => this.w.startTrade!(n, cost - Math.max(0, n.op.owed), (ok) => {
+        if (!ok) {
+          this.w.message("You can't afford it!", 'c_light_red');
+          return onFail?.();
+        }
+        n.op.owed = 0;
+        onPaid();
+      }));
+    } else {
+      this.w.message("You can't afford it!", 'c_light_red');
+      onFail?.();
+    }
+  }
+
+  /**
+   * talk_effect_fun_t::set_bulk_trade_accept: the seller hands over every unit of the current
+   * topic item. A trade (not a donation) is paid in the NPC's faction currency when it has one:
+   * floor(price / currency value) notes, the remainder left as what the NPC owes you.
+   */
+  private bulkTrade(isTrade: boolean, npcSells: boolean): void {
+    const u = this.u, n = this.npc;
+    const id = this.curItem;
+    if (!id) return void warnOnce('talk_bulk', 'no item', '[talk] bulk trade with no topic item (BN trades a null item: nothing)');
+    const seller: Character = npcSells ? n : u, buyer: Character = npcSells ? u : n;
+    const have = seller.inv.countOf(id);
+    if (have <= 0) return;
+    const goods = seller.inv.useAmount(id, have);
+    if (isTrade) {
+      let price = goods.reduce((a, it) => a + marketPrice(it), 0) * (npcSells ? -1 : 1) + n.op.owed;
+      const cur = this.w.nd.factions[n.faction]?.currency;
+      if (cur && this.data.items[cur]) {
+        const unit = marketPrice(createItem(this.data, cur), 1);
+        if (unit > 0) {
+          let pay = Math.trunc(price / unit);
+          if (npcSells) {
+            pay = Math.max(0, Math.min(pay, u.inv.countOf(cur)));
+            if (pay) u.inv.useAmount(cur, pay);
+          } else if (pay > 0) this.w.message(`${n.name} gives you ${pay > 1 ? `${pay} ` : 'a '}${itemName(this.data.items[cur], pay)}.`, 'c_light_green');
+          for (const it of this.makeItems(cur, Math.max(0, pay), false)) {
+            if (seller === u) this.giveToPlayer(it);
+            else if (n.inv.stashNew(it)) spawnItem(it, L.stock(n), { quiet: true });
+          }
+          price -= Math.max(0, pay) * unit;
+        }
+        n.op.owed = price;
       }
     }
-    if (IGNORED_EFFECTS.has(k)) return;
-    warnOnce('talk_effect', k, `[talk] unsupported effect "${k}" (no-op)`);
+    for (const it of goods) {
+      if (buyer === u) this.giveToPlayer(it);
+      else if (n.inv.stashNew(it)) spawnItem(it, L.stock(n), { quiet: true });
+    }
   }
 
   private setVarObj(target: unknown, val: string): void {
@@ -1458,20 +1755,99 @@ export class Dialogue implements MathHost {
   }
 }
 
-// Effects that make no sense in CDDA-3D yet (camps, bionics surgery, map updates, AI rules):
-// quietly no-ops rather than warnings on every conversation.
-const IGNORED_EFFECTS = new Set([
-  'npc_rules_menu', 'set_npc_pickup', 'basecamp_mission', 'start_camp', 'distribute_food_auto', 'revert_activity', 'goto_location',
-  'find_mount', 'dismount', 'drop_items_in_place', 'remove_stolen_status', 'toggle_npc_rule', 'set_npc_rule', 'clear_npc_rule',
-  'set_npc_engagement_rule', 'set_npc_aim_rule', 'u_location_variable', 'npc_location_variable', 'u_assign_activity',
-  'bionic_install', 'bionic_remove', 'u_add_bionic', 'u_lose_bionic', 'companion_mission', 'u_set_fac_relation', 'u_transform_radius',
-  'u_teleport', 'npc_teleport', 'u_spawn_npc', 'assign_camp', 'return_to_camp_duties', 'abandon_camp', 'lead_to_safety',
-  'start_training', 'start_training_npc', 'start_training_seminar', 'sort_loot', 'do_construction', 'do_mining', 'do_mopping',
-  'do_read', 'do_eread', 'do_read_repeatedly', 'study_npc_zone', 'do_vehicle_deconstruct', 'do_vehicle_repair', 'do_chop_plank',
-  'do_butcher', 'do_chop_trees', 'do_fishing', 'do_farming', 'do_disassembly', 'do_craft', 'dismiss', 'u_bulk_trade_accept',
-  'npc_bulk_trade_accept', 'u_bulk_donate', 'npc_bulk_donate', 'u_make_sound', 'npc_make_sound', 'u_cast_spell', 'npc_cast_spell',
-  'u_run_npc_eocs', 'npc_run_npc_eocs', 'u_run_inv_eocs', 'npc_run_inv_eocs',
-]);
+// Effects BN has that the port can't honour yet, with the missing system named: they warn once
+// (specifically) and do nothing, as ARCHITECTURE.md asks. Never silently pass.
+const MISSING_EFFECTS: Record<string, string> = {
+  ...Object.fromEntries(['basecamp_mission', 'start_camp', 'distribute_food_auto', 'assign_camp', 'return_to_camp_duties', 'abandon_camp', 'companion_mission', 'dismiss'].map((k) => [k, 'faction camps are not implemented'])),
+  ...Object.fromEntries(['revert_activity', 'sort_loot', 'do_construction', 'do_mining', 'do_mopping', 'do_read', 'do_eread',
+    'do_read_repeatedly', 'study_npc_zone', 'do_vehicle_deconstruct', 'do_vehicle_repair', 'do_chop_plank', 'do_butcher', 'do_dissect', 'do_chop_trees',
+    'do_fishing', 'do_farming', 'do_disassembly', 'do_craft', 'u_assign_activity', 'drop_items_in_place'].map((k) => [k, 'NPC activities are not implemented'])),
+  ...Object.fromEntries(['find_mount', 'dismount'].map((k) => [k, 'mounts are not implemented'])),
+  ...Object.fromEntries(['remove_stolen_status', 'drop_stolen_item'].map((k) => [k, 'item ownership (stolen items) is not implemented'])),
+  npc_rules_menu: 'DDA-only effect, not in BN',
+  set_npc_pickup: 'NPC pickup whitelists are not implemented',
+  ...Object.fromEntries(['bionic_install', 'bionic_remove', 'u_add_bionic', 'u_lose_bionic'].map((k) => [k, 'NPC surgery is not wired to the bionics system'])),
+  ...Object.fromEntries(['start_training', 'start_training_npc', 'start_training_seminar'].map((k) => [k, 'NPC training is not implemented'])),
+  lead_to_safety: 'MISSION_REACH_SAFETY / NPC leading is not implemented',
+  control_npc: 'playing as an NPC is not implemented',
+  ...Object.fromEntries(['u_location_variable', 'npc_location_variable', 'u_set_fac_relation', 'u_transform_radius', 'u_teleport', 'npc_teleport', 'u_spawn_npc',
+    'u_make_sound', 'npc_make_sound', 'u_cast_spell', 'npc_cast_spell', 'u_run_npc_eocs', 'npc_run_npc_eocs', 'u_run_inv_eocs', 'npc_run_inv_eocs'].map((k) => [k, 'DDA-only effect, not in BN'])),
+};
+
+/** BN ally_rule_strs.find failing: the rule condition is false and the effect does nothing, in BN too. */
+function unknownRule(kind: string, rule: string): false {
+  warnOnce('talk_rule', rule, `[talk] ${kind}: "${rule}" is not a BN ally rule (BN ignores it too: false / no-op)`);
+  return false;
+}
+
+/**
+ * BN get_talk_varname (condition.cpp): dialogue variables are stored as
+ * "npctalk_var" + "_<type>" + "_<context>" + "_<name>", so {"u_add_var": "met", "type": "general",
+ * "context": "meeting"} is "npctalk_var_general_meeting_met".
+ */
+export function talkVarName(o: Record<string, unknown>, member: string): string {
+  const base = o[member];
+  if (typeof base !== 'string') throw new Error(`${member}: variable name must be a string, got ${JSON.stringify(base)}`);
+  const type = typeof o.type === 'string' && o.type ? `_${o.type}` : '';
+  const context = typeof o.context === 'string' && o.context ? `_${o.context}` : '';
+  return `npctalk_var${type}${context}_${base}`;
+}
+
+const varIndexCache = new WeakMap<NpcData, Map<string, Set<string>>>();
+/** Every BN variable name the data stores, by bare name ("met" -> npctalk_var_general_meeting_met). */
+function talkVarIndex(nd: NpcData): Map<string, Set<string>> {
+  let idx = varIndexCache.get(nd);
+  if (idx) return idx;
+  idx = new Map();
+  const visit = (x: unknown): void => {
+    if (Array.isArray(x)) return x.forEach(visit);
+    if (!x || typeof x !== 'object') return;
+    const o = x as Record<string, unknown>;
+    for (const k of ['u_add_var', 'npc_add_var', 'u_adjust_var', 'npc_adjust_var']) {
+      if (typeof o[k] !== 'string') continue;
+      const full = talkVarName(o, k);
+      const set = idx!.get(o[k] as string) ?? new Set<string>();
+      set.add(full);
+      idx!.set(o[k] as string, set);
+    }
+    Object.values(o).forEach(visit);
+  };
+  visit([nd.topics, nd.missions]);
+  varIndexCache.set(nd, idx);
+  return idx;
+}
+
+/**
+ * Old saves stored dialogue variables under their bare name; rename each to the one BN name the
+ * data uses for it. A bare name the data stores under several names can't be told apart: it is
+ * kept as it was and reported.
+ */
+export function migrateTalkVars(nd: NpcData, vars: Map<string, string>): void {
+  const idx = talkVarIndex(nd);
+  for (const [k, v] of [...vars]) {
+    if (k.startsWith('npctalk_var')) continue;
+    const full = idx.get(k);
+    if (!full) continue;
+    if (full.size > 1) {
+      warnOnce('talk_var_migrate', k, `[talk] old save variable "${k}" matches ${[...full].join(', ')}; left unmigrated`);
+      continue;
+    }
+    const [name] = full;
+    if (!vars.has(name)) vars.set(name, v);
+    vars.delete(k);
+  }
+}
+
+/** A condition the port can't evaluate: warn once naming what's missing; it counts as false. */
+function unsupportedCond(kind: string, why: string): false {
+  warnOnce('talk_cond', kind, `[talk] unsupported condition "${kind}": ${why} (treated as false)`);
+  return false;
+}
+
+/** An effect the port can't apply: warn once naming what's missing; it does nothing. */
+function unsupportedEffect(kind: string, why: string): void {
+  warnOnce('talk_effect', kind, `[talk] unsupported effect "${kind}": ${why} (no-op)`);
+}
 
 /** Keys that are arguments of an effect object, never the effect itself. */
 const EFFECT_ARGS = new Set([
@@ -1504,6 +1880,12 @@ const COND_ARGS = new Set(['level', 'amount', 'range', 'count', 'intensity', 'va
 function topicId(r: any): string | undefined {
   const t = r?.topic ?? r?.success?.topic;
   return typeof t === 'string' ? t : t?.id;
+}
+
+/** BN item::get_category: a filled container counts as its first content's category. */
+function itemCategory(it: Item): string | undefined {
+  const inner = it.contents[0];
+  return inner ? itemCategory(inner) : it.def.category;
 }
 
 /** "overmap terrain id" or its base type without rotation suffix (house_01_east matches house_01). */

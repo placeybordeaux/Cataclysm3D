@@ -5,6 +5,10 @@ import type { Item } from './game/item';
 import type { ActionResult } from './game/inventory';
 import { createItem } from './game/item';
 import { qualityUsages } from './game/inventory';
+import { installRubble, isRubble, startClearRubble } from './game/rubble';
+import { trapAt } from './game/traps';
+import type { MonsterSystem } from './game/monai';
+import type { NpcSystem } from './game/npcai';
 import { interactionProviders, type Interaction } from './game/interact';
 import { targetTile, frontTile } from './game/targeting';
 import { hasFlag, isDiggable } from './world/registry';
@@ -25,7 +29,7 @@ import {
 import {
   canTill, isTree, isTrunk, startChopLogs, startChopTree, startDig, startLumber, startTill, findLog, treeNear, trunkNear,
 } from './game/woodcut';
-import { openMenu, c } from './ui/framework';
+import { openMenu, c, confirm } from './ui/framework';
 
 // Seasons, foraging, farming, water, fishing, swimming and wood/earth work wired into the
 // game: `e` interactions (interactionProviders), tool-quality activations (`a` on an axe,
@@ -83,6 +87,40 @@ function toolWith(game: Game, q: string, level = 1): Item | null {
   return game.player.inv.findByQuality(q, level)[0] ?? null;
 }
 
+/**
+ * Runs a tool-quality action (chop, dig, till, fish, clear rubble…) and, only if it actually
+ * starts an activity, arranges for that activity's own completion to fire the item's
+ * successful-use gesture — never when it's merely offered, cancelled, or refused. `run` may
+ * open its own confirm dialog first (clearRubbleAction on an occupied tile): the wrap stays
+ * live across that await, since `game.activities.start` isn't called until `run` resolves.
+ * Axe/shovel/rod tools don't change type from these actions, so the live Item is a safe
+ * stand-in for a pre-transform snapshot.
+ */
+function withDeferredGesture(game: Game, item: Item, run: () => void | Promise<void>): void | Promise<void> {
+  const realStart = game.activities.start.bind(game.activities);
+  game.activities.start = (spec) => {
+    game.activities.start = realStart;
+    return realStart({ ...spec, onComplete: () => { spec.onComplete(); game.player.inv.presentDeferredUse(item); } });
+  };
+  let result: void | Promise<void>;
+  try {
+    result = run();
+  } catch (e) {
+    game.activities.start = realStart;
+    throw e;
+  }
+  if (result instanceof Promise) return result.finally(() => { game.activities.start = realStart; });
+  game.activities.start = realStart;
+  return result;
+}
+
+async function clearRubbleAction(game: Game, at: Tile, tool?: Item): Promise<void> {
+  const actors = game as unknown as { monsters?: MonsterSystem; npcs?: NpcSystem };
+  const occupied = game.vehicles?.at(at.x, at.y, at.z) || trapAt(game, at.x, at.y, at.z) || actors.monsters?.monsterAt(at.x, at.y, at.z) || actors.npcs?.npcAt(at.x, at.y, at.z);
+  if (occupied && typeof document !== 'undefined' && !(await confirm(`Clear up that ${game.map.furnAt(at.x, at.y, at.z).name}?`))) return;
+  startClearRubble(game, at, tool);
+}
+
 /** `e` on nature tiles. */
 function natureInteractions(game: Game, x: number, y: number, z: number): Interaction[] {
   const out: Interaction[] = [];
@@ -91,13 +129,15 @@ function natureInteractions(game: Game, x: number, y: number, z: number): Intera
   const t = map.terAt(x, y, z), f = map.furnAt(x, y, z);
   const at = { x, y, z };
 
+  if (f.examine_action === 'rubble' && isRubble(game, at)) add('clear_rubble', `Clear the ${f.name}`, () => void clearRubbleAction(game, at));
+
   // --- crops (grow lazily first: the seed's age decides the stage)
   if (hasFlag(f, 'PLANT') && seedAt(game, x, y, z)) {
     growPlant(game, x, y, z);
     const fs = map.furnAt(x, y, z);
     const stage = furnStage(fs);
     const seed = seedAt(game, x, y, z)!;
-    const pname = String(seed.def.plant_name ?? seed.def.name);
+    const pname = String((seed.def.seed_data as { plant_name?: string } | undefined)?.plant_name ?? seed.def.plant_name ?? seed.def.name);
     if (stage === 'GROWTH_HARVEST')
       add('harvest_plant', `Harvest the ${pname}`, () =>
         void game.activities.start({ name: `harvesting the ${pname}`, duration: 60, onComplete: () => void harvestPlantNow(game, x, y, z) }));
@@ -150,17 +190,18 @@ function toolActions(game: Game, it: Item): ActionResult {
   const q = (id: string) => it.qualityLevel(id);
   if (q('AXE') >= 1) {
     const tree = treeNear(game, target);
-    if (tree) acts.push({ label: `Chop down the ${game.map.terAt(tree.x, tree.y, tree.z).name}`, run: () => void startChopTree(game, it, tree) });
+    if (tree) acts.push({ label: `Chop down the ${game.map.terAt(tree.x, tree.y, tree.z).name}`, run: () => void withDeferredGesture(game, it, () => { startChopTree(game, it, tree); }) });
     const trunk = trunkNear(game, target);
-    if (trunk) acts.push({ label: `Chop the ${game.map.terAt(trunk.x, trunk.y, trunk.z).name} into logs`, run: () => void startChopLogs(game, it, trunk) });
+    if (trunk) acts.push({ label: `Chop the ${game.map.terAt(trunk.x, trunk.y, trunk.z).name} into logs`, run: () => void withDeferredGesture(game, it, () => { startChopLogs(game, it, trunk); }) });
   }
-  if ((q('AXE') >= 2 || q('SAW_W') >= 2) && findLog(game)) acts.push({ label: 'Cut a log into planks', run: () => void startLumber(game) });
+  if ((q('AXE') >= 2 || q('SAW_W') >= 2) && findLog(game)) acts.push({ label: 'Cut a log into planks', run: () => void withDeferredGesture(game, it, () => { startLumber(game); }) });
   if (q('DIG') >= 1 && target) {
-    if (canTill(game, target.x, target.y, target.z)) acts.push({ label: 'Till the soil (dirt mound for planting)', run: () => void startTill(game, target) });
+    if (isRubble(game, target)) acts.push({ label: `Clear the ${game.map.furnAt(target.x, target.y, target.z).name}`, run: () => void withDeferredGesture(game, it, () => clearRubbleAction(game, target, it)) });
+    if (canTill(game, target.x, target.y, target.z)) acts.push({ label: 'Till the soil (dirt mound for planting)', run: () => void withDeferredGesture(game, it, () => { startTill(game, target); }) });
     if (isDiggable(game.map.terAt(target.x, target.y, target.z)) || game.map.terAt(target.x, target.y, target.z).id.startsWith('t_pit'))
-      acts.push({ label: 'Dig a pit', run: () => void startDig(game, target) });
+      acts.push({ label: 'Dig a pit', run: () => void withDeferredGesture(game, it, () => { startDig(game, target); }) });
   }
-  if (q('FISHING_ROD') >= 1 && fishingSpot(game)) acts.push({ label: 'Cast your line', run: () => void startFishing(game, it) });
+  if (q('FISHING_ROD') >= 1 && fishingSpot(game)) acts.push({ label: 'Cast your line', run: () => void withDeferredGesture(game, it, () => { startFishing(game, it); }) });
   if (!acts.length) {
     const msg = q('FISHING_ROD') >= 1 ? "You can't fish there!" : q('AXE') >= 1 ? 'There is no tree to chop down nearby.' : q('DIG') >= 1 ? "You can't dig there." : `You can't do anything interesting with your ${it.name()}.`;
     game.message(msg, 'c_light_gray');
@@ -168,7 +209,9 @@ function toolActions(game: Game, it: Item): ActionResult {
   }
   if (acts.length === 1) acts[0].run();
   else menu(`Use your ${it.name()}`, acts);
-  return ok();
+  // Accepted so far, not finished: the gesture (if any) fires from whichever activity
+  // actually completes, via withDeferredGesture above.
+  return { ...ok(), deferred: true };
 }
 
 /** Jump the calendar forward to day `dayOfSeason` of the next `season` (keeps the hour). */
@@ -190,7 +233,7 @@ export function installNature(game: Game, renderer: Renderer | null, api?: Debug
 
   for (const [quality, level, type] of [
     ['AXE', 1, 'CHOP_TREE'], ['AXE', 1, 'CHOP_LOGS'], ['AXE', 2, 'LUMBER'], ['SAW_W', 2, 'LUMBER'],
-    ['DIG', 1, 'MAKEMOUND'], ['DIG', 1, 'DIG'], ['FISHING_ROD', 1, 'FISH_ROD'],
+    ['DIG', 1, 'CLEAR_RUBBLE'], ['DIG', 1, 'MAKEMOUND'], ['DIG', 1, 'DIG'], ['FISHING_ROD', 1, 'FISH_ROD'],
   ] as const) {
     if (!qualityUsages.some((u) => u.quality === quality && u.type === type)) qualityUsages.push({ quality, level, type });
     game.player.inv.useHandlers.set(type, (it) => toolActions(game, it));
@@ -222,6 +265,7 @@ export function installNature(game: Game, renderer: Renderer | null, api?: Debug
     load: (d: { stamps?: Record<string, [number, number]> }) => actualizer.load(d.stamps ?? {}),
     missing: () => actualizer.load({}),
   });
+  installRubble(game);
 
   if (renderer) {
     // swimming: head just above the surface; sunk: just below it
@@ -394,5 +438,11 @@ function installNatureDebug(game: Game, api: DebugApi, sys: NatureSystem): void 
     },
     natureInteractions: (x: number, y: number, z = p().z) => natureInteractions(game, x, y, z).map((i) => i.label),
     fillable: (liquid = 'water') => fillableContainers(game, liquid).map(([it, n]) => [it.name(), n]),
+    /** Place RUBBLE furniture at (dx, dy) from the player (default: in front); setup only. */
+    makeRubble: (dx = 1, dy = 0, id = 'f_rubble_rock') => {
+      const t = { x: p().tileX + dx, y: p().tileY + dy, z: p().z };
+      game.map.setFurn(t.x, t.y, t.z, id);
+      return t;
+    },
   });
 }

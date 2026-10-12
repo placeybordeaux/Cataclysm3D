@@ -41,8 +41,12 @@ export function mapgenLab(env: LabEnv, dat: MapgenDat, levels: Levels): void {
   }
 
   const sewer = { top: match(env, 'sewer', north, ROT.type), left: match(env, 'sewer', east, ROT.type), bottom: match(env, 'sewer', south, ROT.type), right: match(env, 'sewer', west, ROT.type) };
-  if (sewer.top || sewer.left || sewer.bottom || sewer.right) drawSewerRoom(buf, sewer);
-  else drawNormalRoom();
+  if (sewer.top || sewer.left || sewer.bottom || sewer.right) {
+    drawSewerRoom(buf, sewer);
+    // Not BN: lab.lua's sewer room has no stairs, so a lab_stairs OMT beside a sewer strands
+    // the levels below it. Its concrete floor takes them like any other room.
+    addStairs();
+  } else drawNormalRoom();
 
   // nearby_overmap_adjustments: slime pits and anthills eat into the lab.
   for (const fuzzy of ['slimepit', 'ants']) {
@@ -81,9 +85,13 @@ export function mapgenLab(env: LabEnv, dat: MapgenDat, levels: Levels): void {
     } else if (match(env, 'filler', self, ROT.contains)) gen('lab_4side_filler');
     else gen('lab_4side');
     drawWalls(walls);
+    addStairs();
+    drawLights();
+  }
+
+  function addStairs(): void {
     if (match(env, 'stairs', at(0, 0, 1), ROT.contains)) insertStairs('t_stairs_up');
     else if (match(env, 'stairs', self, ROT.contains)) insertStairs('t_stairs_down');
-    drawLights();
   }
 
   function drawWalls(walls: { top: number; bottom: number; left: number; right: number }): void {

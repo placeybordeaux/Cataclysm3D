@@ -1,5 +1,6 @@
 import type { Character } from './character';
 import { BionicState } from './bionics';
+import { setArmorInterface } from './powerArmor';
 import { mutagenAction, MutationState, PURIFIER_ACTIONS, useActionTypes } from './mutations';
 
 // Attaches mutations + bionics to a Character through its hook points (no Game needed, so
@@ -28,6 +29,20 @@ export function attachBodyMods(c: Character, opts: { isDay?: () => boolean } = {
 
   c.enchantCondition = (cond, traitId) => mut.conditionHolds(cond, traitId, isDay);
   c.enchantProviders.push((v) => bio.enchant(v));
+  // Power armor draws bionic power through a powered BIONIC_ARMOR_INTERFACE CBM (src/game/powerArmor.ts).
+  setArmorInterface(c, {
+    efficiency: () => {
+      let best = 0;
+      for (const b of bio.bionics) {
+        const d = bio.def(b.id);
+        // BN uses max(1, fuel_efficiency) of the powered interfaces (Character::has_charges(itype_bio_armor)).
+        if (b.powered && d?.flags?.includes('BIONIC_ARMOR_INTERFACE')) best = Math.max(best, 1, d.fuel_efficiency ?? 1);
+      }
+      return best;
+    },
+    power: () => bio.power,
+    drain: (kj) => bio.modPower(-kj),
+  });
   const inv = c.inv;
   inv.wearChecks.push((it) => mut.wearBlocker(it));
   inv.extraEncumbrance.push((bp) => mut.encumbrance(bp) + bio.encumbrance(bp));

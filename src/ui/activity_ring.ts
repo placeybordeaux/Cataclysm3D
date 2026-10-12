@@ -61,6 +61,7 @@ export function installActivityRing(game: Game, lastMessage: () => string | null
   if (!registered) {
     registered = true;
     registerOption({
+      category: 'Interface',
       name: 'Activity progress',
       value: () => ({ ring: 'Crosshair ring', bar: 'Bottom bar', both: 'Both' })[activityUiMode()],
       change: (d) => {

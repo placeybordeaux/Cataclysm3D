@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { layoutOf, speciesOf, wantsFlora3d, flora, setFlora } from '../src/render/flora';
+import { layoutOf, speciesOf, wantsFlora3d, flora, setFlora, bareInSeason, paintImpostor } from '../src/render/flora';
 import { paintBark, paintFringe, paintLeaves, paintNeedles } from '../src/render/floraArt';
 
 describe('flora species', () => {
@@ -91,3 +91,36 @@ describe('flora switch', () => {
     expect(() => setFlora('ferns' as never)).toThrow(/unknown flora/);
   });
 });
+
+ describe('fern fronds and winter saplings', () => {
+  it('uses six curved fronds and paired leaflets instead of shrub lumps, shared across LOD', () => {
+    const l = layoutOf('fern', 0, false);
+    expect(l.lumps).toHaveLength(0);
+    expect(l.limbs).toHaveLength(6);
+    expect(l.leaflets).toHaveLength(60);
+    expect(l.leaflets.every(p => p.length === 4 && p.flat().every(Number.isFinite))).toBe(true);
+    expect(layoutOf('fern', 0, false)).toBe(l);
+    expect(l.limbs.every(f => f.pts[2][1] > f.pts[3][1])).toBe(true);
+  });
+  it('projects the same fern leaflet geometry into both far impostor axes', () => {
+    const l = layoutOf('fern', 1, false);
+    const leaf = paintLeaves([[20,30,15],[50,80,30],[80,110,45],[120,150,60]], 1);
+    const bark = paintBark('smooth', [60,80,40], 1);
+    for (const axis of [0,1] as const) {
+      const full = paintImpostor(l, axis, { leaf: [[20,30,15],[50,80,30],[80,110,45],[120,150,60]] } as never, leaf, bark, false);
+      const stem = paintImpostor({ ...l, leaflets: [] }, axis, {} as never, leaf, bark, false);
+      const filled = (img: typeof full) => img.data.filter((_, i) => i % 4 === 3 && img.data[i] > 0).length;
+      expect(filled(full)).toBeGreaterThan(filled(stem));
+      expect(filled(full)).toBeLessThan(full.w * full.h);
+    }
+  });
+  it('makes young deciduous trees bare in winter even when the sampled sprite remains colored', () => {
+    expect(bareInSeason('sapling','winter',false)).toBe(true);
+    expect(bareInSeason('sapling','summer',true)).toBe(false);
+    expect(bareInSeason('conifer','winter',true)).toBe(false);
+    const l = layoutOf('sapling',0,true);
+    expect(l.lumps).toHaveLength(0);
+    expect(l.twigs).toHaveLength(3);
+    expect(l.limbs).toHaveLength(9);
+  });
+ });

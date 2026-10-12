@@ -15,7 +15,16 @@ import type { Item } from './item';
 export type Attitude = 'attack' | 'follow' | 'ignore' | 'flee' | 'friend';
 
 /** Short-lived real-time status on a monster (seconds left). */
-export type MonEffect = 'stunned' | 'downed' | 'grabbing' | 'boomered' | 'onfire' | 'fleeing' | 'hit_by_player';
+export type MonEffect = 'stunned' | 'downed' | 'grabbing' | 'boomered' | 'onfire' | 'fleeing' | 'hit_by_player' | 'poison' | 'badpoison';
+
+/**
+ * BN effects.json mods a monster gets from poison (monster::process_one_effect reads SPEED,
+ * DODGE, HIT and HURT). HURT rolls one_in(hurtOneIn) each turn.
+ */
+export const MON_POISON = {
+  poison: { speed: 0, dodge: 0, hit: 0, hurtOneIn: 450, hurt: [1, 1] },
+  badpoison: { speed: -10, dodge: -2, hit: -2, hurtOneIn: 60, hurt: [1, 2] },
+} as const;
 
 export interface SpecialAttackState {
   /** Entry from MonsterDef.special_attacks, merged over misc.monster_attack when referenced. */
@@ -125,6 +134,7 @@ export class Monster {
   /** CDDA wander_pos/wandf: where noise led us and how many real seconds we keep going. */
   wanderX = 0;
   wanderY = 0;
+  wanderZ: number | null = null;
   wanderTime = 0;
   /** Last known player position (seen) and how long ago. */
   lastSeenX = 0;
@@ -264,6 +274,22 @@ export class Monster {
     this.effects.set(e, Math.max(this.effects.get(e) ?? 0, seconds));
   }
 
+  /** monster::is_immune_effect: poisons only take in warm-blooded flesh. */
+  resistsPoison(): boolean {
+    return !this.has('WARM') || !this.type.material.some((m) => m === 'flesh' || m === 'iflesh');
+  }
+
+  /** Sum of one mod over the active poisons (BN adds every effect's bonus). */
+  private poisonMod(k: 'speed' | 'dodge' | 'hit'): number {
+    let v = 0;
+    for (const id of ['poison', 'badpoison'] as const) if (this.hasEffect(id)) v += MON_POISON[id][k];
+    return v;
+  }
+  /** monster hit_bonus from effects (melee accuracy). */
+  hitBonus(): number {
+    return this.poisonMod('hit');
+  }
+
   /** "zombie" (or the mapgen-given name). */
   displayName(): string {
     return this.name ?? zombieAwareName(this.type);
@@ -283,7 +309,7 @@ export class Monster {
     if (this.hasEffect('downed') || this.hasEffect('stunned')) return 0;
     let d = this.type.dodge;
     if (this.hasEffect('grabbing')) d = Math.max(0, d - 8);
-    return d;
+    return Math.max(0, d + this.poisonMod('dodge'));
   }
   sizeMeleePenalty(): number {
     return sizeMeleePenalty(this.size);
@@ -296,14 +322,14 @@ export class Monster {
     // Diggers/swimmers ignore terrain costs of their medium (simplified).
     if (this.has('SWIMS') && moveCost > 100) cost = 100;
     // BALANCE.monsterSpeed: the difficulty's BN MONSTER_SPEED (walking only; swing rates stay BN's).
-    let s = (this.type.speed / cost) * ACTION_SCALE * BALANCE.monsterSpeed;
+    let s = (this.speed / cost) * ACTION_SCALE * BALANCE.monsterSpeed;
     if (this.hasEffect('stunned')) s *= 0.5;
     return s;
   }
 
-  /** Effective speed in CDDA moves for action costs. */
+  /** Effective speed in CDDA moves for action costs (base speed plus effect speed bonuses). */
   get speed(): number {
-    return Math.max(1, this.type.speed);
+    return Math.max(1, this.type.speed + this.poisonMod('speed'));
   }
 
   /**
@@ -342,9 +368,10 @@ export class Monster {
   }
 
   /** CDDA monster::wander_to: go investigate `x,y` for `seconds` unless already on something louder. */
-  wanderTo(x: number, y: number, seconds: number): void {
+  wanderTo(x: number, y: number, seconds: number, z = this.z): void {
     this.wanderX = x;
     this.wanderY = y;
+    this.wanderZ = z;
     this.wanderTime = seconds;
     this.path = [];
   }

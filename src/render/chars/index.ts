@@ -1,3 +1,4 @@
+import { visualPreference } from '../visualPreference';
 import type { Renderer } from '../renderer';
 import type { TileFrame } from '../textureSource';
 import { CharLayer, SkinStore, charUniforms } from './charLayer';
@@ -56,11 +57,11 @@ export const charSettings = {
   /** pose updates per second (Shadowglass-style stepped animation); 0 = every frame */
   fps: 10,
   /** draw bows/slingshots in 3D too (off: the 2D bowArt sprite reads better) */
-  fpBow: false,
+  fpBow: visualPreference('fpbow', ['sprite', 'model'], 'sprite') === 'model',
   /** first-person hands: 3D (fpView.ts) or the sprite viewmodel (?viewmodel=sprite) */
   viewmodel: initialViewmodel(),
   /** people's skins: styled.ts (default) or the projected sprite (?charpaint=sprite) */
-  paint: (typeof location !== 'undefined' && new URLSearchParams(location.search).get('charpaint') === 'sprite' ? 'sprite' : 'styled') as 'styled' | 'sprite',
+  paint: visualPreference('charpaint', ['styled', 'sprite'], 'styled'),
   listeners: [] as ((m: CharMode) => void)[],
 };
 

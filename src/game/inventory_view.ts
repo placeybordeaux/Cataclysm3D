@@ -1,8 +1,9 @@
 import type { BodyPartId } from './bodyparts';
 import { ALL_PARTS, BODY_PARTS } from './bodyparts';
 import type { Character } from './character';
-import { covers, itemLayer, useActions, type Layer } from './inventory';
+import { covers, itemActionName, itemLayer, useActions, type Layer } from './inventory';
 import type { Item } from './item';
+import { upsToggleLabel } from './upsTransfer';
 import { cddaText } from './units';
 import {
   canMove, carriedAs, isAt, itemsAt, L, locate, locName, unloadItem, type Cargo, type Ground, type Loc, type MoveResult, type WhyNot,
@@ -416,7 +417,14 @@ export function itemActions(who: Character, it: Item, loc: Loc): ItemAction[] {
     out.push({ id: 'wield', label: 'Wield', moves: inv.wielded ? 100 + Math.min(200, Math.floor(it.volume() / 20)) : cost(L.hands(who)), disabled: d, primary: !food && !it.isArmor() && !it.hasContents(), run: () => inv.wield(it, loc) });
   }
   const acts = useActions(it.def);
-  if (acts.length) out.push({ id: 'activate', label: cddaText(acts[0].menu_text) || 'Activate', moves: 100, run: () => inv.use(it, undefined, 0, loc) });
+  // When there's only one use_action this label is what shows (model.ts only builds a "Use"
+  // submenu for 2+); with several it's never shown, so it doesn't need to pick among them.
+  if (acts.length)
+    out.push({
+      id: 'activate',
+      label: acts[0].type === 'TOGGLE_UPS_CHARGING' ? upsToggleLabel(it) : cddaText(acts[0].menu_text) || itemActionName(it.data, acts[0].type),
+      moves: 100, run: () => inv.use(it, undefined, 0, loc),
+    });
   if (it.isBook()) out.push({ id: 'read', label: 'Read', moves: 0, run: () => ({ ok: false, msg: 'Reading is started from the read menu.' }) });
   if (it.isGun() || it.isMagazine() || it.takesMagazines() || it.hasIntegralMagazine() || it.isBandolier())
     out.push({ id: 'reload', label: 'Reload', moves: 100, disabled: it.hasFlag('NO_RELOAD') ? inv.whyNoReload(it) : it.ammoRemaining() >= it.ammoCapacity() && !it.takesMagazines() ? `The ${it.baseName()} is already fully loaded!` : undefined, run: () => inv.reload(it) });

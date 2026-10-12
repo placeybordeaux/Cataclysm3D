@@ -82,8 +82,8 @@ export function mergeGeometries(geos: THREE.BufferGeometry[]): THREE.BufferGeome
 
 // --- parts swatches ------------------------------------------------------------------
 
-export type PartSwatch = 'tread' | 'sidewall' | 'rim' | 'spokes' | 'fabric' | 'dark' | 'floor' | 'chrome' | 'light' | 'metal' | 'ribbed' | 'leather' | 'fins';
-const PART_SWATCHES: PartSwatch[] = ['tread', 'sidewall', 'rim', 'spokes', 'fabric', 'dark', 'floor', 'chrome', 'light', 'metal', 'ribbed', 'leather', 'fins'];
+export type PartSwatch = 'tread' | 'sidewall' | 'rim' | 'spokes' | 'fabric' | 'dark' | 'floor' | 'chrome' | 'light' | 'metal' | 'ribbed' | 'leather' | 'fins' | 'armor';
+const PART_SWATCHES: PartSwatch[] = ['tread', 'sidewall', 'rim', 'spokes', 'fabric', 'dark', 'floor', 'chrome', 'light', 'metal', 'ribbed', 'leather', 'fins', 'armor'];
 const SW = 32;
 
 function paintPart(kind: PartSwatch, x: number, y: number): number {
@@ -133,6 +133,16 @@ function paintPart(kind: PartSwatch, x: number, y: number): number {
     case 'fins':
       // engine cooling fins: horizontal ridges
       return y % 4 < 2 ? 170 + Math.floor(n * 12) : 84;
+    case 'armor': {
+      // Painted armour plate (render/vehicleTank.ts): 'metal' has a seam every 16 px both ways,
+      // a 0.5 m grid that read as the sidewalk's paving slabs under a tank. One weld seam per
+      // metre along the plate, soft paint mottling in 4 px blocks, a highlight bead over the
+      // seam and a row of bolt heads: a plate, not a tile.
+      const blk = hash(x >> 2, y >> 2, 91);
+      const seam = x % 32 === 0 ? -34 : x % 32 === 1 ? 14 : 0;
+      const bolt = x % 32 === 4 && y % 16 === 6 ? 26 : x % 32 === 4 && y % 16 === 7 ? -18 : 0;
+      return 156 + Math.floor((blk - 0.5) * 18) + Math.floor(n * 6) + seam + bolt;
+    }
   }
 }
 

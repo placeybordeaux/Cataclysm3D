@@ -169,10 +169,16 @@ export interface Layout {
   trunk: Tube | null;
   limbs: Tube[];
   lumps: Lump[];
+  /** Fern leaflet diamonds, shared by meshes and projected impostors. */
+  leaflets: V3[][];
   cones: Cone[];
   /** twig cutout cards (bare crowns): centre and size */
   twigs: Lump[];
   crown: V3;
+}
+
+export function bareInSeason(family: Family, season: string, sampledBare: boolean): boolean {
+  return season === 'winter' && family !== 'conifer' && family !== 'deadconifer' && (sampledBare || family === 'sapling');
 }
 
 const VARIANTS = 3;
@@ -189,7 +195,7 @@ export function layoutOf(family: Family, variant: number, bare: boolean): Layout
 function makeLayout(family: Family, variant: number, bare: boolean): Layout {
   const rng = new Rng(hashString(family) ^ (variant * 0x9e3779b1));
   const j = (a: number) => (rng.next() - 0.5) * 2 * a;
-  const L: Layout = { trunk: null, limbs: [], lumps: [], cones: [], twigs: [], crown: [0, 0.65, 0] };
+  const L: Layout = { trunk: null, limbs: [], lumps: [], leaflets: [], cones: [], twigs: [], crown: [0, 0.65, 0] };
   const trunk = (top: number, r: number, lean = 0.03): V3 => {
     const lx = j(lean), lz = j(lean);
     const pts: V3[] = [[0, -0.03, 0], [0, 0.04, 0], [lx * 0.3, top * 0.45, lz * 0.3], [lx, top, lz]];
@@ -213,9 +219,9 @@ function makeLayout(family: Family, variant: number, bare: boolean): Layout {
       L.lumps.push({ c: [c[0] + d[0] * R[0] * 0.58, c[1] + d[1] * R[1] * 0.58, c[2] + d[2] * R[2] * 0.58], r: [R[0] * k, R[1] * k * squash, R[2] * k] });
     }
   };
-  const bareCrown = (top: V3, r: number, spread: number) => {
+  const bareCrown = (top: V3, r: number, spread: number, includeFirst = false) => {
     // limbs to every lump position, each forking twice; twig cards at the tips
-    for (const lp of L.lumps.slice(1)) {
+    for (const lp of L.lumps.slice(includeFirst ? 0 : 1)) {
       const tip: V3 = [lp.c[0] * 1.15, lp.c[1] + lp.r[1] * 0.5, lp.c[2] * 1.15];
       const st: V3 = [top[0] * 0.8, top[1] * (0.82 + rng.next() * 0.18), top[2] * 0.8];
       limb(st, tip, r * 0.42);
@@ -270,7 +276,7 @@ function makeLayout(family: Family, variant: number, bare: boolean): Layout {
         const a = (i / 3) * Math.PI * 2 + j(0.4);
         L.lumps.push({ c: [top[0] + Math.cos(a) * 0.1, 0.66 + i * 0.09, top[2] + Math.sin(a) * 0.1], r: [0.16, 0.14, 0.16] });
       }
-      if (bare) bareCrown(top, 0.02, 0.05);
+      if (bare) bareCrown(top, 0.02, 0.05, true);
       break;
     }
     case 'conifer': {
@@ -305,9 +311,23 @@ function makeLayout(family: Family, variant: number, bare: boolean): Layout {
       }
       break;
     }
-    case 'bush':
-    case 'underbrush':
     case 'fern': {
+      L.crown = [0, 0.3, 0];
+      for (let f = 0; f < 6; f++) {
+        const a = f * Math.PI / 3 + j(0.2), dx = Math.cos(a), dz = Math.sin(a);
+        const point = (t: number): V3 => [dx * t * 0.68, 0.03 + Math.sin(t * Math.PI * 0.85) * 0.48, dz * t * 0.68];
+        L.limbs.push({ pts: [point(0), point(0.35), point(0.7), point(1)], radii: [0.008, 0.006, 0.004, 0.001] });
+        for (let k = 1; k <= 5; k++) for (const side of [-1, 1]) {
+          const t = k / 6, base = point(t), len = 0.2 * (1 - t * 0.7);
+          const tip: V3 = [base[0] - dz * len * side + dx * 0.05, base[1] + 0.025, base[2] + dx * len * side + dz * 0.05];
+          const mid: V3 = [(base[0] + tip[0]) / 2, (base[1] + tip[1]) / 2, (base[2] + tip[2]) / 2];
+          L.leaflets.push([base, [mid[0] + dx * 0.025, mid[1] + 0.01, mid[2] + dz * 0.025], tip, [mid[0] - dx * 0.025, mid[1] - 0.01, mid[2] - dz * 0.025]]);
+        }
+      }
+      break;
+    }
+    case 'bush':
+    case 'underbrush': {
       const low = family !== 'bush';
       const n = low ? 4 : 3 + (variant % 2);
       L.crown = [0, 0.45, 0];
@@ -537,13 +557,14 @@ function boundsOf(L: Layout): ImpBounds {
   for (const l of L.lumps) { hw = Math.max(hw, Math.hypot(l.c[0], l.c[2]) + l.r[0]); top = Math.max(top, l.c[1] + l.r[1]); }
   for (const c of L.cones) { hw = Math.max(hw, c.r); top = Math.max(top, c.y1); }
   for (const t of L.twigs) { hw = Math.max(hw, Math.hypot(t.c[0], t.c[2]) + t.r[0]); top = Math.max(top, t.c[1] + t.r[1]); }
+  for (const leaf of L.leaflets) for (const p of leaf) { hw = Math.max(hw, Math.hypot(p[0], p[2])); top = Math.max(top, p[1]); }
   for (const b of L.limbs) for (const p of b.pts) { hw = Math.max(hw, Math.hypot(p[0], p[2])); top = Math.max(top, p[1]); }
   if (L.trunk) for (const p of L.trunk.pts) top = Math.max(top, p[1]);
   return { hw: hw * 1.05, top: top * 1.02, bot: -0.03 };
 }
 
 /** The layout projected on one vertical plane (axis 0: x, 1: z), painted flat. */
-function paintImpostor(L: Layout, axis: 0 | 1, pal: Palette, leafTex: Img, barkTex: Img, conifer: boolean): Img {
+export function paintImpostor(L: Layout, axis: 0 | 1, pal: Palette, leafTex: Img, barkTex: Img, conifer: boolean): Img {
   const b = boundsOf(L);
   const W = Math.max(4, Math.ceil(b.hw * 2 * IMP_PX)), H = Math.max(4, Math.ceil((b.top - b.bot) * IMP_PX));
   const img = new Img(W, H);
@@ -584,6 +605,20 @@ function paintImpostor(L: Layout, axis: 0 | 1, pal: Palette, leafTex: Img, barkT
         img.set(x, y, v > 0.55 ? pal.leaf[0] : texAt(leafTex, x, y));
       }
   }
+  for (const leaf of [...L.leaflets].sort((a, c) => depth(a[0]) - depth(c[0]))) {
+    const ps = leaf.map((p) => [X(p), Y(p[1])]);
+    for (const ids of [[0, 1, 2], [0, 2, 3]]) {
+      const [a, c, d] = ids.map((i) => ps[i]);
+      const den = (c[1] - d[1]) * (a[0] - d[0]) + (d[0] - c[0]) * (a[1] - d[1]);
+      if (Math.abs(den) < 1e-6) continue;
+      for (let y = Math.floor(Math.min(a[1], c[1], d[1])); y <= Math.max(a[1], c[1], d[1]); y++)
+        for (let x = Math.floor(Math.min(a[0], c[0], d[0])); x <= Math.max(a[0], c[0], d[0]); x++) {
+          const u = ((c[1] - d[1]) * (x - d[0]) + (d[0] - c[0]) * (y - d[1])) / den;
+          const v = ((d[1] - a[1]) * (x - d[0]) + (a[0] - d[0]) * (y - d[1])) / den;
+          if (u >= 0 && v >= 0 && u + v <= 1) img.set(x, y, texAt(leafTex, x, y));
+        }
+    }
+  }
   for (const t of L.twigs) {
     const cx = X(t.c), cy = Y(t.c[1]), r = t.r[0] * IMP_PX;
     for (let k = 0; k < 6; k++) {
@@ -619,7 +654,7 @@ export function* buildFloraSteps(specs: TreeSpec[], ground: GroundField | null):
     const variant = (s.seed >>> 3) % VARIANTS;
     // Bare crowns only when the season says so: a sparse sprite (saplings, some autumn
     // trees) otherwise read as bare and lost its leaves in summer
-    const bare = pal.bare && season === 'winter' && sp.family !== 'conifer' && sp.family !== 'deadconifer';
+    const bare = bareInSeason(sp.family, season, pal.bare);
     const fam = sp.family;
     const L = layoutOf(fam, variant, bare && fam !== 'dead');
     const shrubby = fam === 'bush' || fam === 'underbrush' || fam === 'fern';
@@ -655,8 +690,13 @@ export function* buildFloraSteps(specs: TreeSpec[], ground: GroundField | null):
     const near = lod === 0;
     const Xs = (pts: V3[]) => pts.map(X);
     if (L.trunk) tube(g, barkF, Xs(L.trunk.pts), L.trunk.radii.map((r) => r * H), near ? 8 : 5);
-    const limbs = near ? L.limbs : bare || fam === 'dead' ? L.limbs.filter((l) => l.radii[0] * H > 0.03) : [];
-    for (const l of limbs) tube(g, barkF, Xs(l.pts), l.radii.map((r) => Math.max(0.012, r * H)), near ? 5 : 3);
+    const limbs = near || fam === 'fern' ? L.limbs : bare || fam === 'dead' ? L.limbs.filter((l) => l.radii[0] * H > 0.03) : [];
+    for (const l of limbs) tube(fam === 'fern' ? fg : g, fam === 'fern' ? leafF : barkF, Xs(l.pts), l.radii.map((r) => Math.max(fam === 'fern' ? 0.002 : 0.012, r * H)), near ? 5 : 3);
+    for (const leaf of L.leaflets) {
+      const ps = leaf.map(X), ns: V3[] = ps.map(() => [0, 1, 0]);
+      quadOut(fg, ps[0], ps[1], ps[2], ps[3], ns, [0.001, 0.001, 0.999, 0.999], leafF, WHITE);
+      quadOut(fg, ps[3], ps[2], ps[1], ps[0], ns.map(() => [0, -1, 0]), [0.001, 0.001, 0.999, 0.999], leafF, WHITE);
+    }
     const snow = season === 'winter' && conifer ? A.frame('snow', true, () => paintSnow(5)) : undefined;
     for (let i = 0; i < L.cones.length; i++) {
       const c = L.cones[i];

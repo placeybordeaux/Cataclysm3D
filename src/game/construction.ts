@@ -459,3 +459,22 @@ export function cancelConstruction(host: CraftHost, site: Item, x: number, y: nu
   host.message(`You abandon the ${site.baseName()} and gather up its materials.`);
   return true;
 }
+
+/** The targeted examine action uses the same recipes and requirements as construction. */
+export function furnitureDeconstruction(host: CraftHost, x: number, y: number, z: number): { id: string; label: string; run: () => void }[] {
+  const f = host.map.furnAt(x, y, z);
+  if (f.id === 'f_null' || !f.deconstruct) return [];
+  const inv = constructionInventory(host);
+  const candidates = constructionGroups(host.data).flatMap((g) => g.constructions)
+    .filter((con) => asList(con.post_special).includes('done_deconstruct') && siteOk(host, con, x, y, z))
+    .map((con) => ({ con, requirements: canBuild(host, con, inv) }))
+    .sort((a, b) => Number(b.requirements.ok) - Number(a.requirements.ok) || a.con.time - b.con.time);
+  const choice = candidates[0];
+  if (!choice) return [];
+  const need = choice.requirements.ok ? '' : ` (Need: ${choice.requirements.missing.join('; ')})`;
+  return [{
+    id: 'deconstruct_furniture',
+    label: `Deconstruct the ${cddaText(f.name)}${need}`,
+    run: () => { startConstruction(host, choice.con, x, y, z); },
+  }];
+}

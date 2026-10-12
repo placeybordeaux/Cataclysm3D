@@ -24,6 +24,12 @@ export interface RideAnchors {
   feet: [V3, V3];
   /** Bicycles: the crank the feet pedal round (centre, arm length, pedal distance from the centre line). */
   crank?: { c: V3; r: number; half: number };
+  /**
+   * The body turned about the hips from mount forward toward mount right (rad): a commander
+   * in a hatch or a gunner in a turret faces where they look. The grips and feet are given
+   * already turned (stationAnchors).
+   */
+  turn?: number;
 }
 
 /**
@@ -47,6 +53,32 @@ export function genericAnchors(mx: number, my: number, base: number): RideAnchor
     kind: 'seat', hip: [mx - 0.1, hy, my], lean: 0,
     grips: [[mx + 0.3, hy + 0.3, my + 0.18], [mx + 0.3, hy + 0.3, my - 0.18]],
     feet: [[mx + 0.45, base + 0.12, my + 0.12], [mx + 0.45, base + 0.12, my - 0.12]],
+  };
+}
+
+/**
+ * A body at a vehicle station that isn't the wheel (src/game/vehwalk.ts): `seated` on a seat or
+ * bunk (hips on the seat, hands in the lap, feet on the floor ahead), or `hatch` (standing in
+ * it, head and shoulders out, forearms on the rim). (x, y) the station in mount space
+ * (forward, right), `eye` its eye height (absolute m, VehicleRenderer.stationEye), `turn` the
+ * way the body faces (rad from forward toward the right).
+ */
+export function stationAnchors(posture: 'seated' | 'hatch', x: number, y: number, eye: number, turn: number): RideAnchors {
+  const c = Math.cos(turn), s = Math.sin(turn);
+  // eye above the hips joint, upright (the rig's head sits ~0.65 m over its hips)
+  const hipH = eye - (posture === 'hatch' ? 0.68 : 0.66);
+  const at = (fwd: number, up: number, right: number): V3 => [x + fwd * c - right * s, hipH + up, y + fwd * s + right * c];
+  if (posture === 'hatch') {
+    return {
+      kind: 'seat', hip: at(0, 0, 0), lean: 0.12, turn,
+      grips: [at(0.3, 0.42, 0.27), at(0.3, 0.42, -0.27)],
+      feet: [at(0.04, -0.82, 0.12), at(0.04, -0.82, -0.12)],
+    };
+  }
+  return {
+    kind: 'seat', hip: at(-0.05, 0, 0), lean: -0.08, turn,
+    grips: [at(0.3, 0.12, 0.17), at(0.3, 0.12, -0.17)],
+    feet: [at(0.45, -0.5, 0.13), at(0.45, -0.5, -0.13)],
   };
 }
 
@@ -93,10 +125,14 @@ export class Rider {
     const r = this.ride;
     r.lean = a.lean;
     // mount point -> the rig's model space: hips joint at `hip`, facing +x (mount forward)
+    // turned by `turn` toward mount right
+    const tc = Math.cos(a.turn ?? 0), ts = Math.sin(a.turn ?? 0);
     const toModel = (p: V3, out: V3) => {
-      out[0] = p[2] - a.hip[2];
+      const dx = p[0] - a.hip[0], dz = p[2] - a.hip[2];
+      const fx = dx * tc + dz * ts, rz = -dx * ts + dz * tc;
+      out[0] = rz;
       out[1] = p[1] - a.hip[1] + dm.hipY;
-      out[2] = -(p[0] - a.hip[0]);
+      out[2] = -fx;
     };
     const g = grips ?? a.grips;
     const T = this.targets;
@@ -123,7 +159,9 @@ export class Rider {
     this.pin.t = t;
     this.inst.setPose(this.pin);
     // root: frame · T(hip) · turn to face mount +x · drop to the feet origin
-    this.root.copy(frame).multiply(tmpM.makeTranslation(a.hip[0], a.hip[1], a.hip[2])).multiply(tmpR).multiply(tmpM.makeTranslation(0, -dm.hipY, 0));
+    this.root.copy(frame).multiply(tmpM.makeTranslation(a.hip[0], a.hip[1], a.hip[2]));
+    if (a.turn) this.root.multiply(tmpM.makeRotationY(-a.turn));
+    this.root.multiply(tmpR).multiply(tmpM.makeTranslation(0, -dm.hipY, 0));
     this.inst.rootOverride = this.root;
     this.inst.x = world.x;
     this.inst.y = world.y;
@@ -158,7 +196,8 @@ export class Rider {
 
 /**
  * Who sits in the driven vehicle's seat, per renderer: the player model (chars/playerModel.ts)
- * sets `rider` while you drive outside first person, VehicleRenderer places it each frame.
+ * sets `rider` while you drive outside first person, or sit / turn out at a vehicle station
+ * (seat, bunk, gunner's seat, hatch); VehicleRenderer places it each frame.
  */
 export interface RiderSlot {
   rider: Rider | null;

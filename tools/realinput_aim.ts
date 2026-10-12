@@ -12,7 +12,7 @@
 //
 // cdda.* is only used for setup (weapon, skills, the pinned zombie, the model) and to read state.
 
-import type { XInput } from './lib/realinput';
+import { waitFor, type XInput } from './lib/realinput';
 
 export interface AimCtx {
   x: () => XInput;
@@ -617,7 +617,10 @@ export function aimScenarios(c: AimCtx): Scenario[] {
       check('turning with the mouse puts the line on the zombie', on?.target === (await js<number>('window.__uid')), on);
       await x().buttonDown(3);
       await sleep(600);
-      const aimed = await js<{ target: number | null; shown: boolean } | null>('cdda.topAim()');
+      // The 'sway' model weaves the line while aiming, so one sample can catch it just off a
+      // 10 m zombie: wait (up to 2 s) for the line to be shown on it.
+      const aimed = (await waitFor<{ target: number | null; shown: boolean } | null>(js, `(() => { const a = cdda.topAim(); return a && a.shown && a.target === window.__uid ? a : null; })()`, 2000))
+        ?? (await js<{ target: number | null; shown: boolean } | null>('cdda.topAim()'));
       check('aiming (RMB) shows the full line and the ring', !!aimed?.shown && aimed.target === (await js<number>('window.__uid')), aimed);
       await shot('top_aim_line');
       const hp0 = await js<number>('window.__m.hp');

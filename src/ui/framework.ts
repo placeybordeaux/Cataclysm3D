@@ -2,10 +2,12 @@ import type { Input } from '../core/input';
 import { sfx } from '../audio/sfx';
 import { Keys } from './keys';
 import { keyLabel } from './keymap';
+import { shareTheme } from '../ui2/theme';
+import './framework_modern.css';
 
 // Shared building blocks for CDDA-style curses screens. Every modal screen (inventory,
 // crafting, construction, character sheet, …) should be made from these so the whole UI
-// looks and behaves consistently: black bordered windows, CDDA color tags, letter hotkeys,
+// looks and behaves consistently: modern palette and panel skins, CDDA color tags, letter hotkeys,
 // Space (the player's `close_menu` key) or the opening key to close, arrow keys / j k to move,
 // Enter to select. Esc also closes but is never advertised: outside fullscreen the browser takes
 // it to release the captured mouse, so players who learn "Esc closes" keep losing the mouse.
@@ -15,6 +17,7 @@ let input: Input | null = null;
 
 export function initUi(root: HTMLElement, inp: Input): void {
   uiRoot = root;
+  shareTheme(root);
   input = inp;
 }
 
@@ -114,6 +117,7 @@ const openWindows: { close: () => void; escape: () => void; el: HTMLElement; mou
 
 /** Only the top window takes clicks (a click on the inventory behind an item menu opened a second one). */
 function markTopWindow(): void {
+  uiRoot?.classList.toggle('framework-window-open', openWindows.length > 0);
   openWindows.forEach((w, i) => w.el.classList.toggle('inactive', i < openWindows.length - 1));
   if (input) input.menuMouseLook = openWindows[openWindows.length - 1]?.mouseLook ?? false;
 }
@@ -180,8 +184,11 @@ export function openWindow(opts: WindowOpts): UiWindow {
   if (anchor === 'center') Object.assign(el.style, { left: '50%', top: '50%', transform: 'translate(-50%,-50%)' });
   else if (anchor === 'left') Object.assign(el.style, { left: '2vw', top: '4vh' });
   else Object.assign(el.style, { right: '2vw', top: '4vh' });
-  el.innerHTML = `<div class="title"></div><div class="body"></div><div class="footer"></div>`;
-  const title = el.querySelector('.title') as HTMLElement;
+  el.setAttribute('role', 'dialog');
+  el.setAttribute('aria-label', opts.title);
+  el.innerHTML = `<div class="title"><span class="window-title"></span><button class="window-close" type="button" aria-label="Close">×</button></div><div class="body"></div><div class="footer"></div>`;
+  const title = el.querySelector('.window-title') as HTMLElement;
+  const titlebar = el.querySelector('.title') as HTMLElement;
   const body = el.querySelector('.body') as HTMLElement;
   const footer = el.querySelector('.footer') as HTMLElement;
   title.textContent = opts.title;
@@ -230,7 +237,7 @@ export function openWindow(opts: WindowOpts): UiWindow {
   const win: UiWindow = {
     el,
     body,
-    setTitle: (t) => (title.textContent = t),
+    setTitle: (t) => { title.textContent = t; el.setAttribute('aria-label', t); },
     setFooter,
     close() {
       if (closed) return;
@@ -250,6 +257,33 @@ export function openWindow(opts: WindowOpts): UiWindow {
       return closed;
     },
   };
+  const closeButton = el.querySelector('.window-close') as HTMLButtonElement;
+  closeButton.title = `Close (${closeKeyLabel()})`;
+  closeButton.onclick = () => win.close();
+  // Dragging converts the initial anchor into a viewport position.
+  titlebar.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0 || (e.target as HTMLElement).closest('button')) return;
+    e.preventDefault();
+    const r = el.getBoundingClientRect();
+    const dx = e.clientX - r.left, dy = e.clientY - r.top;
+    titlebar.setPointerCapture(e.pointerId);
+    const move = (ev: PointerEvent) => {
+      const bounds = el.getBoundingClientRect();
+      Object.assign(el.style, {
+        transform: 'none', right: 'auto',
+        left: `${Math.max(0, Math.min(innerWidth - bounds.width, ev.clientX - dx))}px`,
+        top: `${Math.max(0, Math.min(innerHeight - bounds.height, ev.clientY - dy))}px`,
+      });
+    };
+    const end = () => {
+      titlebar.removeEventListener('pointermove', move);
+      titlebar.removeEventListener('pointerup', end);
+      titlebar.removeEventListener('pointercancel', end);
+    };
+    titlebar.addEventListener('pointermove', move);
+    titlebar.addEventListener('pointerup', end);
+    titlebar.addEventListener('pointercancel', end);
+  });
   return win;
 }
 
@@ -417,7 +451,7 @@ export function confirm(question: string, opts: { destructive?: boolean } = {}):
       },
       onClose: () => !answered && resolve(false),
     });
-    w.body.innerHTML = `${colorize(question)}<div class="confirm-buttons"><span class="btn" data-a="y">[${c('c_light_green', 'Y')}es]</span> <span class="btn" data-a="n">[${c('c_light_green', 'N')}o]</span></div>`;
+    w.body.innerHTML = `${colorize(question)}<div class="confirm-buttons"><button type="button" class="btn" data-a="y">[${c('c_light_green', 'Y')}es]</button> <button type="button" class="btn" data-a="n">[${c('c_light_green', 'N')}o]</button></div>`;
     w.body.querySelectorAll<HTMLElement>('.btn').forEach((b) => (b.onclick = () => answer(b.dataset.a === 'y')));
   });
 }

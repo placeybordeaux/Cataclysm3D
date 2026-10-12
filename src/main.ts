@@ -5,6 +5,7 @@ import { Game } from './game/game';
 import { Renderer } from './render/renderer';
 import { TestGenerator } from './world/testgen';
 import { WorldGenerator } from './world/worldgen';
+import { WORLDGEN_VERSION } from './world/overmap/overmap';
 import { loadWorldgenData } from './world/worldgen_data';
 import { installWorldgenDebug } from './world/worldgen_debug';
 import { installDebugApi } from './debug';
@@ -23,9 +24,11 @@ import { installMonsters } from './monsters';
 import { smashAimed } from './game/bash';
 import { installNpcs } from './npcs';
 import { installMutBio } from './mutbio';
+import { installBionicGuns } from './bionicguns';
 import { installCombatDepth } from './combatdepth';
 import { installCombatFeel } from './feel';
 import { installAim } from './aim';
+import { installTurrets } from './turrets';
 import { installLabs } from './labs';
 import { installChunkTracking } from './save/tracking';
 import { installSave, takePendingLoad } from './save/install';
@@ -65,6 +68,8 @@ async function main(): Promise<void> {
   const pending = gallery ? null : await takePendingLoad();
   const seed = pending?.file ? pending.file.world.seed : Number(params.get('seed') ?? (gallery ? 1 : Math.floor(Math.random() * 2 ** 31)));
   const genKind = pending?.file ? pending.file.world.gen : params.get('gen') ?? 'world';
+  // A loaded world keeps generating the way it did when it was made (saves without the field predate it).
+  const genVersion = pending?.file ? pending.file.world.genVersion ?? 1 : WORLDGEN_VERSION;
   if (genKind !== 'world' && genKind !== 'test') throw new Error(`unknown gen=${genKind} (expected world or test)`);
   const canvas = document.getElementById('view') as HTMLCanvasElement;
   const [data, worldgenData] = await Promise.all([loadGameData(), genKind === 'world' ? loadWorldgenData() : null]);
@@ -75,7 +80,7 @@ async function main(): Promise<void> {
   installChunkTracking(game);
   let worldgen: WorldGenerator | null = null;
   if (worldgenData) {
-    worldgen = new WorldGenerator(seed, worldgenData, data);
+    worldgen = new WorldGenerator(seed, worldgenData, data, genVersion);
     game.map.generator = worldgen;
     // CDDA's default scenario: wake up inside an evacuation shelter near a town.
     // (A loaded save puts the player back where they were instead: stand there from the
@@ -120,7 +125,7 @@ async function main(): Promise<void> {
   const mods = installMutBio(game, renderer, api);
   installLabs(game, worldgen, api);
   // Before installUi: the UI registers the save key only when game.save exists.
-  const save = await installSave(game, { api, genKind, worldgen, monsters });
+  const save = await installSave(game, { api, genKind, genVersion: worldgen ? genVersion : undefined, worldgen, monsters });
   game.events.on('gameLoaded', () => renderer.chunks.invalidateAll());
   // Far clean chunks are dropped (they regenerate); keep well outside the rendered radius.
   api.eviction = installChunkEviction(game, { keepRadius: () => renderer.chunks.radius + 4 });
@@ -131,6 +136,10 @@ async function main(): Promise<void> {
   installCombatFeel(game, renderer, monsters, api);
   // Aim model (sway / timing / classic dice): moving reticle, timing games, Options entry; wraps reload.
   installAim(game, renderer, monsters, api);
+  // Bionic guns (docs/BN_BIONIC_GUNS.md): after the UI, whose menu key (Esc) it wraps to stop aiming.
+  installBionicGuns(game, monsters.combat, mods);
+  // Vehicle turrets (src/turrets.ts): man the gun at a gunner station; after bionic guns (it wraps the menu key too).
+  installTurrets(game, renderer, monsters, api);
   // After installMonsters (wraps PlayerCombat for attack events) and installSave (its saveable).
   const achievements = await installAchievements(game, worldgen, api);
   // Unlocks, discovery tips, the journal; the title screen's Start / New Game use it.

@@ -61,7 +61,7 @@ describe('unlock catalogue (public/data/unlocks.json)', () => {
       unlocks: [
         { id: 'free', kind: 'start', name: 'x', requirement: [], grants: { profession: 'unemployed', scenario: 'evacuee' } },
         { id: 'a', kind: 'profession', name: 'A', requirement: [{ achievement: 'nope' }], grants: { profession: 'not_a_prof' } },
-        { id: 'b', kind: 'scenario', name: 'B', requirement: [{ stat: 'bogus', gte: 1 }], grants: { scenario: 'lab_chal' } },
+        { id: 'b', kind: 'scenario', name: 'B', requirement: [{ stat: 'bogus', gte: 1 }], grants: { scenario: 'bordered' } },
         { id: 'b', kind: 'cosmetic', name: 'dup', requirement: [], grants: {} },
       ],
     };
@@ -74,7 +74,7 @@ describe('unlock catalogue (public/data/unlocks.json)', () => {
     expect(msg).toMatch(/unknown achievement nope/);
     expect(msg).toMatch(/unknown profession not_a_prof/);
     expect(msg).toMatch(/unknown stat bogus/);
-    expect(msg).toMatch(/lab_chal has no start placement/);
+    expect(msg).toMatch(/bordered has no start placement/);
     expect(msg).toMatch(/duplicate id/);
     expect(msg).toMatch(/kind cosmetic doesn't match/);
   });
@@ -313,7 +313,7 @@ describe('starts', () => {
     expect(b.stats).toEqual({ str: 8, dex: 8, int: 8, per: 8 });
     expect([...b.traits]).toEqual([]);
     expect(() => buildFor(data, { unlockId: 'x', profession: 'unemployed', scenario: 'evacuee', name: '  ', male: true, difficulty: 'accessible', title: '' })).toThrow(/name/);
-    expect(() => buildFor(data, { unlockId: 'x', profession: 'unemployed', scenario: 'lab_chal', name: 'A', male: true, difficulty: 'accessible', title: '' })).toThrow(/placed/);
+    expect(() => buildFor(data, { unlockId: 'x', profession: 'unemployed', scenario: 'bordered', name: 'A', male: true, difficulty: 'accessible', title: '' })).toThrow(/placed/);
   });
 
   it('cards follow the ladder; scenario options include only unlocked, placeable ones', () => {

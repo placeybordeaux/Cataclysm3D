@@ -1,7 +1,9 @@
+import { visualPreference, storeVisualPreference } from '../visualPreference';
 import type { DebugApi } from '../../debug';
 import { registerOption } from '../../ui/options';
 import type { Renderer } from '../renderer';
 import { FURNITURE_STYLES, furnitureState, modelStats, storeFurnitureStyle, type FurnitureStyle } from './index';
+import { GROUND_ITEM_STYLES, groundItemState, storeGroundItemStyle, type GroundItemStyle } from './groundHeld';
 import type { Game } from '../../game/game';
 import { look } from '../look';
 import { AtlasTextureSource } from '../atlasSource';
@@ -22,6 +24,7 @@ export function installFurniture(renderer: Renderer, api: DebugApi): void {
     renderer.chunks.invalidateAll();
   };
   registerOption({
+    category: 'World',
     name: 'Furniture',
     value: () => LABEL[furnitureState.style],
     change: (d) => {
@@ -36,7 +39,29 @@ export function installFurniture(renderer: Renderer, api: DebugApi): void {
     return s;
   };
   a.furnitureStats = () => ({ ...modelStats, style: furnitureState.style, atlasPages: renderer.models.atlas.pageCount, frames: renderer.models.atlas.frameCount, texels: renderer.models.atlas.texels });
+
+  // Dropped weapons (groundHeld.ts): held meshes on the floor vs the v2 generic shapes
+  const setGround = (s: GroundItemStyle, persist: boolean) => {
+    if (!GROUND_ITEM_STYLES.includes(s)) throw new Error(`unknown dropped-weapon style ${s}: ${GROUND_ITEM_STYLES.join('|')}`);
+    groundItemState.style = s;
+    if (persist) storeGroundItemStyle(s);
+    renderer.chunks.invalidateAll();
+  };
+  registerOption({
+    category: 'World',
+    name: 'Dropped weapons',
+    value: () => GLABEL[groundItemState.style],
+    change: () => setGround(groundItemState.style === 'held' ? 'shape' : 'held', true),
+    desc: 'Modelled: guns, melee weapons and tools on the ground are the same 3D models you hold, lying on their side.\nSimple shapes: the older look, a generic stand-in per kind (a plank with a stock for every gun). In Crisp and Terrain only items the tileset never drew (otherwise a glyph) are modelled; Classic is unchanged.',
+  });
+  a.setGroundItemStyle = (s: string) => {
+    setGround(s as GroundItemStyle, false);
+    return s;
+  };
+  a.groundItemStyle = () => groundItemState.style;
 }
+
+const GLABEL: Record<GroundItemStyle, string> = { held: 'Modelled', shape: 'Simple shapes' };
 
 const SLABEL: Record<SurfaceStyle, string> = { painted: 'Painted', sprite: 'Tileset' };
 
@@ -50,9 +75,17 @@ export function installSurfaces(renderer: Renderer, api: DebugApi, game: Game): 
   const painter = new SurfacePainter(game.data.terrain, renderer.models.atlas);
   const dresser = new Dresser(renderer.models.atlas);
   // set dressing (dressing.ts) rides on painted surfaces; `?dressing=off` / cdda.setDressing(false) for the bare rooms
-  const dq = typeof location !== 'undefined' ? new URLSearchParams(location.search).get('dressing') : null;
-  if (dq && dq !== 'on' && dq !== 'off') throw new Error(`?dressing must be on|off, got ${dq}`);
-  const dressState = { on: dq !== 'off' };
+  const dressState = { on: visualPreference('dressing', ['on', 'off'], 'on') === 'on' };
+  registerOption({
+    category: 'World',
+    name: 'Set dressing', value: () => dressState.on ? 'on' : 'off',
+    change: () => {
+      dressState.on = !dressState.on;
+      storeVisualPreference('dressing', dressState.on ? 'on' : 'off');
+      renderer.chunks.invalidateAll();
+    },
+    desc: 'Pictures, rugs, grime, lamps and house numbers in painted rooms.',
+  });
   /** Building state of the chunk at OMT (cx, cy): 0 kept, 1 dirty, 2 wrecked (dressing.ts). */
   (api as DebugApi & Record<string, unknown>).buildingLevel = (cx: number, cy: number) => buildingState((Math.imul(cx, 73856093) ^ Math.imul(cy, 19349663)) >>> 0).level;
   /** Set dressing on? (the style gallery reads it back). */
@@ -85,6 +118,7 @@ export function installSurfaces(renderer: Renderer, api: DebugApi, game: Game): 
     renderer.chunks.invalidateAll();
   };
   registerOption({
+    category: 'World',
     name: 'Surfaces',
     value: () => SLABEL[surfaceState.style],
     change: (d) => {

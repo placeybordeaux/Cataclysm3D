@@ -128,7 +128,8 @@ export function fuelGauges(v: Vehicle): Gauge[] {
     const left = v.fuelLeft(t);
     const frac = Math.max(0, Math.min(1, left / cap));
     const name = t === 'battery' ? 'Battery' : capitalize(v.vdata.fuels[t]?.name ?? t);
-    const text = t === 'battery' ? `${Math.round(left)} / ${Math.round(cap)} kJ` : `${(left / 1000).toFixed(1)} / ${(cap / 1000).toFixed(1)} L`;
+    const reactorFuel = v.parts.some(p => has(p, 'REACTOR') && p.fuelType === t);
+    const text = reactorFuel ? `${left.toFixed(2)} / ${Math.round(cap)} charges` : t === 'battery' ? `${Math.round(left)} / ${Math.round(cap)} kJ` : `${(left / 1000).toFixed(1)} / ${(cap / 1000).toFixed(1)} L`;
     out.push({ id: t, label: name, frac, text, tone: frac > 0.5 ? 'good' : frac > 0.15 ? 'warn' : 'bad' });
   }
   return out;
@@ -145,9 +146,13 @@ export interface DriveReadout {
   tone: Tone;
 }
 
-export function driveReadout(v: Vehicle, cruising: boolean): DriveReadout {
-  const safeMs = v.engineOn ? v.maxVelocity(true) : 0;
-  const topMs = v.engineOn ? Math.max(safeMs + 0.01, v.maxVelocity()) : 0;
+/**
+ * `limits`: safe / top speed (m/s) as driven (VehicleSystem.speedLimits: CDDA's figures under
+ * the track governor); default CDDA's own.
+ */
+export function driveReadout(v: Vehicle, cruising: boolean, limits?: { safe: number; top: number }): DriveReadout {
+  const safeMs = v.engineOn ? limits?.safe ?? v.maxVelocity(true) : 0;
+  const topMs = v.engineOn ? Math.max(safeMs + 0.01, limits?.top ?? v.maxVelocity()) : 0;
   const speed = Math.abs(v.velocity);
   const strain = !v.engineOn || speed < safeMs ? 0 : Math.min(1, (speed - safeMs) / Math.max(0.01, topMs - safeMs));
   return {

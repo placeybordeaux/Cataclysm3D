@@ -11,6 +11,8 @@ import { L } from './game/moves';
 import type { NpcSystem } from './game/npcai';
 import type { Npc } from './game/npc';
 import { moveWithCollision } from './game/physics';
+import { Grid } from './game/los';
+import { routeToStair } from './game/stairroute';
 
 // Wires walkable stairs (docs/STAIRS.md) into the game: the variant switch (`?stairs=`,
 // Options > Stairs, cdda.stairs.setVariant), the player's movement hook, the `<` / `>`
@@ -79,6 +81,11 @@ export function installStairs(game: Game, opts: { monsters?: MonsterSystem; api?
 
   // --- monsters: follow the survivor up and down the flight they took
   const wants = new WeakMap<Monster, { link: StairLink; up: boolean }>();
+  const routeGrid = new Grid(game.map);
+  let routeVersion = 0, routeBudgetTime = -1;
+  const routeBudget = { remaining: 2000 };
+  const routeCache = new WeakMap<Monster, { key: string; until: number; route: ReturnType<typeof routeToStair> }>();
+  game.events.on('mapChanged', () => routeVersion++);
   // the player's trip is known the moment they set foot on a flight
   walker.onAttach.push((w, link, up) => {
     if (w === game.player) walker.lastTrip = { link, up, time: walker.time };
@@ -123,6 +130,26 @@ export function installStairs(game: Game, opts: { monsters?: MonsterSystem; api?
         return false;
       },
       plan(m, brain) {
+        // A heard goal keeps its z coordinate: choose a reachable flight independently of
+        // the survivor's last trip. Never manufacture chunks or teleport the creature.
+        if (m.wanderTime > 0 && m.wanderZ !== null && m.wanderZ !== m.z && m.morale >= 0 && m.anger >= 10) {
+          routeGrid.reset();
+          if (routeBudgetTime !== walker.time) { routeBudgetTime = walker.time; routeBudget.remaining = 2000; }
+          const key = `${m.z}:${m.wanderX},${m.wanderY},${m.wanderZ}:${routeVersion}`;
+          const cached = routeCache.get(m);
+          const route = cached?.key === key && cached.until > walker.time ? cached.route
+            : routeToStair(routeGrid, walker.index.all(), m, { x: m.wanderX, y: m.wanderY, z: m.wanderZ }, routeBudget);
+          if (!cached || cached.key !== key || cached.until <= walker.time) routeCache.set(m, { key, until: walker.time + 0.75 + (m.uid % 17) / 68, route });
+          if (route) {
+            const entry = route.link.path.at(route.up ? 0 : route.link.path.len);
+            brain.goal = 'wander';
+            brain.gx = entry.x;
+            brain.gy = entry.y;
+            brain.speedMul = 1;
+            wants.set(m, route);
+            return;
+          }
+        }
         const p = game.player;
         const trip = walker.lastTrip;
         if (!trip || p.dead || m.friendly || m.attitude() !== 'attack') {

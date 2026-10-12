@@ -98,9 +98,12 @@ export function driveScenarios(c: DriveCtx): Scenario[] {
       }
 
       // --- 1b. for comparison, the old whole-tile crashes (cdda.vehicleCrashes('tiles')): the
-      // same pass scrapes the parked car with ~0.3 m of air between the paint -----------------
+      // same pass scrapes the parked car with ~0.3 m of air between the paint. With the old
+      // immovable-vehicle model too, so the parked car stays put and the air stays measurable
+      // (momentum crashes would shove it off down the road). -------------------------------
       const old = await js<{ uid: number; puid: number } | null>(`(() => {
         cdda.vehicleCrashes('tiles');
+        cdda.vehicleCrashModel('immovable');
         const { trip, park, aabb } = window.__dc;
         const v = trip(); if (!v) return null;
         const a = aabb(v), o = park(v.x - (a.x1 - a.x0) - 0.3, v.y - 14, v.facing);
@@ -117,14 +120,14 @@ export function driveScenarios(c: DriveCtx): Scenario[] {
         await shot('drivecollide_pass_tiles_top');
         await camera('first');
       }
-      await js(`cdda.vehicleCrashes('body')`);
+      await js(`cdda.vehicleCrashes('body'); cdda.vehicleCrashModel('momentum')`);
 
       // --- 2. ram a parked car: the crash is where the bumpers meet ---------------------------
-      const ram = await js<{ uid: number; puid: number } | null>(`(() => {
+      const ram = await js<{ uid: number; puid: number; py: number } | null>(`(() => {
         const { trip, park } = window.__dc;
         const v = trip(); if (!v) return null;
         const o = park(v.x, v.y - 13, v.facing);
-        return { uid: v.uid, puid: o.uid };
+        return { uid: v.uid, puid: o.uid, py: o.y };
       })()`);
       check('setup: a parked car 13 m ahead in your lane', !!ram, ram);
       if (ram) {
@@ -132,9 +135,11 @@ export function driveScenarios(c: DriveCtx): Scenario[] {
         const hp0 = await js<[number, number]>(`[window.__dc.hp(window.__dc.byUid(${ram.uid})), window.__dc.hp(window.__dc.byUid(${ram.puid}))]`);
         await c.x().hold('w', 3200);
         await sleep(300);
-        const r = await js<{ gap: number; hp: [number, number]; v: number; log: string[] }>(`(() => { const { hp, byUid, aabb } = window.__dc, v = byUid(${ram.uid}), o = byUid(${ram.puid});
-          return { gap: aabb(v).y0 - aabb(o).y1, hp: [hp(v), hp(o)], v: v.velocity, log: cdda.ui.log().slice(-4) }; })()`);
-        check('rammed it: stopped with the bumpers touching (gap under 3 cm, no overlap)', r.gap > -0.005 && r.gap < 0.03 && Math.abs(r.v) < 0.5, r);
+        const r = await js<{ gap: number; hp: [number, number]; v: number; shoved: number; log: string[] }>(`(() => { const { hp, byUid, aabb } = window.__dc, v = byUid(${ram.uid}), o = byUid(${ram.puid});
+          return { gap: aabb(v).y0 - aabb(o).y1, hp: [hp(v), hp(o)], v: v.velocity, shoved: ${ram.py} - o.y, log: cdda.ui.log().slice(-4) }; })()`);
+        // Momentum crashes (2026-10): the parked car is shoved down the road rather than acting
+        // as a wall, so the bumpers part again; what must hold is that they never overlap.
+        check('rammed it: the bumpers met without overlapping and the parked car was shoved ahead', r.gap > -0.005 && r.shoved > 0.5, r);
         check('both cars are damaged and the log says so', r.hp[0] < hp0[0] && r.hp[1] < hp0[1] && r.log.some((m) => /rams into the /.test(m)), { ...r, hp0 });
         await js(`(() => { const { byUid, aabb, view } = window.__dc, v = byUid(${ram.uid}), a = aabb(v); view((a.x0 + a.x1) / 2, a.y0, 1, 0.35); })()`);
         await sleep(600);
@@ -271,6 +276,121 @@ export function driveScenarios(c: DriveCtx): Scenario[] {
         }
         await js(`(() => { const vs = cdda.vehicleSystem; if (vs.driving) { vs.driving.velocity = 0; vs.releaseControls(); } })()`);
       }
+    }],
+    ['crashmomentum', 'momentum crashes (vehicleImpact.ts): an Abrams clips and then rams a parked ambulance and keeps going, a car spins a parked car, a car into a parked tank stops hard', async () => {
+      await js(HELPERS);
+      // Page side: put a parked vehicle `ahead` m in front of the one you drive, `side` m to its
+      // right, turned `turn` deg from it; read back what happened.
+      await js(`(() => {
+        const vs = cdda.vehicleSystem;
+        const centre = (v) => { const b = vs.physRect(v); return v.mountToWorld((b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2); };
+        window.__cm = {
+          centre,
+          place(proto, ahead, side, turn) {
+            const v = vs.driving, [cx, cy] = centre(v), a = v.facing * Math.PI / 180;
+            const o = vs.spawn(proto, Math.floor(cx), Math.floor(cy), v.z, (v.facing + turn + 360) % 360, { fuel: 0, status: 2, force: true });
+            o.engineOn = false; o.velocity = 0;
+            for (const q of o.parts) if (q.def.id.startsWith('door')) q.open = false;
+            const [ox, oy] = centre(o);
+            o.x += cx + Math.cos(a) * ahead - Math.sin(a) * side - ox;
+            o.y += cy + Math.sin(a) * ahead + Math.cos(a) * side - oy;
+            o.version++; vs.reindex(o);
+            return o.uid;
+          },
+          read(uid) {
+            const v = vs.driving, o = window.__dc.byUid(uid), [vx, vy] = centre(v), [ox, oy] = centre(o);
+            return { mph: v.velocity * 2.2369363, dist: Math.hypot(ox - vx, oy - vy), ox, oy, of: o.facing, oslide: cdda.vehicleMotion(uid).slideMph,
+              torso: cdda.game.player.hp.torso.cur, dead: cdda.game.player.dead, hp: window.__dc.hp(v), ohp: window.__dc.hp(o) };
+          },
+        };
+      })()`);
+      type Read = { mph: number; dist: number; ox: number; oy: number; of: number; oslide: number; torso: number; dead: boolean; hp: number; ohp: number };
+      const read = (uid: number) => js<Read>(`window.__cm.read(${uid})`);
+      /**
+       * Hold W (real key) until `uid` has been hit and `after` ms have passed, shooting a frame
+       * sequence from `shotsFrom` m out; returns the state just before the hit, the slowest the
+       * driven vehicle got in the second after it, and the end state.
+       */
+      const ramWithW = async (uid: number, tag: string, opts: { shotsFrom?: number; maxMs?: number; after?: number } = {}) => {
+        const s0 = await read(uid);
+        let pre = s0, minMph = Infinity, hitAt = 0, frame = 0, maxTurn = 0;
+        const t0 = Date.now();
+        await c.x().down('w');
+        try {
+          while (Date.now() - t0 < (opts.maxMs ?? 25000)) {
+            const s = await read(uid);
+            const hit = Math.hypot(s.ox - s0.ox, s.oy - s0.oy) > 0.05 || Math.abs(s.of - s0.of) > 0.5;
+            if (!hit) pre = s;
+            else if (!hitAt) hitAt = Date.now();
+            if (hitAt) minMph = Math.min(minMph, s.mph);
+            maxTurn = Math.max(maxTurn, Math.abs(((s.of - s0.of + 540) % 360) - 180));
+            if (s.dist < (opts.shotsFrom ?? 14) && frame < 8 && (!hitAt || Date.now() - hitAt < 1500)) {
+              await shot(`crash_${tag}_${frame++}`);
+              continue;
+            }
+            if (hitAt && Date.now() - hitAt > (opts.after ?? 1500)) break;
+            await sleep(60);
+          }
+        } finally {
+          await c.x().up('w');
+        }
+        await sleep(400);
+        await shot(`crash_${tag}_after`);
+        return { pre, minMph, maxTurn, hit: !!hitAt, end: await read(uid) };
+      };
+      const trip = (proto: string) => js<boolean>(`(() => { const vs = cdda.vehicleSystem; if (vs.driving) { vs.driving.velocity = 0; vs.releaseControls(); }
+        if (!cdda.roadTrip('${proto}', 6)) return false; const v = vs.driving;
+        for (const o of [...vs.list]) if (o !== v && Math.hypot(o.x - v.x, o.y - v.y) < 90) vs.remove(o);
+        cdda.clearMonsters(); return true; })()`);
+      check('crash model is momentum (the default)', (await js<string>(`cdda.vehicleCrashModel()`)) === 'momentum');
+
+      // --- 1. Abrams clips a parked ambulance at an angle (its nose sticks into the lane) -----
+      if (check('setup: at the wheel of an Abrams on a long straight road', await trip('tank_m1_abrams'))) {
+        const amb = await js<number>(`window.__cm.place('ambulance', 62, -3.2, 35)`);
+        await c.toGameplay();
+        check('top-down camera (V)', await camera('top'));
+        const r = await ramWithW(amb, 'tank_clips_ambulance', { shotsFrom: 16 });
+        check('the Abrams got going under W and hit the ambulance', r.hit && r.pre.mph > 15, r);
+        check('tank barely slowed (kept over 70% of its speed through the hit)', r.minMph > r.pre.mph * 0.7, r);
+        check('ambulance shoved and spun (moved over 1.5 m, turned over 15 deg)', Math.hypot(r.end.ox - r.pre.ox, r.end.oy - r.pre.oy) > 1.5 && r.maxTurn > 15, r);
+        check('driver unhurt (under 10 torso damage), alive', !r.end.dead && r.pre.torso - r.end.torso < 10, { r, log: await log() });
+      }
+
+      // --- 2. Abrams head-on into an ambulance parked across the lane: plows it --------------
+      if (check('setup: Abrams again, ambulance broadside across the lane', await trip('tank_m1_abrams'))) {
+        const amb = await js<number>(`window.__cm.place('ambulance', 62, 0, 90)`);
+        await c.toGameplay();
+        check('chase camera (V)', await camera('third'));
+        const r = await ramWithW(amb, 'tank_plows_ambulance', { shotsFrom: 18, after: 2000 });
+        check('head-on: the tank keeps going (over 70%) and pushes the ambulance down the road', r.hit && r.minMph > r.pre.mph * 0.7 && Math.hypot(r.end.ox - r.pre.ox, r.end.oy - r.pre.oy) > 4, r);
+        check('driver alive and barely jolted', !r.end.dead && r.pre.torso - r.end.torso < 10, { r, log: await log() });
+        check('the ambulance is damaged, the tank much less', r.pre.ohp - r.end.ohp > r.pre.hp - r.end.hp, r);
+      }
+
+      // --- 3. a car clips the tail of a parked car: it spins out -----------------------------
+      if (check('setup: in a car, a parked car ahead overlapping a third of the lane', await trip('car'))) {
+        const other = await js<number>(`window.__cm.place('car', 45, -1.5, 0)`);
+        await c.toGameplay();
+        check('top-down camera (V)', await camera('top'));
+        const r = await ramWithW(other, 'car_spins_car', { shotsFrom: 12 });
+        check('hit it at speed and it spun out (over 90 deg, W still held) and moved', r.hit && r.pre.mph > 15 && r.maxTurn > 90 && Math.hypot(r.end.ox - r.pre.ox, r.end.oy - r.pre.oy) > 1, r);
+        check('the car was slowed but not stopped dead (glancing)', r.minMph < r.pre.mph - 2 && r.minMph > 3, r);
+        check('driver alive', !r.end.dead, r);
+      }
+
+      // --- 4. a car into a parked tank: stops hard, the tank doesn't care --------------------
+      if (check('setup: in a car, a parked Abrams across the lane ahead', await trip('car'))) {
+        const tank = await js<number>(`window.__cm.place('tank_m1_abrams', 45, 0, 90)`);
+        await c.toGameplay();
+        check('chase camera (V)', await camera('third'));
+        const r = await ramWithW(tank, 'car_into_tank', { shotsFrom: 14, after: 600 });
+        const moved = Math.hypot(r.end.ox - r.pre.ox, r.end.oy - r.pre.oy);
+        const msgs = await log();
+        check('the car stopped hard (to under 3 mph) and the tank barely moved (under 0.5 m)', r.hit && r.pre.mph > 20 && r.minMph < 3 && moved < 0.5, { r, moved });
+        check('the driver felt it (an impact message or torso damage)', r.pre.torso > r.end.torso || msgs.some((m) => /power of the impact|rams into the M1/.test(m)), { r, msgs });
+      }
+      await js(`(() => { const vs = cdda.vehicleSystem; if (vs.driving) { vs.driving.velocity = 0; vs.releaseControls(); } })()`);
+      await camera('first');
     }],
     ['riders', 'your body rides in the seat outside first person: hands on the bars / wheel, feet on pedals / pegs / floor, pedalling with speed, leaning with the bike; none in the cockpit view or the billboard mode', async () => {
       await js(HELPERS);

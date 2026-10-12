@@ -2,6 +2,8 @@ import type { DebugApi } from '../debug';
 import type { Game } from '../game/game';
 import { CHUNK } from './coords';
 import type { WorldGenerator } from './worldgen';
+import type { OmtInfo } from './overmap/overmap';
+import { parseOterId } from './overmap/oter';
 
 // window.cdda helpers for the world generator (see ARCHITECTURE.md "window.cdda").
 
@@ -43,5 +45,24 @@ export function installWorldgenDebug(api: DebugApi, game: Game, gen: WorldGenera
       omt: c.omt, items: [...c.items.values()].reduce((a, l) => a + l.length, 0), spawns: c.spawns, vehicles: c.vehicles,
       zones: c.zones, signs: [...c.signs.values()], graffiti: [...c.graffiti.values()], computers: c.computers.size,
     };
+  };
+  /**
+   * Stage overmap terrain for QA scenes the overmap doesn't place nearby (sewers, subways...):
+   * `{ "x,y,z": "sewer_nesw", ... }` (BN oter ids). Only for chunks not generated yet, so the
+   * world stays consistent; throws otherwise.
+   */
+  api.stageOmts = (entries: Record<string, string>) => {
+    const staged = new Map<string, OmtInfo>();
+    for (const [k, id] of Object.entries(entries)) {
+      const [x, y, z] = k.split(',').map(Number);
+      if (![x, y, z].every(Number.isInteger)) throw new Error(`stageOmts: bad key ${k}`);
+      if (game.map.hasChunk(x, y, z)) throw new Error(`stageOmts: chunk ${k} is already generated`);
+      const ref = parseOterId(id, gen.overmap.data.terrains);
+      if (!gen.overmap.data.terrains[ref.type]) throw new Error(`stageOmts: unknown oter ${id}`);
+      staged.set(`${x},${y},${z}`, { ...ref, id });
+    }
+    const prev = gen.overmap.omtAt.bind(gen.overmap);
+    gen.overmap.omtAt = (x, y, z) => staged.get(`${x},${y},${z}`) ?? prev(x, y, z);
+    return staged.size;
   };
 }

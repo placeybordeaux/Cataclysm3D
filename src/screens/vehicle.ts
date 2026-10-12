@@ -9,7 +9,14 @@
 // - The driving HUD, bottom right: speed against safe/top speed, cruise target, engine,
 //   fuel and battery bars, lights, and the keys.
 
+import { cddaText } from '../game/units';
 import type { Game } from '../game/game';
+import { openSiphonPanel } from './siphoning';
+import { refillReason, refillSources, startRefill } from '../game/vehicleRefill';
+import { openVehicleWorkPanel } from './vehicleWork';
+import { openVehicleFacilities } from './vehicleFacilities';
+import { isColdCargo } from '../game/vehicleStorage';
+import { loadReactorFuel } from '../game/vehiclePower';
 import { cargoVolume, has, MPH_PER_MS, type Vehicle, type VehiclePart } from '../game/vehicle';
 import { L, isAt, moveItem } from '../game/moves';
 import { verdict } from '../game/inventory_view';
@@ -28,6 +35,15 @@ import { hotwire, takeControls } from '../ui/vehicle_ui';
  * unset, the vehicle panel opens its own simple one (openCargoPanel below).
  */
 export const cargoPanel = { open: null as null | ((game: Game, v: Vehicle, part: VehiclePart) => void) };
+
+/** Extra actions for the selected square from other systems; `close` shuts the panel first. */
+export interface VehiclePanelExtra {
+  label: string;
+  run: () => void;
+  disabled?: string;
+  close?: boolean;
+}
+export const vehiclePanelExtras: ((game: Game, v: Vehicle, sel: { mx: number; my: number }) => VehiclePanelExtra[])[] = [];
 
 export interface VehiclePanelHandle {
   panel: Panel;
@@ -103,13 +119,13 @@ export function openVehiclePanel(game: Game, v: Vehicle, focus?: { mx: number; m
   }
 
   function drawSide(): void {
+    const focused = document.activeElement;
+    const focusedLabel = focused instanceof HTMLButtonElement && side.contains(focused) ? focused.textContent : null;
     const cond = conditionWord(v);
     const driving = vs.driving === v;
-    const wasOn = v.engineOn;
-    // Speeds with the engine running, the way BN's vehicle info reads them.
-    v.engineOn = true;
-    const safe = Math.round(v.maxVelocity(true) * MPH_PER_MS), top = Math.round(v.maxVelocity() * MPH_PER_MS);
-    v.engineOn = wasOn;
+    // Speeds with the engine running, the way BN's vehicle info reads them (governed: speedLimits).
+    const lim = vs.speedLimits(v);
+    const safe = Math.round(lim.safe * MPH_PER_MS), top = Math.round(lim.top * MPH_PER_MS);
     const status = h('div', { class: 'ix-veh-status' },
       chip(`${cond.word} (${cond.pct}%)`, cond.tone),
       v.engines.length ? chip(v.engineOn ? 'Engine running' : 'Engine off', v.engineOn ? 'good' : 'dim') : chip('No engine', 'dim'),
@@ -146,12 +162,53 @@ export function openVehiclePanel(game: Game, v: Vehicle, focus?: { mx: number; m
     // The selected square: its parts and what you can do there.
     const parts = listOrder(v.partsAt(sel.mx, sel.my));
     actions = [];
+    for (const charger of parts.filter(p => has(p, 'RECHARGE'))) {
+      actions.push({ label: `${charger.enabled ? 'Disable' : 'Enable'} ${charger.def.name} (${charger.def.bonus ?? 0} W)`, disabled: charger.hp <= 0 ? 'The charger is broken' : v.locked ? 'The vehicle is locked' : undefined, run: () => {
+        charger.enabled = !charger.enabled;
+        say(`You ${charger.enabled ? 'enable' : 'disable'} the ${charger.def.name}. Put rechargeable items in this square's cargo, then let time pass.`);
+        draw();
+      } });
+    }
+    for (const reactor of parts.filter(p => has(p, 'REACTOR'))) {
+      const fuelName = cddaText(game.data.items[reactor.def.fuel_type ?? '']?.name) || reactor.def.fuel_type || 'fuel';
+      const disabled = reactor.hp <= 0 ? 'The reactor is broken' : v.locked ? 'The vehicle is locked' : undefined;
+      actions.push({ label: `${reactor.enabled ? 'Disable' : 'Enable'} ${reactor.def.name} (${reactor.charges.toFixed(2)} fuel charges)`, disabled: disabled ?? (!reactor.enabled && reactor.charges <= 0 ? 'Load fuel first' : undefined), run: () => {
+        reactor.enabled = !reactor.enabled;
+        say(`You ${reactor.enabled ? 'enable' : 'disable'} the ${reactor.def.name}.`);
+        draw();
+      } });
+      actions.push({ label: `Load ${fuelName} into ${reactor.def.name}`, disabled, run: () => {
+        const loaded = loadReactorFuel(game, v, reactor);
+        say(loaded ? `You load ${loaded} fuel charges into the ${reactor.def.name}.` : 'No matching carried fuel, or the reactor is full.');
+        draw();
+      } });
+    }
+    // Every tank with liquid, not just the selected square's: you look for "siphon" on the
+    // vehicle, not on whichever square happens to hold the tank.
+    for (const tank of v.parts.filter(p => has(p, 'FLUIDTANK') && p.fuelType && p.charges > 0)) {
+      const name = cddaText(game.data.items[tank.fuelType!]?.name) || tank.fuelType;
+      actions.push({ label: `Siphon ${name} (${(tank.charges / 1000).toFixed(1)} L in the ${tank.def.name})…`, run: () => { panel.close(); openSiphonPanel(game, v, tank); } });
+    }
+    // BN veh_interact "Refill": pour a carried can into the tanks, from anywhere around the vehicle.
+    const refillWhy = refillReason(game, v);
+    for (const src of refillSources(game, v)) {
+      const litres = (src.charges * src.mlPerCharge / 1000).toFixed(2);
+      actions.push({ label: `Refill from your ${src.container.baseName()} (${litres} L ${src.liquid.baseName()})`, disabled: refillWhy ?? undefined, run: () => {
+        if (startRefill(game, v, src.container)) panel.close();
+      } });
+    }
     const door = parts.find((p) => has(p, 'OPENABLE'));
     if (door) actions.push({ label: `${door.open ? 'Close' : 'Open'} the ${door.def.name}`, run: () => (say(vs.toggleDoor(v, sel.mx, sel.my)), draw()) });
     for (const cargo of parts.filter((p) => has(p, 'CARGO'))) {
       const covered = parts.some((p) => has(p, 'OPENABLE') && !p.open) && !has(cargo, 'CARGO_PASSABLE');
       actions.push({ label: `Open the ${cargo.def.name} (${cargo.items.length} item${cargo.items.length === 1 ? '' : 's'})`, run: () => (cargoPanel.open ?? openCargoPanel)(game, v, cargo), disabled: covered ? `The ${door?.def.name ?? 'lid'} is closed` : undefined });
     }
+    if (v.parts.some(p => has(p, 'FAUCET') || has(p, 'CRAFTER') || has(p, 'WORKBENCH') || has(p, 'BED') || isColdCargo(p))) actions.push({ label: 'Use vehicle facilities…', run: () => {
+      panel.close(); openVehicleFacilities(game, v, part => (cargoPanel.open ?? openCargoPanel)(game, v, part));
+    } });
+    // Other systems' actions for the selected square (src/towing.ts: tow cable).
+    for (const extra of vehiclePanelExtras) for (const a of extra(game, v, sel)) actions.push({ label: a.label, disabled: a.disabled, run: () => { if (a.close) panel.close(); a.run(); if (!a.close) draw(); } });
+    actions.push({ label: 'Plan vehicle work…', run: () => { panel.close(); openVehicleWorkPanel(game, v, sel.mx, sel.my); } });
     const partRows = parts.map((p) => {
       const f = partHealth(p);
       const extra = p.fuelType && p.def.capacity ? ` · ${Math.round((100 * p.charges) / p.def.capacity)}% ${p.fuelType}` : has(p, 'CARGO') ? ` · ${fmtVolume(cargoVolume(p)[0])} / ${fmtVolume(cargoVolume(p)[1])}` : '';
@@ -169,6 +226,7 @@ export function openVehiclePanel(game: Game, v: Vehicle, focus?: { mx: number; m
       actions.length ? h('div', { class: 'ix-veh-actions', attrs: { 'data-testid': 'vehicle-actions' } }, ...actions.map((a, i) => button(a.label, a.run, { small: true, tone: i === 0 ? 'accent' : undefined, disabled: a.disabled, key: i === 0 ? 'Enter' : undefined }))) : null,
     ];
     side.replaceChildren(...kids.filter((x): x is HTMLElement => !!x));
+    if (focusedLabel) [...side.querySelectorAll<HTMLButtonElement>('button')].find(b => b.textContent === focusedLabel)?.focus();
   }
 
   function select(mx: number, my: number): void {
@@ -178,6 +236,13 @@ export function openVehiclePanel(game: Game, v: Vehicle, focus?: { mx: number; m
   }
 
   function onKey(e: KeyboardEvent): boolean {
+    if (e.key === 'Enter' && document.activeElement instanceof HTMLButtonElement && side.contains(document.activeElement)) { document.activeElement.click(); return true; }
+    if (e.key === 'Tab') {
+      const nodes = [...side.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')];
+      const index = nodes.indexOf(document.activeElement as HTMLButtonElement);
+      nodes[(index + (e.shiftKey ? -1 : 1) + nodes.length) % nodes.length]?.focus();
+      return true;
+    }
     // Front is up: ↑ is +x (forward), → is +y (the vehicle's right).
     const step: Record<string, [number, number]> = { ArrowUp: [1, 0], ArrowDown: [-1, 0], ArrowLeft: [0, -1], ArrowRight: [0, 1] };
     const s = step[e.key];
@@ -299,9 +364,9 @@ export function driveHud(game: Game): { el: HTMLElement; update(): void } {
       if (last !== '') (el.style.display = 'none'), (last = '');
       return;
     }
-    const r = driveReadout(v, vs.driveMode === 'cruise');
+    const r = driveReadout(v, vs.driveMode === 'cruise', vs.speedLimits(v));
     const gauges = fuelGauges(v);
-    const key = JSON.stringify([v.uid, r, gauges.map((g) => [g.id, Math.round(g.frac * 40)]), v.engineOn, v.lightsOn, v.locked, v.validWheelConfig(), vs.driveMode]);
+    const key = JSON.stringify([v.uid, vs.stations.mode, r, gauges.map((g) => [g.id, Math.round(g.frac * 40)]), v.engineOn, v.lightsOn, v.locked, v.validWheelConfig(), vs.driveMode]);
     if (key === last) return;
     last = key;
     el.style.display = '';
@@ -328,7 +393,7 @@ export function driveHud(game: Game): { el: HTMLElement; update(): void } {
       ...gauges.map((g) => meter(g.label, g.frac, `${Math.round(g.frac * 100)}%`, g.tone, { cls: 'ix-dh-gauge' })),
       h('div', { class: 'ix-dh-keys' },
         r.cruiseMph !== null ? `${mv[0]}/${mv[2]} ±4 mph · Space stop` : `${mv[0]} gas · ${mv[2]} brake`,
-        ` · ${k('interact')} get out · ${k('vehicle_engine')} engine · ${k('vehicle_headlights')} lights · ${k('vehicle_horn')} horn · ${k('control_vehicle')} vehicle`),
+        ` · ${k('interact')} ${vs.stations.cabin(v) && vs.stations.cabin(v) !== 'wheel' ? 'leave the wheel' : 'get out'} · ${k('vehicle_engine')} engine · ${k('vehicle_headlights')} lights · ${k('vehicle_horn')} horn · ${k('control_vehicle')} vehicle`),
     );
   };
   return { el, update };

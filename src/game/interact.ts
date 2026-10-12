@@ -16,6 +16,7 @@ import { ignite, fieldName } from './fields';
 import { playerSeesTrap, trapAt, trapDef } from './traps';
 import { curtainInteractions } from './curtains';
 import { pryAttempt, pryInfo } from './pry';
+import { furnitureDeconstruction } from './construction';
 
 // Examine / interact (`e`), after CDDA iexamine.cpp and map::open_door / close_door.
 // interactionsAt() lists what can be done with a tile (pure, testable); the key handler
@@ -43,6 +44,41 @@ export interface InteractUi {
  * (prompt '' = show no prompt at all, e.g. while driving).
  */
 export const interactOverrides: { interact(game: Game): boolean; prompt(game: Game): string | null }[] = [];
+
+/** Someone `e` would act on (talk to), as the creature system that owns them reports it. */
+export interface CreatureTarget {
+  /** "Reena Sandhu, beggar" */
+  name: string;
+  /** Distance along the crosshair ray to where it meets them, metres. */
+  dist: number;
+  /** HUD text without the key, e.g. "Talk to Reena Sandhu, beggar". */
+  label: string;
+  run: () => void;
+  /** Their tile (the `o` menu's creature entries). */
+  x: number;
+  y: number;
+  z: number;
+  /** The owner's own object (src/npcs.ts: the Npc). */
+  creature: unknown;
+}
+
+/**
+ * Sources of people under the crosshair (src/npcs.ts). Each returns its nearest one only when
+ * nothing drawn is in front of them (it does the occlusion test), so a person always beats the
+ * bench, pile or door they stand behind or in front of: `e`, the HUD prompt, the loot panel
+ * and the `o` menu all ask aimedCreature(), so they always agree on what is aimed at.
+ */
+export const creatureTargets: ((game: Game) => CreatureTarget | null)[] = [];
+
+/** The nearest person under the crosshair that `e` acts on, or null. */
+export function aimedCreature(game: Game): CreatureTarget | null {
+  let best: CreatureTarget | null = null;
+  for (const f of creatureTargets) {
+    const t = f(game);
+    if (t && (!best || t.dist < best.dist)) best = t;
+  }
+  return best;
+}
 
 /**
  * Extra interactions for a tile contributed by other systems (src/game/nature.ts: harvest,
@@ -342,6 +378,8 @@ export function interactionsAt(game: Game, x: number, y: number, z: number): Int
     const main = f.id !== 'f_null' ? f : t;
     add('describe', `Examine ${main.name}`, () => describe(game, x, y, z));
   }
+  // Keep examination/looting first: deconstruction is an explicit menu choice.
+  out.push(...furnitureDeconstruction(game, x, y, z));
   out.push(...grabs);
   return out;
 }
@@ -393,9 +431,17 @@ function describe(game: Game, x: number, y: number, z: number): void {
 }
 
 /** `e`: act on the aimed tile (the first interaction, or a menu when there are several). */
-export function interact(game: Game, target: TargetTile | null = targetTile(game)): boolean {
+export function interact(game: Game, tile?: TargetTile | null): boolean {
   const p = game.player;
   if (p.dead || p.isAsleep()) return false;
+  // A person drawn in front of whatever else is aimed at wins (the beggar standing at a bench).
+  // An explicit tile (cdda.interact(x, y)) is about that tile, not about who stands near it.
+  const who = tile === undefined ? aimedCreature(game) : null;
+  const target = tile === undefined ? targetTile(game) : tile;
+  if (who) {
+    who.run();
+    return true;
+  }
   for (const o of interactOverrides) if (o.interact(game)) return true;
   // Nothing aimed at: the tile you stand on (stairs, items), CDDA examines your own square.
   const tt = target ?? { x: p.tileX, y: p.tileY, z: p.z, dist: 0 };
@@ -433,6 +479,14 @@ export function interact(game: Game, target: TargetTile | null = targetTile(game
 export function interactionPrompt(game: Game): string | null {
   const p = game.player;
   if (p.dead || p.isAsleep() || game.activities.current) return null;
+  // Same order as interact(): the person in front first, so the prompt names what `e` does.
+  const who = aimedCreature(game);
+  if (who) {
+    // Something usable right behind or below them (the bench they stand at) is one key away.
+    const tile = targetTile(game);
+    const behind = tile && game.keys.has('world_menu') && interactionsAt(game, tile.x, tile.y, tile.z).some((i) => i.id !== 'describe');
+    return `[${game.keys.keyFor('interact')}] ${who.label}${behind ? `  [${game.keys.keyFor('world_menu')}] More…` : ''}`;
+  }
   for (const o of interactOverrides) {
     const text = o.prompt(game);
     if (text !== null) return text || null;

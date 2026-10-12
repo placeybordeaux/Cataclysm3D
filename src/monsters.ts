@@ -64,6 +64,7 @@ export function installMonsters(game: Game, renderer: Renderer | null, worldgen:
     spawner.hold();
     game.events.on('gameLoaded', () => spawner.discardHeld());
     registerOption({
+      category: 'Gameplay',
       name: 'Zombie density',
       value: () => densityLabel(spawner.opts.density),
       change: (d) => void (spawner.opts.density = cycleDensity(spawner.opts.density, d)),
@@ -79,16 +80,20 @@ export function installMonsters(game: Game, renderer: Renderer | null, worldgen:
     combat.viewmodel = () => (renderer as unknown as { viewmodel?: ViewModelHook }).viewmodel;
     const fx = new HitFx(game, renderer, view);
     const arrows = new ArrowFx(game, renderer, combat, sys, view);
-    if (api) Object.assign(api, { hitFx: fx, arrowFx: arrows, nearClamp: NEAR_CLAMP, meleeAim: MELEE_AIM, chars: charsApi, monsterView: view });
-    if (renderer.viewmodel) new FpView(game, renderer, renderer.viewmodel);
+    // Read-only for verification (real-input evidence can check the pending gesture without
+    // performing anything itself): docs/CHARACTERS.md "Successful item gestures".
+    const fpView = renderer.viewmodel ? new FpView(game, renderer, renderer.viewmodel) : null;
+    if (api) Object.assign(api, { hitFx: fx, arrowFx: arrows, nearClamp: NEAR_CLAMP, meleeAim: MELEE_AIM, chars: charsApi, monsterView: view, fpView });
     new FireView(game, renderer);
     registerOption({
+      category: 'World',
       name: 'First-person hands',
       value: () => (charSettings.viewmodel === 'model' ? '3D' : 'sprites'),
       change: () => setViewmodelMode(charSettings.viewmodel === 'model' ? 'sprite' : 'model'),
       desc: 'Your hands and what you hold, in first person: 3D arms and weapons, or the classic flat pixel sprites.',
     });
     registerOption({
+      category: 'World',
       name: 'Creatures',
       value: () => (charSettings.mode === 'model' ? '3D models' : 'sprites'),
       change: () => setCharMode(charSettings.mode === 'model' ? 'billboard' : 'model'),
@@ -143,7 +148,7 @@ export function installMonsters(game: Game, renderer: Renderer | null, worldgen:
   });
 
   game.keys.register('fire', 'Fire wielded weapon', () => {
-    if (game.player.inv.wielded?.isGun()) combat.fire();
+    if (combat.weapon()?.isGun()) combat.fire();
     else game.message('You are not wielding a ranged weapon.');
   });
   game.keys.register('throw', 'Throw item', () => throwMenu(game, combat));

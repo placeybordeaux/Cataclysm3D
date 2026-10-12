@@ -192,10 +192,16 @@ describe('driving collision follows the drawn body', () => {
       const h0 = hp(car), p0 = hp(parked);
       car.velocity = 9;
       for (let i = 0; i < 90; i++) game.tick(1 / 30);
-      expect(car.velocity).toBe(0);
       const a = rectObb(car, b), o = rectObb(parked, pb);
       expect(obbHitsObb(a, o)).toBe(false);
-      expect(obbHitsObb(grow(a, 0.03), o)).toBe(true);
+      if (facing === 90) {
+        expect(car.velocity).toBe(0);
+        expect(obbHitsObb(grow(a, 0.03), o)).toBe(true);
+      } else {
+        // Hit off-centre at an angle, the parked car spins out and slides off (vehicleImpact
+        // SKID_*); the driverless rammer rolls on slowly behind it.
+        expect(Math.abs(car.velocity)).toBeLessThan(1.5);
+      }
       expect(car.x).toBeLessThan(pcx);
       expect(hp(car)).toBeLessThan(h0);
       expect(hp(parked)).toBeLessThan(p0);
@@ -238,28 +244,39 @@ describe('driving collision follows the drawn body', () => {
     }
   });
 
-  it('turning toward a wall stops when the corner touches it', () => {
-    const { game, vs } = world(true);
-    for (let x = 10; x < 80; x++) wall(game.map, x, 30);
-    const b = bodyRectFor(put(vs, 'car', 5.5, 5.5, 0))!;
-    const car = put(vs, 'car', 20.5, 30 - 0.4 - b.y1, 0);
-    drive(vs, car);
-    vs.input = { throttle: 0.5, steer: 1, brake: false }; // D: clockwise, toward +y (the wall)
-    let stoppedAt = -1;
-    for (let i = 0; i < 150 && stoppedAt < 0; i++) {
-      game.tick(1 / 30);
-      if (i > 10 && car.velocity === 0) stoppedAt = i;
+  // Changed with momentum crashes (2026-10): steering into a wall used to stop the car dead at
+  // the first touch (no sliding, a known gap). Now the wall takes only the speed into it and
+  // the car scrapes along (arcade feel brief: glance off and slide along walls). The old stop
+  // is kept as crashModel 'immovable', checked here too.
+  it('turning toward a wall: the corner touches it and scrapes along (immovable: stops)', () => {
+    for (const model of ['momentum', 'immovable'] as const) {
+      const { game, vs } = world(true);
+      vs.crashModel = model;
+      for (let x = 10; x < 80; x++) wall(game.map, x, 30);
+      const b = bodyRectFor(put(vs, 'car', 5.5, 5.5, 0))!;
+      const car = put(vs, 'car', 20.5, 30 - 0.4 - b.y1, 0);
+      drive(vs, car);
+      vs.input = { throttle: 0.5, steer: 1, brake: false }; // D: clockwise, toward +y (the wall)
+      let stoppedAt = -1, touching = false;
+      for (let i = 0; i < 150 && stoppedAt < 0; i++) {
+        game.tick(1 / 30);
+        if (i > 10 && car.velocity === 0) stoppedAt = i;
+        const o = rectObb(car, b);
+        for (let x = 10; x < 80; x++) {
+          expect(obbHitsTile(o, x, 30)).toBe(false);
+          touching ||= obbHitsTile(grow(o, 0.05), x, 30);
+        }
+      }
+      expect(touching).toBe(true);
+      expect(car.facing).toBeGreaterThan(1);
+      expect(car.facing).toBeLessThan(90);
+      if (model === 'immovable') expect(stoppedAt).toBeGreaterThan(0);
+      else {
+        // still rolling along the wall at the end, well past where it first touched
+        expect(stoppedAt).toBe(-1);
+        expect(car.x).toBeGreaterThan(25);
+      }
     }
-    expect(stoppedAt).toBeGreaterThan(0);
-    expect(car.facing).toBeGreaterThan(1);
-    expect(car.facing).toBeLessThan(90);
-    const o = rectObb(car, b);
-    let touching = false;
-    for (let x = 10; x < 80; x++) {
-      expect(obbHitsTile(o, x, 30)).toBe(false);
-      touching ||= obbHitsTile(grow(o, 0.05), x, 30);
-    }
-    expect(touching).toBe(true);
   });
 
   it('no tunnelling at 60 mph: a one-tile wall, a one-tile post, and a long frame hitch', () => {

@@ -12,7 +12,7 @@ import type { Input } from '../src/core/input';
 import type { Chunk, ChunkGenerator, GameMap } from '../src/world/map';
 import { createItem } from '../src/game/item';
 import {
-  applyCardreader, autoUi, cardreaderOf, climbOver, computerAction, elevatorFloors, finishHack, rideElevator, toggleGate,
+  applyCardreader, autoUi, cardreaderOf, cardsFor, isConsole, climbOver, computerAction, computerFailure, elevatorFloors, finishHack, rideElevator, toggleGate,
   useCardreader, useComputer, type CardreaderDef,
 } from '../src/game/labs';
 import { stairDestination } from '../src/game/zlevels';
@@ -33,8 +33,9 @@ function labCells(gen: WorldGenerator, special: string, from: { x: number; y: nu
   const sp = gen.overmap.findSpecial(special, from, 3)!;
   const cells: { x: number; y: number; z: number; id: string }[] = [];
   for (let z = 1; z >= -7; z--)
-    for (let dy = -5; dy <= 5; dy++)
-      for (let dx = -5; dx <= 5; dx++) {
+    // BN's mutable lab_basement can spread a dozen OMTs from its entrance
+    for (let dy = -12; dy <= 12; dy++)
+      for (let dx = -12; dx <= 12; dx++) {
         const o = gen.overmap.omtAt(sp.x + dx, sp.y + dy, z);
         if (o.special?.uid === sp.uid) cells.push({ x: sp.x + dx, y: sp.y + dy, z, id: o.id });
       }
@@ -187,14 +188,17 @@ describe("BN's classic lab (Lab special + lab_basement, Lua lab mapgen)", () => 
     let walls = 0, connected = 0, downs = 0;
     for (const c of cells.filter((e) => e.z < 0)) {
       const ch = map.chunk(c.x, c.y, c.z)!;
-      expect(ch.omt?.source).toBe('builtin:lua:lab');
+      // BN draws the escape cells/entrance and the train depot with their own JSON mapgen
+      expect(ch.omt?.source, c.id).toBe(/^lab_(escape|train)/.test(c.id) ? 'json' : 'builtin:lua:lab');
       walls += ids(ch).filter((t) => t === 't_concrete_wall').length;
       for (let i = 0; i < CHUNK * CHUNK; i++) {
         const x = c.x * CHUNK + (i % CHUNK), y = c.y * CHUNK + Math.floor(i / CHUNK);
         if (!hasFlag(map.terAt(x, y, c.z), 'GOES_DOWN') || hasFlag(map.terAt(x, y, c.z), 'SWIMMABLE')) continue;
         downs++;
         const d = stairDestination(game, x, y, c.z, 'down');
-        if (d && hasFlag(map.terAt(d.x, d.y, d.z), 'GOES_UP')) connected++;
+        // lab.lua's insert_stairs only uses bare t_thconc_floor, so a lab_core drawn with a
+        // carpeted floor plan gets no up-stairs (BN does the same); you still land on floor.
+        if (d && (hasFlag(map.terAt(d.x, d.y, d.z), 'GOES_UP') || map.passable(d.x, d.y, d.z))) connected++;
       }
     }
     expect(walls).toBeGreaterThan(100);
@@ -226,29 +230,36 @@ function flat() {
   return { game, msgs };
 }
 
-// These exercise the machinery against DDA-shaped data (JSON "cardreader" examine actors,
-// f_console furniture, boom barriers). BN hardcodes card readers in C++ and makes consoles
-// terrain (t_console), so each runs only while the data it needs is present.
-const hasTer = (id: string) => !!data.terrain[id];
-const hasFurn = (id: string) => !!data.furniture[id];
-const cardreaderData = hasTer('t_card_science') && !!cardreaderOf(data.terrain.t_card_science as any);
+// Machinery tests use actual BN terrain, exact ID cards, and climbable fences.
 
 describe('lab machinery', () => {
-  it.runIf(cardreaderData)('a science card opens the metal doors around its reader and the reader stays', async () => {
+  it('a science card opens the metal doors around its reader and the reader stays', async () => {
     const { game, msgs } = flat();
     game.map.setTer(12, 10, 0, 't_card_science');
-    game.map.setTer(13, 11, 0, 't_door_metal_locked');
+    for (let x = 13; x <= 18; x++) game.map.setTer(x, 11, 0, 't_door_metal_locked');
     game.map.setTer(20, 10, 0, 't_door_metal_locked');
     const cr = cardreaderOf(game.map.terAt(12, 10, 0))!;
-    expect(cr.flags).toContain('SCIENCE_CARD');
+    expect(cr.card_ids).toEqual(['id_science']);
     expect(await useCardreader(game, 12, 10, 0, cr, autoUi(game))).toBe('none');
+    expect(game.player.inv.wear(createItem(data, 'backpack'), null).ok).toBe(true);
+    const wrongCard = createItem(data, 'id_military');
+    game.player.inv.giveNew(wrongCard);
+    expect(await useCardreader(game, 12, 10, 0, cr, autoUi(game))).toBe('none');
+    expect(game.player.inv.has(wrongCard)).toBe(true);
     game.player.inv.giveNew(createItem(data, 'id_science'));
+    game.player.inv.giveNew(createItem(data, 'id_science'));
+    expect(cardsFor(game, cr)).toHaveLength(2);
     expect(await useCardreader(game, 12, 10, 0, cr, autoUi(game))).toBe('opened');
     expect(game.map.terAt(13, 11, 0).id).toBe('t_door_metal_c');
-    // outside radius 3: untouched
+    expect(game.map.terAt(18, 11, 0).id).toBe('t_door_metal_c'); // connected beyond radius3
+    expect(cardsFor(game, cr)).toHaveLength(1);
+    // isolated outside radius3: untouched
     expect(game.map.terAt(20, 10, 0).id).toBe('t_door_metal_locked');
     expect(msgs.some((m) => /doors unlock/.test(m))).toBe(true);
-    expect(await useCardreader(game, 12, 10, 0, cr, autoUi(game))).toBe(cr.consume_card === false ? 'redundant' : 'none');
+    expect(await useCardreader(game, 12, 10, 0, cr, autoUi(game))).toBe('redundant');
+    expect(cardsFor(game, cr)).toHaveLength(1);
+    expect(game.player.inv.has(wrongCard)).toBe(true);
+    expect(game.map.terAt(12, 10, 0).id).toBe('t_card_science');
   });
 
   it('card readers apply their terrain_changes within the radius', () => {
@@ -282,13 +293,14 @@ describe('lab machinery', () => {
     expect(ok).toBeGreaterThan(8);
   });
 
-  it.runIf(hasFurn('f_console'))('consoles: failing to bypass security triggers a failure, success unlocks nearby doors', async () => {
+  it('consoles: failing to bypass security triggers a failure, success unlocks nearby doors', async () => {
     const { game, msgs } = flat();
-    game.map.setFurn(11, 10, 0, 'f_console');
+    game.map.setTer(11, 10, 0, 't_console');
     game.map.setTer(15, 10, 0, 't_door_metal_locked');
     const c = game.map.chunk(0, 0, 0)!;
     const comp = { name: 'Test terminal', security: 0, options: [{ name: 'UNLOCK ENTRANCE', action: 'unlock' }], failures: [{ action: 'shutdown' }] };
     c.computers.set(10 * CHUNK + 11, comp);
+    expect(isConsole(game, 11, 10, 0)).toBe(true);
     await useComputer(game, 11, 10, 0, autoUi(game));
     expect(game.map.terAt(15, 10, 0).id).toBe('t_door_metal_c');
     expect(msgs.some((m) => /Lock disabled/.test(m))).toBe(true);
@@ -296,7 +308,55 @@ describe('lab machinery', () => {
     comp.security = 50;
     game.player.setSkill('computer', 0);
     await useComputer(game, 11, 10, 0, autoUi(game));
-    expect(game.map.furnAt(11, 10, 0).id).toBe('f_console_broken');
+    expect(game.map.terAt(11, 10, 0).id).toBe('t_console_broken');
+    expect(isConsole(game, 11, 10, 0)).toBe(false);
+  });
+
+  it('BN shutdown breaks nearby consoles first, or all loaded same-level consoles when none are nearby', async () => {
+    const { game } = flat();
+    game.map.setTer(11, 10, 0, 't_console');
+    game.map.setTer(18, 10, 0, 't_console');
+    game.map.setTer(18, 10, -1, 't_console');
+    await computerFailure(game, 11, 10, 0, 'shutdown', autoUi(game));
+    expect(game.map.terAt(11, 10, 0).id).toBe('t_console_broken');
+    expect(game.map.terAt(18, 10, 0).id).toBe('t_console');
+    const loaded = [...game.map.loadedChunks()].length;
+    await computerFailure(game, 18, 10, 0, 'shutdown', autoUi(game));
+    expect(game.map.terAt(18, 10, 0).id).toBe('t_console_broken');
+    expect(game.map.terAt(18, 10, -1).id).toBe('t_console');
+    expect([...game.map.loadedChunks()]).toHaveLength(loaded);
+  });
+
+  it('BN table consoles lose their furniture CONSOLE flag on shutdown', async () => {
+    const { game } = flat();
+    game.map.setFurn(11, 10, 0, 'f_console_table');
+    game.map.chunk(0, 0, 0)!.computers.set(10 * CHUNK + 11, { options: [] });
+    expect(isConsole(game, 11, 10, 0)).toBe(true);
+    await computerFailure(game, 11, 10, 0, 'shutdown', autoUi(game));
+    expect(game.map.furnAt(11, 10, 0).id).toBe('f_console_broken_table');
+    expect(isConsole(game, 11, 10, 0)).toBe(false);
+  });
+  it('a custom console without a broken counterpart clears furniture without an unknown ID', async () => {
+    const custom = { ...data, furniture: { ...data.furniture, f_console_mod: { ...data.furniture.f_console_table, id: 'f_console_mod' } } };
+    const game = new Game(custom, 3, fakeInput());
+    game.map.generator = new FlatGen();
+    game.player.x = 10.5; game.player.y = 10.5;
+    game.map.setFurn(11, 10, 0, 'f_console_mod');
+    game.map.chunk(0, 0, 0)!.computers.set(10 * CHUNK + 11, { options: [] });
+    expect(isConsole(game, 11, 10, 0)).toBe(true);
+    await computerFailure(game, 11, 10, 0, 'shutdown', autoUi(game));
+    expect(game.map.furnAt(11, 10, 0).id).toBe('f_null');
+    expect(isConsole(game, 11, 10, 0)).toBe(false);
+  });
+  it('a reader at the loaded-map edge never generates surrounding chunks', () => {
+    const { game } = flat();
+    game.map.setTer(0, 0, 0, 't_card_science');
+    game.map.setTer(2, 0, 0, 't_door_metal_locked');
+    const count = [...game.map.loadedChunks()].length;
+    const def = cardreaderOf(game.map.terAt(0, 0, 0))!;
+    expect(applyCardreader(game, 0, 0, 0, def)).toBe(true);
+    expect([...game.map.loadedChunks()]).toHaveLength(count);
+    expect(game.map.terAt(2, 0, 0).id).toBe('t_door_metal_c');
   });
 
   it('research notes come from lab_notes snippets and raise alerts', () => {
@@ -345,9 +405,9 @@ describe('lab machinery', () => {
     expect(elevatorFloors(game, 12, 10, -2).map((f) => f.z)).toEqual([-2]);
   });
 
-  it.runIf(hasTer('t_boom_barrier_lowered'))('climbing over a boom barrier puts you on the far side', () => {
+  it('climbing over a BN chain fence puts you on the far side', () => {
     const { game } = flat();
-    game.map.setTer(11, 10, 0, 't_boom_barrier_lowered');
+    game.map.setTer(11, 10, 0, 't_chainfence');
     expect(hasFlag(game.map.terAt(11, 10, 0), 'CLIMBABLE')).toBe(true);
     expect(climbOver(game, 11, 10, 0)).toBeNull();
     expect(game.player.tileX).toBe(12);

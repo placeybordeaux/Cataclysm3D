@@ -117,7 +117,11 @@ tests/               vitest unit tests (pure logic, no DOM/WebGL)
   calorie-only `stomach`, instant thirst, flat 10000 stamina. Traits act through
   `mutationValue(field)` (BN mutation_branch floats, BN aggregation) and BN enchantments
   (`enchant(value)` / `enchantBonus(value, base)` = add + base × multiply + max; providers in
-  `enchantProviders`). `sleepComfort` (set by rest.ts) feeds `rollCanSleep`.
+  `enchantProviders`; BN's suffix tree of enchantment values, such as CLIMATE_CONTROL_COOLING_TORSO,
+  is in `enchantValues.ts`). Item relic passive effects come from `relicEnchant.ts`: wielded, worn
+  and carried items, under every BN enchantment condition. Conditions that depend on where the
+  character is read `Character.world` (`characterWorld.ts`, set for the player and NPCs). Climate
+  control is applied in `climateCorrected`. `sleepComfort` (set by rest.ts) feeds `rollCanSleep`.
 - `healing.ts` BN heal_actor (`applyHealActor`), used by Inventory.use for `heal` actions.
 - `effects.ts` data-driven effect_type (misc.effect_type, with built-in fallbacks).
 - `inventory.ts` `character.inv`: BN carrying (flat `items` inventory vs worn `storage`, weight
@@ -181,7 +185,7 @@ tests/               vitest unit tests (pure logic, no DOM/WebGL)
   craft2/actions.ts), world menu "Continue construction" / "Build here…". `cdda.crafting.*`,
   `cdda.construction.*` for automation.
 
-### Combat depth (src/game/{techniques,martialarts,gunmods,monguns,explosion}.ts, wired by src/combatdepth.ts)
+### Combat depth (src/game/{techniques,martialarts,gunmods,monguns,blast,armed}.ts, wired by src/combatdepth.ts)
 - `meleeAttack(c, {dodge, armor, info?: TargetInfo}, rng, name, {allowSpecial, aoeTargets, forceTechnique})`
   picks a weapon/style technique (BN melee.cpp get_valid_techniques: dummy/defensive skipped, crit_tec,
   downed/stunned/human_target, BN ma_requirements (req_buffs, skills, weapon damage/flags/categories,
@@ -210,7 +214,9 @@ tests/               vitest unit tests (pure logic, no DOM/WebGL)
   `fireGun` rolls malfunctions/jams (`gun.vars.jammed`, cleared by `r`), adds 5×recoil×(1−skill/20)
   per round and returns `delayedRecoil`, `pellets/shotSpreadMoa/shotDamage`, `ammoEffects`.
   PlayerCombat fires bursts BURST_INTERVAL apart (`combat.burst`), pellets per ray, INCENDIARY/
-  EXPLOSIVE/aoe ammo effects through `combat.hooks` (explosion.ts is an approximation). Aim levels:
+  EXPLOSIVE/aoe ammo effects through `combat.hooks` (every explosion goes through `blast.ts detonate`, BN
+  explosion.cpp; `vehicleDamage.ts` is BN vehicle::damage for blasts and rounds; `armed.ts` ticks a
+  live grenade's fuse). Aim levels:
   `aimState(c, gun)` → Immediate/Regular/Careful/Precise (CDDA get_aim_types thresholds).
 - Monster guns (`monguns.ts gunActor`): special attack type "gun" — ranges pick the fire mode,
   starting_ammo pool, targeting lock + `targeting_sound` announcement, fake shooter stats, hitscan vs
@@ -220,7 +226,7 @@ tests/               vitest unit tests (pure logic, no DOM/WebGL)
 - Keys `_` martial arts, `b` fire mode (CDDA `F` is our flashlight). Debug: `cdda.learnStyle(id)`,
   `cdda.setStyle(id)`, `cdda.martialArts()`, `cdda.openMartialArts()`, `cdda.techniques(crit?)`,
   `cdda.fireMode()`, `cdda.cycleFireMode()`, `cdda.installGunmod(gunId?, modId)`, `cdda.openGunmods()`,
-  `cdda.aimState()`.
+  `cdda.aimState()`, `cdda.detonate(dx, dy, explosion | itemId)` (a BN explosion beside you).
 
 ### World interaction (src/game, installed by src/worldInteraction.ts)
 
@@ -268,7 +274,7 @@ tests/               vitest unit tests (pure logic, no DOM/WebGL)
   cruise model is the "Driving controls" option), Space handbrake. Launch acceleration is
   CDDA power/mass compressed toward a car (`feltAcceleration`, 0-30 mph in ~4 s); steering
   lock narrows with speed (`maxSteerAt`, lateral accel <= 5.5 m/s^2).
-- Run-overs use BN's impulse model (`resolveBodyCollision`, 0.1 damage per N·s, minus torso bash armor; a car at 20 mph kills an ordinary zombie) and credit the kill to the driver (`hurt(m, dmg, "player")` only when you drive; tests/runover.test.ts). Terrain/vehicle impacts still use the DDA energy loop (`resolveCollision`). `vs.creatureHooks = composeCreatureHooks([monsterCreatureHooks(ms),
+- Run-overs use BN's impulse model (`resolveBodyCollision`, 0.1 damage per N·s, minus torso bash armor; a car at 20 mph kills an ordinary zombie) and credit the kill to the driver (`hurt(m, dmg, "player")` only when you drive; tests/runover.test.ts). Terrain impacts still use the DDA energy loop (`resolveCollision`, on the speed into the obstacle); vehicle-vs-vehicle crashes exchange a rigid-body impulse with a transient slide/spin per vehicle (`vehicleImpact.ts`, docs/VEHICLES.md "Momentum crashes"; Options > Vehicle crashes keeps the old immovable model), and heavy/tracked handling comes from `handlingFor` (mass, power, tracks). `vs.creatureHooks = composeCreatureHooks([monsterCreatureHooks(ms),
   npcCreatureHooks(game, vs)])` — NPCs take CDDA impact damage on the torso, get stunned,
   flung and downed, and npcai `afterHit` handles death drops and anger. `e` on a vehicle part goes
   through `interactOverrides` in interact.ts (doors toggle, else a part menu: cargo get/put,
@@ -279,6 +285,13 @@ tests/               vitest unit tests (pure logic, no DOM/WebGL)
   {fuel,status})`, `cdda.vehicles()`, `cdda.enterVehicle()`, `cdda.drive(throttle, steer,
   s, brake?)`, `cdda.roadTrip(proto)`, `cdda.gotoVehicle(regex, {angle, dist})`,
   `cdda.vehicleLights(on)`, `cdda.vehicleAt(dx, dy)`.
+- Towing (docs/VEHICLES.md "Towing"): `vs.towing` (`src/game/towing.ts` `TowSystem`) links two vehicles
+  with BN's `hd_tow_cable` (a part on each, the item in the tower's part); `step` runs after every
+  vehicle moved: a rope impulse through `applyImpulse` once the hooks are 7 m apart, the towed
+  vehicle's axles grip / steer to the pull (`decayMotion(..., towed)` skips its flat decay), BN's
+  breaks plus overload. Saved in `VehicleSaveJSON.tows`. `src/towing.ts` wires the cable's use action,
+  the vehicle panel actions (`vehiclePanelExtras` in src/screens/vehicle.ts) and `render/towFx.ts`;
+  `cdda.towing.*`.
 - Mesh (vehicleMesh.ts): bonnet rows ahead of the windscreen slope from 0.9 m to 0.7 m at the
   nose, low dark cowl/dash, thin A-pillars, faint glass (0.14), painted panels mid-tone with
   darker tops (`panelTop`) so sunlit cars don't read as white slabs; BN wheel sizes are cm.
@@ -288,12 +301,19 @@ tests/               vitest unit tests (pure logic, no DOM/WebGL)
   sections, wheels, doors; width squeezed, seats keep their tiles via `zOf`),
   `vehicleModel.ts` builds a profile-lofted body with cut-out windows / arches / open doors,
   `vehicleSkin.ts` paints a 32 texel/m skin (in `vehicleSkinWorker.ts`), `vehicleBikes.ts`
-  and `vehicleFrame.ts` cover bikes and odd grids, `vehicleGeom.ts` holds shared helpers.
+  and `vehicleFrame.ts` cover bikes and odd grids, `vehicleTank.ts` armoured hulls (tanks, IFVs, APCs:
+  frame templates plated over half their cells; tracks / wheels / hover pads and the turret read from
+  the parts), `vehicleRoller.ts` drum compactors (road roller), `vehicleWork.ts` work machines
+  (excavator, dozer, roadheader, trencher, forklift, hoist, tractors and their implements, sweeper:
+  chosen by their tool parts), `vehicleGeom.ts` holds shared helpers.
   VehicleRenderer keeps the parts renderer as the `parts` look. Collision follows the drawn
   body: `MapOverlay.shaped/collide` (sub-tile shapes, used by physics.ts), the vehicle system's
   `bodyShape` hook + `bodyRect/occupantAt`, clipping in `src/game/vehicleShape.ts`. The driven
   vehicle gets `vehicleCockpit.ts` (live dials, wheel + hands, windscreen film); `rig.eyeCap`
-  keeps the on-foot eye under a car roof in a doorway. `tools/vehicle-freq.ts` ranks what
+  keeps the on-foot eye under a car roof in a doorway. Inside a vehicle you don't free-walk: `vehwalk.ts` `VehicleStations`
+  (`vs.stations`) seats you at stations (cars: wheel or outside; RVs/buses: seats, aisle, door
+  exits; tanks: driver/gunner/hatches) with W/A/S/D hops and `rig.stationEye`; `?vehwalk=`,
+  Options > Inside vehicles (docs/VEHICLES.md "Inside vehicles"). `tools/vehicle-freq.ts` ranks what
   mapgen spawns by body style.
 ### NPCs, dialogue, trade, missions (src/game, wired by src/npcs.ts `installNpcs`)
 - Data: `public/data/npcs.json` (`npm run extract:npcs`, tools/extract/npcs.ts): npc templates,
@@ -304,14 +324,50 @@ tests/               vitest unit tests (pure logic, no DOM/WebGL)
   {template}|{cls}, seed)` = npc::randomize (4d3 stats + class bonuses, class skills, gear from
   `<class>_<slot>`/`npc_<slot>` groups, names). `toJSON/fromJSON`.
 - `npcai.ts` `NpcSystem` (`game.npcs`): reality bubble like monsters; goals fight / flee / follow /
-  return (guards, shopkeepers, "wait here") / approach (TALK, MUG) / wander; melee via combat.ts,
-  guns via fireGun with reload. It is also the dialogue world and mission host (survivor vars,
+  return (guards, shopkeepers, "wait here") / approach (TALK, MUG) / wander / rest / investigate /
+  pulp; melee via combat.ts, guns via fireGun (aimed first) with reload. It is also the dialogue world and mission host (survivor vars,
   faction trust, kills). `spawn(spec, x, y, z, opts)`, `talkTo(n)`, `npcAt`, `toJSON/fromJSON`.
   Monsters hunt NPCs through the additive `MonsterSystem.extraTargets` hook; the player hits
   NPCs through `PlayerCombat.attackGuard` / `npcMelee` / `npcShot` (friendly ones ask first).
-- `talk.ts` `Dialogue`: CDDA dynamic lines, responses (switch/default, show_always, truefalse,
-  trials with talk_trial::calc_chance), a large subset of conditions/effects (unsupported ones
-  warn once, false/no-op); `talkmath.ts` evaluates `math` expressions. `missions.ts`
+- **Follower rules in the AI** (`npcai.ts`, BN arithmetic in `npctactics.ts`, tests
+  `tests/npcrules_ai.test.ts`). Per think an `NpcAiCache` (BN ai_cache: danger, danger_assessment,
+  emergency, friends, sound alerts, pulp target) is rebuilt. Allies pick targets as BN
+  `assess_danger`: def_radius (6, follow distance with follow_close, confident range when only
+  defending itself), "too close" to it or a friend always counts, otherwise `ok_by_rules` for the
+  engagement rule (NONE / CLOSE / WEAK vs `melee_value` / HIT via hit_by_player / NO_MOVE /
+  FREE_FIRE / ALL), forbid_engage drops all; priority = danger − 2 × (scaled distance − 1);
+  follow_close or an emergency sends a walking-with follower back first. Non-allies keep the
+  nearest-foe choice. `methodOfAttack` = BN `method_of_attack` for everyone: alt attack in an
+  emergency (use_grenades; NPC_ALT_ATTACK / NPC_THROW_NOW items, armed at the throw,
+  `onThrownExplosive` → `ArmedExplosives`), reach, a shot only within `confident_gun_mode_range`
+  (BN hit_range.json × `confidence_mult` by aim rule) and `wont_hit_friend` (else side-step),
+  use_guns / use_silent (gun noise < 50) and danger ≥ 3 gate the gun, reload, melee, **aim**
+  (recoil falls toward the sight floor; any step or reload resets it to MAX_RECOIL), and only then
+  close in, which NO_MOVE / FREE_FIRE and HIT-not-yet forbid. Following: `followDist` (2 with
+  follow_distance_2 or out of sight, 4, 1 on stairs), `followPace` (move_own_pace, else the
+  survivor's run/crouch, plus the port's catch-up over 8 tiles). Paths (`pathRules`): doors unless
+  avoid_doors (doors also avoided), bashing up to `smash_ability` for non-allies and allow_bash,
+  hold_the_line avoids open doors / rough tiles next to the survivor (`PathOpts.avoid/bashMax`);
+  close_doors shuts the door left behind. Needs: noise investigation (`handle_sound`, not when
+  walking with you; 10 tiles, 50 guards, 0 with ignore_noise), pulping reviving corpses within 6
+  (allow_pulp; `pulp_do_turn` damage → PULPED, which `monai` won't revive), `complain()` timers in
+  `Npc.complaints` (allow_complain; serious ones forced). Not acted on: allow_pick_up and the CBM
+  rules (`NpcRules.canUseOffensiveCbm / wantsToRechargeCbm` are ready for NPC bionics). BN's AI
+  never reads avoid_friendly_fire (wont_hit_friend always applies), so neither does the port.
+- `talk.ts` `Dialogue`: BN dynamic lines (`{"and"}` concatenation), responses (switch/default,
+  show_always, truefalse, trials with talk_trial::calc_chance, repeat responses for_item/for_category
+  in front), BN conditions/effects (condition.cpp, npctalk.cpp). Variables use BN names
+  (`talkVarName`: `npctalk_var_<type>_<context>_<name>`; old saves migrated by `migrateTalkVars`),
+  with u_adjust_var/u_compare_var integers; `curItem` (BN cur_item) feeds bulk trades. Kinds the
+  port can't honour go through `unsupportedCond`/`unsupportedEffect` (warn once naming the missing
+  system, false/no-op; `MISSING_EFFECTS`); kinds BN itself treats as false/no-op (unknown string
+  conditions, unknown ally rules) are false with their own warning. Hooks: `pickOption` (barber,
+  copy_npc_rules), `playerDriving`, `npcGoToSleep`, `spawnPets` (u_buy_monster). `npcrules.ts`
+  `NpcRules` = BN npc_follower_rules on `Npc.rules` (saved; `STORED_ONLY` lists what the AI can't
+  act on, each warning once naming the missing system). `traitgroup.ts` rolls npc_class trait groups (background
+  stories, starting traits). `tools/dialogue-coverage.ts` measures which kinds the runtime handles,
+  weighted by reachable / early (refugee center, starting, random) topics. `talkmath.ts` evaluates
+  DDA `math` expressions. `missions.ts`
   `MissionSystem` (FIND_ITEM, KILL_MONSTER_TYPE/SPEC, KILL_MONSTER target, GO_TO(_TYPE),
   ASSASSINATE, CONDITION). `trade.ts` `TradeSession` (npctrade.cpp prices, balance, credit).
 - **update_mapgen**: `worldgen.applyUpdate(map, idOrObject, omx, omy, z)` runs an update_mapgen
@@ -378,6 +434,8 @@ tests/               vitest unit tests (pure logic, no DOM/WebGL)
 - UI: `)` scores window (ACHIEVEMENTS / CONDUCTS / SCORES / KILLS tabs), unlock toast + log message.
   Debug: `cdda.achievements(filter?)`, `cdda.unlockAchievement(id)`, `cdda.achievementStat(id)`,
   `cdda.achievementEvent(type, fields)`, `cdda.openAchievements()`.
+- Event coverage inventory (which BN event types the current achievement data needs, what feeds
+  each, what's out of scope and why): [docs/ACHIEVEMENTS.md](docs/ACHIEVEMENTS.md).
 
 ### Underground labs & dissection (src/game/labs.ts, src/labs.ts `installLabs`, src/game/butchery.ts)
 - Labs are CDDA 0.J+ **modular JSON labs** (upstream removed the hardcoded lab/lab_stairs/lab_finale
@@ -416,6 +474,14 @@ tests/               vitest unit tests (pure logic, no DOM/WebGL)
 - Overmap: BN city profile (hamlets, finale buildings, urban lists over size 10), the classic `Lab`
   special grows a simplified mutable `lab_basement` (CLASSIC_LAB_SPECIAL, LAB_BASEMENT_TYPES), bridges
   replace straight roads over water, z<0 is `empty_rock`. The start is BN's `Evac Shelter`.
+  genVersion 2 (`WORLDGEN_VERSION`, saves keep theirs) adds BN's `UNIQUE` rule, manholes over a
+  city sewer (z-1) and subway tunnels (z-2): non-road connections go to `Region.connectionRequests`
+  and src/world/overmap/connections.ts (BN overmap_connection layout) builds them per region.
+  docs/WORLD_TRANSPORT.md; `tsx tools/transport_probe.ts` counts them per seed.
+- Mutable specials (genVersion >= 2): overmap/mutable.ts is a port of BN's join-matching solver,
+  overmap/mutable_place.ts scatters `mutableWildSpecials` (anthills, slime pit, Ice Lab, stream, mines +
+  mine_tunnel) per region on its own RNG stream; `Overmap.joinAt` feeds mapgen's nested `joins`.
+  mapgen/bncaves.ts ports draw_mine, slimepit.lua and mapgen_rock_partial. docs/WORLD_TRANSPORT.md.
 - BN semantics kept at runtime: floors have no INDOORS flag (indoors = covered from above), every
   open-air tile over terrain with a `roof` gets it (mapbuffer post-pass), consoles are `t_console`
   terrain, vending machines are `f_vending_c` or broken `f_vending_o`, `translate_ter` works.

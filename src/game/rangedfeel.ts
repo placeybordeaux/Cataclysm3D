@@ -221,6 +221,17 @@ export function arcHeight(s: number, a: { eye: number; slope: number; aimDist: n
   return line + toLine + hump;
 }
 
+/**
+ * The gravity part of `arcHeight` alone: how far (m) a projectile flying at `speed` m/s sits above
+ * the straight line from its launch point to the point it was aimed at `aimDist` m away, `s` m
+ * along. Zero at both ends, negative past the aim point (it keeps falling). Enemy rounds
+ * (enemyfire.ts) add it to their straight line so their arrows drop like the survivor's.
+ */
+export function arcHump(s: number, aimDist: number, speed: number): number {
+  const D = Math.max(0.5, aimDist);
+  return (GRAVITY / (2 * speed * speed)) * s * (D - s);
+}
+
 /** Where (m along the flight) the arc reaches the ground, searching up to `maxS`; Infinity if it doesn't. */
 export function groundDistance(a: { eye: number; slope: number; aimDist: number; speed: number }, maxS: number, step = 0.25): number {
   for (let s = step; s <= maxS; s += step) if (arcHeight(s, a) <= 0.02) return s;

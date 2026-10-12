@@ -1,3 +1,6 @@
+import { storeVisualPreference } from './visualPreference';
+import { charSettings, charsApi } from './chars/index';
+import { cardSettings } from './cards';
 import type { DebugApi } from '../debug';
 import type { Game } from '../game/game';
 import type { WorldGenerator } from '../world/worldgen';
@@ -7,8 +10,9 @@ import type { Renderer } from './renderer';
 import { frameStats, summarize } from '../perfDebug';
 import { voxelStats } from './voxel';
 import { installFurniture, installSurfaces } from './furniture/install';
+import { installHeldIcons } from './heldIconInstall';
 import { HAZE_NAMES, HAZES, haze, isHazeName, setHaze } from './atmosphere';
-import { setCutoutMips } from './cutoutMips';
+import { cutoutMipsOn, setCutoutMips } from './cutoutMips';
 import { installNearCurtain } from './nearChunks';
 import { FLORA_DESC, FLORA_NAMES, flora, floraAtlas, floraTiming, isFloraName, setFlora } from './flora';
 import { FORM_NAMES, FORMS, form, isFormName, setForm } from './formLight';
@@ -23,12 +27,38 @@ import { installShadows } from './shadowInstall';
 
 export function installLooks(game: Game, renderer: Renderer, worldgen: WorldGenerator | null, api: DebugApi): void {
   installNearCurtain(game, renderer);
+  registerOption({
+    category: 'World',
+    name: 'Cutout mips', value: () => cutoutMipsOn() ? 'on' : 'off',
+    change: () => { setCutoutMips(!cutoutMipsOn()); storeVisualPreference('cutout', cutoutMipsOn() ? 'on' : 'off'); },
+    desc: 'Stable grass and leaf sampling at distance; off restores unmipped pixel sampling.',
+  });
+  registerOption({
+    category: 'World',
+    name: 'Creature paint', value: () => charSettings.paint,
+    change: () => { charsApi({ paint: charSettings.paint === 'styled' ? 'sprite' : 'styled' }); storeVisualPreference('charpaint', charSettings.paint); },
+    desc: 'Styled skins or projected tileset paint for 3D creatures.',
+  });
+  registerOption({
+    category: 'World',
+    name: 'First-person bow', value: () => charSettings.fpBow ? 'model' : 'sprite',
+    change: () => { charSettings.fpBow = !charSettings.fpBow; storeVisualPreference('fpbow', charSettings.fpBow ? 'model' : 'sprite'); },
+    desc: 'Draw bows as pixel art or 3D models when first-person hands are 3D.',
+  });
+  registerOption({
+    category: 'World',
+    name: 'Props', value: () => cardSettings.mode,
+    change: () => { cardSettings.mode = cardSettings.mode === 'cards' ? 'billboard' : 'cards'; storeVisualPreference('props', cardSettings.mode); renderer.chunks.invalidateAll(); },
+    desc: 'World-fixed cards or camera-facing billboards for fire, distant furniture and loose items.',
+  });
+
   if (worldgen) {
     renderer.skyline.overmap = worldgen.overmap;
     // how tall each column is (src/world/levels.ts): what exists is derived from the world
     renderer.chunks.levels.overmap = worldgen.overmap;
   }
   registerOption({
+    category: 'World',
     name: 'Visual style',
     value: () => LOOKS[look.name].label,
     change: (d) => {
@@ -38,6 +68,7 @@ export function installLooks(game: Game, renderer: Renderer, worldgen: WorldGene
     desc: LOOK_NAMES.map((n) => `${LOOKS[n].label}: ${LOOKS[n].desc}`).join('\n'),
   });
   registerOption({
+    category: 'World',
     name: 'Distance haze',
     value: () => HAZES[haze.name].label,
     change: (d) => {
@@ -47,6 +78,7 @@ export function installLooks(game: Game, renderer: Renderer, worldgen: WorldGene
     desc: HAZE_NAMES.map((n) => `${HAZES[n].label}: ${HAZES[n].desc}`).join('\n'),
   });
   registerOption({
+    category: 'World',
     name: 'Form lighting',
     value: () => FORMS[form.name].label,
     change: (d) => {
@@ -70,6 +102,7 @@ export function installLooks(game: Game, renderer: Renderer, worldgen: WorldGene
     return name;
   };
   registerOption({
+    category: 'World',
     name: 'Trees',
     value: () => flora.name,
     change: (d) => {
@@ -101,6 +134,7 @@ export function installLooks(game: Game, renderer: Renderer, worldgen: WorldGene
     }
   }
   registerOption({
+    category: 'World',
     name: 'Draw distance',
     value: () => `${Math.max(2, renderer.chunks.radius - 1) * 24} m`,
     change: (d) => {
@@ -159,6 +193,7 @@ export function installLooks(game: Game, renderer: Renderer, worldgen: WorldGene
   a.voxelStats = voxelStats;
   installShadows(game, renderer, api);
   installFurniture(renderer, api);
+  installHeldIcons(game, renderer, api);
   installSurfaces(renderer, api, game);
   a.setLook = (name: string) => {
     if (!isLookName(name)) throw new Error(`unknown look ${name}`);

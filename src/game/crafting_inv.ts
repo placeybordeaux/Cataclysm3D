@@ -13,7 +13,14 @@ import { consumeItem, isAt, L, moveItem, type Loc } from './moves';
 /** Tiles around the crafter that count as "nearby" (BN PICKUP_RANGE is 6; 2 feels right in 3D). */
 export const CRAFT_RANGE = 2;
 
-export type SourceKind = 'inv' | 'map' | 'furniture' | 'environment';
+export type SourceKind = 'inv' | 'map' | 'furniture' | 'environment' | 'vehicle';
+
+/** Several installed tools can draw on one finite resource. Object identity is
+ * the shared budget key when checking all requirement groups together. */
+export interface CraftToolResource {
+  available(): number;
+  consume(charges: number): number;
+}
 
 export interface CraftSource {
   item: Item;
@@ -28,6 +35,8 @@ export interface CraftSource {
   z?: number;
   /** Worn clothing itself (usable as a tool, never as a component, like BN). */
   worn?: boolean;
+  resource?: CraftToolResource;
+  valid?: () => boolean;
 }
 
 export interface CrafterPos {
@@ -36,8 +45,10 @@ export interface CrafterPos {
   z: number;
 }
 
-/** Charges a tool offers for "tools: [[id, n]]" requirements (pseudo tools are unlimited). */
+/** Charges a tool offers for "tools: [[id, n]]" requirements (fixed furniture/environment pseudo tools are unlimited). */
 export function toolCharges(s: CraftSource): number {
+  if (s.valid && !s.valid()) return 0;
+  if (s.resource) return s.resource.available();
   if (s.kind === 'furniture' || s.kind === 'environment') return Infinity;
   const it = s.item;
   return it.countByCharges ? it.charges : it.ammoRemaining();
@@ -48,6 +59,7 @@ export class CraftingInventory {
   /** typeId → sources, built on first query (thousands of recipes are checked per screen). */
   private byType: Map<string, CraftSource[]> | null = null;
   private qualCache = new Map<string, number>();
+  private dynamicSources: CraftSource[] | null = null;
 
   constructor(readonly data: GameData, readonly crafter: Character | null, readonly map: GameMap | null, readonly pos: CrafterPos | null) {}
 
@@ -105,6 +117,7 @@ export class CraftingInventory {
   private dirty(): void {
     this.byType = null;
     this.qualCache.clear();
+    this.dynamicSources = null;
   }
 
   private ofType(id: string): CraftSource[] {
@@ -123,10 +136,15 @@ export class CraftingInventory {
   /** Best level of a tool quality among everything available. */
   maxQuality(id: string): number {
     let best = this.qualCache.get(id);
-    if (best !== undefined) return best;
-    best = 0;
-    for (const s of this.sources) best = Math.max(best, s.item.qualityLevel(id));
-    this.qualCache.set(id, best);
+    if (best === undefined) {
+      best = 0;
+      for (const s of this.sources) if (!s.valid) best = Math.max(best, s.item.qualityLevel(id));
+      this.qualCache.set(id, best);
+    }
+    // Keep the large carried/map inventory cached, but revalidate the small set
+    // of installed sources every time: a cached quality cannot outlive its rig.
+    this.dynamicSources ??= this.sources.filter(s => s.valid);
+    for (const s of this.dynamicSources) if (s.valid!()) best = Math.max(best, s.item.qualityLevel(id));
     return best;
   }
   /** `amount` distinct tools each with quality `id` >= level. */
@@ -134,12 +152,12 @@ export class CraftingInventory {
     if (this.maxQuality(id) < level) return false;
     if (amount <= 1) return true;
     let n = 0;
-    for (const s of this.sources) if (s.item.qualityLevel(id) >= level && ++n >= amount) return true;
+    for (const s of this.sources) if ((!s.valid || s.valid()) && s.item.qualityLevel(id) >= level && ++n >= amount) return true;
     return false;
   }
   /** The items providing quality `id` at `level` (for "where is it" in the UI). */
   qualitySources(id: string, level: number): CraftSource[] {
-    return this.sources.filter((s) => s.item.qualityLevel(id) >= level);
+    return this.sources.filter((s) => (!s.valid || s.valid()) && s.item.qualityLevel(id) >= level);
   }
 
   /** Items usable as components of type `id` (not worn gear, not non-empty containers). */
@@ -155,15 +173,21 @@ export class CraftingInventory {
 
   /** Tool sources of type `id`. */
   toolSources(id: string): CraftSource[] {
-    return this.ofType(id);
+    return this.ofType(id).filter(s => !s.valid || s.valid());
   }
   hasTool(id: string): boolean {
-    return this.ofType(id).length > 0;
+    return this.toolSources(id).length > 0;
   }
   /** Total charges available from tools of type `id`. */
-  toolChargesOf(id: string): number {
+  toolChargesOf(id: string, budget?: Map<object, number>): number {
     let n = 0;
-    for (const s of this.toolSources(id)) n += toolCharges(s);
+    const seen = new Set<object>();
+    for (const s of this.toolSources(id)) {
+      const key = s.resource ?? s.item;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      n += budget?.get(key) ?? toolCharges(s);
+    }
     return n;
   }
 
@@ -188,12 +212,22 @@ export class CraftingInventory {
     return out;
   }
 
-  /** Use `n` charges of tool `id` (pseudo tools are free). */
-  consumeToolCharges(id: string, n: number): void {
+  /** Use `n` charges of tool `id`; installed tools draw their finite resource. */
+  consumeToolCharges(id: string, n: number, budget?: Map<object, number>): void {
     let left = n;
-    const srcs = [...this.toolSources(id)].sort((a, b) => toolCharges(b) - toolCharges(a));
+    // Keep shared vehicle energy available to tools that have no carried source.
+    // Preview and consumption use the same order; charge-count sorting alone
+    // could spend a battery before an equally usable independent carried tool.
+    const srcs = [...this.toolSources(id)].sort((a, b) => Number(!!a.resource) - Number(!!b.resource) || toolCharges(b) - toolCharges(a));
     for (const s of srcs) {
       if (left <= 0) return;
+      if (budget) {
+        const key = s.resource ?? s.item;
+        const available = budget.get(key) ?? toolCharges(s);
+        const take = Math.min(left, available);
+        budget.set(key, available - take); left -= take; continue;
+      }
+      if (s.resource) { left -= s.resource.consume(left); continue; }
       if (s.kind === 'furniture' || s.kind === 'environment') return;
       const it = s.item;
       if (it.countByCharges) {

@@ -6,11 +6,15 @@ import {
   boundModToVals, Effect, effectActivated, effectAmount, EffectRegistry, EffectSet, effectRollMod, type EffectJSON,
 } from './effects';
 import { Inventory, type InventoryJSON } from './inventory';
+import { installPowerArmor } from './powerArmor';
+import { inClimateControl, installRelicEnchantments, type CharacterWorld } from './relicEnchant';
+import { enchantLookupIds } from './enchantValues';
 import type { Loc } from './moves';
 import { focusEquilibrium, Morale, type MoralePoint } from './morale';
 import { cddaText } from './units';
 import { buffFlat } from './martialarts';
 import { NEUTRAL_SURVIVOR, type SurvivorBalance } from './balance';
+import { updateThermalInjuries, type FrostbiteTimers } from './thermalinjury';
 import { emitPractice, type PracticeBlock } from './practice';
 
 // The survivor model (Cataclysm: Bright Nights Character/avatar, simplified). Everything is
@@ -137,6 +141,8 @@ export interface CharacterEnvironment {
   floorItemWarmth?: number;
   /** Intensity of the best fire adjacent to you (get_heat_radiation(pos, true)), 0 = none. */
   bestFire?: number;
+  /** Radiant heat delta in °F, BN get_heat_radiation (separate from ambient air). */
+  heatRadiationF?: number;
 }
 
 export interface HpPart {
@@ -206,6 +212,7 @@ export interface CharacterJSON {
   thirst: number; hunger: number; sleepiness: number; sleepDeprivation: number; stim: number;
   focus: number;
   bodyTemp: Record<MainPartId, number>; wetness: Record<MainPartId, number>;
+  frostbiteTimers?: FrostbiteTimers;
   traits: string[];
   effects: EffectJSON[];
   morale: MoralePoint[];
@@ -266,6 +273,7 @@ export class Character {
   bodyTemp = {} as Record<MainPartId, number>;
   /** 0..1 per main part */
   wetness = {} as Record<MainPartId, number>;
+  frostbiteTimers: FrostbiteTimers = {};
   readonly morale = new Morale();
   readonly effects: EffectSet;
   readonly traits = new Set<string>();
@@ -323,6 +331,12 @@ export class Character {
    * needs the mutation powered, DAY/NIGHT/INSIDE…). Unset: always true.
    */
   enchantCondition: ((condition: unknown, traitId: string) => boolean) | null = null;
+  /**
+   * Where this character is, for enchantment conditions of carried items (DAY, OUTSIDE,
+   * ABOVEGROUND…) and climate control (src/game/relicEnchant.ts). Set by the game for the
+   * player and NPCs; null in unit tests, where those conditions throw instead of guessing.
+   */
+  world: CharacterWorld | null = null;
   /** Adjacent monsters holding this character (set by the monster system; BN get_dodge). */
   grabbers: (() => number) | null = null;
   /**
@@ -346,6 +360,8 @@ export class Character {
       this.healAcc[p] = 0;
     }
     this.inv = new Inventory(this);
+    installPowerArmor(this);
+    installRelicEnchantments(this);
     this.recalcHp(true);
     this.stamina = this.staminaMax();
     // character.cpp: a new character starts 100 kcal short of full.
@@ -400,8 +416,13 @@ export class Character {
    * enchantment_value parents (enchantment_value.cpp define_child_enchantments): generated
    * children like PAIN_GAIN or HEALTH_POINTS_ARM_L also count their base value (PAIN,
    * HEALTH_POINTS). Values listed in the data are their own roots (PAIN_MOD isn't PAIN's child).
+   * The BN tree (src/game/enchantValues.ts) decides; an id may repeat, and then counts that
+   * many times, as in BN's get_value_add. Ids the data doesn't generate fall back to
+   * stripping "_suffix" until a root is found.
    */
   private enchantChain(value: string): string[] {
+    const known = enchantLookupIds(this.data, value);
+    if (known) return known;
     const out = [value];
     if (this.enchantValueIds.has(value)) return out;
     let v = value;
@@ -440,9 +461,10 @@ export class Character {
     const chain = this.enchantChain(value);
     for (const e of this.activeTraitEnchantments()) {
       for (const v of e.values ?? []) {
-        if (!chain.includes(v.value)) continue;
-        add += v.add ?? 0;
-        multiply += v.multiply ?? 0;
+        const n = chain.filter((id) => id === v.value).length;
+        if (!n) continue;
+        add += (v.add ?? 0) * n;
+        multiply += (v.multiply ?? 0) * n;
         max = Math.max(max, v.max ?? 0);
       }
     }
@@ -1281,6 +1303,7 @@ export class Character {
     const coldMul = this.balance.cold;
     const air = (env.temperature - 19) / 5;
     let conv = BODYTEMP.NORM + (air < 0 ? air * coldMul : air) + (windchill < 0 ? windchill * coldMul : windchill) + clothing + heatLow + (env.sun ?? 0);
+    conv = this.climateCorrected(conv, p);
     // adjust_bp_conv_for_bonus_warmth
     const lying = this.canUseFloorWarmth() ? this.floorWarmth() : 0;
     const comfortable = (env.bestFire ?? 0) * 1 + lying;
@@ -1306,6 +1329,29 @@ export class Character {
       else conv -= (clothing - (BODYTEMP.NORM - without)) / 2;
     }
     return conv;
+  }
+  /**
+   * Character::temp_corrected_by_climate_control (character.cpp), applied to the convergent
+   * temperature before bonus warmth. Above BODYTEMP_NORM it drops by the
+   * CLIMATE_CONTROL_COOLING_<PART> enchantment, then by 1250 more in climate control
+   * (in_climate_control: a worn CLIMATE_CONTROL item, src/game/relicEnchant.ts), never below
+   * NORM; below NORM it rises by the climate-control 1250, then HEATING, never above NORM.
+   * Units: the enchantment is in legacy body-temperature units (500 = 1 °C, so the exo's
+   * CLIMATE_CONTROL 2000 is 4 °C) and its base, for `multiply`, is the legacy temperature
+   * (units::to_legacy_bodypart_temp: 0 = 27 °C, truncated).
+   */
+  climateCorrected(conv: number, p: MainPartId): number {
+    const legacy = (t: number) => Math.trunc(5000 + (t - BODYTEMP.NORM) * 500);
+    const part = p.toUpperCase();
+    const controlled = inClimateControl(this);
+    if (conv > BODYTEMP.NORM) {
+      conv -= this.enchantBonus(`CLIMATE_CONTROL_COOLING_${part}`, legacy(conv)) / 500;
+      if (controlled) conv -= 2.5;
+      return Math.max(BODYTEMP.NORM, conv);
+    }
+    if (controlled) conv += 2.5;
+    conv += this.enchantBonus(`CLIMATE_CONTROL_HEATING_${part}`, legacy(conv)) / 500;
+    return Math.min(BODYTEMP.NORM, conv);
   }
   /** Character::floor_warmth: bedding + items + mutation floor warmth (fur never lets bedding go negative). */
   floorWarmth(): number {
@@ -1399,9 +1445,10 @@ export class Character {
     while (this.acc >= 1 && !this.dead) {
       this.acc -= 1;
       this.turn++;
+      this.updateBodyTemp(1);
+      updateThermalInjuries(this, 1);
       this.perTurn();
     }
-    this.updateBodyTemp(gameDt);
     this.morale.decay(gameDt);
     this.inv.update(gameDt);
     this.inv.processRot(gameDt, this.env.temperature);
@@ -1605,7 +1652,7 @@ export class Character {
       storedKcal: this.storedKcal, stomach: { ...this.stomach },
       thirst: this.thirst, hunger: this.hunger, sleepiness: this.sleepiness, sleepDeprivation: this.sleepDeprivation, stim: this.stim,
       focus: this.focus,
-      bodyTemp: { ...this.bodyTemp }, wetness: { ...this.wetness },
+      bodyTemp: { ...this.bodyTemp }, wetness: { ...this.wetness }, frostbiteTimers: { ...this.frostbiteTimers },
       traits: [...this.traits], effects: this.effects.toJSON(), morale: structuredClone(this.morale.points),
       turn: this.turn, dead: this.dead, causeOfDeath: this.causeOfDeath,
       inventory: this.inv.toJSON(),
@@ -1621,7 +1668,7 @@ export class Character {
       // DDA-era saves also stored stomach volume/water: BN only keeps calories.
       stomach: { kcal: j.stomach?.kcal ?? 0, lastAte: j.stomach?.lastAte ?? 0 },
       thirst: j.thirst, hunger: j.hunger, sleepiness: j.sleepiness, sleepDeprivation: j.sleepDeprivation, stim: j.stim,
-      focus: j.focus, bodyTemp: { ...j.bodyTemp }, wetness: { ...j.wetness },
+      focus: j.focus, bodyTemp: { ...j.bodyTemp }, wetness: { ...j.wetness }, frostbiteTimers: { ...j.frostbiteTimers },
       turn: j.turn, dead: j.dead, causeOfDeath: j.causeOfDeath,
       lastSleepCheck: j.lastSleepCheck ?? -Infinity,
     });

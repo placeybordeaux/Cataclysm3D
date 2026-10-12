@@ -12,13 +12,19 @@ import type { Npc, NpcData } from './game/npc';
 import type { Item } from './game/item';
 import type { Dialogue } from './game/talk';
 import { NpcView } from './render/npcView';
-import { hud } from './ui/hud';
-import { interact } from './game/interact';
+import { pickModel } from './render/aimPick';
+import { aimHooks, zoneOfPart } from './game/aimmodel';
+import { npcFireHooks } from './game/npcfire';
+import { interact, creatureTargets } from './game/interact';
+import { worldContextProviders } from './ui2/world';
+import { personOnRay, playerViewRay, pickablePeople, type ViewRay } from './game/targeting';
+import { vehicleSolidHeight } from './ui/vehicle_ui';
+import { Vector3 } from 'three';
 import { playerCanSee, isOutside } from './game/vision';
 import { chunkTracker } from './save/tracking';
 import { registerSaveable } from './save/registry';
 import { sanitizeItemJSON } from './save/items';
-import { confirmAttackNpc, factionName, openChatMenu, openDialogue, openMissionLog, openTrade, pickItemMenu, type NpcUiCtx } from './ui/npc_ui';
+import { confirmAttackNpc, factionName, openChatMenu, openDialogue, openMissionLog, openTrade, pickItemMenu, pickOptionMenu, type NpcUiCtx } from './ui/npc_ui';
 import { DATA_BASE } from './core/assets';
 
 // Wiring for NPCs: data (public/data/npcs.json), the simulation system, mapgen placements
@@ -44,6 +50,8 @@ export const npcScreens = {
   chat: (ctx: NpcUiCtx, talk: (n: Npc) => void): void => openChatMenu(ctx, talk),
   /** Dialogue effects that take one of your items (npc_gets_item). */
   pickItem: (title: string, items: Item[], onPick: (it: Item | null) => void): void => pickItemMenu(title, items, onPick),
+  /** Dialogue effects that offer a list of choices (barber styles, copy_npc_rules). */
+  pickOption: (title: string, options: string[], onPick: (i: number | null) => void): void => pickOptionMenu(title, options, onPick),
 };
 
 export interface NpcsHandle {
@@ -121,6 +129,7 @@ export async function installNpcs(game: Game, renderer: Renderer | null, worldge
   if (renderer && typeof document !== 'undefined') {
     sys.startTrade = (n, cost = 0, onDone) => npcScreens.trade(uiCtx(), n, cost, onDone);
     sys.pickItem = (title, items, onPick) => npcScreens.pickItem(title, items, onPick);
+    sys.pickOption = (title, options, onPick) => npcScreens.pickOption(title, options, onPick);
     sys.confirmAttack = confirmAttackNpc;
     sys.onWantsTalk = (n) => {
       if (game.input.captured || game.player.dead) return;
@@ -138,8 +147,19 @@ export async function installNpcs(game: Game, renderer: Renderer | null, worldge
       combat.cooldown = sys.lastPlayerSwing;
       return true;
     };
-    combat.npcShot = (yaw, maxDist, shot) => sys.playerShot(yaw, maxDist, shot);
-    combat.npcRound = (n, shot, missedBy, what) => sys.playerRoundHits(n, shot, missedBy, what);
+    combat.npcFire = npcFireHooks(sys);
+    sys.rangedTargetNpc = (reach) => combat.crosshairNpc(reach) as Npc | null;
+    // Free-aim shots enter the drawn person's part boxes, as they do a monster's (src/aim.ts).
+    if (view) {
+      const v = view;
+      aimHooks.pickNpc = (n, o, d) => {
+        const inst = v.modelOf(n as Npc);
+        if (!inst) return undefined;
+        const r = pickModel(inst, o, d);
+        if (!r) return r;
+        return { t: r.t, part: r.part, zone: zoneOfPart(r.part) };
+      };
+    }
     game.activities.dangerChecks.push(() => {
       const p = game.player;
       for (const n of sys.npcs) {
@@ -157,29 +177,61 @@ export async function installNpcs(game: Game, renderer: Renderer | null, worldge
     if (!n) return prevCreatureAt(x, y, z);
     return { name: n.displayName(), symbol: '@', color: n.isEnemy() ? 'c_red' : n.isAlly() ? 'c_light_green' : 'c_white', describe: () => describeNpc(sys, n), npc: n } as LookCreature;
   };
-  const npcUnderCrosshair = (maxDist = 3): Npc | null => {
-    const hit = game.lookAt?.(maxDist);
-    const n = hit?.kind === 'creature' ? (hit.creature as { npc?: Npc } | undefined)?.npc : undefined;
-    if (n && !n.dead && Math.hypot(n.x - game.player.x, n.y - game.player.y) <= maxDist + 0.5) return n;
-    return null;
+  // Who `e` / `C` mean: the first person on the crosshair's ray, tested against where they're
+  // drawn (personOnRay: an upright body on their spot, not their tile column, which missed
+  // people walking between tiles and caught empty floor beside them) with nothing drawn in
+  // front of them. In first person that is the player's own eye ray, the one targetTile()
+  // marches for the tile `e` would act on otherwise (the camera only catches up with the player
+  // on the next drawn frame: right after a teleport it still looked at whoever stood at the old
+  // spot). Over the shoulder the crosshair is the camera's centre.
+  const camDir = new Vector3();
+  const crosshairRay = (): ViewRay => {
+    if (!renderer || renderer.cameraMode !== 'third') return playerViewRay(game);
+    const cam = renderer.camera;
+    cam.updateMatrixWorld();
+    cam.getWorldDirection(camDir);
+    return { o: { x: cam.position.x, y: cam.position.z, h: cam.position.y }, d: { x: camDir.x, y: camDir.z, h: camDir.y } };
   };
-  hud.addPromptProvider(() => {
-    const n = npcUnderCrosshair();
-    if (!n || n.isEnemy()) return null;
-    return `[${game.keys.keyFor('interact')}] Talk to ${n.displayName()}`;
+  const npcOnCrosshair = (reach: number): { n: Npc; t: number } | null => {
+    const hit = personOnRay(game, sys.npcs, crosshairRay(), reach, {
+      skipOrigin: !renderer || renderer.cameraMode !== 'third',
+      vehicleAt: (x, y, z) => vehicleSolidHeight(game, x, y, z),
+      // a monster in front hides them too (its tile column, as combat sees it)
+      creatureAt: prevCreatureAt,
+    });
+    // A hostile in front is no one to talk to, and hides whoever stands behind them.
+    return hit && !hit.body.isEnemy() ? { n: hit.body, t: hit.t } : null;
+  };
+  pickablePeople.push(() => sys.npcs);
+  // `e` (interact.ts aimedCreature): the prompt, the loot panel and the `o` menu ask the same.
+  creatureTargets.push((g) => {
+    // At the wheel or a vehicle station `e` is that station's (let go, get out, the turret).
+    const vs = g.vehicles;
+    if (vs && (vs.driving || vs.stations.at)) return null;
+    const hit = npcOnCrosshair(3);
+    if (!hit) return null;
+    const n = hit.n;
+    return { name: n.displayName(), dist: hit.t, label: `Talk to ${n.displayName()}`, run: () => talk(n), x: n.tileX, y: n.tileY, z: n.z, creature: n };
+  });
+  // The `o` menu and a free-cursor click on someone (ui2: the primary entry): talk, as `e` does.
+  worldContextProviders.push((t) => {
+    const n = t.kind === 'creature' ? (t.creature as { npc?: Npc } | undefined)?.npc : undefined;
+    if (!n || n.dead || n.isEnemy()) return [];
+    const far = Math.hypot(n.x - game.player.x, n.y - game.player.y) - 0.3 > 3 ? 'Too far away' : undefined;
+    // After the menu closes, so the dialogue's panel is the next surface (screens/chat.ts).
+    return [{ label: `Talk to ${n.displayName()}`, key: 'T', time: 0, primary: true, disabled: far, action: () => void setTimeout(() => talk(n), 0) }];
   });
 
   // ---------------------------------------------------------------- keys
+  // `e` talking is interact()'s (creatureTargets above); only the key's description changes.
   const prevInteract = game.keys.handler('interact');
   game.keys.register('interact', 'Examine / open / close / use / talk', () => {
-    const n = npcUnderCrosshair();
-    if (n && !n.isEnemy()) return talk(n);
     if (prevInteract) prevInteract();
     else void interact(game);
   });
   game.keys.register('chat', 'Chat with NPCs / order followers', () => {
-    const n = npcUnderCrosshair(4);
-    if (n) return talk(n);
+    const hit = npcOnCrosshair(4);
+    if (hit) return talk(hit.n);
     if (renderer) npcScreens.chat(uiCtx(), talk);
   });
   game.keys.register('missions', 'View missions', () => {

@@ -8,7 +8,7 @@
 // Keys and mouse are OS-level input; cdda.* only hands out the items, sets noon, clears monsters
 // and reads state.
 
-import type { XInput } from './lib/realinput';
+import { calmSurroundings, type XInput } from './lib/realinput';
 
 export interface SkillsCtx {
   x: () => XInput;
@@ -75,11 +75,20 @@ export function skillsScenarios(c: SkillsCtx): Scenario[] {
   return [
     ['skills', 'disassemble from the inventory starts at once; the practice cue says what it trained (or why not); @ shows focus, recent practice and how to reach the next level', async () => {
       await toGameplay();
+      // (hostile NPCs too: an attacker interrupts the disassembly and trains Dodging instead)
+      await calmSurroundings(js, { hour: 12 });
       await js(`(() => {
-        cdda.godMode(true); cdda.setHour(12); cdda.clearMonsters(60);
+        cdda.godMode(true);
         cdda.giveItem('backpack', { wear: true });
         cdda.giveItem('screwdriver'); cdda.giveItem('toaster'); cdda.giveItem('curling_iron');
         cdda.game.player.setSkill('electronics', 0);
+        // Full focus and a clear head: in a full run the shooting scenarios before this one drain
+        // focus to single digits, and enemyproj's tear gas and wounds leave effects and pain that
+        // pull Intelligence (effective focus = focus + 5 per Int over 8) to "learning at 0%".
+        const p = cdda.game.player;
+        for (const e of p.effects.all()) if (!e.permanent) p.removeEffect(e.id, e.bp ?? undefined);
+        p.pain = 0; p.resetStats();
+        p.focus = 100;
       })()`);
       // Look at the floor so the crosshair isn't on something with its own card.
       const d = await js<{ dp: number; sens: number }>(`({ dp: -0.9 - cdda.game.player.pitch, sens: cdda.game.mouseSensitivity })`);

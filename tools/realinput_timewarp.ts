@@ -10,7 +10,7 @@
 // Keys are OS-level input; cdda.* only sets the hour, clears/spawns monsters, gives the book
 // and reads state.
 
-import type { XInput } from './lib/realinput';
+import { settleWorld, type XInput } from './lib/realinput';
 
 export interface TimewarpCtx {
   x: () => XInput;
@@ -44,8 +44,14 @@ export function timewarpScenarios(c: TimewarpCtx): Scenario[] {
     return { r: ((await clock()) - t0) / ((Date.now() - r0) / 1000), eff: eff.reduce((a, b) => a + b, 0) / Math.max(1, eff.length) };
   };
   // Noon in an open field (a zombie 15 tiles away is in plain view), nothing hostile around.
-  const safeSpot = () => js(`(() => { const f = cdda.findOmt('field', 40); if (!f) throw new Error('no field near the start');
-    cdda.teleportOmt(f.x, f.y, 0); cdda.setHour(12); cdda.clearMonsters(200); cdda.godMode(false); cdda.step(0.3); })()`);
+  // (then the surroundings settled: the load gate holds the clock after the teleport, and a
+  // rate measured while it is closed reads low, e.g. ×1 at 89 game s per real s, not ~120)
+  const safeSpot = async () => {
+    await js(`(() => { const f = cdda.findOmt('field', 40); if (!f) throw new Error('no field near the start');
+      cdda.teleportOmt(f.x, f.y, 0); cdda.setHour(12); cdda.clearMonsters(200); cdda.godMode(false); cdda.step(0.3); })()`);
+    const w = await settleWorld(js);
+    if (!w.ok) check('the surroundings finished loading (load gate open, chunks built)', false, w);
+  };
 
   /** R, then the menu letter of the entry whose label starts with `label`. */
   const readBook = async (label: string) => {

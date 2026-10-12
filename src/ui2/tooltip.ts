@@ -86,7 +86,14 @@ if (typeof document !== 'undefined') {
     const warm = performance.now() - lastHidden < WARM_MS;
     timer = setTimeout(() => {
       timer = 0;
-      if (current === el) show(el);
+      if (current !== el) return;
+      // A list can re-render under a resting pointer during the delay (the inventory's 400 ms
+      // poll saw a charge or count change), leaving `el` a detached row. No pointermove comes
+      // to find its replacement, so the tooltip would never open: look again under the pointer.
+      const live = el.isConnected ? el : providerFor(document.elementFromPoint(lastXY.x, lastXY.y));
+      if (!live) return hideTooltip();
+      current = live;
+      show(live);
     }, warm ? 0 : DELAY);
   });
   // A click starts something (drag, menu, use): get out of the way.

@@ -21,6 +21,7 @@ function registerLogoOption(): void {
   if (logoOption) return;
   logoOption = true;
   registerOption({
+    category: 'Interface',
     name: 'Title logo',
     value: () => (titleLogoStyle() === 'ascii' ? 'ASCII art (CDDA)' : 'Pixel'),
     change: () => setTitleLogoStyle(titleLogoStyle() === 'ascii' ? 'pixel' : 'ascii'),

@@ -81,6 +81,40 @@ add its own crawl. A/B: `cdda.cutoutMips(false)`. Same session, mips off -> on:
 | terrain forest | 0.0422 -> 0.0317 | 0.0565 -> 0.0377 |
 | terrain far | 0.0131 -> 0.0083 | 0.0256 -> 0.0213 |
 
+## Antialiasing (`AAMode` in `src/render/post.ts`)
+
+**Options > Antialiasing**, `?aa=off|msaa|msaa+a2c|ssaa2`, `cdda.renderer.pipeline.setAA(m)`;
+default `off`. All modes smooth the *low-res scene image* before the post pass, so outlines,
+dither and the palette snap still act on whole low-res pixels: an edge gets one in-between
+palette step, not a blur. Post-grade FXAA/SMAA and TAA were ruled out (they smear the dither
+and the palette; TAA ghosts).
+
+* `msaa`: 4x MSAA on the scene MRT. Geometry edges only. The normal/flag attachment is
+  averaged by the resolve, so the skyline tag moved from a = 0.5 (exactly what a 50/50
+  outlined/sky edge averages to) to a = -1.
+* `msaa+a2c`: plus alpha-to-coverage on alpha-tested opaque materials, applied by sweeping the
+  scene graph (on change, then every 30 frames for new chunks). With nearest-sampled cutouts it
+  only softens the outermost texel, and it read as the worst shimmer of the four.
+* `ssaa2`: scene at 2x2 the low-res size, resolved by `DOWN_FRAG` (colour box-averaged;
+  normal/flag/depth from the nearest of the four samples so outlines still see one surface).
+  Covers textures, cards and shadow edges; screen-door (Bayer `gl_FragCoord`) transparency like
+  window glass turns into smooth translucency.
+
+Measured 2026-10-05, full look, 1920x1080 (962x542 low-res), RTX 5080, same session per view.
+`render` ms from `look-shots --bench` (separate runs, +-15 % noise); flicker = `flickerTest(24)`:
+
+| mode | render street/forest/far (ms) | flicker street | forest | far |
+| --- | --- | --- | --- | --- |
+| off | 2.5 / 3.4 / 2.6 | 0.0144 | 0.0116 | 0.0096 |
+| msaa | 2.6 / 3.4 / 3.9 | 0.0134 | 0.0110 | 0.0101 |
+| msaa+a2c | 2.9 / 3.6 / 3.5 | 0.0142 | 0.0106 | 0.0094 |
+| ssaa2 | 3.1 / 4.3 / 3.4 | 0.0133 | 0.0106 | 0.0072 |
+
+`shimmerTest` drifted too much within one session to rank modes (`off` re-measured at the end
+read 20-50 % higher than at the start), and it counts the gradual edge ramps AA produces as
+change, so it is biased against AA anyway. Visually: roof lines and far silhouettes stop
+stair-stepping, and thin far geometry (lamp posts) no longer drops out between frames.
+
 ## Form lighting (round 2, `src/render/formLight.ts`)
 
 v2 had a strong hemisphere ambient, the sun in 5 bands and a fill from the anti-sun azimuth.

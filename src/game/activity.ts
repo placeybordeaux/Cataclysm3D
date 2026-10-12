@@ -32,6 +32,30 @@ export interface ActivitySpec {
   at?: { x: number; y: number; z: number };
   /** A richer UI draws this activity's progress; the plain HUD bar can stay out of the way. */
   customUi?: boolean;
+  /** Liquid moving between two points while this runs (siphoning, pouring): src/render/hoseFx.ts draws it. */
+  hose?: HoseSpec;
+}
+
+/** A world point: tile coordinates (continuous), level, metres above that level's floor. */
+export interface HosePoint {
+  x: number; y: number; z: number; h: number;
+  /** Unit world direction the hose leaves this end along (out of a vehicle's side), if any. */
+  nx?: number; ny?: number;
+}
+export interface HoseSpec {
+  /** 'hose' sags to the ground between the ends; 'pour' is a short stream from a can's spout. */
+  style: 'hose' | 'pour';
+  /** Ends are re-read every frame: the vehicle or the survivor may shift. Null hides the hose. */
+  from: () => HosePoint | null;
+  to: () => HosePoint | null;
+  /**
+   * Where the hose lies on the ground between the ends (tile coordinates, first and last
+   * where it leaves each end), so it runs around vehicle bodies instead of through them.
+   * Without it the hose sags straight between the ends.
+   */
+  path?: (from: HosePoint, to: HosePoint) => { x: number; y: number }[];
+  /** Colour of the liquid (0xrrggbb). */
+  color: number;
 }
 
 const MOVE_KEYS = ['KeyW', 'KeyA', 'KeyS', 'KeyD'];
@@ -70,6 +94,8 @@ export class ActivityManager implements GameSystem {
   readonly distractionChecks: (() => string | null)[] = [];
   /** Told when an activity is cancelled or interrupted, with the reason (fast-forward drops to ×1). */
   readonly cancelHooks: ((a: Activity, reason: string) => void)[] = [];
+  /** Called synchronously after work starts, so menus can release their pause immediately. */
+  readonly startHooks: ((a: Activity) => void)[] = [];
 
   constructor(private game: Game) {}
 
@@ -84,6 +110,7 @@ export class ActivityManager implements GameSystem {
     for (const k of MOVE_KEYS) if (this.game.input.held.has(k)) this.current.heldAtStart.add(k);
     for (const r of this.distractions()) this.current.ignored.add(r);
     this.game.clock.warp = spec.warp ?? defaultWarp(spec.duration);
+    for (const h of this.startHooks) h(this.current);
     return true;
   }
 

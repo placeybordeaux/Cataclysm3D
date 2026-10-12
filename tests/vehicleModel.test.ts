@@ -13,6 +13,10 @@ import { spawnVehicle, type Vehicle } from '../src/game/vehicle';
 import type { VehicleDataFile } from '../src/game/vehicle_data';
 import { analyze, classify, setVehicleWidth, wheelRadius } from '../src/render/vehicleLayout';
 import { buildOutline, buildVehicleModel, parkedSteerAngle } from '../src/render/vehicleModel';
+import { armourHull } from '../src/render/vehicleTank';
+import { isCompactor } from '../src/render/vehicleRoller';
+import { workMachine } from '../src/render/vehicleWork';
+import { isDrum, isTrack, wheelRuns } from '../src/render/vehicleFrame';
 import { paintSkin, SKIN_PPM, skinLayout, skinLayoutInfo } from '../src/render/vehicleSkin';
 import { loadNodeData } from '../tools/lib/node_data';
 
@@ -142,7 +146,7 @@ describe('vehicle model: geometry', () => {
   }, 60_000);
 
   it('draws odd grids as a tidy frame, every part on its own tile', () => {
-    for (const id of ['shopping_cart', 'golf_cart', 'tractor_plow', 'apc', 'car_chassis']) {
+    for (const id of ['shopping_cart', 'golf_cart', 'food_cart', 'car_chassis']) {
       const v = make(id);
       const m = buildVehicleModel(v, 0)!;
       expect([id, m.bodyUsesParts]).toEqual([id, true]);
@@ -152,6 +156,127 @@ describe('vehicle model: geometry', () => {
       expect(b.max[2]).toBeLessThan(y1 + 0.6);
       expect(b.max[0]).toBeLessThan(x1 + 1.5); // turret barrels reach forward
       expect(b.min[0]).toBeGreaterThan(x0 - 0.6);
+    }
+  });
+
+  it('draws armoured hulls as tanks / APCs: tracks, turret and gun from the parts', () => {
+    const want: Record<string, [string, string | null]> = {
+      tank_m1_abrams: ['tracks', 'mbt'], tank_m60_patton: ['tracks', 'mbt'], tank_m60_patton_mothballed: ['tracks', 'mbt'],
+      tank_m60_patton_decoy: ['none', 'mbt'], howitzer_m109: ['tracks', 'box'], tank_xm7_elec: ['tracks', 'mbt'],
+      ifv_m2_bradley: ['tracks', 'ifv'], apc: ['tracks', null], 'aapc-mg': ['wheels', null], xapc_hover: ['hover', null], tank_xm_hover: ['hover', 'mbt'],
+    };
+    for (const [id, [gear, turret]] of Object.entries(want)) expect([id, armourHull(make(id))]).toEqual([id, { gear, turret }]);
+    // tractors on treads, armoured boats and helicopters stay frames
+    for (const id of ['tractor_heavy_plow', 'tractor_bandit', 'excavator', 'CG_cutter', 'helicopter_apache_1a', 'hovercraft_motor_single']) expect([id, armourHull(make(id))]).toEqual([id, null]);
+    for (const status of [0, 1]) {
+      const v = make('tank_m1_abrams', status, 5);
+      const m = buildVehicleModel(v, 0)!;
+      expect(m.bodyUsesParts).toBe(true);
+      // The turret, its gun and the MGs are separate geometry around their pivots (they traverse
+      // and elevate, vehicleMesh.ts): put them back where they sit at rest and bound it all.
+      expect(m.turrets).toHaveLength(1);
+      const t = m.turrets![0];
+      expect(t.part?.def.id).toBe('mounted_tank_manual');
+      expect(t.mgs.map((g) => g.part.def.id).sort()).toEqual(['mounted_browning', 'mounted_m240']);
+      const at = (g: THREE.BufferGeometry | null, ...offs: number[][]) => {
+        if (!g) return null;
+        const b = bounds(g), o = [0, 1, 2].map((k) => offs.reduce((a, d) => a + d[k], 0));
+        return { min: b.min.map((x, k) => x + o[k]), max: b.max.map((x, k) => x + o[k]) };
+      };
+      const gun = at(t.gun!.geo, t.pivot, t.gun!.pivot)!;
+      const all = [bounds(m.parts!), at(t.geo, t.pivot), gun, ...t.mgs.map((g) => at(g.geo, t.pivot, g.onTurret ? g.pivot : [-t.pivot[0], -t.pivot[1], -t.pivot[2]].map((x, k) => x + g.pivot[k])))].filter((x): x is { min: number[]; max: number[] } => !!x);
+      const b = { min: [0, 1, 2].map((k) => Math.min(...all.map((q) => q.min[k]))), max: [0, 1, 2].map((k) => Math.max(...all.map((q) => q.max[k]))) };
+      const [x0, y0, x1, y1] = v.bounds();
+      expect(b.min[2]).toBeGreaterThan(y0 - 0.75);
+      expect(b.max[2]).toBeLessThan(y1 + 0.75);
+      expect(b.min[0]).toBeGreaterThan(x0 - 0.6);
+      // the 120 mm gun (on the turret, laid straight ahead) projects well past the bow; the hull itself stops at the grid
+      if (status === 0) expect(gun.max[0]).toBeGreaterThan(x1 + 2);
+      expect(b.max[0]).toBeLessThan(x1 + 4);
+      expect(bounds(m.parts!).max[0]).toBeLessThan(x1 + 0.6);
+      // the barrel's muzzle is `len` ahead of its trunnion
+      if (status === 0) expect(t.pivot[0] + t.gun!.pivot[0] + t.gun!.len).toBeCloseTo(gun.max[0], 0);
+      expect(b.min[1]).toBeGreaterThan(-0.05);
+      expect(b.max[1]).toBeLessThan(2.95);
+    }
+  });
+
+  it('draws a road roller with one drum per run of drum cells, inside its grid', () => {
+    const v = make('road_roller');
+    expect(isCompactor(v)).toBe(true);
+    expect(wheelRuns(v.wheels.filter(isDrum), 'y').map((r) => [r.at, r.lo, r.hi])).toEqual(expect.arrayContaining([[2, -2, 2], [-3, -2, 2]]));
+    const m = buildVehicleModel(v, 0)!;
+    expect(m.bodyUsesParts).toBe(true);
+    expect(m.ride?.kind).toBe('seat');
+    const b = bounds(m.parts!);
+    const [x0, y0, x1, y1] = v.bounds();
+    expect(b.min[0]).toBeGreaterThan(x0 - 0.6);
+    expect(b.max[0]).toBeLessThan(x1 + 0.6);
+    expect(b.min[2]).toBeGreaterThan(y0 - 0.6);
+    expect(b.max[2]).toBeLessThan(y1 + 0.6);
+    expect(b.max[1]).toBeLessThan(2.95);
+    // nothing else in BN rolls on drums; treads on tractors are tracks, not drums
+    expect(isCompactor(make('tractor_heavy_plow'))).toBe(false);
+    expect(make('tractor_heavy_plow').wheels.every(isTrack)).toBe(true);
+  });
+
+  it('draws construction and farm machines from their tool parts (vehicleWork.ts)', () => {
+    const want: Record<string, [string, string]> = {
+      excavator: ['excavator', 'tracks'], trencher: ['trencher', 'wheels'], roadheader_mining: ['roadheader', 'tracks'],
+      tractor_bandit: ['dozer', 'tracks'], forklift: ['forklift', 'wheels'], engine_crane: ['hoist', 'wheels'], handjack: ['hoist', 'wheels'],
+      tractor_plow: ['tractor', 'wheels'], tractor_reaper: ['tractor', 'wheels'], tractor_seed: ['tractor', 'wheels'], oldtractor: ['tractor', 'wheels'],
+      autotractor: ['tractor', 'wheels'], tractor_heavy_plow: ['tractor', 'tracks'], tractor_heavy_seed: ['tractor', 'tracks'],
+      tractor_heavy_reaper: ['tractor', 'tracks'], autosweeper: ['sweeper', 'wheels'],
+    };
+    for (const [id, [kind, gear]] of Object.entries(want)) expect([id, workMachine(make(id))]).toEqual([id, { kind, gear }]);
+    // carts, wagons, tanks, boats (the water sweeper's SCOOP), aircraft and trains stay what they were
+    for (const id of ['golf_cart', 'shopping_cart', 'dogsled', 'covered_wagon', 'water_autosweeper', 'CG_cutter', 'helicopter_apache_1a', 'coal_hopper', 'car_chassis']) expect([id, workMachine(make(id))]).toEqual([id, null]);
+    for (const id of Object.keys(want)) {
+      for (const status of [0, 1]) {
+        const v = make(id, status, 7);
+        const m = buildVehicleModel(v, 0)!;
+        expect([id, m.bodyUsesParts]).toEqual([id, true]);
+        const [x0, y0, x1, y1] = v.bounds();
+        for (const g of [m.parts!, m.roof, m.glass, m.lamps, m.tails, m.beacons]) {
+          if (!g) continue;
+          // the body stays on its cells: only a blade's corners, teeth and lamps poke a little past
+          const b = bounds(g);
+          expect([id, b.min[0] > x0 - 0.75, b.max[0] < x1 + 0.75, b.min[2] > y0 - 0.75, b.max[2] < y1 + 0.75]).toEqual([id, true, true, true, true]);
+          expect([id, b.min[1] > -0.05, b.max[1] < 4.3]).toEqual([id, true, true]);
+        }
+        // a driver's seat means a ride (the robot tractor / sweeper and the hoist have none)
+        expect([id, !!m.ride]).toEqual([id, !!v.driverSeat() && v.parts.some((p) => p.def.flags.includes('SEAT'))]);
+      }
+    }
+  });
+
+  it('work machines: tools from the parts, wrecks scorched with the glass out', () => {
+    // the excavator's arm reaches the rockwheel's cell and stands well above the cab
+    const ex = make('excavator');
+    const tool = ex.parts.find((p) => p.def.flags.includes('ROCKWHEEL'))!;
+    const b = bounds(buildVehicleModel(ex, 0)!.parts!);
+    expect(b.max[0]).toBeGreaterThan(tool.mx + 0.3);
+    expect(b.max[1]).toBeGreaterThan(3.5);
+    // destroy the bucket: the arm slumps
+    tool.hp = 0;
+    ex.version++;
+    expect(bounds(buildVehicleModel(ex, 0)!.parts!).max[1]).toBeLessThan(b.max[1] - 0.5);
+    // burnt out: no glass, no beacon
+    for (const id of ['excavator', 'tractor_heavy_plow', 'forklift', 'roadheader_mining']) {
+      const v = make(id);
+      const intact = buildVehicleModel(v, 0)!;
+      expect([id, !!(intact.glass || id === 'forklift')]).toEqual([id, true]);
+      for (const p of v.parts) if (!p.def.flags.includes('WHEEL')) p.hp = 0;
+      v.version++;
+      const m = buildVehicleModel(v, 0)!;
+      expect([id, m.glass, m.beacons]).toEqual([id, null, null]);
+    }
+  });
+
+  it('lifts tanks, rollers and work machines onto the z-level floor', () => {
+    for (const id of ['tank_m1_abrams', 'road_roller', 'excavator', 'tractor_plow', 'forklift', 'trencher']) {
+      const b = bounds(buildVehicleModel(make(id), 2.6)!.parts!);
+      expect([id, b.min[1] > 2.55]).toEqual([id, true]);
     }
   });
 

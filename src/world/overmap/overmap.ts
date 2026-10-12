@@ -1,6 +1,11 @@
 import { Rng, hashSeed } from '../../core/rng';
-import type { OvermapData, SpecialDef } from '../worldgen_data';
+import type { CubeDir, OvermapData, SpecialConnection, SpecialDef } from '../worldgen_data';
+import { ConnectionBuilder, type ConnectionGrid } from './connections';
+import { MinHeap } from './heap';
 import { Noise2D } from './noise';
+import { placeMutableSpecials, type MutableHost } from './mutable_place';
+import { MutableSpecial, type MutableReadHost, type PlacedPiece } from './mutable';
+import { MAX_Z, MIN_Z } from '../coords';
 import {
   LINE_E, LINE_N, LINE_S, LINE_W, OmtRef, isLinear, isRotatable, oterId, parseOterId, rotateLine, rotateOffset,
 } from './oter';
@@ -20,8 +25,9 @@ export const MICROLAB_SPECIAL = '4x4_microlab_surface';
 /** BN's classic science lab: a z0 lab_stairs bunker over the mutable "lab_basement" special
  *  (generated here by placeLabBasement; drawn by src/world/mapgen/lab.ts). */
 export const CLASSIC_LAB_SPECIAL = 'Lab';
-/** The oter types a lab_basement is built from (BN overmap_mutable/lab.json). */
-export const LAB_BASEMENT_TYPES = ['lab', 'lab_filler', 'lab_stairs', 'lab_core', 'lab_finale'] as const;
+/** The oter types a lab_basement is built from (BN overmap_mutable/lab.json). genVersion 1
+ *  only grows the first five; 2 adds the escape cells chunk and train depots. */
+export const LAB_BASEMENT_TYPES = ['lab', 'lab_filler', 'lab_stairs', 'lab_core', 'lab_finale', 'lab_escape_cells', 'lab_escape_entrance', 'lab_train_depot'] as const;
 const RR = REGION * REGION;
 
 export interface City {
@@ -60,6 +66,18 @@ interface FinaleState {
   placed: boolean;
 }
 
+/** See Region.connectionRequests. */
+export interface ConnectionRequest {
+  x: number;
+  y: number;
+  z: number;
+  /** BN overmap_connection id */
+  connection: string;
+  /** SpecialInstance uid that asked (0 = none, e.g. a manhole). Lets the builder find the
+   *  special's connection "from" point, the side the tunnel enters it from. */
+  uid: number;
+}
+
 interface Slot {
   t: number;
   rot: number;
@@ -77,6 +95,16 @@ class Region {
   readonly layers = new Map<number, Slot>();
   readonly cities: City[] = [];
   readonly specials: SpecialInstance[] = [];
+  /**
+   * Non-road connections (BN overmap_connection ids such as "sewer_tunnel", "subway_tunnel")
+   * asked for by anything that places terrain: specials, city buildings, the lab grower, mutable
+   * specials. Built once every special in the region is placed (genVersion >= 2). Coordinates
+   * are region-local OMTs at the connection's own z.
+   */
+  readonly connectionRequests: ConnectionRequest[] = [];
+  /** BN road_nesw_manhole candidates (city centres and one in 8 street branch points), checked
+   *  once road lines are known (genVersion >= 2). */
+  readonly manholes: { x: number; y: number; city: City; center: boolean }[] = [];
   constructor(readonly rx: number, readonly ry: number) {}
   get x0() { return this.rx * REGION; }
   get y0() { return this.ry * REGION; }
@@ -84,6 +112,16 @@ class Region {
 
 const DX = [0, 1, 0, -1], DY = [-1, 0, 1, 0];
 const LINE_BIT = [LINE_N, LINE_E, LINE_S, LINE_W];
+
+/**
+ * Overmap generation version. Overmaps are never saved, only regenerated from the seed, so a
+ * change to what generates where would move buildings under chunks a save already stored.
+ * Saves record the version they were made with (save/format.ts `world.genVersion`; saves
+ * without it are 1) and keep generating that way; new games use the latest.
+ *   1  generation before the transport fixes
+ *   2  transport fixes (docs/WORLD_TRANSPORT.md); gate every change with `genVersion >= 2`
+ */
+export const WORLDGEN_VERSION = 2;
 
 export class Overmap {
   private regions = new Map<string, Region>();
@@ -99,11 +137,19 @@ export class Overmap {
   /** location id -> set of oter types it accepts */
   private locationSets = new Map<string, Set<string>>();
   private finales = new WeakMap<City, FinaleState>();
+  /** City a request without a special belongs to (manhole sewers). */
+  private requestCity = new WeakMap<ConnectionRequest, City>();
+  /** BN overmap::joins_used: "x,y,z,dir" (global OMT) -> join id matched there by a mutable special. */
+  private joinsUsed = new Map<string, string>();
+  /** One entry per mutable special grown (mutable_place.ts), for tests and probes. */
+  readonly mutableReports: { uid: number; def: string; openMandatory: number; bnUnresolved: boolean; pieces: PlacedPiece[] }[] = [];
+  private labBasement?: MutableSpecial;
   /** Default terrain below ground: DDA has solid_earth at z-1; BN is empty_rock everywhere. */
   private readonly shallowUnderground: string;
   readonly T: Record<string, number> = {};
 
-  constructor(readonly seed: number, readonly data: OvermapData) {
+  constructor(readonly seed: number, readonly data: OvermapData, readonly genVersion: number = WORLDGEN_VERSION) {
+    if (!Number.isInteger(genVersion) || genVersion < 1 || genVersion > WORLDGEN_VERSION) throw new Error(`unsupported overmap genVersion ${genVersion} (this build knows 1..${WORLDGEN_VERSION})`);
     this.landNoise = new Noise2D(hashSeed(seed, 101));
     this.thickNoise = new Noise2D(hashSeed(seed, 102));
     this.lakeNoise = new Noise2D(hashSeed(seed, 103));
@@ -117,6 +163,11 @@ export class Overmap {
     this.shallowUnderground = data.terrains.solid_earth ? 'solid_earth' : 'empty_rock';
     if (data.terrains.bridge) this.T.bridge = this.intern('bridge');
     for (const [id, terr] of Object.entries(data.locations)) this.locationSets.set(id, new Set(terr));
+    if (genVersion >= 2) {
+      if (!data.connections) throw new Error('overmap.json lacks overmap connections (re-run npm run extract:mapgen)');
+      for (const t of ['road_nesw_manhole', 'sewer']) if (!data.terrains[t]) throw new Error(`overmap.json lacks terrain ${t} (re-run npm run extract:mapgen)`);
+      this.T.road_nesw_manhole = this.intern('road_nesw_manhole');
+    }
   }
 
   private intern(t: string): number {
@@ -149,8 +200,14 @@ export class Overmap {
     }
     const info: OmtInfo = { ...ref, id: oterId(ref, this.data.terrains) };
     if (sp) info.special = this.specialsByUid.get(sp);
-    if (z === 0 && (sp || ref.type === 'road' || ref.type === 'bridge')) info.predecessor = this.baseLand(x, y);
+    if (z === 0 && (sp || ref.type === 'road' || ref.type === 'bridge' || ref.type === 'road_nesw_manhole')) info.predecessor = this.baseLand(x, y);
     return info;
+  }
+
+  /** BN overmap::join_used_at: the join a mutable special matched on this OMT face (mapgen reads it). */
+  joinAt(x: number, y: number, z: number, dir: CubeDir): string | undefined {
+    this.region(Math.floor(x / REGION), Math.floor(y / REGION));
+    return this.joinsUsed.get(`${x},${y},${z},${dir}`);
   }
 
   /**
@@ -202,6 +259,35 @@ export class Overmap {
     if (!c || !c.from) return null;
     const [dx, dy] = rotateOffset(c.from[0], c.from[1], inst.rot);
     return { x: inst.x + dx, y: inst.y + dy };
+  }
+
+  /**
+   * Nearest OMT (global coords, any z != 0) of oter type `type` placed by a special, searching
+   * regions outward from `from` (generating them). Nearest by horizontal distance, then depth.
+   */
+  findUnderground(type: string, from: { x: number; y: number }, maxRegions = 1): { x: number; y: number; z: number; omt: OmtInfo } | undefined {
+    const rx = Math.floor(from.x / REGION), ry = Math.floor(from.y / REGION);
+    let best: { x: number; y: number; z: number } | undefined, bd = Infinity, foundAt = Infinity;
+    // A hit in ring n can still lose to one in ring n + 1 (corner vs edge), never to ring n + 2.
+    for (let rad = 0; rad <= Math.min(maxRegions, foundAt + 1); rad++) {
+      for (let dy = -rad; dy <= rad; dy++)
+        for (let dx = -rad; dx <= rad; dx++) {
+          if (Math.max(Math.abs(dx), Math.abs(dy)) !== rad) continue;
+          const r = this.region(rx + dx, ry + dy);
+          // looked up after generating: the type is interned when first placed
+          const t = this.typeIdx.get(type);
+          if (t === undefined) continue;
+          for (const [k, slot] of r.layers) {
+            if (slot.t !== t) continue;
+            const z = Math.floor(k / RR), i = k - z * RR;
+            const x = r.x0 + (i % REGION), y = r.y0 + Math.floor(i / REGION);
+            const d = Math.hypot(x - from.x, y - from.y) - z * 1e-3;
+            if (d < bd) (bd = d), (best = { x, y, z });
+          }
+        }
+      if (best && foundAt === Infinity) foundAt = rad;
+    }
+    return best && { ...best, omt: this.omtAt(best.x, best.y, best.z) };
   }
 
   /** Nearest placed instance of an overmap special id. Generates regions outward as needed. */
@@ -281,6 +367,8 @@ export class Overmap {
   // Region generation
 
   private region(rx: number, ry: number): Region {
+    // NaN region coords make every A* index NaN, so roadPath's heap grows until the tab OOMs.
+    if (!Number.isInteger(rx) || !Number.isInteger(ry)) throw new Error(`overmap.region: bad region coordinates (${rx}, ${ry})`);
     const key = `${rx},${ry}`;
     let r = this.regions.get(key);
     if (!r) {
@@ -302,7 +390,13 @@ export class Overmap {
     this.placeCities(r, rng);
     this.connectRegion(r, rng);
     this.placeSpecials(r, rng);
+    // Own RNG stream so the placements above draw exactly what they did in genVersion 1.
+    if (this.genVersion >= 2) placeMutableSpecials(this.mutableHost(r), new Rng(hashSeed(this.seed, r.rx, r.ry, 0x6d75)));
     this.computeRoadLines(r);
+    if (this.genVersion >= 2) {
+      this.placeManholes(r);
+      this.buildConnections(r);
+    }
   }
 
   private get(r: Region, x: number, y: number): string | undefined {
@@ -358,6 +452,8 @@ export class Overmap {
         r.cities.push(city);
         this.finales.set(city, finale);
         this.setRoad(r, x, y);
+        // BN place_cities: every city starts with a manhole intersection over the sewer hub.
+        if (this.genVersion >= 2) this.addManhole(r, x, y, city, true);
         const startDir = rng.int(0, 3);
         for (let d = 0; d < 4; d++) this.buildCityStreet(r, rng, x, y, size, (startDir + d) % 4, city, unique, 2);
         placed = true;
@@ -381,6 +477,8 @@ export class Overmap {
         if (right === 1) right++;
         this.buildCityStreet(r, rng, x, y, left, (dir + 3) % 4, city, unique, newWidth);
         this.buildCityStreet(r, rng, x, y, right, (dir + 1) % 4, city, unique, newWidth);
+        // BN build_city_street rolls one_in(8) before checking for a four-way road.
+        if (this.genVersion >= 2 && rng.oneIn(8)) this.addManhole(r, x, y, city, false);
       }
       // BN build_city_street: the finale goes in once the town's counter runs out; a finale
       // that doesn't fit is abandoned so it never ends up at the edge of town.
@@ -444,7 +542,9 @@ export class Overmap {
       if (!id) return false;
       const def = this.specialOrBuilding(id);
       if (this.canPlaceSpecial(r, def, bx, by, bdir)) {
-        this.placeSpecial(r, def, bx, by, bdir, city);
+        const inst = this.placeSpecial(r, def, bx, by, bdir, city);
+        // BN place_building -> place_special builds a city building's connections too.
+        if (this.genVersion >= 2) this.placeConnections(r, def, inst, bx, by, bdir);
         if (def.flags.includes('CITY_UNIQUE') || def.flags.includes('GLOBALLY_UNIQUE') || def.flags.includes('OVERMAP_UNIQUE')) unique.add(id);
         return true;
       }
@@ -674,8 +774,17 @@ export class Overmap {
       const def = this.data.specials[id];
       if (!def) continue;
       const [lo, hi] = def.occurrences;
-      const uniq = def.flags.includes('OVERMAP_UNIQUE') || def.flags.includes('GLOBALLY_UNIQUE');
-      let count = uniq ? (rng.int(1, 100) <= lo * area * 2 ? 1 : 0) : rollRemainder(rng.int(lo, hi) * area, rng);
+      let count: number;
+      if (this.genVersion >= 2) {
+        // BN place_specials: occurrences [min, max] of a UNIQUE special are a min/max chance of
+        // one per 180x180 overmap. A region is `area` of that, so the chance is scaled by it:
+        // the same expected count per OMT, never more than one per region.
+        const uniq = def.flags.includes('UNIQUE') || def.flags.includes('OVERMAP_UNIQUE') || def.flags.includes('GLOBALLY_UNIQUE');
+        count = uniq ? (rng.next() < (lo / hi) * area ? 1 : 0) : rollRemainder(rng.int(lo, hi) * area, rng);
+      } else {
+        const uniq = def.flags.includes('OVERMAP_UNIQUE') || def.flags.includes('GLOBALLY_UNIQUE');
+        count = uniq ? (rng.int(1, 100) <= lo * area * 2 ? 1 : 0) : rollRemainder(rng.int(lo, hi) * area, rng);
+      }
       if (id === 'Evac Shelter') count = Math.max(count, r.cities.length > 0 ? 1 : 0);
       // The refugee center (Free Merchants NPC hub) is globally unique: exactly one, placed
       // near the start town so new survivors can find it, like CDDA's scenarios point them at.
@@ -688,7 +797,8 @@ export class Overmap {
       // smaller regions that could mean hundreds of OMTs of walking, so the start region
       // always gets one within a short trek of the start town (CBMs/mutagen need a lab).
       if ((id === LAB_SPECIAL || id === CLASSIC_LAB_SPECIAL) && start && r.cities.length) {
-        this.tryPlaceWild(r, rng, def, r.cities[0], true);
+        // genVersion 2: that classic lab also always has escape cells, for the lab_escape start.
+        this.tryPlaceWild(r, rng, def, r.cities[0], true, id === CLASSIC_LAB_SPECIAL && this.genVersion >= 2);
         continue;
       }
       for (let k = 0; k < count; k++) this.tryPlaceWild(r, rng, def, start && id === 'Evac Shelter' ? r.cities[0] : undefined);
@@ -699,8 +809,9 @@ export class Overmap {
     if (start && r.cities.length && micro && !r.specials.some((s) => s.def === MICROLAB_SPECIAL)) this.tryPlaceWild(r, rng, micro, r.cities[0], true);
   }
 
-  /** `widen`: big specials (the refugee center) search ever further from `near` until they fit. */
-  private tryPlaceWild(r: Region, rng: Rng, def: SpecialDef, near?: City, widen = false): boolean {
+  /** `widen`: big specials (the refugee center) search ever further from `near` until they fit.
+   *  `labEscape`: a nested lab_basement must get the escape cells chunk (see placeLabBasement). */
+  private tryPlaceWild(r: Region, rng: Rng, def: SpecialDef, near?: City, widen = false, labEscape = false): boolean {
     const [dmin, dmax] = def.cityDistance;
     for (let tries = 0; tries < (widen ? 400 : 80); tries++) {
       let x: number, y: number;
@@ -722,29 +833,82 @@ export class Overmap {
       const inst = this.placeSpecial(r, def, x, y, rot, near ?? this.nearestCity(r, x, y));
       for (const n of def.nested ?? []) {
         const [dx, dy] = rotateOffset(n.p[0], n.p[1], rot);
-        if (n.special === 'lab_basement') this.placeLabBasement(r, rng, inst, x + dx, y + dy, n.p[2]);
+        if (n.special === 'lab_basement') this.placeLabBasement(r, rng, inst, x + dx, y + dy, n.p[2], rot, labEscape);
       }
-      for (const c of def.connections) {
-        const [dx, dy] = rotateOffset(c.p[0], c.p[1], rot);
-        const cx = x + dx, cy = y + dy;
-        if (cx < 1 || cy < 1 || cx >= REGION - 1 || cy >= REGION - 1) continue;
-        const target = this.nearestRoad(r, cx, cy);
-        if (target) this.buildRoad(r, [cx, cy], target);
-      }
-      void inst;
+      if (this.genVersion >= 2) this.placeConnections(r, def, inst, x, y, rot);
+      else
+        for (const c of def.connections) {
+          // genVersion 1 paved every connection as a z0 road, sewers and subways included.
+          const [dx, dy] = rotateOffset(c.p[0], c.p[1], rot);
+          const cx = x + dx, cy = y + dy;
+          if (cx < 1 || cy < 1 || cx >= REGION - 1 || cy >= REGION - 1) continue;
+          const target = this.nearestRoad(r, cx, cy);
+          if (target) this.buildRoad(r, [cx, cy], target);
+        }
       return true;
     }
     return false;
   }
 
   /**
-   * BN's mutable "lab_basement" special (overmap_mutable/lab.json), simplified: from a lab_core
-   * under the entrance, each level is a connected blob of lab rooms inside a 4x4-OMT box (the
-   * special's shared "size"); every level but the last has a lab_stairs room leading to the
-   * lab_core below it, a lab_filler or two pad the blob, and the bottom level holds the finale.
-   * Escape cells and train depots are left out.
+   * BN's mutable "lab_basement" special (overmap_mutable/lab.json) under a classic Lab, rotated
+   * like it (BN place_nested). genVersion 2 grows it with the overmap_mutable port (mutable.ts):
+   * levels of lab rooms joined by lab_stairs over lab_core, the escape cells + entrance chunk
+   * (BN "lab_escape": z -10..-4, chance 0.2 x shared size 4), fillers, a lab_train_depot at z-2
+   * and z-4 whose north side asks for a subway_tunnel, extra bottom labs and the finale.
+   * `needEscape` (the start region's guaranteed lab) regrows with fresh RNGs until the escape
+   * chunk appears, so the lab_escape start always has cells near the start.
    */
-  private placeLabBasement(r: Region, rng: Rng, inst: SpecialInstance, x: number, y: number, z0: number): void {
+  private placeLabBasement(r: Region, rng: Rng, inst: SpecialInstance, x: number, y: number, z0: number, rot = 0, needEscape = false): void {
+    if (this.genVersion < 2) return this.placeLabBasementV1(r, rng, inst, x, y, z0);
+    const def = this.data.mutables?.lab_basement;
+    if (!def) throw new Error('overmap.json lacks the lab_basement mutable special (re-run extract:mapgen)');
+    const m = (this.labBasement ??= new MutableSpecial(def));
+    const host = this.labReadHost(r);
+    const origin = { x, y, z: z0 };
+    if (!m.canPlace(host, origin, rot)) return;
+    let res = m.grow(host, origin, rot, new Rng(hashSeed(this.seed, 0x1ab, r.rx, r.ry, x, y, 0)));
+    const hasCells = () => res.placed.some((p) => p.type === 'lab_escape_cells');
+    for (let attempt = 1; needEscape && !hasCells() && attempt < 64; attempt++) res = m.grow(host, origin, rot, new Rng(hashSeed(this.seed, 0x1ab, r.rx, r.ry, x, y, attempt)));
+    if (needEscape && !hasCells()) throw new Error(`lab_basement at ${r.x0 + x},${r.y0 + y} never grew escape cells in 64 tries`);
+    // BN reports this with a debugmsg and keeps the placement; lab.json never leaves one
+    if (res.unresolvedMandatory) console.error(`lab_basement at ${r.x0 + x},${r.y0 + y}: ${res.unresolvedMandatory} unresolved mandatory joins`);
+    for (const p of res.placed) {
+      if (p.z === 0) throw new Error('lab_basement placed terrain at z0');
+      const def = this.data.terrains[p.type];
+      if (!def) throw new Error(`lab_basement writes unknown oter ${p.oter}`);
+      r.layers.set(p.z * RR + p.y * REGION + p.x, { t: this.intern(p.type), rot: isRotatable(def) ? (parseOterId(p.oter, this.data.terrains).rot + p.rot) % 4 : 0, line: -1, sp: inst.uid });
+    }
+    for (const [jx, jy, jz, dir, id] of res.joinsUsed) this.joinsUsed.set(`${r.x0 + jx},${r.y0 + jy},${jz},${dir}`, id);
+    for (const c of res.connections) r.connectionRequests.push({ x: c.x, y: c.y, z: c.z, connection: c.connection, uid: inst.uid });
+  }
+
+  /** What the mutable special grower reads: region-local terrain, bounded by the region and
+   *  the z range the game renders (BN: the 180-OMT overmap and OVERMAP_DEPTH 10). */
+  private labReadHost(r: Region): MutableReadHost {
+    return {
+      terrainAt: (x, y, z) => {
+        const i = y * REGION + x;
+        if (z === 0) return this.types[r.t[i]];
+        const s = r.layers.get(z * RR + i);
+        return s ? this.types[s.t] : this.defaultTerrain(z);
+      },
+      inbounds: (x, y, z) => x >= 0 && y >= 0 && x < REGION && y < REGION && z >= MIN_Z && z <= MAX_Z,
+      location: (id) => this.locationSets.get(id),
+      defaultTerrain: (z) => this.defaultTerrain(z),
+    };
+  }
+  private defaultTerrain(z: number): string {
+    return z > 0 ? 'open_air' : z === -1 ? this.shallowUnderground : z < 0 ? 'empty_rock' : 'field';
+  }
+
+  /**
+   * genVersion 1's lab_basement, kept so old saves regenerate the same labs: from a lab_core
+   * under the entrance, each level is a connected blob of lab rooms inside a 4x4-OMT box; every
+   * level but the last has a lab_stairs room leading to the lab_core below it, a lab_filler or
+   * two pad the blob, and the bottom level holds the finale. No escape cells or train depots.
+   */
+  private placeLabBasementV1(r: Region, rng: Rng, inst: SpecialInstance, x: number, y: number, z0: number): void {
     const levels = rng.int(2, 4);
     const minX = Math.max(1, x - rng.int(0, 3)), minY = Math.max(1, y - rng.int(0, 3));
     const inBox = (cx: number, cy: number) => cx >= minX && cy >= minY && cx < Math.min(REGION - 1, minX + 4) && cy < Math.min(REGION - 1, minY + 4);
@@ -784,6 +948,171 @@ export class Overmap {
       if (!next) return;
       root = next;
     }
+  }
+
+  // --- connections (BN place_special's connection loop; see connections.ts) ---
+
+  /**
+   * genVersion >= 2: only local_road connections at z0 are paved here, as they always were; every
+   * other connection (sewer_tunnel, subway_tunnel, at whatever z) becomes a connection request,
+   * built by buildConnections once the region's terrain is final.
+   */
+  private placeConnections(r: Region, def: SpecialDef, inst: SpecialInstance, ox: number, oy: number, rot: number): void {
+    for (const c of def.connections) {
+      const id = connectionIdOf(c);
+      const [dx, dy] = rotateOffset(c.p[0], c.p[1], rot);
+      const cx = ox + dx, cy = oy + dy, z = c.p[2];
+      if (id === 'local_road' && z === 0) {
+        if (cx < 1 || cy < 1 || cx >= REGION - 1 || cy >= REGION - 1 || this.isRoad(r, cx, cy)) continue;
+        const target = this.nearestRoad(r, cx, cy);
+        if (target) this.buildRoad(r, [cx, cy], target);
+        continue;
+      }
+      // BN: ter() outside the overmap is null, which no connection can start from.
+      if (cx < 0 || cy < 0 || cx >= REGION || cy >= REGION) continue;
+      r.connectionRequests.push({ x: cx, y: cy, z, connection: id, uid: inst.uid });
+    }
+  }
+
+  /**
+   * A manhole candidate. BN lays the sewer_isolated under it while building the city, before any
+   * special, so specials (anthills, labs) can't take that rock: reserve it now. Whether it gets a
+   * manhole (a four-way road) is only known once road lines are computed (placeManholes).
+   */
+  private addManhole(r: Region, x: number, y: number, city: City, center: boolean): void {
+    const k = -RR + y * REGION + x;
+    if (!r.layers.has(k)) r.layers.set(k, { t: this.intern('sewer'), rot: 0, line: 0, sp: 0 });
+    r.manholes.push({ x, y, city, center });
+  }
+
+  /** BN place_cities / build_city_street: road_nesw_manhole over a sewer_isolated, on four-way roads. */
+  private placeManholes(r: Region): void {
+    const sewer = this.intern('sewer');
+    const done = new Set<number>();
+    for (const m of r.manholes) {
+      const i = m.y * REGION + m.x;
+      if (done.has(i)) continue;
+      done.add(i);
+      const hub = r.layers.get(-RR + i);
+      if (hub?.t !== sewer || hub.sp !== 0) throw new Error(`overmap: the sewer reserved under manhole ${m.x},${m.y} was overwritten by ${hub ? this.types[hub.t] : 'nothing'}`);
+      if (r.t[i] === this.T.road && r.line[i] === 15) {
+        r.t[i] = this.T.road_nesw_manhole;
+        r.line[i] = -1;
+      } else if (!m.center) {
+        // Not a four-way: no manhole here, so give the reserved rock back.
+        r.layers.delete(-RR + i);
+        continue;
+      }
+      // BN always puts a manhole on a city's centre; its mapgen is a four-way, so a centre that
+      // isn't one keeps its road and only gets the sewer hub underneath.
+      if (m.center) continue;
+      const req: ConnectionRequest = { x: m.x, y: m.y, z: -1, connection: 'sewer_tunnel', uid: 0 };
+      r.connectionRequests.push(req);
+      this.requestCity.set(req, m.city);
+    }
+  }
+
+  private buildConnections(r: Region): void {
+    const grid: ConnectionGrid = {
+      size: REGION,
+      get: (x, y, z) => {
+        if (x < 0 || y < 0 || x >= REGION || y >= REGION) return null;
+        if (z === 0) throw new Error('overmap connections: z0 is roads only');
+        const s = r.layers.get(z * RR + y * REGION + x);
+        if (s) return { type: this.types[s.t], rot: s.rot, line: s.line };
+        return { type: z > 0 ? 'open_air' : z === -1 ? this.shallowUnderground : 'empty_rock', rot: 0, line: -1 };
+      },
+      set: (x, y, z, ref) => {
+        const k = z * RR + y * REGION + x;
+        r.layers.set(k, { t: this.intern(ref.type), rot: ref.rot, line: ref.line, sp: r.layers.get(k)?.sp ?? 0 });
+      },
+    };
+    const b = new ConnectionBuilder(grid, this.data.terrains, this.data.connections!, this.locationSets);
+    for (const req of r.connectionRequests) {
+      if (req.z === 0) throw new Error(`overmap connection request ${req.connection} at z0 (uid ${req.uid}): z0 connections are roads, built with buildRoad`);
+      const inst = req.uid ? this.specialsByUid.get(req.uid) : undefined;
+      if (req.uid && !inst) throw new Error(`overmap connection request from unknown special uid ${req.uid}`);
+      const city = this.requestCity.get(req) ?? (inst ? inst.city : this.nearestCity(r, req.x, req.y));
+      b.connect({
+        x: req.x, y: req.y, z: req.z, connection: req.connection,
+        initialDir: inst ? this.initialDirOf(r, req, inst) : -1,
+        city: city && { x: city.x - r.x0, y: city.y - r.y0 },
+      });
+    }
+  }
+
+  /**
+   * BN overmap_special_connection initial_dir: the direction from the connection's "from" point to
+   * the point itself, so the tunnel's last tile opens back into the special. Requests from code
+   * that grows terrain without a special def (the lab grower) fall back to the one neighbour the
+   * special owns at that z.
+   */
+  private initialDirOf(r: Region, req: ConnectionRequest, inst: SpecialInstance): number {
+    for (const c of this.data.specials[inst.def]?.connections ?? []) {
+      if (!c.from || c.p[2] !== req.z || connectionIdOf(c) !== req.connection) continue;
+      const [px, py] = rotateOffset(c.p[0], c.p[1], inst.rot);
+      if (inst.x - r.x0 + px !== req.x || inst.y - r.y0 + py !== req.y) continue;
+      const [fx, fy] = rotateOffset(c.from[0], c.from[1], inst.rot);
+      return DX.findIndex((dx, d) => dx === px - fx && DY[d] === py - fy);
+    }
+    const owned = [0, 1, 2, 3].filter((d) => r.layers.get(req.z * RR + (req.y + DY[d]) * REGION + req.x + DX[d])?.sp === inst.uid);
+    return owned.length === 1 ? (owned[0] + 2) % 4 : -1;
+  }
+
+  /** Region access for mutable_place.ts (BN mutable specials, genVersion >= 2). */
+  private mutableHost(r: Region): MutableHost {
+    const slot = (x: number, y: number, z: number) => z * RR + y * REGION + x;
+    return {
+      data: this.data,
+      regionSize: REGION,
+      cities: r.cities,
+      x0: r.x0,
+      y0: r.y0,
+      typeAt: (x, y, z) => {
+        if (z === 0) return this.types[r.t[y * REGION + x]];
+        const s = r.layers.get(slot(x, y, z));
+        return s ? this.types[s.t] : this.defaultTerrain(z);
+      },
+      accepts: (l, t) => this.accepts(l, t),
+      defaultTerrain: (z) => this.defaultTerrain(z),
+      setTerrain: (x, y, z, oter, rot, uid) => {
+        const ref = parseOterId(oter, this.data.terrains);
+        const def = this.data.terrains[ref.type];
+        if (!def) throw new Error(`mutable special writes unknown oter ${oter}`);
+        const t = this.intern(ref.type);
+        const orot = isRotatable(def) ? (ref.rot + rot) % 4 : 0;
+        const line = ref.line >= 0 ? rotateLine(ref.line, rot) : -1;
+        if (z === 0) {
+          const i = y * REGION + x;
+          (r.t[i] = t), (r.rot[i] = orot), (r.line[i] = line), (r.sp[i] = uid);
+        } else if (ref.type === this.defaultTerrain(z)) {
+          // Plain rock/air written by a special (a mine's shaft top, the rock under Lab with
+          // Anthill's stairs) stays unowned, so nested specials (lab_basement) can still claim it.
+          r.layers.delete(slot(x, y, z));
+        } else r.layers.set(slot(x, y, z), { t, rot: orot, line, sp: uid });
+      },
+      newInstance: (def, x, y, rot, city) => {
+        // Same uid scheme as placeSpecial: independent of region generation order.
+        let uid = hashSeed(this.seed, r.rx, r.ry, r.specials.length, 31) & 0x7fffffff || 1;
+        while (this.specialsByUid.has(uid)) uid = (uid + 1) & 0x7fffffff || 1;
+        const inst: SpecialInstance = { uid, def, x, y, rot, city, args: new Map() };
+        this.specialsByUid.set(uid, inst);
+        r.specials.push(inst);
+        return inst;
+      },
+      placeFixed: (def, x, y, rot, city) => this.placeSpecial(r, def, x, y, rot, city),
+      buildLocalRoad: (x, y) => {
+        const target = this.nearestRoad(r, x, y);
+        if (target) this.buildRoad(r, [x, y], target);
+      },
+      requestConnection: (c) => r.connectionRequests.push(c),
+      recordJoin: (x, y, z, dir, id) => this.joinsUsed.set(`${r.x0 + x},${r.y0 + y},${z},${dir}`, id),
+      placeLabBasement: (rng, inst, x, y, z, rot) => this.placeLabBasement(r, rng, inst, x, y, z, rot),
+      report: (inst, res) => this.mutableReports.push({
+        uid: inst.uid, def: inst.def, openMandatory: res.openMandatory, bnUnresolved: res.bnUnresolved,
+        pieces: res.placed.map((p) => ({ ...p, x: r.x0 + p.x, y: r.y0 + p.y })),
+      }),
+    };
   }
 
   private cityEdgeDistance(r: Region, x: number, y: number): number {
@@ -838,6 +1167,12 @@ export class Overmap {
   }
 }
 
+/** BN overmap_special_connection: legacy "terrain" connections map to a connection id. */
+function connectionIdOf(c: SpecialConnection): string {
+  if (c.connection) return c.connection;
+  return c.terrain === 'sewer' ? 'sewer_tunnel' : c.terrain === 'subway' ? 'subway_tunnel' : c.terrain === 'forest_trail' ? 'forest_trail' : 'local_road';
+}
+
 function rollRemainder(v: number, rng: Rng): number {
   const f = Math.floor(v);
   return f + (rng.next() < v - f ? 1 : 0);
@@ -847,46 +1182,4 @@ function normalRoll(rng: Rng, mean: number, sigma: number): number {
   if (sigma <= 0) return mean;
   const u = Math.max(1e-9, rng.next()), v = rng.next();
   return mean + sigma * Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
-}
-
-class MinHeap {
-  private k: number[] = [];
-  private p: number[] = [];
-  get size() {
-    return this.k.length;
-  }
-  push(key: number, pri: number): void {
-    const k = this.k, p = this.p;
-    k.push(key);
-    p.push(pri);
-    let i = k.length - 1;
-    while (i > 0) {
-      const par = (i - 1) >> 1;
-      if (p[par] <= p[i]) break;
-      [k[par], k[i]] = [k[i], k[par]];
-      [p[par], p[i]] = [p[i], p[par]];
-      i = par;
-    }
-  }
-  pop(): number {
-    const k = this.k, p = this.p;
-    const top = k[0];
-    const lk = k.pop()!, lp = p.pop()!;
-    if (k.length) {
-      k[0] = lk;
-      p[0] = lp;
-      let i = 0;
-      for (;;) {
-        const l = 2 * i + 1, rr = l + 1;
-        let m = i;
-        if (l < k.length && p[l] < p[m]) m = l;
-        if (rr < k.length && p[rr] < p[m]) m = rr;
-        if (m === i) break;
-        [k[m], k[i]] = [k[i], k[m]];
-        [p[m], p[i]] = [p[i], p[m]];
-        i = m;
-      }
-    }
-    return top;
-  }
 }

@@ -74,6 +74,7 @@ export function installDifficulty(game: Game, o: { spawner: Spawner | null; api?
 
   customRulesEditor.open = (onClose) => void openDifficultyEditor(game, 'template', onClose);
   registerOption({
+    category: 'Gameplay',
     name: 'Difficulty…',
     value: () => presetName(difficultyState(game)?.preset ?? 'accessible'),
     change: () => void openDifficultyEditor(game, 'game'),

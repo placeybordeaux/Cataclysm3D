@@ -9,12 +9,12 @@ import {
   abandonCraft, availableRecipes, canCraft, continueCraft, craftingInventory, craftQueue, craftState, craftTime, findRecipe, inProgressCrafts, knowsRecipe,
   lightSpeedMultiplier, startCraft, successChance, type CraftHost,
 } from '../src/game/crafting';
-import { canBuild, cancelConstruction, continueConstruction, getConstruction, siteOk, siteProblem, startConstruction, unfinishedAt, unfinishedState } from '../src/game/construction';
+import { canBuild, cancelConstruction, continueConstruction, furnitureDeconstruction, getConstruction, siteOk, siteProblem, startConstruction, unfinishedAt, unfinishedState } from '../src/game/construction';
 import { disassemblyRequirements, startDisassembly, uncraftRecipe } from '../src/game/disassembly';
 import { useFirestarter } from '../src/game/fire';
 import { adaptationRules } from '../src/game/adaptation_rules';
 import { createItem, defaultAmmoId, fromSpawned, Item, loadAmmo } from '../src/game/item';
-import { census, L, type Loc } from '../src/game/moves';
+import { census, L, moveItem, type Loc } from '../src/game/moves';
 import { PlayerAvatar } from '../src/game/player';
 import { bookMastery, cantRead, startReading, timeToRead } from '../src/game/reading';
 import { GameMap } from '../src/world/map';
@@ -336,9 +336,69 @@ describe('fire', () => {
     expect(lighter.ammoRemaining()).toBe(before - 1);
     expect(h.log).toContain('You successfully light a fire.');
   });
+
+  it('fires the item-use gesture only once the fire actually catches, never on open or cancel', () => {
+    const h = world();
+    const lighter = createItem(data, 'lighter');
+    loadAmmo(lighter, defaultAmmoId(data, 'lighter_fluid')!, 10);
+    h.player.inv.giveNew(lighter);
+    h.map.addItem(5, 4, 0, createItem(data, 'stick_long'));
+    adaptationRules.fireWarning = false;
+    const seen: { kind: string; item: { typeId: string } }[] = [];
+    h.player.inv.onItemPresentation.push((a) => seen.push(a as any));
+
+    // Starting the lighting activity is only "accepted", not "lit": no gesture yet.
+    const started = useFirestarter(h, lighter, lighter.def.use_action as any, 5, 4, 0);
+    expect(started.ok).toBe(true);
+    expect(started.deferred).toBe(true);
+    expect(seen).toHaveLength(0);
+
+    // Interrupting it (movement, danger) must never animate it.
+    h.activities.cancel('You stop lighting a fire.');
+    expect(seen).toHaveLength(0);
+    expect(h.map.fieldsAt(5, 4, 0)).toHaveLength(0);
+
+    // Trying again and letting it actually catch fires it exactly once.
+    expect(useFirestarter(h, lighter, lighter.def.use_action as any, 5, 4, 0).ok).toBe(true);
+    h.finish();
+    adaptationRules.fireWarning = true;
+    expect(h.map.fieldsAt(5, 4, 0).map((f) => f.type)).toEqual(['fd_fire']);
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toMatchObject({ kind: 'use', item: { typeId: 'lighter' }, moves: 0 });
+  });
 });
 
 describe('construction', () => {
+  it('offers targeted furniture deconstruction with requirements and recovers material after work', () => {
+    const h = world();
+    h.map.setFurn(6, 5, 0, 'f_chair');
+    const missing = furnitureDeconstruction(h, 6, 5, 0);
+    expect(missing).toHaveLength(1);
+    expect(missing[0].label).toContain('Need:');
+    missing[0].run();
+    expect(h.activities.current).toBeNull();
+    expect(h.map.furnAt(6, 5, 0).id).toBe('f_chair');
+    give(h, 'crowbar');
+    give(h, 'screwdriver');
+    const actions = furnitureDeconstruction(h, 6, 5, 0);
+    expect(actions[0].label).not.toContain('Need:');
+    actions[0].run();
+    expect(h.activities.current).not.toBeNull();
+    expect(h.map.furnAt(6, 5, 0).id).toBe('f_chair');
+    h.finish();
+    expect(h.map.furnAt(6, 5, 0).id).toBe('f_null');
+    expect(h.map.itemsAt(6, 5, 0).length).toBeGreaterThan(0);
+  });
+
+  it('does not offer deconstruction for empty, distant, or occupied sites', () => {
+    const h = world();
+    expect(furnitureDeconstruction(h, 6, 5, 0)).toEqual([]);
+    h.map.setFurn(8, 5, 0, 'f_chair');
+    expect(furnitureDeconstruction(h, 8, 5, 0)).toEqual([]);
+    h.map.setFurn(5, 5, 0, 'f_chair');
+    expect(furnitureDeconstruction(h, 5, 5, 0)).toEqual([]);
+  });
+
   it('boarding up a window turns t_window into t_window_boarded', () => {
     const h = world();
     h.map.setTer(6, 5, 0, 't_window');
@@ -415,6 +475,35 @@ describe('disassembly', () => {
     expect(carried(h, 'stick_long')).toHaveLength(0);
     expect(total(h, 'stick')).toBe(2);
     expect(h.log.some((l) => /^You recover 2 /.test(l))).toBe(true);
+  });
+
+  it('leaves recovered components and contents on the source tile', () => {
+    const h = world();
+    const stick = Item.fromJSON(data, { ...createItem(data, 'stick_long').toJSON(), contents: [createItem(data, 'rag').toJSON()] });
+    const rag = stick.contents[0];
+    h.map.addItem(6, 5, 0, stick);
+    expect(startDisassembly(h, stick)).toBe(true);
+    h.finish();
+    const items = h.map.itemsAt(6, 5, 0) as Item[];
+    // Ground moves merge charge-counted components into a stack; count units, not objects.
+    expect(items.filter((it) => it.typeId === 'stick').reduce((n, it) => n + it.count(), 0)).toBe(2);
+    expect(items).toContain(rag);
+    expect(items).not.toContain(stick);
+    expect(carried(h, 'stick')).toHaveLength(0);
+    expect(carried(h, 'rag')).toHaveLength(0);
+    expect(h.map.itemsAt(5, 5, 0)).toHaveLength(0);
+  });
+
+  it('leaves unfinished craft components on the source tile', () => {
+    const h = spearSetup();
+    const craft = startCraft(h, findRecipe(data, 'spear_wood')!).craft!;
+    h.activities.cancel('You stop.');
+    const components = [...craft.contents];
+    expect(moveItem(craft, h.player.inv.locOf(craft)!, L.ground(h.map, 6, 5, 0), { force: true, quiet: true }).ok).toBe(true);
+    expect(startDisassembly(h, craft)).toBe(true);
+    const items = h.map.itemsAt(6, 5, 0);
+    for (const component of components) expect(items).toContain(component);
+    expect(items).not.toContain(craft);
   });
 
   it('reversible recipes can be taken apart (makeshift knife); sewing becomes cutting', () => {

@@ -86,6 +86,8 @@ export function translateRadius(game: Game, from: string, to: string, radius: nu
 export interface CardreaderDef {
   type: 'cardreader';
   flags: string[];
+  card_ids?: string[];
+  connected_doors?: boolean;
   consume_card?: boolean;
   allow_hacking?: boolean;
   despawn_monsters?: boolean;
@@ -99,13 +101,17 @@ export interface CardreaderDef {
 }
 
 export function cardreaderOf(t: TerrainDef): CardreaderDef | null {
-  const e = t.examine_action as CardreaderDef | undefined;
+  const e = t.examine_action as CardreaderDef | string | undefined;
+  if (e === 'cardreader') {
+    const id = t.id === 't_card_science' ? 'id_science' : t.id === 't_card_military' ? 'id_military' : 'id_industrial';
+    return { type: 'cardreader', flags: [], card_ids: [id], connected_doors: true, radius: 3, terrain_changes: { t_door_metal_locked: 't_door_metal_c' } };
+  }
   return e && typeof e === 'object' && e.type === 'cardreader' ? e : null;
 }
 
 /** Cards the survivor carries that this reader accepts (any of its flags). */
 export function cardsFor(game: Game, def: CardreaderDef): Item[] {
-  return game.player.inv.allItems().filter((it) => def.flags.some((f) => it.hasFlag(f)));
+  return game.player.inv.allItems().filter((it) => def.card_ids?.includes(it.typeId) || def.flags.some((f) => it.hasFlag(f)));
 }
 
 /** cardreader_examine_actor::apply: open what the reader controls. True if anything changed. */
@@ -118,12 +124,23 @@ export function applyCardreader(game: Game, x: number, y: number, z: number, def
   for (let dy = -r; dy <= r; dy++)
     for (let dx = -r; dx <= r; dx++) {
       const tx = x + dx, ty = y + dy;
+      if (!game.map.hasChunk(chunkOf(tx), chunkOf(ty), z)) continue;
       const t = game.map.terAt(tx, ty, z), f = game.map.furnAt(tx, ty, z);
       const nt = def.terrain_changes?.[t.id];
       if (nt && game.map.terrain.has(nt)) {
-        game.map.setTer(tx, ty, z, nt);
-        game.events.emit('mapChanged', { x: tx, y: ty, z });
-        open = true;
+        const queue: [number, number][] = [[tx, ty]];
+        const seen = new Set<string>();
+        for (let i = 0; i < queue.length; i++) {
+          const [ax, ay] = queue[i];
+          const key = `${ax},${ay}`;
+          if (seen.has(key) || !game.map.hasChunk(chunkOf(ax), chunkOf(ay), z)) continue;
+          seen.add(key);
+          if (game.map.terAt(ax, ay, z).id !== t.id) continue;
+          game.map.setTer(ax, ay, z, nt);
+          game.events.emit('mapChanged', { x: ax, y: ay, z });
+          open = true;
+          if (def.connected_doors) queue.push([ax + 1, ay], [ax - 1, ay], [ax, ay + 1], [ax, ay - 1]);
+        }
       }
       const nf = def.furn_changes?.[f.id];
       if (nf && game.map.furniture.has(nf)) {
@@ -268,10 +285,10 @@ export function computerAt(game: Game, x: number, y: number, z: number): Compute
   return (c?.computers.get(localOf(y) * CHUNK + localOf(x)) as ComputerData | undefined) ?? null;
 }
 
-/** Console furniture (CDDA TFLAG_CONSOLE) with a computer behind it. */
+/** BN terrain or compatible furniture with CONSOLE and stored computer data. */
 export function isConsole(game: Game, x: number, y: number, z: number): boolean {
   const f = game.map.furnAt(x, y, z);
-  return hasFlag(f, 'CONSOLE') && !!computerAt(game, x, y, z);
+  return (hasFlag(f, 'CONSOLE') || hasFlag(game.map.terAt(x, y, z), 'CONSOLE')) && !!computerAt(game, x, y, z);
 }
 
 /** Actions this port implements (anything else shows as UNAVAILABLE, like can_activate). */
@@ -305,14 +322,25 @@ export async function computerFailure(game: Game, x: number, y: number, z: numbe
   const sys = monstersOf(game);
   switch (action) {
     case 'shutdown': {
+      const breakConsole = (tx: number, ty: number): boolean => {
+        if (!hasFlag(game.map.terAt(tx, ty, z), 'CONSOLE') && !hasFlag(game.map.furnAt(tx, ty, z), 'CONSOLE')) return false;
+        const furniture = game.map.furnAt(tx, ty, z);
+        if (hasFlag(furniture, 'CONSOLE')) {
+          const broken = furniture.id.replace('console', 'console_broken');
+          game.map.setFurn(tx, ty, z, game.map.furniture.has(broken) ? broken : 'f_null');
+        }
+        game.map.setTer(tx, ty, z, 't_console_broken');
+        game.events.emit('mapChanged', { x: tx, y: ty, z });
+        return true;
+      };
       let found = false;
-      for (let dy = -1; dy <= 1; dy++)
-        for (let dx = -1; dx <= 1; dx++)
-          if (hasFlag(game.map.furnAt(p.tileX + dx, p.tileY + dy, z), 'CONSOLE')) {
-            game.map.setFurn(p.tileX + dx, p.tileY + dy, z, 'f_console_broken');
-            found = true;
-          }
-      if (!found) game.map.setFurn(x, y, z, 'f_console_broken');
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+        if (breakConsole(p.tileX + dx, p.tileY + dy)) found = true;
+      }
+      if (!found) for (const chunk of game.map.loadedChunks()) {
+        if (chunk.z !== z) continue;
+        for (let by = 0; by < CHUNK; by++) for (let bx = 0; bx < CHUNK; bx++) breakConsole(chunk.cx * CHUNK + bx, chunk.cy * CHUNK + by);
+      }
       game.message('The console shuts down.', 'c_red');
       break;
     }
@@ -461,7 +489,7 @@ export async function useComputer(game: Game, x: number, y: number, z: number, u
     await ui.show(name, 'Login successful.  Press any key…');
   }
   for (;;) {
-    if (!hasFlag(game.map.furnAt(x, y, z), 'CONSOLE')) return;
+    if (!isConsole(game, x, y, z)) return;
     const opts = comp.options ?? [];
     const i = await ui.choose(`${name} - Root Menu`, opts.map((o) => ({ label: COMPUTER_ACTIONS.has(o.action) ? o.name : `${o.name} (UNAVAILABLE)`, disabled: !COMPUTER_ACTIONS.has(o.action) })));
     if (i < 0 || i >= opts.length) return;

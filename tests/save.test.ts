@@ -6,6 +6,7 @@ import type { Input } from '../src/core/input';
 import { Game } from '../src/game/game';
 import { TestGenerator } from '../src/world/testgen';
 import { WorldGenerator } from '../src/world/worldgen';
+import { WORLDGEN_VERSION } from '../src/world/overmap/overmap';
 import { MonsterSystem } from '../src/game/monai';
 import { Spawner, type OvermapView } from '../src/game/spawner';
 import { createItem, inNewContainer, loadAmmo, type Item } from '../src/game/item';
@@ -450,6 +451,20 @@ describe('robustness', () => {
     await expect(decodeSave({ enc: 'json', data: '{"trunc' })).rejects.toThrow(SaveError);
   });
 
+  it('records the overmap generation version so a load regenerates the same overmap', async () => {
+    const A = build(7, 'test');
+    const mgr = new SaveManager(A.game, { backend: new MemoryBackend(), gen: 'world', genVersion: WORLDGEN_VERSION });
+    expect(mgr.snapshot('g').world.genVersion).toBe(WORLDGEN_VERSION);
+    const file = serializeGame(A.game, { slot: 'g', name: 'x', gen: 'test', genVersion: WORLDGEN_VERSION });
+    expect(() => applySave(build(7, 'test').game, { ...file, world: { ...file.world, genVersion: WORLDGEN_VERSION + 1 } })).toThrow(/newer version/);
+    // Saves from before the field existed are version 1, and that overmap still builds.
+    const old = serializeGame(A.game, { slot: 'g', name: 'x', gen: 'test' });
+    expect(old.world.genVersion).toBeUndefined();
+    expect(() => applySave(build(7, 'test').game, old)).not.toThrow();
+    expect(new WorldGenerator(7, wg, data, 1).overmap.genVersion).toBe(1);
+    expect(() => new WorldGenerator(7, wg, data, WORLDGEN_VERSION + 1)).toThrow(/genVersion/);
+  });
+
   it('drops unknown ids with warnings instead of failing', () => {
     const A = build(7, 'test');
     A.game.player.inv.wield(createItem(data, '2x4'), null);
@@ -591,8 +606,7 @@ describe('far monster retention (monster stash)', () => {
   const dormantItems = (w: World) =>
     [...w.game.map.chunk(12, 0, 0)!.items.values()].flat().filter((i) => (i as Item).typeId === 'corpse').length;
 
-  // TODO(BN): written for DDA data/behaviour; fails on Bright Nights core data (AssertionError: expected 0 to be greater than 0). Port with its system.
-  it.skip('spawner-laid dormant corpses keep the chunk clean; eviction stashes them and regeneration lays them again', () => {
+  it('legacy custom-generator dormant corpses keep the chunk clean; eviction stashes them and regeneration lays them again', () => {
     const W = setup();
     const c = W.game.map.chunk(12, 0, 0)!;
     const n = W.sys.corpses.length;
@@ -622,6 +636,8 @@ describe('far monster retention (monster stash)', () => {
     const A = setup();
     A.game.map.chunk(12, 0, 0);
     const n = A.sys.corpses.length;
+    expect(n).toBeGreaterThan(0);
+    expect(A.sys.corpses.every((c) => c.monId === 'mon_zombie_fat' && c.dormant)).toBe(true);
     const file = await roundTrip(serializeGame(A.game, { slot: 'w', name: 'x', gen: 'test' }));
     const at = (file.sections.map as { chunks: { at: number[] }[] }).chunks.map((j) => j.at.join(','));
     expect(at).not.toContain('12,0,0');

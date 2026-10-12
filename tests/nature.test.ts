@@ -11,12 +11,18 @@ import { TestGenerator } from '../src/world/testgen';
 import { createItem, type Item } from '../src/game/item';
 import { DAYS_PER_SEASON, SECONDS_PER_DAY } from '../src/core/time';
 import { sunTimes, seasonAt, sunAltitudeAt } from '../src/game/sun';
-import { harvestIdFor, harvestEntries, rollHarvest, startHarvest, harvestKind, forageFinish, forageChance } from '../src/game/harvest';
-import { targetStage, timeToHarvest, startPlanting, growPlant, harvestPlantNow, seedAt, canPlant, fertilizePlant, plantedAt } from '../src/game/farming';
+import { harvestIdFor, harvestEntries, seasonalHarvestEntries, rollHarvest, startHarvest, harvestKind, forageFinish, forageChance } from '../src/game/harvest';
+import { targetStage, timeToHarvest, plantEpoch, startPlanting, growPlant, harvestPlantNow, seedAt, canPlant, fertilizePlant, plantedAt } from '../src/game/farming';
 import { expectedCatchChance, fishChance, catchFish, fillableContainers, fillContainer, fishingSpot, updateSwimming, swimState, fishableLocations } from '../src/game/water';
 import { chopSeconds, cutDownTree, chopLogsAt, cutPlanks } from '../src/game/woodcut';
 import { useActions } from '../src/game/inventory';
+import { consumeItem } from '../src/game/moves';
+import { startClearRubble } from '../src/game/rubble';
+import { Npc, FACTION_FOLLOWERS } from '../src/game/npc';
+import { storedEnergy, upsEffMult, upsUsefulEnergy } from '../src/game/upsTransfer';
 import { installNature, jumpToSeason, natureOf } from '../src/nature';
+import { BnInventoryModel } from '../src/ui2/bn/model';
+import { applyPickerChoice } from '../src/ui2/bn/install';
 import { installWeather } from '../src/game/weather';
 import { interactionsAt } from '../src/game/interact';
 import { canonicalHour } from '../src/render/lights';
@@ -101,20 +107,18 @@ describe('sun and seasons', () => {
 });
 
 describe('harvest_by_season', () => {
-  // TODO(BN): written for DDA data/behaviour; fails on Bright Nights core data (AssertionError: expected null to be 'shrub_blueberry_harv' // Object.is equality). Port with its system.
-  it.skip('berry bushes in summer, apples and acorns in autumn, nothing in winter', () => {
+  it('BN inline berries in spring and autumn tree fruit', () => {
     const blue = data.terrain.t_shrub_blueberry, apple = data.terrain.t_tree_apple, oak = data.terrain.t_tree;
-    expect(harvestIdFor(blue, 'summer')).toBe('shrub_blueberry_harv');
-    expect(harvestIdFor(blue, 'spring')).toBeNull();
-    expect(harvestIdFor(apple, 'autumn')).toBe('apple_harv');
-    expect(harvestIdFor(apple, 'winter')).toBeNull();
-    expect(harvestIdFor(oak, 'autumn')).toBe('oak_harv');
+    expect(seasonalHarvestEntries(data, blue, 'spring')[0].drop).toBe('blueberries');
+    expect(seasonalHarvestEntries(data, blue, 'summer')).toEqual([]);
+    expect(seasonalHarvestEntries(data, apple, 'autumn')[0].drop).toBe('apple');
+    expect(seasonalHarvestEntries(data, apple, 'winter').map((e) => e.drop)).not.toContain('apple');
+    expect(seasonalHarvestEntries(data, oak, 'autumn')[0].drop).toBe('acorns');
   });
 
-  // TODO(BN): written for DDA data/behaviour; fails on Bright Nights core data (TypeError: undefined is not iterable (cannot read property Symbol(Symbol.iterator))). Port with its system.
-  it.skip('rolls CDDA counts: base_num + scale_num × survival', () => {
+  it('rolls BN counts: base_num + scale_num × survival', () => {
     const { game } = makeGame();
-    const entries = harvestEntries(data, 'shrub_blueberry_harv');
+    const entries = seasonalHarvestEntries(data, data.terrain.t_shrub_blueberry, 'spring');
     for (let i = 0; i < 50; i++) {
       const [[id, n]] = rollHarvest(game.player.rng, entries, 0);
       expect(id).toBe('blueberries');
@@ -126,11 +130,10 @@ describe('harvest_by_season', () => {
     expect(hi).toBeGreaterThan(5);
   });
 
-  // TODO(BN): written for DDA data/behaviour; fails on Bright Nights core data (AssertionError: expected 'out_of_season' to be 'harvest' // Object.is equality). Port with its system.
-  it.skip('harvesting transforms the bush; it regrows next season, not before', () => {
+  it('harvesting transforms the bush; it regrows next season, not before', () => {
     const { game, log } = makeGame();
     const map = game.map;
-    game.clock.seconds = day(SUMMER + 5) + 12 * 3600;
+    game.clock.seconds = day(5) + 12 * 3600;
     place(game, 30, 30);
     map.setTer(31, 30, 0, 't_shrub_blueberry');
     const nat = natureOf(game)!;
@@ -146,7 +149,8 @@ describe('harvest_by_season', () => {
     nat.actualizer.sweep();
     expect(map.terAt(31, 30, 0).id).toBe('t_shrub_blueberry_harvested');
     // next season: regrown (but out of season now)
-    game.clock.seconds = day(AUTUMN + 2);
+    game.weather!.temperature = 25;
+    game.clock.seconds = day(SUMMER + 2);
     nat.actualizer.sweep();
     expect(map.terAt(31, 30, 0).id).toBe('t_shrub_blueberry');
     expect(harvestKind(game, 31, 30, 0)?.kind).toBe('out_of_season');
@@ -154,21 +158,20 @@ describe('harvest_by_season', () => {
     expect(log.at(-1)).toMatch(/Nothing can be harvested/);
   });
 
-  // TODO(BN): written for DDA data/behaviour; fails on Bright Nights core data (AssertionError: expected false to be true // Object.is equality). Port with its system.
-  it.skip('apple trees give apples only in autumn', () => {
+  it('apple trees give apples in autumn and sticks otherwise', () => {
     const { game } = makeGame();
     place(game, 30, 30);
     game.map.setTer(31, 30, 0, 't_tree_apple');
     game.clock.seconds = day(SUMMER + 10);
-    expect(harvestKind(game, 31, 30, 0)?.kind).toBe('out_of_season');
+    expect(harvestKind(game, 31, 30, 0)?.kind).toBe('harvest');
+    expect(seasonalHarvestEntries(data, data.terrain.t_tree_apple, 'summer').map((e) => e.drop)).not.toContain('apple');
     game.clock.seconds = day(AUTUMN + 10);
     expect(startHarvest(game, 31, 30, 0, { instant: true })).toBe(true);
     expect(game.player.inv.countOf('apple') + game.map.itemsAt(30, 30, 0).filter((i) => i.typeId === 'apple').length).toBeGreaterThanOrEqual(2);
     expect(game.map.terAt(31, 30, 0).id).toBe('t_tree_apple_harvested');
   });
 
-  // TODO(BN): written for DDA data/behaviour; fails on Bright Nights core data (AssertionError: expected 't_underbrush' to be 't_underbrush_harvested' // Object.is equality). Port with its system.
-  it.skip('forages underbrush with the season forage group', () => {
+  it('forages underbrush with the season forage group', () => {
     const { game } = makeGame();
     game.clock.seconds = day(SUMMER + 10);
     place(game, -20, 5);
@@ -179,29 +182,49 @@ describe('harvest_by_season', () => {
     for (let i = 0; i < 60; i++) {
       game.map.setTer(-19, 5, 0, 't_underbrush');
       found += forageFinish(game, -19, 5, 0).length;
-      expect(game.map.terAt(-19, 5, 0).id).toBe('t_underbrush_harvested');
+      expect(game.map.terAt(-19, 5, 0).id).toBe('t_underbrush_harvested_summer');
     }
     expect(found).toBeGreaterThan(0);
   });
 });
 
 describe('farming', () => {
-  // TODO(BN): written for DDA data/behaviour; fails on Bright Nights core data (AssertionError: expected 'GROWTH_SEED' to be 'GROWTH_SEEDLING' // Object.is equality). Port with its system.
-  it.skip('growth stages by elapsed days (seed_data growth_stages)', () => {
+  it('cancelled planting preserves the seed; an occupied site blocks completion', () => {
+    const { game } = makeGame();
+    game.weather!.temperature = 25;
+    game.clock.seconds = day(SUMMER + 2) + 12 * 3600;
+    place(game, 30, 30);
+    game.map.setTer(31, 30, 0, 't_dirtmound');
+    game.player.inv.stashNew(createItem(data, 'seed_tomato', { charges: 2 }));
+    expect(startPlanting(game, 31, 30, 0, 'seed_tomato')).toBeNull();
+    game.activities.cancel('You stop.');
+    expect(game.player.inv.countOf('seed_tomato')).toBe(2);
+    expect(seedAt(game, 31, 30, 0)).toBeNull();
+    expect(startPlanting(game, 31, 30, 0, 'seed_tomato')).toBeNull();
+    game.map.addItem(31, 30, 0, createItem(data, 'rock'));
+    game.activities.current!.spec.onComplete!();
+    game.activities.cancel('Done testing the blocked completion.');
+    expect(game.player.inv.countOf('seed_tomato')).toBe(2);
+    expect(game.map.furnAt(31, 30, 0).id).toBe('f_null');
+    expect(game.map.itemsAt(31, 30, 0).map((it) => it.typeId)).toEqual(['rock']);
+  });
+  it('growth stages by BN seed_data grow and season scaling', () => {
     const tomato = data.items.seed_tomato;
     expect(targetStage(tomato, 0)).toBe('GROWTH_SEED');
-    expect(targetStage(tomato, day(17))).toBe('GROWTH_SEEDLING');
-    expect(targetStage(tomato, day(33))).toBe('GROWTH_MATURE');
-    expect(targetStage(tomato, day(49))).toBe('GROWTH_HARVEST');
-    expect(targetStage(tomato, day(66))).toBe('GROWTH_OVERGROWN');
-    expect(timeToHarvest(tomato)).toBe(day(49));
+    const epoch = day(10) * DAYS_PER_SEASON / 14 / 3;
+    expect(plantEpoch(tomato)).toBe(epoch);
+    expect(targetStage(tomato, epoch)).toBe('GROWTH_SEEDLING');
+    expect(targetStage(tomato, epoch * 2)).toBe('GROWTH_MATURE');
+    expect(targetStage(tomato, epoch * 3)).toBe('GROWTH_HARVEST');
+    expect(targetStage(tomato, epoch * 10)).toBe('GROWTH_HARVEST');
+    expect(timeToHarvest(tomato)).toBe(epoch * 3);
   });
 
-  // TODO(BN): written for DDA data/behaviour; fails on Bright Nights core data (AssertionError: expected 'seed_tomato is not a seed.' to be null). Port with its system.
-  it.skip('plants in a dirt mound and grows while the player is far away', () => {
+  it('plants in a dirt mound and grows while the player is far away', () => {
     const { game } = makeGame();
     const map = game.map;
     const nat = natureOf(game)!;
+    game.weather!.temperature = 25;
     game.clock.seconds = day(SUMMER + 2) + 10 * 3600;
     place(game, 30, 30);
     map.setTer(31, 30, 0, 't_dirtmound');
@@ -212,48 +235,51 @@ describe('farming', () => {
     expect(map.furnAt(31, 30, 0).id).toBe('f_plant_seed');
     expect(map.terAt(31, 30, 0).id).toBe('t_dirt');
     expect(seedAt(game, 31, 30, 0)).not.toBeNull();
-    expect(game.player.inv.countOf('seed_tomato')).toBe(0);
+    expect(game.player.inv.countOf('seed_tomato')).toBe(3);
+    expect(seedAt(game, 31, 30, 0)!.count()).toBe(1);
 
-    // walk far away (outside the actualize radius), let 20 days pass, sweep there
+    // Walk away beyond actualization, let one BN epoch pass, then return.
     place(game, 30 + 24 * 10, 30);
-    game.clock.seconds += day(20);
+    game.clock.seconds += plantEpoch(data.items.seed_tomato) + 1;
     nat.actualizer.sweep();
     expect(map.furnAt(31, 30, 0).id).toBe('f_plant_seed'); // untouched while away
     // come back: the crop catches up at once
     place(game, 30, 30);
     nat.actualizer.sweep();
     expect(map.furnAt(31, 30, 0).id).toBe('f_plant_seedling');
-    game.clock.seconds += day(15);
+    game.clock.seconds += plantEpoch(data.items.seed_tomato);
     growPlant(game, 31, 30, 0);
     expect(map.furnAt(31, 30, 0).id).toBe('f_plant_mature');
-    game.clock.seconds += day(15);
+    game.clock.seconds += plantEpoch(data.items.seed_tomato);
     expect(interactionsAt(game, 31, 30, 0).map((i) => i.label)).toContain('Harvest the tomato');
     expect(map.furnAt(31, 30, 0).id).toBe('f_plant_harvest');
     const got = harvestPlantNow(game, 31, 30, 0);
     const ids = got.map((i) => i.typeId);
     expect(ids).toContain('tomato');
     expect(ids).toContain('withered');
-    expect(ids).not.toContain('seed_tomato'); // tomato "seeds": false
+    expect(ids).toContain('seed_tomato'); // BN defaults to returning seeds.
     expect(map.furnAt(31, 30, 0).id).toBe('f_null');
     expect(map.itemsAt(31, 30, 0).length).toBe(0);
   });
 
-  // TODO(BN): written for DDA data/behaviour; fails on Bright Nights core data (AssertionError: expected 'seed_tomato is not a seed.' to match /cold will kill/). Port with its system.
-  it.skip('refuses cold planting (warm_enough_to_plant) and dark/indoor tiles', () => {
+  it('refuses cold planting but permits roofed warm soil', () => {
     const { game } = makeGame();
+    game.weather!.temperature = -5;
     game.clock.seconds = day(WINTER + 20) + 12 * 3600;
     place(game, 30, 30);
     game.map.setTer(31, 30, 0, 't_dirtmound');
     game.player.inv.stashNew(createItem(data, 'seed_tomato'));
-    expect(canPlant(game, 31, 30, 0, 'seed_tomato')).toMatch(/cold will kill/);
+    expect(canPlant(game, 31, 30, 0, 'seed_tomato')).toMatch(/too cold/);
     // inside the house (roofed)
     game.map.setTer(8, 8, 0, 't_dirtmound');
-    expect(canPlant(game, 8, 8, 0, 'seed_tomato')).toMatch(/sunlight/);
+    game.weather!.temperature = 25;
+    game.clock.seconds = day(SUMMER + 2) + 12 * 3600;
+    expect(canPlant(game, 8, 8, 0, 'seed_tomato')).toBeNull();
   });
 
-  // TODO(BN): written for DDA data/behaviour; fails on Bright Nights core data (TypeError: Cannot read properties of null (reading 'vars')). Port with its system.
-  it.skip('fertilizer ages the crop 20% of a season, once', () => {
+  it('fertilizer ages the crop by 60% of its BN epoch, once per stage', () => {
     const { game } = makeGame();
+    game.weather!.temperature = 25;
     game.clock.seconds = day(SUMMER + 2);
     place(game, 30, 30);
     game.map.setTer(31, 30, 0, 't_dirtmound');
@@ -264,10 +290,10 @@ describe('farming', () => {
     game.player.inv.stashNew(createItem(data, 'fertilizer_commercial'));
     game.player.inv.stashNew(createItem(data, 'fertilizer_commercial'));
     expect(fertilizePlant(game, 31, 30, 0, game.player.inv.allItems().find((i) => i.typeId === 'fertilizer_commercial')!)).toBeNull();
-    expect(t0 - plantedAt(seed)).toBeCloseTo(day(DAYS_PER_SEASON * 0.2));
-    // 2 + 18.2 days old: past the 17-day seed stage at once; the fertilizer is used up by it
-    expect(game.map.furnAt(31, 30, 0).id).toBe('f_plant_seedling');
-    expect(game.player.inv.countOf('fertilizer_commercial')).toBe(1);
+    expect(t0 - plantedAt(seed)).toBeCloseTo(plantEpoch(data.items.seed_tomato) * 0.6);
+    // A 60% epoch boost alone stays within the seed stage.
+    expect(game.map.furnAt(31, 30, 0).id).toBe('f_plant_seed');
+    expect(game.player.inv.countOf('fertilizer_commercial')).toBe(119);
     seed.vars.fertilized = 1;
     expect(fertilizePlant(game, 31, 30, 0, game.player.inv.allItems().find((i) => i.typeId === 'fertilizer_commercial')!)).toMatch(/already been fertilized/);
   });
@@ -359,6 +385,74 @@ describe('wood and tools', () => {
     const planks = cutPlanks(game).filter((i) => i.typeId === '2x4');
     expect(planks.length).toBeLessThanOrEqual(10);
   });
+
+  it('a tool-quality use (`A`pply an axe) fires its item-use gesture only when the chop actually finishes, never on open or cancel', () => {
+    const { game } = makeGame();
+    place(game, 30, 30);
+    game.map.setTer(31, 30, 0, 't_grass');
+    game.map.setTer(31, 30, 0, 't_tree');
+    const axe = createItem(data, 'ax');
+    game.player.inv.wield(axe, null);
+    const idx = useActions(axe.def).findIndex((a) => a.type === 'CHOP_TREE');
+    expect(idx).toBeGreaterThanOrEqual(0);
+    const seen: { kind: string; item: { typeId: string } }[] = [];
+    game.player.inv.onItemPresentation.push((a) => seen.push(a as any));
+
+    // Opening/accepting the action (the activity starts) must not animate it yet.
+    const started = game.player.inv.use(axe, undefined, idx);
+    expect(started.ok).toBe(true);
+    expect(started.deferred).toBe(true);
+    expect(game.activities.current).not.toBeNull();
+    expect(seen).toHaveLength(0);
+
+    // Cancelling it (walking off, interrupted) must never animate it either.
+    game.activities.cancel('You stop chopping.');
+    expect(seen).toHaveLength(0);
+    expect(game.map.terAt(31, 30, 0).id).toBe('t_tree');
+
+    // Trying again and letting the activity actually finish fires it exactly once, showing
+    // the real tool (not the finished stump/trunks).
+    expect(game.player.inv.use(axe, undefined, idx).ok).toBe(true);
+    game.activities.current!.spec.onComplete();
+    expect(game.map.terAt(31, 30, 0).id).toBe('t_stump');
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toMatchObject({ kind: 'use', item: { typeId: 'ax' }, moves: 0 });
+  });
+
+  it('the `u` apply picker\'s Use submenu for an axe lists its real tool actions (regression: a second model.actions() call used to make this submenu always come up empty), and choosing one starts and completes the activity, firing the deferred gesture', () => {
+    const { game } = makeGame();
+    place(game, 40, 40);
+    game.map.setTer(41, 40, 0, 't_grass');
+    game.map.setTer(41, 40, 0, 't_tree');
+    const axe = createItem(data, 'ax');
+    game.player.inv.wield(axe, null);
+    const seen: { kind: string; item: { typeId: string } }[] = [];
+    game.player.inv.onItemPresentation.push((a) => seen.push(a as any));
+
+    const model = new BnInventoryModel(() => ({ who: game.player, map: game.map, at: { x: game.player.tileX, y: game.player.tileY, z: game.player.z } }));
+    model.refresh();
+    const hands = model.contents('hands')[0];
+    expect(hands?.typeId).toBe('ax');
+
+    const choice = applyPickerChoice(model, hands, 'hands');
+    expect(choice?.kind).toBe('submenu');
+    if (choice?.kind !== 'submenu') throw new Error('expected the axe to offer a Use submenu');
+    // BN's own item_actions.json names (docs/GAP_IMPLEMENTATION_WORK.md use-menu fix), not the
+    // raw CHOP_TREE/CHOP_LOGS/LUMBER ids.
+    const labels = choice.items.map((i) => ('label' in i ? i.label : ''));
+    expect(labels).toEqual(expect.arrayContaining(['Chop down a tree', 'Chop a Tree Trunk into logs', 'Cut a log into planks']));
+
+    const chop = choice.items.find((i) => 'label' in i && i.label === 'Chop down a tree');
+    expect(chop && 'action' in chop && !!chop.action).toBe(true);
+    (chop as { action: () => void }).action();
+    expect(game.activities.current?.spec.name).toMatch(/chopping down/);
+    expect(seen).toHaveLength(0);
+
+    game.activities.current!.spec.onComplete();
+    expect(game.map.terAt(41, 40, 0).id).toBe('t_stump');
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toMatchObject({ kind: 'use', item: { typeId: 'ax' } });
+  });
 });
 
 describe('spoilage of items in the world', () => {
@@ -393,8 +487,7 @@ describe('spoilage of items in the world', () => {
 });
 
 describe('save', () => {
-  // TODO(BN): written for DDA data/behaviour; fails on Bright Nights core data (AssertionError: expected 'f_null' to be 'f_plant_seed' // Object.is equality). Port with its system.
-  it.skip('a planted crop and the chunk stamps survive save/load, and keep growing', async () => {
+  it('a planted crop and the chunk stamps survive save/load, and keep growing', async () => {
     const mk = () => {
       const game = new Game(data, 7, stubInput());
       installChunkTracking(game);
@@ -406,6 +499,7 @@ describe('save', () => {
       return game;
     };
     const A = mk();
+    A.weather!.temperature = 25;
     A.clock.seconds = day(SUMMER + 2) + 10 * 3600;
     place(A, 30, 30);
     A.map.setTer(31, 30, 0, 't_dirtmound');
@@ -424,8 +518,273 @@ describe('save', () => {
     const key = '1,1,0';
     expect(natureOf(B)!.actualizer.stamps.get(key)).toEqual(natureOf(A)!.actualizer.stamps.get(key));
     expect(natureOf(B)!.actualizer.stamps.size).toBeLessThanOrEqual(natureOf(A)!.actualizer.stamps.size);
-    B.clock.seconds += day(20);
+    B.clock.seconds += plantEpoch(data.items.seed_tomato) + 1;
     natureOf(B)!.actualizer.sweep();
     expect(B.map.furnAt(31, 30, 0).id).toBe('f_plant_seedling');
+  });
+});
+
+
+describe('BN clearing rubble', () => {
+  const at = { x: 13, y: 12, z: 0 };
+  const setup = (id = 'shovel') => {
+    const { game } = makeGame();
+    place(game, 12, 12);
+    const tool = createItem(data, id);
+    game.player.inv.giveNew(tool);
+    game.map.setFurn(at.x, at.y, at.z, 'f_rubble_rock');
+    return { game, tool };
+  };
+  const complete = (game: Game) => {
+    const action = game.activities.current!;
+    game.activities.current = null;
+    action.spec.onComplete();
+  };
+  it('uses BN examine/tool durations and rejects inadequate examine quality', () => {
+    const { game, tool } = setup();
+    expect(startClearRubble(game, at)).toBe(true);
+    expect(game.activities.current?.spec.duration).toBe(60);
+    game.activities.cancel('cancel');
+    expect(startClearRubble(game, at, tool)).toBe(true);
+    expect(game.activities.current?.spec.duration).toBe(15);
+    const primitive = setup('primitive_shovel');
+    expect(startClearRubble(primitive.game, at)).toBe(true);
+    expect(primitive.game.activities.current?.spec.duration).toBe(120);
+    const stick = setup('digging_stick');
+    expect(startClearRubble(stick.game, at)).toBe(false);
+    expect(startClearRubble(stick.game, at, stick.tool)).toBe(true);
+    expect(stick.game.activities.current?.spec.duration).toBe(30);
+  });
+  it('tool activation spends the real auger20 charges only after an accepted start; examine spends none', () => {
+    const { game } = setup('auger');
+    const auger = game.player.inv.carried().find((it) => it.typeId === 'auger')!;
+    expect(startClearRubble(game, at, auger)).toBe(false);
+    expect(game.activities.current).toBeNull();
+    expect(auger.ammoRemaining()).toBe(0);
+    auger.charges = 40;
+    expect(startClearRubble(game, { ...at, x: 99 }, auger)).toBe(false);
+    expect(auger.ammoRemaining()).toBe(40);
+    game.activities.dangerChecks.push(() => 'danger');
+    expect(startClearRubble(game, at, auger)).toBe(false);
+    expect(auger.ammoRemaining()).toBe(40);
+    game.activities.dangerChecks.length = 0;
+    expect(startClearRubble(game, at, auger)).toBe(true);
+    expect(auger.ammoRemaining()).toBe(20);
+    game.activities.cancel('cancel');
+    expect(startClearRubble(game, at)).toBe(true);
+    expect(auger.ammoRemaining()).toBe(20);
+  });
+  it('a USE_UPS tool pays remaining activation energy from carried UPS after its internal charges', () => {
+    const { game } = setup('digging_stick');
+    const upsData = { ...data, items: { ...data.items, auger: { ...data.items.auger, flags: [...data.items.auger.flags ?? [], 'USE_UPS'] } } };
+    const tool = createItem(upsData, 'auger', { ammo: 'gasoline', ammoCount: 5 });
+    const ups = createItem(data, 'adv_UPS_off');
+    game.player.inv.giveNew(tool); game.player.inv.giveNew(ups);
+    expect(upsEffMult(ups)).toBe(2);
+    const cost = Number(tool.def.charges_per_use);
+    const before = upsUsefulEnergy(ups);
+    expect(startClearRubble(game, at, tool)).toBe(true);
+    expect(tool.ammoRemaining()).toBe(0);
+    // BN use_charges(itype_UPS): the advanced UPS pays (cost - 5 own charges) useful kJ at
+    // ups_eff_mult 2, i.e. half that of its own charge; the half-charge stays as credit.
+    expect(upsUsefulEnergy(ups)).toBeCloseTo(before - (cost - 5), 9);
+    expect(storedEnergy(ups)).toBeCloseTo(5000 - (cost - 5) / 2, 9);
+  });
+  it('clears furniture and adds real bash drops at the source without losing sealed contents or tool', () => {
+    const { game, tool } = setup();
+    const rag = createItem(data, 'rag');
+    game.map.addItem(at.x, at.y, at.z, rag);
+    expect(interactionsAt(game, at.x, at.y, at.z).map((a) => a.id)).toContain('clear_rubble');
+    expect(startClearRubble(game, at)).toBe(true);
+    complete(game);
+    expect(game.map.furnAt(at.x, at.y, at.z).id).toBe('f_null');
+    const items = game.map.itemsAt(at.x, at.y, at.z) as Item[];
+    expect(items).toContain(rag);
+    const total = (id: string) => items.filter((it) => it.typeId === id).reduce((n, it) => n + it.count(), 0);
+    expect(total('rock')).toBeGreaterThanOrEqual(5);
+    expect(total('rock')).toBeLessThanOrEqual(10);
+    expect(total('sharp_rock')).toBeGreaterThanOrEqual(1);
+    expect(total('sharp_rock')).toBeLessThanOrEqual(5);
+    expect(game.player.inv.has(tool)).toBe(true);
+    expect(game.map.itemsAt(12, 12, 0)).toHaveLength(0);
+    const before = items.map((it) => it.toJSON());
+    expect(startClearRubble(game, at)).toBe(false);
+    expect(items.map((it) => it.toJSON())).toEqual(before);
+  });
+  it('cancellation and a replaced site produce no drops and preserve the replacement', () => {
+    const { game } = setup();
+    expect(startClearRubble(game, at)).toBe(true);
+    game.activities.cancel('moving');
+    expect(game.map.furnAt(at.x, at.y, at.z).id).toBe('f_rubble_rock');
+    expect(game.map.itemsAt(at.x, at.y, at.z)).toHaveLength(0);
+    expect(startClearRubble(game, at)).toBe(true);
+    game.map.setFurn(at.x, at.y, at.z, 'f_chair');
+    complete(game);
+    expect(game.map.furnAt(at.x, at.y, at.z).id).toBe('f_chair');
+    expect(game.map.itemsAt(at.x, at.y, at.z)).toHaveLength(0);
+  });
+  it('lost tool and moved worker cannot complete remotely', () => {
+    const { game, tool } = setup();
+    expect(startClearRubble(game, at, tool)).toBe(true);
+    place(game, 20, 20);
+    complete(game);
+    expect(game.map.furnAt(at.x, at.y, at.z).id).toBe('f_rubble_rock');
+    expect(game.map.itemsAt(at.x, at.y, at.z)).toHaveLength(0);
+    const lost = setup();
+    expect(startClearRubble(lost.game, at, lost.tool)).toBe(true);
+    consumeItem(lost.tool, lost.game.player.inv.locOf(lost.tool)!);
+    complete(lost.game);
+    expect(lost.game.map.furnAt(at.x, at.y, at.z).id).toBe('f_rubble_rock');
+    expect(lost.game.map.itemsAt(at.x, at.y, at.z)).toHaveLength(0);
+  });
+  it('keeps unfinished progress through a cancellation and resumes on the same tile without paying tool energy twice', () => {
+    const { game } = setup('auger');
+    const auger = game.player.inv.carried().find((it) => it.typeId === 'auger')!;
+    auger.charges = 999;
+    expect(startClearRubble(game, at, auger)).toBe(true);
+    expect(auger.ammoRemaining()).toBe(979);
+    const full = game.activities.current!.spec.duration;
+    for (let i = 0; i < 2; i++) game.tick(1 / 30);
+    const partial = game.activities.current!.elapsed;
+    expect(partial).toBeGreaterThan(0);
+    expect(partial).toBeLessThan(full);
+    game.activities.cancel('moving');
+    expect(game.activities.current).toBeNull();
+    expect(game.map.furnAt(at.x, at.y, at.z).id).toBe('f_rubble_rock');
+    // Resuming at the same tile with the same tool continues from where it stopped and does
+    // not spend the auger's charges a second time (BN never re-invokes iuse on a resume).
+    expect(startClearRubble(game, at, auger)).toBe(true);
+    expect(auger.ammoRemaining()).toBe(979);
+    expect(game.activities.current!.spec.duration).toBeCloseTo(full - partial, 5);
+    for (let i = 0; i < 30 * 10; i++) game.tick(1 / 30);
+    expect(game.map.furnAt(at.x, at.y, at.z).id).toBe('f_null');
+    const items = game.map.itemsAt(at.x, at.y, at.z) as Item[];
+    const total = (id: string) => items.filter((it) => it.typeId === id).reduce((n, it) => n + it.count(), 0);
+    expect(total('rock')).toBeGreaterThanOrEqual(5);
+    expect(total('rock')).toBeLessThanOrEqual(10);
+  });
+  it('switching tool/path after a cancellation starts over rather than resuming a mismatched index', () => {
+    const { game, tool } = setup();
+    expect(startClearRubble(game, at)).toBe(true);
+    expect(game.activities.current?.spec.duration).toBe(60);
+    game.activities.cancel('cancel');
+    // BN's player_activity::can_resume_with requires the same `index` (iexamine's -1 vs.
+    // iuse's DIG bonus) to resume; a different route recomputes a fresh duration instead.
+    expect(startClearRubble(game, at, tool)).toBe(true);
+    expect(game.activities.current?.spec.duration).toBe(15);
+  });
+  it('unfinished clearing survives save/load and resumes on the same tile without paying tool energy twice', async () => {
+    const mk = () => {
+      const game = new Game(data, 7, stubInput());
+      installChunkTracking(game);
+      game.map.generator = new TestGenerator();
+      installWeather(game);
+      registerCoreSaveables(game);
+      installNature(game, null);
+      game.player.inv.wear(createItem(data, 'backpack'), null);
+      return game;
+    };
+    const A = mk();
+    place(A, 12, 12);
+    const auger = createItem(data, 'auger');
+    auger.charges = 999;
+    A.player.inv.giveNew(auger);
+    A.map.setFurn(at.x, at.y, at.z, 'f_rubble_rock');
+    expect(startClearRubble(A, at, auger)).toBe(true);
+    expect(auger.ammoRemaining()).toBe(979);
+    const full = A.activities.current!.spec.duration;
+    for (let i = 0; i < 2; i++) A.tick(1 / 30);
+    const partial = A.activities.current!.elapsed;
+    expect(partial).toBeGreaterThan(0);
+    expect(partial).toBeLessThan(full);
+
+    const file = serializeGame(A, { slot: 'rubble', name: A.player.name, gen: 'test' });
+    expect(file.sections.rubble).toBeTruthy();
+    const loaded = await decodeSave((await encodeSave(file)).stored);
+    const B = mk();
+    const r = applySave(B, loaded);
+    expect(r.warnings).toEqual([]);
+    // The generic activity (progress bar) doesn't survive a reload; the rubble-specific
+    // pending-clear record does, which is what lets the tile resume correctly below.
+    expect(B.activities.current).toBeNull();
+    expect(B.map.furnAt(at.x, at.y, at.z).id).toBe('f_rubble_rock');
+    const augerB = B.player.inv.carried().find((it) => it.typeId === 'auger')!;
+    expect(augerB.ammoRemaining()).toBe(979);
+
+    expect(startClearRubble(B, at, augerB)).toBe(true);
+    expect(augerB.ammoRemaining()).toBe(979);
+    const remaining = B.activities.current!.spec.duration;
+    expect(remaining).toBeLessThan(full);
+    expect(remaining).toBeCloseTo(full - partial, 5);
+
+    for (let i = 0; i < 30 * 10; i++) B.tick(1 / 30);
+    expect(B.map.furnAt(at.x, at.y, at.z).id).toBe('f_null');
+    const items = B.map.itemsAt(at.x, at.y, at.z) as Item[];
+    const total = (id: string) => items.filter((it) => it.typeId === id).reduce((n, it) => n + it.count(), 0);
+    expect(total('rock')).toBeGreaterThanOrEqual(5);
+    expect(total('rock')).toBeLessThanOrEqual(10);
+  });
+  it('a nearby awake ally speeds up tool-based clearing; one that leaves mid-clear does not change the run already under way', () => {
+    const withAlly = setup('auger');
+    const ally = new Npc(data, 1);
+    ally.faction = FACTION_FOLLOWERS;
+    ally.x = 12; ally.y = 11; ally.z = 0;
+    (withAlly.game as unknown as { npcs: { npcs: Npc[] } }).npcs = { npcs: [ally] };
+    const auger1 = withAlly.game.player.inv.carried().find((it) => it.typeId === 'auger')!;
+    auger1.charges = 999;
+    expect(startClearRubble(withAlly.game, at, auger1)).toBe(true);
+    const withHelperDuration = withAlly.game.activities.current!.spec.duration;
+
+    const withoutAlly = setup('auger');
+    const auger2 = withoutAlly.game.player.inv.carried().find((it) => it.typeId === 'auger')!;
+    auger2.charges = 999;
+    expect(startClearRubble(withoutAlly.game, at, auger2)).toBe(true);
+    const withoutHelperDuration = withoutAlly.game.activities.current!.spec.duration;
+
+    // BN iuse.cpp: moves = moves * (10 - helpers.size()) / 10 — one helper is a 10% discount.
+    expect(withHelperDuration).toBeLessThan(withoutHelperDuration);
+    expect(withHelperDuration).toBeCloseTo(withoutHelperDuration * 0.9, 5);
+
+    // The ally leaves mid-task (BN's assistant count is fixed at activation/resume, never
+    // live-recalculated while an activity runs): the already-running clear is unaffected.
+    for (let i = 0; i < 2; i++) withAlly.game.tick(1 / 30);
+    const midway = withAlly.game.activities.current!.elapsed;
+    expect(midway).toBeGreaterThan(0);
+    expect(midway).toBeLessThan(withHelperDuration);
+    ally.x = 999;
+    expect(withAlly.game.activities.current!.spec.duration).toBe(withHelperDuration);
+    for (let i = 0; i < 2; i++) withAlly.game.tick(1 / 30);
+    expect(withAlly.game.activities.current!.spec.duration).toBe(withHelperDuration);
+  });
+  it('a sleeping or distant ally does not count as a helper', () => {
+    const asleepRun = setup('auger');
+    const asleep = new Npc(data, 2);
+    asleep.faction = FACTION_FOLLOWERS;
+    asleep.x = 12; asleep.y = 11; asleep.z = 0;
+    asleep.fallAsleep();
+    (asleepRun.game as unknown as { npcs: { npcs: Npc[] } }).npcs = { npcs: [asleep] };
+    const augerA = asleepRun.game.player.inv.carried().find((it) => it.typeId === 'auger')!;
+    augerA.charges = 999;
+    expect(startClearRubble(asleepRun.game, at, augerA)).toBe(true);
+    const asleepDuration = asleepRun.game.activities.current!.spec.duration;
+
+    const farRun = setup('auger');
+    const far = new Npc(data, 3);
+    far.faction = FACTION_FOLLOWERS;
+    far.x = 999; far.y = 999; far.z = 0;
+    (farRun.game as unknown as { npcs: { npcs: Npc[] } }).npcs = { npcs: [far] };
+    const augerB = farRun.game.player.inv.carried().find((it) => it.typeId === 'auger')!;
+    augerB.charges = 999;
+    expect(startClearRubble(farRun.game, at, augerB)).toBe(true);
+    const farDuration = farRun.game.activities.current!.spec.duration;
+
+    const soloRun = setup('auger');
+    const augerC = soloRun.game.player.inv.carried().find((it) => it.typeId === 'auger')!;
+    augerC.charges = 999;
+    expect(startClearRubble(soloRun.game, at, augerC)).toBe(true);
+    const soloDuration = soloRun.game.activities.current!.spec.duration;
+
+    expect(asleepDuration).toBe(soloDuration);
+    expect(farDuration).toBe(soloDuration);
   });
 });

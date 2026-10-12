@@ -1,3 +1,5 @@
+import { installCraftAssembly } from './craftassembly';
+import { installActivityToys } from './activitytoys';
 import type { Game } from '../game/game';
 import type { DebugApi } from '../debug';
 import type { Renderer } from '../render/renderer';
@@ -39,12 +41,19 @@ export function installCrafting(game: Game, api?: DebugApi, renderer?: Renderer)
   // BN "CRAFT" use_action on the in-progress item: activating it continues the work.
   game.player.inv.useHandlers.set('CRAFT', (it) => {
     const r = continueCraft(game, it);
-    return { ok: r.ok, msg: r.msg, moves: 0 };
+    // Resuming a craft starts/continues its own activity (ok=true means "accepted", not
+    // "finished"); the held item is an abstract in-progress placeholder that turns into a
+    // different, unrelated item on completion, so this stays excluded from the use gesture
+    // rather than guessing what to show — `deferred` only suppresses the premature
+    // immediate-success fire use() would otherwise give it on open (docs/CHARACTERS.md).
+    return { ok: r.ok, msg: r.msg, moves: 0, deferred: r.ok };
   });
   itemActionProviders.push((who, it, loc) => (who === game.player ? craftingItemActions(game, it, loc) : []));
   if (renderer) {
     installCraftOverlay(game, renderer);
     installReadQuiz(game, renderer, api);
+    installActivityToys(game, api);
+    installCraftAssembly(game, api);
     worldContextProviders.push((t) => constructionWorldMenu(game, t, () => void openConstructionScreen(game, renderer)));
   }
   if (api) installCraftingDebug(game, api, renderer);

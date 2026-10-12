@@ -1,8 +1,9 @@
+import type { VehicleWorkOrder } from './vehicleWork';
 import type { Rng } from '../core/rng';
 import type { GameData } from '../data/types';
 import { expandItemGroup } from '../data/itemgroups';
 import { warnOnce } from '../data/warn';
-import { createItem, fromSpawned, Item, type ItemJSON } from './item';
+import { createItem, defaultAmmoId, fromSpawned, Item, loadAmmo, type ItemJSON } from './item';
 import { L, spawnItem } from './moves';
 import type { VehicleDataFile, VPartDef } from './vehicle_data';
 import type { VehicleChassis } from './chassis/mapping';
@@ -72,8 +73,24 @@ export interface VehiclePart {
   items: Item[];
   /** Engines: a maintenance fault (CDDA "engine_maintenance"); hard to start, less power. */
   fault?: boolean;
+  /** Engines: the fuel chosen from def.fuel_options (BN vehicle_part::ammo_pref); absent = def.fuel_type. */
+  fuelPref?: string;
   /** CDDA blood level (0..600): the renderer tints bloody parts. */
   blood: number;
+  /** Actual installation item metadata, retained for later removal. */
+  installedItem?: ItemJSON;
+  /**
+   * TURRET parts: the gun itself (BN vehicle_part::base), holding its rounds or belt. Created
+   * when the vehicle spawns or the turret is first used (turretGun); flagged VEHICLE like BN's.
+   */
+  gun?: Item;
+  /**
+   * TURRET parts: where it points (game/turret.ts TurretAim: world yaw, pitch, rad). Saved
+   * hull-relative so a load points it the same way over the hull whatever the facing.
+   */
+  aim?: { yaw: number; pitch: number; want: { yaw: number; pitch: number } | null; sinceShot: number; shots: number };
+  /** TURRET parts: the round type `fire_mode` picked (BN vehicle_part::ammo_pref, saved). */
+  ammoPref?: string;
 }
 
 export interface VehiclePartJSON {
@@ -88,7 +105,13 @@ export interface VehiclePartJSON {
   charges?: number;
   items?: ItemJSON[];
   fault?: boolean;
+  fuelPref?: string;
   blood?: number;
+  installedItem?: ItemJSON;
+  gun?: ItemJSON;
+  /** Turret bearing over the hull and elevation, rad. */
+  aim?: { yaw: number; pitch: number };
+  ammoPref?: string;
 }
 
 export interface VehicleJSON {
@@ -108,6 +131,8 @@ export interface VehicleJSON {
   cruise?: number;
   paint: number;
   parts: VehiclePartJSON[];
+  adopted?: boolean;
+  workOrders?: VehicleWorkOrder[];
   /**
    * The chassis template the grid is mapped onto (vehicles v3). Absent in saves from before
    * it: VehicleSystem maps those once on load (the save migration).
@@ -142,6 +167,8 @@ export class Vehicle {
   /** Body paint (0xRRGGBB) chosen at spawn, for the renderer. */
   paint = 0x8a8f96;
   readonly parts: VehiclePart[] = [];
+  adopted = false;
+  workOrders: VehicleWorkOrder[] = [];
   /** mount key -> indices into parts, in install order. */
   private byMount = new Map<number, number[]>();
   /** Bumped when anything the renderer draws changes (doors, damage, lights). */
@@ -163,12 +190,29 @@ export class Vehicle {
   addPart(def: VPartDef, mx: number, my: number, variant?: string): VehiclePart {
     const p: VehiclePart = { def, mx, my, variant, hp: def.durability, open: false, enabled: false, charges: 0, items: [], blood: 0 };
     if (def.flags.includes('BATTERY')) p.fuelType = 'battery';
+    if (def.flags.includes('REACTOR')) p.fuelType = def.fuel_type;
     const k = mountKey(mx, my);
     let list = this.byMount.get(k);
     if (!list) this.byMount.set(k, (list = []));
     list.push(this.parts.length);
     this.parts.push(p);
     return p;
+  }
+
+  /** Part removal rebuilds mount indices; the authoritative template remains. */
+  removePart(part: VehiclePart): boolean {
+    const index = this.parts.indexOf(part);
+    if (index < 0) return false;
+    this.parts.splice(index, 1);
+    this.byMount.clear();
+    for (let i = 0; i < this.parts.length; i++) {
+      const p = this.parts[i], key = mountKey(p.mx, p.my);
+      const list = this.byMount.get(key) ?? [];
+      list.push(i); this.byMount.set(key, list);
+    }
+    this.chassis = null;
+    this.version++;
+    return true;
   }
 
   // --- geometry ------------------------------------------------------------------------
@@ -283,9 +327,30 @@ export class Vehicle {
     return Math.max(50, g / 1000);
   }
 
+  /** The fuel an engine burns now (BN vehicle_part::fuel_current). */
+  engineFuel(e: VehiclePart): string | undefined {
+    return e.fuelPref ?? e.def.fuel_type;
+  }
+  /** Every fuel an engine can burn (BN vpart_info::engine_fuel_opts). */
+  engineFuelOptions(e: VehiclePart): string[] {
+    return e.def.fuel_options ?? (e.def.fuel_type ? [e.def.fuel_type] : []);
+  }
+  /**
+   * BN vehicle::start_engine: an engine whose current fuel is dry switches to the first of its
+   * fuel_options the vehicle has (a turbine on JP-8 when there's no gasoline). Returns whether
+   * it has fuel now.
+   */
+  selectEngineFuel(e: VehiclePart): boolean {
+    if (this.engineHasFuel(e)) return true;
+    const next = this.engineFuelOptions(e).find((f) => this.fuelLeft(f) > 0);
+    if (!next) return false;
+    e.fuelPref = next === e.def.fuel_type ? undefined : next;
+    return true;
+  }
+
   /** Fuel still available for an engine (muscle engines are fuelled by the driver). */
   engineHasFuel(e: VehiclePart): boolean {
-    const ft = e.def.fuel_type;
+    const ft = this.engineFuel(e);
     if (!ft || ft === 'muscle' || ft === 'animal' || ft === 'wind') return true;
     return this.fuelLeft(ft) > 0;
   }
@@ -400,8 +465,13 @@ export class Vehicle {
     return this.parts.some((p) => has(p, 'SECURITY') && p.hp > 0);
   }
 
+  /** BN vehicle::steering: STEERABLE wheels, and TRACKED ones (tracks steer by braking a side). */
   steerable(): boolean {
-    return this.parts.some((p) => has(p, 'STEERABLE') && p.hp > 0) || this.wheels.length <= 2;
+    return this.parts.some((p) => (has(p, 'STEERABLE') || has(p, 'TRACKED')) && p.hp > 0) || this.wheels.length <= 2;
+  }
+  /** Rides on tracks and has no steerable wheels: turns by skid-steering, including in place. */
+  skidSteers(): boolean {
+    return this.wheels.some((p) => has(p, 'TRACKED') && p.hp > 0) && !this.parts.some((p) => has(p, 'STEERABLE') && p.hp > 0);
   }
 
   /** Distance between steering and fixed axles, tiles (bicycle model). */
@@ -453,9 +523,21 @@ export class Vehicle {
     }
     return charges - left;
   }
-  /** Fuel types this vehicle's engines burn. */
+  /**
+   * Fuels the engines would run on now, for gauges: each engine's current fuel, or the option
+   * selectEngineFuel would switch to when that one is dry (so a turbine with only JP-8 aboard
+   * shows JP-8, not an empty gasoline gauge).
+   */
+  runningFuels(): string[] {
+    return [...new Set(this.engines.map((e) => {
+      const cur = this.engineFuel(e);
+      return this.engineHasFuel(e) ? cur : this.engineFuelOptions(e).find((f) => this.fuelLeft(f) > 0) ?? cur;
+    }).filter((f): f is string => !!f))];
+  }
+
+  /** Fuel types this vehicle's engines can burn (every fuel option, not just the current one). */
   engineFuels(): string[] {
-    return [...new Set(this.engines.map((e) => e.def.fuel_type).filter((f): f is string => !!f))];
+    return [...new Set(this.engines.flatMap((e) => this.engineFuelOptions(e)))];
   }
 
   /**
@@ -467,7 +549,7 @@ export class Vehicle {
     const used: Record<string, number> = {};
     if (!this.engineOn) return used;
     for (const e of this.engines) {
-      const ft = e.def.fuel_type;
+      const ft = this.engineFuel(e);
       if (!e.enabled || e.hp <= 0 || !ft || ft === 'muscle' || ft === 'animal' || ft === 'wind') continue;
       const kjPer = this.vdata.fuels[ft]?.kjPerCharge;
       if (!kjPer) continue;
@@ -486,7 +568,9 @@ export class Vehicle {
     let w = 0;
     for (const p of this.parts) {
       if (p.hp <= 0) continue;
-      if (has(p, 'ENABLED_DRAINS_EPOWER') && (p.enabled || (has(p, 'CONE_LIGHT') && this.lightsOn))) w += p.def.epower ?? 0;
+      // Cold cargo draws in the game-time storage/power loop, not real-time physics.
+      const coldCargo = has(p, 'CARGO') && (has(p, 'FRIDGE') || has(p, 'FREEZER'));
+      if (!coldCargo && has(p, 'ENABLED_DRAINS_EPOWER') && (p.enabled || (has(p, 'CONE_LIGHT') && this.lightsOn))) w += p.def.epower ?? 0;
       if (has(p, 'ALTERNATOR') && this.engineOn) w += p.def.epower ?? 0;
     }
     const kj = (w * dt) / 1000;
@@ -514,6 +598,7 @@ export class Vehicle {
 
   toJSON(): VehicleJSON {
     return {
+      adopted: this.adopted, workOrders: this.workOrders.map(j => ({ ...j })),
       uid: this.uid, proto: this.protoId, name: this.name, x: this.x, y: this.y, z: this.z, facing: this.facing,
       velocity: this.velocity, engineOn: this.engineOn, lightsOn: this.lightsOn, locked: this.locked, alarmOn: this.alarmOn, paint: this.paint,
       ...(this.cruiseVelocity ? { cruise: this.cruiseVelocity } : {}),
@@ -527,7 +612,15 @@ export class Vehicle {
         if (p.charges) j.charges = p.charges;
         if (p.items.length) j.items = p.items.map((i) => i.toJSON());
         if (p.fault) j.fault = true;
+        if (p.fuelPref) j.fuelPref = p.fuelPref;
         if (p.blood) j.blood = p.blood;
+        if (p.installedItem) j.installedItem = p.installedItem;
+        if (p.gun) j.gun = p.gun.toJSON();
+        if (p.aim) {
+          const rel = p.aim.yaw - ((this.facing + 90) * Math.PI) / 180;
+          j.aim = { yaw: Math.atan2(Math.sin(rel), Math.cos(rel)), pitch: p.aim.pitch };
+        }
+        if (p.ammoPref) j.ammoPref = p.ammoPref;
         return j;
       }),
     };
@@ -540,6 +633,8 @@ export class Vehicle {
   static fromJSON(vdata: VehicleDataFile, data: GameData, j: VehicleJSON, opts: { warn?: (msg: string) => void; loadItem?: (j: ItemJSON) => Item | null } = {}): Vehicle {
     const v = new Vehicle(vdata, j.proto);
     v.uid = j.uid;
+    v.adopted = !!j.adopted;
+    v.workOrders = (j.workOrders ?? []).map(order => ({ ...order }));
     nextUid = Math.max(nextUid, j.uid + 1);
     Object.assign(v, { name: j.name, x: j.x, y: j.y, z: j.z, facing: j.facing, velocity: j.velocity, engineOn: j.engineOn, lightsOn: j.lightsOn, locked: j.locked, alarmOn: !!j.alarmOn, paint: j.paint, cruiseVelocity: j.cruise ?? 0 });
     if (j.chassis) {
@@ -563,7 +658,13 @@ export class Vehicle {
       p.charges = pj.charges ?? 0;
       p.items = (pj.items ?? []).map((ij) => (opts.loadItem ? opts.loadItem(ij) : Item.fromJSON(data, ij))).filter((it): it is Item => !!it);
       p.fault = pj.fault;
+      // A preference this data no longer offers falls back to the engine's default fuel.
+      if (pj.fuelPref && (def.fuel_options ?? []).includes(pj.fuelPref)) p.fuelPref = pj.fuelPref;
       p.blood = pj.blood ?? 0;
+      p.installedItem = pj.installedItem;
+      if (pj.gun) p.gun = (opts.loadItem ? opts.loadItem(pj.gun) : Item.fromJSON(data, pj.gun)) ?? undefined;
+      if (pj.aim) p.aim = { yaw: pj.aim.yaw + ((v.facing + 90) * Math.PI) / 180, pitch: pj.aim.pitch, want: null, sinceShot: Infinity, shots: 0 };
+      if (pj.ammoPref) p.ammoPref = pj.ammoPref;
     }
     return v;
   }
@@ -891,9 +992,44 @@ export function initState(v: Vehicle, fuel: number, status: number, rng: Rng): v
   v.version++;
 }
 
-/** vehicle::place_spawn_items: prototype item spawns go into the CARGO part at the mount. */
+/**
+ * The gun of a TURRET part (BN vehicle_part::base): created on first use, flagged VEHICLE (BN
+ * vehicle_part's constructor sets it: turrets ignore NO_RELOAD, draw power from the vehicle).
+ * null for a part whose gun item this data doesn't have.
+ */
+export function turretGun(p: VehiclePart, data: GameData): Item | null {
+  if (!has(p, 'TURRET')) return null;
+  if (!p.gun) {
+    if (!data.items[p.def.item]) {
+      warnOnce('item', p.def.item);
+      return null;
+    }
+    p.gun = createItem(data, p.def.item);
+  }
+  if (!p.gun.flags.includes('VEHICLE')) p.gun.flags.push('VEHICLE');
+  return p.gun;
+}
+
+/**
+ * vehicle::place_spawn_items: turrets first (a prototype part with "ammo" spawns loaded with that
+ * percent chance: a random one of its ammo_types, rng(ammo_qty) rounds, {-1,-1} = full; empty
+ * ammo_types = the gun's default ammo, veh_type.cpp finalize), then prototype item spawns go into
+ * the CARGO part at the mount.
+ */
 export function placeSpawnItems(v: Vehicle, data: GameData, rng: Rng): void {
   const proto = v.vdata.vehicles[v.protoId];
+  for (const pp of proto.parts) {
+    if (!pp.ammo) continue;
+    const turret = v.partsAt(pp.x, pp.y).find((p) => has(p, 'TURRET') && p.hp > 0 && p.def.id === pp.part);
+    if (!turret) continue;
+    const gun = turretGun(turret, data);
+    if (!gun || rng.int(1, 100) > pp.ammo) continue;
+    const types = pp.ammo_types?.length ? pp.ammo_types : [defaultAmmoId(data, gun.ammoTypes()[0] ?? '')].filter((t): t is string => !!t);
+    if (!types.length) continue;
+    const [lo, hi] = pp.ammo_qty ?? [-1, -1];
+    const n = rng.int(Math.min(lo, hi), Math.max(lo, hi));
+    loadAmmo(gun, rng.pick(types), n < 0 ? Infinity : n);
+  }
   for (const sp of proto.items) {
     if (rng.int(1, 100) > sp.chance) continue;
     const cargo = v.partsAt(sp.x, sp.y).find((p) => has(p, 'CARGO'));

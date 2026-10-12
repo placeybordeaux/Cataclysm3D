@@ -47,6 +47,13 @@ export function harvestIdFor(def: TileDef, season: Season): string | null {
   return null;
 }
 
+/** BN stores harvest entries inline on terrain; older DDA data refers to a harvest id. */
+export function seasonalHarvestEntries(data: GameData, def: TileDef, season: Season): HarvestEntry[] {
+  const rows = def.harvest_by_season as { seasons?: string[]; id?: string; entries?: HarvestEntry[] }[] | undefined;
+  const row = rows?.find((e) => e.seasons?.some((s) => s.toLowerCase() === season));
+  return row?.entries ?? (row?.id ? harvestEntries(data, row.id) : []);
+}
+
 export function harvestEntries(data: GameData, id: string): HarvestEntry[] {
   const h = (data.misc.harvest as Record<string, { entries?: HarvestEntry[] }> | undefined)?.[id];
   if (!h) {
@@ -88,8 +95,7 @@ export function harvestKind(game: Game, x: number, y: number, z: number): { kind
   if (act === 'shrub_wildveggies') return { kind: 'forage', def, isFurn: false };
   if (act === 'harvested_plant') return { kind: 'harvested', def, isFurn };
   if (!['harvest_ter', 'harvest_ter_nectar', 'harvest_furn', 'harvest_furn_nectar'].includes(act)) return null;
-  const id = harvestIdFor(def, seasonAt(game.clock.seconds));
-  if (!id || !harvestEntries(game.data, id).length) return { kind: 'out_of_season', def, isFurn };
+  if (!seasonalHarvestEntries(game.data, def, seasonAt(game.clock.seconds)).length) return { kind: 'out_of_season', def, isFurn };
   return { kind: 'harvest', def, isFurn };
 }
 
@@ -139,8 +145,7 @@ export function startHarvest(game: Game, x: number, y: number, z: number, opts: 
   const finish = () => {
     const hk = harvestKind(game, x, y, z);
     if (!hk || hk.kind !== 'harvest') return;
-    const id = harvestIdFor(hk.def, seasonAt(game.clock.seconds))!;
-    const rolls = rollHarvest(p.rng, harvestEntries(game.data, id), p.getSkill('survival'));
+    const rolls = rollHarvest(p.rng, seasonalHarvestEntries(game.data, hk.def, seasonAt(game.clock.seconds)), p.getSkill('survival'));
     let got = false;
     for (const [drop, n] of rolls) for (const it of makeItems(game.data, drop, n)) (got = true), giveHarvest(game, it);
     if (!got) game.message("You couldn't harvest anything.", 'c_light_red');
@@ -194,7 +199,9 @@ export function forageFinish(game: Game, x: number, y: number, z: number): Item[
   const p = game.player;
   const data = game.data;
   const group = `forage_${seasonAt(game.clock.seconds)}`;
-  transformTer(game, x, y, z);
+  const harvested = `t_underbrush_harvested_${seasonAt(game.clock.seconds)}`;
+  if (game.map.terAt(x, y, z).id === 't_underbrush' && game.map.terrain.has(harvested)) game.map.setTer(x, y, z, harvested);
+  else transformTer(game, x, y, z);
   const found: Item[] = [];
   const drop = (groupId: string) => {
     if (!data.itemGroups[groupId]) return void warnOnce('item_group', groupId);

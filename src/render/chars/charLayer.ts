@@ -28,7 +28,8 @@ const WARN_PAGES = 6;
 
 export interface Skin {
   page: number;
-  /** per part: net origin x, y and texel dims W, H, D */
+  /** Per part: net origin x, y and texel dims W, H, D. Immutable after packing;
+   * replace via reskin(), or call layer.touch(true) after any future in-place mutation. */
   rects: Int32Array;
   refs: number;
 }
@@ -298,15 +299,15 @@ class Batch {
     this.geo.dispose();
     this.mesh = this.make(cap);
   }
-  commit(n: number): void {
+  commit(n: number, layout: boolean): void {
     this.count = n;
     this.mesh.count = n;
     touchInstanceRange(this.mesh.instanceMatrix, 0, n * 16);
-    touchInstanceRange(this.tex, 0, n * 4);
+    if (layout) touchInstanceRange(this.tex, 0, n * 4);
     touchInstanceRange(this.misc, 0, n * 4);
     touchInstanceRange(this.flash, 0, n * 4);
     touchInstanceRange(this.root, 0, n * 4);
-    touchInstanceRange(this.shape, 0, n * 4);
+    if (layout) touchInstanceRange(this.shape, 0, n * 4);
   }
 }
 
@@ -365,7 +366,7 @@ export class CharInstance {
   setVisible(v: boolean): void {
     if (v === this.visible) return;
     this.visible = v;
-    this.layer?.touch();
+    this.layer?.touch(true);
   }
   setPose(p: PoseIn): void {
     resetPose(this.pose);
@@ -440,6 +441,9 @@ export class CharLayer {
   private batches = new Map<number, Batch>();
   private scratch: THREE.Matrix4[] = [];
   private needsWrite = true;
+  private needsLayout = true;
+  /** Diagnostic off variant: request every attribute each frame for paired upload measurements. */
+  reuseStaticUploads = true;
   groundAt: ((x: number, y: number, z: number) => number) | null = null;
   skyVisAt: ((x: number, y: number, z: number) => number) | null = null;
   /** `matFor`: a different material per skin page (the first-person arms, fpView.ts). */
@@ -461,6 +465,7 @@ export class CharLayer {
     skin.refs++;
     this.live.add(inst);
     this.needsWrite = true;
+    this.needsLayout = true;
     return inst;
   }
 
@@ -470,11 +475,13 @@ export class CharLayer {
     inst.skin.refs--;
     inst.layer = null;
     this.needsWrite = true;
+    this.needsLayout = true;
   }
 
-  /** @internal flash started */
-  touch(): void {
+  /** @internal flash started; layout changes also invalidate fixed attributes. */
+  touch(layout = false): void {
     this.needsWrite = true;
+    this.needsLayout ||= layout;
   }
 
   /** Swap an instance's skin (outfit change). */
@@ -483,6 +490,7 @@ export class CharLayer {
     skin.refs++;
     inst.skin = skin;
     this.needsWrite = true;
+    this.needsLayout = true;
   }
 
   /**
@@ -504,6 +512,11 @@ export class CharLayer {
     }
     if (!any) return;
     this.needsWrite = false;
+    // CPU writes stay together: splitting them regressed measured flush time. Only
+    // the GPU texture/taper upload requests are suppressed between layout changes.
+    // Rig tapers and packed rects are immutable; future in-place edits must touch(true).
+    const layout = this.needsLayout || !this.reuseStaticUploads;
+    this.needsLayout = false;
     // count per page
     const per = new Map<number, number>();
     for (const i of this.live) if (i.visible) per.set(i.skin.page, (per.get(i.skin.page) ?? 0) + i.rig.parts.length);
@@ -538,7 +551,7 @@ export class CharLayer {
       }
       fill.set(i.skin.page, k);
     }
-    for (const [pg, b] of this.batches) b.commit(fill.get(pg) ?? 0);
+    for (const [pg, b] of this.batches) b.commit(fill.get(pg) ?? 0, layout);
   }
 
   dispose(): void {

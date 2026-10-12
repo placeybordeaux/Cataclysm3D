@@ -47,6 +47,7 @@ export function installAdaptation(game: Game): void {
       // storage blocked: defaults
     }
     registerOption({
+      category: 'Gameplay',
       name,
       value: () => (adaptationRules[key] ? on : off),
       change: () => {
@@ -74,6 +75,7 @@ export function installAdaptation(game: Game): void {
   };
   weatherMessages.all = wmAll();
   registerOption({
+    category: 'Interface',
     name: 'Weather messages',
     value: () => (weatherMessages.all ? 'Every change (CDDA)' : 'Changes you notice'),
     change: () => {
@@ -87,6 +89,7 @@ export function installAdaptation(game: Game): void {
     desc: 'Changes you notice: a message when it starts or stops raining or snowing, not for every shade of drizzle, and none while waiting or sleeping. Every change: like Cataclysm.',
   });
   registerOption({
+    category: 'Gameplay',
     name: 'Climate',
     value: () => (climate() === 'bn' ? 'Mid-spring start (BN)' : 'Early spring (old)'),
     change: () => {

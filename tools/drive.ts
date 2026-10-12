@@ -5,6 +5,7 @@
 //   tsx tools/drive.ts eval  "<js using cdda>"        # prints JSON result (async ok)
 //   tsx tools/drive.ts shot  shots/x.png               # screenshot of the current frame
 //   tsx tools/drive.ts load  "seed=2&menu=1"           # (re)load the page with new params
+//                                                     # (without menu=1 the title is skipped: a NEW survivor)
 //   tsx tools/drive.ts log                             # page console/errors since last `log`
 //   tsx tools/drive.ts key   "i Escape Shift+e"        # real key presses (puppeteer), space-separated
 //   tsx tools/drive.ts hold  "w 1500"                  # hold a key for N ms (real keydown/keyup)
@@ -111,7 +112,18 @@ async function load(params: string): Promise<string> {
   await page.goto(`http://127.0.0.1:${vport}/?${params}`, { waitUntil: 'load' });
   await page.waitForFunction('window.cdda?.ready || window.cddaError', { timeout: 180_000 });
   const err = await page.evaluate('window.cddaError');
-  return err ? `boot failed: ${err}` : 'ok';
+  if (err) return `boot failed: ${err}`;
+  // Under automation the title is skipped unless menu=1 (src/ui/index.ts), so a reload starts a
+  // *new*, empty-handed survivor rather than continuing the saved one — which reads exactly like
+  // "the reload lost my items". Worse, that survivor's page-unload save becomes the newest slot,
+  // so a later Continue picks it. Say so instead of letting it pass for a load.
+  const q = new URLSearchParams(params);
+  if (q.get('menu') !== '1') {
+    const s = (await page.evaluate(`(() => { const m = window.cdda?.save?.manager; return m ? { slots: m.slots.map((x) => x.name), loaded: !!m.slot } : null; })()`)) as { slots: string[]; loaded: boolean } | null;
+    if (s?.slots.length && !s.loaded)
+      return `ok — NOTE: title skipped (no menu=1), so this is a NEW survivor, not the saved one (${s.slots.join(', ')}). To continue a save: load with menu=1 and xkey "c", or eval "cdda.save.load()".`;
+  }
+  return 'ok';
 }
 console.log('load:', await load(opt('--params', 'seed=1')));
 if (headful) await fitWindow(page, size[0], size[1]);

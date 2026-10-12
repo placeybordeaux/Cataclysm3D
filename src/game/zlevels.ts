@@ -3,6 +3,7 @@ import { MAX_Z, MIN_Z } from '../world/coords';
 import { hasFlag, isDiggable } from '../world/registry';
 import { MAIN_PARTS } from './bodyparts';
 import { emitSound } from './sound';
+import { stairKind } from './stairs';
 import { CREATURE_RADIUS, nudgeOutOfOverlap, overlapsSolid, resolveOverlap } from './physics';
 
 // Vertical movement, after CDDA game::vertical_move / find_or_make_stairs and
@@ -86,7 +87,8 @@ export function goStairs(game: Game, dir: StairDir): boolean {
     game.message('The way is blocked.');
     return false;
   }
-  const ladder = hasFlag(game.map.terAt(s.x, s.y, s.z), 'DIFFICULT_Z');
+  // A ladder at either end (a manhole has no DIFFICULT_Z, the ladder below it does).
+  const ladder = [game.map.terAt(s.x, s.y, s.z), game.map.terAt(dest.x, dest.y, dest.z)].some((t) => stairKind(t) === 'ladder');
   p.x = dest.x + 0.5;
   p.y = dest.y + 0.5;
   p.z = dest.z;

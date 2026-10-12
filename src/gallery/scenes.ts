@@ -195,6 +195,9 @@ export const SCENES: Scene[] = [
   { id: 'bedroom', group: 'Interiors', label: 'Bedroom', run: look('furn:^f_bed$:0:3:-16') },
   { id: 'wrecked', group: 'Interiors', label: 'Wrecked house', run: look('house:2') },
   { id: 'shop', group: 'Interiors', label: 'Shop', run: async (c) => shop(c) },
+  // dropped weapons (render/furniture/groundHeld.ts): a pile, a pistol on a table, a spread of
+  // long guns and melee weapons on bare floor
+  { id: 'loot_weapons', group: 'Interiors', label: 'Dropped weapons', run: look('gallery:i:marlin_1894c+i:remington_870+i:ak47+i:shotgun_d+f_table&i:glock_19+i:machete+i:bat+i:fire_ax+i:katana+i:remington_700&i:m4a1&i:knife_combat') },
   { id: 'indoornight', group: 'Interiors', label: 'House at night, flashlight', run: look('indoornight') },
   {
     id: 'lamp', group: 'Interiors', label: 'Lamp-lit room at night',

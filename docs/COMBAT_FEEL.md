@@ -235,8 +235,8 @@ the first wall (cover works — duck behind one and nothing gets through), the s
 a follower in the line (friendly fire), and for NPC rounds any monster. A miss flies on past you
 and out to its range. **Near misses** (a round passing within 1.4 m) raise `nearMiss`: a quick
 zip (`sfx.nearMiss`, the whoosh pitched up for bullets) and a small flinch of the view and hands
-toward the side it passed. The survivor's arrows, bolts and stones now hit NPCs on the way
-(`PlayerCombat.npcRound` → `NpcSystem.playerRoundHits`; followers too). Fixed on the way: monster
+toward the side it passed. The survivor's rounds, pellets and arrows hit NPCs on the way
+(see [NPCs in the line of fire](#npcs-in-the-line-of-fire)). Fixed on the way: monster
 guns now use the monster's own starting ammo when it fits (a light turret carries 9mmfmj and
 used to click empty). Real input: a rifle turret at 16 m over 9 s — up to 4 rounds in the air
 at once, 17 hits and 10 near misses; behind a wall, none. `tests/enemyfire.test.ts`.
@@ -276,9 +276,9 @@ Screenshots (JPEG): `r3_melee_crowd_head.jpg` (the middle of three: "HEAD ×1.5 
 
 Known gaps: the arms hang in front of the torso, so a centre-mass shot on a model sometimes
 reads "limb ×0.75" (that is what's drawn in front); monsters don't dodge rounds in free aim
-(BN's bullet dodge was ~0 anyway); enemy rounds fly straight (no arrow drop) and at the aimed
-height only (BN's dispersion is horizontal); explosive monster rounds (grenade launchers)
-still resolve through the same round without a blast arc; the melee arc has no sway (a swing's
+(BN's bullet dodge was ~0 anyway; now modelled, see [Enemy arrows, grenades and dodging](#enemy-arrows-grenades-and-dodging)); enemy rounds fly at the aimed
+height only (BN's dispersion is horizontal); arrow drop and grenade lobs/blasts are now done
+(same section); the melee arc has no sway (a swing's
 timing is the skill); in the dice model the third-person shot still leaves the eye parallel to
 the camera (as before).
 
@@ -492,9 +492,329 @@ real-input screenshots, and those do include the HUD.
 7. Longbow (`cdda.giveItem("longbow", { wield: true }); cdda.giveItem("arrow_wood", { count: 20 })`): hold RMB to draw and watch the circle shrink and the readout ("Precise 12 m · likely hit ≤ 6 m"), click to loose, and read the line above the crosshair when it misses. Try a bare click (snap shot), a zombie past 22 m, and `cdda.game.player.str_base = 7; cdda.game.player.resetStats()` (a hard pull). Walk the arrows and press `r` on them to take them back.
 
 ## Known gaps and follow-ups
-- Monster-vs-NPC fights resolve without a telegraph (the survivor isn't involved).
+- Monster-versus-NPC melee now uses attack windups; third-party special attacks remain limited.
 - The side-step double-tap can trigger for players who stutter-strafe. Space is the main binding. The double-tap window is `FEEL.doubleTap`.
 - RMB is guard (melee) and aim (gun). If the UI v2 toolkit wants RMB for world context menus in gameplay, it needs a modifier or a different trigger. The guard reads `input.mouseButtons & 4` in `PlayerCombat.update`.
-- Tracers and bullet marks are billboards: marks don't align to the wall plane.
-- Archery: flights ignore NPCs and never hit the survivor (only monsters, walls and the ground); NPC archers still shoot hitscan. Arrows stuck in the ground/walls are billboard pixel lines drawn over the ground item icon. A skill-0 survivor misses a lot even at 8 m: that is BN's dispersion; the crosshair now says so ("past your effective range (~6 m, archery 0)") rather than changing the odds.
+- Tracers remain billboards. Persistent bullet marks now align to verified loaded wall,
+  furniture, floor or ceiling planes; their reconstructed point is cosmetic, and uncertain
+  or legacy impacts without explicit landing facts are omitted.
+- Archery: the survivor's own arrows never hit the survivor (BN: no hitting yourself); NPC and monster arrows do, as enemy rounds. NPC and monster archers roll BN's dispersion and their arrows fly the survivor's gravity arc ([Enemy arrows, grenades and dodging](#enemy-arrows-grenades-and-dodging)). Arrows stuck in the ground/walls are billboard pixel lines drawn over the ground item icon. A skill-0 survivor misses a lot even at 8 m: that is BN's dispersion; the crosshair now says so ("past your effective range (~6 m, archery 0)") rather than changing the odds.
+- NPCs in the line of fire: see [its limits](#npcs-in-the-line-of-fire) (BN's dice for a stray creature on the path, killed-innocent morale and the monster FRIEND_ATTACKED anger are not modelled; an incendiary round on a person lights the tile, not the person).
 - Numbers (to-hit, damage, the block formula's inputs) follow BN when the BN data port lands. Only `FEEL` belongs to this layer.
+
+## NPCs in the line of fire
+
+The survivor's hitscan rounds, every shotgun pellet and every arrow, bolt and stone resolve
+against the nearest body on their own path: monster, wall, or NPC (followers and neutrals too),
+as BN's `projectile_attack` hands a round to whatever critter it reaches. `src/game/npcfire.ts`
+does the NPC side; `PlayerCombat` compares it with the monster and wall each ray or arc step
+would otherwise reach.
+
+- **Geometry.** Free aim tests the drawn 3D person (`aimHooks.pickNpc`, the same part boxes
+  monsters use, `NpcView.modelOf`); without a model a 1.75 m column (half when downed or asleep),
+  1.1 × the collision radius, zoned by height like monsters. Classic dice uses the plan line and
+  the collision radius, like `castRay` for monsters.
+- **Each pellet independently.** Every pellet casts its own ray; one that meets an NPC first
+  stops there, the rest fly on to the zombie behind. The NPC's pellets are resolved one by one:
+  own body part, worn armor rolled once per pellet (`Inventory.absorbHit`), own part HP. The log
+  uses BN's `multi_projectile_hit_message` ("X is hit by many projectiles, dealing N damage").
+- **Damage.** Classic dice: BN `deal_projectile_attack` (`projectile.ts`, character head cap
+  ×1.5, dodge roll against the projectile speed; an NPC who avoids an arrow lets it fly on).
+  Free aim: the model part picks the body part (head, torso, arm, leg); the hit-quality factors
+  (graze, weak spot, perfect, skill) are capped at BN's character severity cap for that part
+  (head and torso ×1.5, limbs ×1.25), since the part's own HP pool already carries the zone.
+- **Consequences, as BN.** `npc::on_attacked` is never called from a projectile: a stray hit (a
+  neutral beside the zombie, a follower behind it) hurts without turning them hostile. Only the
+  target is provoked: `target_ui::on_target_accepted` makes it angry (`make_angry`, with its
+  faction). Here the target is the NPC whose body the crosshair's own ray (no sway) enters
+  first (`PlayerCombat.crosshairNpc`; the look ray is tile-granular, too coarse when a person
+  stands half a metre beside the line), and a gun now asks the "Really attack?" question for
+  that NPC only (melee keeps its swing cone). `ballistics.cpp` skips
+  creatures friendly to the shooter within one tile, so a follower at your shoulder is never
+  hit. A kill is credited to the survivor (`creatureDied` killer), the body and gear drop.
+- **Arrows on people** drop at their feet (`drop_or_embed_projectile` embeds only in monsters)
+  through `PlayerCombat.placeRound` (`moves.ts`), or break as usual.
+- **NPC fire.** NPC rounds already flew and hit whoever was in the way (survivor, NPCs,
+  monsters). Now an NPC shotgun fires each pellet as its own round with the per-pellet damage,
+  and their rounds skip the shooter's friends within one tile (the survivor for a follower,
+  fellow followers or faction members).
+
+Not modelled: BN re-rolls `missed_by` for an unintended creature on the path
+(`rng_float(0.1, 1.5 − missed_by) / target size`, at least 0.4); here the geometry of where the
+ray or pellet passed decides, as it does for monsters. The killed-innocent morale
+(`hit_by_player`), the FRIEND_ATTACKED monster anger and an incendiary round setting the person
+alight are not modelled; overpenetration past the first body is not modelled for anyone.
+
+Tests: `tests/npcfire.test.ts` (ray/column zones, BN adjacency, hitscan stray and aimed hits
+under both models, five pellets each armored once, split pellets never counted twice, arrow
+drop and conservation, a dodged arrow passing once, kill credit, the attack question, NPC
+pellets and adjacency). Real input: `tools/realinput.ts --only npcfire --gpu` (OS mouse and
+keys under Xvfb; `cdda.*` only for setup), 15/15 checks: with buckshot aimed at a zombie past a
+neutral's shoulder (0.45 m off the line at 5 m), no attack question, and the second shot split
+1 pellet into the neutral (right arm, 22) and 2 into the zombie; the neutral stayed neutral;
+with the crosshair on the neutral, LMB asked "Really attack …? They are not hostile.", `n`
+fired nothing, `y` turned them hostile and the next click hit; a longbow arrow then hit them in
+the torso for 35 and lay at their feet, every arrow accounted for. Screenshots:
+[split pellets](screenshots/gaps/npcfire-pellets-split.png) ("2/5 pellets" on the zombie, the
+log line "Lynna Holbrook is hit by a projectile, dealing 22 damage"),
+[the question](screenshots/gaps/npcfire-confirm-neutral.png),
+[arrow hit](screenshots/gaps/npcfire-arrow-hit.png).
+
+## Enemy arrows, grenades and dodging
+
+Closes the Archery/projectiles gaps "NPC archers fly straight rounds", "enemy rounds have no arrow
+drop or explosive blast arc" and "monsters don't dodge free-aim rounds".
+
+**Arrow drop for enemies** (`enemyfire.ts` `arc`, `rangedfeel.arcHump`). Arrows, bolts and stones
+from NPCs (`npcai.ts shoot`) and monsters (`monguns.ts shootAt/throwAt`: the elf-a's longbow, a
+feral's crossbow, thrown rocks) fly the survivor's gravity arc: `arcHump(s, D, v) = g/(2v²)·s·(D−s)`
+on top of the straight line to what they aimed at, so they rise, meet the target's chest at the
+aimed distance (BN's dispersion roll still sets the direction: hit odds unchanged) and fall past
+it to the ground. A target that moves during the flight sees it land short or long. BN itself has
+no drop (ballistics.cpp flies a straight tile line); like the survivor's, the arc is the picture.
+Bullets stay straight.
+
+**Lobbed grenades and blasts** (`enemyfire.lobOf/lobSpeed`, `blast.ts`). Thrown "guns" (skill
+`throw`: the SWAT zombie's tear gas) and grenade launchers (GRENADE_LAUNCHERS, or rounds with BN
+speed ≤ 100: the feral armored bio-operator's 40 mm HEDP, the riot turret's M203, the Mark 19
+turret, the acid mortar) are lobbed: a flight time of 0.6–1.6 s (thrown) or 0.5–1.5 s (launched)
+gives a visible lob (apex ~1.2 m over an 8 m throw). Rockets (M202 FLASH) and tank guns fly
+straight. Any round whose ammo does something where it ends sets it off wherever it ends: on a
+body, the ground, the tile before a wall (ballistics.cpp: `if impassable(tp) tp = prev_point`), or
+at range, by BN `apply_ammo_effects` + the custom explosion (`blast.roundEndsAt`): each effect's
+`aoe` fields, each `explosion`, and the projectile's `drop` (the M651's armed tear gas canister:
+its `emit_tear_gas_stream`, 18 tiles of `fd_tear_gas` at 3). A direct hit first deals the round's
+own impact through BN `deal_projectile_attack` at its BN speed (80 for 40 mm: dodgeable).
+
+`blast.detonate` follows Cataclysm-BN `src/explosion.cpp` (default new explosions):
+- data (`load_explosion_data`): new `damage`/`radius`/`fragment {impact, range}`; legacy `power` →
+  damage = power × 2/15 (`power_to_dmg_mult`), radius = (power × 2/15)^¼ × ln 0.75 / ln
+  distance_factor (`blast_radius_from_legacy`), legacy shrapnel → bullet damage ×3 armor to
+  2 × radius (`shrapnel_from_legacy`).
+- blast (`blast_tile`): tiles with lround(trig distance) ≤ radius not occluded (`is_occluded`: an
+  impassable tile on the line). Creatures take damage × `critter_blast_percentage` (×1 within
+  radius/2, ×0.5 to the radius; size tiny 0.5, small 0.8, medium 1, large 1.5, huge 2). Monsters
+  and NPCs on the torso, bash with 0.4 penetration; the survivor on six parts, rng(dmg × 0.5–1.0)
+  at armor ×0.5 for torso/head, rng(dmg × 0.75–1.25) at ×0.4 for limbs ("You're caught in the
+  explosion!"). Terrain is bashed with damage × `obstacle_blast_percentage`; passable tiles get
+  smoke (fire for `fire` blasts).
+- fragments (`project_shrapnel`): every creature on the level within lround(distance) ≤ range and in
+  sight takes the fragment impact, no roll: the survivor on all six main parts (the full impact
+  each, BN's halved copy is unused), others once. The 40 mm HEDP (AMMO_M433_HEDP: 70 / r 1, 60
+  bullet ×1.6 armor to 7 tiles) is therefore deadly to an unarmored survivor anywhere within 7
+  tiles in the open, as in BN.
+- noise (`explosion_funcs::regular`): min(max(damage, fragment) + (fire ? 70 : 90), 191), "a huge
+  explosion!" ≥ 180, "an explosion!" ≥ 120, else "a loud pop!".
+- kills are credited to the shooter (monster, NPC, or the survivor); the shooter is not spared.
+- drawn by the existing `explosion` event (fireball and smoke in `render/turretFx.ts`) and
+  `enemyFireFx.ts` (a grenade: an olive dot with a short smoke trail along its arc).
+
+The survivor's own new-format explosive ammo (EXPLOSIVE, AMMO_M433_HEDP…) never went off before:
+`ammoEffectsAt` only read legacy `power`. It now goes through the same `blast` hook (`combatdepth.ts`).
+
+**Monsters dodging free-aim rounds** (`projectile.projectileDodge`, `PlayerCombat.freeDodge`). BN
+`Creature::deal_projectile_attack` (creature.cpp) gives every target, monsters included, a partial
+dodge: `dodge_roll / dice(10, proj.speed)` (a monster's dodge_roll is `get_dodge() × 5`,
+monster.cpp; values under 0.01 are dropped, capped at 1) is added to `missed_by`; at ≥ 1 the
+round is avoided ("The elf-a avoids your projectile!") and flies on (ballistics.cpp keeps going,
+`hit_critter` unset). Projectile speed is `item::gun_speed`: the ammo's `speed` (default 1000)
+plus the gun's. Free aim now applies it: a hitscan round's missedBy (how far off the body's centre
+the ray entered) and a free arrow's. Against a gun (1000) it adds ~0.01 at most, so bullets are
+effectively never avoided; against an arrow (~100) a dodge-10 elf-a adds ~0.1 on average, turning
+edge grazes into misses. Plain zombies (dodge 0) never dodge and roll nothing. An avoided round
+reads "dodged" at the crosshair and the monster sways 0.4 m aside (`monsterDodge`).
+
+Not modelled: flinging items, the tear gas canister ticking (one cloud), NPCs throwing hand
+grenades (`npc::alt_attack` uses NPC_ALT_ATTACK items; the survivor's armed explosives now tick,
+see [Blasts](#blasts-one-explosion-vehicles-ceilings-and-live-grenades)), monster-versus-monster/NPC
+gun fire (gun actors only target the survivor), and the survivor's own launcher rounds still resolve
+as hitscan (they explode where they hit). Flinging creatures, z-levels, vehicle damage and ceilings
+are in the next section.
+
+Tests: `tests/enemyprojectiles.test.ts` (16): the arc shape and that it still hits, a miss falls to
+the ground past you, an NPC archer's and the elf-a's arrows arc, BN data/legacy conversion, blast
+falloff/size/noise bands, a blast's falloff and wall shielding on zombies, fragments on six parts
+and shielding/range, the survivor's per-part blast bands, `lobOf`, the bio-operator's HEDP lob and
+blast, the SWAT tear gas cloud, incendiary rockets' fields and blast, the survivor's HEDP reaching
+the blast hook, `projectileDodge` statistics, and edge arrows avoided / bullets and zombies never.
+Real input: `tools/realinput.ts --only enemyproj --gpu --shots <dir>`.
+
+**Real-input QA** (2026-10-11, Chromium on the GPU, `--only enemyproj`, 16/16 checks): an NPC
+archer (archery 4) 15 m away: its arrows fly the arc (+0.1 m over the line mid-flight), 7 loosed in
+~7 s, all missed (BN dispersion at 15 m); a follower archer shooting a zombie 9 m away in profile
+(+0.04 m: at that range the drop is tiny, for the survivor's arrows too); the bio-operator's HEDP
+lobbed +1.2 m over the line, came down 4 m behind the survivor and its fragments hit for 242 (six
+parts, BN's no-roll fragments: lethal to an unarmored survivor); the SWAT zombie's tear gas lob
+left a yellow cloud; `v` to the shoulder camera (real key). Free-aim longbow at the elf-a's edge
+(real RMB draw, LMB loose): 7 of 12 hit, none avoided. Free-aim hits on the drawn part boxes sit
+at missed_by ≲ 0.8 (the boxes are narrower than the creature radius the formula divides by), so
+BN's average +0.1 dodge rarely reaches 1; the rule is covered by the unit tests. Enemy arrows
+remain small dark dots (now 2.2 px; a profile shot at 9 m barely shows them). Frames (session
+scratchpad): `lob_fp_zoom.png` (the grenade rising over the bio-operator with its smoke trail, four
+frames), `grenade_lob_seq.png`, `run3/` (all 24 frames: arrows at you, profile, lob, blast, tear gas
+cloud, dodge test).
+
+## Blasts: one explosion, vehicles, ceilings and live grenades
+
+**One implementation.** `src/game/explosion.ts` (an older approximation: a disc of radius
+cbrt(power), its own falloff, a stun, one terrain bash) is gone. Every explosion now goes through
+`blast.detonate`: the survivor's ammo effects and CUSTOM_EXPLOSION rounds (the turrets' 120 mm HEAT,
+the M79's HEDP: `PlayerCombat.ammoEffectsAt` → the one `blast` hook), enemy grenades and launcher
+rounds (`roundEndsAt`), land mines and booby traps (`traps.ts`: BN `get_basic_explosion_data`,
+40 / r 3, an 80 bullet ×3 fragment to 6, which used to be a flat 20–40 bash on three parts),
+EXPLODE death functions (`mondeath.ts`: BN `mdeath::explode`, legacy power 75–375 by size, which
+used to be a ring of fire), fuel tanks (below) and armed grenades (below). `cdda.detonate(dx, dy,
+explosion | itemId)` sets one off for testing.
+
+`detonate` now follows Cataclysm-BN `src/explosion.cpp` `ExplosionProcess` step by step (the rules
+are listed in the file header; the earlier ones, falloff, sizes, the survivor's six parts, noise,
+are unchanged):
+- **ints**: the process takes damage and radius as `int` (`ExplosionProcess(p, ex.damage,
+  ex.radius…)`): a legacy blast's radius is truncated (1.9 → 1), legacy damage = trunc(power ×
+  2/15).
+- **fill_maps / z-levels**: z-levels within max(radius, fragment range) / 4 (`Z_LEVEL_DIST` 4); a
+  tile is in the blast when lround(3D trig distance + 3 × |dz|) ≤ radius, so a blast of radius ≥ 4
+  reaches the room above or below, through the floor (`is_occluded` follows BN's 3D `line_to`
+  and only looks for impassable tiles; floors don't stop it). Fragments stay on the level.
+- **order**: fragments first (`project_shrapnel`, nearest first), then the blast wave tile by
+  tile, nearest first, each tile checked for occlusion *as the wave reaches it*: a window or a
+  car door the wave already broke no longer shields what is behind it.
+- **fragments on obstacles**: an impassable tile in the fragments' reach is hit by impact × 0.25
+  (`SHRAPNEL_OBSTACLE_REDUCTION`): a vehicle part through `vehicle::damage`, terrain/furniture as
+  a bash (a grenade's fragments break the windows in sight). `fragment_effect` `onfire` (the
+  .50 Raufoss, the 25 mm HEI) sets flammable, or one in `odds` fleshy, monsters alight.
+- **multibash**: each blasted tile is bashed at damage × obstacle percentage, then again at a
+  force falling by damage / 5 (`MULTIBASH_COUNT` 5, `VEHICLE_DAMAGE_MULT` 2) while above 0: up to
+  five bashes (150, 120, 90, 60, 30 for the HEAT round's centre). Each hits the vehicle part there
+  (`map::bash_vehicle`) and the terrain and furniture (floors when the tile below is open).
+- **fling** (`blast_tile` "Fling creatures", `move_entity`): a creature still standing gets
+  (radius − distance) × damage × 40750 / (grams × 100) tiles (`MOB_FLING_FACTOR`,
+  `EXPLOSION_CALIBRATION_POWER`; over 30 it's rng 30–50); from 1 tile it flies away from the
+  centre (±0.95 tile jitter), stops at an impassable tile or another creature and turns back with
+  0.3 of its remaining speed (`RESTITUTION_COEFF`). No landing damage (BN's TODO). A HEAT round
+  throws an 82 kg zombie at its centre 2.25 tiles, a 30 kg dog ~6; a grenade (70 / r 2) can't move
+  a zombie. Monsters dash there, the survivor slides (the side-step's move), NPCs are moved;
+  someone seated in a vehicle stays put.
+- **fields**: smoke stays within half the radius (BN clears the outer half's after a delay).
+- **summary**: BN's "You are hit by the explosion and shrapnel, taking N damage." (and "The
+  zombie is hit by…" for what you can see) after the blast.
+- **queue**: an explosion set off by an explosion (a fuel tank) waits until this one is done
+  (`explosion_queue`).
+
+**Vehicles** (`src/game/vehicleDamage.ts`, BN `vehicle/vehicle.cpp`): see
+[VEHICLES.md, Blasts and vehicles](VEHICLES.md#blasts-and-vehicles-srcgamevehicledamagets).
+Occupants: BN has no special case, a creature on a vehicle tile is blasted like any other; the
+closed doors, boards and windshields around a seat are impassable, so they shield whoever sits
+there until the blast opens or breaks them (a car door survives a grenade; an open door lets the
+blast in).
+
+**Rounds stop at vehicles.** The free-aim ray (`castAim`) now stops at a vehicle body at the
+height look mode and the reticle give it (`vehicleHitHeight`: 1.6 m for a tile with a closed
+obstacle or a roof, else 1.0 m), and the classic ray and thrown items at a vehicle's closed
+obstacle parts (`castRay`): before, rounds and grenades flew through parked cars. A round that
+stops on a vehicle damages a part there by BN `map::shoot` (`PlayerCombat.shootVehicle`: its
+damage through `vehicle::damage`, aimed, as stab or heat for incendiaries): the HEAT shell's own
+4000-point impact wrecks the part it strikes before its blast goes off on the tile in front.
+The shooter's own vehicle never stops its rounds.
+
+**Ceilings: the decision.** BN's projectiles fly straight on the tile grid and land where they
+were aimed; a level change through two floors in a row stops them (ballistics.cpp: "Currently
+strictly no shooting through floor", the round ends on its previous tile). The port's lob arc is
+a picture of that flight, so indoors it must neither pass through the ceiling nor change where
+BN lands it:
+- **flatten** (`enemyfire.ceilingSpeed`): a lob that starts under a ceiling or comes down under
+  one is launched faster, its apex kept 0.2 m under every ceiling over that stretch (the apex of
+  g·s(D−s)/(2v²) must fit the room left over the line). It still lands where it was aimed. A
+  building in between, under open sky on both sides, is something to lob over.
+- **collide** (`EnemyFire.step`, now level by level): what still meets a ceiling (a line already
+  at the ceiling, a round past its aim point) stops just under it ('ceiling', on the shooter's
+  level) and a grenade goes off there; rising out of doors over a wall into the level above, it
+  flies on over the roof and lands on it (`onEnd` now gets the level it ended on) or beyond.
+- the survivor's arrows (`stepFlight`) stop at a ceiling and drop to the floor under it.
+
+**Live grenades** (`src/game/armed.ts`, BN `explosion_iuse`, `item::process_tool`). Pulling the
+pin (`u`, the grenade's `transform` with `target_charges` 5: `Inventory.useTransform` now applies
+BN's target_charges / rand_target_charges / target_ammo, so a packed LAW also unfolds loaded)
+makes an active `grenade_act`; each turn of fuse burns a charge and "Tick."s
+(`sound_volume`), and the tick that finds none left sets off its `explosion` where it is: in your
+hand, or where it landed when thrown (`t`). Using it again says BN's no_deactivate_msg. A turn is
+a combat turn, 1/3 s: a grenade's five turns are 1.7 s (menus pause, so pick and throw at
+leisure). Dynamite (20 turns) and pipe bombs (6) work the same way. Before, the armed grenade
+"ran out of power" after five turns and nothing happened.
+
+Tests: `tests/blast.test.ts` (26): the HEAT/grenade/legacy data, the survivor's explosions and
+CUSTOM_EXPLOSION reaching the one hook, a land mine, an EXPLODE death, multibash forces, BN's
+bresenham, a wall broken by the wave no longer shielding, fragments breaking windows, a radius-5
+blast reaching the floor above (radius 3 not), fling velocity and bounce, a dog thrown by a HEAT
+blast, `vehicle::damage` armour/threshold, a HEAT blast wrecking a car and killing its engine,
+the driver shielded by the closed door (and hit through the open one), a tank untouched by 12
+grenades around it but dented by HEAT, fragments on a car, a fuel tank blowing up (and through
+`detonate`, queued), the Abrams' HEAT round meeting the car it was aimed at, `shootVehicle` (9 mm
+on a door, 4000 on Abrams plate), indoor lobs flattened under the ceiling and landing on target,
+a lob whose line meets the ceiling stopping under it, a lob over a building and onto its roof,
+an arrow loosed into the ceiling, the grenade's fuse held and thrown at a car, the LAW unfolding
+loaded. `tests/enemyprojectiles.test.ts` and `tests/turret.test.ts` now run on the one blast.
+
+**Real-input QA** (2026-10-11, Chromium on the GPU via `drive.ts serve --headful --gpu`, scripts in
+the session scratchpad: `qa_heat.mts`, `qa_grenade.mts`, `qa_lob.mts`; 18/18 checks):
+- the Abrams: `e` at the wheel, real W/A/S/D to the gunner, `e` mans the 120 mm, `r` loads HEAT
+  from the rack, LMB at a car parked broadside 21 m out: one blast on the road at its near side,
+  the car lost ~900 HP of 17653 with a frame and the windshield destroyed (the shell's impact
+  and the multibash), "You hear a huge explosion"; the engine and the far side untouched.
+- a hand grenade: `u` + Enter pulls the pin ("You pull the pin on the grenade.", 5/5), `t` +
+  Enter throws it at a car 8 m off: it lands against the near doors (it used to fly through the
+  car), ticks, goes off 1.5 s after the throw; windshield and a headlight destroyed, "You are hit
+  by the shrapnel, but take no damage." (god mode). The M79's HEDP (LMB) at a second car: blast
+  at the car, a halfboard destroyed.
+- indoors (the refugee center lobby, a 2.6 m ceiling): the feral bio-operator 9 m down the room
+  launched two 40 mm grenades (a launched lob is flat, ~0.5 m over its line: topped out at 1.7 m,
+  nothing to flatten); both came down on the floor ('ground') on your level and went off there.
+  The SWAT zombie's thrown tear gas at 8.5 m: flattened from 8.0 to 8.6 m/s, its apex 2.4 m (the
+  unflattened arc reached 2.6 m, into the ceiling), and it struck a body as aimed
+  (`lobswat_02_in_flight.png`: the canister just under the ceiling). The survivor's longbow (real
+  RMB draw, the view turned up 55° with the real mouse, LMB looses) put its arrow into the ceiling
+  and it dropped 0.8 m away.
+- screenshots (session scratchpad `shots/blast/`): `heat_01_gunner_aimed_at_car.png`,
+  `heat_03_blast.png`, `heat_07_wreck_blast_side.png`, `grenade_02_activate_picker.png`,
+  `grenade_03_in_flight.png` (the live grenade lying at the car, "(4/5)"), `grenade_04_blast.png`,
+  `m79_02_blast.png`, `lob_01_in_flight.png`, `lobswat_02_in_flight.png`,
+  `arrow_01_drawn_at_ceiling.png`, `arrow_02_dropped.png`.
+
+Limits: items on blasted tiles aren't smashed or flung; traps aren't set off by blasts; BN's
+`break_off` (an already broken part torn off into scattered pieces) isn't modelled, so a broken
+part soaks hits; a round that stops on a vehicle stops there (BN's flies on with what the part
+didn't absorb); `obstructed_by_vehicle_rotation` (diagonal gaps in a rotated vehicle) isn't
+checked; a fuel tank destroyed outright spills rather than exploding (as in BN, where it leaks
+first), and its "loud pop" isn't played; NPCs don't arm explosives; a lob that starts outdoors and
+ends indoors through a doorway is flattened only over the covered stretch at its end.
+
+## Surface-aligned bullet marks
+
+Persistent marks use pooled thin world meshes rather than camera-facing billboards. Only
+explicitly landed, target-free hard-round misses/whiffs are eligible; arrows, unresolved
+range endpoints, target-bearing misses and legacy events without a landing fact leave no
+mark. Damage and projectile resolution are unchanged.
+
+The renderer reconstructs height from the current camera and pitch, then verifies a solid
+with a cosmetic raycast. This is an approximation: recoil, reticle offset and third-person
+parallax can make it differ from the actual projectile. The verified point must be within
+35 cm of the reconstructed endpoint (the search extends by the same bound). A loaded-only
+wrapper checks each chunk before terrain/furniture/floor reads and abandons missing state
+without generating the world. The inferred surface normal orients the patch, with an
+8 mm outward offset. This does not claim authoritative projectile impact normals.
+
+Marks retain the existing 30-real-second life and 60-mark cap, reuse pooled instances,
+clear on load, and keep their world transform when the camera moves. Actual OS shots,
+normal pistol stowing, walking and mouse-look produced the inspected
+[wall](screenshots/gaps/impact-wall.png),
+[oblique wall](screenshots/gaps/impact-wall-oblique.png) and
+[floor](screenshots/gaps/impact-floor.png) captures. The wall patch stayed at y944.008
+with tile normal(0,1,0); the floor patch stayed at absolute h0.008 with tile normal(0,0,1),
+which maps to world up. The unresolved first floor-fixture shot had landed:false and
+created no mark; the following landed:true floor shot consumed one round and created one.
+The actual pool later had one allocated instance, zero used after expiry.
+
+Tests exercise event classification, all four wall faces, floor/ceiling normals, bounded
+height reconstruction, unrelated earlier obstacles, actual GameMap generation counters,
+maximum storage, world-normal placement and expiry. This is a visual-correctness package;
+it does not claim GPU performance or removal of the remaining tracer billboards.

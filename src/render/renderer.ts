@@ -9,7 +9,7 @@ import { INDOOR_SKY } from './chunkMesh';
 import { LightManager, SkyState } from './lights';
 import { LightMap, naturalLightLevel } from './lightmap';
 import { patchNormalOutput, shared } from './materials';
-import { PixelPipeline, type GradeMode } from './post';
+import { AA_MODES, PixelPipeline, type AAMode, type GradeMode } from './post';
 import { ProceduralTextureSource } from './proceduralSource';
 import { Sky } from './sky';
 import { SpriteLayer, type SpriteHandle } from './sprites';
@@ -61,6 +61,8 @@ export interface RendererOptions {
   radius?: number;
   /** Dither anchoring, see PipelineOptions.ditherAnchor. */
   dither?: 'screen' | 'view';
+  /** Antialiasing, see AAMode (post.ts). */
+  aa?: AAMode;
 }
 
 export class Renderer {
@@ -168,7 +170,9 @@ export class Renderer {
       wallStyle: (params.get('walls') as WallStyle) || opts.wallStyle || 'tinted',
       radius: Number(params.get('radius')) || opts.radius,
       dither: (params.get('dither') as 'screen' | 'view') || opts.dither,
+      aa: (params.get('aa') as AAMode) || opts.aa || 'off',
     };
+    if (!AA_MODES.includes(o.aa!)) throw new Error(`?aa= must be one of ${AA_MODES.join('|')}, got ${o.aa}`);
     this.three = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' });
     const ratio = Number(params.get('pixelRatio'));
     this.pixelRatio = Number.isFinite(ratio) && ratio >= 0.5 && ratio <= 2 ? ratio : 0;
@@ -183,7 +187,7 @@ export class Renderer {
     // defeating frozen local transforms on static chunks during every render pass.
     this.scene.matrixAutoUpdate = false;
 
-    this.pipeline = new PixelPipeline(this.three, { targetHeight: o.targetHeight, grade: o.grade, ...(o.dither ? { ditherAnchor: o.dither } : {}) });
+    this.pipeline = new PixelPipeline(this.three, { targetHeight: o.targetHeight, grade: o.grade, aa: o.aa, ...(o.dither ? { ditherAnchor: o.dither } : {}) });
     this.rig.mode = o.camera!;
     this.procedural = new ProceduralTextureSource(game.data);
     this.models.itemDefs = game.data.items;
@@ -198,7 +202,7 @@ export class Renderer {
     this.chunks.extraObjects = (data) => (data.trees ? buildTreesSteps(data.trees, this.ground.active ? this.ground : null, this.procedural, this.whiteFrame()) : noTrees());
     this.chunks.extras = (near) => {
       if (look.name === 'classic') return undefined;
-      return { f: look.f, ground: this.ground.active ? this.ground : null, white: this.whiteFrame(), near, voxels: this.voxels, arch: look.f.archDetail ? this.archFrames() : undefined, models: furnitureState.style === 'model' ? this.models : undefined };
+      return { f: look.f, ground: this.ground.active ? this.ground : null, white: this.whiteFrame(), near, voxels: this.voxels, arch: look.f.archDetail ? this.archFrames() : undefined, models: furnitureState.style === 'model' ? this.models : undefined, heldItems: this.models };
     };
     this.sprites.skyVisAt = (x, y, z) => (this.chunks.covered(Math.floor(x), Math.floor(y), Math.round(z)) ? INDOOR_SKY : 1);
     this.decor = new DecorLayer(() => this.source);

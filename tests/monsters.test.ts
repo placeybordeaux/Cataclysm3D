@@ -20,6 +20,7 @@ import { Grid, hasLOS } from '../src/game/los';
 import { nextUpgradeDay, turnsToEffectSeconds } from '../src/game/monster';
 import { biteInfection, dodgeCheck, fmt, isMeleeSpecial, trySpecial } from '../src/game/monattack';
 import { FEEL, setFeelDifficulty, telegraphSeconds } from '../src/game/combatfeel';
+import { installAchievements } from '../src/achievements';
 import { monsterFactionAttitude } from '../src/game/monfaction';
 
 const dir = path.join(__dirname, '../public/data');
@@ -381,6 +382,88 @@ describe('damage & death', () => {
 });
 
 describe('monster factions (BN monfaction.cpp)', () => {
+  it('combines explicit and rolled bash before applying armor once', () => {
+    const { sys } = world();
+    const a = sys.spawnById('mon_zombie', 18.5, 12.5, 0)!;
+    const b = sys.spawnById('mon_zombie', 19.5, 12.5, 0)!;
+    a.type = { ...a.type, melee_skill: 100, melee_damage: [{ damage_type: 'bash', amount: 10 }], melee_dice: 10, melee_dice_sides: 1 };
+    b.type = { ...b.type, dodge: 0, armor: { ...b.type.armor, bash: 15 } };
+    const hp = b.hp;
+    (sys as unknown as { meleeMonster(attacker: typeof a, victim: typeof b): void }).meleeMonster(a, b);
+    expect(hp - b.hp).toBe(5);
+  });
+
+  it('monster kills retain source and do not award survivor kills or achievements', async () => {
+    const { game, sys } = world();
+    const achievements = await installAchievements(game, null, undefined, load('achievements.json'));
+    achievements.begin(false);
+    game.events.on('creatureDied', (e) => { if (e.killer === game.player) game.stats.addKill((e.creature as { type: { id: string } }).type.id); });
+    const a = sys.spawnById('mon_zombie', 18.5, 12.5, 0)!;
+    const b = sys.spawnById('mon_zombie', 19.5, 12.5, 0)!;
+    const deaths: unknown[] = [];
+    game.events.on('creatureDied', (e) => deaths.push(e.killer));
+    sys.hurt(b, b.hp + 1, a);
+    expect(b.dead).toBe(true);
+    expect(deaths).toEqual([a]);
+    expect(sys.kills.size).toBe(0);
+    expect(game.stats.totalKills()).toBe(0);
+    expect(achievements.tracker.value('num_avatar_kills')).toBe(0);
+    expect(achievements.tracker.completion('achievement_kill_zombie')).toBe('pending');
+  });
+
+  it('wild wasps attack their hated bee faction independently of the player', () => {
+    const { game, sys } = world(11);
+    const wasp = sys.spawnById('mon_wasp', 24.5, 12.5, 0)!;
+    const bee = sys.spawnById('mon_bee', 25.5, 12.5, 0)!;
+    const hp = bee.hp;
+    step(game, 0.8);
+    expect(sys.monsterTargets.get(wasp)?.uid).toBe(bee.uid);
+    expect(bee.hp).toBeLessThan(hp);
+  });
+  it('a friendly dog attacks a visible zombie without hurting the survivor', () => {
+    const { game, sys } = world(22);
+    const dog = sys.spawnById('mon_dog', 18.5, 12.5, 0)!;
+    const zombie = sys.spawnById('mon_zombie', 19.5, 12.5, 0)!;
+    dog.friendly = true;
+    const hp = zombie.hp, playerHp = hpTotal(game);
+    step(game, 1.5);
+    expect(sys.monsterTargets.get(dog)).toBe(zombie);
+    expect(zombie.hp).toBeLessThan(hp);
+    expect(hpTotal(game)).toBe(playerHp);
+  });
+
+  it('third-party melee winds up before damage and whiffs when its target moves away', () => {
+    const { game, sys } = world(22);
+    const dog = sys.spawnById('mon_dog', 18.5, 12.5, 0)!;
+    const zombie = sys.spawnById('mon_zombie', 19.5, 12.5, 0)!;
+    dog.friendly = true;
+    const hp = zombie.hp;
+    const phases: string[] = [];
+    game.events.on('monsterAttack', (e) => { if (e.monster === dog) phases.push(e.phase); });
+    for (let i = 0; i < 30 && !dog.windup; i++) game.tick(1 / 60);
+    expect(dog.windup).toBeTruthy();
+    expect(phases).toEqual(['windup']);
+    expect(zombie.hp).toBe(hp);
+    zombie.x = 35.5;
+    step(game, 0.5);
+    expect(phases).toContain('whiff');
+    expect(zombie.hp).toBe(hp);
+  });
+
+  it('same faction monsters do not fight each other and walls hide potential targets', () => {
+    const { game, sys } = world();
+    const a = sys.spawnById('mon_zombie', 24.5, 12.5, 0)!;
+    const b = sys.spawnById('mon_zombie', 25.5, 12.5, 0)!;
+    const dog = sys.spawnById('mon_dog', 27.5, 12.5, 0)!;
+    dog.friendly = true;
+    for (let y = 8; y < 17; y++) game.map.setTer(26, y, 0, 't_wall');
+    const hp = [a.hp, b.hp];
+    step(game, 0.5);
+    expect(sys.monsterTargets.has(a)).toBe(false);
+    expect(sys.monsterTargets.has(b)).toBe(false);
+    expect(sys.monsterTargets.has(dog)).toBe(false);
+    expect([a.hp, b.hp]).toEqual(hp);
+  });
   it('resolves explicit, self, inherited and base-chain relations', () => {
     expect(monsterFactionAttitude(data, 'zombie', 'zombie')).toBe('FRIENDLY');
     expect(monsterFactionAttitude(data, 'zombie', 'blob')).toBe('FRIENDLY');

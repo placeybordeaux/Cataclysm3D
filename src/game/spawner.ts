@@ -189,14 +189,16 @@ export class Spawner {
   private request(c: Chunk, r: SpawnRequest, rng: Rng): void {
     const data = this.sys.game.data;
     if (r.kind === 'monster') {
-      if (!data.monsters[r.id]) {
+      // Legacy custom-generator dormant aliases refer to real monster definitions.
+      const def = data.monsters[dormantBase(r.id) ?? r.id];
+      if (!def) {
         warnOnce('monster', r.id);
         return;
       }
       // jmapgen_monster: CDDA multiplies the spawn odds by SPAWN_DENSITY (capped, the excess
       // turning into extra monsters). Mapgen already rolled the raw odds, so thin/multiply here.
       // Real-time tuning is about hostiles; a pet dog in a yard spawns at plain SPAWN_DENSITY.
-      const d = data.monsters[r.id].aggression > 0 ? this.densityFor(null) : this.opts.density;
+      const d = def.aggression > 0 ? this.densityFor(null) : this.opts.density;
       const n = r.friendly ? r.count ?? 1 : densityCount(r.count ?? 1, d, rng);
       if (n > 0) this.place(c, [{ id: r.id, count: n }], r.x, r.y, rng, r);
       return;

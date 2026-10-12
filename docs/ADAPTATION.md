@@ -515,12 +515,12 @@ group weights); (c) else any that fit. It also names the failure:
 |---|---|
 | none carried | "Your flashlight takes a light disposable battery or a light battery. You have none. The light disposable battery is the most common." |
 | …after looking at a pile | "… You have none. You saw 2 light batteries on the floor 4 m northeast." |
-| batteries all flat | "Your light batteries are all flat. Rechargeable ones need a battery charger, and there's no charging in this version yet. Disposable ones come charged, like the light disposable battery." |
+| batteries all flat | "Your light batteries are all flat. Put rechargeable ones in cargo with an enabled vehicle battery charger or recharging station. Disposable ones come charged, like the light disposable battery." |
 | wrong size | "Your medium battery doesn't fit: the flashlight takes a light disposable battery or a light battery." |
 | loose rounds, no magazine | "You have 9x19mm JHPs, but the Glock 19 loads from a magazine: it takes a Glock magazine, … (9x19mm)." |
 | other calibre loaded | "The S&W 619 still has .38 Specials in it: unload it first to load .357 magnum FMJs." |
 | exo-suit / power armor | "Your powered survivor suit can't be reloaded: it runs on a UPS you carry. … A UPS takes a heavy battery or a heavy battery (high-capacity)." |
-| smartphone | "Your smartphone can't be reloaded: it's recharged from a battery charger or a UPS, and there's no charging in this version yet." |
+| smartphone | "Your smartphone can't be reloaded: put it in cargo with an enabled vehicle battery charger or recharging station." |
 | dead tool, charged battery carried | "The flashlight's batteries are dead. You have a light disposable battery with charge: reload the flashlight with it." |
 | full | unchanged: "The Glock 19 is already fully loaded!" |
 
@@ -538,9 +538,9 @@ Rule changes that came with it, from BN: `NO_RELOAD` items (smartphones, exo-sui
 (BN `item::is_reloadable`). `USE_UPS` tools draw from the UPSes you carry once their own charge is
 gone, for switching on and for running (BN `item::units_remaining` / `use_charges(itype_UPS)`).
 Before this, an exo-suit could never be powered here. A flat battery still goes in (BN allows it),
-but the message says it's flat. Not ported: battery chargers and recharging stations (so
-rechargeables found flat stay flat, and the messages say so), the power-armor interface CBM,
-and power armor's `set_transform` activation.
+but the message says it's flat. Vehicle battery chargers and recharging stations are now supported; see
+[Recharging](RECHARGING.md). Power armor's `set_transform` activation and the power-armor
+interface CBM are covered in [Power armor](BN_POWER_ARMOR.md).
 
 Code: `src/game/reloadhelp.ts` (UI-free), wired into `Inventory.reload` / `useTransform`.
 Tests: `tests/reloadhelp.test.ts` is a table over real BN items (flashlight, heavy-duty

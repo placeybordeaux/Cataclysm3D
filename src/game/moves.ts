@@ -133,6 +133,12 @@ function record(log: Undo[], u: Undo): void {
   log.push(u);
 }
 
+/** Include a scalar resource change (for example vehicle battery energy) in the
+ * current item-move transaction. Call before changing that resource. */
+export function recordResourceUndo(undo: () => void): void {
+  txStack[txStack.length - 1]?.push(undo);
+}
+
 // ------------------------------------------------------------------ raw slot access
 
 /** Raw Inventory slots (inventory.ts exposes them only to this module). */

@@ -183,7 +183,7 @@ export const TEMPLATES: Record<TemplateId, ChassisTemplate> = {
   },
   frame: { id: 'frame', name: 'Frame', rung: 'frame', family: 'frame', style: 'frame', cols: [1, 64], rows: [1, 64], length: null, width: null, engineBay: 'any', blurb: 'An honest home-made grid: golf carts, tractors, draisines, odd builds.' },
   frame_small: { id: 'frame_small', name: 'Cart', rung: 'frame', family: 'frame', style: 'frame', cols: [1, 2], rows: [1, 2], length: null, width: null, engineBay: 'any', blurb: 'One or two cells: carts, wheelchairs, barrows, boards.' },
-  frame_tracked: { id: 'frame_tracked', name: 'Armoured frame', rung: 'frame', family: 'frame', style: 'frame', cols: [1, 64], rows: [1, 64], length: null, width: null, engineBay: 'any', blurb: 'Tanks, APCs and IFVs: armoured grids (tracks drawn as wheels).' },
+  frame_tracked: { id: 'frame_tracked', name: 'Armoured frame', rung: 'frame', family: 'frame', style: 'frame', cols: [1, 64], rows: [1, 64], length: null, width: null, engineBay: 'any', blurb: 'Tanks, APCs and IFVs: armoured hulls on tracks or heavy wheels.' },
   frame_boat: { id: 'frame_boat', name: 'Hull', rung: 'frame', family: 'frame', style: 'frame', cols: [1, 64], rows: [1, 64], length: null, width: null, engineBay: 'any', blurb: 'Boats, rafts and hovercraft: a floating grid.' },
   frame_air: { id: 'frame_air', name: 'Airframe', rung: 'frame', family: 'frame', style: 'frame', cols: [1, 64], rows: [1, 64], length: null, width: null, engineBay: 'any', blurb: 'Planes, helicopters, blimps: wings and rotors on a grid.' },
 };

@@ -84,15 +84,23 @@ export function evaluateRequirements(data: GameData, req: Partial<RequirementDat
   const qualities = (req.qualities ?? []).map((grp) =>
     finishGroup(grp.map((q) => ({ text: qualityText(data, q), have: inv.hasQuality(q.id, q.level, q.amount ?? 1), color: '', kind: 'quality' as const, id: q.id, need: q.level, avail: inv.maxQuality(q.id) }))),
   );
-  const tools = (req.tools ?? []).map((grp) =>
-    finishGroup(
+  // Installed tools share battery energy. Check groups in consumption order so
+  // a welding rig and kitchen cannot each promise the same remaining charges.
+  const budget = inv.sources.some(s => s.resource) ? new Map<object, number>() : undefined;
+  const tools = (req.tools ?? []).map((grp) => {
+    const result = finishGroup(
       grp.map((t) => {
-        const charges = t.count > 0 ? inv.toolChargesOf(t.id) : inv.hasTool(t.id) ? 1 : 0;
+        const charges = t.count > 0 ? inv.toolChargesOf(t.id, budget) : inv.hasTool(t.id) ? 1 : 0;
         const have = t.count > 0 ? charges >= t.count * batch : charges > 0;
         return { text: toolText(data, t, batch), have, color: '', kind: 'tool' as const, id: t.id, need: t.count > 0 ? t.count * batch : 0, avail: charges };
       }),
-    ),
-  );
+    );
+    if (budget && result.ok) {
+      const selected = grp.find(t => t.count > 0 ? inv.toolChargesOf(t.id, budget) >= t.count * batch : inv.hasTool(t.id));
+      if (selected && selected.count > 0) inv.consumeToolCharges(selected.id, selected.count * batch, budget);
+    }
+    return result;
+  });
   const components = (req.components ?? []).map((grp) =>
     finishGroup(
       grp.map((c) => {

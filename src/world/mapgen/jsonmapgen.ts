@@ -1,10 +1,11 @@
 import { Rng, hashString } from '../../core/rng';
 import type { ItemSpawn } from '../map';
-import type { OterDef, WorldgenData } from '../worldgen_data';
+import type { CubeDir, OterDef, WorldgenData } from '../worldgen_data';
+import { rotateDir } from '../overmap/mutable';
 import { MapBuffer, OMT } from './buffer';
 import type { GenStats } from './stats';
 import { evalValue, intR, IntR, ParamCtx, ParamDef, parseWeighted, rollR, Scope, weightedPick } from './values';
-import { MatchType, OmtRef, otMatch, rotateOffset } from '../overmap/oter';
+import { DIR_NAMES, LINE_E, LINE_N, LINE_S, LINE_W, MatchType, OmtRef, otMatch, rotateOffset } from '../overmap/oter';
 import type { SpawnedItem } from '../../data/itemgroups';
 
 // Interpreter for CDDA's "json" mapgen method (src/mapgen.cpp mapgen_function_json /
@@ -134,6 +135,8 @@ export interface MapgenDat {
   omtAt(dx: number, dy: number, dz: number): OmtRef;
   /** terrains this OMT replaced, innermost last (for fallback_predecessor_mapgen) */
   predecessors: string[];
+  /** join id a mutable overmap special matched on this OMT's face (world direction), if any */
+  joinAt?(dir: CubeDir): string | undefined;
   params: ParamCtx;
   rng: Rng;
   cityName: string;
@@ -886,10 +889,34 @@ export class MapgenRunner {
       const any = Object.entries<any>(d.flags_any).some(([dir, fl]) => (fl as string[]).some((f) => hasFlag(dir, f)));
       if (!any) return false;
     }
+    if (d.connections && Object.keys(d.connections).length) {
+      // jmapgen_nested::neighbor_connection_check: the neighbour is part of one of the listed
+      // overmap connections and its line runs towards us (non-linear oters have no line).
+      const conns = this.env.data.overmap.connectionTerrains;
+      if (!conns) throw new Error('nested mapgen "connections" needs overmap.json connectionTerrains (re-run extract:mapgen)');
+      for (const [dir, list] of Object.entries<any>(d.connections)) {
+        const side = DIR_NAMES.indexOf(dir as (typeof DIR_NAMES)[number]);
+        if (side < 0) throw new Error(`nested mapgen connections: bad direction ${dir}`);
+        const n = neighbor(dir);
+        // the neighbour sits on the rotated side, so its line must point back across that side
+        const back = [LINE_S, LINE_W, LINE_N, LINE_E][(side + dat.adjRotation) % 4];
+        const ok = !!n && (Array.isArray(list) ? list : [list]).some((c: string) => {
+          const ts = conns[c];
+          if (!ts) throw new Error(`nested mapgen connections: unknown overmap_connection ${c}`);
+          return ts.includes(n.type) && n.line >= 0 && (n.line & back) !== 0;
+        });
+        if (!ok) return false;
+      }
+    }
     if (d.joins && Object.keys(d.joins).length) {
-      // Joins only exist for mutable overmap specials, which we don't place.
-      this.env.stats.unsupportedFeature('nested:joins');
-      return false;
+      // BN neighbor_join_check: joins a mutable special matched on this OMT's faces, in the
+      // mapgen's own (unrotated) frame; every listed direction must carry one of the ids.
+      for (const [dir, spec] of Object.entries<any>(d.joins)) {
+        const ids: string[] = Array.isArray(spec) ? spec : [spec];
+        if (!ids.length) continue;
+        const j = dat.joinAt?.(rotateDir(dir as CubeDir, dat.adjRotation));
+        if (j === undefined || !ids.includes(j)) return false;
+      }
     }
     if (Array.isArray(d.predecessors) && d.predecessors.length) {
       const ok = d.predecessors.some((o: any) => dat.predecessors.some((p) =>

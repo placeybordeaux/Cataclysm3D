@@ -8,6 +8,7 @@ import { Batches, chamferBox, partFrames, tube, wheel } from './vehicleGeom';
 import { darkenC, lampBox, seat, steeringWheel, type ModelBuild } from './vehicleModel';
 import { rimGrips, type RideAnchors } from './vehicleRider';
 import { liveryBody, skinLayoutInfo } from './vehicleSkin';
+import { trackRun } from './vehicleTank';
 
 // The "model" look for grids that aren't a car / truck / bus / bike: golf carts, tractors,
 // carts, APCs and whatever players weld together. These stay frame-like (the grid is the
@@ -26,6 +27,43 @@ function partTint(p: VehiclePart, fallback: number): number {
   // CDDA curses colours are garish: pull them toward grey
   const mix = (s: number) => Math.round(((c >> s) & 255) * 0.55 + 0x60 * 0.45);
   return (mix(16) << 16) | (mix(8) << 8) | mix(0);
+}
+
+/** A tread belt (BN tread1/2/3 under a cell): drawn as one track per run, not a tyre per cell. */
+export function isTrack(p: VehiclePart): boolean {
+  return has(p, 'TRACKED') && p.def.location === 'under' && !!p.def.wheel;
+}
+
+/** A compaction drum (BN roller_drum: a WHEEL mounted in the cell's centre, not under it). */
+export function isDrum(p: VehiclePart): boolean {
+  return has(p, 'WHEEL') && !has(p, 'TRACKED') && p.def.location === 'center' && !!p.def.wheel;
+}
+
+/**
+ * Runs of adjacent cells: `axis` 'x' groups parts in the same row (my) into runs along x
+ * (a tread down a side), 'y' groups parts in the same column (mx) into runs across (a drum).
+ */
+export function wheelRuns(ws: VehiclePart[], axis: 'x' | 'y'): { lo: number; hi: number; at: number; parts: VehiclePart[] }[] {
+  const by = new Map<number, VehiclePart[]>();
+  for (const w of ws) {
+    const k = axis === 'x' ? w.my : w.mx;
+    by.set(k, [...(by.get(k) ?? []), w]);
+  }
+  const out: { lo: number; hi: number; at: number; parts: VehiclePart[] }[] = [];
+  for (const [at, list] of by) {
+    const pos = (q: VehiclePart) => (axis === 'x' ? q.mx : q.my);
+    list.sort((a, b) => pos(a) - pos(b));
+    let cur: VehiclePart[] = [];
+    for (const q of list) {
+      if (cur.length && pos(q) - pos(cur[cur.length - 1]) > 1) {
+        out.push({ lo: pos(cur[0]), hi: pos(cur[cur.length - 1]), at, parts: cur });
+        cur = [];
+      }
+      cur.push(q);
+    }
+    if (cur.length) out.push({ lo: pos(cur[0]), hi: pos(cur[cur.length - 1]), at, parts: cur });
+  }
+  return out;
 }
 
 export function buildFrame(v: Vehicle, L0: Layout, base: number): ModelBuild {
@@ -99,7 +137,7 @@ export function buildFrame(v: Vehicle, L0: Layout, base: number): ModelBuild {
         if (!board && !half && !door) edge(i, CHASSIS_Y1, 1.0, paint);
       }
     }
-    for (const w of ps.filter((p) => has(p, 'WHEEL'))) {
+    for (const w of ps.filter((p) => has(p, 'WHEEL') && !isTrack(p) && !isDrum(p))) {
       const r = wheelRadius(w);
       const width = Math.max(0.05, Math.min(0.6, ((w.def.wheel?.width ?? 20) / 100) * 1.1));
       const side = outer[2] ? 1 : outer[3] ? -1 : 0;
@@ -135,6 +173,18 @@ export function buildFrame(v: Vehicle, L0: Layout, base: number): ModelBuild {
     for (const l of ps.filter((p) => (has(p, 'CONE_LIGHT') || has(p, 'WIDE_CONE_LIGHT')) && p.hp > 0)) lampBox(lamps, mx + 0.5, Y(0.62), l.my, 0.14, 0.06, 1);
     const pr = ps.find((p) => has(p, 'PROTRUSION') && p.hp > 0);
     if (pr && !ps.some((p) => p.def.location === 'structure' && !has(p, 'PROTRUSION'))) chamferBox(parts.get(0x2a2a2e), mx - 0.08, Y(1.05), my - 0.1, mx + 0.08, Y(1.22), my + 0.1, 0.03, F.dark, F.dark);
+  }
+  // Treads: one belt per run of tread cells instead of a car tyre per cell (BN tread1/2/3
+  // carry a wheel "diameter" of 75-150 cm, which drew a tractor's tread as 1.6 m tyres).
+  for (const run of wheelRuns(v.wheels.filter(isTrack), 'x')) {
+    const w = run.parts[0];
+    const ys = v.wheels.map((q) => q.my);
+    const dir: -1 | 1 = w.my <= (Math.min(...ys) + Math.max(...ys)) / 2 ? -1 : 1;
+    const d = (w.def.wheel?.diameter ?? 75) / 100, wd = (w.def.wheel?.width ?? 40) / 100;
+    trackRun(parts, F, base, {
+      xa: run.lo - 0.45, xb: run.hi + 0.45, zo: w.my + dir * 0.46, dir, width: Math.max(0.35, Math.min(0.9, wd * 1.2)),
+      h: Math.max(0.5, Math.min(0.95, d * 0.65)), s: 1, alive: run.parts.some((q) => q.hp > 0), far: false, rubber: 0x2c2c2a,
+    });
   }
   // tail lamps on the rear corners of the chassis
   if (structural.length) {

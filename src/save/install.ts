@@ -111,7 +111,7 @@ export function quitToTitle(game: Game): void {
 
 export async function installSave(
   game: Game,
-  opts: { api: DebugApi; genKind: string; worldgen: { resetPending(): void } | null; monsters: { sys: MonsterSystem; spawner: Spawner } | null },
+  opts: { api: DebugApi; genKind: string; genVersion?: number; worldgen: { resetPending(): void } | null; monsters: { sys: MonsterSystem; spawner: Spawner } | null },
 ): Promise<SaveHandle> {
   const { api } = opts;
   registerCoreSaveables(game, { monsters: opts.monsters, worldgen: opts.worldgen });
@@ -130,6 +130,7 @@ export async function installSave(
     backend: defaultBackend(),
     sync: browserLocalStorage(),
     gen: opts.genKind,
+    genVersion: opts.genVersion,
     build: () => uiCtx()?.build,
   });
   try {
@@ -149,6 +150,7 @@ export async function installSave(
     else game.message(`Autosave failed: ${(err as Error)?.message ?? err}`, 'c_light_red');
   });
   registerOption({
+    category: 'Gameplay',
     name: 'Autosave',
     value: () => (mgr.autosaveHours ? `every ${mgr.autosaveHours} h` : 'off'),
     change: (d) => {

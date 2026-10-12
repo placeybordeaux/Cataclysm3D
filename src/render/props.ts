@@ -84,13 +84,22 @@ function flake(g: GeomBuilder, w: TileFrame, cx: number, cy: number, cz: number,
 }
 
 const kindCache = new Map<string, number>();
+/**
+ * Things patternFor paints as pavement (via BN's ROAD flag) that aren't a road surface: open
+ * doors, gates, door frames, guardrails, elevators.
+ */
+const NOT_ROAD = /door|gate|frame|guardrail|elevator|platform|pit_/;
 /** 1 natural ground, 2 town hard surface, 3 road, 0 nothing. */
-function surfaceKind(def: TerrainDef): number {
+export function surfaceKind(def: TerrainDef): number {
   let k = kindCache.get(def.id);
   if (k !== undefined) return k;
   const p = patternFor(def.id, def.flags, 'floor');
   if (hasFlag(def, 'INDOORS')) k = 0;
-  else if (hasFlag(def, 'ROAD') || p === 'pavement') k = 3;
+  // Road = what's painted as asphalt. BN's ROAD flag means "smooth for vehicles" and sits on
+  // most built floors (t_floor, t_metal_floor, linoleum, concrete, *_no_roof): keyed on the
+  // flag, every wooden floor under open sky (a roofless ruin, a deck, the style gallery's
+  // showroom) grew a dark sky-mirror puddle.
+  else if (p === 'pavement' && !NOT_ROAD.test(def.id)) k = 3;
   else if (p === 'sidewalk' || p === 'concrete') k = 2;
   else if (p === 'grass' || p === 'dirt' || p === 'gravel' || p === 'sand') k = 1;
   else k = 0;

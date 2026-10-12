@@ -1,14 +1,15 @@
-import type { Rng } from '../../core/rng';
+import { Rng, hashSeed } from '../../core/rng';
 import type { SpawnedItem } from '../../data/itemgroups';
 import type { OterDef, RegionSettings } from '../worldgen_data';
 import { LINE_E, LINE_N, LINE_S, LINE_W, type OmtRef } from '../overmap/oter';
 import { MapBuffer, OMT } from './buffer';
 import type { MapgenDat } from './jsonmapgen';
 import { weightedPick } from './values';
+import { mapgenMine, mapgenRockPartial, mapgenSlimepit } from './bncaves';
 
 // Ports of Cataclysm: Bright Nights' C++ builtin generators (src/mapgen/mapgen_functions.cpp)
 // that BN overmap terrains use instead of JSON: field, road_* (one mapgen_road for all five
-// shapes), parking_lot and the plain fills. Forests and water keep the approximations in
+// shapes), parking_lot, subway_* and sewer_* (underground transport) and the plain fills. Forests and water keep the approximations in
 // builtin.ts; the Lua lab generator lives in lab.ts.
 
 export interface BuiltinEnv {
@@ -281,8 +282,22 @@ export function mapgenRoad(env: BuiltinEnv, dat: MapgenDat, buf: MapBuffer): voi
   if (plaza !== 8) roadVehicles(buf, rng, neighborSidewalks > 0, numDirs === 2 ? (diag ? 'curved' : 'straight') : 'other');
   if (neighborSidewalks && rng.oneIn(2)) buf.spawns.push({ kind: 'group', id: 'GROUP_ZOMBIE', x: 0, y: 0, x2: W - 1, y2: H - 1 });
   placeItems(env, buf, rng, plaza > -1 ? 'trash' : 'road', 5);
-  if (dat.oter.type === 'road_nesw_manhole') buf.ter[MapBuffer.idx(rng.int(6, W - 6), rng.int(6, W - 6))] = 't_manhole_cover';
   buf.rotate(rot);
+  if (dat.oter.type === 'road_nesw_manhole') {
+    const [mx, my] = manholeSpot(dat.env.seed, dat.omx, dat.omy);
+    buf.ter[MapBuffer.idx(mx, my)] = 't_manhole_cover';
+  }
+}
+
+/**
+ * Where road_nesw_manhole puts its cover: BN's rng(6, SEEX*2-6) on both axes, but from an RNG
+ * of its own keyed on the OMT, so the sewer OMT below can put its ladder under it (BN draws no
+ * ladder: it lets you down onto whatever tile is below and gives no way back up). The range is
+ * symmetric, so placing it after the road's rotation keeps BN's distribution.
+ */
+export function manholeSpot(seed: number, omx: number, omy: number): [number, number] {
+  const r = new Rng(hashSeed(seed, omx, omy, 0x6d616e68));
+  return [r.int(6, SEEX * 2 - 6), r.int(6, SEEY * 2 - 6)];
 }
 
 /** mapgen_parking_lot: striped pavement facing the road it touches. */
@@ -312,8 +327,202 @@ export function mapgenParkingLot(env: BuiltinEnv, dat: MapgenDat, buf: MapBuffer
   }
 }
 
-/** Plain fills: open_air, rock, empty_rock (BN mapgen_rock fills t_rock). */
-export const FILL_BUILTINS: Record<string, string> = { open_air: 't_open_air', empty_rock: 't_rock', rock: 't_rock', null: 't_null', test: 't_grass' };
+// ------------------------------------------------------------------------------------------
+// mapgen_subway / mapgen_sewer
+
+/** mapf::formatted_set_simple: one character per tile, every row 24 wide. */
+function formatted(buf: MapBuffer, rows: readonly string[], bind: Record<string, string>): void {
+  if (rows.length !== OMT) throw new Error(`formatted_set_simple: ${rows.length} rows`);
+  for (let y = 0; y < OMT; y++) {
+    const row = rows[y];
+    if (row.length !== OMT) throw new Error(`formatted_set_simple: row ${y} is ${row.length} wide`);
+    for (let x = 0; x < OMT; x++) {
+      const t = bind[row[x]];
+      if (t === undefined) throw new Error(`formatted_set_simple: unbound '${row[x]}'`);
+      buf.ter[MapBuffer.idx(x, y)] = t;
+      buf.furn[MapBuffer.idx(x, y)] = '';
+    }
+  }
+}
+
+// Tracks sit on columns 4, 8, 15 and 19 in every shape (and in BN's station, lab cargo station
+// and microlab station JSON), which is what makes them continue across OMT edges.
+const SUBWAY_BIND = {
+  '.': 't_rock_floor', '#': 't_rock', '^': 't_railroad_rubble', '-': 't_railroad_tie', '|': 't_railroad_tie',
+  X: 't_railroad_track', x: 't_railroad_track_on_tie', D: 't_railroad_track_d', S: 't_buffer_stop',
+};
+const SUBWAY_FOUR_WAY = [
+  '...^X^^^X^....^X^^^X^...', '..^DX^^DX^....^XD^^XD^..', '.^D^X^D^X^....^X^D^X^D^.', '^D^^XD^^X^^^^^^X^^DX^^D^',
+  'XXXXDXXXXXXXXXXXXXXDXXXX', '^^^DX^^^X^^^^^^X^^^XD^^^', '^^D^X^^^X^^^^^^X^^^X^D^^', '^D^^X^^^X^^^^^^X^^^X^^D^',
+  'XXXXXXXXXXXXXXXXXXXXXXXX', '^^^^X^^^X^^^^^^X^^^X^^^^', '...^X^^^X^....^X^^^X^...', '...^X^^^X^....^X^^^X^...',
+  '...^X^^^X^....^X^^^X^...', '...^X^^^X^....^X^^^X^...', '^^^^X^^^X^^^^^^X^^^X^^^^', 'XXXXXXXXXXXXXXXXXXXXXXXX',
+  '^D^^X^^^X^^^^^^X^^^X^^D^', '^^D^X^^^X^^^^^^X^^^X^D^^', '^^^DX^^^X^^^^^^X^^^XD^^^', 'XXXXDXXXXXXXXXXXXXXDXXXX',
+  '^D^^XD^^X^^^^^^X^^DX^^D^', '.^D^X^D^X^....^X^D^X^D^.', '..^DX^^DX^....^XD^^XD^..', '...^X^^^X^....^X^^^X^...',
+];
+const SUBWAY_TEE = [
+  '..^D^^^D^....^D^^^D^....', '.^D^^^D^....^D^^^D^.....', '^D^^^D^....^D^^^D^......', 'D^^^D^^^^^^D^^^D^^^^^^^^',
+  'XXXDXXXXXXDXXXDXXXXXXXXX', '^^D^^^^^^D^^^D^^^^^^^^^^', '^D^^^^^^D^^^D^^^^^^^^^^^', 'D^^^^^^D^^^D^^^^^^^^^^^^',
+  'XXXXXXDXXXDXXXXXXXXXXXXX', '^^^^^D^^^D^^^^^^^^^^^^^^', '...^D^^^D^..............', '..^D^^^D^...............',
+  '.^D^^^D^................', '^D^^^D^.................', 'D^^^D^^^^^|^^|^^|^^|^^|^', 'XXXDXXXXXXxXXxXXxXXxXXxX',
+  '^^D^^^^^^^|^^|^^|^^|^^|^', '^D^^^^^^^^|^^|^^|^^|^^|^', 'D^^^^^^^^^|^^|^^|^^|^^|^', 'XXXXXXXXXXxXXxXXxXXxXXxX',
+  '^^^^^^^^^^|^^|^^|^^|^^|^', '........................', '........................', '........................',
+];
+const SUBWAY_DIAGONAL = [
+  '...^D^^^D^....^D^^^D^...', '....^D^^^D^....^D^^^D^..', '.....^D^^^D^....^D^^^D^.', '......^D^^^D^....^D^^^D^',
+  '.......^D^^^D^....^D^^^D', '#.......^D^^^D^....^D^^^', '##.......^D^^^D^....^D^^', '###.......^D^^^D^....^D^',
+  '####.......^D^^^D^....^D', '#####.......^D^^^D^....^', '######.......^D^^^D^....', '#######.......^D^^^D^...',
+  '########.......^D^^^D^..', '#########.......^D^^^D^.', '##########.......^D^^^D^', '###########.......^D^^^D',
+  '############.......^D^^^', '#############.......^D^^', '##############.......^D^', '###############.......^D',
+  '################.......^', '#################.......', '##################......', '###################.....',
+];
+const SUBWAY_STRAIGHT = Array.from({ length: OMT }, (_, y) => (y % 3 === 1 ? '...-x---x-....-x---x-...' : '...^X^^^X^....^X^^^X^...'));
+const SUBWAY_END = [
+  '...^X^^^X^....^D^^^D^...', '...-x---x-...^DX^^DX^...', '...^X^^^X^..^D^X^D^X^...', '...^X^^^X^.^D^^XD^^X^...',
+  '...^X^^^X^^D^^^D^^^X^...', '...^X^^^X^D^^^DX^^^X^...', '...^X^^^XD^^^D^X^^^X^...', '...^X^^^D^^^D^-x---x-...',
+  '...^X^^DX^^D^.^X^^^X^...', '...^X^D^X^D^..^X^^^X^...', '...^XD^^XD^...-x---x-...', '...^D^^^D^....^X^^^X^...',
+  '...^X^^^X^....^X^^^X^...', '...-x---x-....-x---x-...', '...^X^^^X^....^X^^^X^...', '...^X^^^X^....^X^^^X^...',
+  '...-x---x-....-x---x-...', '...^X^^^X^....^X^^^X^...', '...^X^^^X^....^X^^^X^...', '...^S^^^S^....^S^^^S^...',
+  '...^^^^^^^....^^^^^^^...', '#......................#', '##....................##', '########################',
+];
+
+/** oter_t::has_connection per direction (N E S W) for LINEAR types; none for anything else. */
+function lineDirs(r: OmtRef, env: BuiltinEnv): boolean[] {
+  if (r.line < 0 || !env.terrains[r.type]?.flags.includes('LINEAR')) return [false, false, false, false];
+  return LINE_BITS.map((b) => (r.line & b) !== 0);
+}
+
+/** mapgen_subway: four track lines on rubble in a rock-floored tunnel; ties, diagonal
+ *  crossovers at junctions, a buffer stop (and maybe a draisine) at dead ends, cave moss. */
+export function mapgenSubway(env: BuiltinEnv, dat: MapgenDat, buf: MapBuffer): void {
+  const rng = dat.rng;
+  // dat.fill_groundcover(): every tile is overwritten below, but it consumes the RNG in BN too.
+  for (let i = 0; i < OMT * OMT; i++) buf.ter[i] = groundcover(env.region, rng);
+  let dirs = lineDirs(dat.oter, env);
+  // Neighbours flagged SUBWAY (oter_flags::subway_connection) pull a connection in. No BN
+  // terrain carries the flag today; kept so data that adds it behaves like BN. (BN also works
+  // out curvedir_nesw here, but never reads it.)
+  for (let d = 0; d < 4; d++) {
+    const [dx, dy] = NESWX[d];
+    if (env.terrains[dat.omtAt(dx, dy, 0).type]?.flags.includes('SUBWAY')) dirs[d] = true;
+  }
+  const num = dirs.filter(Boolean).length;
+  let rot = 0, diag = false;
+  if (num === 3) rot = !dirs[0] ? 2 : !dirs[1] ? 3 : !dirs[3] ? 1 : 0;
+  else if (num === 2) {
+    if (dirs[1] && dirs[3]) rot = 1;
+    else if (dirs[1] && dirs[2]) (rot = 1), (diag = true);
+    else if (dirs[2] && dirs[3]) (rot = 2), (diag = true);
+    else if (dirs[3] && dirs[0]) (rot = 3), (diag = true);
+    else if (dirs[0] && dirs[1]) diag = true;
+  } else if (num === 1) rot = dirs[1] ? 1 : dirs[2] ? 2 : dirs[3] ? 3 : 0;
+  dirs = rot4(dirs, rot);
+
+  // num 0 (subway_isolated) maps to subway_four_way like any linear type, but BN's switch has
+  // no case for it and leaves the groundcover; we do the same.
+  if (num === 4) formatted(buf, SUBWAY_FOUR_WAY, SUBWAY_BIND);
+  else if (num === 3) formatted(buf, SUBWAY_TEE, SUBWAY_BIND);
+  else if (num === 2) formatted(buf, diag ? SUBWAY_DIAGONAL : SUBWAY_STRAIGHT, SUBWAY_BIND);
+  else if (num === 1) {
+    formatted(buf, SUBWAY_END, SUBWAY_BIND);
+    subwayDeadendVehicles(buf, rng);
+  }
+
+  for (let i = 0; i < OMT * OMT; i++) {
+    if (rng.oneIn(12) && buf.ter[i] === 't_rock_floor') {
+      buf.ter[i] = 't_moss_underground';
+      if (rng.oneIn(15)) buf.furn[i] = 'f_cave_mushrooms';
+    }
+  }
+  buf.rotate(rot);
+}
+
+/** VehicleSpawn default_subway_deadend (road_vehicles.json): half the time nothing, else 1-2
+ *  draisines at the "subway_deadend" vehicle_placement spots, on the unrotated map. */
+function subwayDeadendVehicles(buf: MapBuffer, rng: Rng): void {
+  if (rng.int(0, 199) < 100) return;
+  const n = rng.int(1, 2);
+  for (let k = 0; k < n; k++) {
+    const s = rng.oneIn(2) ? { x: 16, y: rng.int(3, 13), f: 270 } : { x: 7, y: rng.int(7, 17), f: 90 };
+    buf.vehicles.push({ id: 'trains_draisine', x: s.x, y: s.y, rotation: s.f, status: -1, fuel: -1 });
+  }
+}
+
+/** mapgen_sewer: solid rock with a 4-wide sewage channel from the centre towards every
+ *  connected side (sewer_isolated keeps just the centre pool), plus "sewer" loot. The look
+ *  comes from the mx_sewer_* map extra applied on top (worldgen.ts applyMapExtra). */
+export function mapgenSewer(env: BuiltinEnv, dat: MapgenDat, buf: MapBuffer): void {
+  const dirs = lineDirs(dat.oter, env);
+  const num = dirs.filter(Boolean).length;
+  for (let i = 0; i < OMT; i++)
+    for (let j = 0; j < OMT; j++) {
+      let fill = true;
+      if (j >= SEEY - 2 && j <= SEEY + 1) {
+        if (i <= SEEX - 2) fill = !dirs[3];
+        else if (i >= SEEX + 1) fill = !dirs[1];
+        else fill = false;
+      } else if (i >= SEEX - 2 && i <= SEEX + 1) {
+        fill = j <= SEEY - 2 ? !dirs[0] : !dirs[2];
+      }
+      buf.ter[MapBuffer.idx(i, j)] = fill ? 't_rock' : 't_sewage';
+    }
+  placeItems(env, buf, dat.rng, 'sewer', 4 + num * 6);
+}
+
+/**
+ * Not BN: a ladder under the manhole above (see manholeSpot) and, if the map extra walled it
+ * off, a concrete passage from it to the nearest tile that reaches the sewer's openings
+ * (the channel ends on connected sides; the centre pool for an isolated sewer).
+ */
+export function addManholeLadder(env: BuiltinEnv, dat: MapgenDat, buf: MapBuffer, x: number, y: number, passable: (i: number) => boolean): void {
+  const idx = MapBuffer.idx;
+  const lad = idx(x, y);
+  buf.ter[lad] = 't_ladder_up';
+  buf.furn[lad] = '';
+  const dirs = lineDirs(dat.oter, env);
+  const seeds: number[] = [];
+  for (let k = SEEX - 2; k <= SEEX + 1; k++) {
+    if (dirs[0]) seeds.push(idx(k, 0));
+    if (dirs[1]) seeds.push(idx(OMT - 1, k));
+    if (dirs[2]) seeds.push(idx(k, OMT - 1));
+    if (dirs[3]) seeds.push(idx(0, k));
+  }
+  if (!seeds.length) for (let cx = SEEX - 1; cx <= SEEX; cx++) for (let cy = SEEY - 2; cy <= SEEY + 1; cy++) seeds.push(idx(cx, cy));
+  const reach = new Uint8Array(OMT * OMT);
+  const q = seeds.filter(passable);
+  for (const i of q) reach[i] = 1;
+  while (q.length) {
+    const i = q.pop()!;
+    const ix = i % OMT, iy = (i / OMT) | 0;
+    for (let d = 0; d < 4; d++) {
+      const nx = ix + NESWX[d][0], ny = iy + NESWX[d][1];
+      if (!MapBuffer.inb(nx, ny)) continue;
+      const n = idx(nx, ny);
+      if (!reach[n] && (passable(n) || n === lad)) (reach[n] = 1), q.push(n);
+    }
+  }
+  if (reach[lad]) return;
+  // Nearest reachable tile (or the channel centre if the extra sealed everything), then an L
+  // of floor to it: along x first, then y.
+  let best = -1, bd = Infinity;
+  for (let i = 0; i < OMT * OMT; i++) {
+    if (!reach[i]) continue;
+    const d = Math.abs((i % OMT) - x) + Math.abs(((i / OMT) | 0) - y);
+    if (d < bd) (bd = d), (best = i);
+  }
+  const [tx, ty] = best >= 0 ? [best % OMT, (best / OMT) | 0] : [SEEX, SEEY];
+  const dig = (cx: number, cy: number) => {
+    const i = idx(cx, cy);
+    if (i === lad || passable(i)) return;
+    buf.ter[i] = 't_thconc_floor';
+    buf.furn[i] = '';
+  };
+  for (let cx = x; cx !== tx; cx += Math.sign(tx - x)) dig(cx, y);
+  for (let cy = y; cy !== ty; cy += Math.sign(ty - y)) dig(tx, cy);
+  dig(tx, ty);
+}
+
+/** Plain fills: open_air, empty_rock (BN mapgen_rock fills t_rock); "rock" is bncaves.ts mapgenRockPartial. */
+export const FILL_BUILTINS: Record<string, string> = { open_air: 't_open_air', empty_rock: 't_rock', null: 't_null', test: 't_grass' };
 
 /** Builtins every oter id can map to (see MapgenData.builtin); returns false if unknown. */
 export function runBnBuiltin(name: string, env: BuiltinEnv, dat: MapgenDat, buf: MapBuffer): boolean {
@@ -324,6 +533,11 @@ export function runBnBuiltin(name: string, env: BuiltinEnv, dat: MapgenDat, buf:
   if (name === 'field') mapgenField(env, dat, buf);
   else if (name.startsWith('road_')) mapgenRoad(env, dat, buf);
   else if (name === 'parking_lot') mapgenParkingLot(env, dat, buf);
+  else if (name.startsWith('subway_')) mapgenSubway(env, dat, buf);
+  else if (name.startsWith('sewer_')) mapgenSewer(env, dat, buf);
+  else if (name === 'mine') mapgenMine(env, dat, buf);
+  else if (name === 'rock') mapgenRockPartial(dat, buf);
+  else if (name === 'lua:slimepit') mapgenSlimepit(env, dat, buf, () => groundcover(env.region, dat.rng));
   else return false;
   return true;
 }

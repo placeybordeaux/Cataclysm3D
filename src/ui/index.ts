@@ -33,6 +33,8 @@ import { installFullscreen } from './fullscreen';
 import { armUnloadGuard, disarmUnloadGuard } from '../core/unload';
 import { closeAllWindows } from './framework';
 import { installUi2 } from '../ui2/install';
+import { closeMenu } from '../ui2/menu';
+import { closeGroup } from '../ui2/window';
 
 // Wires the whole UI into the game: HUD, key bindings for every screen, the trackers the
 // screens need (distance walked, overmap exploration, kills), the death screen, and the
@@ -50,18 +52,27 @@ export interface UiHandle {
 }
 
 export async function installUi(game: Game, renderer: Renderer, worldgen: WorldGenerator | null, api: DebugApi): Promise<UiHandle> {
+  // Every activity entry point must return to gameplay, including nested item menus and
+  // world actions selected while another inventory/crafting window is still pausing time.
+  game.activities.startHooks.push(() => {
+    closeMenu();
+    closeGroup();
+    closeAllWindows();
+  });
   const data = await loadUiData();
   const ctx: UiContext = { game, renderer, worldgen, data };
   const h = new Hud(ctx, getUiRoot());
   applyStoredOptions(ctx);
   installMapMarks(game);
   registerOption({
+    category: 'Interface',
     name: 'HUD style',
     desc: 'Modern: body, needs and weapon as icons that only light up when they matter. Detailed: the CDDA sidebar with every number.',
     value: () => (h.modern.prefs.detailed ? 'Detailed' : 'Modern'),
     change: () => h.modern.setPrefs({ detailed: !h.modern.prefs.detailed }),
   });
   registerOption({
+    category: 'Interface',
     name: 'HUD width',
     desc: 'Full: the HUD uses the screen corners. 16:9: it stays in a centred 16:9 area, closer to where you look. Auto: 16:9 on ultrawide screens only.',
     value: () => ({ auto: 'Auto', full: 'Full', '16:9': '16:9' })[h.modern.prefs.width],

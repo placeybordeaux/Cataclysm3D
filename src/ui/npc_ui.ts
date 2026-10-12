@@ -460,3 +460,18 @@ export function pickItemMenu(title: string, items: Item[], onPick: (it: Item | n
     onClose: () => !chosen && onPick(null),
   });
 }
+
+/** Dialogue effects with a BN uilist (barber_hair/barber_beard, copy_npc_rules): pick one; null = cancelled. */
+export function pickOptionMenu(title: string, options: string[], onPick: (i: number | null) => void): void {
+  if (!options.length) return onPick(null);
+  let chosen = false;
+  openMenu<number>({
+    title,
+    entries: options.map((label, i) => ({ label: esc(label), value: i })),
+    onSelect: (i) => {
+      chosen = true;
+      onPick(i);
+    },
+    onClose: () => !chosen && onPick(null),
+  });
+}

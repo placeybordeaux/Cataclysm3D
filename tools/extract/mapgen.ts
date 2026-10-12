@@ -12,12 +12,14 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import type {
-  ForestBiome, MapgenData, OterDef, OvermapData, RegionSettings, SpecialDef, SpecialOvermap,
+  ForestBiome, MapgenData, MutableSpecialDef, OterDef, OvermapConnectionDef, OvermapData,
+  RegionSettings, SpecialDef, SpecialOvermap,
 } from '../../src/world/worldgen_data';
 import type { ItemGroupRef } from '../../src/data/types';
 import { defaultCddaDir, loadCddaObjects, objectIds, resolveFamily } from './cdda';
 import { prepareObject } from './prepare';
 import { migrateGroup, normalizeGroupRef, type ItemMigration } from './itemgroup';
+import { normalizeMutableSpecial } from './mutable';
 
 const argv = process.argv.slice(2);
 if (argv.includes('--help') || argv.includes('-h')) {
@@ -51,6 +53,22 @@ export const WILD_SPECIALS = [
   'Lab', 'lab_mutagen_6_level',
 ];
 
+/**
+ * Specials overmap.ts places from genVersion 2 (placeMutableSpecials): BN's mutable wilderness
+ * specials, plus the fixed mine specials, which exist to host the nested mutable mine_tunnel.
+ * Kept apart from WILD_SPECIALS because genVersion 1 iterates that list and must not change.
+ * Left out: lab_basement (grown by placeLabBasement) and sunken_lab (fixed; needs the
+ * lake_water_cube / lake_bed columns under lakes, which we don't generate).
+ */
+export const MUTABLE_WILD_SPECIALS = [
+  'Anthill', 'Acid Anthill', 'Lab with Anthill', 'Slime Pit', 'Ice Lab', 'stream_mutable',
+  'Mine Entrance', 'Spiral mine', 'Amigara mine', 'Wyrms mine',
+];
+
+/** BN terrains drawn by hardcoded C++ that isn't a registered cfunction (mapgen.cpp draw_map
+ *  dispatches on the oter id): name -> our builtin name. */
+const BN_HARDCODED: Record<string, string> = { mine: 'mine', mine_down: 'mine', mine_finale: 'mine' };
+
 /** Base terrains the overmap generator emits directly (BN has no solid_earth/deep_rock: every
  *  z<0 OMT defaults to empty_rock). `bridge` replaces road over water. The classic lab's
  *  underground terrains come from overmap.ts's lab_basement generator. */
@@ -58,7 +76,12 @@ const BASE_OTERS = [
   'field', 'forest', 'forest_thick', 'forest_water', 'road', 'road_nesw_manhole', 'river',
   'river_center', 'lake_surface', 'lake_shore', 'open_air', 'empty_rock', 'bridge',
   'lab', 'lab_filler', 'lab_stairs', 'lab_core', 'lab_finale',
+  // Underground networks overmap.ts lays out itself (genVersion 2): sewer_isolated under city
+  // manholes and the sewer_tunnel / subway_tunnel connections (see CONNECTIONS_BUILT).
+  'sewer', 'subway',
 ];
+/** BN overmap_connections whose subtype terrains the overmap generator builds. */
+const CONNECTIONS_BUILT = ['sewer_tunnel', 'subway_tunnel'];
 
 /** BN mapgen_functions.cpp get_mapgen_cfunction: C++ generators an OMT uses when its mapgen id
  *  equals one of these names (load_overmap_terrain_mapgens registers them by id) or when its
@@ -72,6 +95,9 @@ const BN_CFUNCTIONS = new Set([
   'subway_curved', 'subway_end', 'subway_tee', 'subway_four_way', 'sewer_straight', 'sewer_curved', 'sewer_end',
   'sewer_tee', 'sewer_four_way', 'tutorial', 'lake_shore', 'pd_border',
 ]);
+/** region_settings map_extras keys whose extras those builtins apply (BN mapgen.cpp generate()
+ *  runs the extras of every oter; we do it only for these, so other terrains keep their output). */
+const TRANSPORT_EXTRAS = ['sewer', 'subway'];
 const LINEAR_SUFFIXES = ['_straight', '_curved', '_end', '_tee', '_four_way'];
 const DIRS = ['_north', '_east', '_south', '_west'];
 
@@ -82,6 +108,8 @@ const DIRS = ['_north', '_east', '_south', '_west'];
 // 0.J's region_settings_* / forest_biome_* split.
 const WANTED_TYPES = [
   'mapgen', 'palette', 'overmap_terrain', 'overmap_special', 'city_building', 'overmap_location', 'region_settings', 'MIGRATION',
+  'overmap_connection',
+  'map_extra',
   // only for their "alias" ids (see canonical below)
   'terrain', 'furniture',
 ];
@@ -181,8 +209,54 @@ for (const [type, city] of [['overmap_special', false], ['city_building', true]]
 }
 for (const w of WILD_SPECIALS) if (!specials[w]) throw new Error(`WILD_SPECIALS entry not found: ${w}`);
 
+// BN mutable specials (normalized by tools/extract/mutable.ts, grown by
+// src/world/overmap/mutable.ts), one `mutables` map: first the ones place_nested reaches from
+// WILD_SPECIALS (the classic Lab's lab_basement), then MUTABLE_WILD_SPECIALS and what they nest.
+const allMutable: Record<string, MutableSpecialDef> = {};
+for (const o of all('overmap_special')) if (o.subtype === 'mutable') allMutable[o.id] = normalizeMutableSpecial(o);
+const mutables: Record<string, MutableSpecialDef> = {};
+const wildNestedMutables: string[] = [];
+for (const w of WILD_SPECIALS) {
+  for (const n of specials[w].nested ?? []) {
+    if (allMutable[n.special] && !mutables[n.special]) (mutables[n.special] = allMutable[n.special]), wildNestedMutables.push(n.special);
+  }
+}
+{
+  const queue = MUTABLE_WILD_SPECIALS.slice();
+  while (queue.length) {
+    const id = queue.shift()!;
+    const m = allMutable[id];
+    const nested = m ? m.nested : specials[id]?.nested;
+    if (!m && !specials[id]) throw new Error(`MUTABLE_WILD_SPECIALS: ${id} is not an overmap special`);
+    if (m) mutables[id] = m;
+    for (const n of nested ?? []) if (allMutable[n.special] && !mutables[n.special]) queue.push(n.special);
+  }
+}
+
+// overmap_connection id -> the oter types it is made of (overmap_connection::has), for nested
+// mapgen "connections" conditions (lab_train_depot opens a tunnel towards a subway).
+const connectionTerrains: Record<string, string[]> = {};
+for (const o of all('overmap_connection')) connectionTerrains[o.id] = [...new Set<string>((o.subtypes ?? []).map((t: any) => t.terrain))];
+
 const locations: Record<string, string[]> = {};
 for (const o of all('overmap_location')) locations[o.id] = o.terrains ?? [];
+
+// BN overmap_connection (overmap_connection.cpp load / subtype::load): basic_cost defaults to 0,
+// weight to 1, layout to "city"; ORTHOGONAL is the only subtype flag.
+const connections: Record<string, OvermapConnectionDef> = {};
+for (const o of all('overmap_connection')) {
+  connections[o.id] = {
+    id: o.id,
+    defaultTerrain: o.default_terrain,
+    layout: o.layout ?? 'city',
+    subtypes: (o.subtypes ?? []).map((st: any) => {
+      for (const l of st.locations) if (!locations[l]) throw new Error(`overmap_connection ${o.id}: unknown location ${l}`);
+      return { terrain: st.terrain, locations: st.locations, basicCost: st.basic_cost ?? 0, weight: st.weight ?? 1, orthogonal: (st.flags ?? []).includes('ORTHOGONAL') };
+    }),
+  };
+  if (connections[o.id].layout !== 'city' && connections[o.id].layout !== 'p2p') throw new Error(`overmap_connection ${o.id}: unknown layout ${o.layout}`);
+}
+for (const id of CONNECTIONS_BUILT) if (!connections[id]) throw new Error(`overmap_connection ${id} not found`);
 
 // ---------------------------------------------------------------------------------------
 // Region settings (BN region_settings "default", one monolithic object).
@@ -305,6 +379,7 @@ for (const id of ['lab_1side', 'lab_4side', 'lab_4side_filler', 'lab_finale_1lev
   if (!omtDefs.has(id)) throw new Error(`lab floor plan mapgen ${id} missing`);
   addOm(id);
 }
+for (const id of wildNestedMutables) for (const t of Object.values(mutables[id].overmaps)) addOm(t.overmap);
 const c = region.city;
 const cityIds = [...new Set([...c.houses, ...c.shops, ...c.parks, ...(c.urban_houses ?? []), ...(c.urban_shops ?? []), ...(c.finales ?? [])].map(([id]) => id))];
 for (const id of [...cityIds, ...WILD_SPECIALS]) {
@@ -312,6 +387,18 @@ for (const id of [...cityIds, ...WILD_SPECIALS]) {
   if (s) s.overmaps.forEach((o) => o.om && addOm(o.om));
   else if (terrains[id]) addOm(id);
   else console.warn(`region/whitelist entry is neither special nor terrain: ${id}`);
+}
+for (const id of CONNECTIONS_BUILT) for (const st of connections[id].subtypes) addOm(st.terrain);
+// Terrains of the genVersion 2 specials are pulled in after everything above has been closed
+// over (see the second drain below), so the objects, nested chunks and palettes the existing
+// content already used keep their order in the outputs.
+const lateOm: string[] = [];
+for (const id of MUTABLE_WILD_SPECIALS) specials[id]?.overmaps.forEach((o) => o.om && lateOm.push(o.om));
+for (const m of Object.values(mutables)) {
+  for (const o of Object.values(m.overmaps)) {
+    if (!terrains[baseType(o.overmap)]) throw new Error(`mutable special ${m.id}: unknown oter ${o.overmap}`);
+    lateOm.push(o.overmap);
+  }
 }
 
 const keptOm = new Set<any>();
@@ -347,27 +434,61 @@ if (npcsText) {
 }
 // Strings anywhere inside kept objects that name nested chunks/palettes/terrains pull those
 // in. Over-inclusion (a string that merely looks like an id) is harmless.
-while (queue.length) {
-  const o = queue.pop();
-  const visit = (v: any) => {
-    if (typeof v === 'string') {
-      if (nestedDefs.has(v) && !keptNested.has(v)) {
-        keptNested.add(v);
-        for (const n of nestedDefs.get(v)!) scan(n.object);
-      }
-      if (paletteRaw.has(v) && !keptPalettes.has(v)) {
-        keptPalettes.add(v);
-        scan(paletteRaw.get(v));
-      }
-      if (omtDefs.has(v) && !wantOm.has(v) && terrains[v]) {
-        addOm(v);
-        enqueueOm(v);
-      }
-    } else if (Array.isArray(v)) v.forEach(visit);
-    else if (v && typeof v === 'object') Object.values(v).forEach(visit);
-  };
-  visit(o);
+function drain(): void {
+  while (queue.length) {
+    const o = queue.pop();
+    const visit = (v: any) => {
+      if (typeof v === 'string') {
+        if (nestedDefs.has(v) && !keptNested.has(v)) {
+          keptNested.add(v);
+          for (const n of nestedDefs.get(v)!) scan(n.object);
+        }
+        if (paletteRaw.has(v) && !keptPalettes.has(v)) {
+          keptPalettes.add(v);
+          scan(paletteRaw.get(v));
+        }
+        if (omtDefs.has(v) && !wantOm.has(v) && terrains[v]) {
+          addOm(v);
+          enqueueOm(v);
+        }
+      } else if (Array.isArray(v)) v.forEach(visit);
+      else if (v && typeof v === 'object') Object.values(v).forEach(visit);
+    };
+    visit(o);
+  }
 }
+drain();
+// Map extras of the transport terrains (every sewer OMT gets one of BN's mx_sewer_* layouts).
+const mapExtraDefs = new Map(all('map_extra').map((o) => [o.id, o]));
+const extraTables = new Map<string, { chance: number; values: { id: string; w: number; obj?: any; fn?: string }[] }>();
+for (const key of TRANSPORT_EXTRAS) {
+  const t = rs.map_extras?.[key];
+  if (!t) throw new Error(`region_settings default has no map_extras.${key}`);
+  const values = weights(t.extras, `map_extras.${key}`).map(([id, w]) => {
+    const mx = mapExtraDefs.get(id);
+    if (!mx) throw new Error(`map_extra ${id} (map_extras.${key}) not found`);
+    const g = mx.generator ?? {};
+    if (g.generator_method === 'update_mapgen') {
+      const m = updateDefs.get(g.generator_id);
+      if (!m) throw new Error(`map_extra ${id}: update_mapgen ${g.generator_id} not found`);
+      queue.push(m.object);
+      return { id, w, obj: m.object };
+    }
+    if (g.generator_method === 'map_extra_function') return { id, w, fn: g.generator_id as string };
+    throw new Error(`map_extra ${id}: unsupported generator_method ${g.generator_method}`);
+  });
+  extraTables.set(key, { chance: Number(t.chance), values });
+}
+// Nested chunks only the extras use are written after everything else, so the object indices
+// of the existing content don't move.
+const firstPassNested = new Set(keptNested);
+drain();
+for (const id of lateOm) {
+  const before = new Set(wantOm);
+  addOm(id);
+  for (const w of wantOm) if (!before.has(w)) enqueueOm(w);
+}
+drain();
 
 // Item migrations (Item_factory::finalize applies these to every item group, and mapgen
 // migrates single item ids when it spawns them).
@@ -428,16 +549,25 @@ for (const m of keptOm) {
   else if (om.every((e: any) => typeof e === 'string')) om.forEach((id: string) => add(id));
   else om.forEach((row: string[], ry: number) => row.forEach((id, rx) => add(id, rx * 24, ry * 24)));
 }
-for (const id of keptNested) {
+const writeNested = (id: string) => {
   mapgenOut.nested[id] = nestedDefs.get(id)!.map((m) => ({ w: weightOf(m.weight), o: mapgenOut.objects.push(normalizeMapgenItems(strip(m.object))) - 1 }));
-}
+};
+for (const id of firstPassNested) writeNested(id);
 for (const [id, m] of [...keptUpdates].sort(([a], [b]) => (a < b ? -1 : 1))) {
   (mapgenOut.update ??= {})[id] = mapgenOut.objects.push(normalizeMapgenItems(strip(m.object))) - 1;
+}
+for (const id of keptNested) if (!firstPassNested.has(id)) writeNested(id);
+mapgenOut.extras = {};
+for (const [key, t] of extraTables) {
+  mapgenOut.extras[key] = {
+    chance: t.chance,
+    values: t.values.map((v) => (v.obj ? { id: v.id, w: v.w, o: mapgenOut.objects.push(normalizeMapgenItems(strip(v.obj))) - 1 } : { id: v.id, w: v.w, fn: v.fn })),
+  };
 }
 // Builtin (C++ / Lua) generators by mapgen id, for ids the generator may need.
 mapgenOut.builtin = {};
 for (const id of [...wantOm].sort()) {
-  const name = luaBuiltins[id] ?? terrains[id]?.builtin ?? (BN_CFUNCTIONS.has(id) ? id : undefined);
+  const name = luaBuiltins[id] ?? BN_HARDCODED[id] ?? terrains[id]?.builtin ?? (BN_CFUNCTIONS.has(id) ? id : undefined);
   if (name) mapgenOut.builtin[id] = name;
 }
 const palettesOut: Record<string, any> = {};
@@ -451,7 +581,7 @@ const nameList = (usage: string) => names.filter((n) => n.usage === usage).flatM
 
 // Only ship terrains/specials the generator can actually produce.
 const usedSpecials: Record<string, SpecialDef> = {};
-for (const id of [...cityIds, ...WILD_SPECIALS]) if (specials[id]) usedSpecials[id] = specials[id];
+for (const id of [...cityIds, ...WILD_SPECIALS, ...MUTABLE_WILD_SPECIALS]) if (specials[id]) usedSpecials[id] = specials[id];
 const usedTerrains: Record<string, OterDef> = {};
 for (const id of wantOm) if (terrains[id]) usedTerrains[id] = terrains[id];
 const overmapOut: OvermapData = {
@@ -460,7 +590,11 @@ const overmapOut: OvermapData = {
   locations,
   region,
   wildSpecials: WILD_SPECIALS,
+  connections,
+  mutableWildSpecials: MUTABLE_WILD_SPECIALS,
   names: { city: nameList('city'), given: nameList('given'), family: nameList('family') },
+  mutables,
+  connectionTerrains,
 };
 
 // ---------------------------------------------------------------------------------------
@@ -478,7 +612,7 @@ const outputs: [string, unknown][] = [
 ];
 console.log(`om_terrain ids with mapgen: ${Object.keys(mapgenOut.omt).length} (of ${omtDefs.size}), builtin: ${Object.keys(mapgenOut.builtin).length}, ` +
   `nested: ${keptNested.size} (of ${nestedDefs.size}), update_mapgen: ${keptUpdates.size} (of ${updateDefs.size}), palettes: ${keptPalettes.size} (of ${paletteRaw.size}), ` +
-  `terrains: ${Object.keys(usedTerrains).length}, specials: ${Object.keys(usedSpecials).length}`);
+  `terrains: ${Object.keys(usedTerrains).length}, specials: ${Object.keys(usedSpecials).length}, mutable: ${Object.keys(mutables).length}`);
 if (!DRY) mkdirSync(OUT, { recursive: true });
 for (const [file, data] of outputs) {
   const text = JSON.stringify(data);

@@ -13,6 +13,10 @@ export interface PathOpts {
   maxNodes?: number;
   /** How far outside the start/goal bounding box the search may wander. */
   margin?: number;
+  /** With `bash`: only obstacles whose bash str_min is at most this count (BN bash_strength_val). */
+  bashMax?: number;
+  /** Tiles never entered (BN npc::get_legacy_path_avoid: hold_the_line, avoid_doors). */
+  avoid?: (x: number, y: number) => boolean;
 }
 
 export interface PathResult {
@@ -28,6 +32,7 @@ export interface PathResult {
 export function tileCost(grid: Grid, x: number, y: number, z: number, opts: PathOpts): number {
   const t = grid.ter(x, y, z);
   if (!t) return Infinity;
+  if (opts.avoid?.(x, y)) return Infinity;
   const mc = grid.moveCost(x, y, z);
   // move_cost 2 (= 100 moves) is flat ground, cost 1.
   if (mc > 0) return mc / 2;
@@ -36,7 +41,7 @@ export function tileCost(grid: Grid, x: number, y: number, z: number, opts: Path
     const f = grid.furn(x, y, z)!;
     const bash = f.id !== 'f_null' && f.move_cost_mod < 0 ? f.bash : t.bash;
     // Stronger obstacles are more expensive so zombies prefer doors/windows over walls.
-    if (bash && typeof bash.str_min === 'number') return 6 + Math.min(60, bash.str_min / 2);
+    if (bash && typeof bash.str_min === 'number' && (opts.bashMax === undefined || bash.str_min <= opts.bashMax)) return 6 + Math.min(60, bash.str_min / 2);
   }
   return Infinity;
 }

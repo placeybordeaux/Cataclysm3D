@@ -2,6 +2,7 @@ import type { Game } from './game';
 import { examineHandlers, type Interaction } from './interact';
 import { consumeItem, itemsAt, L } from './moves';
 import { has, type Vehicle } from './vehicle';
+import { distinctVehicleNames } from './vehicleNames';
 import type { VehicleSystem } from './vehicles';
 
 // "Fill up" at a gas pump: pump the fuel mapgen left in it (BN places the fuel as a liquid
@@ -38,34 +39,51 @@ export function tankRoom(v: Vehicle, fuel: string): number {
   return tanksFor(v, fuel).reduce((a, p) => a + Math.max(0, (p.def.capacity ?? 0) - (p.fuelType === fuel ? p.charges : 0)), 0);
 }
 
+/**
+ * Hose distance from a tile centre to `v`: to the body as drawn (its chassis template) when
+ * it has one, else to its tiles. Compare with HOSE_REACH.
+ */
+export function hoseDistance(vs: VehicleSystem | null | undefined, v: Vehicle, cx: number, cy: number): number {
+  const b = vs?.bodyRect(v);
+  if (!b) return Math.min(...v.occupiedTiles().map((t) => Math.hypot(t.tx + 0.5 - cx, t.ty + 0.5 - cy)));
+  const [lx, ly] = v.worldToMount(cx, cy);
+  const dx = Math.max(b.x0 - lx, 0, lx - b.x1), dy = Math.max(b.y0 - ly, 0, ly - b.y1);
+  return Math.hypot(dx, dy) + (HOSE_REACH - HOSE_REACH_BODY);
+}
+
+/** Is the player standing where a hose (or a can's spout) reaches `v`? */
+export function playerReaches(game: Game, v: Vehicle): boolean {
+  const p = game.player;
+  return p.z === v.z && hoseDistance(game.vehicles, v, p.tileX + 0.5, p.tileY + 0.5) <= HOSE_REACH;
+}
+
 /** Vehicles whose body is within hose reach of the pump, nearest first. */
 export function vehiclesByPump(vs: VehicleSystem, x: number, y: number, z: number): Vehicle[] {
   const cx = x + 0.5, cy = y + 0.5;
-  // To the body as drawn (its chassis template) when it has one, else to its tiles.
-  const dist = (v: Vehicle) => {
-    const b = vs.bodyRect(v);
-    if (!b) return Math.min(...v.occupiedTiles().map((t) => Math.hypot(t.tx + 0.5 - cx, t.ty + 0.5 - cy)));
-    const [lx, ly] = v.worldToMount(cx, cy);
-    const dx = Math.max(b.x0 - lx, 0, lx - b.x1), dy = Math.max(b.y0 - ly, 0, ly - b.y1);
-    return Math.hypot(dx, dy) + (HOSE_REACH - HOSE_REACH_BODY);
-  };
+  const dist = (v: Vehicle) => hoseDistance(vs, v, cx, cy);
   return vs.list.filter((v) => v.z === z && Math.hypot(v.x - cx, v.y - cy) < 16 && dist(v) <= HOSE_REACH).sort((a, b) => dist(a) - dist(b));
 }
 
-/** Pour `charges` of the pump's fuel into `v` (tanks of that fuel first, then empty ones). Returns charges moved. */
+/** Put up to `charges` of `fuel` into `v` (tanks of that fuel first, then empty ones). Returns charges added. */
+export function fillTanks(v: Vehicle, fuel: string, charges: number): number {
+  const want = Math.floor(Math.min(charges, tankRoom(v, fuel)));
+  if (want <= 0) return 0;
+  // claim empty tanks for this fuel (an empty tank has no fuel of its own to mix with)
+  for (const p of tanksFor(v, fuel)) if (p.fuelType !== fuel) {
+    p.fuelType = fuel;
+    p.charges = 0;
+  }
+  const n = v.addFuel(fuel, want);
+  v.version++;
+  return n;
+}
+
+/** Pour `charges` of the pump's fuel into `v`. Returns charges moved. */
 export function pumpInto(game: Game, v: Vehicle, x: number, y: number, z: number, charges: number): number {
   const fuel = pumpFuel(game, x, y, z);
   if (!fuel) return 0;
-  const want = Math.min(charges, fuel.charges, tankRoom(v, fuel.typeId));
-  if (want <= 0) return 0;
-  // claim empty tanks for this fuel (an empty tank has no fuel of its own to mix with)
-  for (const p of tanksFor(v, fuel.typeId)) if (p.fuelType !== fuel.typeId) {
-    p.fuelType = fuel.typeId;
-    p.charges = 0;
-  }
-  const n = v.addFuel(fuel.typeId, Math.floor(want));
+  const n = fillTanks(v, fuel.typeId, Math.min(charges, fuel.charges));
   if (n > 0) consumeItem(fuel, L.ground(game.map, x, y, z), n);
-  v.version++;
   return n;
 }
 
@@ -82,21 +100,24 @@ export function installRefuel(game: Game, vs: VehicleSystem): void {
     const litres = (n: number) => `${(n / perL).toFixed(n / perL < 10 ? 1 : 0)} L`;
     const name = vs.vdata.fuels[fuel.typeId]?.name ?? fuel.typeId;
     const near = vehiclesByPump(vs, x, y, z);
+    // two Cars at one pump: "the red Car to your left" (vehicleNames.ts)
+    const names = distinctVehicleNames(g, near);
     for (const v of near) {
       const room = tankRoom(v, fuel.typeId);
+      const the = names.get(v)!;
       if (!room) {
         const why = v.engineFuels().includes(fuel.typeId) ? 'is full' : `doesn't run on ${name}`;
-        out.push({ id: `fill_${v.uid}`, label: `Fill up the ${v.name} (it ${why})`, run: () => g.message(`The ${v.name} ${why}.`, 'c_light_gray') });
+        out.push({ id: `fill_${v.uid}`, label: `Fill up ${the} (it ${why})`, run: () => g.message(`The ${v.name} ${why}.`, 'c_light_gray') });
         continue;
       }
       const total = Math.min(room, fuel.charges);
       out.push({
         id: `fill_${v.uid}`,
-        label: `Fill up the ${v.name} with ${name} (${litres(total)})`,
+        label: `Fill up ${the} with ${name} (${litres(total)})`,
         run: () => {
           let pumped = 0, acc = 0;
           g.activities.start({
-            name: `filling up the ${v.name}`,
+            name: `filling up ${the}`,
             kind: 'refuel',
             at: { x, y, z },
             duration: Math.max(2, total / perL / PUMP_L_PER_S),

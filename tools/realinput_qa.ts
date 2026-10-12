@@ -3,7 +3,7 @@
 // Six areas each added Options entries (creatures, first-person hands, furniture, surfaces, trees,
 // vehicle look/width, haze, draw distance, form lighting, aim model, title, activity progress,
 // route guide, rest menus, ...). This walks every row of Esc > Options with the arrow keys the
-// way a player would: each value must change on → and come back to where it started (a cycle,
+// way a player would, tab by tab (Tab key; the default 'tabs' layout, src/ui/options.ts): each value must change on → and come back to where it started (a cycle,
 // or ← for sliders), with no page error, no duplicated row, and the game still drawing frames.
 // Rows ending in "…" open another screen and are left to their own scenarios (rebind).
 
@@ -28,7 +28,8 @@ const EXPECTED = [
   'Route guide', 'Rest menus', 'Visual style',
 ];
 /** Toggling these leaves the session in a different state than a player expects mid-suite. */
-const SKIP = new Set(['Fullscreen']);
+// Options layout re-lays out the screen under the walker; its three values are checked by hand.
+const SKIP = new Set(['Fullscreen', 'Options layout']);
 
 const ROWS = `[...document.querySelectorAll('#ui2 .op-row')].map((r) => ({ name: r.dataset.name, value: r.querySelector('.op-val')?.textContent ?? '' }))`;
 
@@ -47,14 +48,91 @@ export function qaScenarios(c: QaCtx): Scenario[] {
       await sleep(400);
       await x.key('o');
       await sleep(600);
-      const rows = await js<{ name: string; value: string }[]>(ROWS);
-      check('Options opens with rows', rows.length > 10, rows.length);
-      const names = rows.map((r) => r.name);
+      const tabCount = await js<number>(`document.querySelectorAll('#ui2 .op-top .ui2-tab').length`);
+      check('Options opens in the tabbed layout', tabCount >= 4, tabCount);
+      const names: string[] = [];
+      for (let t = 0; t < tabCount; t++) {
+        if (t > 0) {
+          await x.key('Tab');
+          await sleep(300);
+        }
+        const tabName = await js<string>(`document.querySelector('#ui2 .op-top .ui2-tab.on')?.textContent ?? ''`);
+        const rows = await js<{ name: string; value: string }[]>(ROWS);
+        check(`${tabName}: has rows`, rows.length > 0, rows.length);
+        names.push(...rows.map((r) => r.name));
+        await shot(`options-${tabName.toLowerCase().replace(/\W+/g, '-')}`);
+        await walkRows(rows);
+      }
       const dup = names.filter((n, i) => names.indexOf(n) !== i);
       check('no duplicated Options rows', dup.length === 0, dup);
       const missing = EXPECTED.filter((n) => !names.includes(n));
       check('every wave-3 switch is listed', missing.length === 0, missing);
-      await shot('options-all');
+      const f0 = await frames();
+      await sleep(500);
+      check('the game still draws after cycling everything', (await frames()) !== f0);
+      await x.key('Escape');
+      await sleep(300);
+      await x.key('Escape');
+      await toGameplay();
+    }],
+    ['options-layouts', 'Options: search finds rows in any layout; drill opens and backs out of categories; sections shows headings; Tab jumps', async () => {
+      await toGameplay();
+      await sleep(800);
+      const x = c.x();
+      const names = () => js<string[]>(`(${ROWS}).map((r) => r.name)`);
+      const selected = () => js<string>(`document.querySelector('#ui2 .ui2-list-row.selected')?.dataset.name ?? document.querySelector('#ui2 .ui2-list-row.selected')?.dataset.cat ?? ''`);
+      // the layout row is found by search in every layout, so this is also how we switch
+      const nextLayout = async () => {
+        await x.type('options layout');
+        await sleep(200);
+        const found = await names();
+        check('search "options layout" finds just that row', found.length === 1 && found[0] === 'Options layout', found);
+        await x.key('Right');
+        await sleep(200);
+        const v = await js<string>(`(${ROWS})[0]?.value ?? ''`);
+        await x.key('Escape');
+        await sleep(200);
+        return v;
+      };
+      await x.key('Escape');
+      await sleep(400);
+      await x.key('o');
+      await sleep(600);
+      check('drill is next after tabs', (await nextLayout()).includes('drill'));
+      const cats = await js<number>(`document.querySelectorAll('#ui2 .op-cat').length`);
+      check('drill: top level lists the categories', cats === 6, cats);
+      await x.key('Down');
+      await x.key('Down');
+      await x.key('Return');
+      await sleep(300);
+      const crumb = await js<string>(`document.querySelector('#ui2 .op-crumb')?.textContent ?? ''`);
+      check('drill: Enter opens the third category', crumb.includes('Controls'), crumb);
+      check('drill: its rows are options', (await names()).includes('Mouse sensitivity'));
+      await shot('options-drill-controls');
+      await x.key('BackSpace');
+      await sleep(300);
+      check('drill: Bksp backs out to the same category, window still open', (await selected()) === 'Controls', await selected());
+      check('sections is next after drill', (await nextLayout()).includes('sections'));
+      const heads = await js<number>(`document.querySelectorAll('#ui2 .op-section').length`);
+      check('sections: one heading per category', heads === 6, heads);
+      const first = await selected();
+      await x.key('Tab');
+      await sleep(200);
+      const second = await selected();
+      check('sections: Tab jumps to the next section', second !== first && second !== '', [first, second]);
+      await shot('options-sections');
+      check('tabs is next after sections', (await nextLayout()).includes('tabs'));
+      check('no page errors', c.errors().length === 0, c.errors().slice(0, 2));
+      await x.key('Escape');
+      await sleep(300);
+      await x.key('Escape');
+      await toGameplay();
+    }],
+  ];
+
+  async function walkRows(rows: { name: string; value: string }[]): Promise<void> {
+    const x = c.x();
+    {
       for (let i = 0; i < rows.length; i++) {
         const { name, value: v0 } = rows[i];
         if (i > 0) await x.key('Down');
@@ -95,13 +173,6 @@ export function qaScenarios(c: QaCtx): Scenario[] {
         const errs = c.errors().slice(errs0);
         check(`${name}: ${seen.join(' → ')}${cycle ? '' : ' (slider)'}`, changed && errs.length === 0, { changed, cycle, errs: errs.slice(0, 2) });
       }
-      const f0 = await frames();
-      await sleep(500);
-      check('the game still draws after cycling everything', (await frames()) !== f0);
-      await x.key('Escape');
-      await sleep(300);
-      await x.key('Escape');
-      await toGameplay();
-    }],
-  ];
+    }
+  }
 }

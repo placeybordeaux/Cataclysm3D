@@ -67,6 +67,7 @@ export function installPractice(game: Game, api?: DebugApi): { feed: PracticeFee
   });
 
   registerOption({
+    category: 'Interface',
     name: 'Practice feedback',
     desc: 'When doing something trains a skill (or teaches nothing, and why). Card: a small card by your needs. Line: one line under the crosshair. Off: only the log and level-ups.',
     value: () => ({ card: 'Card', line: 'Line', off: 'Off' })[mode],
@@ -76,6 +77,7 @@ export function installPractice(game: Game, api?: DebugApi): { feed: PracticeFee
     },
   });
   registerOption({
+    category: 'Gameplay',
     name: 'Practice from simple tasks',
     desc: 'Adaptation. Off (Bright Nights): taking apart a difficulty-0 item (a toaster) teaches nothing. On: it teaches a little, up to level 1, so early progress shows.',
     value: () => (practiceSettings.simpleTasks ? 'On' : 'Off (BN)'),

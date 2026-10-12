@@ -1,4 +1,6 @@
 import * as THREE from 'three';
+import { impactSurface, type ImpactSurface } from './impactSurface';
+import { FxMeshes } from './chars/fxMeshes';
 import type { GameEvents } from '../core/events';
 import type { Game } from '../game/game';
 import type { Monster } from '../game/monster';
@@ -19,6 +21,8 @@ import type { TileFrame } from './textureSource';
 // read as pixel-art spatter rather than modern-shooter decals.
 
 type AttackEvent = GameEvents['playerAttack'];
+/** A gun line to draw (PlayerCombat.tracers): optional end heights (absolute m) and a heavy look for tank rounds. */
+type TracerLine = { x0: number; y0: number; x1: number; y1: number; z: number; h0?: number; h1?: number; heavy?: boolean };
 
 /** CDDA field colours: fd_blood red, fd_bile/acid green-yellow, veggy green, insect olive. */
 const BLOOD: Record<string, number[]> = {
@@ -104,15 +108,17 @@ const GRAVITY = 9;
 export class HitFx {
   private particles: Particle[] = [];
   private tracerDots: { h: SpriteHandle; t: number }[] = [];
-  private marks: { h: SpriteHandle; t: number }[] = [];
+  private marks: { surface: ImpactSurface; size: number; color: [number, number, number]; t: number }[] = [];
+  private markMeshes: FxMeshes | null = null;
   private seenTracers = new WeakSet<object>();
-  private tracerSource: (() => readonly { x0: number; y0: number; x1: number; y1: number; z: number }[]) | null = null;
+  private tracerSource: (() => readonly TracerLine[]) | null = null;
   private frames = new Map<number, TileFrame>();
   private rng = Math.random;
 
   constructor(private game: Game, private renderer: Renderer, private view: MonsterView | null) {
     this.makePalette();
     game.events.on('playerAttack', (e) => this.onAttack(e));
+    game.events.on('gameLoaded', () => { this.marks = []; });
     renderer.beforeRender.push((dt) => this.update(dt));
   }
 
@@ -143,43 +149,50 @@ export class HitFx {
   }
 
   /** Draw gun tracers for new entries of PlayerCombat.tracers (and monster guns sharing it). */
-  watchTracers(src: () => readonly { x0: number; y0: number; x1: number; y1: number; z: number }[]): void {
+  watchTracers(src: () => readonly TracerLine[]): void {
     this.tracerSource = src;
   }
 
-  /** A bullet's path as a dotted line of bright pixels, from just in front of the shooter. */
-  tracer(x0: number, y0: number, x1: number, y1: number, z: number): void {
+  /**
+   * A bullet's path as a dotted line of bright pixels, from just in front of the shooter. A line
+   * with its own end heights (`o.h0`/`o.h1`, absolute metres: a turret's muzzle) starts there; a
+   * heavy round (a tank gun's) is a thick, longer-lived glowing streak.
+   */
+  tracer(x0: number, y0: number, x1: number, y1: number, z: number, o: { h0?: number; h1?: number; heavy?: boolean } = {}): void {
     const cam = this.renderer.rig.camera.position;
     const p = this.game.player;
     const len = Math.hypot(x1 - x0, y1 - y0);
     if (len < 0.5) return;
-    const fromPlayer = Math.hypot(x0 - p.x, y0 - p.y) < 0.3;
+    const fromPlayer = o.h0 === undefined && Math.hypot(x0 - p.x, y0 - p.y) < 0.3;
     // The survivor's rounds leave the muzzle a little under the eye and meet the crosshair.
-    const h0 = fromPlayer ? cam.y - z * LEVEL_HEIGHT - 0.3 : 1.2;
-    const h1 = fromPlayer ? this.impactHeight(x1, y1, 2.5) : 1.2;
-    const start = fromPlayer ? 1.2 : 0.4;
-    const n = Math.min(40, Math.floor((len - start) * 4));
+    const base = z * LEVEL_HEIGHT;
+    const h0 = o.h0 !== undefined ? o.h0 - base : fromPlayer ? cam.y - base - 0.3 : 1.2;
+    const h1 = o.h1 !== undefined ? o.h1 - base : o.h0 !== undefined ? h0 : fromPlayer ? this.impactHeight(x1, y1, 2.5) : 1.2;
+    const start = fromPlayer ? 1.2 : o.h0 !== undefined ? 0.2 : 0.4;
+    const heavy = !!o.heavy;
+    const n = Math.min(heavy ? 90 : 40, Math.floor((len - start) * (heavy ? 6 : 4)));
     for (let i = 0; i < n; i++) {
       const f = (start + ((len - start) * (i + Math.random() * 0.5)) / n) / len;
       const x = x0 + (x1 - x0) * f, y = y0 + (y1 - y0) * f;
       const d = Math.hypot(x - cam.x, y - cam.z);
-      const size = this.pixelSize(d, 1.3);
+      const size = this.pixelSize(d, heavy ? 3 : 1.3);
       const col = TRACER[i % TRACER.length];
       const h = this.renderer.sprites.add({ x, y, z, frame: this.frames.get(col)!, height: size, width: size, anchor: 'center', lift: h0 + (h1 - h0) * f });
-      this.tracerDots.push({ h, t: TRACER_LIFE });
+      this.tracerDots.push({ h, t: heavy ? TRACER_LIFE * 3 : TRACER_LIFE });
     }
   }
 
-  /** A dark bullet mark where a round hit a wall, a hand's width in front of it. */
-  private mark(x: number, y: number, z: number): void {
-    const p = this.game.player;
-    const d0 = Math.hypot(x - p.x, y - p.y) || 1;
-    const mx = x - ((x - p.x) / d0) * 0.04, my = y - ((y - p.y) / d0) * 0.04;
+  /** A small dark patch on a verified nearby solid face; purely cosmetic. */
+  private mark(x: number, y: number, _z: number): void {
     const cam = this.renderer.rig.camera.position;
-    const size = this.pixelSize(Math.hypot(mx - cam.x, my - cam.z), 2);
-    const h = this.renderer.sprites.add({ x: mx, y: my, z, frame: this.frames.get(HOLE[Math.floor(this.rng() * HOLE.length)])!, height: size, width: size, anchor: 'center', lift: this.impactHeight(x, y, 2.5) });
-    this.marks.push({ h, t: MARK_LIFE });
-    if (this.marks.length > MAX_MARKS) this.marks.shift()!.h.remove();
+    const surface = impactSurface(this.game.map, { x: cam.x, y: cam.z, h: cam.y },
+      { x, y, h: cam.y + Math.tan(this.game.player.pitch) * Math.hypot(x - cam.x, y - cam.z) });
+    if (!surface) return;
+    const size = this.pixelSize(Math.hypot(surface.x - cam.x, surface.y - cam.z), 2);
+    const col = HOLE[Math.floor(this.rng() * HOLE.length)];
+    this.marks.push({ surface, size, color: [(col >>> 16) & 255, (col >>> 8) & 255, col & 255], t: MARK_LIFE });
+    if (this.marks.length > MAX_MARKS) this.marks.shift();
+    this.markMeshes ??= new FxMeshes(this.renderer);
   }
 
   /** Dust (and a little blood) where a falling body lands. */
@@ -200,7 +213,8 @@ export class HitFx {
         const soft = e.ranged === 'bow' || e.ranged === 'crossbow' || e.ranged === 'sling';
         if (soft && !e.landed) return;
         this.burst(e.x, e.y, e.z, soft ? 0.15 : this.impactHeight(e.x, e.y, 1.6), DUST, soft ? 3 : 5, soft ? 0.8 : 1.2, false);
-        if (!soft) this.mark(e.x, e.y, e.z);
+        // Missing legacy landing facts and target-bearing misses remain unmarked.
+        if (!soft && e.landed === true && !e.target) this.mark(e.x, e.y, e.z);
       }
       return;
     }
@@ -270,7 +284,7 @@ export class HitFx {
     for (const t of this.tracerSource?.() ?? []) {
       if (this.seenTracers.has(t)) continue;
       this.seenTracers.add(t);
-      this.tracer(t.x0, t.y0, t.x1, t.y1, t.z);
+      this.tracer(t.x0, t.y0, t.x1, t.y1, t.z, t);
     }
     for (let i = this.tracerDots.length - 1; i >= 0; i--) {
       if ((this.tracerDots[i].t -= dt) > 0) continue;
@@ -279,8 +293,15 @@ export class HitFx {
     }
     for (let i = this.marks.length - 1; i >= 0; i--) {
       if ((this.marks[i].t -= dt) > 0) continue;
-      this.marks[i].h.remove();
       this.marks.splice(i, 1);
+    }
+    if (this.markMeshes) {
+      this.markMeshes.begin();
+      for (const mark of this.marks) {
+        const s = mark.surface;
+        this.markMeshes.place('mark', s.x, s.y, 0, s.h, s.normal, mark.color, mark.size / 0.05);
+      }
+      this.markMeshes.end();
     }
     for (let i = this.particles.length - 1; i >= 0; i--) {
       const q = this.particles[i];

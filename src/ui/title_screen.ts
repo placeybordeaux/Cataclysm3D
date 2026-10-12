@@ -49,6 +49,7 @@ export function registerTitleLayoutOption(onChange?: () => void): void {
   registered = true;
   const names: Record<TitleLayout, string> = { center: 'Big buttons', side: 'Side column', classic: 'Classic row (CDDA)' };
   registerOption({
+    category: 'Interface',
     name: 'Title screen',
     value: () => names[titleLayout()],
     change: (d) => {

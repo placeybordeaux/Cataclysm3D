@@ -187,8 +187,8 @@ export class SkylineLayer {
         void main() {
           float l = 0.45 + 0.55 * max(dot(normalize(vN), uSunDir), 0.0);
           gl_FragColor = vec4(vCol * uSkyTint * l * (0.15 + 0.85 * uDay), 1.0);
-          // a = 0.5 tags the skyline for the post pass; r = true distance (it is pulled in)
-          gNormal = vec4(vDist / 1024.0, 0.0, 0.0, 0.5);
+          // a = -1 tags the skyline for the post pass; r = true distance (it is pulled in)
+          gNormal = vec4(vDist / 1024.0, 0.0, 0.0, -1.0);
         }`,
       side: THREE.DoubleSide,
     });

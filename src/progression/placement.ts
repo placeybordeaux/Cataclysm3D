@@ -8,13 +8,18 @@ import type { GameMap } from '../world/map';
 import type { Overmap, OmtInfo } from '../world/overmap/overmap';
 import { CHUNK } from '../world/coords';
 
-export type Placement = 'shelter' | 'town' | 'wilderness';
+export type Placement = 'shelter' | 'town' | 'wilderness' | 'lab_escape';
 
 /** BN scenario id → how we place it (BN start_location lists, reduced to what we generate). */
 export const SCENARIO_PLACEMENT: Record<string, Placement> = {
   evacuee: 'shelter',
   missed: 'town',
   wilderness: 'wilderness',
+  // BN's lab challenges allow sloc_lab_random, sloc_lab_escape_cells, sloc_lab_finale and the
+  // Ice Lab ones; we start them in sloc_lab_escape_cells (oter lab_escape_cells), which the
+  // start region's classic lab always has (overmap.ts placeLabBasement, genVersion 2).
+  lab_chal: 'lab_escape',
+  lab_staff: 'lab_escape',
 };
 
 export interface PlacementHost {
@@ -60,6 +65,46 @@ function freeTile(map: GameMap, ox: number, oy: number, indoors: boolean): { x: 
 }
 
 /**
+ * A free tile in one of the experiment cells of a lab_escape_cells OMT: the small rooms
+ * (flood-filled over passable tiles, stopping at the OMT edge) with no monster placed in them,
+ * nearest the room's middle. BN's start_location::place_player takes any inside tile of the
+ * OMT; the cells are the point of the scenario, so we pick an empty one (in BN's mapgen the
+ * one with the broken window, your way out).
+ */
+function cellTile(map: GameMap, ox: number, oy: number, z: number): { x: number; y: number } | null {
+  const ch = map.chunk(ox, oy, z);
+  if (!ch) return null;
+  const x0 = ox * CHUNK, y0 = oy * CHUNK;
+  const seen = new Uint8Array(CHUNK * CHUNK);
+  const monsters = new Set(ch.spawns.filter((s) => s.z === z).map((s) => `${s.x},${s.y}`));
+  for (let i = 0; i < CHUNK * CHUNK; i++) {
+    if (seen[i] || !map.passable(x0 + (i % CHUNK), y0 + Math.floor(i / CHUNK), z)) continue;
+    const room: number[] = [];
+    const stack = [i];
+    seen[i] = 1;
+    while (stack.length) {
+      const k = stack.pop()!;
+      room.push(k);
+      const lx = k % CHUNK, ly = Math.floor(k / CHUNK);
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const nx = lx + dx, ny = ly + dy, n = ny * CHUNK + nx;
+        if (nx < 0 || ny < 0 || nx >= CHUNK || ny >= CHUNK || seen[n] || !map.passable(x0 + nx, y0 + ny, z)) continue;
+        seen[n] = 1;
+        stack.push(n);
+      }
+    }
+    // a cell is 3x6 tiles; the corridor outside them is several times that
+    if (room.length > 30 || room.some((k) => monsters.has(`${x0 + (k % CHUNK)},${y0 + Math.floor(k / CHUNK)}`))) continue;
+    const free = room.filter((k) => map.furnAt(x0 + (k % CHUNK), y0 + Math.floor(k / CHUNK), z).id === 'f_null');
+    if (!free.length) continue;
+    const mx = room.reduce((a, k) => a + (k % CHUNK), 0) / room.length, my = room.reduce((a, k) => a + Math.floor(k / CHUNK), 0) / room.length;
+    free.sort((a, b) => Math.hypot((a % CHUNK) - mx, Math.floor(a / CHUNK) - my) - Math.hypot((b % CHUNK) - mx, Math.floor(b / CHUNK) - my));
+    return { x: x0 + (free[0] % CHUNK), y: y0 + Math.floor(free[0] / CHUNK) };
+  }
+  return null;
+}
+
+/**
  * Find the start for a placement near `origin` (the shelter, in OMT coords). Returns null
  * for 'shelter' (stay put). Throws when the world has nowhere fitting: the caller shows
  * that rather than silently starting somewhere else.
@@ -83,6 +128,13 @@ export function startClearVictims<M extends StartClearCandidate>(all: readonly M
 export function findStart(host: PlacementHost, placement: Placement, origin: { x: number; y: number }): Spot | null {
   const { map, overmap: ov } = host;
   if (placement === 'shelter') return null;
+  if (placement === 'lab_escape') {
+    const hit = ov.findUnderground('lab_escape_cells', origin, 1);
+    if (!hit) throw new Error('no lab escape cells near the start (this world predates them: start a new world)');
+    const t = cellTile(map, hit.x, hit.y, hit.z);
+    if (!t) throw new Error(`the escape cells at ${hit.x},${hit.y},${hit.z} have no empty cell`);
+    return { ...t, z: hit.z, where: 'a locked cell deep in a science lab' };
+  }
   if (placement === 'town') {
     const city = ov.closestCity(origin.x, origin.y, 1);
     const from = city ? { x: city.x, y: city.y } : origin;

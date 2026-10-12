@@ -65,12 +65,21 @@ export interface ProjectileHit {
 
 const limb = (rng: Rng): HitLocation => (rng.oneIn(2) ? (rng.oneIn(2) ? 'leg_l' : 'leg_r') : rng.oneIn(2) ? 'arm_l' : 'arm_r');
 
+/**
+ * Creature::deal_projectile_attack's partial dodge (creature.cpp): the target's dodge_roll (a
+ * monster's is dodge × 5, monster.cpp) over dice(10, projectile speed), dropped under 0.01 and
+ * capped at 1 — what gets added to missed_by. Against a gun's 1000 it is almost always 0.
+ */
+export function projectileDodge(dodgeRoll: number, speed: number, rng: Rng): number {
+  const dodge = dodgeRoll / Math.max(1, rng.dice(10, speed));
+  return Math.max(0, Math.min(1, dodge < 0.01 ? 0 : dodge));
+}
+
 export function projectileHit(target: ProjectileTarget, o: ProjectileOpts, rng: Rng): ProjectileHit {
   const flags = target.flags ?? [];
   const has = (f: string) => flags.includes(f);
   const speed = o.speed ?? GUN_PROJECTILE_SPEED;
-  const dodge = target.dodgeRoll / Math.max(1, rng.dice(10, speed));
-  const goodhit = o.missedBy + Math.max(0, Math.min(1, dodge < 0.01 ? 0 : dodge));
+  const goodhit = o.missedBy + projectileDodge(target.dodgeRoll, speed, rng);
   const headshot = o.missedBy <= ACCURACY.headshot;
   if (goodhit >= 1) return { hit: false, goodhit, severity: 0, location: 'torso', graze: false, headshot: false, tag: '' };
   let severity: number;

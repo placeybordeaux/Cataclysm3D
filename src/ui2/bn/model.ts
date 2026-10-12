@@ -16,7 +16,7 @@ import { ACTION_SCALE } from '../../core/time';
 import type { BodyPartId } from '../../game/bodyparts';
 import { ALL_PARTS, BODY_PARTS } from '../../game/bodyparts';
 import type { Character } from '../../game/character';
-import { covers, itemLayer, useActions } from '../../game/inventory';
+import { covers, itemActionName, itemLayer, useActions } from '../../game/inventory';
 import {
   inventoryView, itemActions, itemKey, itemNode, locKey, resolveLocKey, scopeLocs, verdict,
   type InventoryScope, type InventoryView, type ItemAction, type PlaceView, type Verdict,
@@ -27,6 +27,8 @@ import { cddaText } from '../../game/units';
 import { takeOrder } from '../../game/loot';
 import { hotbarChoice } from '../../game/hotbar_choice';
 import { reloadHintsFor, seenLine, takesLine } from '../../game/reloadhelp';
+import { belongingsOf, upsStatusLine, upsToggleLabel } from '../../game/upsTransfer';
+import { powerArmorStatusLine } from '../../game/powerArmor';
 import type { DropVerdict } from '../logic/dnd';
 import { fmtVolume, type Badge, type ItemStat, type ItemView } from '../logic/items';
 import type { MenuItem } from '../menu';
@@ -211,7 +213,7 @@ export class BnInventoryModel implements InventoryModel {
         ? { cur: inside.fill.used, max: inside.fill.max, label: inside.items[0].item.baseName() } : undefined),
       badges,
       description: cddaText(it.def.description) || undefined,
-      note: freshnessText(it) ?? undefined,
+      note: freshnessText(it) ?? powerArmorStatusLine(this.who, it) ?? upsStatusLine(it, belongingsOf(this.who.inv)) ?? undefined,
       takes: this.takes(it),
       icon: { typeId: it.typeId, looksLike: it.def.looks_like, symbol: it.def.symbol, color: it.def.color },
       covers: node.covers,
@@ -632,7 +634,7 @@ export class BnInventoryModel implements InventoryModel {
         if (uas.length > 1) {
           out.push({
             label: 'Use', key: 'A', time: secs(a.moves),
-            submenu: uas.map((ua, i) => ({ label: cddaText(ua.menu_text) || ua.type.replace(/_/g, ' '), action: () => { const r = who.inv.use(it, undefined, i, loc); if (!r.ok && r.msg) this.hooks.notify?.(r.msg, 'bad'); this.refresh(true); } })),
+            submenu: uas.map((ua, i) => ({ label: ua.type === 'TOGGLE_UPS_CHARGING' ? upsToggleLabel(it) : cddaText(ua.menu_text) || itemActionName(it.data, ua.type), action: () => { const r = who.inv.use(it, undefined, i, loc); if (!r.ok && r.msg) this.hooks.notify?.(r.msg, 'bad'); this.refresh(true); } })),
           });
           continue;
         }

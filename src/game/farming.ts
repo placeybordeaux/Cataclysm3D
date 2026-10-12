@@ -5,31 +5,38 @@ import { warnOnce } from '../data/warn';
 import { DAYS_PER_SEASON, SECONDS_PER_DAY } from '../core/time';
 import { createItem, type Item } from './item';
 import { destroyWhere, L, spawnItem, spawnOnGround } from './moves';
-import { isOutside } from './vision';
-import { weatherPoint, climateSeconds } from './weather';
+import { weatherPoint, climateSeconds, temperatureAt } from './weather';
 import { practiceForaging } from './harvest';
 
-// Farming, after CDDA iexamine.cpp (dirtmound, aggie_plant, harvest_plant, clear_overgrown),
-// activity_actor.cpp (plant_seed / fertilize_plant) and map::grow_plant.
-//
-// A planted crop is plant furniture (f_plant_seed → f_plant_seedling → f_plant_mature →
-// f_plant_harvest → f_plant_unharvested_overgrown, each stage's `plant_data.transform`) with
-// the seed item lying hidden on the tile. The seed's `vars.planted` (game seconds) is its
-// CDDA birthday: growth is a pure function of age against the seed's `growth_stages`, so it
-// is evaluated lazily (on examine and when the chunk is actualized) and progresses while
-// you're far away. Fertilizer moves the birthday back by 20% of a season, once.
+// Bright Nights iexamine.cpp, itype.cpp and map/mapbuffer.cpp.
+// Hidden seed birthday persists on the tile; default BN growth scales seed_data.grow
+// against a 14-day reference season. Three equal epochs lead to harvest, which remains
+// ripe until collected. Fertilizer advances the birthday by 60% of one epoch per stage.
+// Legacy growth_stages data remains supported for imported DDA content.
 
 export const GROWTH_FLAGS = ['GROWTH_SEED', 'GROWTH_SEEDLING', 'GROWTH_MATURE', 'GROWTH_HARVEST', 'GROWTH_OVERGROWN'] as const;
 export type GrowthStage = (typeof GROWTH_FLAGS)[number];
 
 export function isSeed(def: ItemDef | undefined): boolean {
-  return !!def && !!def.subtypes?.includes('SEED') && Array.isArray(def.growth_stages);
+  return !!def && !!def.subtypes?.includes('SEED') && (Array.isArray(def.growth_stages) || !!def.seed_data);
 }
 
-/** islot_seed growth stages as [stage flag, game seconds], in order. */
+interface SeedData { grow?: number; plant_name?: string; fruit?: string; seeds?: boolean; fruit_div?: number; byproducts?: string[]; }
+const seedData = (def: ItemDef): SeedData => (def.seed_data ?? def) as SeedData;
+
+/** BN islot_seed::get_plant_epoch, default GROWTH_SCALING=0 (14-day reference season). */
+export function plantEpoch(def: ItemDef): number {
+  return Number(seedData(def).grow ?? 0) * DAYS_PER_SEASON / 14 / 3;
+}
+
+/** Growth stages as [stage flag, game seconds], in order. */
 export function growthStages(def: ItemDef): [string, number][] {
   const raw = def.growth_stages as Record<string, number>[] | undefined;
-  if (!raw) return [];
+  if (!raw) {
+    const epoch = plantEpoch(def);
+    if (!(epoch > 0)) return [];
+    return [['GROWTH_SEED', epoch], ['GROWTH_SEEDLING', epoch], ['GROWTH_MATURE', epoch], ['GROWTH_HARVEST', Infinity]];
+  }
   return raw.map((o) => {
     const [k, v] = Object.entries(o)[0];
     return [k, Number(v)] as [string, number];
@@ -114,7 +121,7 @@ export function growPlant(game: Game, x: number, y: number, z: number): number {
 
 /** Tile accepts `seed` (PLANTABLE, or SHALLOW_WATER for cattails/lotus); CDDA required_terrain_flag. */
 export function plantableFor(game: Game, x: number, y: number, z: number, seed: ItemDef): boolean {
-  const flag = (seed.required_terrain_flag as string | undefined) ?? 'PLANTABLE';
+  const flag = (seedData(seed) as SeedData & { required_terrain_flag?: string }).required_terrain_flag ?? 'PLANTABLE';
   const t = game.map.terAt(x, y, z), f = game.map.furnAt(x, y, z);
   if (f.id !== 'f_null') return hasFlag(f, flag) && !hasFlag(f, 'PLANT');
   return hasFlag(t, flag);
@@ -128,17 +135,12 @@ export function highestTempOnDay(seed: number, t: number): number {
 }
 
 /**
- * weather.cpp warm_enough_to_plant: needs sky access, and every future stage boundary must
- * see a day at least as warm as the seed's growth_temp (default 10 °C). Returns an error
- * message, or null when planting is fine.
+ * BN weather.cpp warm_enough_to_plant: today's tile temperature must be at least 10 °C.
+ * Underground planting is permitted; roofs do not block planting. Returns an error or null.
  */
 export function warmEnoughToPlant(game: Game, x: number, y: number, z: number, seed: ItemDef): string | null {
-  if (!isOutside(game.map, x, y, z)) return "Plants need sunlight to grow!  You can't plant there.";
-  const need = typeof seed.growth_temp === 'number' ? seed.growth_temp : 10;
-  let t = game.clock.seconds;
-  const checks = [t];
-  for (const [, dur] of growthStages(seed)) checks.push((t += dur));
-  for (const c of checks) if (highestTempOnDay(game.seed, c) < need) return 'If you plant now, the cold will kill this plant before it can be harvested!';
+  // BN checks today's temperature, rather than predicting future stage weather.
+  if (z >= 0 && (game.weather ? temperatureAt(game, x, y, z) : weatherPoint(game.seed, climateSeconds(game.clock.seconds)).temperature) < 10) return 'It is too cold to plant anything now.';
   return null;
 }
 
@@ -172,7 +174,7 @@ export function plantSeedNow(game: Game, x: number, y: number, z: number, seedId
   seed.vars.planted = game.clock.seconds;
   seed.vars.hidden = 1;
   const f = map.furnAt(x, y, z);
-  const flag = (seed.def.required_terrain_flag as string | undefined) ?? 'PLANTABLE';
+  const flag = (seedData(seed.def) as SeedData & { required_terrain_flag?: string }).required_terrain_flag ?? 'PLANTABLE';
   spawnItem(seed, L.ground(map, x, y, z), { force: true, quiet: true });
   if (f.id !== 'f_null' && hasFlag(f, flag) && plantData(f).transform) map.setFurn(x, y, z, plantData(f).transform!);
   else {
@@ -190,7 +192,11 @@ export function startPlanting(game: Game, x: number, y: number, z: number, seedI
     game.message(err, 'c_light_gray');
     return err;
   }
-  const done = () => void plantSeedNow(game, x, y, z, seedId);
+  const done = () => {
+    const changed = canPlant(game, x, y, z, seedId);
+    if (changed) game.message(changed, 'c_light_gray');
+    else plantSeedNow(game, x, y, z, seedId);
+  };
   if (opts.instant) done();
   else game.activities.start({ name: `planting ${game.data.items[seedId].name}`, duration: 30, onComplete: done });
   return null;
@@ -202,18 +208,18 @@ export function fertilizers(game: Game): Item[] {
 }
 
 /**
- * fertilize_plant_activity_actor::finish: the plant ages 20% of a season (18.2 days) at once.
+ * BN iexamine::fertilize_plant: advance the plant 60% of one growth epoch.
  * Only one application per stage (CDDA: "This %s has already been fertilized.").
  */
 export function fertilizePlant(game: Game, x: number, y: number, z: number, fert: Item): string | null {
   const seed = seedAt(game, x, y, z);
   if (!seed) return 'There is no plant there.';
-  const name = String(seed.def.plant_name ?? seed.def.name);
+  const name = String(seedData(seed.def).plant_name ?? seed.def.name);
   if (seed.vars.fertilized) return `This ${name} has already been fertilized.`;
   const inv = game.player.inv;
   if (!inv.hasAmount(fert.typeId, 1)) return `You don't have any ${fert.name()}.`;
   inv.useAmount(fert.typeId, 1);
-  seed.vars.planted = plantedAt(seed) - DAYS_PER_SEASON * SECONDS_PER_DAY * 0.2;
+  seed.vars.planted = plantedAt(seed) - (seed.def.seed_data ? plantEpoch(seed.def) * 0.6 : DAYS_PER_SEASON * SECONDS_PER_DAY * 0.2);
   seed.vars.fertilized = 1;
   game.message(`You fertilize the ${name} with the ${fert.baseName(1)}.`, 'c_light_gray');
   growPlant(game, x, y, z);
@@ -240,11 +246,15 @@ export function harvestPlantNow(game: Game, x: number, y: number, z: number): It
   const add = (id: string | undefined, n: number) => {
     if (!id || n <= 0) return;
     if (!data.items[id]) return void warnOnce('item', id);
-    for (let i = 0; i < n; i++) out.push(createItem(data, id));
+    const first = createItem(data, id);
+    if (first.countByCharges) {
+      first.charges = Math.max(1, Math.floor(first.charges * n / (seedData(seed.def).fruit_div ?? 1)));
+      out.push(first);
+    } else for (let i = 0; i < n; i++) out.push(createItem(data, id));
   };
-  if (seed.def.seeds !== false) add(seed.typeId, seedCount);
-  add(seed.def.fruit as string | undefined, plants);
-  for (const b of (seed.def.byproducts as string[] | undefined) ?? []) add(b, 1);
+  if (seedData(seed.def).seeds !== false) add(seed.typeId, seedCount);
+  add(seedData(seed.def).fruit, plants);
+  for (const b of seedData(seed.def).byproducts ?? []) add(b, 1);
   clearPlot(game, x, y, z);
   for (const it of out) spawnOnGround(map, p.tileX, p.tileY, p.z, it);
   game.message('You harvest the plant.', 'c_light_gray');
@@ -272,7 +282,7 @@ export function plantStatus(game: Game, x: number, y: number, z: number): string
   const seed = seedAt(game, x, y, z);
   const f = game.map.furnAt(x, y, z);
   if (!seed || !furnStage(f)) return null;
-  const name = String(seed.def.plant_name ?? seed.def.name);
+  const name = String(seedData(seed.def).plant_name ?? seed.def.name);
   const left = plantedAt(seed) + timeToHarvest(seed.def) - game.clock.seconds;
   const days = Math.ceil(left / SECONDS_PER_DAY);
   const when = furnStage(f) === 'GROWTH_HARVEST' ? 'ready to harvest' : furnStage(f) === 'GROWTH_OVERGROWN' ? 'overgrown' : days <= 1 ? 'ready in about a day' : `ready in about ${days} days`;

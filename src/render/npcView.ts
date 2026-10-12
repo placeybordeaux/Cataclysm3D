@@ -1,3 +1,4 @@
+import { appearanceSeed } from './appearanceSeed';
 import { meleeAimLift, nearClamp } from './monsterView';
 import type { Game, GameSystem } from '../game/game';
 import type { Npc } from '../game/npc';
@@ -11,6 +12,8 @@ import type { TileFrame } from './textureSource';
 import { charLayers, charSettings, frameKey, spriteInfo, type CharLayers } from './chars';
 import { bodyShapeOf, weaponOf } from './chars/archetype';
 import { CreatureModel, FallingBody } from './chars/creature';
+import { buildHeld, heldClass, heldVariant } from './chars/held';
+import { analyseSprite } from './chars/paint';
 import { makeRig, type Rig } from './chars/rig';
 import { FxMeshes } from './chars/fxMeshes';
 import { cardsOn } from './cards';
@@ -40,6 +43,11 @@ interface Body {
   npc: Npc;
   frame: TileFrame;
   t: number;
+}
+
+/** Include item identity even when its overlay is missing or shared. */
+export function npcOutfitKey(layers: readonly string[], wieldedId?: string): string {
+  return `${layers.join('|')}|held:${wieldedId ?? ''}`;
 }
 
 /** Atlas ids for an NPC's layers: body, worn items (inner to outer), wielded item. */
@@ -77,7 +85,7 @@ const HAIRS_F: NonNullable<Parameters<typeof makeRig>[0]['hair']>[] = ['long', '
  * Neighbouring uids land on different entries, so a group never looks cloned.
  */
 export function npcLook(n: Npc): { build: number; skin: [number, number, number]; hairColor: [number, number, number]; hair: NonNullable<Parameters<typeof makeRig>[0]['hair']>; hat?: [number, number, number] } {
-  const u = n.uid;
+  const u = appearanceSeed(n);
   const worn = n.inv.worn.map((w) => w.typeId).join(' ');
   const head = /helmet|hardhat|kevlar_helm|motorbike/.exec(worn) ? 'helmet' : /(^|[ _])(cap|beanie|hood|toque|balaclava)/.exec(worn) ? 'cap' : /hat(\b|_)|fedora|cowboy|stetson|tophat|sombrero/.exec(worn) ? 'hat' : null;
   const hairs = n.male !== false ? HAIRS_M : HAIRS_F;
@@ -130,6 +138,11 @@ export class NpcView implements GameSystem {
     charSettings.listeners.push(() => this.rebuildAll());
   }
 
+  /** The drawn 3D person of a live NPC (model mode), for exact shot picking (npcs.ts). */
+  modelOf(n: Npc): CreatureModel['inst'] | null {
+    return this.views.get(n)?.c?.inst ?? null;
+  }
+
   private looksLike = (id: string) => this.game.data.items[id]?.looks_like as string | undefined;
 
   private get models(): boolean {
@@ -146,12 +159,17 @@ export class NpcView implements GameSystem {
     const male = n.male !== false;
     const weapon = weaponOf(n.inv.wielded);
     const look = npcLook(n);
-    const key = `${male ? 'm' : 'f'}:${weapon}:${look.build}:${look.hair}`;
+    const item = n.inv.wielded;
+    const frame = item ? this.renderer.source.item(item.typeId) : null;
+    const key = `${male ? 'm' : 'f'}:${weapon}:${look.build}:${look.hair}:${item?.typeId ?? ''}:${frame ? frameKey(frame) : ''}`;
     let r = this.rigs.get(key);
     if (!r) {
       const base = bodyShapeOf({ id: male ? 'npc_male' : 'npc_female', bodytype: 'human', species: ['HUMAN'], volume: 62500 });
       const [sc, gi] = BUILDS[look.build];
-      r = makeRig({ ...base, scale: (male ? 1 : 0.95) * sc, girth: (male ? 1 : 0.92) * gi, weapon, hair: look.hair });
+      const pal = frame ? spriteInfo(frame)?.pal ?? analyseSprite({ w: 1, h: 1, data: new Uint8Array([128, 128, 128, 255]) }).pal : null;
+      const cls = item ? heldClass(item) : null;
+      const held = item && cls && pal ? buildHeld(cls, pal, item.def.volume, heldVariant(item, cls)) : undefined;
+      r = makeRig({ ...base, scale: (male ? 1 : 0.95) * sc, girth: (male ? 1 : 0.92) * gi, weapon, hair: look.hair }, { held });
       this.rigs.set(key, r);
     }
     return r;
@@ -168,7 +186,8 @@ export class NpcView implements GameSystem {
   /** Composite frame for the NPC's current outfit (memoised by the layer list). */
   frameFor(n: Npc): { key: string; frame: TileFrame } {
     const ids = npcLayers(this.atlas, n, this.looksLike);
-    const key = ids.join('|');
+    // Distinct items can share an overlay (or have none), but their held geometry differs.
+    const key = npcOutfitKey(ids, n.inv.wielded?.typeId);
     const src = this.renderer.source;
     const f = src instanceof AtlasTextureSource ? src.composite(ids) : null;
     return { key, frame: f ?? this.glyphFrame(n) };
@@ -186,7 +205,7 @@ export class NpcView implements GameSystem {
   private makeVisual(n: Npc, v: View): void {
     if (this.models) {
       const rig = this.rigFor(n);
-      v.c = new CreatureModel(this.layers().live, rig, this.skinFor(rig, v.frame, n), seedOf(n.uid), n.x, n.y, n.facing);
+      v.c = new CreatureModel(this.layers().live, rig, this.skinFor(rig, v.frame, n), seedOf(appearanceSeed(n)), n.x, n.y, n.facing);
     } else v.h = this.renderer.sprites.add({ x: n.x, y: n.y, z: n.z, frame: v.frame, height: HEIGHT });
   }
 
@@ -237,7 +256,7 @@ export class NpcView implements GameSystem {
       const p = this.game.player;
       const d = Math.hypot(n.x - p.x, n.y - p.y);
       const slide = !done && d < 6 && d > 0.01 ? 0.3 : 0;
-      b.body = new FallingBody(this.layers().dead, rig, this.skinFor(rig, b.frame, n), seedOf(n.uid), n.x, n.y, n.z, n.facing,
+      b.body = new FallingBody(this.layers().dead, rig, this.skinFor(rig, b.frame, n), seedOf(appearanceSeed(n)), n.x, n.y, n.z, n.facing,
         slide ? ((n.x - p.x) / d) * slide : 0, slide ? ((n.y - p.y) / d) * slide : 0, done);
     } else {
       const k = Math.min(1, b.t / FALL_TIME);

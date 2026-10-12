@@ -58,7 +58,7 @@ describe('what an item takes (real BN items)', () => {
     ['longbow', 'ammo', 'Takes: arrows.'],
     ['crossbow', 'ammo', 'Takes: bolts.'],
     ['glockmag', 'ammo', 'Takes: 9x19mm.'],
-    ['light_battery_cell', 'ammo', /^Rechargeable: it needs a battery charger/],
+    ['light_battery_cell', 'ammo', /^Rechargeable: it needs an enabled vehicle battery charger/],
     ['light_disposable_cell', 'ammo', ''],
     ['knife_combat', 'none', ''],
   ];
@@ -153,7 +153,7 @@ describe('failed reloads say what it takes and which failure it is', () => {
     give(c, 'light_battery_cell');
     const r2 = c.inv.reload();
     expect(r2.ok).toBe(false);
-    expect(r2.msg).toBe("Your light batteries are all flat. Rechargeable ones need a battery charger, and there's no charging in this version yet. Disposable ones come charged, like the light disposable battery.");
+    expect(r2.msg).toBe("Your light batteries are all flat. Put rechargeable ones in cargo with an enabled vehicle battery charger or recharging station. Disposable ones come charged, like the light disposable battery.");
   });
 
   it('wrong battery size: you carry a medium battery, it takes a light one', () => {
@@ -224,7 +224,7 @@ describe('failed reloads say what it takes and which failure it is', () => {
     const ups = give(c, 'UPS_off');
     expect(ups.ammoRemaining()).toBe(0);
     expect(c.inv.reload(suit).msg).toMatch(/^Your powered survivor suit runs on your UPS, and the UPS is flat\./);
-    expect(c.inv.reload(createItem(data, 'smart_phone')).msg).toMatch(/^Your smartphone can't be reloaded: it's recharged/);
+    expect(c.inv.reload(createItem(data, 'smart_phone')).msg).toMatch(/^Your smartphone can't be reloaded: put it in cargo/);
   });
 
   it('the NPC path (no hints) never mentions sightings', () => {
@@ -256,7 +256,8 @@ describe('switching on without power (the hotbar / activate path)', () => {
   it('a USE_UPS exo-suit draws from the UPS you carry (BN units_remaining)', () => {
     const { c } = survivor();
     const suit = createItem(data, 'exosuit_survivor', { charges: 0 });
-    c.inv.giveNew(suit);
+    // need_worn is checked before power (BN iuse_transform::use).
+    expect(c.inv.wear(suit, null).ok).toBe(true);
     expect(c.inv.use(suit).msg).toMatch(/can't be reloaded: it runs on a UPS you carry/);
     const ups = give(c, 'UPS_off');
     const bat = createItem(data, 'heavy_battery_cell');

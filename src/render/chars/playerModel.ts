@@ -4,7 +4,10 @@ import { bodyShapeOf, weaponOf, type Weapon } from './archetype';
 import { CreatureModel } from './creature';
 import { charLayers, charSettings, frameKey, spriteInfo } from './index';
 import { makeRig, type Rig } from './rig';
+import { buildHeld, heldClass, heldVariant } from './held';
+import { analyseSprite } from './paint';
 import { liftOf } from '../../game/stairwalk';
+import { LEVEL_HEIGHT } from '../../world/coords';
 import { Rider, riderSlot } from '../vehicleRider';
 
 // The survivor's own body outside first person (third-person / top-down cameras): the same
@@ -21,6 +24,7 @@ export class PlayerModel implements GameSystem {
   private key = '';
   private rig: Rig | null = null;
   private weapon: Weapon = 'none';
+  private heldKey = '';
   private lx = 0;
   private ly = 0;
   private phase = 0;
@@ -28,14 +32,23 @@ export class PlayerModel implements GameSystem {
 
   constructor(readonly renderer: Renderer) {}
 
+  /** At a vehicle station (vehwalk): raise the body so its head is at the station's eye, not on the road under the deck. */
+  private stationLift(z: number): number {
+    const e = this.renderer.rig.stationEye;
+    return e === null ? 0 : Math.max(0, e - z * LEVEL_HEIGHT - 1.6);
+  }
+
   update(game: Game, dt: number): void {
     const r = this.renderer;
     const models = charSettings.mode === 'model';
     r.playerBodyOverride = models;
     const slot = riderSlot(r);
     const atWheel = !!r.rig.drive && !!game.vehicles?.driving;
+    // Seated or turned out at a vehicle station: VehicleRenderer poses the body there too.
+    const st = atWheel ? null : game.vehicles?.stations.view()?.station;
+    const atSeat = !!st && st.posture !== 'standing' && slot.enabled;
     const show = models && r.cameraMode !== 'first' && (slot.enabled || !atWheel);
-    const riding = show && atWheel;
+    const riding = show && (atWheel || atSeat);
     if (!show) {
       this.c?.remove();
       this.c = null;
@@ -47,10 +60,18 @@ export class PlayerModel implements GameSystem {
     const frame = r.source.sprite('player');
     const key = frameKey(frame);
     const L = charLayers(r);
-    const weapon = weaponOf(p.inv.wielded);
-    if (!this.rig || weapon !== this.weapon) {
+    const item = p.inv.wielded;
+    const weapon = weaponOf(item);
+    // the same detailed held mesh as NPCs and first person (held.ts), coloured from the item's sprite
+    const itemFrame = item ? r.source.item(item.typeId) : null;
+    const heldKey = item ? `${item.typeId}:${itemFrame ? frameKey(itemFrame) : ''}` : '';
+    if (!this.rig || weapon !== this.weapon || heldKey !== this.heldKey) {
       this.weapon = weapon;
-      this.rig = makeRig({ ...bodyShapeOf({ id: p.male ? 'player_male' : 'player_female', bodytype: 'human', species: ['HUMAN'], volume: 62500 }), weapon });
+      this.heldKey = heldKey;
+      const pal = itemFrame ? spriteInfo(itemFrame)?.pal ?? analyseSprite({ w: 1, h: 1, data: new Uint8Array([128, 128, 128, 255]) }).pal : null;
+      const cls = item ? heldClass(item) : null;
+      const held = item && cls && pal ? buildHeld(cls, pal, item.def.volume, heldVariant(item, cls)) : undefined;
+      this.rig = makeRig({ ...bodyShapeOf({ id: p.male ? 'player_male' : 'player_female', bodytype: 'human', species: ['HUMAN'], volume: 62500 }), weapon }, { held });
       this.c?.remove();
       this.c = null;
       this.rider = null;
@@ -90,7 +111,7 @@ export class PlayerModel implements GameSystem {
     this.c.update(dt, {
       x: p.x, y: p.y, z: p.z, facing: p.yaw, target: null,
       moving: moved > 0.003, walkPhase: this.phase, windup: null, flinch: 0,
-      down: p.dead ? 1 : 0, visible: true, emph: 0, camDist: 0, sy: 1, sxz: 1, lift: liftOf(p),
+      down: p.dead ? 1 : 0, visible: true, emph: 0, camDist: 0, sy: 1, sxz: 1, lift: liftOf(p) + this.stationLift(p.z),
     });
   }
 }

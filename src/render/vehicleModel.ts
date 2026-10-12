@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import type { TurretBuild } from './vehicleTank';
 import { has, type Vehicle, type VehiclePart } from '../game/vehicle';
 import { GeomBuilder, type V3 } from './geometry';
 import type { TileFrame } from './textureSource';
@@ -8,6 +9,9 @@ import { liveryBody, paintSkin, sheetUv, skinLayout, skinLayoutInfo, SKIN_PPM, t
 import { Batches, chamferBox, faceNormal, hash, mergeGeometries, partFrames, quad4, tube, wheel, type PartSwatch } from './vehicleGeom';
 import { buildBike } from './vehicleBikes';
 import { buildFrame } from './vehicleFrame';
+import { armourHull, buildTank } from './vehicleTank';
+import { buildRoller, isCompactor } from './vehicleRoller';
+import { buildWork, workMachine } from './vehicleWork';
 import type { CockpitAnchors } from './vehicleCockpit';
 import { rimGrips, type RideAnchors } from './vehicleRider';
 
@@ -58,6 +62,12 @@ export interface ModelBuild {
   layout: Layout;
   /** Driver eye height above the floor level (m) and the driver's drawn seat (mount space). */
   eyeH: number;
+  /** The floor you stand on inside (m above the floor level): cabin floor, a hull's deck. */
+  deckY?: number;
+  /** Armoured hulls: the turret roof (m above the floor level). */
+  turretTop?: number;
+  /** Armoured hulls: the turret's footprint (mount space x, y; radius), for hatches on it vs on the deck. */
+  turretFoot?: { x: number; z: number; r: number };
   driverZ: number | null;
   driverX?: number;
   /** Driven builds: the cockpit camera's eye, mount-space x (the seat's back half). */
@@ -74,6 +84,8 @@ export interface ModelBuild {
   ride?: RideAnchors;
   /** Ridden bicycles: the pedal crank built around its own centre, turned about +z. */
   crank?: { geo: THREE.BufferGeometry; x: number; y: number; z: number };
+  /** Armoured hulls: turret, main gun and machine guns built around their pivots (vehicleTank.ts). */
+  turrets?: TurretBuild[];
 }
 
 const FULL: TileFrame = { texture: null as unknown as THREE.Texture, uv: [0, 0, 1, 1], w: 1, h: 1, ppm: 32 };
@@ -292,7 +304,7 @@ function loopNormals(loop: { x: number; y: number }[]): { nx: number; ny: number
 
 // --- build -----------------------------------------------------------------------------
 
-/** Build the model for a vehicle (odd grids get the tidy frame build, vehicleFrame.ts). */
+/** Build the model for a vehicle (odd grids get the tidy frame build, vehicleFrame.ts; armoured hulls vehicleTank.ts, drum rollers vehicleRoller.ts, construction / farm machines vehicleWork.ts). */
 /**
  * `far`: the distance LOD — no cabin interior, mirrors or exhaust, coarser wheels (a car 50 m
  * away is a few dozen pixels; its seats only cost triangles and build time).
@@ -300,7 +312,16 @@ function loopNormals(loop: { x: number; y: number }[]): { nx: number; ny: number
 export function buildVehicleModel(v: Vehicle, base: number, opts: { reuseSkinKey?: string; deferSkin?: boolean; separateWheels?: boolean; far?: boolean } = {}): ModelBuild | null {
   const L = analyze(v);
   if (L.style === 'motorcycle' || L.style === 'bicycle') return buildBike(v, L, base, !!opts.separateWheels);
-  if (L.style === 'frame' || !L.sections.length) return buildFrame(v, L, base);
+  if (L.style === 'frame' || !L.sections.length) {
+    // armoured hulls (tanks, APCs), drum compactors and work machines (excavators, tractors,
+    // forklifts...) are frames by collision but get their own body
+    const armour = armourHull(v);
+    if (armour) return buildTank(v, L, base, armour, !!opts.far);
+    if (isCompactor(v)) return buildRoller(v, L, base, !!opts.far);
+    const work = workMachine(v);
+    if (work) return buildWork(v, L, base, work, !!opts.far);
+    return buildFrame(v, L, base);
+  }
   const p = L.p;
   const F = partFrames();
   const { loop, nTop, arches } = buildOutline(L);
@@ -885,7 +906,7 @@ export function buildVehicleModel(v: Vehicle, base: number, opts: { reuseSkinKey
 
   return {
     body: out(body), roof: out(roof), parts: merged, glass: out(glass), lamps: out(lampsG), tails: out(tailsG), beacons: out(beaconsB),
-    skin, skinJob, skinKey, layout: L, eyeH, driverZ, driverX: ctrl ? L.xOf(ctrl.mx) : undefined, eyeX: ctrl ? L.xOf(ctrl.mx) + MODEL_EYE_FORWARD : undefined, parkedLean: 0, cockpit, wheels: loose.length ? loose : undefined, ride,
+    skin, skinJob, skinKey, layout: L, eyeH, deckY: floorY, driverZ, driverX: ctrl ? L.xOf(ctrl.mx) : undefined, eyeX: ctrl ? L.xOf(ctrl.mx) + MODEL_EYE_FORWARD : undefined, parkedLean: 0, cockpit, wheels: loose.length ? loose : undefined, ride,
   };
 }
 

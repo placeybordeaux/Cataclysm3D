@@ -11,6 +11,7 @@ import { FEEL } from './game/combatfeel';
 import { freeAim, timingGames } from './game/aimmodel';
 import { modSum } from './game/gunmods';
 import { bodyMods } from './game/bodymods';
+import { activeWeapon } from './game/bionicguns';
 import {
   activeBuffSummary, autolearnStyles, currentStyle, learnStyle, maOf, maWorld, selectStyle, styleBuffs, styleDef, styleWeaponValid,
   traitStyleChoices, BUFF_TRIGGERS, type MartialArtDef, type MartialArtsJSON,
@@ -21,7 +22,8 @@ import {
   modLocations, removableReason, removeGunmod,
 } from './game/gunmods';
 import { monsterTargetInfo } from './game/playercombat';
-import { explode } from './game/explosion';
+import { blastFromJson, blastHooks, detonate } from './game/blast';
+import { ArmedExplosives } from './game/armed';
 import { monGunState, monsterGunHooks } from './game/monguns';
 import { addField, ignite } from './game/fields';
 import { readHooks } from './game/reading';
@@ -67,7 +69,26 @@ export function installCombatDepth(game: Game, renderer: Renderer | null, monste
         warnOnce('field', type);
       }
     },
-    explode: (x, y, z, power, factor, fire) => void explode(game, monsters.sys, x, y, z, power, factor, fire),
+    blast: (x, y, z, e) => {
+      const b = blastFromJson(e);
+      if (!b) throw new Error(`ammo explosion with neither damage/fragment nor power: ${JSON.stringify(e)}`);
+      detonate(game, monsters.sys, x, y, z, b, 'player');
+    },
+  };
+  // Armed explosives (a grenade with its pin pulled): the fuse burns in combat turns and the
+  // blast goes off where the grenade is (armed.ts).
+  const armed = new ArmedExplosives(game, () => monsters.sys);
+  game.systems.push(armed);
+  p.inv.activeProcessors.push((it) => armed.claim(it));
+  combat.onThrown = (it, x, y, z) => armed.thrown(it, x, y, z);
+  // NPCs' alt attacks (npcai.ts: BN npc::alt_attack) arm and throw grenades too; the blast is theirs.
+  const npcSys = (game as unknown as { npcs?: { onThrownExplosive: ((it: Item, x: number, y: number, z: number, thrower: Character) => void) | null } }).npcs;
+  if (npcSys) npcSys.onThrownExplosive = (it, x, y, z, thrower) => armed.thrown(it, x, y, z, { npc: thrower });
+  p.inv.useHandlers.set('explosion', (it) => ({ ok: false, msg: ArmedExplosives.refuse(it), moves: 0 }));
+  // A blast's fling slides the survivor (the side-step's sliding move) rather than teleporting them.
+  blastHooks.flingPlayer = (dx, dy) => {
+    const t = Math.max(0.12, Math.min(0.6, Math.hypot(dx, dy) / 12));
+    combat.step = { vx: dx / t, vy: dy / t, t };
   };
 
   // Monster guns draw their bullet lines with the survivor's tracers; DROPS_AMMO monsters
@@ -113,7 +134,8 @@ export function installCombatDepth(game: Game, renderer: Renderer | null, monste
   // --- keys
   game.keys.register('martial_arts', 'Martial arts style', () => openMartialArtsMenu(game));
   game.keys.register('fire_mode', 'Select fire mode', () => {
-    const g = p.inv.wielded;
+    // An aimed bionic gun's modes (fusion blaster single/triple) switch like a wielded gun's.
+    const g = activeWeapon(game);
     if (!g?.isGun()) return game.message("You're not wielding a firearm.");
     const modes = gunModes(g);
     if (modes.length <= 1) return game.message(`Your ${g.baseName()} has only one firing mode.`);
@@ -160,9 +182,10 @@ export function installCombatDepth(game: Game, renderer: Renderer | null, monste
     L.push(`${c('c_light_gray', 'Style:')} ${c(bad ? 'c_dark_gray' : st.id === 'style_none' ? 'c_light_gray' : 'c_light_blue', st.name)}`);
     const buffs = activeBuffSummary(p);
     if (buffs.length) L.push(c('c_light_green', ' ' + buffs.map((b) => (b.stacks > 1 ? `${b.name} ×${b.stacks}` : b.name)).join(', ')));
-    if (w?.isGun()) {
-      const m = currentMode(w);
-      L.push(`${c('c_light_gray', 'Mode:')} ${c('c_white', m.name)}${m.qty > 1 ? c('c_light_gray', ` (${m.qty})`) : ''}${isJammed(w) ? '  ' + c('c_red', 'JAMMED') : ''}`);
+    const aimed = activeWeapon(game);
+    if (aimed?.isGun()) {
+      const m = currentMode(aimed);
+      L.push(`${c('c_light_gray', 'Mode:')} ${c('c_white', m.name)}${m.qty > 1 ? c('c_light_gray', ` (${m.qty})`) : ''}${isJammed(aimed) ? '  ' + c('c_red', 'JAMMED') : ''}`);
     }
     return L;
   });
@@ -182,7 +205,7 @@ export function installCombatDepth(game: Game, renderer: Renderer | null, monste
       update(_g, dt) {
         if ((t -= dt) > 0) return;
         t = 0.1;
-        const w = p.inv.wielded;
+        const w = activeWeapon(game);
         let html = '';
         if (w?.isGun() && renderer.cameraMode !== 'top' && !game.input.captured) {
           const aiming = (game.input.mouseButtons & 4) !== 0;
@@ -406,6 +429,20 @@ function gunmodDetail(game: Game, mod: Item, gun: Item): string {
 
 function installDebug(api: DebugApi, game: Game, monsters: MonstersHandle): void {
   const p = () => game.player;
+  /**
+   * Set off a BN explosion `dx, dy` tiles from you (blast.ts detonate): `e` is a BN `explosion`
+   * object ({damage, radius, fragment} or legacy {power}) or an item id whose explosion it is
+   * (`'120mm_usable_heat'`, `'grenade_act'`). Returns who was hurt, flung and the centre.
+   */
+  api.detonate = (dx: number, dy: number, e: unknown = 'grenade_act') => {
+    const def = typeof e === 'string' ? (game.data.items[e] as unknown as { explosion?: unknown; use_action?: { explosion?: unknown } } | undefined) : null;
+    if (typeof e === 'string' && !def) throw new Error(`detonate: no item ${e}`);
+    const json = def ? def.explosion ?? def.use_action?.explosion : e;
+    const b = blastFromJson(json);
+    if (!b) throw new Error(`detonate: no explosion in ${JSON.stringify(e)}`);
+    const r = detonate(game, monsters.sys, p().x + dx, p().y + dy, p().z, b, 'player');
+    return { center: r.center, noise: r.noise, damaged: r.damaged.size, flung: r.flung.size };
+  };
   /** Learn a martial art style by id (e.g. 'style_karate'). */
   api.learnStyle = (id: string) => learnStyle(p(), id);
   /** Switch style (learning it first if needed). */

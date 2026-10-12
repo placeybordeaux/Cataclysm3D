@@ -596,3 +596,48 @@ and Firefox at 3440x1304. `toGameplay()` in realinput waits for the gate.
   look like GC/first-JIT, not a slicing problem, but `maxStepMs` in the benchmark will tell.
 * The prefetcher still generates most chunks inside frames in a city (30 fps leaves no idle
   time); mapgen is cheap enough that it doesn't matter today.
+
+## Character texture/taper upload reuse (October 2026)
+
+`CharLayer` now requests texture-coordinate (`cTex`) and taper (`cShape`) uploads only
+when adding/removing instances, changing visibility, or reskinning changes the page
+layout. Matrices, lighting/emphasis, flash and root/fade remain dynamic. CPU writes
+stay in the existing loop: splitting static writes out increased flush CPU time in
+initial probes and was rejected. The diagnostic `layer.reuseStaticUploads = false`
+retains full uploads; production defaults to reuse. Pending ranges survive until
+Three consumes them, including changes while a mesh is not rendered.
+
+`tools/bench-char-upload.ts` compares alternating frames of the same function,
+300 warm-up + 300 recorded samples per mode, with 16-part moving zombie rigs. Run
+through Nix/heavy as described in the script. This isolates CPU flush and requested
+attribute bytes; it does not render or measure simulation. Final medians:
+
+| Rigs | CPU flush full → reuse | Requested bytes/frame full → reuse |
+| --- | --- | --- |
+| 200 | 0.349230 → 0.349849 ms | 460800 → 358400 |
+| 600 | 1.044379 → 1.047569 ms | 1382400 → 1075200 |
+
+CPU is effectively unchanged; requested bytes drop 22.2%. Independently executing
+old/new modules produced inconsistent CPU timings, so those runs do not establish
+a CPU improvement.
+
+`tools/bench-char-webgl.js`, evaluated through `tools/drive.ts` in the settled seeded
+model-character horde gallery, duplicates actual painted character instances solely
+for rendering. It alternates both modes each frame, with 40 warm-up + 80 recorded
+samples, records actual ARRAY_BUFFER `bufferSubData` bytes and non-disjoint
+`EXT_disjoint_timer_query_webgl2` queries, and restores methods/instances afterward.
+The focused browser used ANGLE/Vulkan on NVIDIA GeForce RTX 5080:
+
+| Instances | Render + finish median full → reuse | GPU median full → reuse | Actual array bytes/frame full → reuse |
+| --- | --- | --- | --- |
+| 200 | 1.2 → 1.2 ms | 0.229920 → 0.214528 ms | 460944 → 358512 |
+| 600 | 2.2 → 2.2 ms | 0.349024 → 0.337248 ms | 1382544 → 1075312 |
+
+These show a small GPU/upload benefit on this fixture, not an FPS claim or an
+improvement to real crowd AI. The additional bytes reflect the actual gallery's
+part layout. The [restored horde capture](screenshots/gaps/char-upload-crowd.png) was
+inspected for palette and taper consistency after removing benchmark instances.
+Six lifecycle tests cover animated lighting/flash/fade, the diagnostic off path,
+visibility/removal, page reskinning, capacity growth, and pending upload ranges.
+Worker meshing, palette-page uploads, sparse crowd transforms and broader batching
+remain separate gaps.

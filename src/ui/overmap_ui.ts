@@ -59,6 +59,7 @@ export function registerMapAtlasOption(): void {
   if (atlasOption) return;
   atlasOption = true;
   registerOption({
+    category: 'Interface',
     name: 'Map',
     value: () => (mapAtlasOn() ? 'Road atlas' : 'Explored only (CDDA)'),
     change: () => {
