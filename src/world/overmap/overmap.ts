@@ -119,9 +119,11 @@ const LINE_BIT = [LINE_N, LINE_E, LINE_S, LINE_W];
  * Saves record the version they were made with (save/format.ts `world.genVersion`; saves
  * without it are 1) and keep generating that way; new games use the latest.
  *   1  generation before the transport fixes
- *   2  transport fixes (docs/WORLD_TRANSPORT.md); gate every change with `genVersion >= 2`
+ *   2  transport fixes (docs/WORLD_TRANSPORT.md)
+ *   3  transport follow-ups (cross-region tunnels, lakes, special spawns, depth); gate every
+ *      change with `genVersion >= 3`
  */
-export const WORLDGEN_VERSION = 2;
+export const WORLDGEN_VERSION = 3;
 
 export class Overmap {
   private regions = new Map<string, Region>();

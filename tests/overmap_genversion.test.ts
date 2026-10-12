@@ -71,3 +71,29 @@ describe('overmap genVersion', () => {
     });
   });
 });
+
+describe('overmap genVersion 2', () => {
+  it('generates exactly what it generated when genVersion 2 shipped (bn 4217385)', () => {
+    // Worlds started on genVersion 2 regenerate their overmap from the seed like any other:
+    // later changes must be gated on genVersion >= 3. Hashes over z -7..1 (labs go deep).
+    const out: [number, number, number, number][] = [];
+    for (const seed of [1, 42, 743667900]) {
+      const om = new Overmap(seed, wg.overmap, 2);
+      for (const [rx, ry] of [[0, 0], [1, 0], [-1, 1]]) {
+        const parts: string[] = [];
+        for (let z = -7; z <= 1; z++)
+          for (let y = 0; y < REGION; y++)
+            for (let x = 0; x < REGION; x++) {
+              const o = om.omtAt(rx * REGION + x, ry * REGION + y, z);
+              parts.push(o.special ? `${o.id}@${o.special.def}:${o.special.uid}` : o.id);
+            }
+        out.push([seed, rx, ry, hashString(parts.join('|'))]);
+      }
+    }
+    expect(out).toEqual([
+      [1, 0, 0, 2586729168], [1, 1, 0, 3859344790], [1, -1, 1, 3893360640],
+      [42, 0, 0, 1555172508], [42, 1, 0, 935029921], [42, -1, 1, 2196657813],
+      [743667900, 0, 0, 3680404015], [743667900, 1, 0, 1611241286], [743667900, -1, 1, 1253080853],
+    ]);
+  }, 120_000);
+});
