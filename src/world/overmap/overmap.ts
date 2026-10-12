@@ -5,6 +5,7 @@ import { MinHeap } from './heap';
 import { Noise2D } from './noise';
 import { placeMutableSpecials, type MutableHost } from './mutable_place';
 import { MutableSpecial, type MutableReadHost, type PlacedPiece } from './mutable';
+import { LAKE_COLUMN_TYPES, lakeColumn } from './lakes';
 import { MAX_Z, MIN_Z } from '../coords';
 import {
   LINE_E, LINE_N, LINE_S, LINE_W, OmtRef, isLinear, isRotatable, oterId, parseOterId, rotateLine, rotateOffset,
@@ -170,6 +171,10 @@ export class Overmap {
       for (const t of ['road_nesw_manhole', 'sewer']) if (!data.terrains[t]) throw new Error(`overmap.json lacks terrain ${t} (re-run npm run extract:mapgen)`);
       this.T.road_nesw_manhole = this.intern('road_nesw_manhole');
     }
+    if (genVersion >= 3) {
+      for (const t of ['lake_shore', 'lake_water_cube', 'lake_bed', 'lake_underwater_shore']) if (!data.terrains[t]) throw new Error(`overmap.json lacks terrain ${t} (re-run npm run extract:mapgen)`);
+      if (!data.lakeSpecials) throw new Error('overmap.json lacks lakeSpecials (re-run npm run extract:mapgen)');
+    }
   }
 
   private intern(t: string): number {
@@ -314,7 +319,7 @@ export class Overmap {
   /** Natural terrain type from noise (what CDDA calls the "base" oter before specials). */
   baseLand(x: number, y: number): string {
     if (this.isRiver(x, y)) return 'river_center';
-    if (this.isLake(x, y)) return 'lake_surface';
+    if (this.isLake(x, y)) return this.genVersion >= 3 && this.isLakeShore(x, y) ? 'lake_shore' : 'lake_surface';
     const f = this.data.region.forest;
     const n = this.landNoise.fbm(x, y, 4, 0.5, 1 / 22);
     // Calibrated so roughly 40% of land is forest, like CDDA's default region.
@@ -340,6 +345,17 @@ export class Overmap {
 
   isLake(x: number, y: number): boolean {
     return this.lakeNoise.fbm(x, y, 3, 0.5, 1 / 30) > 0.79;
+  }
+
+  /**
+   * genVersion >= 3, BN place_lakes: a lake OMT with any of its eight neighbours outside the lake
+   * (rivers count as lake) is lake_shore. BN also drops lakes under lake_size_min (20 OMTs); our
+   * lake noise is older than that and keeps every lake.
+   */
+  private isLakeShore(x: number, y: number): boolean {
+    for (let dy = -1; dy <= 1; dy++)
+      for (let dx = -1; dx <= 1; dx++) if (!this.isLake(x + dx, y + dy) && !this.isRiver(x + dx, y + dy)) return true;
+    return false;
   }
 
   private nearWater(x: number, y: number, r: number): boolean {
@@ -389,15 +405,30 @@ export class Overmap {
     const rng = new Rng(hashSeed(this.seed, r.rx, r.ry, 7));
     for (let y = 0; y < REGION; y++)
       for (let x = 0; x < REGION; x++) r.t[y * REGION + x] = this.intern(this.baseLand(r.x0 + x, r.y0 + y));
+    // BN place_lakes writes the columns with the lake, before cities and specials claim rock.
+    if (this.genVersion >= 3) this.placeLakeColumns(r);
     this.placeCities(r, rng);
     this.connectRegion(r, rng);
     this.placeSpecials(r, rng);
     // Own RNG stream so the placements above draw exactly what they did in genVersion 1.
     if (this.genVersion >= 2) placeMutableSpecials(this.mutableHost(r), new Rng(hashSeed(this.seed, r.rx, r.ry, 0x6d75)));
+    // BN sorts specials by z0 area, so the LAKE ones (no z0 terrain) come last; own RNG stream.
+    if (this.genVersion >= 3) placeMutableSpecials(this.mutableHost(r), new Rng(hashSeed(this.seed, r.rx, r.ry, 0x1a4e)), this.data.lakeSpecials!);
     this.computeRoadLines(r);
     if (this.genVersion >= 2) {
       this.placeManholes(r);
       this.buildConnections(r);
+    }
+  }
+
+  /** genVersion >= 3: BN place_lakes' columns under every lake_surface / lake_shore (lakes.ts). */
+  private placeLakeColumns(r: Region): void {
+    const cols = new Map<number, number[]>();
+    for (const t of ['lake_surface', 'lake_shore']) cols.set(this.T[t] ?? this.intern(t), lakeColumn(t).map((c) => this.intern(c)));
+    for (let i = 0; i < RR; i++) {
+      const col = cols.get(r.t[i]);
+      if (!col) continue;
+      for (let k = 0; k < col.length; k++) r.layers.set(-(k + 1) * RR + i, { t: col[k], rot: 0, line: -1, sp: 0 });
     }
   }
 
@@ -730,7 +761,7 @@ export class Overmap {
         case 'forest': return 4;
         case 'forest_thick': return 5;
         case 'forest_water': return 7;
-        case 'river_center': case 'lake_surface': return 25;
+        case 'river_center': case 'lake_surface': case 'lake_shore': return 25;
         default: return -1;
       }
     };
@@ -983,6 +1014,9 @@ export class Overmap {
    */
   private addManhole(r: Region, x: number, y: number, city: City, center: boolean): void {
     const k = -RR + y * REGION + x;
+    // genVersion >= 3: a street laid over a lake has water under it, not rock for a sewer.
+    const below = r.layers.get(k);
+    if (below && LAKE_COLUMN_TYPES.has(this.types[below.t])) return;
     if (!r.layers.has(k)) r.layers.set(k, { t: this.intern('sewer'), rot: 0, line: 0, sp: 0 });
     r.manholes.push({ x, y, city, center });
   }
@@ -1161,7 +1195,7 @@ export class Overmap {
     for (let i = 0; i < RR; i++) {
       if (r.t[i] !== this.T.road || (r.line[i] !== 5 && r.line[i] !== 10)) continue;
       const base = this.baseLand(r.x0 + (i % REGION), r.y0 + Math.floor(i / REGION));
-      if (base !== 'river_center' && base !== 'lake_surface') continue;
+      if (base !== 'river_center' && base !== 'lake_surface' && base !== 'lake_shore') continue;
       r.rot[i] = r.line[i] === 5 ? 0 : 1;
       r.t[i] = this.T.bridge;
       r.line[i] = -1;

@@ -16,6 +16,10 @@ import type { City, ConnectionRequest, SpecialInstance } from './overmap';
 //  - the candidate-point pool is shared only between these specials (the older wilderness
 //    specials were placed by Overmap.placeSpecials and simply occupy their terrain);
 //  - nothing may touch a region's outermost ring (roads cross there through portals).
+//
+// genVersion 3 calls it a second time for the LAKE specials (OvermapData.lakeSpecials:
+// sunken_lab), which BN pools in its own "lake" zone: every z0 lake_surface (oter flag LAKE),
+// with zone_ratio = lake tiles / map area, so a region with little lake gets few.
 
 export interface MutableHost {
   readonly data: OvermapData;
@@ -81,8 +85,7 @@ function rollRemainder(v: number, rng: Rng): number {
   return i + (rng.next() < v - i ? 1 : 0);
 }
 
-export function placeMutableSpecials(h: MutableHost, rng: Rng): void {
-  const ids = h.data.mutableWildSpecials;
+export function placeMutableSpecials(h: MutableHost, rng: Rng, ids: readonly string[] | undefined = h.data.mutableWildSpecials): void {
   if (!ids?.length) return;
   const N = h.regionSize;
   const regionArea = (N * N) / (BN_OMAP * BN_OMAP);
@@ -95,22 +98,31 @@ export function placeMutableSpecials(h: MutableHost, rng: Rng): void {
   // such special could stand on; the rest (none of ours today) to every non-water tile.
   const landLocs = new Set<string>();
   const isLand = (e: Entry) => e.required.some((l) => l.p[2] === 0);
+  const isLake = (e: Entry) => e.flags.includes('LAKE');
   for (const e of entries) {
-    if (e.flags.includes('LAKE') || e.flags.includes('RIVER')) throw new Error(`mutable special ${e.id}: LAKE/RIVER specials are not supported`);
+    if (e.flags.includes('RIVER')) throw new Error(`mutable special ${e.id}: RIVER specials are not supported`);
+    if (isLake(e)) continue;
     if (isLand(e)) for (const l of e.required) if (l.p[2] === 0) l.locations.forEach((x) => landLocs.add(x));
   }
-  const pools: Record<'land' | 'under', number[]> = { land: [], under: [] };
+  type Zone = 'land' | 'under' | 'lake';
+  const zoneOf = (e: Entry): Zone => (isLake(e) ? 'lake' : isLand(e) ? 'land' : 'under');
+  // The lake pool exists only when a LAKE special is asked for, so the genVersion 2 call
+  // (no LAKE specials) shuffles, and so draws, exactly what it always did.
+  const wantLake = entries.some(isLake);
+  const pools: Record<Zone, number[]> = { land: [], under: [], lake: [] };
   for (let y = 0; y < N; y++)
     for (let x = 0; x < N; x++) {
       const t = h.typeAt(x, y, 0);
+      // BN zone::lake is ter()->is_lake(): the LAKE oter flag, which at z0 only lake_surface has.
+      if (wantLake && h.data.terrains[t]?.flags.includes('LAKE')) pools.lake.push(y * N + x);
       if (WATER.has(t)) continue;
       pools.under.push(y * N + x);
       if ([...landLocs].some((l) => h.accepts(l, t))) pools.land.push(y * N + x);
     }
   // BN zone_ratio for the non-unique counts (crowding and SPECIALS_DENSITY taken as 1).
-  const ratio = { land: pools.land.length / (N * N), under: pools.under.length / (N * N) };
+  const ratio: Record<Zone, number> = { land: pools.land.length / (N * N), under: pools.under.length / (N * N), lake: pools.lake.length / (N * N) };
   const removed = new Uint8Array(N * N);
-  for (const pool of Object.values(pools)) {
+  for (const pool of wantLake ? Object.values(pools) : [pools.land, pools.under]) {
     for (let i = pool.length - 1; i > 0; i--) {
       const j = Math.floor(rng.next() * (i + 1));
       [pool[i], pool[j]] = [pool[j], pool[i]];
@@ -118,7 +130,8 @@ export function placeMutableSpecials(h: MutableHost, rng: Rng): void {
   }
 
   // BN sorts by special_area (z0 locations for land specials, the rest otherwise), biggest first.
-  const area = (e: Entry) => e.required.filter((l) => (isLand(e) ? l.p[2] === 0 : l.p[2] !== 0)).length;
+  // BN special_area: z0 locations for land and lake/river specials, the rest for underground ones.
+  const area = (e: Entry) => e.required.filter((l) => (zoneOf(e) !== 'under' ? l.p[2] === 0 : l.p[2] !== 0)).length;
   const order = entries.map((e, i) => [e, i] as const).sort((a, b) => area(b[0]) - area(a[0]) || a[1] - b[1]).map(([e]) => e);
 
   const among = (x: number, y: number, z: number, locs: readonly string[]) => {
@@ -236,7 +249,7 @@ export function placeMutableSpecials(h: MutableHost, rng: Rng): void {
   };
 
   for (const e of order) {
-    const zone = isLand(e) ? 'land' : 'under';
+    const zone = zoneOf(e);
     const [lo, hi] = e.occurrences;
     let amount: number;
     if (e.flags.includes('UNIQUE') || e.flags.includes('GLOBALLY_UNIQUE')) {

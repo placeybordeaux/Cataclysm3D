@@ -3,6 +3,7 @@ import { MAX_Z, MIN_Z } from '../world/coords';
 import { hasFlag, isDiggable } from '../world/registry';
 import { MAIN_PARTS } from './bodyparts';
 import { emitSound } from './sound';
+import { swimVertical } from './water';
 import { stairKind } from './stairs';
 import { CREATURE_RADIUS, nudgeOutOfOverlap, overlapsSolid, resolveOverlap } from './physics';
 
@@ -72,6 +73,9 @@ export function stairDestination(game: Game, x: number, y: number, z: number, di
 export function goStairs(game: Game, dir: StairDir): boolean {
   const p = game.player;
   if (p.dead || p.isAsleep()) return false;
+  // In deep water `<`/`>` dive, surface and swim between levels (BN vertical_move).
+  const swam = swimVertical(game, dir);
+  if (swam !== null) return swam;
   if (stairHooks.auto?.(dir)) return true;
   const s = stairsNear(game, dir);
   if (!s) {

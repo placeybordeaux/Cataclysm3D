@@ -260,6 +260,9 @@ export interface OvermapData {
    * mutable one (the mines and their mine_tunnel). Ids name `mutables` or `specials`.
    */
   mutableWildSpecials?: string[];
+  /** BN "LAKE" specials (sunken_lab) placed from genVersion 3 in the lake columns, by
+   *  placeMutableSpecials' lake zone. Absent in data extracted before genVersion 3. */
+  lakeSpecials?: string[];
   names: { city: string[]; given: string[]; family: string[] };
   /** BN mutable overmap specials ("subtype": "mutable") we grow, by id: lab_basement (Overmap.
    *  placeLabBasement), the mutableWildSpecials and what they nest (mine_tunnel); all grown by

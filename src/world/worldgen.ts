@@ -7,13 +7,14 @@ import type { Chunk, ChunkGenerator, GameMap, MapItem } from './map';
 import { hasFlag } from './registry';
 import type { WorldgenData } from './worldgen_data';
 import { MapBuffer, OMT } from './mapgen/buffer';
-import { mapgenForest, mapgenWater, biomeFor, isWaterType, resolveRegional } from './mapgen/builtin';
+import { mapgenForest, mapgenLakeUnderwaterShore, mapgenWater, biomeFor, isWaterType, resolveRegional } from './mapgen/builtin';
 import { type BuiltinEnv, addManholeLadder, manholeSpot, runBnBuiltin } from './mapgen/bnbuiltin';
 import { mapgenLab } from './mapgen/lab';
 import { Levels, MapgenDat, MapgenEnv, MapgenRunner } from './mapgen/jsonmapgen';
 import { GenStats } from './mapgen/stats';
 import { ArgStores, ParamCtx } from './mapgen/values';
 import { OmtInfo, Overmap, SpecialInstance, WORLDGEN_VERSION } from './overmap/overmap';
+import { LAKE_DEPTH } from './overmap/lakes';
 import { DIR_SUFFIX, mapgenIdOf, oterId, oterRotation } from './overmap/oter';
 import { weightedPick } from './mapgen/values';
 
@@ -301,6 +302,11 @@ export class WorldGenerator implements ChunkGenerator {
     if (isWaterType(dat.oter.type) && dat.z === 0) {
       mapgenWater(dat, base);
       return 'builtin:water';
+    }
+    // genVersion 3 lake columns: BN's lake_shore builtin below z0 (lakes.ts).
+    if (dat.oter.type === 'lake_underwater_shore') {
+      mapgenLakeUnderwaterShore(dat, base, LAKE_DEPTH);
+      return 'builtin:lake_shore';
     }
     // BN C++/Lua builtins (field, road_*, parking_lot, rock, the Lua lab...).
     const builtin = this.wg.mapgen.builtin?.[mapgenId] ?? def?.builtin;

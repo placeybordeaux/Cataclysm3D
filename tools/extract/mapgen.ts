@@ -57,13 +57,21 @@ export const WILD_SPECIALS = [
  * Specials overmap.ts places from genVersion 2 (placeMutableSpecials): BN's mutable wilderness
  * specials, plus the fixed mine specials, which exist to host the nested mutable mine_tunnel.
  * Kept apart from WILD_SPECIALS because genVersion 1 iterates that list and must not change.
- * Left out: lab_basement (grown by placeLabBasement) and sunken_lab (fixed; needs the
- * lake_water_cube / lake_bed columns under lakes, which we don't generate).
+ * Left out: lab_basement (grown by placeLabBasement) and sunken_lab (LAKE_SPECIALS).
  */
 export const MUTABLE_WILD_SPECIALS = [
   'Anthill', 'Acid Anthill', 'Lab with Anthill', 'Slime Pit', 'Ice Lab', 'stream_mutable',
   'Mine Entrance', 'Spiral mine', 'Amigara mine', 'Wyrms mine',
 ];
+
+/**
+ * BN "LAKE" specials, placed from genVersion 3 on lake_surface over the lake columns
+ * (src/world/overmap/lakes.ts, placeMutableSpecials' lake zone). Kept apart from
+ * MUTABLE_WILD_SPECIALS so genVersion 2 placement doesn't change.
+ */
+export const LAKE_SPECIALS = ['sunken_lab'];
+/** BN place_lakes column terrains under lake_surface / lake_shore (genVersion 3). */
+const LAKE_COLUMN_OTERS = ['lake_water_cube', 'lake_bed', 'lake_underwater_shore'];
 
 /** BN terrains drawn by hardcoded C++ that isn't a registered cfunction (mapgen.cpp draw_map
  *  dispatches on the oter id): name -> our builtin name. */
@@ -400,6 +408,14 @@ for (const m of Object.values(mutables)) {
     lateOm.push(o.overmap);
   }
 }
+// genVersion 3 lakes: the columns under every lake tile and the LAKE specials standing in them.
+lateOm.push(...LAKE_COLUMN_OTERS);
+for (const id of LAKE_SPECIALS) {
+  const s = specials[id];
+  if (!s) throw new Error(`LAKE_SPECIALS entry not found: ${id}`);
+  for (const n of s.nested ?? []) if (!mutables[n.special]) throw new Error(`LAKE_SPECIALS ${id} nests ${n.special}, which isn't a kept mutable special`);
+  s.overmaps.forEach((o) => o.om && lateOm.push(o.om));
+}
 
 const keptOm = new Set<any>();
 const keptNested = new Set<string>();
@@ -581,7 +597,7 @@ const nameList = (usage: string) => names.filter((n) => n.usage === usage).flatM
 
 // Only ship terrains/specials the generator can actually produce.
 const usedSpecials: Record<string, SpecialDef> = {};
-for (const id of [...cityIds, ...WILD_SPECIALS, ...MUTABLE_WILD_SPECIALS]) if (specials[id]) usedSpecials[id] = specials[id];
+for (const id of [...cityIds, ...WILD_SPECIALS, ...MUTABLE_WILD_SPECIALS, ...LAKE_SPECIALS]) if (specials[id]) usedSpecials[id] = specials[id];
 const usedTerrains: Record<string, OterDef> = {};
 for (const id of wantOm) if (terrains[id]) usedTerrains[id] = terrains[id];
 const overmapOut: OvermapData = {
@@ -592,6 +608,7 @@ const overmapOut: OvermapData = {
   wildSpecials: WILD_SPECIALS,
   connections,
   mutableWildSpecials: MUTABLE_WILD_SPECIALS,
+  lakeSpecials: LAKE_SPECIALS,
   names: { city: nameList('city'), given: nameList('given'), family: nameList('family') },
   mutables,
   connectionTerrains,

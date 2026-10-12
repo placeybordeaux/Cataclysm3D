@@ -11,6 +11,7 @@ import { createItem, type Item } from './item';
 import { canMove, consumeItem, L, spawnOnGround, spawnSome } from './moves';
 import { emitSound } from './sound';
 import { MAX_VIEW_DISTANCE } from './vision';
+import { MAX_Z, MIN_Z } from '../world/coords';
 
 // Water: drinking and filling containers from lakes/rivers (iexamine::water_source +
 // liquid_handler), fishing with a rod (iuse::fishing_rod + fish_activity_actor), and
@@ -216,6 +217,70 @@ export function startFishing(game: Game, rod: Item, opts: { duration?: number } 
 
 // ------------------------------------------------------------------ swimming
 
+/** Can kick back up to the surface (BN: swim_speed < 500, swim fins, or a MUTATION_SWIM trait). */
+function canSurface(game: Game): boolean {
+  const p = game.player;
+  return swimSpeed(game) < 500 || p.inv.worn.some((it) => it.typeId === 'swim_fins') ||
+    [...p.traits].some((t) => (p.traitDef(t)?.flags ?? []).includes('MUTATION_SWIM'));
+}
+
+/**
+ * `<` / `>` in water: game::vertical_move's swimming branch (BN game.cpp 14345-14615). On deep
+ * water with air above, `>` dives under (no level change) and, once under, swims down into a
+ * water cube below; `<` surfaces. Inside a water cube (the levels under a lake, genVersion 3)
+ * `>`/`<` swim a level down/up while there is water there. Returns null when the player isn't in
+ * swimmable water (take the stairs instead), else true if anything happened.
+ */
+export function swimVertical(game: Game, dir: 'up' | 'down'): boolean | null {
+  const p = game.player;
+  const map = game.map;
+  const here = map.terAt(p.tileX, p.tileY, p.z);
+  if (!hasFlag(here, 'SWIMMABLE')) return null;
+  const st = swimState(game);
+  const dz = dir === 'up' ? 1 : -1;
+  const tz = p.z + dz;
+  const target = tz >= MIN_Z && tz <= MAX_Z ? map.terAt(p.tileX, p.tileY, tz) : null;
+  // BN's checks before the branch: up needs GOES_UP or being under, down GOES_DOWN or being under.
+  if (dir === 'up' && !hasFlag(here, 'GOES_UP') && !st.underwater) return game.message("You can't go up here!"), false;
+  if (dir === 'down' && !hasFlag(here, 'GOES_DOWN') && !st.underwater) return game.message("You can't go down here!"), false;
+  const cube = hasFlag(here, 'WATER_CUBE');
+  if (hasFlag(here, 'DEEP_WATER') && !cube) {
+    if (dir === 'down') {
+      if (!st.underwater) {
+        if (p.inv.worn.some((it) => it.hasFlag('FLOTATION'))) return game.message("You can't dive while wearing a flotation device."), false;
+        st.oxygen = oxygenMax(game);
+        st.underwater = st.dived = st.swimming = true;
+        game.message('You dive underwater!');
+        return true;
+      }
+      if (!target || !hasFlag(target, 'WATER_CUBE')) return game.message('You are already underwater and there is no more water beneath you to swim down!'), false;
+      game.message('You swim down.');
+    } else {
+      if (!canSurface(game)) return game.message("You try to surface but can't!"), false;
+      st.underwater = st.dived = false;
+      game.message('You surface.');
+      return true;
+    }
+  } else if (cube) {
+    st.underwater = st.dived = true;
+    if (dir === 'down') {
+      if (!target || !hasFlag(target, 'WATER_CUBE')) return game.message('You are already underwater and there is no more water beneath you to swim down!'), false;
+      game.message('You swim down.');
+    } else {
+      if (!target || !(hasFlag(target, 'WATER_CUBE') || hasFlag(target, 'DEEP_WATER'))) return game.message('You are already underwater and there is no water above you to swim up!'), false;
+      game.message('You swim up.');
+    }
+  } else {
+    // Shallow swimmable water: BN goes on to its stair search; so do we.
+    return null;
+  }
+  // BN moves straight to the same x, y one level over (no stair search for swimmers).
+  p.z = tz;
+  p.burnMoveStamina(100);
+  emitSound(game, { x: p.tileX, y: p.tileY, z: tz }, 4, 'splash!', { category: 'movement', source: p });
+  return true;
+}
+
 export interface SwimState {
   swimming: boolean;
   underwater: boolean;
@@ -225,13 +290,15 @@ export interface SwimState {
   shoreY: number;
   /** player agreed to dive in; cleared on leaving deep water */
   divingOk: boolean;
+  /** went under on purpose (`>`, BN set_underwater): stays under until `<`, unlike sinking */
+  dived: boolean;
   drownMsgT: number;
 }
 
 const swimStates = new WeakMap<Game, SwimState>();
 export function swimState(game: Game): SwimState {
   let s = swimStates.get(game);
-  if (!s) swimStates.set(game, (s = { swimming: false, underwater: false, oxygen: oxygenMax(game), shoreX: game.player.x, shoreY: game.player.y, divingOk: false, drownMsgT: 0 }));
+  if (!s) swimStates.set(game, (s = { swimming: false, underwater: false, oxygen: oxygenMax(game), shoreX: game.player.x, shoreY: game.player.y, divingOk: false, dived: false, drownMsgT: 0 }));
   return s;
 }
 
@@ -299,7 +366,7 @@ export function updateSwimming(game: Game, realDt: number): void {
   if (shallow) for (const bp of ['leg_l', 'leg_r'] as const) p.wetness[bp] = 1;
   if (!deep) {
     if (st.swimming) game.message('You climb out of the water.', 'c_light_gray');
-    st.swimming = st.underwater = st.divingOk = false;
+    st.swimming = st.underwater = st.divingOk = st.dived = false;
     st.oxygen = oxygenMax(game);
     st.shoreX = p.x;
     st.shoreY = p.y;
@@ -334,10 +401,15 @@ export function updateSwimming(game: Game, realDt: number): void {
   const turns = realDt * ACTION_SCALE;
   const winded = p.effects.has('winded');
   const heavy = swimSpeed(game) >= 500;
-  if (!st.underwater && (heavy || winded)) {
+  // BN vertical_move: inside a water cube (the levels under a lake) you are always underwater.
+  const cube = hasFlag(game.map.terAt(p.tileX, p.tileY, p.z), 'WATER_CUBE');
+  if (cube && !st.underwater) {
+    st.underwater = st.dived = true;
+    st.oxygen = oxygenMax(game);
+  } else if (!st.underwater && (heavy || winded)) {
     st.underwater = true;
     game.message('You sink like a rock!', 'c_light_red');
-  } else if (st.underwater && !heavy && !winded) {
+  } else if (st.underwater && !st.dived && !cube && !heavy && !winded) {
     // CDDA needs '<' to surface; in real time you kick back up once you can
     st.underwater = false;
     game.message('You surface, gasping for air.', 'c_light_gray');
