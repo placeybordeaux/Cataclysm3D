@@ -8,9 +8,13 @@ export function createHeadlight(): THREE.SpotLight {
   light.shadow.mapSize.set(1024, 1024);
   light.shadow.camera.near = 0.1;
   light.shadow.camera.far = light.distance;
-  // Perspective depth bias expands with distance and can detach shadows from slabs.
+  // Perspective depth bias expands with distance and can detach shadows from slabs, so the
+  // offset is along the receiver's normal instead. A headlight ~0.7 m up meets the road at a
+  // grazing angle, where one 1024 texel covers 2-4 cm of road 20-40 m out: at 0.002 m the road
+  // shadowed itself in stripes fanning out from the lamp. 0.04 m clears them out to the beam's
+  // useful range and still keeps floors sealed (tools/check-headlight-occlusion.ts).
   light.shadow.bias = 0;
-  light.shadow.normalBias = 0.002;
+  light.shadow.normalBias = 0.04;
   return light;
 }
 
