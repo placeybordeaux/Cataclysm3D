@@ -18,6 +18,7 @@ lighting.
 | Options > **Vehicle width** / `?vehiclewidth=real\|fill` / `cdda.vehicleWidth('fill')` | model look only: `real` (default) draws real-world proportions; `fill` stretches bodies to the grid footprint. Collision follows the drawn body either way (below), so `real` has no invisible wall |
 | Options > Gameplay > **Vehicle crashes** / `?vehcrash=momentum\|immovable` | vehicles push and spin each other (default) / the old immovable-vehicle model ("Momentum crashes" below) |
 | Options > Gameplay > **Heavy vehicles** / `?vehheft=weighty\|light` | tanks and other heavy / tracked vehicles handle heavy (default) / everything on the car tuning |
+| Options > Gameplay > **Run-over bodies** / `?runover=ragdoll\|loose\|fall` / `cdda.runoverBodies('loose')` | creatures you hit are thrown and tumble as a stiff rag doll (default) / a looser one / the old simple fall ("Run-over bodies" below) |
 
 `fill` for comparison (same views as the first two rows below):
 
@@ -1067,3 +1068,62 @@ avgas and alcohols; diesels take diesel, biodiesel, lamp/motor oil and JP-8. As 
 the vehicle carries when you start it (`Vehicle.selectEngineFuel`); the choice is saved on
 the engine (`fuelPref`, BN `ammo_pref`). Gauges show the fuel each engine would run on
 (`runningFuels`). Picking a fuel by hand (BN `control_engines`) is not ported.
+
+## Run-over bodies (rag doll)
+
+Request: *"When you run over a zombie they should go slightly rigid, but rag doll."* Before, BN's
+`fling_creature` teleported a survivor up to 6 tiles ahead and a killed zombie did the ordinary
+death topple on the spot, under the car. Now a hit reads like GTA 3: the body is launched along
+your path, tumbles, bounces and skids to rest.
+
+**The simulation owns the flight** (`src/game/runoverFling.ts`, pure). When a vehicle is about to
+hit a monster (`collidePose` -> `planRunover`, before the damage lands), `launchFromImpact` turns
+the vehicle's planar velocity, where across the front it struck (-1 left edge .. 1 right edge) and
+the creature's mass into a launch: horizontal speed 1.35x the car's below 40 km/h (thrown clear
+ahead of the bumper), 0.7x above 54 km/h (the car runs under it: up the bonnet and over the roof),
+rolling up onto the bonnet in between; an up-kick of 1.8 + 0.16/m·s (a hop) rising to 7.5 m/s
+above the ramp; a sideways throw and a spin from an off-centre hit; a somersault (legs swept out,
+head back over the bumper). Heavy creatures fly less (x sqrt(80 kg / mass), clamped 0.3-1.2).
+`planFling` then flies it at 1/60 s through the map: arcade gravity 16 m/s², axis-separated wall
+bounces (walls, furniture that blocks, other vehicles, and tiles without a floor, so a body never
+drops off a ledge or into another z-level), a ceiling at 1.4 m under a roof, ground bounces
+(restitution 0.36 above 1.5 m/s, 72% of the slide kept) and a skid at 7.5 m/s². The vehicle that
+hit it is not an obstacle (bodies fly over it). The flight ends on a free tile (passable, no one in
+it, not under the vehicle); otherwise it slides to the nearest free tile within 2, and with none
+the hit is BN's pinned case (the vehicle stops). All tunables: `RUNOVER`.
+
+- **Killed**: `MonsterSystem.dropCorpse` puts the corpse at the end of the flight
+  (`CorpseRecord.fling` carries the plan to the renderer, not saved). The corpse item is where the
+  body is drawn landing.
+- **Survived** (BN's impulse leaves it alive: a soldier zombie at 20 km/h): `launch` starts
+  `Monster.fling`; monai moves it along the plan each tick (no AI, no separation, wind-up
+  cancelled), it can't be hit by a vehicle again until it lands, then it lies `downed` for
+  `RUNOVER.getUp` (1.1 s) more and gets up where it came down.
+- **Gibbed**: BN's pulverisation (`overflowDamage`, damage over 3x max HP) is unchanged: no
+  corpse, no body, the splatter. With in-play HP (a plain zombie has 56) that is any hit over
+  ~60 km/h; tougher zombies (soldiers, brutes) still fly at 70.
+- NPCs and the player keep BN's teleport fling (their hooks have no `planFling`).
+
+`runoverMode` (`VehicleSystem`): `ragdoll` (default) and `loose` fly the body (the renderer
+tumbles it stiffly / loosely), `fall` is the old behaviour exactly (teleport, corpse where it died,
+the simple topple).
+
+The rendering is in docs/CHARACTERS.md "Run-over rag doll".
+
+Tests: `tests/runoverRagdoll.test.ts` (launch direction, speed and side; heavier flies less;
+further when faster; bounces off a wall, stays under a roof, ends on a free tile or reports
+pinned; in a game: a 20 km/h survivor follows the plan exactly, lands at its end, is downed, then
+gets up; a 70 km/h kill puts the corpse at the end of the flight; `fall` keeps the teleport),
+`tests/ragdoll.test.ts`. Real input: `tools/realinput.ts --gpu --only runover`
+(`tools/realinput_runover.ts`): W held through xdotool, feathered around the target speed, into a
+row of three zombies; a frame burst through the hit. `RUNOVER_OUT=dir RUNOVER_ONLY=70-third,...`.
+Hits measured at 16, 34-35 and 64-65 km/h (the throttle is released at the first contact).
+
+| | |
+| --- | --- |
+| 40 km/h, side view (scripted car, stepped 67 ms): thrown ahead, tumbling, flop and skid to rest | ![](screenshots/runover/side_40kmh.jpg) |
+| 70 km/h, soldier zombies, side view (50 ms): over the roof, the car passes under, they land behind | ![](screenshots/runover/side_70kmh_soldiers.jpg) |
+| 25 km/h, a soldier survives: thrown, lies downed, gets up and comes back | ![](screenshots/runover/side_25kmh_survivor.jpg) |
+| real W at 64 km/h, chase camera: the soldiers go over the roof | ![](screenshots/runover/70-third.jpg) |
+| real W at 35 km/h, first person: thrown ahead down the road | ![](screenshots/runover/40-first.jpg) |
+| also: [20 km/h chase](screenshots/runover/20-third.jpg), [40 km/h chase](screenshots/runover/40-third.jpg), [70 km/h first person](screenshots/runover/70-first.jpg), [plain zombies at 70: gibbed](screenshots/runover/70-gib.jpg), [dogs at 40 (low, mostly hidden by the car from the chase camera)](screenshots/runover/40-dogs.jpg) | |

@@ -278,6 +278,7 @@ tests/               vitest unit tests (pure logic, no DOM/WebGL)
   cruise model is the "Driving controls" option), Space handbrake. Launch acceleration is
   CDDA power/mass compressed toward a car (`feltAcceleration`, 0-30 mph in ~4 s); steering
   lock narrows with speed (`maxSteerAt`, lateral accel <= 5.5 m/s^2).
+- Run-over bodies (docs/VEHICLES.md "Run-over bodies"): `runoverFling.ts` plans the throw in the sim (corpse at its end, survivors fly it via `Monster.fling` then get up), `render/chars/ragdoll.ts` tumbles it; `vs.runoverMode` ragdoll|loose|fall, `?runover=`, `cdda.runoverBodies()`.
 - Run-overs use BN's impulse model (`resolveBodyCollision`, 0.1 damage per N·s, minus torso bash armor; a car at 20 mph kills an ordinary zombie) and credit the kill to the driver (`hurt(m, dmg, "player")` only when you drive; tests/runover.test.ts). Terrain impacts still use the DDA energy loop (`resolveCollision`, on the speed into the obstacle); vehicle-vs-vehicle crashes exchange a rigid-body impulse with a transient slide/spin per vehicle (`vehicleImpact.ts`, docs/VEHICLES.md "Momentum crashes"; Options > Vehicle crashes keeps the old immovable model), and heavy/tracked handling comes from `handlingFor` (mass, power, tracks). `vs.creatureHooks = composeCreatureHooks([monsterCreatureHooks(ms),
   npcCreatureHooks(game, vs)])` — NPCs take CDDA impact damage on the torso, get stunned,
   flung and downed, and npcai `afterHit` handles death drops and anger. `e` on a vehicle part goes

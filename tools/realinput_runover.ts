@@ -117,10 +117,11 @@ export function runoverScenarios(c: RunoverCtx): Scenario[] {
     check(`${label}: hit at ~${kmh} km/h (${speedAtHit.toFixed(0)} km/h)`, hitAt >= 0 && Math.abs(speedAtHit - kmh) < Math.max(8, kmh * 0.25), { speedAtHit, end });
     check(`${label}: ${frames} frames through the hit`, frames >= 8);
     await js(`(() => { const v = cdda.vehicleSystem.driving; if (v) v.velocity = 0; })()`);
-    // a strip: ~10 frames spread over the 3 s after the hit
+    // a strip: 10 frames over the first ~1.8 s after the hit (the throw, the tumble, the landing)
     const pick: string[] = [];
+    const span = Math.min(frames - 1, Math.round((frames * 1.8) / 3.2));
     const n = Math.min(10, frames);
-    for (let i = 0; i < n; i++) pick.push(resolve(dir, `f${String(Math.round((i * (frames - 1)) / Math.max(1, n - 1))).padStart(3, '0')}.jpg`));
+    for (let i = 0; i < n; i++) pick.push(resolve(dir, `f${String(Math.round((i * span) / Math.max(1, n - 1))).padStart(3, '0')}.jpg`));
     try {
       // two rows of five, half size (montage needs a font for its labels; plain appends don't)
       const rowOf = (fs: string[]) => ['(', ...fs, '-resize', '480x270', '-bordercolor', '#111', '-border', '2', '+append', ')'];
