@@ -6,8 +6,11 @@
 
 export const CHUNK = 24;
 export const LEVEL_HEIGHT = 2.6;
-export const MIN_Z = -7;
-export const MAX_Z = 5;
+// BN's OVERMAP_DEPTH / OVERMAP_HEIGHT (game_constants.h): the map holds every level BN has. What
+// overmap generation may place there depends on the world's genVersion (overmap.ts genZRange):
+// worlds before genVersion 3 were generated against -7..5 and still are.
+export const MIN_Z = -10;
+export const MAX_Z = 10;
 
 export interface TilePos {
   x: number;

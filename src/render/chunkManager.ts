@@ -668,7 +668,7 @@ export class ChunkManager {
       if (dx * dx + dy * dy > R * R) break; // offsets are sorted by distance
       const cx = pcx + dx, cy = pcy + dy;
       if (pz >= 0 && lv.policy.mode === 'world')
-        for (let z = 0; z <= MAX_Z; z++) {
+        for (let z = 0, top = Math.min(MAX_Z, m.topZ()); z <= top; z++) {
           if (!m.hasChunk(cx, cy, z) || m.chunk(cx, cy, z)!.empty) continue;
           if (lv.radiusAt(cx, cy, z, pz) < 0) miss(cx, cy, z, 'content');
         }

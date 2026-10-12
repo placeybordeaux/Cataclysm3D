@@ -1,7 +1,7 @@
 import { cardSettings, cardsOn, crossCards, flatCard } from './cards';
 import { bakeFigure, isFigure } from './chars/figures';
 import type * as THREE from 'three';
-import { CHUNK, LEVEL_HEIGHT, MAX_Z, chunkOf, localOf } from '../world/coords';
+import { CHUNK, LEVEL_HEIGHT, MIN_Z, chunkOf, localOf } from '../world/coords';
 import type { Chunk, GameMap } from '../world/map';
 import { pointSeed } from './atlasIndex';
 import { GeomBuilder } from './geometry';
@@ -243,7 +243,7 @@ export function* buildChunkMeshSteps(
   const CM = 16, CW = CHUNK + 2 * CM, cx0 = chunk.cx * CHUNK - CM, cy0 = chunk.cy * CHUNK - CM;
   const coverMemo = new Int8Array(CW * CW).fill(-1);
   const higher: number[] = [];
-  for (let zz = z + 2; zz <= MAX_Z; zz++) higher.push(zz);
+  for (let zz = z + 2, top = map.topZ(); zz <= top; zz++) higher.push(zz);
   const overhead = (tx: number, ty: number): boolean => {
     if (shapes.terrain(above.ter(tx, ty)) !== S.none) return true;
     if (!higher.length) return false;
@@ -474,7 +474,7 @@ export function* buildChunkMeshSteps(
       // eave soffit; without it you looked up into the dark under the roof)
       const gutter = !!SP && A !== undefined && /^t_gutter/.test(def.id);
       const hasSlab = shape !== S.none && shape !== S.liquid && (shape !== S.stairs_down || srole === 3) && srole !== 2;
-      if (hasSlab && z > -10) {
+      if (hasSlab && z > MIN_Z) {
         const belowShape = shapeAt(below, x, y);
         if (!isWall(belowShape) && (belowShape !== S.stairs_up || ST?.role(x, y, z - 1) === 3)) {
           curSky = INDOOR_SKY; // a ceiling always faces a covered room

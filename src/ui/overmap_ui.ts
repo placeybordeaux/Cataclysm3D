@@ -1,5 +1,5 @@
 import type { Game, GameSystem } from '../game/game';
-import { CHUNK } from '../world/coords';
+import { CHUNK, MAX_Z, MIN_Z } from '../world/coords';
 import { cddaColor } from '../render/colors';
 import type { AtlasHit, FrameRef, Atlas } from '../render/atlas';
 import { button, h, openContextMenu, textPrompt, attachTooltip, type MenuItem, type Panel } from '../ui2';
@@ -620,7 +620,7 @@ export function openOvermap(ctx: UiContext): Panel | null {
     draw();
   }
   function level(d: number): void {
-    cz = Math.max(-7, Math.min(5, cz + d));
+    cz = Math.max(MIN_Z, Math.min(MAX_Z, cz + d));
     draw();
   }
   function centre(): void {

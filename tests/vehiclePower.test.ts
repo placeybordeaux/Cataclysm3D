@@ -19,6 +19,7 @@ function setup() {
   game.weather = null;
   game.map.terAt = () => ({ flags: [] }) as any;
   game.map.hasFloor = () => false;
+  game.map.hasChunk = () => false;
   return { v, battery, panel };
 }
 describe('vehicle solar generation', () => {
@@ -73,6 +74,8 @@ describe('vehicle power integration and reactors', () => {
   it('blocks sunlight beneath roofs several levels above the panel', () => {
     const { v } = setup();
     game.map.hasFloor = (_x, _y, z) => z === 3;
+    // levels above the next are read only where generated (vehiclePower.ts solarWatts)
+    game.map.hasChunk = (_cx, _cy, z) => z === 3;
     expect(generateSolarPower(game, v, 100)).toBe(0);
   });
   it('uses game elapsed time in the installed system', () => {

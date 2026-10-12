@@ -153,6 +153,12 @@ export class GameMap {
   readonly terrain = new IdRegistry<TerrainDef>(NULL_TER);
   readonly furniture = new IdRegistry<FurnitureDef>(NULL_FURN);
   private chunks = new Map<string, Chunk>();
+  /**
+   * Chunks present per level (index z - MIN_Z). The map holds BN's 21 levels, but a world rarely
+   * has anything above z5 or 6 (tower tops); loops that read "every level above" (sky cover,
+   * light signatures, room roofs) stop at topZ() instead of MAX_Z, so empty levels cost nothing.
+   */
+  private perLevel = new Int32Array(MAX_Z - MIN_Z + 1);
   generator: ChunkGenerator | null = null;
   /** Converts mapgen item placements into real items; set by Game. */
   itemFactory: ((spawn: ItemSpawn) => MapItem[]) | null = null;
@@ -197,6 +203,7 @@ export class GameMap {
     if (!c) {
       c = new Chunk(cx, cy, z);
       this.chunks.set(key, c);
+      this.perLevel[z - MIN_Z]++;
       if (this.generator) this.generator.generate(this, c);
       for (const fn of this.onChunkGenerated) fn(c);
     }
@@ -209,7 +216,16 @@ export class GameMap {
 
   /** Used by save/load to restore an authoritative chunk without regenerating. */
   putChunk(c: Chunk): void {
-    this.chunks.set(chunkKey(c.cx, c.cy, c.z), c);
+    if (c.z < MIN_Z || c.z > MAX_Z) throw new Error(`putChunk: chunk ${c.cx},${c.cy} at z ${c.z} is outside the map (${MIN_Z}..${MAX_Z})`);
+    const key = chunkKey(c.cx, c.cy, c.z);
+    if (!this.chunks.has(key)) this.perLevel[c.z - MIN_Z]++;
+    this.chunks.set(key, c);
+  }
+
+  /** Highest level holding any chunk (MIN_Z - 1 when the map is empty). Cheap: 21 reads. */
+  topZ(): number {
+    for (let z = MAX_Z; z >= MIN_Z; z--) if (this.perLevel[z - MIN_Z] > 0) return z;
+    return MIN_Z - 1;
   }
 
   /**
@@ -220,12 +236,14 @@ export class GameMap {
     const key = chunkKey(c.cx, c.cy, c.z);
     if (this.chunks.get(key) !== c) return;
     this.chunks.delete(key);
+    this.perLevel[c.z - MIN_Z]--;
     for (const fn of this.onChunkEvicted) fn(c);
   }
 
   /** Forget every chunk (loading a save into a running game); they regenerate on demand. */
   clearChunks(): void {
     this.chunks.clear();
+    this.perLevel.fill(0);
   }
 
   private at(x: number, y: number, z: number): [Chunk, number] | null {

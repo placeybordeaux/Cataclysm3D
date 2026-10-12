@@ -1,5 +1,4 @@
 import { Rng } from '../../core/rng';
-import { MAX_Z, MIN_Z } from '../coords';
 import type { CubeDir, MutableSpecialDef, OvermapData, SpecialConnection, SpecialDef } from '../worldgen_data';
 import { mutableRequiredLocations, placeMutable, type MutableGrid, type MutablePlacement } from './mutable';
 import { rotateOffset } from './oter';
@@ -20,6 +19,8 @@ import type { City, ConnectionRequest, SpecialInstance } from './overmap';
 export interface MutableHost {
   readonly data: OvermapData;
   readonly regionSize: number;
+  /** [lo, hi] levels specials may occupy (Overmap.zRange: BN's -10..10 from genVersion 3) */
+  readonly zRange: readonly [number, number];
   /** cities of this region (global coords) */
   readonly cities: readonly City[];
   readonly x0: number;
@@ -47,8 +48,6 @@ export interface MutableHost {
 const BN_OMAP = 180;
 /** BN SPECIALS_SPACING default (options.cpp). */
 const SPECIALS_SPACING = 6;
-/** BN allows z -10..10 (OVERMAP_DEPTH / OVERMAP_HEIGHT); our map only has MIN_Z..MAX_Z. */
-const Z_MIN = MIN_Z, Z_MAX = MAX_Z;
 const WATER = new Set(['river_center', 'lake_surface', 'river', 'lake_shore']);
 /** overmap_connection default/own terrains (BN overmap_connections.json) */
 const CONNECTION_TERRAINS: Record<string, string[]> = {
@@ -89,7 +88,7 @@ export function placeMutableSpecials(h: MutableHost, rng: Rng): void {
   const entries = ids.map((id) => entryFor(h.data, id));
 
   const inbounds = (x: number, y: number, z: number, margin: number) =>
-    x >= margin && y >= margin && x < N - margin && y < N - margin && z >= Z_MIN && z <= Z_MAX;
+    x >= margin && y >= margin && x < N - margin && y < N - margin && z >= h.zRange[0] && z <= h.zRange[1];
 
   // BN place_specials zones: specials needing a z0 location go to the "land" pool of tiles some
   // such special could stand on; the rest (none of ours today) to every non-water tile.

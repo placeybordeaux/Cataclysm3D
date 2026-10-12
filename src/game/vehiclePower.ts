@@ -2,7 +2,7 @@ import type { Game } from './game';
 import { bodyLocs, consumeItem, walkLocs } from './moves';
 import { has, type Vehicle, type VehiclePart } from './vehicle';
 import { isOutside, sunAltitudeAt, sunLight } from './vision';
-import { MAX_Z } from '../world/coords';
+import { CHUNK, MAX_Z } from '../world/coords';
 import { rechargeVehicleCargo } from './recharging';
 import { isColdCargo, processColdCargo, rotCargo } from './vehicleStorage';
 
@@ -31,7 +31,12 @@ function solarWatts(game: Game, vehicle: Vehicle): number {
     const [x, y] = vehicle.mountToWorld(p.mx, p.my);
     const tx = Math.floor(x), ty = Math.floor(y);
     if (!isOutside(game.map, tx, ty, vehicle.z)) return false;
-    for (let z = vehicle.z + 1; z <= MAX_Z; z++) if (game.map.hasFloor(tx, ty, z)) return false;
+    // Higher levels only where generated (as roofAbove in world/levels.ts): the chunk manager
+    // generates every level a column has, and reading would otherwise run mapgen for open air
+    // all the way up to z10, raising GameMap.topZ for every sky-cover loop in the game.
+    if (game.map.hasFloor(tx, ty, vehicle.z + 1)) return false;
+    const cx = Math.floor(tx / CHUNK), cy = Math.floor(ty / CHUNK);
+    for (let z = vehicle.z + 2; z <= MAX_Z; z++) if (game.map.hasChunk(cx, cy, z) && game.map.hasFloor(tx, ty, z)) return false;
     return true;
   });
   return exposed.reduce((sum, p) => sum + Math.max(0, p.def.epower ?? 0) * p.hp / p.def.durability, 0);

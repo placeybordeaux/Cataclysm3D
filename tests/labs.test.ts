@@ -5,7 +5,7 @@
 import { describe, expect, it } from 'vitest';
 import { WorldGenerator } from '../src/world/worldgen';
 import { CLASSIC_LAB_SPECIAL, LAB_BASEMENT_TYPES, LAB_SPECIAL, MICROLAB_SPECIAL } from '../src/world/overmap/overmap';
-import { CHUNK } from '../src/world/coords';
+import { CHUNK, MIN_Z } from '../src/world/coords';
 import { hasFlag } from '../src/world/registry';
 import { Game } from '../src/game/game';
 import type { Input } from '../src/core/input';
@@ -32,7 +32,7 @@ function world(seed: number) {
 function labCells(gen: WorldGenerator, special: string, from: { x: number; y: number }) {
   const sp = gen.overmap.findSpecial(special, from, 3)!;
   const cells: { x: number; y: number; z: number; id: string }[] = [];
-  for (let z = 1; z >= -7; z--)
+  for (let z = 1; z >= MIN_Z; z--)
     // BN's mutable lab_basement can spread a dozen OMTs from its entrance
     for (let dy = -12; dy <= 12; dy++)
       for (let dx = -12; dx <= 12; dx++) {

@@ -1600,7 +1600,7 @@ export class MonsterSystem implements GameSystem {
 const BODY_PART_NAMES: Record<string, string> = Object.fromEntries(Object.entries(BODY_PARTS).map(([id, d]) => [id, d.name]));
 
 function key(x: number, y: number, z: number): number {
-  return ((x & 0x7ff) | ((y & 0x7ff) << 11) | ((z + 8) << 22)) >>> 0;
+  return ((x & 0x7ff) | ((y & 0x7ff) << 11) | ((z - MIN_Z) << 22)) >>> 0;
 }
 
 /**
