@@ -19,6 +19,15 @@
 //   --browser firefox  headless Firefox (also on the GPU) instead of Chromium
 //   --save DIR         write each route's telemetry dump (tools/perf-report.ts reads them)
 //   --heap-profile DIR Chromium: sampled allocations per route (<route>.heapprofile; includes collected objects)
+//   --ff-profile FILE  Firefox: the Gecko profiler from startup, written to FILE (gzip JSON; open it at
+//                      profiler.firefox.com) when the browser closes: GC/CC markers name stalls
+//                      between frames that no page API can see
+//   --ff-gc FILE       Firefox: every GC's timing (MOZ_GCTIMER on stderr: each process writes its own;
+//                      a file path would be truncated by every process that starts) collected into
+//                      FILE: reason, incremental or not, total and max pause. Says whether stalls
+//                      between frames are GC
+//   --heap-snapshots DIR  Chromium, soak route: a heap snapshot after the forced GC at the start and at
+//                      the end (soak_start/end.heapsnapshot; compare them in DevTools > Memory)
 //   --profile DIR      Chromium: a CPU profile per route (<route>.cpuprofile; DevTools > Performance loads it)
 //   --shots DIR        JPEG screenshots at 1/3 and 2/3 of each route (<route>_<s>s.jpg)
 //                      diagnostic only: screenshots can disturb presentation timing
@@ -33,7 +42,7 @@
 // Exit code 1 when a route breaks a budget.
 import { createServer } from 'vite';
 import puppeteer, { type Page } from 'puppeteer-core';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { summarize, type PerfDump, type PerfSummary } from '../src/perf/analyze';
 import { printReport } from './perf-report';
@@ -57,7 +66,7 @@ interface Route {
   what: string;
   /** where: 'town' (longest straight road through the nearest town), 'rural' (longest straight road
    *  outside towns near the start), 'forest' (through the nearest thick forest) */
-  kind: 'town' | 'city' | 'rural' | 'forest' | 'load' | 'loaddrive' | 'teleport' | 'stand';
+  kind: 'town' | 'city' | 'rural' | 'forest' | 'load' | 'loaddrive' | 'teleport' | 'stand' | 'horde' | 'soak';
   mph: number;
   seconds: number;
   /** absolute limits for this route instead of LIMITS' (merged over them) */
@@ -84,6 +93,15 @@ export const ROUTES: Record<string, Route> = {
   // Firefox): mean draw ms and calls, and the longest frame with the flashlight switched on and
   // off twice mid-run (its first use once recompiled every shader: a 0.8-1 s freeze).
   citystand: { what: 'stand in the city centre for 12 s, flashlight on/off twice', kind: 'stand', mph: 0, seconds: 12, limits: { maxFrameMs: 150 } },
+  // The user's stutter trace (2026-10-13, Firefox): ~1 Hz stalls of 120-170 ms that land in
+  // whichever section is running (GC-like), with zombies on 3D models around a car at night,
+  // headlights on (two shadowed spots), idle sway and wind-ups. Night, headlights, 60 zombies
+  // of mixed families ahead on the road, the car rolling at 12 mph; they turn and chase it.
+  horde: { what: 'night in town, headlights on, 60 mixed zombies ahead, the car rolling through them at 12 mph', kind: 'horde', mph: 12, seconds: 20, limits: { maxHoleS: 8 } },
+  // Long sessions: the user's stutter showed up 2.8 h into a session. Waves of zombies spawned
+  // ahead, killed (corpses) and left behind while the car rolls on; Chromium reports the heap
+  // after a forced GC at the start and the end (growth = something kept per wave or per chunk).
+  soak: { what: 'horde waves every 15 s (spawn 30, kill them 8 s later) while rolling at 12 mph; retained heap growth', kind: 'soak', mph: 12, seconds: 150, limits: { maxHoleS: 8 } },
   teleport: { what: 'jump from the city to Holden (~150 OMTs), stand still until everything in view is built', kind: 'teleport', mph: 0, seconds: 15 },
 };
 
@@ -91,7 +109,7 @@ if (argv.includes('--list')) {
   for (const [k, r] of Object.entries(ROUTES)) console.log(`${k.padEnd(8)} ${r.seconds}s  ${r.what}`);
   process.exit(0);
 }
-const routeNames = opt('--routes', 'town40,town60,city40,city60,forest,rural,citystand,teleport,load,loaddrive').split(',');
+const routeNames = opt('--routes', 'town40,town60,city40,city60,forest,rural,citystand,horde,teleport,load,loaddrive').split(',');
 // "the world is drawn" gate (tools/lib/worldDrawn.ts) runs first unless --no-drawn
 for (const r of routeNames) if (!ROUTES[r]) throw new Error(`unknown route ${r} (${Object.keys(ROUTES).join(', ')})`);
 const size = opt('--size', '3440x1304').split('x').map(Number);
@@ -230,13 +248,74 @@ const port = (server.httpServer!.address() as { port: number }).port;
 const browser = browserKind === 'firefox'
   ? await puppeteer.launch({
     browser: 'firefox', executablePath: process.env.FIREFOX_PATH ?? '/run/current-system/sw/bin/firefox', headless: true, protocolTimeout: 600_000,
+    env: opt('--ff-profile', '')
+      ? { ...process.env, MOZ_PROFILER_STARTUP: '1', MOZ_PROFILER_SHUTDOWN: resolve(opt('--ff-profile', '')), MOZ_PROFILER_STARTUP_INTERVAL: '1', MOZ_PROFILER_STARTUP_ENTRIES: '50000000', MOZ_PROFILER_STARTUP_FEATURES: 'js,stackwalk,cpu,markersallthreads', MOZ_PROFILER_STARTUP_FILTERS: 'GeckoMain,Compositor,Renderer,DOM Worker,CanvasRenderer' }
+      : opt('--ff-gc', '') ? { ...process.env, MOZ_GCTIMER: 'stderr' } : process.env,
+    dumpio: false,
     extraPrefsFirefox: { 'browser.shell.checkDefaultBrowser': false, 'datareporting.policy.dataSubmissionEnabled': false },
   })
   : await puppeteer.launch({
     executablePath: chrome, headless: true, protocolTimeout: 600_000,
     args: ['--no-sandbox', '--use-angle=vulkan', '--enable-features=Vulkan', '--ignore-gpu-blocklist', '--enable-gpu', `--window-size=${size[0]},${size[1]}`],
   });
-const results: Record<string, { route: unknown; metrics: Metrics; summary: PerfSummary; chunks: unknown }> = {};
+// MOZ_GCTIMER=stderr: collect the browser processes' stderr into the --ff-gc file
+const ffGc = browserKind === 'firefox' ? opt('--ff-gc', '') : '';
+if (ffGc) {
+  const proc = browser.process();
+  if (!proc?.stderr) throw new Error('--ff-gc: no stderr from the Firefox process');
+  writeFileSync(ffGc, '');
+  proc.stderr.on('data', (b: Buffer) => appendFileSync(ffGc, b));
+}
+const results: Record<string, { route: unknown; metrics: Metrics; summary: PerfSummary; chunks: unknown; alloc?: Alloc }> = {};
+/**
+ * Chromium --heap-profile: the sampled allocation profile (collected objects included) summed
+ * per allocation site. Allocation is what makes Firefox stop for 100+ ms GCs between frames;
+ * Chromium's sampled numbers are the repeatable proxy (performance.memory is too coarse).
+ */
+type Alloc = { mbPerS: number; top: { site: string; mb: number }[] };
+type HeapNode = { callFrame: { functionName: string; url: string; lineNumber: number }; selfSize: number; children: HeapNode[] };
+function allocOf(head: HeapNode, seconds: number): Alloc {
+  const by = new Map<string, number>();
+  let total = 0;
+  const walk = (n: HeapNode, ours: string) => {
+    const cf = n.callFrame;
+    const file = cf.url.split('/').pop()?.split('?')[0] ?? '';
+    const here = `${cf.functionName || '(anonymous)'} ${file}:${cf.lineNumber + 1}`;
+    // charge native/library frames (subarray, three.js) to the nearest frame of our own sources
+    const site = /\/src\//.test(cf.url) ? here : ours ? `${here.split(' ')[0]} < ${ours}` : here;
+    if (n.selfSize) {
+      total += n.selfSize;
+      by.set(site, (by.get(site) ?? 0) + n.selfSize);
+    }
+    for (const c of n.children) walk(c, /\/src\//.test(cf.url) ? here : ours);
+  };
+  walk(head, '');
+  const top = [...by].sort((a, b) => b[1] - a[1]).slice(0, 15).map(([site, b]) => ({ site, mb: +(b / 1048576).toFixed(1) }));
+  return { mbPerS: +(total / 1048576 / seconds).toFixed(1), top };
+}
+let heapStart: number | null = null;
+/** Chromium: JS heap (MB) after a forced full GC (and a snapshot of it with --heap-snapshots); null elsewhere. */
+const retainedMB = async (page: Page, snapshot?: string): Promise<number | null> => {
+  if (browserKind !== 'chromium') return null;
+  const cdp = await page.createCDPSession();
+  try {
+    await cdp.send('HeapProfiler.collectGarbage');
+    await cdp.send('HeapProfiler.collectGarbage');
+    const u = (await cdp.send('Runtime.getHeapUsage')) as { usedSize: number };
+    const dir = opt('--heap-snapshots', '');
+    if (dir && snapshot) {
+      mkdirSync(dir, { recursive: true });
+      const parts: string[] = [];
+      cdp.on('HeapProfiler.addHeapSnapshotChunk', (e: { chunk: string }) => void parts.push(e.chunk));
+      await cdp.send('HeapProfiler.takeHeapSnapshot', { reportProgress: false });
+      writeFileSync(join(dir, `${snapshot}.heapsnapshot`), parts.join(''));
+    }
+    return +(u.usedSize / 1048576).toFixed(1);
+  } finally {
+    await cdp.detach();
+  }
+};
+
 const failures: string[] = [];
 try {
   const page = (await browser.pages())[0] ?? (await browser.newPage());
@@ -274,7 +353,7 @@ try {
     const r = ROUTES[name];
     const seconds = secondsArg ? Number(secondsArg) : r.seconds;
     const jump = r.kind === 'load' || r.kind === 'loaddrive' || r.kind === 'teleport';
-    const route = await page.evaluate(`__perfBench.pick(${JSON.stringify(jump ? (r.kind === 'teleport' ? 'town' : 'city') : r.kind === 'stand' ? 'city' : r.kind)})`);
+    const route = await page.evaluate(`__perfBench.pick(${JSON.stringify(jump ? (r.kind === 'teleport' ? 'town' : 'city') : r.kind === 'stand' ? 'city' : r.kind === 'horde' || r.kind === 'soak' ? 'town' : r.kind)})`);
     let mon: Mon | null = null;
     const profDir = opt('--profile', '');
     const heapDir = opt('--heap-profile', '');
@@ -325,6 +404,22 @@ try {
       await new Promise((res) => setTimeout(res, 8000)); // far blocks merge once settled
       await startProfiles();
       await page.evaluate(`(() => { cdda.perf.reset(); const fl = (on, ms) => setTimeout(() => cdda.flashlight(on), ms); fl(true, 3000); fl(false, 5000); fl(true, 7000); fl(false, 9000); })()`);
+    } else if (r.kind === 'soak') {
+      await page.evaluate(`__perfBench.place({ ...${JSON.stringify(route)}, lead: 0 })`);
+      await waitStreamed(page, 30_000);
+      await page.evaluate(`__perfBench.horde(30)`);
+      await new Promise((res) => setTimeout(res, 4000));
+      heapStart = await retainedMB(page, 'soak_start');
+      await startProfiles();
+      await page.evaluate(`(() => { cdda.perf.reset(); __perfBench.go(${r.mph * MPH}); __perfBench.waves = setInterval(() => { cdda.killAll(80); setTimeout(() => __perfBench.horde(30), 7000); }, 15000); })()`);
+    } else if (r.kind === 'horde') {
+      await page.evaluate(`__perfBench.place({ ...${JSON.stringify(route)}, lead: 0 })`);
+      await waitStreamed(page, 30_000);
+      await page.evaluate(`__perfBench.horde(60)`);
+      // their skins paint and the first wind-ups compile before the measurement starts
+      await new Promise((res) => setTimeout(res, 4000));
+      await startProfiles();
+      await page.evaluate(`(() => { Object.assign(cdda.renderer.chunks.stats, { maxStepMs: 0, maxStep: '', maxFrameMs: 0, maxBuildMs: 0, slowBuilds: 0 }); cdda.perf.reset(); __perfBench.go(${r.mph * MPH}); })()`);
     } else {
       await page.evaluate(`__perfBench.place(${JSON.stringify(route)})`);
       // let the start area stream in completely, then measure from standing start at full speed
@@ -343,10 +438,17 @@ try {
       }
       await new Promise((res) => setTimeout(res, (seconds * 1000) / 3));
     } else await new Promise((res) => setTimeout(res, seconds * 1000));
+    let alloc: Alloc | undefined;
     if (cdp && heapDir) {
       const { profile } = await cdp.send('HeapProfiler.stopSampling');
+      alloc = allocOf(profile.head as unknown as HeapNode, seconds);
       mkdirSync(heapDir, { recursive: true });
       writeFileSync(join(heapDir, `${name}.heapprofile`), JSON.stringify(profile));
+    }
+    if (r.kind === 'soak') {
+      await page.evaluate('clearInterval(__perfBench.waves)');
+      const end = await retainedMB(page, 'soak_end');
+      if (heapStart !== null && end !== null) console.log(`\n== ${name}: retained heap after GC ${heapStart} MB -> ${end} MB (${(end - heapStart).toFixed(1)} MB in ${seconds} s)`);
     }
     const out = (await page.evaluate(`(() => { __perfBench.stop(); return { dump: cdda.perf.dump(${seconds + 5}), chunks: { ...cdda.renderer.chunks.stats } }; })()`)) as { dump: PerfDump; chunks: { maxStepMs: number; maxStep: string } };
     if (cdp && profDir) {
@@ -374,7 +476,15 @@ try {
       });
       console.log(`\n== ${name}: 3x3 shown ${m.nearMs} ms, all in view ${m.fullMs ?? '(driving)'} ms after ${r.kind === 'teleport' ? 'the jump' : 'ready'}; longest frame behind the curtain ${m.curtainFrameMs} ms, after it ${m.maxFrameMs} ms`);
     }
-    results[name] = { route, metrics: m, summary: s, chunks: out.chunks };
+    results[name] = { route, metrics: m, summary: s, chunks: out.chunks, alloc };
+    if (alloc) {
+      console.log(`\n== ${name}: JS allocation ${alloc.mbPerS} MB/s (sampled, collected objects included); top sites (MB over the run):`);
+      for (const t of alloc.top) console.log(`   ${String(t.mb).padStart(7)}  ${t.site}`);
+    }
+    if (r.kind === 'horde') {
+      const iv = (out.dump.frames.interval ?? []).filter((v): v is number => typeof v === 'number');
+      console.log(`== ${name}: frames over 50 ms ${iv.filter((v) => v > 50).length}, over 100 ms ${iv.filter((v) => v > 100).length}; p50 ${s.interval.p50} p99 ${s.interval.p99} max ${s.interval.max}; ${s.compiles} shader compiles; sections ${JSON.stringify(s.sections)}`);
+    }
     const meta = out.dump.meta as Record<string, unknown>;
     console.log(`\n== ${name}: ${r.what} (${JSON.stringify(route)})`);
     console.log(`   ${meta.look} radius ${meta.radius} ${meta.canvas} ${browserKind}; ${s.seconds} s, ${s.frames} frames, ${s.speed.mean} m/s`);

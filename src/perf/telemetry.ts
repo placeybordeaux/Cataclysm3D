@@ -33,6 +33,10 @@ export interface TelemetrySource {
   fogFar(): number;
   prefetch?: { stats: { queue: number }; inPrefetch: boolean };
   gl?: { calls: number; triangles: number; geometries: number; textures: number; programs: number };
+  /** per-frame scene counters (install.ts): NaN where unknown */
+  scene?: () => { monsters: number; charParts: number; spots: number; points: number; shadowMaps: number; uploads: number };
+  /** the page's other callbacks since the previous frame (src/perf/tasks.ts) */
+  tasks?: () => { ms: number; n: number };
 }
 
 export type EventKind = 'want' | 'gen' | 'built' | 'rebuild' | 'trees' | 'empty' | 'drop' | 'evict';
@@ -80,6 +84,13 @@ export const CHANNELS = [
   'calls', 'triangles', 'geometries', 'textures', 'heapMB',
   // shader programs compiled so far: a step is a compile (a new material or light setup: ~0.1-1 s in Firefox)
   'programs',
+  // the page's other callbacks since the previous frame (timers, other rAF loops, idle, events;
+  // src/perf/tasks.ts): ms and count. A long interval that neither our loop nor these explain
+  // is the browser's: GC, style/layout/paint, waiting on the GPU.
+  'tasks', 'tasksN',
+  // what the frame drew: active monsters, character body parts (instances), lit headlight
+  // spots / point lights in the scene, shadow maps redrawn, buffer + texture uploads
+  'monsters', 'charParts', 'spots', 'points', 'shadowMaps', 'uploads',
 ] as const;
 export type Channel = (typeof CHANNELS)[number];
 
@@ -276,6 +287,16 @@ export class Telemetry implements ChunkProbe {
     C.geometries[i] = g ? g.geometries : NaN;
     C.textures[i] = g ? g.textures : NaN;
     C.programs[i] = g ? g.programs : NaN;
+    const tk = this.src.tasks?.();
+    C.tasks[i] = tk ? tk.ms : NaN;
+    C.tasksN[i] = tk ? tk.n : NaN;
+    const sc = this.src.scene?.();
+    C.monsters[i] = sc ? sc.monsters : NaN;
+    C.charParts[i] = sc ? sc.charParts : NaN;
+    C.spots[i] = sc ? sc.spots : NaN;
+    C.points[i] = sc ? sc.points : NaN;
+    C.shadowMaps[i] = sc ? sc.shadowMaps : NaN;
+    C.uploads[i] = sc ? sc.uploads : NaN;
     C.heapMB[i] = (r.n & 31) === 0 ? this.heapMB() : C.heapMB[r.back(0)];
     r.n++;
   }

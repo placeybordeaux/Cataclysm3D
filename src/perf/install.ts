@@ -1,3 +1,4 @@
+import type * as THREE from 'three';
 import type { DebugApi } from '../debug';
 import { installSkyLeak } from '../render/skyLeak';
 import type { Game } from '../game/game';
@@ -15,6 +16,8 @@ import { PerfOverlay } from './overlay';
 import { ringToFrames, summarize, type PerfDump } from './analyze';
 import { installPlaceholders } from '../render/placeholders';
 import { installChunkBatch } from '../render/chunkBatch';
+import { tasks } from './tasks';
+import { charLayers } from '../render/chars/index';
 
 // Wires the telemetry (telemetry.ts) into the running game and gives the player and us ways
 // to use it (docs/PERF.md):
@@ -43,7 +46,66 @@ export function installPerf(game: Game, renderer: Renderer, api: DebugApi, prefe
   const chunks = renderer.chunks;
   const three = renderer.three;
   const glInfo = { calls: 0, triangles: 0, geometries: 0, textures: 0, programs: 0 };
+  // ---- per-frame scene counters: shadow maps the frame redrew (wrapping three's shadow pass)
+  //      and bytes uploaded to the GPU (wrapping the context's upload calls). Both are what a
+  //      headlight, a horde of new skins or a mesh rebuild cost the GPU side of a frame.
+  const sceneCount = { shadowMaps: 0, uploadKB: 0 };
+  const sm = three.shadowMap as unknown as { render: (lights: THREE.Light[], ...rest: unknown[]) => void; enabled: boolean; autoUpdate: boolean; needsUpdate: boolean };
+  const smRender = sm.render.bind(sm);
+  sm.render = (lights, ...rest) => {
+    if (sm.enabled && (sm.autoUpdate || sm.needsUpdate)) {
+      for (const l of lights) {
+        const sh = (l as THREE.Light & { shadow?: THREE.LightShadow }).shadow;
+        if (l.castShadow && sh && (sh.autoUpdate || sh.needsUpdate)) sceneCount.shadowMaps++;
+      }
+    }
+    smRender(lights, ...rest);
+  };
+  const glc = three.getContext() as WebGL2RenderingContext & Record<string, unknown>;
+  const bytesOf = (v: unknown): number => (typeof v === 'number' ? v : (v as ArrayBufferView | null)?.byteLength ?? 0);
+  for (const name of ['bufferData', 'bufferSubData', 'texImage2D', 'texSubImage2D', 'texImage3D', 'texSubImage3D'] as const) {
+    const orig = (glc[name] as (...a: unknown[]) => unknown).bind(glc);
+    glc[name] = (...a: unknown[]) => {
+      // bufferData(target, data|size, usage), bufferSubData(target, offset, data, srcOffset?, length?);
+      // textures: the ArrayBufferView argument when there is one, else width x height x 4 (images)
+      let b = 0;
+      if (name === 'bufferData') b = bytesOf(a[1]);
+      else if (name === 'bufferSubData') {
+        const src = a[2] as ArrayBufferView;
+        const per = (src as unknown as { BYTES_PER_ELEMENT?: number }).BYTES_PER_ELEMENT ?? 1;
+        b = a[4] !== undefined ? (a[4] as number) * per : bytesOf(src) - ((a[3] as number | undefined) ?? 0) * per;
+      } else {
+        const view = a.find((x) => ArrayBuffer.isView(x)) as ArrayBufferView | undefined;
+        if (view) b = view.byteLength;
+        else {
+          const img = a.find((x) => typeof x === 'object' && x !== null && 'width' in x) as { width: number; height: number } | undefined;
+          b = img ? img.width * img.height * 4 : 0;
+        }
+      }
+      sceneCount.uploadKB += b / 1024;
+      return orig(...a);
+    };
+  }
+  const chars = charLayers(renderer);
+  const sceneInfo = () => {
+    const vv = renderer.vehicleView;
+    let spots = renderer.lights.flashlightOn ? 1 : 0;
+    if (vv) for (const s of vv.headlights) if (s.intensity > 0) spots++;
+    const r = {
+      monsters: (game as unknown as { monsters?: { active: unknown[] } }).monsters?.active.length ?? NaN,
+      charParts: chars.live.drawnParts + chars.dead.drawnParts,
+      spots,
+      points: renderer.lights.activePoints(),
+      shadowMaps: sceneCount.shadowMaps,
+      uploads: Math.round(sceneCount.uploadKB),
+    };
+    sceneCount.shadowMaps = 0;
+    sceneCount.uploadKB = 0;
+    return r;
+  };
   const tel = new Telemetry({
+    scene: sceneInfo,
+    tasks: () => tasks.take(),
     player: () => game.player,
     view: () => {
       const cam = renderer.rig.camera;
@@ -224,7 +286,9 @@ export function installPerf(game: Game, renderer: Renderer, api: DebugApi, prefe
   const dump = (seconds = 60): PerfDump => {
     const frames = ringToFrames(tel.ring, seconds);
     const t0 = frames.t[0] ?? 0;
-    return { version: 1, meta: meta(), frames, events: tel.eventList().filter((e) => e.t >= t0) };
+    // slow callbacks outside the main loop, on the telemetry's clock (ms since it started)
+    const slow = tasks.since(t0 + tel.t0).map((r) => ({ ...r, t: Math.round((r.t - tel.t0) * 10) / 10 }));
+    return { version: 1, meta: meta(), frames, events: tel.eventList().filter((e) => e.t >= t0), tasks: slow };
   };
   const download = (seconds = 60): string => {
     const d = dump(seconds);

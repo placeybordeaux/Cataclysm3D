@@ -1,3 +1,5 @@
+// First: times every other timer / rAF / idle / event callback from here on (src/perf/tasks.ts).
+import { tasks as perfTasks } from './perf/tasks';
 import { installLooks } from './render/lookInstall';
 import { Input } from './core/input';
 import { loadGameData } from './data/load';
@@ -177,6 +179,7 @@ async function main(): Promise<void> {
     frameStats.frame(performance.now() - now, now);
     requestAnimationFrame(loop);
   };
+  perfTasks.main = loop;
   // Loading a save: no frames until it is applied (they would stream the shelter the new
   // game starts in, then throw it away).
   if (!pending) requestAnimationFrame(loop);

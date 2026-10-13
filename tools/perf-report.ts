@@ -55,10 +55,15 @@ export function printReport(d: PerfDump, name = 'dump'): void {
   console.log('\n   mapgen');
   console.log(`   in frames ${mg.syncN} chunks / ${mg.syncMs} ms;  idle-time prefetch ${mg.preN} / ${mg.preMs} ms;  hooks ${mg.hooksMs} ms;  slowest chunk ${mg.maxMs} ms`);
   for (const o of mg.slowest.slice(0, 8)) console.log(`     ${o.omt.padEnd(34)} n ${String(o.n).padStart(4)}  mean ${o.mean.toFixed(2).padStart(6)}  max ${o.max.toFixed(1).padStart(6)}  total ${o.total.toFixed(0).padStart(6)} ms`);
-  console.log('\n   worst frames');
+  if (s.slowTasks.length) {
+    console.log('\n   slow callbacks outside the main loop (>= 4 ms; timers, other rAF loops, idle, events)');
+    for (const k of s.slowTasks.slice(0, 8)) console.log(`     ${k.kind.padEnd(8)} n ${String(k.n).padStart(4)}  max ${k.max.toFixed(1).padStart(6)}  total ${k.total.toFixed(0).padStart(6)} ms  ${k.src.slice(0, 80)}`);
+  }
+  console.log('\n   worst frame intervals (= the previous frame\'s loop, split below, + time outside it: other callbacks, GC, layout, GPU)');
   for (const w of s.worstFrames.slice(0, 8)) {
     const split = Object.entries(w.split).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k} ${v}`).join('  ');
-    console.log(`   ${String(w.interval).padStart(6)} ms @${(w.t / 1000).toFixed(1)}s  ${split}${w.gens.length ? `  | gen: ${w.gens.slice(0, 3).join(', ')}${w.gens.length > 3 ? ` +${w.gens.length - 3}` : ''}` : ''}${w.builds ? `  | ${w.builds} builds done` : ''}${w.compiled ? `  | ${w.compiled} shader compile(s)` : ''}`);
+    const out = Number.isFinite(w.outside) ? `  | outside ${w.outside}${Number.isFinite(w.tasks) ? ` (callbacks ${w.tasks})` : ''}` : '';
+    console.log(`   ${String(w.interval).padStart(6)} ms @${(w.t / 1000).toFixed(1)}s  loop ${w.loop}: ${split}${out}${w.slow.length ? `  | ${w.slow.slice(0, 2).join('; ')}` : ''}${w.gens.length ? `  | gen: ${w.gens.slice(0, 3).join(', ')}${w.gens.length > 3 ? ` +${w.gens.length - 3}` : ''}` : ''}${w.builds ? `  | ${w.builds} builds done` : ''}${w.compiled ? `  | ${w.compiled} shader compile(s)` : ''}`);
   }
   console.log('\n   findings');
   for (const f of s.findings) console.log(`   - ${f}`);

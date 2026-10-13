@@ -433,6 +433,8 @@ export class CharLayer {
   private scratch: THREE.Matrix4[] = [];
   private needsWrite = true;
   private needsLayout = true;
+  /** body-part instances written by the last flush that wrote anything (perf telemetry) */
+  drawnParts = 0;
   /** Diagnostic off variant: request every attribute each frame for paired upload measurements. */
   reuseStaticUploads = true;
   groundAt: ((x: number, y: number, z: number) => number) | null = null;
@@ -556,7 +558,12 @@ export class CharLayer {
         R[k * 4] = rx; R[k * 4 + 1] = ry; R[k * 4 + 2] = rz; R[k * 4 + 3] = i.fade;
       }
     }
-    for (const [key, b] of this.batches) b.commit(fill[key] ?? 0, layout);
+    let parts = 0;
+    for (const [key, b] of this.batches) {
+      b.commit(fill[key] ?? 0, layout);
+      parts += fill[key] ?? 0;
+    }
+    this.drawnParts = parts;
   }
 
   dispose(): void {

@@ -270,6 +270,13 @@ export class LightManager {
     this.group.add(this.flashlight, this.flashlight.target);
   }
 
+  /** Pooled point lights lit this frame (perf telemetry). */
+  activePoints(): number {
+    let n = 0;
+    for (const p of this.pool) if (p.intensity > 0) n++;
+    return n;
+  }
+
   add(spec: LightSpec): LightHandle {
     const s: Source = {
       x: spec.x, y: spec.y, z: spec.z, height: spec.height ?? 1.2, color: spec.color ?? 0xffd9a0,
