@@ -36,6 +36,11 @@ export interface MeshShape {
 }
 
 let loaded: Map<string, MeshShape> | null = null;
+/** Bumped whenever the loaded set changes (tests reset it); charLayer drops cached slots. */
+let generation = 0;
+export function spriteModelGeneration(): number {
+  return generation;
+}
 let loading: Promise<void> | null = null;
 let stats: Record<string, { lo: number; hi: number }> = {};
 
@@ -171,6 +176,7 @@ export function loadSpriteModels(base = `${ASSET_BASE}models/zombies/`, fetchBuf
     }));
     loaded = out;
     stats = tri;
+    generation++;
   })();
   // a failed load can be retried (after fixing the assets) instead of caching the rejection
   loading.catch(() => (loading = null));
@@ -179,6 +185,7 @@ export function loadSpriteModels(base = `${ASSET_BASE}models/zombies/`, fetchBuf
 
 /** Tests only: forget what was loaded. */
 export function resetSpriteModelsForTests(): void {
+  generation++;
   loaded = null;
   loading = null;
   stats = {};
@@ -194,5 +201,6 @@ export function registerTestMeshes(keys: string[]): void {
     return g;
   };
   loaded ??= new Map();
+  generation++;
   for (const k of keys) loaded.set(k, { key: k, lo: box(), hi: box() });
 }

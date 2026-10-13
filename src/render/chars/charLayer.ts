@@ -5,7 +5,7 @@ import { addNormalOutput, patchBandedLambert } from '../materials';
 import { analyseSprite, netSize, paintPart, texelDims, type Img, type PaintOpts, type SpriteInfo } from './paint';
 import { paintStyled, personPalette } from './styled';
 import { paintZombiePart, sprite3dPalette, zombiePalette } from './zombieSkin';
-import { meshShape, PALETTE_REGIONS } from './spriteModels';
+import { meshShape, PALETTE_REGIONS, spriteModelGeneration } from './spriteModels';
 import { newPoseOut, resetPose, type PoseIn, type PoseOut, type Rig } from './rig';
 import { SHAPES, shapeGeometry } from './shapes';
 
@@ -654,6 +654,7 @@ export class CharLayer {
 const MAX_SHAPES = 1024;
 const meshSlot = new Map<string, number>();
 const meshGeos: THREE.BufferGeometry[] = [];
+let slotGeneration = -1;
 function meshIndex(key: string, hi: boolean): number {
   const k = hi ? `${key}@hi` : key;
   let i = meshSlot.get(k);
@@ -667,9 +668,16 @@ function meshIndex(key: string, hi: boolean): number {
   return i;
 }
 
-const shapeIdx = new WeakMap<Rig, { lo: Uint16Array; hi: Uint16Array }>();
+let shapeIdx = new WeakMap<Rig, { lo: Uint16Array; hi: Uint16Array }>();
 /** Per part: shape slot (unit shape or mesh), far and close variants (rig parts are immutable). */
 function shapeIndex(rig: Rig): { lo: Uint16Array; hi: Uint16Array } {
+  if (slotGeneration !== spriteModelGeneration()) {
+    // the loaded meshes changed (only tests reload them): forget every slot handed out
+    slotGeneration = spriteModelGeneration();
+    meshSlot.clear();
+    meshGeos.length = 0;
+    shapeIdx = new WeakMap();
+  }
   let a = shapeIdx.get(rig);
   if (!a) {
     const of = (hi: boolean) => Uint16Array.from(rig.parts, (p) => (p.mesh ? meshIndex(p.mesh, hi) : SHAPES.indexOf(p.shape ?? 'box')));

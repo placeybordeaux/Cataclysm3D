@@ -94,6 +94,7 @@ class M:
     def __init__(self):
         self.v = []
         self.f = []  # (indices, material)
+        self.decals = set()  # face indices that must face the front (-z) whatever recalc says
 
     def vert(self, p):
         self.v.append((float(p[0]), float(p[1]), float(p[2])))
@@ -177,8 +178,17 @@ class M:
             j = (k + 1) % 4
             self.face([lo[k], lo[j], hi[j], hi[k]], mat(k) if callable(mat) else mat)
 
+    def decal(self, c, w, h, mat):
+        """A flat quad facing -z (the front) at c: paint on a surface for 2 triangles instead of
+        a 12-triangle block. Sits a few mm proud so it never z-fights."""
+        x, y, z = c
+        a = [self.vert((x - w / 2, y - h / 2, z)), self.vert((x - w / 2, y + h / 2, z)), self.vert((x + w / 2, y + h / 2, z)), self.vert((x + w / 2, y - h / 2, z))]
+        self.decals.add(len(self.f))
+        self.face(a, mat)
+
     def merge(self, other):
         base = len(self.v)
+        self.decals |= {i + len(self.f) for i in other.decals}
         self.v.extend(other.v)
         for idx, m in other.f:
             self.f.append(([i + base for i in idx], m))
@@ -261,16 +271,16 @@ def p_torso(sx, sy, sz, st):
         m.face([lo[(k + 1) % 8], lo[k], m.vert(tip)], pal(shirt, 0.8))
     if st.get('inner'):
         # an open jacket / undershirt: a front panel down the chest
-        m.block((0, y0 + h * 0.5, -d * 0.58), (w * 0.32, h * 0.7, 0.012), pal('inner', 1.0))
+        m.decal((0, y0 + h * 0.5, -d * 0.58), w * 0.32, h * 0.7, pal('inner', 1.0))
     # gore on the chest and a torn hole showing skin (top-lit sprite reads this at 30 px)
-    m.block((-w * 0.18, y0 + h * 0.3, -d * 0.6), (w * 0.24, h * 0.16, 0.012), pal('skin', 0.85))
+    m.decal((-w * 0.18, y0 + h * 0.3, -d * 0.6), w * 0.24, h * 0.16, pal('skin', 0.85))
     if st.get('blood', 0) > 0.6:
         # a sprite this red is soaked: whole flanks of the shirt are blood
         for sgn in (-1, 1):
             m.block((sgn * w * 0.4, y0 + h * 0.55, -d * 0.1), (w * 0.24, h * 0.7, d * 1.1), fix(BLOOD))
     if st.get('blood', 0) > 0.2:
-        m.block((w * 0.16, y0 + h * 0.62, -d * 0.62), (w * 0.2, h * 0.2, 0.012), fix(BLOOD))
-        m.block((w * 0.2, y0 + h * 0.42, -d * 0.6), (w * 0.08, h * 0.2, 0.012), fix(BLOOD_DARK))
+        m.decal((w * 0.16, y0 + h * 0.62, -d * 0.62), w * 0.2, h * 0.2, fix(BLOOD))
+        m.decal((w * 0.2, y0 + h * 0.42, -d * 0.6), w * 0.08, h * 0.2, fix(BLOOD_DARK))
     return m
 
 
@@ -329,7 +339,7 @@ def p_head(sx, sy, sz, st):
     fz = -d / 2 * 1.08
     m.block((0, y0 + h * 0.6, fz + 0.004), (w * 0.72, h * 0.1, 0.03), pal('skin', 1.08))
     for sgn in (-1, 1):
-        m.block((sgn * w * 0.2, y0 + h * 0.44, fz - 0.002), (w * 0.22, h * 0.16, 0.012), fix(SOCKET))
+        m.decal((sgn * w * 0.2, y0 + h * 0.44, fz - 0.002), w * 0.22, h * 0.16, fix(SOCKET))
         m.block((sgn * w * 0.2, y0 + h * 0.45, fz - 0.008), (w * 0.07, h * 0.06, 0.006), glow(st.get('eye', EYE), st.get('eyeGlow', 0.15)))
     m.block((0, y0 + h * 0.28, fz - 0.01), (w * 0.12, h * 0.2, 0.04), pal('skin', 0.92), taper=(0.6, 0.5))
     # ears
@@ -350,7 +360,7 @@ def p_jaw(sx, sy, sz, st):
     m.loft(secs, 8, lambda s, k: pal('skin', 0.85 if k in (4, 5, 6, 7) else 0.7), lo_mat=pal('skin', 0.6), hi_mat=fix(MOUTH))
     # lower teeth along the front edge, dark mouth, a blood drip
     m.block((0, h / 2 + 0.006, -d * 0.4), (w * 0.62, 0.016, 0.022), fix(TEETH))
-    m.block((w * 0.12, -h * 0.1, -d * 0.55), (w * 0.12, h * 0.6, 0.012), fix(BLOOD))
+    m.decal((w * 0.12, -h * 0.1, -d * 0.55), w * 0.12, h * 0.6, fix(BLOOD))
     return m
 
 
@@ -373,7 +383,7 @@ def p_fore_arm(sx, sy, sz, st):
     secs = [(-h / 2, w * 0.7, d * 0.7), (h * 0.15, w, d), (h / 2, w * 0.9, d * 0.9)]
     m.loft(secs, 6, lambda s, k: pal(reg, 0.95 if k in (1, 2) else 0.78), lo_mat=pal(reg, 0.7), hi_mat=pal(reg, 0.7))
     if st.get('blood', 0) > 0.2:
-        m.block((0, -h * 0.25, -d * 0.5), (w * 0.5, h * 0.3, 0.012), fix(BLOOD_DARK))
+        m.decal((0, -h * 0.25, -d * 0.5), w * 0.5, h * 0.3, fix(BLOOD_DARK))
     return m
 
 
@@ -412,7 +422,7 @@ def p_thigh(sx, sy, sz, st):
     m.loft([(-h / 2, w * 0.82, d * 0.82, 0, 0, 0.1), (h * 0.1, w * 0.98, d, 0, 0, 0.08), (h / 2, w, d)], 6,
            lambda s, k: pal('pants', 1.0 if k in (3, 4) else 0.85), lo_mat=pal('pants', 0.7), hi_mat=pal('pants', 0.9))
     if st.get('blood', 0) > 0.2:
-        m.block((w * 0.1, -h * 0.1, -d * 0.52), (w * 0.4, h * 0.25, 0.012), fix(BLOOD_DARK))
+        m.decal((w * 0.1, -h * 0.1, -d * 0.52), w * 0.4, h * 0.25, fix(BLOOD_DARK))
     return m
 
 
@@ -647,6 +657,12 @@ def to_object(name, mesh, size, palette, normalise=True):
     bm = _bm.new()
     bm.from_mesh(me)
     _bm.ops.recalc_face_normals(bm, faces=bm.faces)
+    # a lone decal quad has no inside for recalc to find: it faces the front (three -z =
+    # Blender +y), always
+    bm.faces.ensure_lookup_table()
+    flip = [bm.faces[i] for i in mesh.decals if bm.faces[i].normal.y < 0]
+    if flip:
+        _bm.ops.reverse_faces(bm, faces=flip)
     bm.to_mesh(me)
     bm.free()
     me.update()
