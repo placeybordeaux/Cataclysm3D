@@ -19,6 +19,17 @@ export function overflowDamage(m: Monster): { overflow: number; corpseDamage: nu
   return { overflow, corpseDamage, pulverized: corpseDamage > 5 && overflow > maxHp };
 }
 
+/**
+ * The body is torn apart by its death (no corpse): NORMAL pulverised by the overkill, or a
+ * SPLATTER death. NOGIB bodies (and those with nothing to tear: BOOMER, ACID, BROKEN… lists
+ * without NORMAL or SPLATTER) never are. Purely what BN already decides; gibs.ts draws it.
+ */
+export function gibbedBody(m: Monster): boolean {
+  if (m.has('NOGIB')) return false;
+  const list = m.type.death_function?.length ? m.type.death_function : ['NORMAL'];
+  return list.includes('SPLATTER') || (list.includes('NORMAL') && overflowDamage(m).pulverized);
+}
+
 /** Death functions handled without a warning (their effects are cosmetic or not modelled). */
 const QUIET = new Set(['FUNGUS', 'FUNGALBURST', 'KILL_VINES', 'VINE_CUT', 'TRIFFID_HEART', 'AMIGARA', 'GAMEOVER', 'KILL_BREATHERS', 'DARKMAN', 'JABBERWOCKY', 'RATKING', 'FOCUSEDBEAM', 'CONFLAGRATION', 'FIREBALL', 'DETONATE', 'JACKSON', 'BRAINBLOB', 'PREG_ROACH']);
 

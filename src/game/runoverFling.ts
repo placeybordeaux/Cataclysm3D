@@ -123,6 +123,8 @@ export interface FlingPlan {
 export interface FlingRun {
   plan: FlingPlan;
   t: number;
+  /** the map the plan was flown through (gibs.ts flies the pieces of a body gibbed by the hit through it too) */
+  world?: FlingWorld;
 }
 
 const clamp = (v: number, a: number, b: number) => Math.min(b, Math.max(a, v));
@@ -177,14 +179,15 @@ function circleBlocked(w: FlingWorld, x: number, y: number, r: number): boolean 
  * Fly a body from (x, y) with `launch` through `world`: ballistic flight under arcade gravity,
  * axis-separated wall bounces, a ceiling under roofs, ground bounces, then a skid to rest. The
  * end is moved to the nearest free tile within RUNOVER.endSearch; null if there is none (the
- * vehicle has pinned it, as BN's fling does).
+ * vehicle has pinned it, as BN's fling does). `h0`: starting height of the underside (m; the
+ * pieces of a gibbed body leave from where they were on it).
  */
-export function planFling(x: number, y: number, launch: Launch, world: FlingWorld, seed = 0, K: RunoverTuning = RUNOVER): FlingPlan | null {
+export function planFling(x: number, y: number, launch: Launch, world: FlingWorld, seed = 0, K: RunoverTuning = RUNOVER, h0 = 0): FlingPlan | null {
   const dt = K.dt;
   const r = K.radius;
-  let vx = launch.vx, vy = launch.vy, vz = launch.vz, h = 0;
-  let air = vz > 0;
-  const xs = [x], ys = [y], hs = [0];
+  let vx = launch.vx, vy = launch.vy, vz = launch.vz, h = h0;
+  let air = vz > 0 || h0 > 0;
+  const xs = [x], ys = [y], hs = [h0];
   const contacts: FlingContact[] = [];
   let landT = -1;
   const n = Math.ceil(K.maxTime / dt);

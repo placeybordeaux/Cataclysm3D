@@ -18,7 +18,8 @@ lighting.
 | Options > **Vehicle width** / `?vehiclewidth=real\|fill` / `cdda.vehicleWidth('fill')` | model look only: `real` (default) draws real-world proportions; `fill` stretches bodies to the grid footprint. Collision follows the drawn body either way (below), so `real` has no invisible wall |
 | Options > Gameplay > **Vehicle crashes** / `?vehcrash=momentum\|immovable` | vehicles push and spin each other (default) / the old immovable-vehicle model ("Momentum crashes" below) |
 | Options > Gameplay > **Heavy vehicles** / `?vehheft=weighty\|light` | tanks and other heavy / tracked vehicles handle heavy (default) / everything on the car tuning |
-| Options > Gameplay > **Run-over bodies** / `?runover=ragdoll\|loose\|fall` / `cdda.runoverBodies('loose')` | creatures you hit are thrown and tumble as a stiff rag doll (default) / a looser one / the old simple fall ("Run-over bodies" below) |
+| Options > Gameplay > **Run-over bodies** / `?runover=loose\|ragdoll\|fall` / `cdda.runoverBodies('loose')` | creatures you hit are thrown and tumble as a loose rag doll (default) / a stiff one / the old simple fall ("Run-over bodies" below) |
+| Options > Gameplay > **Gibbed bodies** / `?gibs=pieces\|splat` / `cdda.gibbedBodies()`; **Gore** / `?gore=some\|lots\|max` / `cdda.gibGore()` | a gibbed body comes apart into flying pieces (default) / vanishes into the splatter (old); 4 / 6 (default) / 10 pieces ("Gibs" below) |
 
 `fill` for comparison (same views as the first two rows below):
 
@@ -1100,12 +1101,13 @@ the hit is BN's pinned case (the vehicle stops). All tunables: `RUNOVER`.
   cancelled), it can't be hit by a vehicle again until it lands, then it lies `downed` for
   `RUNOVER.getUp` (1.1 s) more and gets up where it came down.
 - **Gibbed**: BN's pulverisation (`overflowDamage`, damage over 3x max HP) is unchanged: no
-  corpse, no body, the splatter. With in-play HP (a plain zombie has 56) that is any hit over
-  ~60 km/h; tougher zombies (soldiers, brutes) still fly at 70.
+  corpse, only the drops and the splatter. With in-play HP (a plain zombie has 56) that is any hit
+  over ~60 km/h; tougher zombies (soldiers, brutes) still fly at 70. The body now comes apart
+  into pieces instead of vanishing ("Gibs" below).
 - NPCs and the player keep BN's teleport fling (their hooks have no `planFling`).
 
-`runoverMode` (`VehicleSystem`): `ragdoll` (default) and `loose` fly the body (the renderer
-tumbles it stiffly / loosely), `fall` is the old behaviour exactly (teleport, corpse where it died,
+`runoverMode` (`VehicleSystem`): `loose` (default: it played the most fun) and `ragdoll` fly the
+body (the renderer tumbles it loosely / stiffly), `fall` is the old behaviour exactly (teleport, corpse where it died,
 the simple topple).
 
 The rendering is in docs/CHARACTERS.md "Run-over rag doll".
@@ -1126,4 +1128,45 @@ Hits measured at 16, 34-35 and 64-65 km/h (the throttle is released at the first
 | 25 km/h, a soldier survives: thrown, lies downed, gets up and comes back | ![](screenshots/runover/side_25kmh_survivor.jpg) |
 | real W at 64 km/h, chase camera: the soldiers go over the roof | ![](screenshots/runover/70-third.jpg) |
 | real W at 35 km/h, first person: thrown ahead down the road | ![](screenshots/runover/40-first.jpg) |
-| also: [20 km/h chase](screenshots/runover/20-third.jpg), [40 km/h chase](screenshots/runover/40-third.jpg), [70 km/h first person](screenshots/runover/70-first.jpg), [plain zombies at 70: gibbed](screenshots/runover/70-gib.jpg), [dogs at 40 (low, mostly hidden by the car from the chase camera)](screenshots/runover/40-dogs.jpg) | |
+| real W at 65 km/h, chase camera, plain zombies: gibbed, they come apart over the roof | ![](screenshots/runover/70-gib.jpg) |
+| also: [20 km/h chase](screenshots/runover/20-third.jpg), [40 km/h chase](screenshots/runover/40-third.jpg), [70 km/h first person](screenshots/runover/70-first.jpg), [dogs at 40 (low, mostly hidden by the car from the chase camera)](screenshots/runover/40-dogs.jpg) | |
+
+## Gibs (gibbed bodies come apart)
+
+Request: *"The rag doll loose def feels the most fun, but it's quite odd when you hit a zombie fast
+enough to 'gib' that it just disappears, instead the game should ragdoll their limbs & torso."*
+
+BN still decides the gib (`mondeath.ts gibbedBody`: NORMAL pulverised by the overkill, or a
+SPLATTER death; never NOGIB): no corpse item, the death drops and the gib/blood fields as before.
+What changed is the look. `MonsterSystem.die` (with `gibMode = 'pieces'`) calls
+`planGibs` (`src/game/gibs.ts`, pure): one flight per piece slot of the gore level (`some`: torso,
+head, an arm, a leg; `lots`: torso, head, both arms and legs; `max`: arms and legs split at elbow
+and knee too), each from where it was on the body (`GIBS.at`, height x the size class's height),
+flown by `planFling` (runoverFling.ts, with a smaller radius, livelier bounces, a 2.1 m ceiling and a
+start height `h0`) through the same map the vehicle's throw used (`FlingRun.world`):
+
+- **a vehicle**: the whole body's launch spread out: 0.55-1.0x its carry (never faster than the
+  body, or a piece rides on the roof), 1.0-1.45x its up-kick (the torso clears the roof too), limbs
+  thrown out to their own side (0.17x the impact speed), a light head further; at 70-100 km/h the
+  pieces go up over the car and come down behind it.
+- **any other blow** (a shotgun, a blade, a blast): away from the killer in a 1.1 rad fan at
+  2.5-9 m/s by overkill share (random directions with no known source). Cheap, so it is on: a
+  shotgun or melee overkill scatters pieces too.
+
+Each piece's first landing and resting spot get an `fd_blood` field when it gets there (queued on
+sim time, transient). `onGibbed` (before `onDied`) hands the `GibBurst` to the renderer
+(docs/CHARACTERS.md "Gibbed bodies"). `gibMode = 'splat'` is the old behaviour exactly.
+
+Tests: `tests/gibs.test.ts` (pieces per gore level, all ahead along the road from a car, spread,
+high at speed, further when faster, at rest on the ground, deterministic, out of walls; in a game:
+a 130 km/h hit gibs a zombie with no corpse item and six pieces, blood where they come down later;
+`splat` leaves none; an overkill blow scatters them away from the survivor; the rig cut, the flight
+and the budget below). Real input: `tools/realinput.ts --gpu --only runover`, `70-gib` checks the
+pieces spawn, all come to rest on the ground, and no corpse is left.
+
+| | |
+| --- | --- |
+| 70 km/h, side view (stepped 133 ms): over the roof, landing behind, the torso rolls to rest | ![](screenshots/runover/gib_side_70.jpg) |
+| 100 km/h, side view: higher, further, limbs wide | ![](screenshots/runover/gib_side_100.jpg) |
+| 70 km/h, driver's seat, a row of three | ![](screenshots/runover/gib_first_70.jpg) |
+| 100 km/h, driver's seat | ![](screenshots/runover/gib_first_100.jpg) |

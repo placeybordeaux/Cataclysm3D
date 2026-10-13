@@ -3,6 +3,7 @@ import type { Renderer } from './render/renderer';
 import type { DebugApi } from './debug';
 import type { WorldGenerator } from './world/worldgen';
 import { MonsterSystem } from './game/monai';
+import { GIB_GORES, GIB_MODES, isGibGore, isGibMode, type GibGore, type GibMode } from './game/gibs';
 import { findPath } from './game/pathfind';
 import { Spawner, type OvermapView } from './game/spawner';
 import { PlayerCombat, type ViewModelHook } from './game/playercombat';
@@ -134,6 +135,7 @@ export function installMonsters(game: Game, renderer: Renderer | null, worldgen:
       change: () => setZombieStyle(ZSTYLES[(ZSTYLES.indexOf(charSettings.zstyle) + 1) % ZSTYLES.length]),
       desc: 'How 3D zombies are built: hunched and reaching with a silhouette per kind of special (after the tileset sprites), the same pushed further, or the older upright box bodies.',
     });
+    installGibOptions(sys);
   }
   (game as unknown as { monsters: MonsterSystem }).monsters = sys;
 
@@ -379,12 +381,83 @@ function butcherMenu(game: Game, sys: MonsterSystem): void {
   });
 }
 
+// ------------------------------------------------------------------ gibbed bodies
+
+const GIB_KEY = 'cdda3d.gibbedBodies';
+const GORE_KEY = 'cdda3d.gibGore';
+const GIB_LABEL: Record<GibMode, string> = { pieces: 'come apart', splat: 'splat (old)' };
+const GORE_LABEL: Record<GibGore, string> = { some: 'some (4 pieces)', lots: 'lots (6)', max: 'max (10)' };
+
+/** `?param=` wins (a bad value fails loudly), else the stored choice, else the default. */
+function initialChoice<T extends string>(param: string, key: string, all: readonly T[], def: T): T {
+  const q = typeof location === 'undefined' ? null : new URLSearchParams(location.search).get(param);
+  if (q !== null) {
+    if (!(all as readonly string[]).includes(q)) throw new Error(`?${param}=${q}: expected ${all.join('|')}`);
+    return q as T;
+  }
+  try {
+    const st = localStorage.getItem(key);
+    if (st !== null && (all as readonly string[]).includes(st)) return st as T;
+  } catch {
+    // storage blocked
+  }
+  return def;
+}
+function storeChoice(key: string, v: string): void {
+  try {
+    localStorage.setItem(key, v);
+  } catch {
+    // not persisted
+  }
+}
+
+/** Options > Gameplay: what a gibbed body looks like (game/gibs.ts), and how many pieces. */
+function installGibOptions(sys: MonsterSystem): void {
+  sys.gibMode = initialChoice('gibs', GIB_KEY, GIB_MODES, 'pieces');
+  sys.gibGore = initialChoice('gore', GORE_KEY, GIB_GORES, 'lots');
+  registerOption({
+    category: 'Gameplay',
+    name: 'Gibbed bodies',
+    value: () => GIB_LABEL[sys.gibMode],
+    change: () => {
+      sys.gibMode = sys.gibMode === 'pieces' ? 'splat' : 'pieces';
+      storeChoice(GIB_KEY, sys.gibMode);
+    },
+    desc: "A creature killed hard enough to be torn apart (BN's pulverisation: no corpse, only its drops) — run over above ~60 km/h, or an overkill blow. Come apart (default): the body breaks into torso, head and limbs, thrown along the blow (over the roof from a fast car), tumbling, bouncing off walls and bleeding, then lying where they stop for a couple of minutes before they sink away. Splat: the older look, where it just vanishes into the splatter. Also ?gibs=pieces|splat.",
+  });
+  registerOption({
+    category: 'Gameplay',
+    name: 'Gore',
+    value: () => GORE_LABEL[sys.gibGore],
+    change: (d) => {
+      const i = GIB_GORES.indexOf(sys.gibGore);
+      sys.gibGore = GIB_GORES[(i + (d < 0 ? -1 : 1) + GIB_GORES.length) % GIB_GORES.length];
+      storeChoice(GORE_KEY, sys.gibGore);
+    },
+    desc: 'How many pieces a gibbed body comes apart into: some = the head, an arm and a leg off; lots (default) = head and every limb; max = arms and legs split at the elbow and knee too. Also ?gore=some|lots|max.',
+  });
+}
+
 // ------------------------------------------------------------------ debug API
 
 function installDebug(api: DebugApi, game: Game, sys: MonsterSystem, spawner: Spawner, combat: PlayerCombat): void {
   const p = () => game.player;
   api.monsterSystem = sys;
   api.combat = combat;
+  /** Gibbed bodies: 'pieces' (they come apart) or 'splat' (the old vanish); no argument reads it. */
+  api.gibbedBodies = (mode?: GibMode) => {
+    if (mode !== undefined && !isGibMode(mode)) throw new Error(`gibbedBodies: ${GIB_MODES.join(' or ')}, not ${String(mode)}`);
+    if (mode) sys.gibMode = mode;
+    return sys.gibMode;
+  };
+  /** How many pieces: 'some' | 'lots' | 'max'; no argument reads it. */
+  api.gibGore = (g?: GibGore) => {
+    if (g !== undefined && !isGibGore(g)) throw new Error(`gibGore: ${GIB_GORES.join(' or ')}, not ${String(g)}`);
+    if (g) sys.gibGore = g;
+    return sys.gibGore;
+  };
+  /** Pieces of gibbed bodies in the world (model mode): counts and where they are. */
+  api.gibPieces = () => (api.monsterView as MonsterView | undefined)?.gibStats() ?? null;
   /** A* route (door-opening, like a survivor) from the player to (x, y) on their z-level, for playtest scripts. */
   api.findPath = (x: number, y: number, maxNodes = 40000) =>
     findPath(sys.grid, p().tileX, p().tileY, x, y, p().z, { doors: true, maxNodes, margin: 40 });

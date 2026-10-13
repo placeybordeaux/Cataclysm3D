@@ -20,7 +20,8 @@ The billboards are still there as a variant.
 | `?viewmodel=model` / `?viewmodel=sprite`, Options → **First-person hands**, `cdda.chars({ viewmodel: 'sprite' })` | 3D first-person arms/items (default) or the classic 2D viewmodel sprites |
 | `?zstyle=shamble` / `caricature` / `boxy`, Options → **Zombie bodies**, `cdda.chars({ zstyle })` | zombie bodies: hunched, reaching, a silhouette per family (default) / the same pushed further / the round-6 upright box bodies (persisted, `localStorage cdda3d.visual.zstyle`) |
 | `cdda.chars()` | current settings + live/body/skin/page counts |
-| `?runover=ragdoll\|loose\|fall`, Options → Gameplay → **Run-over bodies**, `cdda.runoverBodies()` | bodies hit by a vehicle: stiff rag doll (default) / loose rag doll / the old fall ("Run-over rag doll" below) |
+| `?runover=loose\|ragdoll\|fall`, Options → Gameplay → **Run-over bodies**, `cdda.runoverBodies()` | bodies hit by a vehicle: loose rag doll (default) / stiff rag doll / the old fall ("Run-over rag doll" below) |
+| `?gibs=pieces\|splat`, `?gore=some\|lots\|max`, Options → Gameplay → **Gibbed bodies** / **Gore**, `cdda.gibbedBodies()`, `cdda.gibGore()`, `cdda.gibPieces()` | a gibbed body comes apart into pieces (default) or vanishes (old); how many ("Gibbed bodies" below) |
 
 ## How it works (src/render/chars/)
 
@@ -664,7 +665,7 @@ the rag doll draws it: the plan's position, plus
   loads the same body); for a survivor the downed `CreatureModel` (it gets `setYaw`, the monster
   its facing, `down = 1`), which then gets up. The hand-over matrices match to 2 mm (tests).
 
-| `RAGDOLL` | stiff (default) | loose |
+| `RAGDOLL` | stiff | loose (default) |
 | --- | --- | --- |
 | joint spring k (1/s²), damping ratio | 240, 0.55 | 70, 0.25 |
 | limb kick at the hit / per bounce (rad/s) | 9 / 6 | 15 / 11 |
@@ -678,6 +679,25 @@ deeper than its own lying pose (plus a few cm of a flailing limb) and ends matri
 its corpse). Billboards (`?chars=billboard`) follow the flight standing and lie flat when it
 touches down. Cost: a rag doll is the same instances as a body plus ~180 corner rotations a frame
 while it flies; it becomes an ordinary static body when it lands.
+
+## Gibbed bodies
+
+`src/render/chars/gibs.ts`. The simulation plans a flight per piece (docs/VEHICLES.md "Gibs");
+`MonsterView.gibbed` draws them. A piece is the creature's own rig and skin on the corpse layer
+with only its parts shown (`CharInstance.hidden`, skipped by the layer's flush), so it keeps the
+corpse's spread pose, the zombie style, gear and held weapon, on every rig. `gibPieces` cuts the rig
+by part name, parent first (`GIB_CUTS`: `head`; `uArm*`/`legF*`/`wing*`; `thigh*`/`legB*`/`leg*`;
+`fArm*`; `shin*`); everything else goes with its parent, the root with the torso. A slot the rig
+has no part for stays on the torso (a blob flies whole).
+
+`GibBody` flies the plan: a rigid tumble from the plan's spin, knocked by bounces and walls, the
+remaining joints flopping on the rag doll's springs (`springLimbs`, the run-over feel: loose by
+default), rolling onto its long side on the ground, the lowest posed box kept on the floor (measured
+on the built matrices: a loose shin swings far past the rest outline), blood drips for 0.9 s in the
+air, a burst at the hit (`onGore` -> hitFx) and dust/blood where each lands. 0.5 s after the flight
+it freezes (no rebuilds). `GibSet` keeps them: lying 120 s, then sinking 2.5 s into the ground while
+dithering out; over 72 pieces the oldest resting ones sink in 0.6 s; beyond 110 m from the survivor
+they go at once (`GIB_VIEW`). Billboards (`?chars=billboard`) keep the old vanish.
 
 ## Common quadruped family anatomy
 

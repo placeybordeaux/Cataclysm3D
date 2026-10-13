@@ -672,7 +672,7 @@ export async function installVehicles(game: Game, renderer: Renderer, api?: Debu
     },
     desc: 'Weighty (default): heavy and tracked vehicles take their time to get moving, steer and pivot slowly, and are governed to their real top speeds (an M1 about 45 mph). Taken from each vehicle\'s mass, power and tracks; cars are unchanged. Light: everything handles like a car (the older feel). Also ?vehheft=weighty|light.',
   });
-  vs.runoverMode = initialSetting('runover', RUNOVER_KEY, RUNOVER_MODES, 'ragdoll');
+  vs.runoverMode = initialSetting('runover', RUNOVER_KEY, RUNOVER_MODES, 'loose');
   registerOption({
     category: 'Gameplay',
     name: 'Run-over bodies',
@@ -682,7 +682,7 @@ export async function installVehicles(game: Game, renderer: Renderer, api?: Debu
       vs.runoverMode = RUNOVER_MODES[(i + (d < 0 ? -1 : 1) + RUNOVER_MODES.length) % RUNOVER_MODES.length];
       storeSetting(RUNOVER_KEY, vs.runoverMode);
     },
-    desc: 'What a vehicle does to a creature it runs over. Rag doll (default): it is thrown along your path with a kick up and a spin, over the bonnet and roof at speed, tumbles, bounces off walls and skids to rest where its corpse lies; a survivor gets up where it lands. Stiff limbs keep the body\'s shape; loose ones flop more. Simple fall: the older look, where the body is put down a few tiles ahead (BN\'s fling) and a corpse drops where it was hit. Also ?runover=ragdoll|loose|fall.',
+    desc: 'What a vehicle does to a creature it runs over. Rag doll: it is thrown along your path with a kick up and a spin, over the bonnet and roof at speed, tumbles, bounces off walls and skids to rest where its corpse lies; a survivor gets up where it lands. Loose limbs (default) flop and flail; stiff ones keep the body\'s shape. A body hit hard enough to be gibbed comes apart instead (Gibbed bodies). Simple fall: the older look, where the body is put down a few tiles ahead (BN\'s fling) and a corpse drops where it was hit. Also ?runover=ragdoll|loose|fall.',
   });
   vs.driveMode = storedDriveMode();
   registerOption({

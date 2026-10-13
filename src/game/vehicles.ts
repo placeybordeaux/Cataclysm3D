@@ -326,11 +326,11 @@ export class VehicleSystem implements GameSystem, MapOverlay {
   /** Heavy / tracked handling (vehicleImpact.ts handlingFor): Options > Heavy vehicles, ?vehheft=. */
   handlingMode: HandlingMode = 'weighty';
   /**
-   * What a run-over does to the body (runoverFling.ts): 'ragdoll' / 'loose' throw it along a
-   * planned flight (the renderer tumbles it stiffly / loosely), 'fall' is BN's teleport to a
+   * What a run-over does to the body (runoverFling.ts): 'loose' (default) / 'ragdoll' throw it
+   * along a planned flight (the renderer tumbles it loosely / stiffly), 'fall' is BN's teleport to a
    * free tile a few tiles ahead. Options > Run-over bodies, ?runover=.
    */
-  runoverMode: RunoverMode = 'ragdoll';
+  runoverMode: RunoverMode = 'loose';
   /** Vehicles already moved this frame (a crash can move the one it hit early: advanceStruck). */
   private moved = new Set<Vehicle>();
   /** This frame's dt (s), for moving a struck vehicle out of the way mid-frame. */
@@ -2186,7 +2186,7 @@ export function monsterCreatureHooks(ms: MonsterSystem): CreatureHooks {
       if (m.has('IMMOBILE')) return false;
       const plan = planFling(m.x, m.y, launchFromImpact(imp), world, imp.seed);
       if (!plan) return false;
-      m.fling = { plan, t: -1 };
+      m.fling = { plan, t: -1, world };
       return true;
     },
     launch: (c) => {
