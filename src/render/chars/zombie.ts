@@ -15,7 +15,10 @@
 // lunge (leap) and the lunge-grab that follows it, flinch, downed, dead.
 //
 // Styles: 'shamble' follows the sprites; 'caricature' pushes every family's proportions and
-// posture further (bigger hands and heads, deeper hunch, more belly, bigger fists).
+// posture further (bigger hands and heads, deeper hunch, more belly, bigger fists); 'sprite3d'
+// is the shamble rig with the sprites' chunkier proportions (big head and hands, short legs)
+// whose body parts are drawn with low-poly Blender meshes (tools/blender, chars/spriteModels.ts)
+// instead of painted boxes.
 //
 // NOTE: this module and rig.ts import each other; nothing here may touch rig.ts values at the
 // top level (only inside functions).
@@ -25,8 +28,52 @@ import type { BodyShape } from './archetype';
 import { HUM, crawlPose, ease, quirk, scaleParts, setRot, type PartDef, type PoseIn, type PoseOut, type Rig } from './rig';
 import type { ZBuild, ZombieLook } from './zombieFamily';
 
-export type ZStyle = 'shamble' | 'caricature' | 'boxy';
-export const ZSTYLES: readonly ZStyle[] = ['shamble', 'caricature', 'boxy'];
+export type ZStyle = 'shamble' | 'caricature' | 'boxy' | 'sprite3d';
+export const ZSTYLES: readonly ZStyle[] = ['shamble', 'caricature', 'boxy', 'sprite3d'];
+
+// ------------------------------------------------------------------ sprite3d mesh contract
+
+/** The Blender-built zombie models (tools/blender/zombies.py writes one GLB per id). */
+export type SpriteModelId = 'walker' | 'fat' | 'brute' | 'runner' | 'cop' | 'soldier' | 'boomer' | 'spitter' | 'child' | 'skeleton';
+export const SPRITE_MODELS: readonly SpriteModelId[] = ['walker', 'fat', 'brute', 'runner', 'cop', 'soldier', 'boomer', 'spitter', 'child', 'skeleton'];
+
+/**
+ * Parts every model draws as a mesh (the 16 person parts and the silhouette pieces every zombie
+ * gets). Optional ones (hump, belly) only exist on some builds; the GLB must still have them so
+ * any family can borrow a model.
+ */
+export const SPRITE_CORE_PARTS: readonly string[] = [
+  'hips', 'torso', 'head', 'uArmR', 'fArmR', 'uArmL', 'fArmL', 'thighR', 'shinR', 'thighL', 'shinL', 'footR', 'footL', 'neck', 'handR', 'handL',
+  'headJaw', 'uArmDeltR', 'uArmDeltL', 'torsoHump', 'torsoBelly',
+];
+/** Gear parts a model draws as meshes too (the rest keep their painted unit shape). */
+export const SPRITE_MODEL_GEAR: Record<SpriteModelId, readonly string[]> = {
+  walker: [], fat: [], brute: [], runner: [], boomer: [], child: [],
+  // every acid sac zombie.ts can grow (corrosive: all eight) and the drool
+  spitter: ['sac0', 'sac1', 'sac2', 'sac3', 'sac4', 'uArmSac5', 'thighSac6', 'sac7', 'fxDrool'],
+  cop: ['headHelmet', 'headVisor', 'torsoBadge'],
+  soldier: ['headHelmet', 'torsoVest', 'torsoPouch0', 'torsoPouch1', 'torsoPouch2'],
+  skeleton: ['torsoRib0', 'torsoRib1', 'torsoRib2', 'torsoRib3'],
+};
+
+/**
+ * Which model a zombie borrows: its own when the pipeline built one for its kind, else the
+ * plain walker's parts stretched into its boxes (a hulk is walker meshes in hulk proportions).
+ */
+export function spriteModelOf(look: ZombieLook): SpriteModelId {
+  if (look.bone) return 'skeleton';
+  if (look.gear === 'cop' || look.gear === 'swat') return 'cop';
+  if (look.gear === 'soldier') return 'soldier';
+  switch (look.family) {
+    case 'boomer': return 'boomer';
+    case 'fat': return 'fat';
+    case 'brute': return 'brute';
+    case 'acid': return 'spitter';
+    case 'child': return 'child';
+    case 'runner': case 'feral': return 'runner';
+    default: return 'walker';
+  }
+}
 
 /** Torn / asymmetric individuals per zombie type (picked from the creature's seed). */
 export const ZVARIANTS = 3;
@@ -39,17 +86,18 @@ export const ZVARIANTS = 3;
  *   elbow    forearm bend                wrist    hand droop (negative = limp)
  *   knee     resting crouch              stance   feet apart
  *   lurch    shamble sway                swing    arm swing while walking (brutes, runners)
+ *   stride   resting stride: one foot forward, one back (the sprites' stance; sprite3d)
  */
 export interface Build {
   girth: number; chestD: number; shoulder: number; arm: number; fore: number; fist: number; armLen: number;
   leg: number; legLen: number; head: number; neck: number; belly: number; hump: number; height: number;
   hunch: number; headComp: number; reach: number; armOut: number; elbow: number; wrist: number;
-  knee: number; stance: number; lurch: number; swing: number;
+  knee: number; stance: number; lurch: number; swing: number; stride: number;
 }
 
 const WALKER: Build = {
   girth: 1, chestD: 1, shoulder: 1, arm: 1, fore: 1, fist: 1.1, armLen: 1.05, leg: 1, legLen: 1, head: 1, neck: 1, belly: 0, hump: 0.35, height: 1.04,
-  hunch: 0.62, headComp: 0.8, reach: 1.25, armOut: 0.12, elbow: 0.2, wrist: -0.55, knee: 0.32, stance: 0.08, lurch: 1, swing: 0,
+  hunch: 0.62, headComp: 0.8, reach: 1.25, armOut: 0.12, elbow: 0.2, wrist: -0.55, knee: 0.32, stance: 0.08, lurch: 1, swing: 0, stride: 0,
 };
 
 export const BUILDS: Record<ZBuild, Build> = {
@@ -106,6 +154,33 @@ export function buildOf(look: ZombieLook, style: Exclude<ZStyle, 'boxy'>): Build
     b.reach = Math.min(1.6, b.reach * 1.08);
     b.lurch *= 1.3;
   }
+  if (style === 'sprite3d') {
+    // UltiCa zombies are ~29 px tall with an 8 px head, mitt hands, thick limbs and short legs:
+    // chibi, not realistic. Matching those ratios is most of what makes the far figure read as
+    // the sprite (tools/blender comparison sheets, docs/SPRITE3D.md). Limbs have to be 2-3 px
+    // wide at sprite scale, or they vanish into the outline.
+    b.head *= 1.6;
+    b.fist *= 1.4;
+    b.girth *= 1.18;
+    b.chestD *= 1.35;
+    b.arm *= 1.55;
+    b.fore *= 1.55;
+    b.leg *= 1.45;
+    b.legLen *= 0.8;
+    b.armLen *= 0.9;
+    b.neck *= 0.5;
+    b.stance += 0.06;
+    // the sprites hold their arms out in front and a little down, hands drooping, and stand
+    // in a stride
+    b.reach = Math.min(Math.max(b.reach, 0.9), 1.1);
+    b.elbow = Math.min(b.elbow, 0.2);
+    b.wrist = Math.min(b.wrist, -0.5);
+    b.armOut = Math.max(b.armOut, 0.26);
+    b.stride = 0.32;
+    b.belly *= 1.5;
+    // a gentler hunch: the sprites stand fairly upright with the head on top, not thrust out
+    b.hunch *= 0.6;
+  }
   return b;
 }
 
@@ -138,6 +213,7 @@ interface Gear {
 }
 
 export function zombieRig(sh: BodyShape, look: ZombieLook, style: Exclude<ZStyle, 'boxy'>, variant: number): Rig {
+  const sprite3d = style === 'sprite3d';
   const H = HUM;
   const B = buildOf(look, style);
   const v = ((variant % ZVARIANTS) + ZVARIANTS) % ZVARIANTS;
@@ -207,8 +283,9 @@ export function zombieRig(sh: BodyShape, look: ZombieLook, style: Exclude<ZStyle
   const rag = (name: string, parent: number, joint: [number, number, number], w: number, h: number, on: 'torso' | 'arm', arm?: 'R' | 'L', region: PartDef['src']['region'] = 'torso') => {
     rags.push({ i: add({ name, parent, joint, size: [w, h, 0.014], center: [0, -h / 2 + 0.01, 0], shape: 'box', src: { zr: 'rag', region }, kind: 'thin' }), on, arm });
   };
-  const ragged = !look.bone && look.gear !== 'hazmat' && look.gear !== 'bioop' && look.build !== 'bloated';
-  if (ragged || look.bone) {
+  // (sprite3d: the meshes model their own torn hems and sleeves)
+  const ragged = !sprite3d && !look.bone && look.gear !== 'hazmat' && look.gear !== 'bioop' && look.build !== 'bloated';
+  if (ragged || (look.bone && !sprite3d)) {
     if (v === 0) {
       rag('ragFront', H.torso, [torsoW * 0.18, 0.03, -torsoD / 2 - 0.006], torsoW * 0.4, 0.24, 'torso');
       rag('uArmRagR', H.uArmR, [0, -upperArm + 0.06, 0], armW * 1.25, 0.13, 'arm', 'R', 'upperArm');
@@ -369,6 +446,18 @@ export function zombieRig(sh: BodyShape, look: ZombieLook, style: Exclude<ZStyle
     wingL = add({ name: 'wingL', parent: H.torso, joint: [-0.08, 0.38, torsoD * 0.5], size: [0.75, 0.55, 0.03], center: [-0.37, 0.05, 0], rest: [0, 0.4, -0.3], shape: 'box', src: { role: 'wing', zr: 'rag', region: 'torso' }, kind: 'thin' });
   }
 
+  let meshModel: SpriteModelId | undefined;
+  if (sprite3d) {
+    meshModel = spriteModelOf(look);
+    const want = new Set([...SPRITE_CORE_PARTS, ...SPRITE_MODEL_GEAR[meshModel]]);
+    for (const p of parts) {
+      // a torn-off forearm's bloody stump keeps its painted shape (it is not a hand)
+      if (!want.has(p.name) || p.src.zr === 'flesh') continue;
+      p.mesh = `${meshModel}/${p.name}`;
+      // the mesh is modelled tapered; the per-instance taper would squeeze it twice
+      delete p.taper;
+    }
+  }
   const scaled = scaleParts(parts, s);
   /** floor contact correction (m), from the idle pose below */
   let ground = 0;
@@ -377,6 +466,7 @@ export function zombieRig(sh: BodyShape, look: ZombieLook, style: Exclude<ZStyle
   const rig: Rig = {
     shape: sh, parts: scaled, height: 1, hover: sh.flies ? 0.6 * s : 0, zlook: look,
     skinTag: `z:${look.family}:${look.build}:${look.gear}:${look.fx.join('+')}:${look.bone ? 'b' : ''}:${style}:${v}`,
+    ...(meshModel ? { meshModel } : {}),
     lie: crawl ? { angle: 0.3, lift: 0, side: true } : { angle: Math.PI / 2, lift: torsoD * (B.belly > 0.3 ? 0.5 + 0.8 * B.belly : 0.5) * s, side: false },
     pose(p, o) {
       if (crawl && !p.ride) {
@@ -412,9 +502,11 @@ export function zombieRig(sh: BodyShape, look: ZombieLook, style: Exclude<ZStyle
     const q = (k: number) => quirk(p.seed, k);
     const idle = sin(p.t * 1.7 + p.seed * TAU);
     // one arm hangs dead in about a third of a horde (never on the brutes' fists)
-    const dangle = !hulkArms && look.build !== 'bloated' && q(3) < 0.33;
+    // (not in sprite3d: every UltiCa zombie holds both arms out)
+    const dangle = !sprite3d && !hulkArms && look.build !== 'bloated' && q(3) < 0.33;
     const hunch = B.hunch * (0.8 + 0.4 * q(1));
     const reachR = B.reach + 0.12 * (q(7) - 0.5) + 0.05 * idle;
+    const stride = B.stride * Math.max(0, 1 - p.gait);
     const reachL = dangle ? 0.15 + 0.08 * sin(p.t * 1.1 + p.seed * 3) : B.reach + 0.12 * (q(8) - 0.5) - 0.05 * idle;
     return {
       lean: hunch + 0.03 * idle, roll: (q(5) - 0.5) * 0.14, twist: (q(9) - 0.5) * 0.2,
@@ -423,7 +515,8 @@ export function zombieRig(sh: BodyShape, look: ZombieLook, style: Exclude<ZStyle
       elbR: B.elbow + 0.1 * sin(p.t * 1.3 + p.seed * 4), elbL: dangle ? 0.05 : B.elbow + 0.1 * sin(p.t * 1.1 + p.seed * 7),
       wriR: B.wrist, wriL: dangle ? -0.1 : B.wrist,
       knee: B.knee * (0.85 + 0.3 * q(4)), jaw: 0.12 + 0.1 * Math.max(0, sin(p.t * 2.3 + p.seed * 11)),
-      dx: 0, dy: 0, dz: 0, legR: 0, legL: 0,
+      // (the resting stride gives way to the walk cycle)
+      dx: 0, dy: 0, dz: 0, legR: stride * (q(11) < 0.5 ? 1 : -0.8), legL: stride * (q(11) < 0.5 ? -0.8 : 1),
     };
   }
 

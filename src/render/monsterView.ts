@@ -24,6 +24,8 @@ import type { MonsterDef } from '../data/types';
 import { liftOf } from '../game/stairwalk';
 import { flies, floorKnown } from '../game/standing';
 import { warnOnce } from '../data/warn';
+import { CreatureLod, bodyFade, setDetail } from './chars/lodView';
+import { lodMix, newLodState } from './chars/spriteLod';
 
 // Billboards for monsters, their corpses and projectiles (blood/bile/acid decals are drawn by
 // render/worldFx.ts from the map fields the monster system adds). Runs as a
@@ -77,7 +79,12 @@ interface MonView {
   rag: RagdollBody | null;
   /** the flight the last rag doll played (the simulation may still be finishing it) */
   flown: FlingPlan | null;
+  /** model mode with ?zlod: the far-distance sprite next to the body (chars/lodView.ts) */
+  lod: CreatureLod | null;
 }
+
+/** No sprite LOD: only the close-range mesh switch (shared, stateless in 'off'). */
+const LOD_OFF = newLodState(0, 'off');
 
 interface CorpseView {
   h: SpriteHandle | null;
@@ -359,6 +366,7 @@ export class MonsterView implements GameSystem {
     const v = this.views.get(m);
     v?.h?.flash(color, seconds);
     v?.c?.flash(color, seconds);
+    v?.lod?.flash(color, seconds);
   }
 
   /** Sprite frame + height for a monster type (atlas sprite, looks_like chain, glyph fallback). */
@@ -390,7 +398,7 @@ export class MonsterView implements GameSystem {
 
   private create(m: Monster): MonView {
     const { frame, height } = this.frameFor(m);
-    const v: MonView = { h: null, c: null, frame, height, typeId: m.type.id, down: 0, hold: 0, warned: false, rag: null, flown: null };
+    const v: MonView = { h: null, c: null, frame, height, typeId: m.type.id, down: 0, hold: 0, warned: false, rag: null, flown: null, lod: null };
     this.makeVisual(m, v);
     this.views.set(m, v);
     return v;
@@ -401,6 +409,10 @@ export class MonsterView implements GameSystem {
       const seed = seedOf(appearanceSeed(m));
       const rig = this.rigFor(m.type, seed);
       v.c = new CreatureModel(this.layers().live, rig, this.skinFor(rig, v.frame), seed, m.x, m.y, m.facing);
+      if (charSettings.zlod !== 'off') {
+        const cam = this.renderer.rig.camera.position;
+        v.lod = new CreatureLod(this.renderer, v.frame, rig, v.height, charSettings.zlod, Math.hypot(m.x - cam.x, m.y - cam.z));
+      }
     } else v.h = this.renderer.sprites.add({ x: m.x, y: m.y, z: m.z, frame: v.frame, height: v.height });
   }
 
@@ -408,9 +420,11 @@ export class MonsterView implements GameSystem {
     v.h?.remove();
     v.c?.remove();
     v.rag?.remove();
+    v.lod?.remove();
     v.h = null;
     v.c = null;
     v.rag = null;
+    v.lod = null;
   }
 
   /** How thrown bodies flail (Options > Run-over bodies: rag doll stiff / loose). */
@@ -615,22 +629,34 @@ export class MonsterView implements GameSystem {
           this.flash(m, 0xfff4d0, 0.12);
         }
       }
-      if (v.c && this.thrown(m, v, dt, visible)) continue;
+      if (v.c && this.thrown(m, v, dt, visible)) {
+        v.lod?.hide();
+        continue;
+      }
       if (v.c) {
         // 3D body: the pose carries the bob, telegraph and flinch; the sway and shoves move it.
         const x = m.x + kx + sway * Math.cos(m.facing), y = m.y + ky + sway * Math.sin(m.facing);
         const dP = Math.hypot(m.x - p.x, m.y - p.y);
         const fighting = m.z === p.z && m.attitude() === 'attack' && (!!w || dP < 2.5);
+        const camDist = Math.hypot(x - cam.x, y - cam.z);
+        // far figures dissolve over the last 12 m before the draw distance instead of popping
+        const fadeFar = m.dormant ? Math.min(1, Math.max(0, (Math.hypot(m.x - p.x, m.y - p.y) - (this.farRange - 12)) / 12)) : 0;
+        // sprite <-> 3D distance LOD (chars/spriteLod.ts); 'off' only picks the close mesh
+        const mix = v.lod ? v.lod.plan(dt, charSettings.zlod, camDist) : lodMix('off', camDist, LOD_OFF, dt);
+        const fade = bodyFade(mix, fadeFar);
         v.c.update(dt, {
           x, y, z: m.z, facing: m.facing, target: fighting ? { x: p.x, y: p.y } : null,
           moving: m.moving, walkPhase: m.walkPhase,
           windup: w ? { elapsed: w.total - w.t, total: w.total, kind: w.kind } : null,
-          flinch: Math.min(1, Math.max(m.flinch * 4, kickK)), down: v.down, visible,
-          emph: m.attitude() === 'attack' ? 1 : 0, camDist: Math.hypot(x - cam.x, y - cam.z), lift: liftOf(m),
-          // far figures dissolve over the last 12 m before the draw distance instead of popping
-          fade: m.dormant ? Math.min(1, Math.max(0, (Math.hypot(m.x - p.x, m.y - p.y) - (this.farRange - 12)) / 12)) : 0,
+          flinch: Math.min(1, Math.max(m.flinch * 4, kickK)), down: v.down, visible: visible && fade < 0.999,
+          emph: m.attitude() === 'attack' ? 1 : 0, camDist, lift: liftOf(m), fade,
           sy: 1 + (stretch - 1) * 0.5 - (1 - squash) * 0.5, sxz: 1 - (1 - narrow) * 0.5,
         });
+        setDetail(v.c.inst, mix.detail);
+        if (v.lod) {
+          const e = this.renderer.rig.camera.matrixWorld.elements;
+          v.lod.apply(v.c.inst, mix, { x, y, z: m.z, lift: liftOf(m), dist: camDist, fadeFar, visible, camRight: [e[0], e[2]] });
+        }
         continue;
       }
       const h = v.h!;

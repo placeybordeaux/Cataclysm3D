@@ -8,7 +8,7 @@ import { Spawner, type OvermapView } from './game/spawner';
 import { PlayerCombat, type ViewModelHook } from './game/playercombat';
 import { MELEE_AIM, MonsterView, NEAR_CLAMP } from './render/monsterView';
 import { HitFx } from './render/hitFx';
-import { charSettings, charsApi, setCharMode, setViewmodelMode, setZombieStyle } from './render/chars';
+import { charSettings, charsApi, setCharMode, setViewmodelMode, setZombieLod, setZombieStyle, ZLODS } from './render/chars';
 import { ZSTYLES } from './render/chars/zombie';
 import { FpView } from './render/chars/fpView';
 import { FireView } from './render/chars/fireView';
@@ -130,9 +130,16 @@ export function installMonsters(game: Game, renderer: Renderer | null, worldgen:
     registerOption({
       category: 'World',
       name: 'Zombie bodies',
-      value: () => ({ shamble: 'shambling', caricature: 'exaggerated', boxy: 'boxy (v2)' } as const)[charSettings.zstyle],
-      change: () => setZombieStyle(ZSTYLES[(ZSTYLES.indexOf(charSettings.zstyle) + 1) % ZSTYLES.length]),
-      desc: 'How 3D zombies are built: hunched and reaching with a silhouette per kind of special (after the tileset sprites), the same pushed further, or the older upright box bodies.',
+      value: () => ({ shamble: 'shambling', caricature: 'exaggerated', boxy: 'boxy (v2)', sprite3d: 'sprite 3D' } as const)[charSettings.zstyle],
+      change: () => void setZombieStyle(ZSTYLES[(ZSTYLES.indexOf(charSettings.zstyle) + 1) % ZSTYLES.length]).catch((e) => console.error(e)),
+      desc: 'How 3D zombies are built: hunched and reaching with a silhouette per kind of special (after the tileset sprites), the same pushed further, the older upright box bodies, or chunky low-poly models built in Blender to read like the tileset sprites from afar.',
+    });
+    registerOption({
+      category: 'World',
+      name: 'Zombie sprite LOD',
+      value: () => ({ off: 'off', dither: 'dither fade', pop: 'pop', flip: 'card flip' } as const)[charSettings.zlod],
+      change: () => setZombieLod(ZLODS[(ZLODS.indexOf(charSettings.zlod) + 1) % ZLODS.length]),
+      desc: 'Prototype: far-away creatures drawn as their 2D tileset sprite, turning into the 3D model as you approach (a dithered cross-fade, a hard pop, or a quick card flip). Off keeps the 3D model at every distance.',
     });
   }
   (game as unknown as { monsters: MonsterSystem }).monsters = sys;

@@ -442,3 +442,24 @@ function blotch(rects: [number, number, number, number][], put: Ctx['put'], r: (
     if (fw > 3) put(f, x + (x < fw - 1 ? 1 : -1), y, mul(c, 0.85), glow);
   }
 }
+
+/**
+ * The palette a sprite3d mesh (Blender model, spriteModels.ts) wears. Pixel art draws cloth as
+ * a dark mid tone plus hand-placed highlights; a lit mesh has no highlights of its own and
+ * shades every side away from the light, so the mid tone alone reads near-black at range (the
+ * sprite's jeans read blue, the mid tone (46, 67, 77) reads as a black leg). Cloth is lifted
+ * toward the sprite's own highlight level instead; skin is already light.
+ */
+export function sprite3dPalette(pp: PersonPalette): PersonPalette {
+  const up = (c: RGB, k: number): RGB => {
+    const l = lum(c);
+    // dark cloth lifts most; the cap keeps a white shirt from blowing out
+    const kk = l < 70 ? k : l < 140 ? 1 + (k - 1) * 0.5 : 1;
+    return [Math.min(240, c[0] * kk), Math.min(240, c[1] * kk), Math.min(240, c[2] * kk)];
+  };
+  return {
+    ...pp,
+    shirt: up(pp.shirt, 1.4), pants: up(pp.pants, 1.45), shoes: up(pp.shoes, 1.3), hair: up(pp.hair, 1.2),
+    inner: pp.inner ? up(pp.inner, 1.4) : null, upperArm: up(pp.upperArm, 1.4), foreArm: up(pp.foreArm, 1.4),
+  };
+}

@@ -84,6 +84,12 @@ export interface PartDef {
   kind?: 'core' | 'limb' | 'thin';
   /** unit shape the box is drawn with (shapes.ts); default 'box' */
   shape?: Shape;
+  /**
+   * `zstyle=sprite3d`: a Blender-built mesh (`<model>/<part>`, chars/spriteModels.ts) drawn in
+   * the box instead of the unit shape. It is authored in the box's unit frame, so the box (and
+   * everything that reads it: poses, aim picking, rag dolls) is unchanged.
+   */
+  mesh?: string;
 }
 
 export interface PoseIn {
@@ -142,6 +148,8 @@ export interface Rig {
   zlook?: ZombieLook;
   /** Extra skin-cache key: rigs whose parts paint differently with the same sizes. */
   skinTag?: string;
+  /** `zstyle=sprite3d`: the Blender model the parts' `mesh` keys come from. */
+  meshModel?: string;
   pose(p: PoseIn, out: PoseOut): void;
 }
 
@@ -1105,13 +1113,14 @@ function lump(sh: BodyShape): Rig {
 }
 
 /**
- * `zstyle`: zombie bodies (zombie.ts) — 'shamble' (default), 'caricature', or 'boxy' for the
+ * `zstyle`: zombie bodies (zombie.ts) — 'shamble' (default), 'caricature', 'sprite3d' (Blender
+ * meshes in the boxes, chars/spriteModels.ts), or 'boxy' for the
  * round-6 person rig; `variant` picks one of a zombie type's torn/asymmetric individuals.
  */
 export function makeRig(sh: BodyShape, opts: { turret?: boolean; held?: HeldBuild; zstyle?: ZStyle; variant?: number } = {}): Rig {
   switch (sh.arch) {
     case 'humanoid':
-      if (sh.zlook && (opts.zstyle ?? 'shamble') !== 'boxy' && !sh.weapon) return zombieRig(sh, sh.zlook, opts.zstyle === 'caricature' ? 'caricature' : 'shamble', opts.variant ?? 0);
+      if (sh.zlook && (opts.zstyle ?? 'shamble') !== 'boxy' && !sh.weapon) return zombieRig(sh, sh.zlook, opts.zstyle === 'caricature' || opts.zstyle === 'sprite3d' ? opts.zstyle : 'shamble', opts.variant ?? 0);
       return humanoid(sh, opts.held);
     case 'quadruped': return quadruped(sh, false);
     case 'critter': return quadruped(sh, true);

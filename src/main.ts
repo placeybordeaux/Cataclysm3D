@@ -21,6 +21,8 @@ import { installWorldInteraction } from './worldInteraction';
 import { installNature } from './nature';
 import { lightAt } from './game/vision';
 import { installMonsters } from './monsters';
+import { charSettings } from './render/chars';
+import { loadSpriteModels } from './render/chars/spriteModels';
 import { smashAimed } from './game/bash';
 import { installNpcs } from './npcs';
 import { installMutBio } from './mutbio';
@@ -96,6 +98,9 @@ async function main(): Promise<void> {
   const renderer = new Renderer(canvas, game);
   // Wait for the tile atlas so the first frames (and screenshots) use the real art.
   await renderer.ready;
+  // zstyle=sprite3d bodies are Blender meshes: loaded before any monster is drawn (throws if
+  // the GLBs are missing; render/chars/spriteModels.ts)
+  if (charSettings.zstyle === 'sprite3d') await loadSpriteModels();
   const api = installDebugApi(game, renderer);
   if (worldgen) installWorldgenDebug(api, game, worldgen);
   installPerfDebug(api, game, worldgen ? () => worldgen!.overmap.citiesNear(game.player.x / 24, game.player.y / 24) : undefined);

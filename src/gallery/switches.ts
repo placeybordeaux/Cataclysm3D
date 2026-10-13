@@ -10,7 +10,7 @@ import { furnitureState } from '../render/furniture/index';
 import { surfaceState } from '../render/surfaces';
 import { groundItemState } from '../render/furniture/groundHeld';
 import { cardSettings } from '../render/cards';
-import { charSettings, charsApi, setCharMode, setViewmodelMode, setZombieStyle } from '../render/chars/index';
+import { charSettings, charsApi, setCharMode, setViewmodelMode, setZombieLod, setZombieStyle, type ZLod } from '../render/chars/index';
 import { cutoutMipsOn, setCutoutMips } from '../render/cutoutMips';
 import { AIM_MODELS, aimModel, isAimModel, setAimModel } from '../game/aimmodel';
 import type { GradeMode } from '../render/post';
@@ -155,9 +155,15 @@ export function buildSwitches(renderer: Renderer, api: DebugApi): GallerySwitch[
     },
     {
       id: 'zstyle', label: 'Zombie bodies', group: 'Characters', option: 'Zombie bodies', url: 'zstyle',
-      values: [{ v: 'shamble', label: 'shambling' }, { v: 'caricature', label: 'exaggerated' }, { v: 'boxy', label: 'boxy (v2)' }], def: 'shamble',
-      note: '3D creatures only. Console: cdda.chars({ zstyle }).',
-      get: () => charSettings.zstyle, set: (v) => setZombieStyle(v as 'shamble' | 'caricature' | 'boxy'), proof: 'zcrowd',
+      values: [{ v: 'shamble', label: 'shambling' }, { v: 'caricature', label: 'exaggerated' }, { v: 'boxy', label: 'boxy (v2)' }, { v: 'sprite3d', label: 'sprite 3D (Blender)' }], def: 'shamble',
+      note: '3D creatures only. sprite 3D: low-poly Blender models built to read like the tileset sprites (docs/SPRITE3D.md). Console: cdda.chars({ zstyle }).',
+      get: () => charSettings.zstyle, set: (v) => void setZombieStyle(v as 'shamble' | 'caricature' | 'boxy' | 'sprite3d').catch((e) => console.error(e)), proof: 'zcrowd',
+    },
+    {
+      id: 'zlod', label: 'Zombie sprite LOD', group: 'Characters', option: 'Zombie sprite LOD', url: 'zlod',
+      values: [{ v: 'off', label: 'off (3D only)' }, { v: 'dither', label: 'dither fade' }, { v: 'pop', label: 'pop' }, { v: 'flip', label: 'card flip' }], def: 'off',
+      note: 'Prototype: creatures past ~30 m drawn as their tileset sprite, blending into the 3D body as you approach. Console: cdda.chars({ zlod, lod: { far, band, near } }).',
+      get: () => charSettings.zlod, set: (v) => setZombieLod(v as ZLod), proof: 'zlod_far',
     },
     {
       id: 'charpaint', label: 'Creature paint', group: 'Characters', option: 'Creature paint', url: 'charpaint',
