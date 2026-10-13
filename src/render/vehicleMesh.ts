@@ -919,7 +919,7 @@ export class VehicleRenderer {
       // The light map only knows round sources, so a headlight cone is approximated by
       // lights stepping out along the beam, dimmer and wider with distance.
       if (lit && !e.beam.length) {
-        e.beam = BEAM.map(([, intensity, radius]) => this.renderer.lights.add({ x: v.x, y: v.y, z: v.z, color: 0xfff0d0, intensity, radius, height: 0.5 }));
+        e.beam = BEAM.map(([, intensity, radius]) => this.renderer.lights.add({ x: v.x, y: v.y, z: v.z, color: 0xfff0d0, intensity, radius, height: 0.5, beam: true }));
       } else if (!lit && e.beam.length) {
         for (const l of e.beam) l.remove();
         e.beam = [];

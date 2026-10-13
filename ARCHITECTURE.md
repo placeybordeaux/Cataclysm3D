@@ -303,6 +303,11 @@ tests/               vitest unit tests (pure logic, no DOM/WebGL)
   darker tops (`panelTop`) so sunlit cars don't read as white slabs; BN wheel sizes are cm.
   Headlights: a spot aimed ~30 m out plus four light-map beam lights out to ~30 m. There are
   two shadowed spots (`HEADLIGHT_SPOTS`): the car you drive, then the nearest other lit car.
+  The beam lights (`beam: true` handles) are cast per `beamMode.ts` (`?beam=smooth|tile|spot`,
+  Options > World detail > Headlight beams, `cdda.setBeam`): smooth (default) splits each over
+  the four nearest tiles by its sub-tile position and keeps it out of the point-light pool, so
+  lit walls don't pop as you drive; the light map reuses the tile lights' cast while only
+  handles move (`LightField.computeArtificial` nBase). Real-input check: `--only beamflicker`.
 - Model look (default since wave 3, docs/VEHICLES.md; `?vehicles=model|parts`, Options >
   Vehicle look, `cdda.vehicleLook()`): `vehicleLayout.ts` classifies the grid (style, livery,
   sections, wheels, doors; width squeezed, seats keep their tiles via `zOf`),

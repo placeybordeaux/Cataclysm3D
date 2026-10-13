@@ -33,6 +33,12 @@ export interface LightSource {
   r: number;
   g: number;
   b: number;
+  /**
+   * Share of the source's light cast from this tile (default 1). A moving light is split over
+   * the four tiles around it with bilinear weights (lightmap.ts), so its light glides between
+   * tile casts instead of jumping a whole tile; the radius still follows the full `lum`.
+   */
+  w?: number;
 }
 
 /** CDDA light_calc: light reaching distance d (tiles) from a source of luminance lum. */
@@ -119,6 +125,10 @@ export class LightField {
   indoorAmbient = 0.07;
   private stamp: Int32Array;
   private stampId = 0;
+  /** art/disp from the leading (tile) sources alone, reused while they and the grid hold */
+  private baseArt: Float32Array;
+  private baseDisp: Float32Array;
+  private baseSig = NaN;
 
   constructor(readonly size: number) {
     const n = size * size;
@@ -128,6 +138,13 @@ export class LightField {
     this.art = new Float32Array(n * 3);
     this.disp = new Float32Array(n * 3);
     this.stamp = new Int32Array(n);
+    this.baseArt = new Float32Array(n * 3);
+    this.baseDisp = new Float32Array(n * 3);
+  }
+
+  /** The grid changed (or the window moved): the cached tile-source light is stale. */
+  dropBase(): void {
+    this.baseSig = NaN;
   }
 
   /** Cell index of world tile (x, y), or -1 outside the field. */
@@ -198,16 +215,37 @@ export class LightField {
     }
   }
 
-  computeArtificial(sources: readonly LightSource[]): void {
+  /**
+   * `nBase` leading sources with signature `baseSig` are the tile lights (lamps, fires, items):
+   * while their signature and the grid hold, their light is copied from the last cast and only
+   * the rest (moving handles: headlight beams, muzzle flashes) are cast again. A street full of
+   * lamps cost ~3 ms per rebuild, and a moving beam rebuilds every frame (beamMode.ts).
+   */
+  computeArtificial(sources: readonly LightSource[], nBase = 0, baseSig = NaN): void {
     const art = this.art, disp = this.disp;
-    art.fill(0);
-    disp.fill(0);
-    for (const s of sources) {
+    let from = 0;
+    if (nBase > 0 && baseSig === this.baseSig) {
+      art.set(this.baseArt);
+      disp.set(this.baseDisp);
+      from = nBase;
+    } else {
+      art.fill(0);
+      disp.fill(0);
+    }
+    for (let i = from; i < sources.length; i++) {
+      if (i === nBase && from === 0 && nBase > 0) {
+        this.baseArt.set(art);
+        this.baseDisp.set(disp);
+        this.baseSig = baseSig;
+      }
+      const s = sources[i];
       const si = this.index(s.x, s.y);
       if (si < 0) continue;
       const id = ++this.stampId;
       const stamp = this.stamp;
+      const w = s.w ?? 1;
       const add = (k: number, v: number, dv: number) => {
+        v *= w; dv *= w;
         art[k * 3] += v * s.r;
         art[k * 3 + 1] += v * s.g;
         art[k * 3 + 2] += v * s.b;
@@ -228,6 +266,11 @@ export class LightField {
       // A source inside an opaque tile (lamp furniture, a wall light) still lights around
       // itself: casting starts from the source cell, which castOctant never tests.
       for (const o of OCTANTS) castOctant(this.blocks, s.x, s.y, R, o, visit);
+    }
+    if (from === 0 && nBase > 0 && nBase >= sources.length) {
+      this.baseArt.set(art);
+      this.baseDisp.set(disp);
+      this.baseSig = baseSig;
     }
   }
 

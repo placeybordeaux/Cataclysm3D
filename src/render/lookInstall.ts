@@ -17,6 +17,7 @@ import { installNearCurtain } from './nearChunks';
 import { FLORA_DESC, FLORA_NAMES, flora, floraAtlas, floraTiming, isFloraName, setFlora } from './flora';
 import { FORM_NAMES, FORMS, form, isFormName, setForm } from './formLight';
 import { installShadows } from './shadowInstall';
+import { BEAM_MODES, beamSettings, setBeamMode } from './beamMode';
 
 // Wires the visual styles (look.ts) into the game: the Options entry, the automation API
 // and the per-look scene layers that need game/world access (skyline from the overmap).
@@ -50,6 +51,12 @@ export function installLooks(game: Game, renderer: Renderer, worldgen: WorldGene
     name: 'Props', value: () => cardSettings.mode,
     change: () => { cardSettings.mode = cardSettings.mode === 'cards' ? 'billboard' : 'cards'; storeVisualPreference('props', cardSettings.mode); renderer.chunks.invalidateAll(); },
     desc: 'World-fixed cards or camera-facing billboards for fire, distant furniture and loose items.',
+  });
+  registerOption({
+    category: 'World',
+    name: 'Headlight beams', value: () => beamSettings.mode,
+    change: (d) => setBeamMode(BEAM_MODES[(BEAM_MODES.indexOf(beamSettings.mode) + d + BEAM_MODES.length) % BEAM_MODES.length]),
+    desc: 'smooth: the beam\'s light on walls glides as you drive.  tile: the old tile-stepped beam light (walls popped lit and dark).  spot: only the headlight itself, no extra light-map glow.',
   });
 
   if (worldgen) {
@@ -161,6 +168,11 @@ export function installLooks(game: Game, renderer: Renderer, worldgen: WorldGene
     flora: flora.name, atlasUsed: +floraAtlas().used.toFixed(3), midRadius: renderer.chunks.midRadius,
     perTreeMs: floraTiming.n.map((n, i) => ({ lod: i, n, mean: +(floraTiming.ms[i] / Math.max(1, n)).toFixed(2), max: +floraTiming.max[i].toFixed(1), maxId: floraTiming.maxId[i] })),
   });
+  /** Headlight beam casting (beamMode.ts): 'smooth' | 'tile' | 'spot', live, not persisted. */
+  a.setBeam = (m: string) => {
+    if (!(BEAM_MODES as readonly string[]).includes(m)) throw new Error(`unknown beam mode ${m} (expected ${BEAM_MODES.join('|')})`);
+    beamSettings.mode = m as (typeof BEAM_MODES)[number];
+  };
   /** A/B the stable cutout mips on grass/leaf cards (cutoutMips.ts). */
   a.cutoutMips = (on = true) => setCutoutMips(on);
   /** Form-lighting preset (formLight.ts), live, not persisted; formTweak edits single values. */

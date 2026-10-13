@@ -59,6 +59,7 @@ import { labEscapeScenarios } from './realinput_labescape';
 import { spawnsScenarios } from './realinput_spawns';
 import { deepLabScenarios } from './realinput_deeplab';
 import { headlightScenarios } from './realinput_headlights';
+import { beamScenarios } from './realinput_beam';
 
 const argv = process.argv.slice(2);
 const opt = (n: string, d: string) => (argv.includes(n) ? argv[argv.indexOf(n) + 1] : d);
@@ -1682,6 +1683,8 @@ scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...spawnsScenar
 scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...deepLabScenarios({ x: () => x, js, check, shot, toGameplay, sleep }));
 // Another car's headlights survive switching your own on (H): the renderer's headlight budget.
 scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...headlightScenarios({ page: () => page, x: () => x, js, check, toGameplay, sleep }));
+// Headlight light on walls follows the car smoothly (beamMode.ts): no tile pops.
+scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...beamScenarios({ page: () => page, x: () => x, js, check, toGameplay, sleep }));
 // Run-over bodies (src/game/runoverFling.ts, render/chars/ragdoll.ts): W into a row of zombies, frame strips.
 scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...runoverScenarios({ page: () => page, x: () => x, js, check, toGameplay, sleep }));
 

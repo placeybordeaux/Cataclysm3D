@@ -52,6 +52,8 @@ export interface DynamicLight {
   color: number;
   flicker: boolean;
   phase: number;
+  /** Cast from its sub-tile position (bilinear over the four nearest tiles), not its tile. */
+  smooth?: boolean;
 }
 
 interface IdCache {
@@ -85,6 +87,8 @@ export class LightMap {
   private artT = 0;
   private flickering = false;
   private sources: LightSource[] = [];
+  /** collectSources: how many leading `sources` are tile lights (the rest are handles) */
+  private nTile = 0;
   /** Tile sources of the last collection (new array whenever it is rebuilt). */
   statics: StaticLight[] = [];
   private valid = false;
@@ -172,6 +176,7 @@ export class LightMap {
       this.z = pz;
       this.buildGrid();
       f.computeNatural();
+      f.dropBase();
       this.natSig = nsig;
       this.ownStats.naturalMs = performance.now() - t0;
       this.artSig = NaN; // grid changed: occlusion of every source may have changed
@@ -181,12 +186,20 @@ export class LightMap {
     this.artT += dt;
     const due = this.artT >= 1 / this.hz;
     if (due || force || Number.isNaN(this.artSig)) {
+      let baseSig = NaN;
       const sources = this.collectSources(dynamic, time);
-      let sig = sources.length;
-      for (const s of sources) sig = (Math.imul(sig, 31) + ((s.x * 7919 + s.y * 104729) ^ Math.round(s.lum * 16))) | 0;
+      // baseSig covers the tile lights alone (seeded with their count), sig everything
+      let sig = this.nTile;
+      for (let i = 0; i < sources.length; i++) {
+        const s = sources[i];
+        sig = (Math.imul(sig, 31) + ((s.x * 7919 + s.y * 104729) ^ Math.round(s.lum * 16) ^ (Math.round((s.w ?? 1) * 64) << 20))) | 0;
+        if (i === this.nTile - 1) baseSig = sig;
+      }
+      if (this.nTile === 0) baseSig = NaN;
+      sig = (Math.imul(sig, 31) + sources.length) | 0;
       if (sig !== this.artSig || this.flickering) {
         const t0 = performance.now();
-        f.computeArtificial(sources);
+        f.computeArtificial(sources, this.nTile, baseSig);
         this.artSig = sig;
         this.ownStats.artificialMs = performance.now() - t0;
         this.ownStats.sources = sources.length;
@@ -327,13 +340,29 @@ export class LightMap {
             statics.push({ x, y, z, lum, color: 0xffecc8, flicker: false, height: 0.3 });
           }
       }
+    this.nTile = out.length;
     for (const d of dynamic) {
       if (d.z !== z) continue;
       const x = Math.floor(d.x), y = Math.floor(d.y);
       if (!inside(x, y) || d.lum <= 0) continue;
       const k = d.flicker ? flickerAt(time, x + d.phase, y) : 1;
       if (d.flicker) flicker = true;
-      out.push({ x, y, lum: d.lum * k, r: ((d.color >> 16) & 255) / 255, g: ((d.color >> 8) & 255) / 255, b: (d.color & 255) / 255 });
+      const r = ((d.color >> 16) & 255) / 255, g = ((d.color >> 8) & 255) / 255, b = (d.color & 255) / 255;
+      if (!d.smooth) {
+        out.push({ x, y, lum: d.lum * k, r, g, b });
+        continue;
+      }
+      // Tile centres sit at +0.5: weights are 1 on a tile's centre and fade linearly to its
+      // neighbours', the same bilinear the shader's light-map sample uses between tiles.
+      const fx = d.x - 0.5, fy = d.y - 0.5;
+      const x0 = Math.floor(fx), y0 = Math.floor(fy);
+      const tx = fx - x0, ty = fy - y0;
+      for (let j = 0; j < 4; j++) {
+        const sx = x0 + (j & 1), sy = y0 + (j >> 1);
+        const w = ((j & 1) ? tx : 1 - tx) * ((j >> 1) ? ty : 1 - ty);
+        if (w < 1 / 64 || !inside(sx, sy)) continue;
+        out.push({ x: sx, y: sy, lum: d.lum * k, r, g, b, w });
+      }
     }
     this.flickering = flicker;
     // keep the previous array (identity) when nothing changed, so consumers can skip work

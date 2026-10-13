@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { LEVEL_HEIGHT } from '../world/coords';
 import { form } from './formLight';
 import { ShadowRig, initialShadowMode } from './shadows';
+import { beamSettings } from './beamMode';
 
 // All scene lights. The *number* of each light type is fixed at construction so shader
 // programs never recompile at runtime.
@@ -33,6 +34,8 @@ export interface LightSpec {
   /** reach in metres (hard cutoff; banded falloff inside) */
   radius?: number;
   flicker?: boolean;
+  /** A stand-in along a vehicle headlight's beam (beamMode.ts decides how it is cast). */
+  beam?: boolean;
 }
 
 export interface LightHandle {
@@ -50,6 +53,9 @@ interface Source {
   d2: number;
   /** light-map view of this source (luminance derived from intensity/radius) */
   lum: number;
+  beam: boolean;
+  /** read by the light map: cast from the sub-tile position (set per frame from beamSettings) */
+  smooth?: boolean;
 }
 
 /** Handle intensity/radius -> CDDA luminance for the light map (a radius-8, intensity-1
@@ -75,7 +81,7 @@ function fromStatic(l: StaticLight): Source {
   return {
     x: l.x + 0.5, y: l.y + 0.5, z: l.z, height: l.height, color: l.color,
     intensity: Math.min(2, 0.4 + l.lum / 80), radius: Math.min(14, 3 + Math.sqrt(l.lum) * 0.9), flicker: l.flicker,
-    phase: (l.x * 12.9898 + l.y * 78.233) % 6.283, d2: 0, lum: l.lum,
+    phase: (l.x * 12.9898 + l.y * 78.233) % 6.283, d2: 0, lum: l.lum, beam: false,
   };
 }
 
@@ -281,16 +287,18 @@ export class LightManager {
     const s: Source = {
       x: spec.x, y: spec.y, z: spec.z, height: spec.height ?? 1.2, color: spec.color ?? 0xffd9a0,
       intensity: spec.intensity ?? 1, radius: spec.radius ?? 8, flicker: spec.flicker ?? false,
-      phase: Math.random() * 6.283, d2: 0, lum: 0,
+      phase: Math.random() * 6.283, d2: 0, lum: 0, beam: spec.beam ?? false,
     };
     s.lum = handleLuminance(s);
     this.dynamic.add(s);
     this.handlesDirty = true;
     const self = this;
-    // Only changes that move light between tiles or switch it on/off force a rebuild.
+    // Only changes that move light between tiles or switch it on/off force a rebuild; a
+    // smooth-cast beam stand-in also rebuilds every 1/8 tile it moves (its bilinear weights).
     return {
       set(x, y, z) {
-        if (Math.floor(x) !== Math.floor(s.x) || Math.floor(y) !== Math.floor(s.y) || z !== s.z) self.handlesDirty = true;
+        const q = s.beam && beamSettings.mode === 'smooth' ? 8 : 1;
+        if (Math.floor(x * q) !== Math.floor(s.x * q) || Math.floor(y * q) !== Math.floor(s.y * q) || z !== s.z) self.handlesDirty = true;
         s.x = x; s.y = y; s.z = z;
       },
       get intensity() { return s.intensity; },
@@ -310,10 +318,24 @@ export class LightManager {
     this.shadows.applyLookSize();
   }
 
-  /** Handles for the light map (lightmap.ts reads x/y/z/lum/color/flicker/phase). */
+  /** Handles for the light map (lightmap.ts reads x/y/z/lum/color/flicker/phase/smooth). */
   handles(): Iterable<Source> {
-    return this.dynamic;
+    const mode = beamSettings.mode;
+    if (mode !== this.handleMode) {
+      this.handleMode = mode;
+      this.handlesDirty = true;
+    }
+    const out = this.handleList;
+    out.length = 0;
+    for (const s of this.dynamic) {
+      if (s.beam && mode === 'spot') continue;
+      s.smooth = s.beam && mode === 'smooth';
+      out.push(s);
+    }
+    return out;
   }
+  private handleList: Source[] = [];
+  private handleMode = beamSettings.mode;
 
   /** Tile sources found by the light map; they compete for the point-light pool too. */
   setStaticLights(list: readonly StaticLight[]): void {
@@ -362,7 +384,11 @@ export class LightManager {
       s.d2 = dx * dx + dy * dy + dz * dz;
       if (s.d2 < 60 * 60) act.push(s);
     };
-    for (const s of this.dynamic) if (s.intensity > 0) consider(s);
+    // Beam stand-ins only claim pool lights in 'tile' mode: the shadowed spot already shades
+    // what they light, and four of them in front of the car took every slot from the street
+    // lamps you drove past (their pools blinked out and back as the distances crossed).
+    const beamPoints = beamSettings.mode === 'tile';
+    for (const s of this.dynamic) if (s.intensity > 0 && (beamPoints || !s.beam)) consider(s);
     for (const s of this.statics) consider(s);
     if (act.length > POOL_SIZE) act.sort((a, b) => a.d2 - b.d2);
     for (let i = 0; i < POOL_SIZE; i++) {
