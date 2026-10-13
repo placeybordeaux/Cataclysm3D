@@ -43,7 +43,7 @@
 import { createServer } from 'vite';
 import puppeteer, { type Page } from 'puppeteer-core';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { summarize, type PerfDump, type PerfSummary } from '../src/perf/analyze';
 import { printReport } from './perf-report';
 import { PERF_MONITOR, PERF_PAGE } from './lib/perfRoutes';
@@ -263,6 +263,7 @@ const ffGc = browserKind === 'firefox' ? opt('--ff-gc', '') : '';
 if (ffGc) {
   const proc = browser.process();
   if (!proc?.stderr) throw new Error('--ff-gc: no stderr from the Firefox process');
+  mkdirSync(dirname(resolve(ffGc)), { recursive: true });
   writeFileSync(ffGc, '');
   proc.stderr.on('data', (b: Buffer) => appendFileSync(ffGc, b));
 }
