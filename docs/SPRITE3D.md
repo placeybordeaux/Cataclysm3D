@@ -154,6 +154,7 @@ to the body), wired in `monsterView.ts`. Creatures only (not corpses).
 
 | | |
 |---|---|
+| default (shamble), for reference | ![](screenshots/sprite3d/ingame/lod_crop_default.png) |
 | sprite3d, LOD off | ![](screenshots/sprite3d/ingame/lod_crop_off.png) |
 | dither (24–36 m) | ![](screenshots/sprite3d/ingame/lod_crop_dither.png) |
 | pop (30 m) | ![](screenshots/sprite3d/ingame/lod_crop_pop.png) |
@@ -161,7 +162,24 @@ to the body), wired in `monsterView.ts`. Creatures only (not corpses).
 
 ### Honest verdict
 
-LOD_VERDICT
+- **The far sprite3d body reads close to the sprite.** At 25–55 m (10–20 px tall) the sprite3d
+  figures have the sprite's mass distribution, colours and big head; on the comparison sheets
+  the downsampled render is recognisably the same character for walker, fat, brute, soldier,
+  boomer and spitter. Weaker: the cop (the sprite is black riot armour standing upright, ours a
+  navy uniform with a hunch), the child (the sprite stands upright) and the skeleton (the sprite
+  is yellow bone and rags, ours reads as a white skull on a dark body). The sprites still have
+  more contrast: hand-placed highlights and inner outlines a lit mesh doesn't produce.
+- **The billboard LOD does not look better in first person, and I would not ship it as is.**
+  The tileset draws every creature side-on facing right; in first person most zombies face
+  *you*. Far away a horde becomes a row of profiles walking sideways, then turns to face you as
+  it crosses 30 m. Mirroring by walking direction helps when they cross the street, not when
+  they come at you. At 30+ m the 3D body is already only 10–15 px tall and, since sprite3d,
+  has the sprite's proportions and palette, so the sprite adds little except its pixel-exact
+  look. *dither* shows a noisy half-and-half figure across the band (visible in a still; in
+  motion it reads as a shimmer); *pop* is clean in a still but pops; *flip* hides the pop in a
+  0.2 s narrowing that reads as a deliberate stylisation (verified by the unit tests, no motion
+  capture yet). If any, pop/flip with a much farther switch (50 m+) where the change is a few
+  pixels, or sprites drawn front-on (UltiCa has none), would be the way.
 
 ## In-game screenshots
 
@@ -186,4 +204,18 @@ themselves), `s3d_dither_*` / `s3d_pop_*` = sprite3d with the LOD. Views: `horde
 
 ## Open problems
 
-OPEN_PROBLEMS
+- Model fidelity varies: cop, child and skeleton read less like their sprites (above); the
+  boomer's belly sits higher than the sprite's and its shirt is red where the sprite's is
+  magenta (the palette reader counts some magenta as blood).
+- Faces up close are a dark socket decal + glint per eye: fine to ~5 m, slightly "mask"-like at
+  arm's length. The close mesh (subdivided) only rounds facets; it adds no extra detail
+  (fingers, ears, hair locks) — that would be a second set of builders in zombies.py.
+- The head box (aim picking) grows with the sprite proportions: headshots are easier in this
+  style.
+- Only 10 kinds have their own model; the rest borrow the walker meshes in their own boxes,
+  which works for proportions (hulk, necromancer) but loses their outline details unless the
+  family's painted features add it.
+- LOD: corpses stay 3D; dormant far figures get the sprite too but idle in profile; no
+  per-distance sprite for animals beyond what their own sprite is.
+- The palette row is per skin (sprite), so all individuals of a sprite variant share colours;
+  gore placement is per model, not per individual (the painted bodies vary it by seed).
