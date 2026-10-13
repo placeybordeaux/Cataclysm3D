@@ -223,9 +223,21 @@ export function installRouteGuide(game: Game, renderer: Renderer, overmap: () =>
     root.dataset.path = `${res.complete ? 'ok' : 'partial'}:${res.tiles.slice(0, 6).map(([x, y]) => `${x},${y}`).join(' ')}`;
   };
 
+  // The canvas rect, read when it changes instead of every frame: getBoundingClientRect() in
+  // this rAF loop forced a synchronous style + layout of the whole HUD each frame (~2 % of the
+  // frame in Chromium; a full reflow at 3440 px in Firefox), with or without a route.
+  const canvas = renderer.three.domElement as HTMLCanvasElement;
+  let rect: DOMRect | null = null;
+  const dropRect = () => void (rect = null);
+  addEventListener('resize', dropRect);
+  if (typeof ResizeObserver !== 'undefined') new ResizeObserver(dropRect).observe(canvas);
+  let shown = false;
   const place = () => {
+    // nothing to draw and nothing drawn: no DOM writes at all
+    if (!pts.length && !beaconAt && !shown) return;
+    shown = pts.length > 0 || !!beaconAt;
     const cam = renderer.camera;
-    const r = (renderer.three.domElement as HTMLCanvasElement).getBoundingClientRect();
+    const r = (rect ??= canvas.getBoundingClientRect());
     cam.updateMatrixWorld();
     const z = game.player.z;
     const project = (x: number, y: number, lift: number) => {

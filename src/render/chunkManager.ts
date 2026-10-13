@@ -389,10 +389,16 @@ export class ChunkManager {
     lv.eye.z = pz;
     lv.beginFrame();
     const driving = !unlimited && Math.hypot(this.vel.x, this.vel.y) > 8;
-    outer: for (const [dx, dy] of this.offsets) {
+    // indexed loops and a reused span pair: this runs over ~200 columns and ~1000 entries
+    // every frame, and destructuring iterators allocated per item (perf-bench horde: the top
+    // allocation site after the A* fix)
+    const offs = this.offsets, span = this.spanScratch;
+    outer: for (let oi = 0; oi < offs.length; oi++) {
+      const dx = offs[oi][0], dy = offs[oi][1];
       if (curtain && (Math.abs(dx) > 1 || Math.abs(dy) > 1)) break; // offsets are nearest first
       const cx = pcx + dx, cy = pcy + dy;
-      const [clo, chiAll] = lv.columnSpan(cx, cy, pz);
+      lv.columnSpan(cx, cy, pz, pol, span);
+      const clo = span[0], chiAll = span[1];
       // Driving (> 8 m/s), storeys above the window (tower tops) aren't started except over the
       // player's own column: their entries, mapgen and meshing doubled the unbuilt-street time
       // through a city (perf city40); they fill in once you slow down.
@@ -420,7 +426,7 @@ export class ChunkManager {
     // 2. signatures, visibility, eviction
     const dirty = this.dirty;
     dirty.length = 0;
-    for (const [k, e] of this.entries) {
+    for (const e of this.entries.values()) {
       const ddx = e.cx - pcx, ddy = e.cy - pcy;
       const dd = ddx * ddx + ddy * ddy;
       const rz = lv.radiusAt(e.cx, e.cy, e.z, pz);
@@ -430,7 +436,7 @@ export class ChunkManager {
       if (keepR < 0 || dd > (keepR + 1.5) * (keepR + 1.5)) {
         this.probe?.drop(e.cx, e.cy, e.z, !!e.shown);
         this.dispose(e);
-        this.entries.delete(k);
+        this.entries.delete(key(e.cx, e.cy, e.z));
         continue;
       }
       // (entries in the hysteresis ring stay up and current, as they always have)
@@ -683,6 +689,7 @@ export class ChunkManager {
   }
 
   private offsets: [number, number][] = [];
+  private readonly spanScratch: [number, number] = [0, 0];
   private offsetsR = -1;
   private computeOffsets(R: number): void {
     this.offsets = [];

@@ -32,6 +32,9 @@ import { VehicleStations, type Station } from './vehwalk';
 import { warnOnce } from '../data/warn';
 import { launchFromImpact, planFling, RUNOVER, type FlingWorld, type RunoverImpact, type RunoverMode } from './runoverFling';
 import { updateVehiclePower } from './vehiclePower';
+
+/** Game seconds of vehicle power upkeep batched together (0.2 real s at CLOCK_SCALE 24). */
+const POWER_STEP = 5;
 import { TowSystem, type TowLinkJSON } from './towing';
 import {
   boxInertia, contactImpulse, crashDamage, SKID_COUNTER, SKID_MIN_MPH, SKID_MIN_SPIN, SKID_TIME, damageShare, decayMotion, handlingFor, MAX_SLIDE, MAX_SPIN, motionOf, obbNormal, settled, stopMotion, tileObb, trackTopSpeed,
@@ -249,6 +252,14 @@ export class VehicleSystem implements GameSystem, MapOverlay {
   readonly onAdded: ((v: Vehicle) => void)[] = [];
   readonly onRemoved: ((v: Vehicle) => void)[] = [];
   private soundAcc = new Map<Vehicle, number>();
+  /**
+   * Game seconds of power/cargo upkeep (vehiclePower.ts) owed per vehicle. Upkeep walks every
+   * part and cargo item; done each frame for every parked car in town it cost ~0.35 ms/frame
+   * (perf-bench horde, Chromium). It integrates any span exactly (1 s steps inside), so it runs
+   * once POWER_STEP game seconds are owed, staggered by uid so the cars don't all pay in the
+   * same frame. Long waits (time warp) owe more than a step at once and run at once.
+   */
+  private powerOwed = new WeakMap<Vehicle, number>();
   /** Running-engine loops that follow the vehicles (no-op without audio). */
   readonly engineSounds = new EngineSounds((v) => this.speedLimits(v as Vehicle).safe);
   /** Last engine load per vehicle (0..1), for sound/fuel/HUD. */
@@ -886,7 +897,14 @@ export class VehicleSystem implements GameSystem, MapOverlay {
     if (this.driving && this.driveMode === 'cruise') this.updateCruise(this.driving, realDt);
     for (const v of this.list) this.simulate(v, realDt);
     this.towing.step(realDt);
-    for (const v of this.list) updateVehiclePower(game, v, gameDt);
+    for (const v of this.list) {
+      // the threshold (not the owed time) varies by uid: 0.5-1.5 steps, so cars spread out
+      const owed = (this.powerOwed.get(v) ?? 0) + gameDt;
+      if (owed >= POWER_STEP * (0.5 + ((v.uid * 0.618) % 1))) {
+        updateVehiclePower(game, v, owed);
+        this.powerOwed.set(v, 0);
+      } else this.powerOwed.set(v, owed);
+    }
     if (this.driving) this.closeDoorsUnderway(this.driving);
     const p = game.player;
     this.engineSounds.update(this.list, { x: p.x, y: p.y, z: p.z }, this.driving, realDt);

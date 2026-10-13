@@ -547,7 +547,10 @@ export class CharLayer {
         const k = fill[key]++;
         const M = b.mesh.instanceMatrix.array as Float32Array;
         const T = b.tex.array as Float32Array, X = b.misc.array as Float32Array, F = b.flash.array as Float32Array, R = b.root.array as Float32Array, P = b.shape.array as Float32Array;
-        M.set(i.mats.subarray(p * 16, p * 16 + 16), k * 16);
+        // copied by hand: subarray() made a typed-array view per part per frame (~5 MB/s of
+        // garbage with 60 zombies in view)
+        const src = i.mats, so = p * 16, mo = k * 16;
+        for (let j = 0; j < 16; j++) M[mo + j] = src[so + j];
         const r = i.skin.rects;
         T[k * 4] = r[p * 5]; T[k * 4 + 1] = r[p * 5 + 1]; T[k * 4 + 2] = r[p * 5 + 2]; T[k * 4 + 3] = r[p * 5 + 3];
         const pd = i.rig.parts[p];
