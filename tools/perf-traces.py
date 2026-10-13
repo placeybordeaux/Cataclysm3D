@@ -6,6 +6,7 @@ Two separable steps so the analysis can be changed and re-run without re-parsing
     uv run tools/perf-traces.py ingest ~/Downloads/cdda3d-perf-*.json   # -> perf-traces.sqlite
     uv run tools/perf-traces.py report                                  # every trace, side by side
     uv run tools/perf-traces.py report --trace 2026-10-13 --hitches 20  # one trace, its worst frames
+    uv run tools/perf-traces.py gc gc.txt                               # Firefox GC log (perf-bench --ff-gc)
 
 The dump format is src/perf/analyze.ts PerfDump (frames are columns, oldest first; events
 are chunk streaming events). `tools/perf-report.ts` explains one dump's streaming; this tool
@@ -206,6 +207,35 @@ def report(db: str, trace: str | None, hitches: int) -> None:
               f'calls {fmt(num(f["calls"][i]))} tris {num(f["triangles"][i]) / 1e6:.1f}M speed {fmt(num(f["speed"][i]))} {extra}')
 
 
+def gc_report(path: str, bucket: float, min_heap: float) -> None:
+    """Firefox MOZ_GCTIMER log (perf-bench --ff-gc): GCs of the game's process per time bucket."""
+    import re
+    txt = open(path, errors='replace').read()
+    rows: dict[int, list[float]] = {}
+    for b in re.split(r'\n(?=GC\(T\+)', txt):
+        m = re.match(r'GC\(T\+([\d.]+)s\)', b)
+        if not m:
+            continue
+        heap = float((re.search(r'HeapSize: ([\d.]+)', b) or [0, 0])[1])
+        # every Firefox process writes to the same stderr: the game's is the one with the big heap
+        if heap < min_heap:
+            continue
+        k = int(float(m[1]) // bucket)
+        r = rows.setdefault(k, [0, 0.0, 0.0, 0, 0.0, 0.0])
+        r[0] += 1
+        r[1] += float((re.search(r'Total Time: ([\d.]+)', b) or [0, 0])[1])
+        r[2] = max(r[2], float((re.search(r'Max Pause: ([\d.]+)', b) or [0, 0])[1]))
+        r[3] += sum(1 for x in re.findall(r'Pause: ([\d.]+)ms', b) if float(x) > 50)
+        r[4] = max(r[4], heap)
+        r[5] = max([r[5]] + [float(x) for x in re.findall(r'Trigger: ([\d.]+) MiB of [\d.]+ MiB threshold', b)])
+    if not rows:
+        raise SystemExit(f'{path}: no GC with a heap over {min_heap} MiB (is it a MOZ_GCTIMER log?)')
+    print(f'{"time (s)":>13} {"GCs":>4} {"total ms":>9} {"max pause":>9} {"slices>50ms":>11} {"gc heap MiB":>11} {"malloc MiB":>10}')
+    for k in sorted(rows):
+        n, tot, mx, long, heap, mal = rows[k]
+        print(f'{k * bucket:6.0f}-{(k + 1) * bucket:<6.0f} {n:4} {tot:9.0f} {mx:9.1f} {long:11} {heap:11.0f} {mal:10.0f}  {bar(mx, 200)}')
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest='cmd', required=True)
@@ -217,10 +247,16 @@ def main() -> None:
     r.add_argument('--db', default=DEFAULT_DB)
     r.add_argument('--trace', help='substring of the trace file name')
     r.add_argument('--hitches', type=int, default=15, help='worst frames to list (single trace)')
+    g = sub.add_parser('gc', help='summarise a Firefox MOZ_GCTIMER log (perf-bench --ff-gc) over time')
+    g.add_argument('log')
+    g.add_argument('--bucket', type=float, default=150, help='seconds per row (default 150)')
+    g.add_argument('--min-heap', type=float, default=60, help='MiB: smaller heaps are other processes (default 60)')
     args = ap.parse_args()
     if args.cmd == 'ingest':
         paths = [p for x in args.paths for p in (glob.glob(os.path.expanduser(x)) or [x])]
         ingest(paths, args.db, args.dry_run)
+    elif args.cmd == 'gc':
+        gc_report(args.log, args.bucket, args.min_heap)
     else:
         report(args.db, args.trace, args.hitches)
 
