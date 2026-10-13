@@ -52,6 +52,11 @@ class Heap {
   get size(): number {
     return this.k.length;
   }
+  /** Empty, keeping the arrays' capacity (a reused heap allocates nothing per search). */
+  clear(): void {
+    this.k.length = 0;
+    this.p.length = 0;
+  }
   push(key: number, pri: number): void {
     const k = this.k, p = this.p;
     let i = k.length;
@@ -94,6 +99,12 @@ const DIRS: [number, number, number][] = [
   [1, 0, 1], [-1, 0, 1], [0, 1, 1], [0, -1, 1],
   [1, 1, Math.SQRT2], [1, -1, Math.SQRT2], [-1, 1, Math.SQRT2], [-1, -1, Math.SQRT2],
 ];
+// The same directions as flat arrays: `for (const [dx, dy, dl] of DIRS)` in the inner loop
+// allocated an iterator result per neighbour (the largest allocation site with a horde
+// chasing: ~10 MB/s in the perf-bench horde route).
+const DX = Int8Array.from(DIRS, (d) => d[0]);
+const DY = Int8Array.from(DIRS, (d) => d[1]);
+const DL = Float64Array.from(DIRS, (d) => d[2]);
 
 // Sequential monster searches share scratch storage, not results. Keep the retained buffer
 // bounded (~3.25 MiB); exceptional long paths and reentrant grid callbacks use private
@@ -104,6 +115,7 @@ class Scratch {
   readonly from: Int32Array;
   readonly closed: Uint8Array;
   readonly cost: Float32Array;
+  readonly open = new Heap();
   constructor(readonly capacity: number) {
     this.g = new Float32Array(capacity);
     this.from = new Int32Array(capacity);
@@ -157,7 +169,8 @@ function search(grid: Grid, sx: number, sy: number, gx: number, gy: number, z: n
     const dx = Math.abs(x - gx), dy = Math.abs(y - gy);
     return Math.max(dx, dy) + (Math.SQRT2 - 1) * Math.min(dx, dy);
   };
-  const open = new Heap();
+  const open = work.open;
+  open.clear();
   const s = idx(sx, sy);
   g[s] = 0;
   open.push(s, hfn(sx, sy));
@@ -180,7 +193,8 @@ function search(grid: Grid, sx: number, sy: number, gx: number, gy: number, z: n
       bestH = hc;
       best = cur;
     }
-    for (const [dx, dy, dl] of DIRS) {
+    for (let di = 0; di < 8; di++) {
+      const dx = DX[di], dy = DY[di], dl = DL[di];
       const nx = cx + dx, ny = cy + dy;
       if (!inb(nx, ny)) continue;
       const ni = idx(nx, ny);

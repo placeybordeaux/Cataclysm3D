@@ -580,6 +580,88 @@ Load, driving on a slowed streaming budget: soft note, car frozen, no re-close w
 a per-frame monitor asserts no creature drawn without its chunk throughout): 21/21 in Chromium
 and Firefox at 3440x1304. `toGameplay()` in realinput waits for the gate.
 
+## Stutter (round 4: the user's 2026-10-13 Firefox trace)
+
+User report: *"a fair amount of stuttering"*. Trace: Firefox 157, 3440x1304, voxel, radius 8,
+2.8 hours into the session, night, headlights on, zombies on 3D models.
+
+**What the trace showed** (`uv run tools/perf-traces.py ingest ~/Downloads/cdda3d-perf-*.json`,
+then `report`): frame interval p50 14 ms, p95 55, p99 140, max 319; 139 intervals over 50 ms, 51
+over 100 ms. Not steady low FPS: **a 120-320 ms stall about once a second** (32 of the 51 long
+intervals sat ~1.0 s apart), landing in whatever was running: `sim`, `beforeRender`,
+`chunkCreate`, mesh steps, `draw`, or between frames. Earlier Firefox traces of fresh sessions
+(5-6 min of uptime: Oct 1, Oct 10) have no such rhythm. No shader compiles in the window
+(programs flat at 26), no unbuilt chunks in view, mapgen 7 ms/s.
+
+First, a fix to the tools themselves: an interval runs from the previous frame's rAF timestamp to
+this one's, so a long interval holds the **previous** frame's loop. `perf-report` used to show
+the sections of the frame *after* the slow one (e.g. "318 ms: sim 19, draw 7"); attributed
+properly, that interval was a 319 ms loop with `beforeRender` 151 + `draw` 81 + `sim` 84.
+
+**Diagnosis.** A stall that lands in any JS section, roughly periodic and growing with session
+length, is the GC. Firefox shows it with `MOZ_GCTIMER` (`perf-bench --ff-gc`, summarised by
+`perf-traces.py gc`): in a 20-minute Firefox soak (horde waves while driving), the game's
+incremental GC was triggered by **malloc'd bytes** (`TOO_MUCH_MALLOC`, 135 of 180 GCs) with
+~800 MB-1.2 GB of typed-array memory live; after ~13 minutes its slices stretched from the 5 ms
+budget to 100-900 ms (21 slices over 50 ms in one 150 s window, one of 887 ms). The machine
+was shared (GC helper threads wait on busy cores: "Join Parallel Tasks" was half of the 887 ms),
+so the absolute numbers are the bad case, but the trigger is ours: typed-array churn.
+
+Where the typed arrays came from (a constructor proxy in the page, driving at 12 mph through a
+horde): **19 MB/s, 83 % of it `GeomBuilder`'s growable buffers** (every chunk mesh grew each
+attribute from 1024 floats by doubling and threw the lot away after `build()`). The sampled JS
+allocation (Chromium heap profile, `perf-bench --heap-profile`) was 127 MB/s, led by the A*
+direction iterator, character matrix `subarray()` views and the chunk manager's per-frame loops.
+
+**Fixes** (each measured on `perf-bench --routes horde` / `soak`, 3440x1304):
+
+| fix | measure | before → after |
+| --- | --- | --- |
+| `GeomBuilder` buffers pooled (48 MB cap), 16-bit indices written directly | typed arrays allocated while driving | 19.1 → 4.2 MB/s |
+| A*: flat direction arrays, heap reused | sampled JS allocation, horde | 127 → 98 MB/s (with the next two) |
+| `CharLayer.flush`: matrices copied by hand, not `subarray()` | (same run) | 150 MB → 0 per 20 s |
+| chunk manager per-frame loops: indexed, reused span pair | top site after the above | |
+| `cMisc`/`cFlash` uploaded only when a value changed | median GPU upload per frame, horde | 384 → 286 KB |
+| route guide: canvas rect cached; no DOM writes when nothing shown | `getBoundingClientRect` forced a layout every frame | 2 % of Chromium CPU → 0 |
+| vehicle power/cargo upkeep batched per ~5 game s per car (staggered) | every parked car, every frame | ~0.35 ms/frame → negligible |
+| all of the above: 20-min Firefox soak (`--ff-gc`), game process | GCs (of them `TOO_MUCH_MALLOC`) | 236 (168) → 120 (40) |
+| | GC time / longest pause | 17.9 s / 887 ms → 8.2 s / 123 ms |
+| | last 214 s of frames: p95 / >50 ms / >100 ms | 33.1 ms / 51 / 19 → 17.2 ms / 25 / 6 |
+
+Still open: the GC heap still grows while exploring (74 → 290-450 MiB over 20 minutes of
+driving: overmap regions, generated-chunk key sets, vehicle index; growth with territory seen,
+not a per-frame leak), and mapgen of a slow chunk (labs: up to 164 ms) inside the idle-time
+prefetcher still makes one 300 ms stall now and then (`tasks`: "idle loop"); it can't be cut
+short once started: a worker or a sliced generator would be the fix.
+
+Not a cause (measured): headlight shadow maps (two 1024 spots: ~100 draw calls and 0.9 M
+triangles, ~0.1 ms of GPU on the RTX 5080; no option added), the engine-noise hearing pass
+(1-2 ms), the hotbar's 500 ms inventory refresh (~2 ms in Chromium; Firefox showed it up to
+284 ms once, likely a GC slice landing in it).
+
+**Telemetry for the next trace** (all in Shift+F3 dumps from now on):
+
+* `tasks` channel + dump `tasks` list: every other callback (timers, other rAF loops, idle
+  callbacks, event listeners; `src/perf/tasks.ts`, installed first in main.ts) — per-frame ms,
+  and each one over 4 ms with its source. The idle-time prefetcher shows up here (one lab chunk
+  generated in idle time took 315 ms in the soak).
+* worst frames: the previous frame's split, `outside` (neither loop nor wait), and which slow
+  callbacks fell in it. A long interval that is mostly `outside` with no callback named is the
+  browser: GC, style/layout/paint, GPU waits.
+* `monsters`, `charParts`, lit `spots`/`points`, `shadowMaps` redrawn, `uploads` (KB to the GPU)
+  per frame.
+
+**For the player, a better stutter report**: Shift+F3 as before; if the stutter is "about once a
+second", also note how long the tab has been open and try a reload (a fresh session not
+stuttering points at GC/heap). For a definitive one, Firefox's profiler (`about:profiling`,
+Ctrl+Shift+1 to start, Ctrl+Shift+2 to capture, upload the profile) records GC and CC markers,
+which no page API can see.
+
+Tools: `perf-bench` routes `horde` (night, headlights, 60 mixed zombies, rolling at 12 mph) and
+`soak` (waves of 30 every 15 s; Chromium prints retained heap after GC), `--heap-profile` prints
+MB/s and the top allocation sites, `--ff-gc FILE` collects Firefox's GC log, `--heap-snapshots`.
+`tools/perf-traces.py` (`ingest` / `report` / `gc`) keeps traces in sqlite for comparison.
+
 ## Not done / next
 
 * **Draw cost in cities** is now the biggest frame item after streaming: ~1000-1200 draw

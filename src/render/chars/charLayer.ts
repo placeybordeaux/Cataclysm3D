@@ -344,13 +344,17 @@ class Batch {
     this.geo.dispose();
     this.mesh = this.make(cap);
   }
+  /** set by the fill when a cMisc / cFlash value changed: only then are they uploaded */
+  miscDirty = false;
+  flashDirty = false;
   commit(n: number, layout: boolean): void {
     this.count = n;
     this.mesh.count = n;
     touchInstanceRange(this.mesh.instanceMatrix, 0, n * 16);
     if (layout) touchInstanceRange(this.tex, 0, n * 4);
-    touchInstanceRange(this.misc, 0, n * 4);
-    touchInstanceRange(this.flash, 0, n * 4);
+    if (layout || this.miscDirty) touchInstanceRange(this.misc, 0, n * 4);
+    if (layout || this.flashDirty) touchInstanceRange(this.flash, 0, n * 4);
+    this.miscDirty = this.flashDirty = false;
     touchInstanceRange(this.root, 0, n * 4);
     if (layout) touchInstanceRange(this.shape, 0, n * 4);
   }
@@ -508,6 +512,8 @@ export class CharLayer {
   private scratch: THREE.Matrix4[] = [];
   private needsWrite = true;
   private needsLayout = true;
+  /** body-part instances written by the last flush that wrote anything (perf telemetry) */
+  drawnParts = 0;
   /** Diagnostic off variant: request every attribute each frame for paired upload measurements. */
   reuseStaticUploads = true;
   groundAt: ((x: number, y: number, z: number) => number) | null = null;
@@ -619,6 +625,9 @@ export class CharLayer {
       const sh = i.detail ? si.hi : si.lo;
       const fk = i.flashDur > 0 ? i.flashT / i.flashDur : 0;
       const sky = this.skyVisAt ? this.skyVisAt(i.x, i.y, i.z) : 1;
+      // as stored (float32), so the compare-on-write below sees an unchanged value as equal
+      const skyF = Math.fround(sky), fkF = Math.fround(fk), emF = Math.fround(i.emph);
+      const fr = Math.fround(i.flashColor.r), fg = Math.fround(i.flashColor.g), fb = Math.fround(i.flashColor.b);
       const rx = i.x, ry = i.z * LEVEL_HEIGHT + i.lift, rz = i.y;
       const hid = i.hidden;
       for (let p = 0; p < i.rig.parts.length; p++) {
@@ -628,7 +637,10 @@ export class CharLayer {
         const k = fill[key]++;
         const M = b.mesh.instanceMatrix.array as Float32Array;
         const T = b.tex.array as Float32Array, X = b.misc.array as Float32Array, F = b.flash.array as Float32Array, R = b.root.array as Float32Array, P = b.shape.array as Float32Array;
-        M.set(i.mats.subarray(p * 16, p * 16 + 16), k * 16);
+        // copied by hand: subarray() made a typed-array view per part per frame (~5 MB/s of
+        // garbage with 60 zombies in view)
+        const src = i.mats, so = p * 16, mo = k * 16;
+        for (let j = 0; j < 16; j++) M[mo + j] = src[so + j];
         const r = i.skin.rects;
         const pd = i.rig.parts[p];
         if (pd.mesh) {
@@ -639,14 +651,29 @@ export class CharLayer {
         } else {
           T[k * 4] = r[p * 5]; T[k * 4 + 1] = r[p * 5 + 1]; T[k * 4 + 2] = r[p * 5 + 2]; T[k * 4 + 3] = r[p * 5 + 3];
         }
-        X[k * 4] = r[p * 5 + 4]; X[k * 4 + 1] = sky; X[k * 4 + 2] = i.emph; X[k * 4 + 3] = pd.taperAxis === 'z' ? 1 : 0;
+        // cMisc and cFlash hardly ever change (sky visibility, emphasis, a hit flash), yet
+        // were re-uploaded for every part every frame: compare as they are written and upload
+        // only a batch where something differs (Firefox horde: ~1.1 MB of uploads a frame)
+        const ax = pd.taperAxis === 'z' ? 1 : 0;
+        if (X[k * 4] !== r[p * 5 + 4] || X[k * 4 + 1] !== skyF || X[k * 4 + 2] !== emF || X[k * 4 + 3] !== ax) {
+          X[k * 4] = r[p * 5 + 4]; X[k * 4 + 1] = skyF; X[k * 4 + 2] = emF; X[k * 4 + 3] = ax;
+          b.miscDirty = true;
+        }
         const tp = pd.taper;
         P[k * 4] = tp ? tp[0] : 1; P[k * 4 + 1] = tp ? tp[1] : 1; P[k * 4 + 2] = tp ? tp[2] : 1; P[k * 4 + 3] = tp ? tp[3] : 1;
-        F[k * 4] = i.flashColor.r; F[k * 4 + 1] = i.flashColor.g; F[k * 4 + 2] = i.flashColor.b; F[k * 4 + 3] = fk;
+        if (F[k * 4] !== fr || F[k * 4 + 1] !== fg || F[k * 4 + 2] !== fb || F[k * 4 + 3] !== fkF) {
+          F[k * 4] = fr; F[k * 4 + 1] = fg; F[k * 4 + 2] = fb; F[k * 4 + 3] = fkF;
+          b.flashDirty = true;
+        }
         R[k * 4] = rx; R[k * 4 + 1] = ry; R[k * 4 + 2] = rz; R[k * 4 + 3] = i.fade;
       }
     }
-    for (const [key, b] of this.batches) b.commit(fill[key] ?? 0, layout);
+    let parts = 0;
+    for (const [key, b] of this.batches) {
+      b.commit(fill[key] ?? 0, layout);
+      parts += fill[key] ?? 0;
+    }
+    this.drawnParts = parts;
   }
 
   dispose(): void {

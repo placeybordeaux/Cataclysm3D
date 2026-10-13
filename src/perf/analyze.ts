@@ -9,6 +9,8 @@ export interface PerfDump {
   /** per-frame columns, oldest first; `t` = ms since the telemetry started */
   frames: { t: number[] } & Partial<Record<Channel, (number | null)[]>>;
   events: PerfEvent[];
+  /** callbacks outside the main loop that took >= 4 ms (src/perf/tasks.ts; dumps since 2026-10) */
+  tasks?: { t: number; ms: number; kind: string; src: string }[];
 }
 
 /** Columns oldest-first from the ring (last `seconds` only when given). */
@@ -78,7 +80,17 @@ export interface PerfSummary {
     slowest: { omt: string; n: number; mean: number; max: number; total: number }[];
   };
   /** longest single mesher/tree stretch visible in the event log (ms) */
-  worstFrames: { t: number; interval: number; split: Record<string, number>; gens: string[]; builds: number; compiled: number }[];
+  /**
+   * The longest frame intervals. An interval runs from the previous frame's rAF timestamp to this
+   * one's, so what filled it is the *previous* frame's wait + loop (`split` is that frame's
+   * sections) plus `outside`: time in neither, of which `tasks` ms were the page's other
+   * callbacks (named in `slow`) and the rest the browser's (GC, layout/paint, GPU waits).
+   */
+  worstFrames: { t: number; interval: number; split: Record<string, number>; loop: number; outside: number; tasks: number; slow: string[]; gens: string[]; builds: number; compiled: number }[];
+  /** intervals over 50 ms mostly (> half) spent outside our loop, and their summed outside ms */
+  outsideHitches: { n: number; ms: number };
+  /** the page's other callbacks that took >= 4 ms, by source, worst total first */
+  slowTasks: { src: string; kind: string; n: number; total: number; max: number }[];
   /** shader programs compiled during the window (each one a stall: ~0.1-1 s in Firefox) */
   compiles: number;
   findings: string[];
@@ -131,17 +143,26 @@ export function summarize(d: PerfDump): PerfSummary {
     .sort((a, b) => b.total - a.total).slice(0, 10);
   // the worst frames and what happened during them
   const order = [...iv.keys()].filter((i) => Number.isFinite(iv[i])).sort((a, b) => iv[b] - iv[a]).slice(0, 10);
+  const loopC = col(d, 'loop'), waitC = col(d, 'wait'), tasksC = col(d, 'tasks');
+  const n0 = n;
   const worstFrames = order.map((i) => {
+    const prev = Math.max(0, i - 1);
     const split: Record<string, number> = {};
     for (const c of [...SECTIONS, 'mesh', 'trees', 'genSync', 'gpu'] as Channel[]) {
-      const v = col(d, c)[i];
+      const v = col(d, c)[prev];
       if (Number.isFinite(v) && v >= 0.5) split[c] = Math.round(v * 10) / 10;
     }
     const t1 = t[i], t0 = t1 - iv[i];
     const inFrame = ev.filter((e) => e.t >= t0 && e.t <= t1 + 1);
     const pr = col(d, 'programs');
+    const outside = i > 0 ? iv[i] - (loopC[prev] || 0) - (waitC[prev] || 0) : NaN;
     return {
-      t: Math.round(t1), interval: Math.round(iv[i] * 10) / 10, split, compiled: i > 0 && pr[i] > pr[i - 1] ? pr[i] - pr[i - 1] : 0,
+      t: Math.round(t1), interval: Math.round(iv[i] * 10) / 10, split,
+      loop: Math.round((loopC[prev] || 0) * 10) / 10,
+      outside: Math.round(outside * 10) / 10,
+      tasks: Number.isFinite(tasksC[i]) ? Math.round(tasksC[i] * 10) / 10 : NaN,
+      slow: (d.tasks ?? []).filter((k) => k.t >= t0 - 1 && k.t <= t1 + 1).map((k) => `${k.kind} ${k.ms} ms ${k.src.slice(0, 60)}`),
+      compiled: i > 0 && pr[i] > pr[i - 1] ? pr[i] - pr[i - 1] : 0,
       gens: inFrame.filter((e) => e.k === 'gen').map((e) => `${e.omt ?? '?'}${e.pre ? ' (prefetch)' : ''} ${e.ms}ms`),
       builds: inFrame.filter((e) => e.k === 'built' || e.k === 'rebuild').length,
     };
@@ -180,6 +201,27 @@ export function summarize(d: PerfDump): PerfSummary {
       slowest,
     },
     worstFrames,
+    outsideHitches: (() => {
+      let n = 0, ms = 0;
+      for (let i = 1; i < n0; i++) {
+        if (!(iv[i] > 50)) continue;
+        const out = iv[i] - (loopC[i - 1] || 0) - (waitC[i - 1] || 0);
+        if (out > iv[i] / 2) (n++, ms += out);
+      }
+      return { n, ms: Math.round(ms) };
+    })(),
+    slowTasks: (() => {
+      const by = new Map<string, { src: string; kind: string; n: number; total: number; max: number }>();
+      for (const k of d.tasks ?? []) {
+        const key = `${k.kind}|${k.src}`;
+        let e = by.get(key);
+        if (!e) by.set(key, (e = { src: k.src, kind: k.kind, n: 0, total: 0, max: 0 }));
+        e.n++;
+        e.total = Math.round((e.total + k.ms) * 10) / 10;
+        e.max = Math.max(e.max, k.ms);
+      }
+      return [...by.values()].sort((a, b) => b.total - a.total).slice(0, 10);
+    })(),
     compiles: (() => {
       const pr = col(d, 'programs');
       let n = 0;
@@ -207,6 +249,7 @@ function findings(s: PerfSummary): string[] {
   const top = Object.entries(sec).filter(([k]) => !['mesh', 'trees', 'genSync', 'genHooks', 'kModels', 'kSurfaces', 'kDressing', 'kRooms', 'gpu', 'wait'].includes(k)).sort((a, b) => b[1] - a[1]).slice(0, 3);
   if (top.length) f.push(`Main loop per frame: ${top.map(([k, v]) => `${k} ${v} ms`).join(', ')}.`);
   if (s.missed > s.frames * 0.05) f.push(`${s.missed} of ${s.frames} frames missed a refresh (over 1.5x the median ${s.interval.p50} ms).`);
+  if (s.outsideHitches.n > 0) f.push(`${s.outsideHitches.n} long frames (> 50 ms) were mostly time outside our loop (${s.outsideHitches.ms} ms in all): GC, layout/paint, GPU waits or other callbacks${s.slowTasks.length ? ` (slowest callbacks: ${s.slowTasks.slice(0, 2).map((t) => `${t.kind} ${t.src.slice(0, 40)} ${t.n}x max ${t.max} ms`).join('; ')})` : ''}.`);
   if (s.compiles > 0) f.push(`${s.compiles} shader programs compiled during the window (each stalls a frame; see worst frames).`);
   if (s.hitches50 > 0) f.push(`${s.hitches50} frames over 50 ms, ${s.hitches33} over 33 ms (worst ${s.interval.max} ms).`);
   if (!f.length) f.push('No streaming or frame-time problems in this window.');

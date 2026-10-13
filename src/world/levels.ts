@@ -75,12 +75,18 @@ export class VisibleLevels {
    * Levels [lo, hi] column (cx, cy) can want with the eye on pz (radiusAt >= 0 inside, -1
    * outside). The chunk manager's per-frame loops iterate this instead of every level.
    */
-  columnSpan(cx: number, cy: number, pz: number, p: LevelPolicy = this.policy): [number, number] {
+  columnSpan(cx: number, cy: number, pz: number, p: LevelPolicy = this.policy, out: [number, number] = [0, 0]): [number, number] {
     const wlo = Math.max(MIN_Z, pz - p.below), whi = Math.min(MAX_Z, pz + p.above);
-    if (p.mode === 'window' || pz < 0) return [wlo, whi];
+    if (p.mode === 'window' || pz < 0) {
+      out[0] = wlo;
+      out[1] = whi;
+      return out;
+    }
     const top = this.columnTop(cx, cy);
     const t = Number.isNaN(top) ? whi : Math.min(MAX_Z, top);
-    return [Math.min(wlo, 0), Math.max(whi, t)];
+    out[0] = Math.min(wlo, 0);
+    out[1] = Math.max(whi, t);
+    return out;
   }
 
   get overmap(): OmtLookup | null {

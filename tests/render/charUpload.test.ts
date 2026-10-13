@@ -77,4 +77,23 @@ describe('character static instance uploads', () => {
     expect(f.attr('cTex').updateRanges).toHaveLength(1);
     expect(f.attr('cTex').getX(0)).toBe(33);
   });
+  it('uploads sky/emphasis and flash only when one of them changed, while poses stream every frame', () => {
+    const f=fixture(), i=f.add(11);f.layer.skyVisAt=()=>0.3;f.flush();
+    const misc=f.attr('cMisc').version, flash=f.attr('cFlash').version, mat=f.meshes()[0].instanceMatrix.version;
+    for (let k=0;k<5;k++) {i.setPose({...pose,phase:k/8});f.flush();}
+    expect(f.meshes()[0].instanceMatrix.version).toBe(mat+5);
+    expect(f.attr('cMisc').version).toBe(misc);
+    expect(f.attr('cFlash').version).toBe(flash);
+    f.layer.skyVisAt=()=>0.6;i.setPose(pose);f.flush();
+    expect(f.attr('cMisc').version).toBe(misc+1);
+    expect(f.attr('cMisc').getY(0)).toBeCloseTo(0.6);
+    i.flash(0xff0000);f.flush();
+    expect(f.attr('cFlash').version).toBe(flash+1);
+    // the flash fades frame by frame (uploads), then stops changing (no more uploads)
+    for (let k=0;k<30;k++) f.flush();
+    const settled=f.attr('cFlash').version;
+    i.setPose(pose);f.flush();
+    expect(f.attr('cFlash').getW(0)).toBe(0);
+    expect(f.attr('cFlash').version).toBe(settled);
+  });
 });

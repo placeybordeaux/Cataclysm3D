@@ -8,18 +8,58 @@ import type { TileFrame } from './textureSource';
 
 export type V3 = [number, number, number];
 
+/**
+ * Backing arrays of finished builders, reused by the next ones. Without it every chunk mesh
+ * grew each attribute from 1024 floats by doubling (garbage ~2x the final size) and dropped the
+ * lot after build(): ~16 MB/s of typed arrays while driving, 83 % of all typed-array allocation
+ * (tools/perf-bench.ts horde/soak). Firefox schedules GCs by malloc'd bytes (TOO_MUCH_MALLOC);
+ * after ~15 min of driving its slices stretched to 100-900 ms (perf-bench --ff-gc). The pool
+ * keeps at most POOL_BYTES; each list holds arrays of one type, largest last.
+ */
+const POOL_BYTES = 48 * 1024 * 1024;
+const pools = { f32: [] as Float32Array[], u32: [] as Uint32Array[] };
+let pooledBytes = 0;
+export const geomPoolStats = { reused: 0, made: 0, released: 0, dropped: 0 };
+function takePooled<T extends Float32Array | Uint32Array>(list: T[], min: number): T | null {
+  // smallest pooled array that fits (lists are short: a builder holds 8)
+  let best = -1;
+  for (let i = 0; i < list.length; i++) if (list[i].length >= min && (best < 0 || list[i].length < list[best].length)) best = i;
+  if (best < 0) return null;
+  const a = list[best];
+  list[best] = list[list.length - 1];
+  list.pop();
+  pooledBytes -= a.byteLength;
+  geomPoolStats.reused++;
+  return a;
+}
+function release<T extends Float32Array | Uint32Array>(list: T[], a: T): void {
+  if (pooledBytes + a.byteLength > POOL_BYTES) {
+    geomPoolStats.dropped++;
+    return;
+  }
+  list.push(a);
+  pooledBytes += a.byteLength;
+  geomPoolStats.released++;
+}
+
 /** Growable typed array (chunk meshing pushes millions of floats; plain arrays + a copy
  *  into Float32Array at build time were a large share of the meshing cost). */
 class Grow<T extends Float32Array | Uint32Array> {
   a: T;
   length = 0;
-  constructor(private make: (n: number) => T, cap = 1024) {
-    this.a = make(cap);
+  constructor(private make: (n: number) => T, private pool: T[], cap = 1024) {
+    this.a = takePooled(pool, cap) ?? this.fresh(cap);
+  }
+  private fresh(n: number): T {
+    geomPoolStats.made++;
+    return this.make(n);
   }
   private ensure(n: number): void {
     if (this.length + n <= this.a.length) return;
-    const b = this.make(Math.max(this.a.length * 2, this.length + n));
+    const need = Math.max(this.a.length * 2, this.length + n);
+    const b = takePooled(this.pool, need) ?? this.fresh(need);
     b.set(this.a.subarray(0, this.length));
+    release(this.pool, this.a);
     this.a = b;
   }
   push1(x: number): void {
@@ -47,18 +87,25 @@ class Grow<T extends Float32Array | Uint32Array> {
   view(): T {
     return this.a.slice(0, this.length) as T;
   }
+  /** Hand the backing array back to the pool; this Grow must not be used again. */
+  dispose(): void {
+    release(this.pool, this.a);
+    this.a = null as unknown as T; // a later push fails loudly instead of corrupting a reused array
+    this.length = 0;
+  }
 }
 const f32 = (n: number) => new Float32Array(n);
+const u32 = (n: number) => new Uint32Array(n);
 
 export class GeomBuilder {
-  private pos = new Grow(f32);
-  private nrm = new Grow(f32);
-  private uv = new Grow(f32);
-  private rect = new Grow(f32);
-  private col = new Grow(f32);
-  private cut = new Grow(f32, 256);
-  private sky = new Grow(f32, 256);
-  private idx = new Grow((n) => new Uint32Array(n));
+  private pos = new Grow(f32, pools.f32);
+  private nrm = new Grow(f32, pools.f32);
+  private uv = new Grow(f32, pools.f32);
+  private rect = new Grow(f32, pools.f32);
+  private col = new Grow(f32, pools.f32);
+  private cut = new Grow(f32, pools.f32, 256);
+  private sky = new Grow(f32, pools.f32, 256);
+  private idx = new Grow(u32, pools.u32);
   /** Sky visibility (ambient multiplier) stamped on subsequent quads: 1 outdoors, less
    *  under a roof. Stateful to keep quad()/box() signatures short. */
   skyVis = 1;
@@ -234,10 +281,19 @@ export class GeomBuilder {
     g.setAttribute('cut', new THREE.BufferAttribute(this.cut.view(), 1));
     g.setAttribute('skyVis', new THREE.BufferAttribute(this.sky.view(), 1));
     const n = this.vertexCount;
-    const idx = this.idx.view();
-    g.setIndex(n > 65535 ? new THREE.BufferAttribute(idx, 1) : new THREE.BufferAttribute(Uint16Array.from(idx), 1));
+    // 16-bit indices straight from the growable buffer (no 32-bit copy first)
+    const ia = this.idx.a, il = this.idx.length;
+    let index: Uint32Array | Uint16Array;
+    if (n > 65535) index = this.idx.view();
+    else {
+      index = new Uint16Array(il);
+      for (let i = 0; i < il; i++) index[i] = ia[i];
+    }
+    g.setIndex(new THREE.BufferAttribute(index, 1));
     g.computeBoundingSphere();
     g.computeBoundingBox();
+    // the geometry holds copies: the growable buffers go back to the pool for the next builder
+    for (const b of [this.pos, this.nrm, this.uv, this.rect, this.col, this.cut, this.sky, this.idx] as Grow<Float32Array | Uint32Array>[]) b.dispose();
     return g;
   }
 }

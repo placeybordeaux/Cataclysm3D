@@ -111,6 +111,26 @@ export const PERF_PAGE = `(() => {
       c.game.systems.push(sys);
       this.stopClear = () => c.game.systems.splice(c.game.systems.indexOf(sys), 1);
     },
+    /**
+     * Night, the car's headlights on (shadowed spot) and 'n' zombies of mixed families on and
+     * beside the road 12-90 m ahead (deterministic layout), awake: the horde route.
+     */
+    horde(n) {
+      const vs = c.vehicleSystem, v = vs.driving;
+      if (!v) throw new Error('horde: not at the wheel');
+      c.setHour(23);
+      c.vehicleLights(true, v.uid);
+      const rad = (v.facing * Math.PI) / 180, fx = Math.cos(rad), fy = Math.sin(rad);
+      const ids = ['mon_zombie', 'mon_zombie_cop', 'mon_zombie_fat', 'mon_zombie_child', 'mon_zombie_tough', 'mon_zombie_brute', 'mon_zombie_electric', 'mon_zombie_acidic', 'mon_zombie_runner', 'mon_zombie_hulk', 'mon_zombie_soldier', 'mon_zombie_fireman'];
+      let k = 0;
+      for (let i = 0; i < n; i++) {
+        const along = 12 + ((i * 37) % 79), side = ((i * 53) % 21) - 10;
+        const id = ids[i % ids.length];
+        if (c.spawnMonster(id, fx * along - fy * side, fy * along + fx * side) !== null) k++;
+      }
+      if (k < n * 0.8) throw new Error('horde: only ' + k + ' of ' + n + ' zombies spawned');
+      return k;
+    },
     /** Move the car (and you in it) straight ahead at mps, no collision, until stop(). */
     go(mps) {
       const vs = c.vehicleSystem, v = vs.driving, p = c.game.player;
