@@ -18,7 +18,8 @@ The billboards are still there as a variant.
 | `cdda.chars({ far: [16, 45], emph: 0.35 })` | hostile readability ramp (m) and strength |
 | `cdda.chars({ paint: 'sprite' })` / `?charpaint=sprite` | people painted by projecting the sprite (round 1) instead of the styled skins |
 | `?viewmodel=model` / `?viewmodel=sprite`, Options → **First-person hands**, `cdda.chars({ viewmodel: 'sprite' })` | 3D first-person arms/items (default) or the classic 2D viewmodel sprites |
-| `?zstyle=shamble` / `caricature` / `boxy`, Options → **Zombie bodies**, `cdda.chars({ zstyle })` | zombie bodies: hunched, reaching, a silhouette per family (default) / the same pushed further / the round-6 upright box bodies (persisted, `localStorage cdda3d.visual.zstyle`) |
+| `?zstyle=shamble` / `caricature` / `boxy` / `sprite3d`, Options → **Zombie bodies**, `cdda.chars({ zstyle })` | zombie bodies: hunched, reaching, a silhouette per family (default) / the same pushed further / the round-6 upright box bodies / low-poly Blender models built to read like the sprites ([SPRITE3D.md](SPRITE3D.md)) (persisted, `localStorage cdda3d.visual.zstyle`) |
+| `?zlod=off\|dither\|pop\|flip`, Options → **Zombie sprite LOD**, `cdda.chars({ zlod, lod })` | prototype: far creatures drawn as their 2D sprite, turning into the 3D body as you approach ([SPRITE3D.md](SPRITE3D.md)) |
 | `cdda.chars()` | current settings + live/body/skin/page counts |
 | `?runover=ragdoll\|loose\|fall`, Options → Gameplay → **Run-over bodies**, `cdda.runoverBodies()` | bodies hit by a vehicle: stiff rag doll (default) / loose rag doll / the old fall ("Run-over rag doll" below) |
 
