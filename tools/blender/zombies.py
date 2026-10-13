@@ -382,8 +382,8 @@ def p_fore_arm(sx, sy, sz, st):
     reg = st.get('forearm', 'skin')
     secs = [(-h / 2, w * 0.7, d * 0.7), (h * 0.15, w, d), (h / 2, w * 0.9, d * 0.9)]
     m.loft(secs, 6, lambda s, k: pal(reg, 0.95 if k in (1, 2) else 0.78), lo_mat=pal(reg, 0.7), hi_mat=pal(reg, 0.7))
-    if st.get('blood', 0) > 0.2:
-        m.decal((0, -h * 0.25, -d * 0.5), w * 0.5, h * 0.3, fix(BLOOD_DARK))
+    if st.get('blood', 0) > 0.2 and st.get('side') == 1:
+        m.decal((0, -h * 0.3, -d * 0.5), w * 0.4, h * 0.22, fix(BLOOD_DARK))
     return m
 
 
@@ -421,8 +421,9 @@ def p_thigh(sx, sy, sz, st):
     w, h, d = sx, sy, sz
     m.loft([(-h / 2, w * 0.82, d * 0.82, 0, 0, 0.1), (h * 0.1, w * 0.98, d, 0, 0, 0.08), (h / 2, w, d)], 6,
            lambda s, k: pal('pants', 1.0 if k in (3, 4) else 0.85), lo_mat=pal('pants', 0.7), hi_mat=pal('pants', 0.9))
-    if st.get('blood', 0) > 0.2:
-        m.decal((w * 0.1, -h * 0.1, -d * 0.52), w * 0.4, h * 0.25, fix(BLOOD_DARK))
+    if st.get('blood', 0) > 0.2 and st.get('side') == -1:
+        # a drip down one trouser leg
+        m.decal((w * 0.15, h * 0.05, -d * 0.52), w * 0.18, h * 0.5, fix(BLOOD_DARK))
     return m
 
 
@@ -700,6 +701,9 @@ def build_model(md, hi=False):
         fn = PARTS.get(p['name'])
         if not fn:
             raise SystemExit(f"{md['model']}: no mesh builder for meshed part {p['name']}")
+        # which side a limb is on (gore and wear go on one side only: a pair of matching
+        # blood squares reads as a pattern, not as gore)
+        st['side'] = 1 if p['name'].endswith('R') else -1 if p['name'].endswith('L') else 0
         mesh = fn(*p['size'], st)
         ob = to_object(p['name'], mesh, p['size'], pal_)
         if hi:
