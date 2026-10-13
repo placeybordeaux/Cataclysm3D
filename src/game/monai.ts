@@ -21,7 +21,8 @@ import { consumeItem, L, moveItem, spawnOnGround } from './moves';
 import { flies, floorKnown, standingSpot, standKnown } from './standing';
 import type { BodyPartId } from './bodyparts';
 import { sfx } from '../audio/sfx';
-import { overflowDamage, runDeathFunctions } from './mondeath';
+import { gibbedBody, overflowDamage, runDeathFunctions } from './mondeath';
+import { GIBS, gibStains, mapFlingWorld, planGibs, type GibBurst, type GibGore, type GibMode } from './gibs';
 import { corpseDissectables } from './butchery';
 import { bash } from './bash';
 import { addField, fieldDamageAt } from './fields';
@@ -173,6 +174,16 @@ export class MonsterSystem implements GameSystem {
   readonly onCorpseGone: ((c: CorpseRecord) => void)[] = [];
   /** A corpse appeared without a death (dormant zombies placed by the spawner). */
   readonly onCorpse: ((c: CorpseRecord) => void)[] = [];
+  /**
+   * A body torn apart by its death (gibs.ts: BN's pulverisation, unchanged) comes apart into
+   * pieces flying from the blow ('pieces', Options > Gameplay > Gibbed bodies) or just vanishes
+   * into the splatter ('splat', the old look). Runs before onDied, while the body's view exists.
+   */
+  readonly onGibbed: ((m: Monster, b: GibBurst) => void)[] = [];
+  gibMode: GibMode = 'pieces';
+  gibGore: GibGore = 'lots';
+  /** blood the flying pieces leave when they land (game time order; transient, not saved) */
+  private gore: { at: number; x: number; y: number; z: number; type: string }[] = [];
   /** Seconds since system start. */
   time = 0;
   private brains = new Map<Monster, MonBrain>();
@@ -707,6 +718,7 @@ export class MonsterSystem implements GameSystem {
     // The death functions (mondeath.ts) print their own messages and place the corpse.
     sfx.monsterDeath(def.id, m, overflowDamage(m).pulverized);
     const corpse = runDeathFunctions(this, m);
+    if (!corpse && this.gibMode === 'pieces' && gibbedBody(m)) this.gib(m, killer);
     if (def.death_drops) {
       const rng = new Rng(hashSeed(this.game.seed, m.uid, 0xd40b));
       for (const s of expandItemGroup(this.game.data, def.death_drops, rng)) for (const it of fromSpawned(this.game.data, s)) spawnOnGround(this.game.map, tx, ty, m.z, it);
@@ -718,6 +730,29 @@ export class MonsterSystem implements GameSystem {
     if (blood && corpse) this.addField(tx, ty, m.z, blood, 2);
     this.game.events.emit('creatureDied', { creature: m, killer: killer === 'player' ? this.game.player : killer });
     for (const f of this.onDied) f(m, corpse);
+  }
+
+  /** Plan the pieces of a gibbed body (gibs.ts), queue the blood they leave and tell the renderer. */
+  private gib(m: Monster, killer: 'player' | Monster | null): void {
+    const run = m.fling;
+    const from = killer === 'player' ? this.game.player : killer;
+    const d = from ? Math.hypot(m.x - from.x, m.y - from.y) : 0;
+    const burst = planGibs(
+      {
+        x: m.x, y: m.y, z: m.z, facing: m.facing, size: m.size,
+        // a vehicle's throw (planned before the hit landed, runoverFling.ts) beats who killed it
+        launch: run?.plan.launch,
+        dir: d > 1e-3 ? [(m.x - from!.x) / d, (m.y - from!.y) / d] : null,
+        overkill: Math.max(0, -m.hp) / Math.max(1, m.hpMax),
+      },
+      this.gibGore,
+      run?.world ?? mapFlingWorld(this.game.map, m.z),
+      new Rng(hashSeed(this.game.seed, m.uid, 0x61b5)),
+    );
+    const blood = this.bloodType(m.type);
+    if (blood) for (const p of burst.pieces) for (const s of gibStains(p.plan)) this.gore.push({ at: this.time + s.t, x: Math.floor(s.x), y: Math.floor(s.y), z: m.z, type: blood });
+    this.gore.sort((a, b) => a.at - b.at);
+    for (const f of this.onGibbed) f(m, burst);
   }
 
   /**
@@ -817,6 +852,10 @@ export class MonsterSystem implements GameSystem {
 
   update(game: Game, dt: number, gameDt: number): void {
     this.time += dt;
+    while (this.gore.length && this.gore[0].at <= this.time) {
+      const g = this.gore.shift()!;
+      if (this.grid.passable(g.x, g.y, g.z)) this.addField(g.x, g.y, g.z, g.type, GIBS.blood);
+    }
     this.grid.reset();
     const p = game.player;
     if (isNaN(this.lastPX)) {

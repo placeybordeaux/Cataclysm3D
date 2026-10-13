@@ -12,7 +12,7 @@ import { sampleFling, type FlingPlan } from '../../game/runoverFling';
 // lying body has (FallingBody for a corpse, the downed CreatureModel for a survivor), so the
 // hand-over doesn't pop. Not a physics engine: one rigid tumble + spring offsets per limb.
 
-/** Feel of the limbs and the tumble. 'stiff' is the default; 'loose' the floppier variant. */
+/** Feel of the limbs and the tumble. 'loose' is the default (it played the most fun); 'stiff' keeps the body's shape. */
 export const RAGDOLL = {
   stiff: {
     /** joint spring (1/s²) and damping ratio: stiff and well damped, the body keeps its shape */
@@ -52,7 +52,7 @@ export const RAGDOLL = {
 export type RagdollFeel = typeof RAGDOLL.stiff;
 
 /** How much each named part flails (0 = it moves with the trunk). */
-function limbWeight(name: string): number {
+export function limbWeight(name: string): number {
   if (/^(uArm|thigh|leg|tail|wing|ant[LR]|antenna|whip|tendril|fang)/.test(name)) return 1;
   if (/^(fArm|shin)/.test(name)) return 0.7;
   if (/^(head|neck|jaw)$/.test(name)) return 0.45;
@@ -89,6 +89,31 @@ export function nearestLie(rig: Rig, q: THREE.Quaternion, side: 1 | -1, n = RAGD
     if (d > bd) (bd = d), (best = f);
   }
   return best;
+}
+
+/**
+ * The limbs' damped springs about the pose over the last `dt` (ending at time `t`): offsets and
+ * velocities per part and axis (rad, rad/s), each limb weighted (limbWeight; 0 = rigid).
+ * Shared by the run-over rag doll and the pieces of a gibbed body (gibs.ts).
+ */
+export function springLimbs(F: RagdollFeel, weights: number[], off: Float32Array, vel: Float32Array, seed: number, t: number, dt: number, air: boolean): void {
+  const k = F.k, c = 2 * F.zeta * Math.sqrt(k);
+  const steps = Math.max(1, Math.ceil(dt * Math.sqrt(k) / 0.35));
+  const h = dt / steps;
+  for (let s = 0; s < steps; s++) {
+    const tt = t - dt + h * (s + 1);
+    for (let i = 0; i < weights.length; i++) {
+      const wgt = weights[i];
+      if (!wgt) continue;
+      for (let a = 0; a < 3; a++) {
+        const j = i * 3 + a;
+        // airborne, the limbs windmill a little about the pose (each its own phase)
+        const goal = air ? F.flail * wgt * Math.sin(tt * F.flailHz * Math.PI * 2 + quirk(seed, 500 + j) * 6.283) * (a === 1 ? 0.3 : 1) : 0;
+        vel[j] += (-k * (off[j] - goal) - c * vel[j]) * h;
+        off[j] = Math.max(-F.max * wgt, Math.min(F.max * wgt, off[j] + vel[j] * h));
+      }
+    }
+  }
 }
 
 export interface RagdollEvent {
@@ -248,24 +273,7 @@ export class RagdollBody {
   }
 
   private springs(dt: number, air: boolean): void {
-    const F = this.opts.feel;
-    const k = F.k, c = 2 * F.zeta * Math.sqrt(k);
-    const steps = Math.max(1, Math.ceil(dt * Math.sqrt(k) / 0.35));
-    const h = dt / steps;
-    for (let s = 0; s < steps; s++) {
-      const tt = this.t - dt + h * (s + 1);
-      for (let i = 0; i < this.weights.length; i++) {
-        const wgt = this.weights[i];
-        if (!wgt) continue;
-        for (let a = 0; a < 3; a++) {
-          const j = i * 3 + a;
-          // airborne, the limbs windmill a little about the pose (each its own phase)
-          const goal = air ? F.flail * wgt * Math.sin(tt * F.flailHz * Math.PI * 2 + quirk(this.seed, 500 + j) * 6.283) * (a === 1 ? 0.3 : 1) : 0;
-          this.vel[j] += (-k * (this.off[j] - goal) - c * this.vel[j]) * h;
-          this.off[j] = Math.max(-F.max * wgt, Math.min(F.max * wgt, this.off[j] + this.vel[j] * h));
-        }
-      }
-    }
+    springLimbs(this.opts.feel, this.weights, this.off, this.vel, this.seed, this.t, dt, air);
   }
 
   /** Blend share of the lying end: 0 in flight .. 1 at rest. */

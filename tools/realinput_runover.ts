@@ -136,7 +136,7 @@ export function runoverScenarios(c: RunoverCtx): Scenario[] {
     ['runover', 'run-over bodies: real W into a row of zombies at ~20 / ~40 / ~70 km/h, frame strips from the chase camera and first person', async () => {
       await js(HELPERS);
       // Plain zombies (56 HP in play) survive ~20 km/h barely and are gibbed past ~60 km/h (BN's
-      // pulverisation, no body): soldiers (70 HP, 11 bash armour) show the survivor and the
+      // pulverisation, no corpse: the body comes apart into pieces): soldiers (70 HP, 11 bash armour) show the survivor and the
       // over-the-roof throw.
       const Z = ['mon_zombie', 'mon_zombie', 'mon_zombie'], S = ['mon_zombie_soldier', 'mon_zombie_soldier', 'mon_zombie_soldier'];
       await run('20-third', 22, 'third', S);
@@ -144,7 +144,20 @@ export function runoverScenarios(c: RunoverCtx): Scenario[] {
       await run('70-third', 70, 'third', S);
       await run('40-first', 40, 'first', Z);
       await run('70-first', 70, 'first', S);
+      // Gibbed bodies come apart (src/game/gibs.ts, render/chars/gibs.ts): a plain zombie at ~70 km/h
+      // leaves no corpse, and its pieces fly, then lie still on the road.
+      const gib0 = await js<{ pieces: number } | null>(`cdda.gibbedBodies('pieces'), cdda.gibPieces()`);
+      const zcorpses = `cdda.monsterSystem.corpses.filter((c) => c.monId === 'mon_zombie').length`;
+      const corpses0 = await js<number>(zcorpses);
       await run('70-gib', 70, 'third', Z);
+      if (!only || only.has('70-gib')) {
+        await sleep(2500);
+        const g = await js<{ pieces: number; flying: number; lying: number; at: { h: number }[] } | null>(`cdda.gibPieces()`);
+        const corpses = (await js<number>(zcorpses)) - corpses0;
+        check('70-gib: the zombies come apart into pieces (model mode)', !!g && !!gib0 && g.pieces - gib0.pieces >= 6, { before: gib0?.pieces, after: g?.pieces });
+        check('70-gib: every piece has come to rest on the ground', !!g && g.flying === 0 && g.lying >= 6 && g.at.every((q) => q.h > -0.3 && q.h < 0.8), g && { flying: g.flying, lying: g.lying, h: g.at.map((q) => +q.h.toFixed(2)) });
+        check('70-gib: no corpse left by the gibbed zombies (BN: pulverised)', corpses === 0, corpses);
+      }
       await run('40-dogs', 40, 'third', ['mon_zombie_dog', 'mon_dog', 'mon_zombie_dog']);
     }],
   ];

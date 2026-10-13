@@ -332,6 +332,12 @@ export class CharInstance {
    */
   tumble: THREE.Quaternion | null = null;
   readonly tumbleCenter = new THREE.Vector3();
+  /**
+   * Parts not drawn (1 = hidden): a piece of a gibbed body (gibs.ts) is the whole rig with only
+   * its own parts shown, so it keeps the body's skin and pose; set before the first flush and
+   * call layer.touch(true) after changing it.
+   */
+  hidden: Uint8Array | null = null;
   readonly pose: PoseOut;
   readonly mats: Float32Array;
   /** set when the pose/placement changed and matrices must be rebuilt */
@@ -517,7 +523,8 @@ export class CharLayer {
       const sh = shapeIndex(i.rig);
       const base = i.skin.page * NS;
       while (per.length < base + NS) per.push(0);
-      for (let p = 0; p < sh.length; p++) per[base + sh[p]]++;
+      const hid = i.hidden;
+      for (let p = 0; p < sh.length; p++) if (!hid || !hid[p]) per[base + sh[p]]++;
     }
     const byKey = this.batchByKey;
     for (let key = 0; key < per.length; key++) {
@@ -539,7 +546,9 @@ export class CharLayer {
       const fk = i.flashDur > 0 ? i.flashT / i.flashDur : 0;
       const sky = this.skyVisAt ? this.skyVisAt(i.x, i.y, i.z) : 1;
       const rx = i.x, ry = i.z * LEVEL_HEIGHT + i.lift, rz = i.y;
+      const hid = i.hidden;
       for (let p = 0; p < i.rig.parts.length; p++) {
+        if (hid && hid[p]) continue;
         const key = i.skin.page * NS + sh[p];
         const b = byKey[key];
         const k = fill[key]++;

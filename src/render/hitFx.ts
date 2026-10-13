@@ -201,6 +201,11 @@ export class HitFx {
     if (blood) this.burst(x, y, z, 0.2, BLOOD[blood] ?? BLOOD.fd_blood, 6, 1.6, true);
   }
 
+  /** Blood sprayed from a gibbed body (MonsterView.onGore): `n` drops from h m above the floor, every way. */
+  gore(x: number, y: number, z: number, h: number, blood: string, n: number, speed: number): void {
+    this.burst(x, y, z, h, BLOOD[blood] ?? BLOOD.fd_blood, n, speed, true);
+  }
+
   onAttack(e: AttackEvent): void {
     const m = e.target as Monster | undefined;
     const p = this.game.player;

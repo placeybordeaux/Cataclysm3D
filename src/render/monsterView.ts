@@ -18,6 +18,9 @@ import { ZVARIANTS } from './chars/zombie';
 import { FxMeshes } from './chars/fxMeshes';
 import { RAGDOLL, RagdollBody, nearestLie, type RagdollEvent, type RagdollFeel } from './chars/ragdoll';
 import { sampleFling, type FlingPlan } from '../game/runoverFling';
+import { GibBody, GibSet, GIB_VIEW, gibPieces } from './chars/gibs';
+import type { GibBurst } from '../game/gibs';
+import { quirk } from './chars/rig';
 import { cardsOn } from './cards';
 import { cddaColor } from './atlasIndex';
 import type { MonsterDef } from '../data/types';
@@ -236,6 +239,11 @@ export class MonsterView implements GameSystem {
   private rigs = new Map<string, Rig>();
   /** A body hit the ground (hitFx puts dust/blood there). */
   onBodyLanded: ((x: number, y: number, z: number, blood: string | null) => void) | null = null;
+  /** Blood sprayed at (x, y, h m above the floor): `n` drops at about `speed` m/s (hitFx). Gibbed bodies. */
+  onGore: ((x: number, y: number, z: number, h: number, blood: string, n: number, speed: number) => void) | null = null;
+  /** The pieces of gibbed bodies (chars/gibs.ts), and what each bleeds / whether it is the heavy part. */
+  private readonly gibs = new GibSet();
+  private readonly gibInfo = new WeakMap<GibBody, { blood: string | null; torso: boolean }>();
 
   constructor(readonly game: Game, readonly renderer: Renderer, readonly sys: MonsterSystem, readonly combat: PlayerCombat | null) {
     // only hides: showing waits for the next tick's update (src/render/surroundings.ts)
@@ -243,6 +251,7 @@ export class MonsterView implements GameSystem {
       const ch = renderer.chunks;
       for (const [m, v] of this.views) if (!ch.drawnAt(m.x, m.y, m.z)) (v.c?.inst.setVisible(false), v.h?.setVisible(false));
       for (const [c, v] of this.corpses) if (!ch.drawnAt(c.x, c.y, c.z)) (v.body?.inst.setVisible(false), v.h?.setVisible(false));
+      for (const b of this.gibs.pieces) if (!ch.drawnAt(b.inst.x, b.inst.y, b.z)) b.inst.setVisible(false);
     });
     loadAtlas().then(
       (a) => {
@@ -254,6 +263,7 @@ export class MonsterView implements GameSystem {
       () => {},
     );
     sys.onHurt.push((m) => this.flash(m, 0xff2a2a, 0.18));
+    sys.onGibbed.push((m, b) => this.gibbed(m, b));
     sys.onDied.push((m, c) => this.died(m, c));
     sys.onRemoved.push((m) => this.drop(m));
     sys.onCorpseGone.push((c) => this.dropCorpse(c));
@@ -413,9 +423,9 @@ export class MonsterView implements GameSystem {
     v.rag = null;
   }
 
-  /** How thrown bodies flail (Options > Run-over bodies: rag doll stiff / loose). */
+  /** How thrown bodies and gibbed pieces flail (Options > Run-over bodies: rag doll loose, the default, or stiff). */
   private ragFeel(): RagdollFeel {
-    return this.game.vehicles?.runoverMode === 'loose' ? RAGDOLL.loose : RAGDOLL.stiff;
+    return this.game.vehicles?.runoverMode === 'ragdoll' ? RAGDOLL.stiff : RAGDOLL.loose;
   }
 
   /** Bodies landing, bouncing and hitting walls: a thud, and dust / blood where it first lands. */
@@ -454,6 +464,43 @@ export class MonsterView implements GameSystem {
       this.makeVisual(m, v);
     }
     for (const [c, v] of this.corpses) this.remakeCorpse(c, v);
+    // pieces are cut from the old style's rig: they go (a display switch, not gameplay)
+    this.gibs.clear();
+  }
+
+  /**
+   * A body torn apart by its death (game/gibs.ts): its own rig, cut into the pieces the
+   * simulation planned flights for, each drawn as a GibBody on the corpse layer, with a spray of
+   * blood where it burst. Billboards (?chars=billboard) keep the old look: the body vanishes
+   * into the splatter.
+   */
+  private gibbed(m: Monster, b: GibBurst): void {
+    if (!this.models) return;
+    const v = this.views.get(m);
+    const seed = seedOf(appearanceSeed(m));
+    const rig = v?.c?.rig ?? this.rigFor(m.type, seed);
+    const skin = v?.c?.inst.skin ?? this.skinFor(rig, v?.frame ?? this.frameFor(m).frame);
+    const cut = gibPieces(rig, b.pieces.map((p) => p.slot));
+    const blood = this.sys.bloodType(m.type);
+    const feel = this.ragFeel();
+    b.pieces.forEach((p, i) => {
+      const sel = cut.get(p.slot);
+      if (!sel) return;
+      const g = new GibBody(this.layers().dead, rig, skin, quirk(b.seed, i), p.plan, b.z, b.facing, sel.hidden, sel.root, feel);
+      g.inst.flash(0xff2020, 0.15);
+      this.gibInfo.set(g, { blood, torso: p.slot === 'torso' });
+      this.gibs.add(g);
+    });
+    if (blood) this.onGore?.(b.x, b.y, b.z, rig.height * 0.6, blood, 28, b.cause === 'vehicle' ? 4.5 : 3);
+  }
+
+  /** Pieces of gibbed bodies alive (debug / QA): flying, lying, sinking. */
+  gibStats(): { pieces: number; flying: number; lying: number; sinking: number; at: { x: number; y: number; h: number }[] } {
+    const ps = this.gibs.pieces.filter((b) => !b.gone);
+    return {
+      pieces: ps.length, flying: ps.filter((b) => !b.done).length, lying: ps.filter((b) => b.done && b.sinkT === null).length,
+      sinking: ps.filter((b) => b.sinkT !== null).length, at: ps.map((b) => ({ x: b.inst.x, y: b.inst.y, h: b.inst.lift })),
+    };
   }
 
   private remakeCorpse(c: CorpseRecord, v: CorpseView): void {
@@ -703,6 +750,21 @@ export class MonsterView implements GameSystem {
         v.h.setSize((v.frame.w / MON_PPM) * pose.wide, v.height * pose.hgt);
       }
     }
+
+    // Pieces of gibbed bodies: fly, bleed, land, lie a while, sink away (chars/gibs.ts).
+    this.gibs.update(dt, (x, y) => Math.hypot(x - p.x, y - p.y) < GIB_VIEW.far, (b, ev) => {
+      b.inst.setVisible(this.renderer.chunks.drawnAt(b.inst.x, b.inst.y, b.z));
+      if (!ev.length) return;
+      const info = this.gibInfo.get(b);
+      for (const e of ev) {
+        if (e.kind === 'drip') {
+          if (info?.blood) this.onGore?.(e.x, e.y, b.z, e.h, info.blood, 1, 0.8);
+        } else if (e.kind === 'land') {
+          if (info?.torso || e.speed > 4) sfx.bodyFall({ x: e.x, y: e.y, z: b.z }, !!info?.torso);
+          this.onBodyLanded?.(e.x, e.y, b.z, info?.blood ?? null);
+        } else if (e.speed > 3 && info?.blood) this.onGore?.(e.x, e.y, b.z, 0.1, info.blood, 3, 1.2);
+      }
+    });
 
     // Projectiles (acid globs, bile, thrown items).
     for (const h of this.projectiles) h.remove();

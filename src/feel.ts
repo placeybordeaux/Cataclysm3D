@@ -166,8 +166,9 @@ export function installCombatFeel(game: Game, renderer: Renderer | null, monster
       renderer.viewmodel?.jolt(-Math.sin(rel), e.amount > 0 ? Math.min(1, 0.4 + e.amount / 15) : 0.3);
     });
     // Dust and blood where dying bodies land; tracers for every gun line.
-    const fx = api?.hitFx as { bodyLanded?: (x: number, y: number, z: number, b: string | null) => void; watchTracers?: (f: () => readonly never[]) => void } | undefined;
+    const fx = api?.hitFx as { bodyLanded?: (x: number, y: number, z: number, b: string | null) => void; gore?: (x: number, y: number, z: number, h: number, b: string, n: number, s: number) => void; watchTracers?: (f: () => readonly never[]) => void } | undefined;
     if (monsters.view && fx?.bodyLanded) monsters.view.onBodyLanded = (x, y, z, b) => fx.bodyLanded!(x, y, z, b);
+    if (monsters.view && fx?.gore) monsters.view.onGore = (x, y, z, h, b, n, s) => fx.gore!(x, y, z, h, b, n, s);
     fx?.watchTracers?.(() => combat.tracers as never);
     try {
       const hud = new CombatHud(game, combat, sys, getUiRoot(), () => renderer.cameraMode !== 'top', () => renderer.rig.camera.fov);
