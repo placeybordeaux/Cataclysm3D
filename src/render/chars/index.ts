@@ -4,6 +4,10 @@ import type { Renderer } from '../renderer';
 import type { TileFrame } from '../textureSource';
 import { CharLayer, SkinStore, charUniforms } from './charLayer';
 import { analyseSprite, type Img, type SpriteInfo } from './paint';
+import { loadSpriteModels, spriteModelsLoaded } from './spriteModels';
+import { SPRITE_LOD, ZLODS, type ZLod } from './spriteLod';
+
+export { ZLODS, type ZLod };
 
 // Entry point for the 3D characters (docs/CHARACTERS.md): the display mode switch, the shared
 // layers (live creatures / lying bodies) and sprite pixel access for the painter.
@@ -11,7 +15,8 @@ import { analyseSprite, type Img, type SpriteInfo } from './paint';
 //   ?chars=model|billboard       URL (wins for the session)
 //   Options → Creatures          persisted in localStorage
 //   cdda.chars('billboard')      debug console; cdda.chars({ fps: 12, far: [16, 45] }) tweaks
-//   ?zstyle=shamble|caricature|boxy, Options → Zombie bodies, cdda.chars({ zstyle })
+//   ?zstyle=shamble|caricature|boxy|sprite3d, Options → Zombie bodies, cdda.chars({ zstyle })
+//   ?zlod=off|dither|pop|flip, Options → Zombie sprite LOD, cdda.chars({ zlod, lod: {...} })
 
 export type CharMode = 'model' | 'billboard';
 const STORAGE_KEY = 'cdda3d.chars';
@@ -69,6 +74,8 @@ export const charSettings = {
    * the sprites), 'caricature' (the same pushed further), 'boxy' (the round-6 person rig).
    */
   zstyle: visualPreference<ZStyle>('zstyle', ZSTYLES, 'shamble'),
+  /** Far creatures as their 2D sprite, blending into the 3D body (spriteLod.ts); off = 3D only. */
+  zlod: visualPreference<ZLod>('zlod', ZLODS, 'off'),
   listeners: [] as ((m: CharMode) => void)[],
 };
 
@@ -86,15 +93,31 @@ export function setCharMode(m: CharMode): void {
 
 /** Debug entry (cdda.chars): mode string, or a tweak object; returns the current settings. */
 /** Switch the zombie bodies (persisted); every creature and body is rebuilt. */
-export function setZombieStyle(z: ZStyle): void {
+export function setZombieStyle(z: ZStyle): Promise<void> {
   if (!ZSTYLES.includes(z)) throw new Error(`zombie style: ${z} (expected ${ZSTYLES.join('|')})`);
-  if (z === charSettings.zstyle) return;
-  charSettings.zstyle = z;
-  storeVisualPreference('zstyle', z);
+  if (z === charSettings.zstyle) return Promise.resolve();
+  const apply = () => {
+    charSettings.zstyle = z;
+    storeVisualPreference('zstyle', z);
+    for (const f of charSettings.listeners) f(charSettings.mode);
+  };
+  // sprite3d needs its GLBs before any rig asks for a mesh; a failed load leaves the style
+  // as it was and rejects (the caller / console sees why)
+  if (z === 'sprite3d' && !spriteModelsLoaded()) return loadSpriteModels().then(apply);
+  apply();
+  return Promise.resolve();
+}
+
+/** Switch the sprite <-> 3D distance LOD (persisted); every creature is rebuilt. */
+export function setZombieLod(m: ZLod): void {
+  if (!ZLODS.includes(m)) throw new Error(`zombie LOD: ${m} (expected ${ZLODS.join('|')})`);
+  if (m === charSettings.zlod) return;
+  charSettings.zlod = m;
+  storeVisualPreference('zlod', m);
   for (const f of charSettings.listeners) f(charSettings.mode);
 }
 
-export function charsApi(arg?: CharMode | { fps?: number; far?: [number, number]; emph?: number; paint?: 'styled' | 'sprite'; viewmodel?: 'model' | 'sprite'; fpBow?: boolean; zstyle?: ZStyle }): Record<string, unknown> {
+export function charsApi(arg?: CharMode | { fps?: number; far?: [number, number]; emph?: number; paint?: 'styled' | 'sprite'; viewmodel?: 'model' | 'sprite'; fpBow?: boolean; zstyle?: ZStyle; zlod?: ZLod; lod?: Partial<typeof SPRITE_LOD> }): Record<string, unknown> {
   if (typeof arg === 'string') setCharMode(arg);
   else if (arg) {
     if (arg.viewmodel) setViewmodelMode(arg.viewmodel);
@@ -106,14 +129,21 @@ export function charsApi(arg?: CharMode | { fps?: number; far?: [number, number]
       // repaint: every view rebuilds its visuals (skins are keyed by style)
       for (const f of charSettings.listeners) f(charSettings.mode);
     }
-    if (arg.zstyle) setZombieStyle(arg.zstyle);
+    if (arg.zstyle) void setZombieStyle(arg.zstyle).catch((e) => console.error(e));
+    if (arg.zlod) setZombieLod(arg.zlod);
+    if (arg.lod) {
+      for (const [k, v] of Object.entries(arg.lod)) {
+        if (!(k in SPRITE_LOD) || typeof v !== 'number') throw new Error(`chars lod: ${k}=${v}`);
+        (SPRITE_LOD as Record<string, number>)[k] = v;
+      }
+    }
     if (arg.fps !== undefined) charSettings.fps = arg.fps;
     if (arg.far) (charUniforms.uFarNear.value = arg.far[0], charUniforms.uFarFar.value = arg.far[1]);
     if (arg.emph !== undefined) charUniforms.uEmphK.value = arg.emph;
   }
   const L = layersIfAny;
   return {
-    mode: charSettings.mode, paint: charSettings.paint, zstyle: charSettings.zstyle, viewmodel: charSettings.viewmodel, fps: charSettings.fps, far: [charUniforms.uFarNear.value, charUniforms.uFarFar.value], emph: charUniforms.uEmphK.value,
+    mode: charSettings.mode, paint: charSettings.paint, zstyle: charSettings.zstyle, zlod: charSettings.zlod, lod: { ...SPRITE_LOD }, viewmodel: charSettings.viewmodel, fps: charSettings.fps, far: [charUniforms.uFarNear.value, charUniforms.uFarFar.value], emph: charUniforms.uEmphK.value,
     live: L?.live.count ?? 0, bodies: L?.dead.count ?? 0, skins: L?.store.skinCount ?? 0, pages: L?.store.pageCount ?? 0,
   };
 }

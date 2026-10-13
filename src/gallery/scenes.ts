@@ -187,7 +187,8 @@ export const SCENES: Scene[] = [
   { id: 'corpses', group: 'Creatures', label: 'Bodies', run: char('corpse') },
   { id: 'nightcreatures', group: 'Creatures', label: 'Night, flashlight, zombies', run: char('night') },
   { id: 'props', group: 'Creatures', label: 'Props: fire, loot, mannequin', run: char('props') },
-  // --- zombie bodies: for choosing the Zombie bodies switch (shambling / exaggerated / boxy)
+  // --- zombie bodies: for choosing the Zombie bodies switch (shambling / exaggerated / boxy /
+  // sprite 3D) and the Zombie sprite LOD switch (docs/SPRITE3D.md)
   { id: 'zcrowd', group: 'Zombie bodies', label: 'Spot the specials: crowd 5-33 m', run: char('zombie_scene_crowd') },
   { id: 'zcrowddusk', group: 'Zombie bodies', label: 'Spot the specials at dusk', run: char('zombie_scene_dusk') },
   { id: 'znight', group: 'Zombie bodies', label: 'Night, flashlight', run: char('zombie_scene_night') },
@@ -202,6 +203,8 @@ export const SCENES: Scene[] = [
   { id: 'zwindup', group: 'Zombie bodies', label: 'Wind-ups and lunge crouch', run: char('zombie_lineup_windup') },
   { id: 'zcrawl', group: 'Zombie bodies', label: 'Crawlers', run: char('zombie_lineup_crawl') },
   { id: 'zdead', group: 'Zombie bodies', label: 'Bodies', run: char('zombie_lineup_dead') },
+  { id: 'zlod_far', group: 'Zombie bodies', label: 'Sprite LOD: one of each kind, 4-56 m', run: char('zombie_lod') },
+  { id: 'zlod_side', group: 'Zombie bodies', label: 'Sprite LOD: broadside, like the sprites, 4-56 m', run: char('zombie_lod_side') },
   // --- interiors
   { id: 'house', group: 'Interiors', label: 'House, main room', run: look('house') },
   { id: 'kitchen', group: 'Interiors', label: 'Kitchen', run: look('furn:^f_oven$:0:3:-16') },

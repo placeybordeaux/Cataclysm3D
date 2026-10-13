@@ -697,6 +697,10 @@ distance-dependent asset detail for readability. Our implementation:
 - Camera modes (switch with `V`): first-person (default), over-the-shoulder, top-down
   (classic CDDA view). Keep all three working.
 
+- **Characters** (docs/CHARACTERS.md): creatures are rigid-box rigs (src/render/chars) drawn as
+  instanced shapes. `?zstyle=sprite3d` draws zombie parts with Blender-built low-poly meshes from
+  `public/models/zombies` (tools/blender, docs/SPRITE3D.md; colours from the sprite's palette at
+  runtime), `?zlod=` swaps far creatures for their 2D sprite.
 - **Visual styles** (docs/LOOKS.md): `look=classic|crisp|voxel|terrain|full` (default full;
   Options > Visual style, persisted; `renderer.setLook(name)`, `cdda.setLook`,
   `cdda.lookTweak({feature: v})`). Features live in `src/render/look.ts`; the mesher reads

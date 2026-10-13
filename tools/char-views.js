@@ -3,7 +3,7 @@
 // street viewpoint, spawns the subject(s) ahead of the camera and waits for the pose asked for.
 // Returns a short list of what is standing where. Plain JS so it can be pasted into
 // `drive.ts eval` too.
-window.charViews = ['horde_near', 'horde_mid', 'horde_far', 'horde_road', 'horde_dusk', 'dog', 'npc', 'windup', 'critters', 'zoo', 'night', 'third', 'props', 'bugs', 'zombies2', 'crawlers', 'crawl_move', 'crowd', 'fire', 'corpse', 'bench', 'fp_fists', 'fp_punch', 'fp_pistol', 'fp_pistol_fire', 'fp_rifle', 'fp_rifle_ads', 'fp_shotgun', 'fp_reload', 'fp_bat', 'fp_bat_swing', 'fp_guard', 'fp_knife', 'fp_axe', 'fp_spear', 'fp_katana', 'fp_flashlight', 'fp_bow', 'fp_revolver', 'fp_1911', 'fp_double', 'fp_ak', 'fp_hunting', 'fp_crowbar', 'fp_kitchen', 'fp_sledge', 'fp_lever', 'fp_lever_ads', 'fp_lever_fire', 'third_lever', 'npc_lever', 'zombie_lineup_a', 'zombie_lineup_b', 'zombie_lineup_c', 'zombie_lineup_d', 'zombie_lineup_far', 'zombie_lineup_windup', 'zombie_lineup_close', 'zombie_lineup_walk', 'zombie_lineup_dead', 'zombie_lineup_crawl', 'zombie_scene_crowd', 'zombie_scene_dusk', 'zombie_scene_night', 'zombie_scene_face'];
+window.charViews = ['horde_near', 'horde_mid', 'horde_far', 'horde_road', 'horde_dusk', 'dog', 'npc', 'windup', 'critters', 'zoo', 'night', 'third', 'props', 'bugs', 'zombies2', 'crawlers', 'crawl_move', 'crowd', 'fire', 'corpse', 'bench', 'fp_fists', 'fp_punch', 'fp_pistol', 'fp_pistol_fire', 'fp_rifle', 'fp_rifle_ads', 'fp_shotgun', 'fp_reload', 'fp_bat', 'fp_bat_swing', 'fp_guard', 'fp_knife', 'fp_axe', 'fp_spear', 'fp_katana', 'fp_flashlight', 'fp_bow', 'fp_revolver', 'fp_1911', 'fp_double', 'fp_ak', 'fp_hunting', 'fp_crowbar', 'fp_kitchen', 'fp_sledge', 'fp_lever', 'fp_lever_ads', 'fp_lever_fire', 'third_lever', 'npc_lever', 'zombie_lineup_a', 'zombie_lineup_b', 'zombie_lineup_c', 'zombie_lineup_d', 'zombie_lineup_far', 'zombie_lineup_windup', 'zombie_lineup_close', 'zombie_lineup_walk', 'zombie_lineup_dead', 'zombie_lineup_crawl', 'zombie_scene_crowd', 'zombie_scene_dusk', 'zombie_scene_night', 'zombie_scene_face', 'zombie_lod', 'zombie_lod_side'];
 // An open paved strip (road, parking lot) so nothing stands in a flower bed or behind a tree:
 // the nearest spot with (2*half+1) m x len m of pavement and no furniture ahead, in one of the
 // four directions, preferring to look away from the sun so zombies are lit from the front.
@@ -428,6 +428,42 @@ window.charView = async (name) => {
       return name;
     }
     await stepView(20);
+    await wait(300);
+    return name;
+  } else if (name === 'zombie_lod' || name === 'zombie_lod_side') {
+    // Sprite <-> 3D LOD (docs/SPRITE3D.md): one zombie of each modelled kind every few metres
+    // down an open strip, 4 m to 56 m, standing three-quarters toward us (_side: broadside, the
+    // way the sprites are drawn). Compare ?zlod=off|dither|pop|flip and the zstyles.
+    const ids = ['mon_zombie', 'mon_zombie_fat', 'mon_zombie_brute', 'mon_zombie_cop', 'mon_boomer', 'mon_zombie_soldier', 'mon_zombie_spitter', 'mon_zombie_runner', 'mon_zombie', 'mon_skeleton', 'mon_zombie_child', 'mon_zombie'];
+    const dists = [4, 7, 10, 14, 18, 23, 28, 33, 38, 44, 50, 56];
+    let spot;
+    try { spot = window.zombieOpenStrip(c, p, 58, 2); } catch { spot = window.zombieOpenStrip(c, p, 44, 2); }
+    c.teleport(spot.x + 0.5, spot.y + 0.5, p.z);
+    const yaw = Math.atan2(spot.fx, -spot.fy);
+    const deg = name === 'zombie_lod_side' ? 90 : 150;
+    // which side of the strip is open further: count paved tiles 6 m to the left and right
+    const m0 = c.game.map;
+    const openTiles = (sg) => { let n = 0; for (let f = 4; f < 40; f += 4) for (let w = 1; w <= 6; w++) if (m0.furnAt(Math.floor(spot.x + spot.fx * f - spot.fy * w * sg), Math.floor(spot.y + spot.fy * f + spot.fx * w * sg), p.z).id === 'f_null' && !/wall|fence/.test(m0.terAt(Math.floor(spot.x + spot.fx * f - spot.fy * w * sg), Math.floor(spot.y + spot.fy * f + spot.fx * w * sg), p.z).id)) n++; return n; };
+    const side = openTiles(-1) >= openTiles(1) ? 1 : -1;
+    const uids = ids.map((id, i) => {
+      // each at its own bearing, all on the side of the view the strip opens to (the other is
+      // often a wall), the near ones wide and the far ones toward the middle, so nobody hides
+      // behind a nearer one
+      const f = dists[i], s2 = f * Math.tan((-side * (34 - 2.8 * i) * Math.PI) / 180);
+      const uid = c.spawnMonster(id, Math.round(spot.fx * f - spot.fy * s2), Math.round(spot.fy * f + spot.fx * s2), { friendly: true });
+      const mm = uid === null ? null : byUid(uid);
+      if (!mm) { console.warn(`charView: could not spawn ${id} at ${f} m`); return uid; }
+      mm.type = { ...mm.type, flags: [...mm.type.flags, 'IMMOBILE'] };
+      mm.facing = yaw + (deg * Math.PI) / 180;
+      return uid;
+    });
+    c.look(yaw * 180 / Math.PI, -2);
+    c.settle();
+    await wait(600);
+    c.game.paused = true;
+    const mview = c.game.systems.find((s) => s.name === 'monster-view');
+    uids.forEach((uid) => { const mm = byUid(uid); if (mm) mm.facing = yaw + (deg * Math.PI) / 180; });
+    for (let i = 0; i < 20; i++) { mview?.update(c.game, 1 / 30); c.renderer.render(); await wait(30); }
     await wait(300);
     return name;
   } else if (name === 'windup') {
