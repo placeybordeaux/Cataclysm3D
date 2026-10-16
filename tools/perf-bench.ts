@@ -77,6 +77,8 @@ export const ROUTES: Record<string, Route> = {
   town60: { what: 'the same road at 60 mph', kind: 'town', mph: 60, seconds: 25 },
   city40: { what: 'into and through the biggest town within ~100 OMTs (seed 1: Columbia Falls, size 18) at 40 mph', kind: 'city', mph: 40, seconds: 30 },
   city60: { what: 'the same city road at 60 mph', kind: 'city', mph: 60, seconds: 25 },
+  // On foot (a brisk walk): what pops in when streaming has all the time it needs (docs/FAR_LOD.md).
+  citywalk: { what: 'the same city road at walking pace (3 mph)', kind: 'city', mph: 3, seconds: 40 },
   forest: { what: 'straight through thick forest at 40 mph (3D trees, flora LOD rings)', kind: 'forest', mph: 40, seconds: 20 },
   rural: { what: 'the longest straight road outside town at 60 mph', kind: 'rural', mph: 60, seconds: 25 },
   // Loads and teleports (the user's "huge blip" after a hot reload, docs/PERF.md): time from the
