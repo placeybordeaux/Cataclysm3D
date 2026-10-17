@@ -898,3 +898,19 @@ You work in a git worktree; the lead merges branches. Shared hot files — `src/
 `src/ui/keys.ts`, `ARCHITECTURE.md` — take **small, additive** edits only (new lines, new
 fields), never reformat or reorder them. Put your feature in your own files and wire it in with
 a few lines (e.g. `installMonsters(game, renderer)` from main.ts).
+
+## Far LOD (docs/FAR_LOD.md)
+
+`render/farLod.ts` (modes, the per-column `Handoff`), `farProxy.ts` (real-map proxies out to
+1.75x the draw radius from a hook-free scratch generator), `dissolve.ts` (screen-door fades of
+world meshes), wired by `farLodInstall.ts` from `main.ts`. A column beyond 1.5 chunks keeps its
+proxy/stand-in until `ChunkManager.columnComplete`, then its chunks dissolve in over it. Debug:
+`cdda.setFarLod`, `cdda.farLod()`, `cdda.restreamEdge(m)`, `cdda.holdBuilds(on)`.
+
+## Debug spawn menu
+
+Esc > Debug spawn (dev builds, or `?debugmenu=1`; `src/ui/debug_spawn.ts`): a working car ahead
+of you or with you at the wheel (BN status 2, full tanks and battery, unlocked), any vehicle,
+monster, item or NPC from a filtered list, time of day, weather, god mode. Goes through the
+`cdda.*` helpers. Real-input check: `--only debugspawn`.
+

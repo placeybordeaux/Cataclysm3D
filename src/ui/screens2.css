@@ -163,3 +163,8 @@
 body.lk-hovering #ui2 .ui2-hover-label { display: none !important; }
 /* Road atlas: towns you know of but haven't seen (src/ui/overmap_ui.ts). */
 #ui2 .om-label.city.atlas { color: var(--p-text-dim); font-style: italic; }
+
+/* Debug spawn menu (src/ui/debug_spawn.ts) */
+#ui2 .dbg-body { margin-top: calc(var(--u) * 2); }
+#ui2 .dbg-tab { display: flex; flex-direction: column; gap: calc(var(--u) * 2); }
+#ui2 .dbg-row { display: flex; flex-wrap: wrap; gap: calc(var(--u) * 2); }

@@ -1,6 +1,6 @@
 # Far LOD: why buildings pop in, and what to do about it
 
-Status: investigation (2026-10-15). Nothing here is built yet; the plan at the end is a proposal.
+Status: built (2026-10-17), default `proxy-dissolve`. Investigation first (2026-10-15), then what was built and measured at the end.
 
 ## What pops, and why: rendering, not the world sim
 
@@ -70,9 +70,73 @@ Two smaller contributors at the same edge:
    the stand-in or proxy holds until the whole building is ready. Small change in
    `placeholders.ts`; best together with 2 or 3.
 
-## Proposed plan
+## What was built
 
-Build 2 and 3 behind a switch (`?farlod=impostor|dissolve|proxy|proxy+dissolve`, Options), with
+Modes (`src/render/farLod.ts`; `?farlod=proxy-dissolve|proxy|dissolve|current`, Options > World
+detail > Far detail, `cdda.setFarLod`, persisted):
+
+* **proxy-dissolve** (default): far proxies, and the hand-off to chunks is a dissolve.
+* **proxy**: far proxies, hand-off in one frame.
+* **dissolve**: no proxies; stand-ins fade in, chunks dissolve in over them.
+* **current**: the old behaviour.
+
+Pieces:
+
+* **Far proxies** (`farProxy.ts`): per column, per tile the top of what stands there across its
+  levels (walls a storey, roofs and floors as slabs, ground-level tree crowns from 2.2 to 7 m) in
+  the atlas average colour of the tile (`AtlasTextureSource.averageColor`), greedy-merged into
+  boxes (2x2-tile cells beyond 11 chunks), out to 1.75x the draw radius, merged per 4x4 columns.
+  Columns the live map has are read from it (edits included); the rest come from a second
+  `WorldGenerator` sharing the live overmap, writing into a scratch `GameMap` with no chunk
+  hooks, dropped right after. Built in `requestIdleCallback` time (in the frame only after
+  500 ms without idle time, and never while the streaming is behind). The camera's far plane
+  follows the ring (200 m -> ~370 m at radius 8).
+* **Hand-off** (`Handoff`, run in the chunk manager's `afterUpdate`, so a chunk built this
+  frame is faded before it is drawn): a column more than 1.5 chunks out holds its proxy (or
+  stand-in) and keeps its chunks undrawn until every level the manager wants is shown
+  (`ChunkManager.columnComplete`: the same span and radii as entry creation, tower tops skipped
+  while driving), then the chunks dissolve in over 0.6 s while the cover dissolves out on the
+  complementary pixels. A level arriving after the hand-off fades in on its own; a rebuild of a
+  shown level (LOD flip, edit) just shows. Covers appearing at the far edge fade in.
+* **Dissolve** (`dissolve.ts`, `materials.ts` DISSOLVE_SOLID): 4x4 Bayer screen-door in the world
+  material; a fading mesh wears a shared clone of its page material per step (17 steps x in/out:
+  same program, no compile); fully out is simply not drawn. Non-world meshes (3D trees, glass,
+  puddles, prop cards) switch at half way.
+* **Per-storey hold**: stand-ins too go only when the hand-off says the column is done.
+
+Sharp edges: proxies have no furniture, vehicles or 3D tree shapes; proxy ground sits 0.2 m
+under the real ground; the scratch generator duplicates generation work for columns you'll
+later reach (mapgen is cheap: p50 0.1 ms per chunk-level, ~0.4 ms per proxy column incl.
+generation); a proxy built from scratch doesn't know edits until the live chunk exists.
+
+## Measured
+
+Real-input `farlod` scenario (`tools/realinput.ts --only farlod --gpu`): the benchmark's city
+road, camera still, chunk building held while everything beyond 60 m is dropped, then released
+and photographed; change per step above the animation floor (grass, clouds):
+
+| mode | worst single step | total change |
+|---|---|---|
+| current | 16.1 | 22.4 |
+| dissolve | 2.0 | 9.2 |
+| proxy | 1.6 | 5.2 |
+| proxy-dissolve | 1.5 | 4.9 |
+
+`current` puts most of the change in one frame (the stand-in boxes, far taller than the real
+buildings, swap for the meshes); with proxies there is less to change at all.
+
+Cost (`perf-bench city40`, Chromium on the GPU, 3440x1304, back to back on the same machine
+state): 883 frames `current` vs 863 `proxy-dissolve` in 30 s; main loop mean 22.0 -> 22.8 ms.
+The first version (building in the frame, a clone per fading mesh, whole-ring rescans every
+frame) cost 11-13 %.
+
+Tools: `tools/pop-report.py` (where chunks first appear, from a telemetry dump), the `citywalk`
+perf route, `cdda.restreamEdge(m)` and `cdda.holdBuilds(on)` for captures, `cdda.farLod()` stats.
+
+## The original plan
+
+
+Build 2 and 3 behind a switch (`?farlod=impostor|dissolve|proxy|proxy-dissolve`, Options), with
 4 under all of them, and measure each with the routes above plus a frame-strip capture of a
 building crossing the edge (real input, as with `beamflicker`). "impostor" stays the current
 behaviour for comparison.

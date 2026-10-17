@@ -61,6 +61,7 @@ import { deepLabScenarios } from './realinput_deeplab';
 import { headlightScenarios } from './realinput_headlights';
 import { beamScenarios } from './realinput_beam';
 import { farLodScenarios } from './realinput_farlod';
+import { debugSpawnScenarios } from './realinput_debugspawn';
 
 const argv = process.argv.slice(2);
 const opt = (n: string, d: string) => (argv.includes(n) ? argv[argv.indexOf(n) + 1] : d);
@@ -1688,6 +1689,8 @@ scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...headlightSce
 scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...beamScenarios({ page: () => page, x: () => x, js, check, toGameplay, sleep }));
 // Buildings arriving at the draw-distance edge (render/farLod.ts): dissolve over far proxies, per mode.
 scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...farLodScenarios({ page: () => page, x: () => x, js, check, toGameplay, sleep }));
+// Esc > Debug spawn (src/ui/debug_spawn.ts): a working car, at the wheel, a filtered monster.
+scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...debugSpawnScenarios({ x: () => x, js, check, toGameplay, sleep, shot }));
 // Run-over bodies (src/game/runoverFling.ts, render/chars/ragdoll.ts): W into a row of zombies, frame strips.
 scenarios.splice(scenarios.findIndex(([n]) => n === 'death'), 0, ...runoverScenarios({ page: () => page, x: () => x, js, check, toGameplay, sleep }));
 

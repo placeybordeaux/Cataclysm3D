@@ -9,6 +9,7 @@ import type { UiContext } from './context';
 import { logLine } from './format';
 import { messageTone } from './hud_logic';
 import { openScreen } from './screen2';
+import { debugMenuEnabled, openDebugSpawn } from './debug_spawn';
 
 // The in-game Esc menu (a pause menu: time stops whatever the pause setting says) and the full
 // message log ('P', or a click on the HUD's message feed), on ui2.
@@ -50,6 +51,8 @@ export function openEscMenu(ctx: UiContext, onQuit: () => void): Panel {
       },
     },
   ];
+  // Dev builds (or ?debugmenu=1): spawn a working car, monsters, items, NPCs; time and weather.
+  if (debugMenuEnabled()) entries.push({ label: 'Debug spawn', key: 'd', run: () => void openDebugSpawn(ctx) });
   // Dev builds: the style gallery (docs/GALLERY.md) in its own tab, so this game is untouched.
   if (import.meta.env.DEV)
     entries.push({ label: 'Style gallery (debug)', key: 'g', run: () => void window.open(`${location.pathname}?gallery`, '_blank', 'noopener') });
