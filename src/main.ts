@@ -45,6 +45,7 @@ import { installTacticalPause } from './pause';
 import { installScreens } from './screens/install';
 import { installChunkEviction } from './save/eviction';
 import { installPerf } from './perf/install';
+import { installFarLod } from './render/farLodInstall';
 import { installStairs, installStairNpcs } from './stairs';
 import { installStairsView } from './render/stairs/install';
 import { installLoadGate } from './loadgate/install';
@@ -168,7 +169,9 @@ async function main(): Promise<void> {
   const startPrefetch = () => void (params.get('prefetch') !== '0' && prefetch.start());
   if (!pending) startPrefetch();
   // Performance telemetry: F3 overlay, Shift+F3 dump, cdda.perf (src/perf, docs/PERF.md).
-  installPerf(game, renderer, api, prefetch);
+  const perf = installPerf(game, renderer, api, prefetch);
+  // Far LOD (render/farLod.ts, docs/FAR_LOD.md): proxies past the draw distance and the hand-off to chunks.
+  if (worldgen) installFarLod(game, renderer, worldgen, perf.placeholders, api);
 
   let last = performance.now();
   const loop = (now: number) => {

@@ -53,4 +53,6 @@ export interface TileTextureSource {
   sprite(name: string): TileFrame;
   /** Called once per frame before rendering: lazy sources upload newly packed frames. */
   flush?(): void;
+  /** Average opaque sRGB colour (0-255) of a terrain/furniture id's art, null without any (far proxies). */
+  averageColor?(id: string): [number, number, number] | null;
 }

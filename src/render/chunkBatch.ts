@@ -102,7 +102,8 @@ export class ChunkBatcher {
     const cand = new Map<string, { bx: number; by: number; groups: THREE.Group[] }>();
     for (const o of chunks.children) {
       const g = o as THREE.Group;
-      if (this.inBatch.has(g) || !g.visible) continue;
+      // (a group mid-dissolve wears per-group material clones: merging would draw it solid)
+      if (this.inBatch.has(g) || !g.visible || g.userData.fading) continue;
       let born = this.seen.get(g);
       if (born === undefined) this.seen.set(g, (born = now));
       if (now - born < this.settleMs) continue;

@@ -50,8 +50,14 @@ export class WorldGenerator implements ChunkGenerator {
   /** update_mapgen runs so far (salts their RNG so repeated updates differ) */
   private updates = 0;
 
-  constructor(readonly seed: number, readonly wg: WorldgenData, readonly game: GameData, readonly genVersion: number = WORLDGEN_VERSION) {
-    this.overmap = new Overmap(seed, wg.overmap, genVersion);
+  /**
+   * `overmap`: share another generator's (render/farProxy.ts runs a second generator into a
+   * scratch map for far proxies: same seed, so the same overmap; generating it twice would
+   * double the region work and could drift if the live one changes at runtime).
+   */
+  constructor(readonly seed: number, readonly wg: WorldgenData, readonly game: GameData, readonly genVersion: number = WORLDGEN_VERSION, overmap?: Overmap) {
+    if (overmap && (overmap.seed !== seed || overmap.genVersion !== genVersion)) throw new Error(`shared overmap is seed ${overmap.seed} v${overmap.genVersion}, generator wants ${seed} v${genVersion}`);
+    this.overmap = overmap ?? new Overmap(seed, wg.overmap, genVersion);
     for (const m of Object.values<any>(game.misc?.ter_furn_migration ?? {})) {
       if (m.from_ter && m.to_ter) this.terMigration.set(m.from_ter, { ter: m.to_ter, furn: m.to_furn });
       if (m.from_furn && m.to_furn) this.furnMigration.set(m.from_furn, m.to_furn);

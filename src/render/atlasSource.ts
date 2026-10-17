@@ -201,6 +201,11 @@ export class AtlasTextureSource implements TileTextureSource {
     return this.conv(hit?.fg ?? hit?.bg, false) ?? this.fallback.sprite(name);
   }
 
+  /** Average opaque sRGB colour (0-255) of an id's atlas sprite, or null without art (far proxies, farProxy.ts). */
+  averageColor(id: string): RGB | null {
+    return this.average(id);
+  }
+
   /** Average opaque colour of an id's atlas sprite (memoised), for tinting procedural faces. */
   private average(id: string): RGB | null {
     if (this.avgCache.has(id)) return this.avgCache.get(id)!;

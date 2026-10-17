@@ -14,7 +14,7 @@ import { RoomMap } from '../render/rooms';
 import { Telemetry, type MeshKind } from './telemetry';
 import { PerfOverlay } from './overlay';
 import { ringToFrames, summarize, type PerfDump } from './analyze';
-import { installPlaceholders } from '../render/placeholders';
+import { installPlaceholders, type PlaceholderLayer } from '../render/placeholders';
 import { installChunkBatch } from '../render/chunkBatch';
 import { tasks } from './tasks';
 import { charLayers } from '../render/chars/index';
@@ -39,6 +39,8 @@ export interface PerfApi {
   summary(seconds?: number): ReturnType<typeof summarize>;
   download(seconds?: number): string;
   reset(): void;
+  /** the stand-in layer (render/farLod.ts hands columns over through it) */
+  placeholders: PlaceholderLayer;
 }
 
 export function installPerf(game: Game, renderer: Renderer, api: DebugApi, prefetch?: ChunkPrefetcher): PerfApi {
@@ -377,6 +379,7 @@ export function installPerf(game: Game, renderer: Renderer, api: DebugApi, prefe
 
   const perf: PerfApi = {
     tel,
+    placeholders,
     show: (on = !overlay.visible) => show(on),
     detail: (on = !tel.detail) => setDetail(on),
     gpu: (on = !gpuOn) => (gpuOn = on && !!ext),

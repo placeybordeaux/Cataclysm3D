@@ -27,6 +27,21 @@ export class PlaceholderLayer {
   private meshes = new Map<number, THREE.Mesh>();
   private built = new Set<number>();
   private tick = 0;
+  /**
+   * farLod.ts: when set, a stand-in goes when the hand-off says its column is done (every
+   * wanted level shown and dissolved in) instead of when its ground level is built, and no
+   * stand-in is made where `covered` (a far proxy stands there).
+   */
+  doneFn: ((cx: number, cy: number) => boolean) | null = null;
+  covered: ((cx: number, cy: number) => boolean) | null = null;
+  /** stand-ins made at the last update (farLod.ts fades them in) */
+  readonly fresh: THREE.Mesh[] = [];
+
+  /** The stand-in drawn for column (cx, cy), null if none or nothing to draw (fields, roads). */
+  meshAt(cx: number, cy: number): THREE.Mesh | null {
+    const m = this.meshes.get(colKey(cx, cy));
+    return m && m.parent ? m : null;
+  }
 
   constructor(public overmap: OmtLookup | null, private white: () => TileFrame) {
     this.group.name = 'placeholders';
@@ -44,12 +59,18 @@ export class PlaceholderLayer {
       if (this.meshes.size) this.clear();
       return;
     }
+    this.fresh.length = 0;
     const built = this.built;
     built.clear();
-    forEachEntry((e) => {
-      if (e.z === 0 && e.shown) built.add(colKey(e.cx, e.cy));
-    });
     const pcx = Math.floor(px / CHUNK), pcy = Math.floor(py / CHUNK);
+    const done = this.doneFn, covered = this.covered;
+    if (done) {
+      const r = radius + 1;
+      for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) if (done(pcx + dx, pcy + dy) || covered?.(pcx + dx, pcy + dy)) built.add(colKey(pcx + dx, pcy + dy));
+    } else
+      forEachEntry((e) => {
+        if (e.z === 0 && e.shown) built.add(colKey(e.cx, e.cy));
+      });
     const R = radius + 0.5;
     // drop stand-ins whose chunk is built or out of range
     for (const [k, m] of this.meshes) {
@@ -97,6 +118,7 @@ export class PlaceholderLayer {
     this.group.add(mesh);
     this.meshes.set(k, mesh);
     this.stats.built++;
+    this.fresh.push(mesh);
   }
 
   private remove(k: number, m: THREE.Mesh): void {

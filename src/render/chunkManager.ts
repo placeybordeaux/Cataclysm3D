@@ -86,6 +86,8 @@ type WorkClass = 'hole' | 'high' | 'edit' | 'up' | 'down' | 'trees';
 
 /** What telemetry (src/perf) may read of an entry. */
 export type ChunkEntryView = Readonly<Pick<Entry, 'cx' | 'cy' | 'z' | 'shown' | 'wantT' | 'visible' | 'job'>>;
+/** What the far-LOD hand-off (farLod.ts) may read of an entry: its group too, to fade it. */
+export type ChunkGroupView = Readonly<Pick<Entry, 'cx' | 'cy' | 'z' | 'shown' | 'visible' | 'group'>>;
 
 /**
  * Optional observer (src/perf/telemetry.ts). Called only when installed, so an idle game pays
@@ -182,6 +184,8 @@ export class ChunkManager {
   gateBudgetMs = 30;
   /** the view is curtained this frame (telemetry) */
   curtained = false;
+  /** debug (far-LOD captures, cdda.holdBuilds): entries are made and kept, nothing is built */
+  holdBuilds = false;
   private pendingLast = 0;
   private curtainSince = -1;
   boostSlackShare = 0.7;
@@ -309,6 +313,37 @@ export class ChunkManager {
     for (const e of this.entries.values()) fn(e);
   }
 
+  /** One entry (wanted chunk), or undefined (not wanted, or not created yet). */
+  entryAt(cx: number, cy: number, z: number): ChunkGroupView | undefined {
+    return this.entries.get(key(cx, cy, z));
+  }
+
+  /**
+   * Is every surface level (z >= 0) that column (cx, cy) wants, as of the last update, shown?
+   * The same rule the entry creation follows (levels.ts span and radii, tower tops skipped
+   * while driving), so a column the manager won't finish at speed still counts as complete.
+   * The far-LOD hand-off (farLod.ts) holds the column's proxy or stand-in until then.
+   */
+  columnComplete(cx: number, cy: number): boolean {
+    const u = this.lastFrame;
+    if (!u.set) return false;
+    const lv = this.levels, span = this.spanScratch;
+    const dx = cx - u.pcx, dy = cy - u.pcy;
+    lv.columnSpan(cx, cy, u.pz, lv.policy, span);
+    const chi = u.driving && (dx || dy) ? Math.min(span[1], u.pz + this.levelsAbove) : span[1];
+    let any = false;
+    for (let z = Math.max(0, span[0]); z <= chi; z++) {
+      const rz = lv.radiusAt(cx, cy, z, u.pz);
+      if (rz < 0 || (rz < u.R && dx * dx + dy * dy > (rz + 0.5) * (rz + 0.5))) continue;
+      const e = this.entries.get(key(cx, cy, z));
+      if (!e || !e.shown) return false;
+      any = true;
+    }
+    return any;
+  }
+  /** what columnComplete needs of the last update */
+  private readonly lastFrame = { set: false, pcx: 0, pcy: 0, pz: 0, R: 0, driving: false };
+
   /** Force every chunk to rebuild (texture source swap, save loaded, season change). */
   invalidateAll(): void {
     for (const e of this.entries.values()) {
@@ -318,6 +353,23 @@ export class ChunkManager {
       e.deps = this.depsOf(e.cx, e.cy, e.z);
       e.chunk = e.deps[0]!;
     }
+  }
+
+  /**
+   * Drop every entry whose nearest edge is more than `dist` m from (px, py): they are wanted
+   * again next frame and stream back in as if just reached (far-LOD captures, cdda.restreamEdge).
+   */
+  dropBeyond(px: number, py: number, dist: number): number {
+    let n = 0;
+    for (const [k, e] of this.entries) {
+      const nx = Math.max(e.cx * CHUNK, Math.min(px, e.cx * CHUNK + CHUNK));
+      const ny = Math.max(e.cy * CHUNK, Math.min(py, e.cy * CHUNK + CHUNK));
+      if (Math.hypot(nx - px, ny - py) <= dist) continue;
+      this.dispose(e);
+      this.entries.delete(k);
+      n++;
+    }
+    return n;
   }
 
   /** Rebuild one chunk's mesh (keeps the old one up meanwhile): a stair flight solved next door. */
@@ -389,6 +441,8 @@ export class ChunkManager {
     lv.eye.z = pz;
     lv.beginFrame();
     const driving = !unlimited && Math.hypot(this.vel.x, this.vel.y) > 8;
+    const lf = this.lastFrame;
+    lf.set = true; lf.pcx = pcx; lf.pcy = pcy; lf.pz = pz; lf.R = R; lf.driving = driving;
     // indexed loops and a reused span pair: this runs over ~200 columns and ~1000 entries
     // every frame, and destructuring iterators allocated per item (perf-bench horde: the top
     // allocation site after the A* fix)
@@ -471,6 +525,7 @@ export class ChunkManager {
     let built = 0;
     const pctx = Math.floor(px / CHUNK), pcty = Math.floor(py / CHUNK);
     for (const e of dirty) {
+      if (this.holdBuilds) break;
       // the player's own chunk or a neighbour was edited (a door, a smashed wall): show it
       // promptly. LOD flips (near/far volumes) while moving are not urgent.
       // Never-built chunks next to the player (teleport, load) are urgent too: until they
@@ -829,6 +884,8 @@ export class ChunkManager {
         opacity: s.opacity, fadeNear: s.fadeNear,
       })), bounds);
       if (!e.visible) e.sprites.setVisible(false);
+      // dissolve.ts toggles a fading chunk's prop cards with its non-dithering meshes
+      g.userData.sprites = e.sprites;
     }
   }
 

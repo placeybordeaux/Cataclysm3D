@@ -414,6 +414,27 @@ function patchWorldVertex(shader: Shader, lm = false): void {
 
 const worldCache = new Map<THREE.Texture, { mat: THREE.MeshLambertMaterial; depth: THREE.MeshDepthMaterial }>();
 
+/**
+ * Screen-door dissolve for world geometry (dissolve.ts, farLod.ts): a fragment is drawn when
+ * the 4x4 Bayer threshold at its pixel is below uDissolve (fading in), or at or above it when
+ * uDissolveOut is set (fading out). Two meshes at the same uDissolve, one in and one out,
+ * cover complementary pixels: a chunk dissolving in over its far proxy never shows both or
+ * neither. The cached page materials share DISSOLVE_SOLID (always drawn); a fading mesh gets a
+ * clone with its own pair (same program: no recompile).
+ */
+export const DISSOLVE_SOLID = { uDissolve: { value: 1 }, uDissolveOut: { value: 0 } };
+const DISSOLVE_FRAG = /* glsl */ `
+uniform float uDissolve;
+uniform float uDissolveOut;
+float dissolveBayer(vec2 p) {
+  ivec2 i = ivec2(mod(p, 4.0));
+  int m[16] = int[16](0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5);
+  return (float(m[i.x + i.y * 4]) + 0.5) / 16.0;
+}
+`;
+const DISSOLVE_TEST = /* glsl */ `if (uDissolve < 0.999 || uDissolveOut > 0.5) { bool under = dissolveBayer(gl_FragCoord.xy) < uDissolve; if (under == (uDissolveOut > 0.5)) discard; }
+	#include <clipping_planes_fragment>`;
+
 /** Material for merged chunk geometry textured from one atlas page. Cached per page. */
 export function worldMaterials(page: THREE.Texture): { mat: THREE.MeshLambertMaterial; depth: THREE.MeshDepthMaterial } {
   let m = worldCache.get(page);
@@ -427,8 +448,11 @@ export function worldMaterials(page: THREE.Texture): { mat: THREE.MeshLambertMat
     patchWorldVertex(shader, true);
     patchBandedLambert(shader, 'world');
     addNormalOutput(shader, true, 1);
+    Object.assign(shader.uniforms, DISSOLVE_SOLID);
+    shader.fragmentShader = replaceOnce(DISSOLVE_FRAG + shader.fragmentShader, '#include <clipping_planes_fragment>', DISSOLVE_TEST);
   };
   mat.customProgramCacheKey = () => 'cdda-world';
+  (mat.userData as { worldPage?: boolean }).worldPage = true;
   (mat.userData as any).mrt = true;
   // Shadow casters need the same atlas-rect alpha test (tree canopies) and wall cut.
   const depth = new THREE.MeshDepthMaterial({ map: page, alphaTest: 0.5, depthPacking: THREE.RGBADepthPacking });
