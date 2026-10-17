@@ -2,7 +2,7 @@ import { Box3, type Mesh } from 'three';
 import type * as THREE from 'three';
 import type { DebugApi } from '../debug';
 import type { Game } from '../game/game';
-import { CHUNK } from '../world/coords';
+import { CHUNK, LEVEL_HEIGHT } from '../world/coords';
 import { GameMap } from '../world/map';
 import { WorldGenerator } from '../world/worldgen';
 import { registerOption } from '../ui/options';
@@ -40,6 +40,7 @@ export function installFarLod(game: Game, renderer: Renderer, worldgen: WorldGen
   });
   renderer.scene.add(proxies.group);
   proxies.yieldTo = () => chunks.behind;
+  proxies.speed = () => Math.hypot(chunks.vel.x, chunks.vel.y);
   proxies.startIdle();
   const handoff = new Handoff(chunks, placeholders, proxies, (cx, cy) => {
     const t = chunks.levels.columnTop(cx, cy);
@@ -183,6 +184,20 @@ export function installFarLod(game: Game, renderer: Renderer, worldgen: WorldGen
       }
     out.sort((a2, b) => Math.abs(b.diff) - Math.abs(a2.diff));
     return { checked: out.length, worst: out.slice(0, n), meanAbs: +(out.reduce((s2, o) => s2 + Math.abs(o.diff), 0) / Math.max(1, out.length)).toFixed(2) };
+  };
+  /**
+   * Debug: how much of column (cx, cy) is drawn, by anyone: the top of the highest level its
+   * chunks show from the ground up, or what the proxy layer draws (proxy, solo cover, cap).
+   */
+  a.columnDrawnTop = (cx: number, cy: number) => {
+    let z = -1;
+    for (let k = 0; k <= 12; k++) {
+      const e = chunks.entryAt(cx, cy, k);
+      if (!e || !e.shown || !e.visible) break;
+      z = k;
+    }
+    const chunkTop = z < 0 ? -Infinity : (z + 1) * LEVEL_HEIGHT;
+    return { chunks: chunkTop, proxy: proxies.drawnTop(cx, cy), full: proxies.proxyTop(cx, cy) };
   };
   /** Debug: a column's proxy source and the live chunks' wall/tree counts per level. */
   a.proxyColumn = (cx: number, cy: number) => {

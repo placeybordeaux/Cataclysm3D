@@ -3,7 +3,7 @@ import type { TerrainDef } from '../data/types';
 import { CHUNK, LEVEL_HEIGHT, MAX_Z } from '../world/coords';
 import type { Chunk, GameMap } from '../world/map';
 import { isAir } from '../world/levels';
-import { GeomBuilder, type V3 } from './geometry';
+import type { V3 } from './geometry';
 import { worldMaterials } from './materials';
 import type { TileFrame } from './textureSource';
 import { terrainShape } from './tileKinds';
@@ -43,7 +43,13 @@ const ROOF_SLOPE = 0.5;
 const QF = 18;
 const BLOCK = 4;
 
-const enum K { None, Ground, Slab, Wall, Half, Tree, Shrub }
+/** Lattice: see-through impassable terrain (railings, fences, radio tower girders). */
+const enum K { None, Ground, Slab, Wall, Half, Tree, Shrub, Lattice }
+/** A floor or roof with no wall under it (bridge deck, catwalk, overhang) is this thick. */
+const SLAB = 0.3;
+/** A lattice stacked over this many levels or more is a mast: drawn as a thin post per tile. */
+const MAST_LEVELS = 2;
+const MAST_W = 0.3;
 
 export interface TileLook {
   kind: K;
@@ -75,7 +81,8 @@ export function tileLook(t: TerrainDef, art: [number, number, number] | null, br
         : shape === 'halfwall' ? K.Half
           : shape === 'tree' ? K.Tree
             : shape === 'shrub' ? K.Shrub
-              : K.Ground;
+              : shape === 'fence' ? K.Lattice
+                : K.Ground;
   const bright = kind === K.Tree ? bright0 * CANOPY_LIFT : bright0;
   const name = String((t as { color?: unknown }).color ?? '').replace(/^c_/, '');
   const s = art ?? NAMED[name] ?? [120, 120, 120];
@@ -95,6 +102,17 @@ export function buildColumnQuads(cx: number, cy: number, levels: readonly (Chunk
   const side = new Uint32Array(n * n);
   /** the top is a ground-level tree crown: its sides hang from CROWN_LO, open below */
   const crown = new Uint8Array(n * n);
+  /**
+   * The top is a floor or roof with no wall right under it: its sides are a SLAB-thick edge,
+   * not a wall to the ground (NaN = stands on the ground). Without it a bridge deck, a catwalk
+   * or a radio tower's platforms read as a solid block.
+   */
+  const floatBot = new Float32Array(n * n).fill(NaN);
+  /** per tile: the level below had a wall there (what a slab on top rests on) */
+  let wallBelow = new Uint8Array(CHUNK * CHUNK), wallHere = new Uint8Array(CHUNK * CHUNK);
+  /** per tile: lattice levels (lowest, highest, how many) and its colour */
+  const latLo = new Int8Array(CHUNK * CHUNK).fill(127), latHi = new Int8Array(CHUNK * CHUNK).fill(-1), latN = new Uint8Array(CHUNK * CHUNK);
+  const latCol = new Uint32Array(CHUNK * CHUNK);
   const q = (v: number) => Math.max(0, Math.min(1023, Math.round(v * 1023)));
   const pack = (c: readonly number[]) => (q(c[0]) << 20) | (q(c[1]) << 10) | q(c[2]);
   const unpack = (p: number): V3 => [((p >>> 20) & 1023) / 1023, ((p >>> 10) & 1023) / 1023, (p & 1023) / 1023];
@@ -132,12 +150,21 @@ export function buildColumnQuads(cx: number, cy: number, levels: readonly (Chunk
               roofD[i] = Math.min(roofD[i], m + 1);
             }
     }
+    wallHere.fill(0);
     for (let ly = 0; ly < CHUNK; ly++)
       for (let lx = 0; lx < CHUNK; lx++) {
         const L = look(c.ter[ly * CHUNK + lx], z);
+        const ti = ly * CHUNK + lx;
+        if (L.kind === K.Wall || L.kind === K.Half) wallHere[ti] = 1;
         let h: number;
         switch (L.kind) {
           case K.None: continue;
+          case K.Lattice:
+            latLo[ti] = Math.min(latLo[ti], z);
+            latHi[ti] = Math.max(latHi[ti], z);
+            latN[ti]++;
+            latCol[ti] = pack(L.col);
+            continue;
           case K.Ground:
             h = z === 0 ? GROUND_Y : L.pitched && pitch ? base + Math.min(roofD[ly * CHUNK + lx] - 0.5, 6) * ROOF_SLOPE : base + 0.1;
             break;
@@ -156,8 +183,10 @@ export function buildColumnQuads(cx: number, cy: number, levels: readonly (Chunk
           top[i] = pack(k === 1 ? L.col : [L.col[0] * k, L.col[1] * k, L.col[2] * k]) | 0x40000000;
           if (L.kind === K.Wall || L.kind === K.Half || L.kind === K.Tree || L.kind === K.Shrub) side[i] = pack(L.col) | 0x40000000;
           crown[i] = L.kind === K.Tree && z === 0 ? 1 : 0;
+          floatBot[i] = L.kind === K.Ground && z > 0 && !wallBelow[ti] ? H[i] - SLAB : NaN;
         }
       }
+    [wallBelow, wallHere] = [wallHere, wallBelow];
   }
   const out: number[] = [];
   const quad = (a: V3, b: V3, c: V3, d: V3, nn: V3, col: V3) => out.push(...a, ...b, ...c, ...d, ...nn, ...col);
@@ -214,6 +243,13 @@ export function buildColumnQuads(cx: number, cy: number, levels: readonly (Chunk
         const h = H[k], lo = hAt(i + di, j + dj);
         const sc = side[k] || top[k];
         if (h <= lo + 0.05 || top[k] === 0) { flush(b); continue; }
+        const fb = floatBot[k];
+        if (!Number.isNaN(fb)) {
+          // a floating deck: its edge only
+          flush(b);
+          if (h > Math.max(lo, fb) + 0.05) edge(a, b, b + 1, Math.max(lo, fb), h, unpack(sc));
+          continue;
+        }
         if (crown[k]) {
           // a tree: canopy above CROWN_LO, trunks and shade below it (open underneath, the
           // trees' proxies let the eye through to a pale road far behind: a bright line)
@@ -229,6 +265,41 @@ export function buildColumnQuads(cx: number, cy: number, levels: readonly (Chunk
       }
       flush(n);
     }
+  }
+  // masts: a lattice stacked over levels (radio towers) as thin posts, one per tile
+  for (let ti = 0; ti < CHUNK * CHUNK; ti++) {
+    if (latN[ti] < MAST_LEVELS) continue;
+    const x = bx + (ti % CHUNK) + 0.5, zc = by + Math.floor(ti / CHUNK) + 0.5, w = MAST_W / 2;
+    const lo = latLo[ti] === 0 ? GROUND_Y : latLo[ti] * LEVEL_HEIGHT, hi = (latHi[ti] + 1) * LEVEL_HEIGHT;
+    const c0 = unpack(latCol[ti]), col: V3 = [c0[0] * 0.8, c0[1] * 0.8, c0[2] * 0.8];
+    const x0 = x - w, x1 = x + w, z0 = zc - w, z1 = zc + w;
+    quad([x0, lo, z1], [x1, lo, z1], [x1, hi, z1], [x0, hi, z1], [0, 0, 1], col);
+    quad([x1, lo, z0], [x0, lo, z0], [x0, hi, z0], [x1, hi, z0], [0, 0, -1], col);
+    quad([x1, lo, z1], [x1, lo, z0], [x1, hi, z0], [x1, hi, z1], [1, 0, 0], col);
+    quad([x0, lo, z0], [x0, lo, z1], [x0, hi, z1], [x0, hi, z0], [-1, 0, 0], col);
+    quad([x0, hi, z1], [x1, hi, z1], [x1, hi, z0], [x0, hi, z0], [0, 1, 0], col);
+  }
+  return Float32Array.from(out);
+}
+
+/**
+ * The part of a column's quads above height `y` (farLod.ts caps: the storeys the chunks don't
+ * draw). Proxy quads are axis-aligned: tops are kept if above `y`; walls are cut at `y` (the
+ * corners below it raised to it) and dropped when wholly below.
+ */
+export function clipQuads(quads: Float32Array, y: number): Float32Array {
+  const out: number[] = [];
+  for (let o = 0; o < quads.length; o += QF) {
+    const ny = quads[o + 13];
+    let lo = Infinity, hi = -Infinity;
+    for (let v = 0; v < 4; v++) {
+      lo = Math.min(lo, quads[o + v * 3 + 1]);
+      hi = Math.max(hi, quads[o + v * 3 + 1]);
+    }
+    if (hi <= y + 0.01) continue;
+    const q = Array.from(quads.subarray(o, o + QF));
+    if (Math.abs(ny) < 0.5 && lo < y) for (let v = 0; v < 4; v++) q[v * 3 + 1] = Math.max(q[v * 3 + 1], y);
+    out.push(...q);
   }
   return Float32Array.from(out);
 }
@@ -249,6 +320,8 @@ interface Col {
   stale: boolean;
   /** live chunks it was built from: levels present and their versions (liveSig) */
   sig: number;
+  /** while hidden behind its chunks: the part above what they draw (a tower's top storeys) */
+  cap: { y: number; mesh: THREE.Mesh | null; quads: Float32Array } | null;
 }
 
 interface Block {
@@ -294,6 +367,10 @@ export class FarProxyLayer {
   coarseFrom = 11;
   /** ms per frame for building proxies when the browser gives no idle time (startIdle) */
   budgetMs = 0.75;
+  /** the same while the player stands still (a load, a teleport: frames have room, the ring is empty) */
+  stillBudgetMs = 4;
+  /** player speed (m/s), for the budget (farLodInstall.ts sets it from the chunk manager) */
+  speed: () => number = () => 0;
   /** a block takes in new columns at most this often (they arrive at the ring's rim, far off) */
   mergeEveryMs = 500;
   /** debug (cdda.proxyView): draw every proxy, hidden ones too, to compare them with the chunks */
@@ -302,7 +379,7 @@ export class FarProxyLayer {
   yieldTo: () => boolean = () => false;
   /** linear brightness of the tile averages (by eye against the chunks at the edge) */
   bright = 0.85;
-  readonly stats = { columns: 0, built: 0, live: 0, blocks: 0, quads: 0, lastMs: 0, genMs: 0 };
+  readonly stats = { columns: 0, built: 0, live: 0, blocks: 0, quads: 0, lastMs: 0, genMs: 0, buildMs: 0, mergeMs: 0, idleRuns: 0, frameRuns: 0 };
   private cols = new Map<number, Col>();
   /**
    * Columns the hand-off has hidden (their chunks show), by key, whether or not their proxy
@@ -348,6 +425,20 @@ export class FarProxyLayer {
     return top;
   }
 
+  /** Debug (cdda.farLod tower check): the highest point this layer draws of column (cx, cy) now. */
+  drawnTop(cx: number, cy: number): number {
+    const c = this.cols.get(colKey(cx, cy));
+    if (!c) return -Infinity;
+    if (!c.hidden || c.solo) return this.proxyTop(cx, cy);
+    if (c.cap?.mesh) {
+      let top = -Infinity;
+      const q = clipQuads(c.quads, c.cap.y);
+      for (let o = 0; o < q.length; o += QF) for (let v = 0; v < 4; v++) top = Math.max(top, q[o + v * 3 + 1]);
+      return top;
+    }
+    return -Infinity;
+  }
+
   /** Debug (cdda.proxyColumn): how column (cx, cy)'s proxy was made. */
   describe(cx: number, cy: number): { live: boolean; stale: boolean; hidden: boolean; quads: number; top: number } | null {
     const c = this.cols.get(colKey(cx, cy));
@@ -388,6 +479,7 @@ export class FarProxyLayer {
     const c = this.cols.get(k);
     if (!c) return;
     this.dropSolo(c);
+    if (!hidden) this.dropCap(c);
     if (c.hidden === hidden) return;
     c.hidden = hidden;
     // Back from its chunks: if they differ from what it was built of (levels built since, a
@@ -429,6 +521,37 @@ export class FarProxyLayer {
     }
     pos.addUpdateRange(r.start * 3, nv * 3);
     pos.needsUpdate = true;
+  }
+
+  /**
+   * Draw the part of column (cx, cy)'s proxy above height `y` on its own (its chunks draw
+   * the levels below; a tower's upper storeys are only built nearer, and not at all while
+   * driving), or no cap (null). Cheap to call every frame: only a new `y` or a rebuilt
+   * proxy changes anything.
+   */
+  setCap(cx: number, cy: number, y: number | null): void {
+    const c = this.cols.get(colKey(cx, cy));
+    if (!c) return;
+    if (y === null) {
+      this.dropCap(c);
+      return;
+    }
+    if (c.cap && Math.abs(c.cap.y - y) < 0.01 && c.cap.quads === c.quads) return;
+    this.dropCap(c);
+    const part = clipQuads(c.quads, y);
+    const cl: Col = { ...c, quads: part };
+    const mesh = part.length ? this.meshOf([cl], `proxy cap ${cx},${cy}`) : null;
+    if (mesh) this.group.add(mesh);
+    c.cap = { y, mesh, quads: c.quads };
+  }
+
+  private dropCap(c: Col): void {
+    if (!c.cap) return;
+    if (c.cap.mesh) {
+      this.group.remove(c.cap.mesh);
+      c.cap.mesh.geometry.dispose();
+    }
+    c.cap = null;
   }
 
   /** Back into its block (a fade-in finished, or it was abandoned). */
@@ -496,6 +619,7 @@ export class FarProxyLayer {
       if ((c.cx - pcx) ** 2 + (c.cy - pcy) ** 2 <= keep) continue;
       if (c.stale) this.staleN--;
       this.dropSolo(c);
+      this.dropCap(c);
       this.cols.delete(k);
       this.markBlock(c.cx, c.cy, false);
     }
@@ -505,8 +629,10 @@ export class FarProxyLayer {
     // is behind: the proxy is what shows there); the rest share a small budget.
     if (t0 - this.lastIdle > 500) {
       const near = this.scanAt.missing && this.missingWithin(pcx, pcy, R + 3);
-      const end = t0 + (this.yieldTo() && !near ? this.budgetMs / 3 : this.budgetMs);
+      const still = this.speed() < 1;
+      const end = t0 + (still ? this.stillBudgetMs : this.yieldTo() && !near ? this.budgetMs / 3 : this.budgetMs);
       let first = near;
+      this.stats.frameRuns++;
       this.work(() => (first ? ((first = false), false) : performance.now() > end));
     }
     this.stats.columns = this.cols.size;
@@ -536,7 +662,10 @@ export class FarProxyLayer {
       // counts as idle time (a busy page gets callbacks with ~0 ms left, all frame long)
       if (d.timeRemaining() >= 2) {
         this.lastIdle = performance.now();
-        if (this.at.on && !this.yieldTo()) this.work(() => d.timeRemaining() < 2);
+        if (this.at.on && !this.yieldTo()) {
+          this.stats.idleRuns++;
+          this.work(() => d.timeRemaining() < 2);
+        }
       }
       ric(loop);
     };
@@ -610,7 +739,9 @@ export class FarProxyLayer {
         b.ranges.set(colKey(c.cx, c.cy), { start, quads: c.quads });
         start += (c.quads.length / QF) * 4;
       }
+      const tm = performance.now();
       b.mesh = this.meshOf(members, `proxy block ${bx},${by}`);
+      this.stats.mergeMs += performance.now() - tm;
       if (b.mesh) {
         this.group.add(b.mesh);
         for (const c of members) if (!this.inBlock(c)) this.applyVis(c);
@@ -651,7 +782,9 @@ export class FarProxyLayer {
       levels.push(c && !c.empty ? c : null);
     }
     if (scratchUsed) this.stats.genMs += performance.now() - t0;
+    const tq = performance.now();
     const quads = buildColumnQuads(cx, cy, levels, (i, z) => this.look(i, maps[z]), cell, this.deps.pitch());
+    this.stats.buildMs += performance.now() - tq;
     if (scratchUsed) {
       for (let z = top; z >= 0; z--) if (scratch.hasChunk(cx, cy, z)) scratch.evictChunk(scratch.chunk(cx, cy, z)!);
       (scratch.generator as { forgetColumn?(cx: number, cy: number): void } | null)?.forgetColumn?.(cx, cy);
@@ -659,7 +792,8 @@ export class FarProxyLayer {
     const old = this.cols.get(colKey(cx, cy));
     if (old?.stale) this.staleN--;
     if (old) this.dropSolo(old);
-    this.cols.set(colKey(cx, cy), { cx, cy, quads, hidden: this.hiddenKeys.has(colKey(cx, cy)), solo: null, live: fromLive, born: performance.now(), stale: false, sig: this.liveSig(cx, cy) });
+    if (old) this.dropCap(old);
+    this.cols.set(colKey(cx, cy), { cx, cy, quads, hidden: this.hiddenKeys.has(colKey(cx, cy)), solo: null, live: fromLive, born: performance.now(), stale: false, sig: this.liveSig(cx, cy), cap: null });
     this.stats.built++;
     if (fromLive) this.stats.live++;
     this.stats.quads += quads.length / QF;
@@ -667,26 +801,50 @@ export class FarProxyLayer {
     this.fresh.push([cx, cy]);
   }
 
+  /**
+   * One mesh of the columns' quads, the same attributes GeomBuilder.quadEx makes (white frame,
+   * vertex colours, no cut, full sky), written straight from the quad records: through
+   * GeomBuilder a 16-column block cost about as much as building the columns.
+   */
   private meshOf(cols: readonly Col[], name: string): THREE.Mesh | null {
+    let nq = 0;
+    for (const cl of cols) nq += cl.quads.length / QF;
+    if (nq === 0) return null;
     const f = this.deps.white();
-    const g = new GeomBuilder();
-    const n4: V3[] = [[0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0]];
-    const a: V3 = [0, 0, 0], b: V3 = [0, 0, 0], c: V3 = [0, 0, 0], d: V3 = [0, 0, 0];
-    const col = [0, 0, 0];
+    const nv = nq * 4;
+    const pos = new Float32Array(nv * 3), nrm = new Float32Array(nv * 3), col = new Float32Array(nv * 3);
+    const uv = new Float32Array(nv * 2), rect = new Float32Array(nv * 4), cut = new Float32Array(nv), sky = new Float32Array(nv).fill(1);
+    const index = nv > 65535 ? new Uint32Array(nq * 6) : new Uint16Array(nq * 6);
+    const du = f.uv[2] - f.uv[0], dv = f.uv[3] - f.uv[1];
+    let v = 0, ii = 0;
     for (const cl of cols) {
       const q = cl.quads;
       for (let o = 0; o < q.length; o += QF) {
-        a[0] = q[o]; a[1] = q[o + 1]; a[2] = q[o + 2];
-        b[0] = q[o + 3]; b[1] = q[o + 4]; b[2] = q[o + 5];
-        c[0] = q[o + 6]; c[1] = q[o + 7]; c[2] = q[o + 8];
-        d[0] = q[o + 9]; d[1] = q[o + 10]; d[2] = q[o + 11];
-        for (const v of n4) { v[0] = q[o + 12]; v[1] = q[o + 13]; v[2] = q[o + 14]; }
-        col[0] = q[o + 15]; col[1] = q[o + 16]; col[2] = q[o + 17];
-        g.quadEx(a, b, c, d, n4, [0, 0, 1, 1], f, col);
+        for (let k = 0; k < 4; k++, v++) {
+          pos[v * 3] = q[o + k * 3]; pos[v * 3 + 1] = q[o + k * 3 + 1]; pos[v * 3 + 2] = q[o + k * 3 + 2];
+          nrm[v * 3] = q[o + 12]; nrm[v * 3 + 1] = q[o + 13]; nrm[v * 3 + 2] = q[o + 14];
+          col[v * 3] = q[o + 15]; col[v * 3 + 1] = q[o + 16]; col[v * 3 + 2] = q[o + 17];
+          uv[v * 2] = k === 1 || k === 2 ? 1 : 0;
+          uv[v * 2 + 1] = k >= 2 ? 1 : 0;
+          rect[v * 4] = f.uv[0]; rect[v * 4 + 1] = f.uv[1]; rect[v * 4 + 2] = du; rect[v * 4 + 3] = dv;
+        }
+        const b = v - 4;
+        index[ii++] = b; index[ii++] = b + 1; index[ii++] = b + 2;
+        index[ii++] = b; index[ii++] = b + 2; index[ii++] = b + 3;
       }
     }
-    if (g.vertexCount === 0) return null;
-    const mesh = new THREE.Mesh(g.build(), worldMaterials(f.texture).mat);
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    g.setAttribute('normal', new THREE.BufferAttribute(nrm, 3));
+    g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+    g.setAttribute('uvRect', new THREE.BufferAttribute(rect, 4));
+    g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    g.setAttribute('cut', new THREE.BufferAttribute(cut, 1));
+    g.setAttribute('skyVis', new THREE.BufferAttribute(sky, 1));
+    g.setIndex(new THREE.BufferAttribute(index, 1));
+    g.computeBoundingSphere();
+    g.computeBoundingBox();
+    const mesh = new THREE.Mesh(g, worldMaterials(f.texture).mat);
     mesh.matrixAutoUpdate = false;
     mesh.castShadow = false;
     mesh.receiveShadow = true;
@@ -702,7 +860,10 @@ export class FarProxyLayer {
 
   /** Drop everything (look/season change, teleport, load: the next updates rebuild). */
   clear(): void {
-    for (const c of this.cols.values()) this.dropSolo(c);
+    for (const c of this.cols.values()) {
+      this.dropSolo(c);
+      this.dropCap(c);
+    }
     for (const b of this.blocks.values()) if (b.mesh) { this.group.remove(b.mesh); b.mesh.geometry.dispose(); }
     this.cols.clear();
     this.blocks.clear();

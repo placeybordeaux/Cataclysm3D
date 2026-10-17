@@ -176,6 +176,28 @@ Hand-off capture (`farlod`, HUD hidden: a tutorial toast had been counted as a p
 single step 16.4 current, 1.6 dissolve, 1.8 proxy, 2.1 proxy-dissolve; total change 22.8 /
 5.8 / 4.8 / 4.9.
 
+## Round 3 (2026-10-17): tall buildings vanish as you approach; a radio tower is a block
+
+* **Tower tops**: storeys above the eye's window are only built within R - 2 and not at all
+  while driving (levels.ts levelRadius, chunkManager), so the hand-off counted a tower's column
+  complete with its lower floors and hid the proxy; the rest vanished until much nearer (in the
+  heavier hazes the lower floors are faint too, so the whole building went). Now a handed-over
+  column keeps a **cap**: its proxy clipped at the top of the highest level the chunks draw
+  (`clipQuads`), raised once a late storey has faded in. `farlodleave` watches ten tall
+  buildings ahead while driving at 40 mph: the chunks alone drew as little as 16-25 % of their
+  height; with the caps all ten stay at 100 %.
+* **Radio towers**: `t_radio_tower` is see-through impassable terrain (a fence panel to the
+  mesher) that the proxy took for floor slabs, so the heightfield filled the tower's footprint
+  solid to the top. Lattice stacked over two or more levels is now a thin post per tile (a
+  mast), and a floor with no wall under it (platforms, bridge decks, catwalks, overhangs) is a
+  0.3 m deck instead of a box to the ground. The overmap silhouette no longer takes
+  `radio_tower` for a tall building (it matched `tower`). `farlodmast` shots.
+* **Building rate**: with almost no idle time (headless, or a busy page) the ring took 10+ s to
+  fill after a teleport. Block meshes are now written straight from the quad records (they cost
+  as much as building through GeomBuilder), and standing still gets a 4 ms in-frame budget.
+
+perf-bench city40, same machine state: 858 frames `current` vs 800 `proxy-dissolve` (-7 %).
+
 ## The original plan
 
 

@@ -48,6 +48,8 @@ const GROUND_Y = -0.6;
 
 function classify(id: string): Kind {
   if (/^forest|swamp/.test(id)) return 'forest';
+  // a lattice mast, not a building (it matched 'tower' below and stood as a tall block)
+  if (/^radio_tower/.test(id)) return 'none';
   if (/^(field|road|river|lake|bridge|open_air|empty_rock|solid_earth|hiway|railroad|sewer|subway|crater|lab|ants|anthill|slimepit|cave)/.test(id)) return 'none';
   if (/house|home|mansion|trailer|cabin|garage|shed|duplex|bungalow|cottage|farm|barn|church/.test(id)) return 'house';
   if (/apartment|office|hospital|hotel|tower|condo|skyscraper|highrise|high_rise/.test(id)) return 'tall';

@@ -1,5 +1,5 @@
 import type * as THREE from 'three';
-import { CHUNK } from '../world/coords';
+import { CHUNK, LEVEL_HEIGHT } from '../world/coords';
 import { clearFade, setFade } from './dissolve';
 import type { FarProxyLayer } from './farProxy';
 import type { PlaceholderLayer } from './placeholders';
@@ -162,6 +162,7 @@ export class Handoff {
             setFade(g, f);
           });
         if (s.cover) setFade(s.cover, f, true);
+        if (proxies && s.state === 'fade') this.cap(s, top, proxies);
         if (f >= 1) this.finish(s, proxies);
         else if (s.state === 'hold') holding++;
         else fading++;
@@ -180,6 +181,7 @@ export class Handoff {
             setFade(g, 0);
           }
         });
+        if (proxies && !s.near) this.cap(s, top, proxies);
         // replaced groups (rebuilds) are gone from the scene: nothing left to clear on them
         if (s.groups.size > 8) for (const g of s.groups) if (!g.parent && !s.late.has(g)) s.groups.delete(g);
         for (const [g, t] of s.late) {
@@ -197,6 +199,23 @@ export class Handoff {
     // columns not visited this frame (out of the ring)
     for (const [k, s] of this.cols) if (s.seen !== this.frame) this.forget(k, s);
     Object.assign(this.stats, { holding, fading, done, late });
+  }
+
+  /**
+   * Keep the proxy of what column `s`'s chunks don't draw: storeys above the window are only
+   * built within R - 2 and not at all while driving (levels.ts, chunkManager), so a tower handed
+   * over at the edge kept its lower floors and lost the rest until much nearer. The cap starts
+   * at the top of the highest level drawn from the ground up; a level still fading in doesn't
+   * count yet (the cap leaves it once it is solid).
+   */
+  private cap(s: ColState, top: number, proxies: FarProxyLayer): void {
+    let drawn = -1;
+    for (let z = 0; z <= top; z++) {
+      const e = this.chunks.entryAt(s.cx, s.cy, z);
+      if (!e || !e.shown || !e.visible || (e.group && s.late.has(e.group))) break;
+      drawn = z;
+    }
+    proxies.setCap(s.cx, s.cy, drawn < 0 ? null : (drawn + 1) * LEVEL_HEIGHT - 0.05);
   }
 
   /** The cover to hold column (cx, cy) under: its proxy (proxy modes) or its stand-in. */

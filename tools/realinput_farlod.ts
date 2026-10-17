@@ -132,14 +132,43 @@ export function farLodScenarios(c: FarLodCtx): Scenario[] {
       await js(`cdda.setFarLod('proxy-dissolve')`);
       check('streamed in', await settled(30_000));
       await sleep(3000);
+      console.log('    proxies at the start:', JSON.stringify(await js(`cdda.farLod()`)));
+      // tall buildings ahead (proxy over 9 m) to watch while closing on them
+      const towers = await js<[number, number][]>(`(() => {
+        const p = cdda.game.player, v = cdda.vehicleSystem.driving, out = [];
+        const f = (v.facing * Math.PI) / 180, fx = Math.cos(f), fy = Math.sin(f);
+        const pcx = Math.floor(p.x / 24), pcy = Math.floor(p.y / 24);
+        for (let d = 5; d <= 14; d++) for (let s = -3; s <= 3; s++) {
+          const cx = pcx + Math.round(fx * d - fy * s), cy = pcy + Math.round(fy * d + fx * s);
+          const t = cdda.columnDrawnTop(cx, cy);
+          if (t.full > 9 && !out.some(([x, y]) => x === cx && y === cy)) out.push([cx, cy]);
+        }
+        return out.slice(0, 12);
+      })()`);
+      check('tall buildings ahead to watch', towers.length > 0, towers);
+      const worst = new Map<string, number>();
+      /** the same from the chunks alone: how much a cap had to carry */
+      const chunksOnly = new Map<string, number>();
       // 40 mph along the road (the benchmark's ghost car: no collisions)
       await js(`__perfBench.go(17.9)`);
       const samples: { all: number; inner: number }[] = [];
       for (let k = 0; k < 40; k++) {
         await sleep(250);
         samples.push((await js<{ uncovered: { all: number; inner: number } }>(`cdda.farLod()`)).uncovered);
+        for (const [cx, cy] of towers) {
+          const t = await js<{ chunks: number; proxy: number; full: number }>(`cdda.columnDrawnTop(${cx}, ${cy})`);
+          if (!(t.full > 0)) continue; // dropped behind us
+          const share = Math.max(t.chunks, t.proxy) / t.full;
+          const key = `${cx},${cy}`;
+          worst.set(key, Math.min(worst.get(key) ?? 1, share));
+          if (t.chunks > 0) chunksOnly.set(key, Math.min(chunksOnly.get(key) ?? 1, t.chunks / t.full));
+        }
         if (k === 20) writeFileSync(resolve(OUT, 'leave_mid.png'), (await grab()).bytes);
       }
+      const minShare = Math.min(...worst.values());
+      console.log('    …of which the chunks alone drew (least):', JSON.stringify(Object.fromEntries([...chunksOnly].map(([k, v]) => [k, +v.toFixed(2)]))));
+      console.log('    tall buildings, least of their height drawn while closing in:', JSON.stringify(Object.fromEntries([...worst].map(([k, v]) => [k, +v.toFixed(2)]))));
+      check('a tall building keeps (almost) all its height drawn as you drive towards it', minShare > 0.85, { minShare });
       await js(`__perfBench.stop()`);
       const maxInner = Math.max(...samples.map((s) => s.inner));
       console.log('    uncovered inner (per 250 ms):', samples.map((s) => s.inner).join(' '), '| all:', samples.map((s) => s.all).join(' '));
@@ -174,6 +203,27 @@ export function farLodScenarios(c: FarLodCtx): Scenario[] {
       const pc = await js<unknown>(`cdda.proxyCheck(6, 15)`);
       console.log('    proxy vs real tops:', JSON.stringify(pc));
       for (const w of (pc as { worst: { cx: number; cy: number }[] }).worst.slice(0, 4)) console.log('    ', w.cx, w.cy, JSON.stringify(await js(`cdda.proxyColumn(${w.cx}, ${w.cy})`)));
+    }],
+    ['farlodmast', 'a radio tower is a mast in its proxy too (it was drawn as a tall solid block)', async () => {
+      await c.toGameplay();
+      await js(`cdda.loadGate('off')`);
+      await js(`cdda.setFarLod('proxy-dissolve')`);
+      // seed 1's nearest radio tower: OMT (74, -64); stand 5.5 OMTs south of it, looking north
+      const tx = 74 * 24 + 12, ty = -64 * 24 + 12;
+      await js(`(() => { const vs = cdda.vehicleSystem; if (vs.driving) { vs.driving.velocity = 0; cdda.exitVehicle(); } cdda.godMode(true); cdda.setWeather('clear'); cdda.setHour(12); cdda.teleport(${tx}, ${ty + 132}, 0); Object.assign(cdda.game.player, { yaw: 0, pitch: 0.08 }); })()`);
+      check('streamed in', await settled(40_000));
+      await sleep(3000);
+      writeFileSync(resolve(OUT, 'mast_real.png'), (await grab()).bytes);
+      await js(`cdda.proxyView(true)`);
+      await sleep(800);
+      writeFileSync(resolve(OUT, 'mast_proxy.png'), (await grab()).bytes);
+      await js(`cdda.proxyView(false)`);
+      // from beyond the draw distance (the proxy is what you see there)
+      await js(`(() => { cdda.teleport(${tx}, ${ty + 260}, 0); Object.assign(cdda.game.player, { yaw: 0, pitch: 0.06 }); })()`);
+      check('streamed in far', await settled(40_000));
+      await sleep(3000);
+      writeFileSync(resolve(OUT, 'mast_far.png'), (await grab()).bytes);
+      check('shots taken', true);
     }],
   ];
 }
