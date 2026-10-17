@@ -133,6 +133,49 @@ frame) cost 11-13 %.
 Tools: `tools/pop-report.py` (where chunks first appear, from a telemetry dump), the `citywalk`
 perf route, `cdda.restreamEdge(m)` and `cdda.holdBuilds(on)` for captures, `cdda.farLod()` stats.
 
+## Round 2 (2026-10-17): "stuff far off just fully disappears"
+
+Measured with `cdda.farLod().uncovered` (columns in the proxy ring with neither their chunks
+nor a proxy drawn) on the `farlodleave` scenario (40 mph down the city road), and the shapes
+with `cdda.proxyView(true)` (chunks hidden, every proxy drawn) and `cdda.proxyCheck()` (proxy
+top vs the real meshes' top per column) on `farlodshape`.
+
+* **Holes behind and beside you** (24-74 columns inside the draw radius + 2 while driving):
+  a column whose chunks were dropped had its proxy *deleted* for a rebuild from the live map,
+  and the rebuild waited for idle time, which the busy page rarely had (and proxies yielded
+  whenever streaming was behind). Now the old proxy stays drawn and is rebuilt only if the
+  live chunks differ from what it was built of (a signature of levels and versions); idle time
+  only counts when it had room; the frame always builds a missing column near the draw edge.
+  Result: 0 uncovered inside the radius + 2 throughout; the rim (~340 m) refills within ~1 s
+  of each chunk crossing.
+* **Towers two storeys short**: a proxy built from the live map only had the levels the chunk
+  manager had made (tower tops are skipped while driving). Each level now comes from the live
+  map if it has it, else from the scratch generator.
+* **Roofs**: the volume looks' hipped roofs (chunkMesh.ts PITCHED, arch.ts) are modelled
+  (stepped, height = tiles to the roof edge x 0.5, capped at 6 tiles).
+* **Trees**: crowns were 4.6-6.8 m solid slabs in the sprite's dark trunk-and-leaf average; the
+  real trees are 4.8-5.6 m (chunkMesh.ts) with lifted leaf colours (flora.ts). Now 4.7-5.6 m
+  tops varying per 2x2 tiles, the colour from the top 60 % of the sprite lifted 1.45x, and
+  solid to the ground (dark below 2 m): open underneath, the eye went through to a pale road
+  far behind, a bright line along the horizon.
+* **Far ground ring over proxies**: the skyline pulls everything beyond its near distance
+  toward the camera (to fit the old 200 m far plane); with proxies to ~370 m the pulled ground
+  ring landed in front of distant proxies. The pull now starts past the proxy ring
+  (`SkylineLayer.uniforms.uNear`), the far plane sized to match.
+
+Proxy vs real tops over 169 city columns: mean |difference| 1.04 m -> 0.91 m (the rest is
+rooftop clutter and furniture, which proxies don't model). Ground bands: within ~5-10 % of the
+real view's colour.
+
+Cost: hiding a handed-over column collapses its vertices in its block's merged mesh instead of
+re-merging the block (1-2 ms a block, ~20 hand-offs a second at 40 mph). `perf-bench city40`:
+812 frames `current` vs 769 `proxy-dissolve` (-5 %; most of it the in-frame building budget,
+which runs because the headless benchmark gets almost no idle time).
+
+Hand-off capture (`farlod`, HUD hidden: a tutorial toast had been counted as a pop): biggest
+single step 16.4 current, 1.6 dissolve, 1.8 proxy, 2.1 proxy-dissolve; total change 22.8 /
+5.8 / 4.8 / 4.9.
+
 ## The original plan
 
 

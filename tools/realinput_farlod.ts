@@ -68,6 +68,8 @@ export function farLodScenarios(c: FarLodCtx): Scenario[] {
         // 60 m: the street's buildings too, so the hand-offs happen large in view. Building is
         // held over the drop, so "before" is the view with them gone (covers up) and only the
         // arrivals are measured
+        // the HUD's toasts and messages pop in on their own: measure the world only
+        await js(`for (const id of ['ui', 'ui2']) { const e = document.getElementById(id); if (e) e.style.visibility = 'hidden'; }`);
         await js(`cdda.holdBuilds(true)`);
         const dropped = await js<number>(`cdda.restreamEdge(60)`);
         await sleep(1500);
@@ -93,6 +95,7 @@ export function farLodScenarios(c: FarLodCtx): Scenario[] {
         // grass sway and clouds change every step a little: measure above that floor
         const floor = [...steps].sort((a, b) => a - b)[Math.floor(steps.length / 2)];
         const above = steps.map((v) => Math.max(0, v - floor));
+        await js(`for (const id of ['ui', 'ui2']) { const e = document.getElementById(id); if (e) e.style.visibility = ''; }`);
         const total = above.reduce((a, b) => a + b, 0);
         const maxStep = Math.max(...above);
         results[mode] = { abrupt: +(maxStep / Math.max(total, 1e-6)).toFixed(3), maxStep: +maxStep.toFixed(3), total: +total.toFixed(3), steps: steps.map((s) => +s.toFixed(3)) };
@@ -101,8 +104,10 @@ export function farLodScenarios(c: FarLodCtx): Scenario[] {
         writeFileSync(resolve(OUT, `${mode}_steps.json`), JSON.stringify(results[mode]));
       }
       check('current pops (most of the change in one step: the measure works)', results.current.abrupt > 0.3, results.current);
-      check('proxy-dissolve: no step carries most of the change', results['proxy-dissolve'].abrupt < 0.5 * results.current.abrupt, { pd: results['proxy-dissolve'].abrupt, current: results.current.abrupt });
-      check('dissolve: gentler than current', results.dissolve.abrupt < results.current.abrupt, { d: results.dissolve.abrupt, current: results.current.abrupt });
+      // the largest single-step change is the pop you see (a share of the total misleads when
+      // proxies leave little to change at all)
+      check('proxy-dissolve: the biggest jump is under a quarter of current\'s', results['proxy-dissolve'].maxStep < 0.25 * results.current.maxStep, { pd: results['proxy-dissolve'].maxStep, current: results.current.maxStep });
+      check('dissolve: the biggest jump is under half of current\'s', results.dissolve.maxStep < 0.5 * results.current.maxStep, { d: results.dissolve.maxStep, current: results.current.maxStep });
 
       // real input: drive into town in the default mode, a few shots on the way
       await js(`cdda.setFarLod('proxy-dissolve')`);
@@ -116,6 +121,59 @@ export function farLodScenarios(c: FarLodCtx): Scenario[] {
       const speed = await js<number>(`Math.abs(cdda.vehicleSystem.driving?.velocity ?? 0)`);
       check('W drove the car', speed > 2, speed);
       await js(`(() => { const v = cdda.vehicleSystem.driving; if (v) v.velocity = 0; })()`);
+    }],
+    ['farlodleave', 'driving on, columns left behind fall back to their proxy instead of leaving holes', async () => {
+      await c.toGameplay();
+      await js(PERF_PAGE);
+      const route = await js<unknown>(`__perfBench.pick('city')`);
+      if (!check('found the benchmark city road', !!route, route)) return;
+      await js(`__perfBench.place(${JSON.stringify(route)})`);
+      await js(`cdda.loadGate('off')`);
+      await js(`cdda.setFarLod('proxy-dissolve')`);
+      check('streamed in', await settled(30_000));
+      await sleep(3000);
+      // 40 mph along the road (the benchmark's ghost car: no collisions)
+      await js(`__perfBench.go(17.9)`);
+      const samples: { all: number; inner: number }[] = [];
+      for (let k = 0; k < 40; k++) {
+        await sleep(250);
+        samples.push((await js<{ uncovered: { all: number; inner: number } }>(`cdda.farLod()`)).uncovered);
+        if (k === 20) writeFileSync(resolve(OUT, 'leave_mid.png'), (await grab()).bytes);
+      }
+      await js(`__perfBench.stop()`);
+      const maxInner = Math.max(...samples.map((s) => s.inner));
+      console.log('    uncovered inner (per 250 ms):', samples.map((s) => s.inner).join(' '), '| all:', samples.map((s) => s.all).join(' '));
+      check('no column inside the draw radius + 2 shows nothing while driving on', maxInner === 0, { maxInner });
+    }],
+    ['farlodshape', 'proxies have the buildings\' shapes: the same views with real chunks and with proxies only', async () => {
+      await c.toGameplay();
+      await js(PERF_PAGE);
+      const route = await js<unknown>(`__perfBench.pick('city')`);
+      if (!check('found the benchmark city road', !!route, route)) return;
+      await js(`__perfBench.place(${JSON.stringify(route)})`);
+      await js(`cdda.loadGate('off')`);
+      await js(`cdda.setFarLod('proxy-dissolve')`);
+      // into town a little, then four directions
+      await js(`__perfBench.go(17.9)`);
+      await sleep(5000);
+      await js(`__perfBench.stop()`);
+      check('streamed in', await settled(30_000));
+      await sleep(3000);
+      for (const [i, yaw] of [0, 90, 180, 270].entries()) {
+        await js(`(() => { const p = cdda.game.player; p.yaw = ${(yaw * Math.PI) / 180} + Math.atan2(1, 0) * 0; })()`);
+        await js(`cdda.renderer.rig.mode = 'first'`).catch(() => undefined);
+        await sleep(600);
+        writeFileSync(resolve(OUT, `shape_${i}_real.png`), (await grab()).bytes);
+        await js(`cdda.proxyView(true)`);
+        await sleep(600);
+        writeFileSync(resolve(OUT, `shape_${i}_proxy.png`), (await grab()).bytes);
+        await js(`cdda.proxyView(false)`);
+        await sleep(300);
+      }
+      check('shots taken', true);
+      const pc = await js<unknown>(`cdda.proxyCheck(6, 15)`);
+      console.log('    proxy vs real tops:', JSON.stringify(pc));
+      for (const w of (pc as { worst: { cx: number; cy: number }[] }).worst.slice(0, 4)) console.log('    ', w.cx, w.cy, JSON.stringify(await js(`cdda.proxyColumn(${w.cx}, ${w.cy})`)));
     }],
   ];
 }

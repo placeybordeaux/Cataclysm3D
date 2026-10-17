@@ -72,7 +72,7 @@ describe('far proxies', () => {
     const top = overmapTopOf((x, y, z) => gen.overmap.omtAt(x, y, z), cx, cy);
     const levels = column(map, cx, cy, top).map((c) => (c.empty ? null : c));
     const looks = new Map<number, ReturnType<typeof tileLook>>();
-    const look = (i: number) => {
+    const look = (i: number, _z: number) => {
       let L = looks.get(i);
       if (!L) looks.set(i, (L = tileLook(map.terrain.get(i) as TerrainDef, null, 1)));
       return L;

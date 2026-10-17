@@ -27,8 +27,18 @@ import { terrainShape } from './tileKinds';
 
 /** Proxy ground sits under the real ground (relief dips to -0.45 m in the terrain look). */
 const GROUND_Y = -0.2;
-/** Tree crowns: a box from CROWN_LO to CROWN_HI above the level floor. */
-const CROWN_LO = 2.2, CROWN_HI = 7;
+/** Tree crowns: from CROWN_LO up to CROWN_HI above the level floor, the top varying per 2x2
+ *  tiles by CROWN_VAR (one flat slab read as a green wall where the real trees are crowns).
+ *  The mesher's trees are 4.8-5.6 m tall (chunkMesh.ts), their crowns from ~0.4 of that. */
+const CROWN_LO = 2, CROWN_HI = 5.6, CROWN_VAR = 0.9;
+/** Canopies are lifted like flora.ts lifts its leaf ramp: the sprite's own colours carry baked
+ *  shade and outline, and as an average they read dark olive next to the lit 3D crowns. */
+const CANOPY_LIFT = 1.45;
+/** Under a crown: trunks and undergrowth in its shade. */
+const TRUNK_SHADE = 0.4;
+/** Hipped roofs of the volume looks (chunkMesh.ts PITCHED, arch.ts hipRoofTile). */
+const PITCHED = /^t_(shingle_flat_roof|thatch_roof|tile_flat_roof)$/;
+const ROOF_SLOPE = 0.5;
 /** floats per quad record: 4 corners, normal, linear rgb */
 const QF = 18;
 const BLOCK = 4;
@@ -39,6 +49,8 @@ export interface TileLook {
   kind: K;
   /** linear rgb */
   col: [number, number, number];
+  /** a roof the volume looks pitch (hipped) */
+  pitched: boolean;
 }
 
 /** CDDA colour names for terrain without art (procedural sources, missing sprites). */
@@ -55,7 +67,7 @@ const lin = (c: number) => Math.pow(c / 255, 2.2);
  * (0-255) of the id, or null. `bright` scales the linear colour: tile art is drawn with baked
  * AO and banded light, a flat average would read a little lighter than the chunk next to it.
  */
-export function tileLook(t: TerrainDef, art: [number, number, number] | null, bright: number): TileLook {
+export function tileLook(t: TerrainDef, art: [number, number, number] | null, bright0: number): TileLook {
   const shape = terrainShape(t);
   const kind =
     shape === 'none' ? K.None
@@ -64,9 +76,10 @@ export function tileLook(t: TerrainDef, art: [number, number, number] | null, br
           : shape === 'tree' ? K.Tree
             : shape === 'shrub' ? K.Shrub
               : K.Ground;
+  const bright = kind === K.Tree ? bright0 * CANOPY_LIFT : bright0;
   const name = String((t as { color?: unknown }).color ?? '').replace(/^c_/, '');
   const s = art ?? NAMED[name] ?? [120, 120, 120];
-  return { kind, col: [lin(s[0]) * bright, lin(s[1]) * bright, lin(s[2]) * bright] };
+  return { kind, col: [lin(s[0]) * bright, lin(s[1]) * bright, lin(s[2]) * bright], pitched: PITCHED.test(t.id) };
 }
 
 /**
@@ -75,29 +88,62 @@ export function tileLook(t: TerrainDef, art: [number, number, number] | null, br
  * a level with nothing. `cell` = tiles per proxy cell (1, or 2 further out: max height, colour
  * of the tallest tile).
  */
-export function buildColumnQuads(cx: number, cy: number, levels: readonly (Chunk | null)[], look: (terIndex: number) => TileLook, cell = 1): Float32Array {
+export function buildColumnQuads(cx: number, cy: number, levels: readonly (Chunk | null)[], look: (terIndex: number, z: number) => TileLook, cell = 1, pitch = false): Float32Array {
   const n = CHUNK / cell;
   const H = new Float32Array(n * n).fill(GROUND_Y);
   const top = new Uint32Array(n * n);
   const side = new Uint32Array(n * n);
   /** the top is a ground-level tree crown: its sides hang from CROWN_LO, open below */
   const crown = new Uint8Array(n * n);
-  const pack = (c: readonly number[]) => (Math.round(c[0] * 1023) << 20) | (Math.round(c[1] * 1023) << 10) | Math.round(c[2] * 1023);
+  const q = (v: number) => Math.max(0, Math.min(1023, Math.round(v * 1023)));
+  const pack = (c: readonly number[]) => (q(c[0]) << 20) | (q(c[1]) << 10) | q(c[2]);
   const unpack = (p: number): V3 => [((p >>> 20) & 1023) / 1023, ((p >>> 10) & 1023) / 1023, (p & 1023) / 1023];
+  /** `pitch`: per tile of a pitched roof region, tiles to its edge (Chebyshev, within the column) */
+  const roofD = new Uint8Array(CHUNK * CHUNK);
+  const hash = (x: number, y: number) => {
+    let h = Math.imul(x * 374761393 + y * 668265263, 1274126177);
+    h ^= h >>> 13;
+    return ((h >>> 0) % 1000) / 1000;
+  };
   for (let z = 0; z < levels.length; z++) {
     const c = levels[z];
     if (!c) continue;
     const base = z * LEVEL_HEIGHT;
+    if (pitch && z > 0) {
+      // distance to the nearest non-pitched tile (or the column edge), as arch.ts slopes it
+      let any = false;
+      for (let i = 0; i < CHUNK * CHUNK; i++) {
+        const p = look(c.ter[i], z).pitched;
+        roofD[i] = p ? 255 : 0;
+        any ||= p;
+      }
+      if (any)
+        for (let pass = 0; pass < 6; pass++)
+          for (let ly = 0; ly < CHUNK; ly++)
+            for (let lx = 0; lx < CHUNK; lx++) {
+              const i = ly * CHUNK + lx;
+              if (roofD[i] === 0) continue;
+              let m = 255;
+              for (let dy = -1; dy <= 1; dy++)
+                for (let dx = -1; dx <= 1; dx++) {
+                  const x = lx + dx, y = ly + dy;
+                  m = Math.min(m, x < 0 || y < 0 || x >= CHUNK || y >= CHUNK ? 0 : roofD[y * CHUNK + x]);
+                }
+              roofD[i] = Math.min(roofD[i], m + 1);
+            }
+    }
     for (let ly = 0; ly < CHUNK; ly++)
       for (let lx = 0; lx < CHUNK; lx++) {
-        const L = look(c.ter[ly * CHUNK + lx]);
+        const L = look(c.ter[ly * CHUNK + lx], z);
         let h: number;
         switch (L.kind) {
           case K.None: continue;
-          case K.Ground: h = z === 0 ? GROUND_Y : base + 0.1; break;
+          case K.Ground:
+            h = z === 0 ? GROUND_Y : L.pitched && pitch ? base + Math.min(roofD[ly * CHUNK + lx] - 0.5, 6) * ROOF_SLOPE : base + 0.1;
+            break;
           case K.Wall: h = base + LEVEL_HEIGHT; break;
           case K.Half: h = base + 1; break;
-          case K.Tree: h = base + CROWN_HI; break;
+          case K.Tree: h = base + CROWN_HI - CROWN_VAR * hash(Math.floor((cx * CHUNK + lx) / 2), Math.floor((cy * CHUNK + ly) / 2)); break;
           case K.Shrub: h = base + 1; break;
           default: continue;
         }
@@ -105,7 +151,9 @@ export function buildColumnQuads(cx: number, cy: number, levels: readonly (Chunk
         // ground at z0 always sets a colour; anything else only by standing taller
         if (h > H[i] + 0.01 || (z === 0 && L.kind === K.Ground && H[i] <= GROUND_Y + 0.01 && top[i] === 0)) {
           H[i] = Math.round(h * 20) / 20;
-          top[i] = pack(L.col) | 0x40000000;
+          // crowns vary a little in colour too, like the real canopies' light and shade
+          const k = L.kind === K.Tree ? 0.85 + 0.3 * hash(cx * CHUNK + lx + 7, cy * CHUNK + ly) : 1;
+          top[i] = pack(k === 1 ? L.col : [L.col[0] * k, L.col[1] * k, L.col[2] * k]) | 0x40000000;
           if (L.kind === K.Wall || L.kind === K.Half || L.kind === K.Tree || L.kind === K.Shrub) side[i] = pack(L.col) | 0x40000000;
           crown[i] = L.kind === K.Tree && z === 0 ? 1 : 0;
         }
@@ -142,20 +190,22 @@ export function buildColumnQuads(cx: number, cy: number, levels: readonly (Chunk
   // +x / -x faces run along j; +z / -z along i
   for (const [di, dj, nrm] of [[1, 0, [1, 0, 0]], [-1, 0, [-1, 0, 0]], [0, 1, [0, 0, 1]], [0, -1, [0, 0, -1]]] as [number, number, V3][]) {
     const alongJ = di !== 0;
+    /** the face along edge row `a` from cell b0 to b1, between heights lo and hi */
+    const edge = (a: number, b0: number, b1: number, lo: number, hi: number, col: V3) => {
+      if (alongJ) {
+        const x = bx + (di > 0 ? a + 1 : a) * cell, z0 = by + b0 * cell, z1 = by + b1 * cell;
+        if (di > 0) quad([x, lo, z1], [x, lo, z0], [x, hi, z0], [x, hi, z1], nrm, col);
+        else quad([x, lo, z0], [x, lo, z1], [x, hi, z1], [x, hi, z0], nrm, col);
+      } else {
+        const z = by + (dj > 0 ? a + 1 : a) * cell, x0 = bx + b0 * cell, x1 = bx + b1 * cell;
+        if (dj > 0) quad([x0, lo, z], [x1, lo, z], [x1, hi, z], [x0, hi, z], nrm, col);
+        else quad([x1, lo, z], [x0, lo, z], [x0, hi, z], [x1, hi, z], nrm, col);
+      }
+    };
     for (let a = 0; a < n; a++) {
       let run = -1, rh = 0, rlo = 0, rcol = 0;
       const flush = (end: number) => {
-        if (run < 0) return;
-        const col = unpack(rcol);
-        if (alongJ) {
-          const x = bx + (di > 0 ? a + 1 : a) * cell, z0 = by + run * cell, z1 = by + end * cell;
-          if (di > 0) quad([x, rlo, z1], [x, rlo, z0], [x, rh, z0], [x, rh, z1], nrm, col);
-          else quad([x, rlo, z0], [x, rlo, z1], [x, rh, z1], [x, rh, z0], nrm, col);
-        } else {
-          const z = by + (dj > 0 ? a + 1 : a) * cell, x0 = bx + run * cell, x1 = bx + end * cell;
-          if (dj > 0) quad([x0, rlo, z], [x1, rlo, z], [x1, rh, z], [x0, rh, z], nrm, col);
-          else quad([x1, rlo, z], [x0, rlo, z], [x0, rh, z], [x1, rh, z], nrm, col);
-        }
+        if (run >= 0) edge(a, run, end, rlo, rh, unpack(rcol));
         run = -1;
       };
       for (let b = 0; b < n; b++) {
@@ -164,11 +214,18 @@ export function buildColumnQuads(cx: number, cy: number, levels: readonly (Chunk
         const h = H[k], lo = hAt(i + di, j + dj);
         const sc = side[k] || top[k];
         if (h <= lo + 0.05 || top[k] === 0) { flush(b); continue; }
-        const bottom = crown[k] ? Math.max(lo, CROWN_LO) : lo;
-        if (h <= bottom + 0.05) { flush(b); continue; }
-        if (run >= 0 && h === rh && bottom === rlo && sc === rcol) continue;
+        if (crown[k]) {
+          // a tree: canopy above CROWN_LO, trunks and shade below it (open underneath, the
+          // trees' proxies let the eye through to a pale road far behind: a bright line)
+          flush(b);
+          const c = unpack(sc);
+          if (lo < CROWN_LO) edge(a, b, b + 1, lo, Math.min(h, CROWN_LO), [c[0] * TRUNK_SHADE, c[1] * TRUNK_SHADE, c[2] * TRUNK_SHADE]);
+          if (h > CROWN_LO + 0.05) edge(a, b, b + 1, Math.max(lo, CROWN_LO), h, c);
+          continue;
+        }
+        if (run >= 0 && h === rh && lo === rlo && sc === rcol) continue;
         flush(b);
-        run = b; rh = h; rlo = bottom; rcol = sc;
+        run = b; rh = h; rlo = lo; rcol = sc;
       }
       flush(n);
     }
@@ -187,15 +244,28 @@ interface Col {
   live: boolean;
   /** performance.now() when it was built (fade-in) */
   born: number;
+  /** drawn but out of date (its chunks were shown and may have been edited): rebuilt from the
+   *  live map in idle time, the old proxy staying up meanwhile */
+  stale: boolean;
+  /** live chunks it was built from: levels present and their versions (liveSig) */
+  sig: number;
 }
 
 interface Block {
   mesh: THREE.Mesh | null;
+  /** members added, dropped or rebuilt since the last merge */
   dirty: boolean;
-  /** a member was hidden, shown or taken solo: re-merge this frame (else it overlaps the chunks) */
+  /** a member that must be drawn isn't in the merged mesh: re-merge this frame (else a hole) */
   urgent: boolean;
   /** performance.now() of the last merge */
   at: number;
+  /**
+   * Each member's vertices in the merged mesh (4 per quad, in quad order) and the quads they
+   * were made from. Hiding a column (its chunks show, or it fades on its own) collapses its
+   * vertices in place, showing it writes them back: no re-merge, which cost 1-2 ms a block
+   * and happened at every hand-off (~20 a second at 40 mph).
+   */
+  ranges: Map<number, { start: number; quads: Float32Array }>;
 }
 
 const colKey = (cx: number, cy: number) => (cx + 32768) * 65536 + (cy + 32768);
@@ -209,8 +279,10 @@ export interface FarProxyDeps {
   /** column top level (overmap: the top OMT that isn't air, + its roof) */
   overmapTop(cx: number, cy: number): number;
   white(): TileFrame;
-  /** atlas average sRGB of a terrain id */
-  art(id: string): [number, number, number] | null;
+  /** atlas average sRGB of a terrain id (`top`: of the sprite's top, a tree's canopy) */
+  art(id: string, part?: 'top'): [number, number, number] | null;
+  /** the look pitches shingle/thatch/tile roofs (look.f.archDetail) */
+  pitch(): boolean;
 }
 
 export class FarProxyLayer {
@@ -224,6 +296,8 @@ export class FarProxyLayer {
   budgetMs = 0.75;
   /** a block takes in new columns at most this often (they arrive at the ring's rim, far off) */
   mergeEveryMs = 500;
+  /** debug (cdda.proxyView): draw every proxy, hidden ones too, to compare them with the chunks */
+  showAll = false;
   /** true while the chunk streaming is behind: no new proxies then (they only add load) */
   yieldTo: () => boolean = () => false;
   /** linear brightness of the tile averages (by eye against the chunks at the edge) */
@@ -236,8 +310,10 @@ export class FarProxyLayer {
    * drop) must come back hidden, or it is drawn over the real chunks.
    */
   private hiddenKeys = new Set<number>();
+  private staleN = 0;
   private blocks = new Map<number, Block>();
-  private looks: (TileLook | undefined)[] = [];
+  /** by terrain id: the live and scratch maps' registries may number them differently */
+  private looks = new Map<string, TileLook>();
   private offsets: [number, number][] = [];
   private offsetsR = -1;
   /** the ring is only rescanned after moving to another chunk or while columns are missing */
@@ -254,13 +330,34 @@ export class FarProxyLayer {
   }
 
   private look(i: number, map: GameMap): TileLook {
-    let L = this.looks[i];
+    const t = map.terrain.get(i);
+    let L = this.looks.get(t.id);
     if (!L) {
-      const t = map.terrain.get(i);
-      L = tileLook(t, this.deps.art(t.id), this.bright);
-      this.looks[i] = L;
+      L = tileLook(t, this.deps.art(t.id, terrainShape(t) === 'tree' ? 'top' : undefined), this.bright);
+      this.looks.set(t.id, L);
     }
     return L;
+  }
+
+  /** Debug (cdda.proxyCheck): highest point of column (cx, cy)'s proxy, NaN without one. */
+  proxyTop(cx: number, cy: number): number {
+    const c = this.cols.get(colKey(cx, cy));
+    if (!c) return NaN;
+    let top = -Infinity;
+    for (let o = 0; o < c.quads.length; o += QF) for (let v = 0; v < 4; v++) top = Math.max(top, c.quads[o + v * 3 + 1]);
+    return top;
+  }
+
+  /** Debug (cdda.proxyColumn): how column (cx, cy)'s proxy was made. */
+  describe(cx: number, cy: number): { live: boolean; stale: boolean; hidden: boolean; quads: number; top: number } | null {
+    const c = this.cols.get(colKey(cx, cy));
+    return c ? { live: c.live, stale: c.stale, hidden: c.hidden, quads: c.quads.length / QF, top: this.proxyTop(cx, cy) } : null;
+  }
+
+  /** Is column (cx, cy) drawn as a proxy right now (built and not hidden)? */
+  drawn(cx: number, cy: number): boolean {
+    const c = this.cols.get(colKey(cx, cy));
+    return !!c && !c.hidden;
   }
 
   /** Proxy column (cx, cy)'s geometry exists (it may be empty: open ground still has a top). */
@@ -278,7 +375,7 @@ export class FarProxyLayer {
     if (!c.solo) {
       c.solo = this.meshOf([c], `proxy ${cx},${cy}`);
       if (c.solo) this.group.add(c.solo);
-      this.markBlock(cx, cy);
+      this.applyVis(c);
     }
     return c.solo;
   }
@@ -293,12 +390,45 @@ export class FarProxyLayer {
     this.dropSolo(c);
     if (c.hidden === hidden) return;
     c.hidden = hidden;
-    // leaving the drawn area: rebuild from the live chunks (edits made while it was drawn)
-    if (!hidden && this.deps.live.hasChunk(cx, cy, 0)) {
-      this.cols.delete(colKey(cx, cy));
-      this.scanAt.missing = true;
+    // Back from its chunks: if they differ from what it was built of (levels built since, a
+    // tower top; edits), rebuild from them in idle time. The old proxy stays drawn until then
+    // (deleting it left a hole for as long as the idle time took to come round).
+    if (!hidden && !c.stale && this.liveSig(cx, cy) !== c.sig) {
+      c.stale = true;
+      this.staleN++;
     }
-    this.markBlock(cx, cy);
+    this.applyVis(c);
+  }
+
+  /** Drawn in its block: not hidden behind its chunks (unless debug showAll) and not solo. */
+  private inBlock(c: Col): boolean {
+    return (!c.hidden || this.showAll) && !c.solo;
+  }
+
+  /** Show or collapse column `c`'s vertices in its block's mesh to match inBlock(c). */
+  private applyVis(c: Col): void {
+    const b = this.blocks.get(blockKey(c.cx, c.cy));
+    const r = b?.ranges.get(colKey(c.cx, c.cy));
+    const want = this.inBlock(c);
+    if (!b?.mesh || !r || r.quads !== c.quads) {
+      // not in the merged mesh as it is now: hidden is already right, shown needs a merge now
+      if (want) this.markBlock(c.cx, c.cy, true);
+      return;
+    }
+    const pos = b.mesh.geometry.attributes.position as THREE.BufferAttribute;
+    const a = pos.array as Float32Array;
+    const q = c.quads, nv = (q.length / QF) * 4;
+    for (let v = 0; v < nv; v++) {
+      const o = (r.start + v) * 3, src = Math.floor(v / 4) * QF + (v % 4) * 3;
+      if (want) {
+        a[o] = q[src]; a[o + 1] = q[src + 1]; a[o + 2] = q[src + 2];
+      } else {
+        // all four corners on one point far below: zero-area triangles, nothing drawn
+        a[o] = q[0]; a[o + 1] = -1000; a[o + 2] = q[2];
+      }
+    }
+    pos.addUpdateRange(r.start * 3, nv * 3);
+    pos.needsUpdate = true;
   }
 
   /** Back into its block (a fade-in finished, or it was abandoned). */
@@ -307,18 +437,27 @@ export class FarProxyLayer {
     if (c) this.dropSolo(c);
   }
 
+  /** Signature of the live chunks of column (cx, cy) up to its top: which exist, their versions. */
+  private liveSig(cx: number, cy: number): number {
+    const live = this.deps.live;
+    const top = Math.max(0, Math.min(MAX_Z, this.deps.overmapTop(cx, cy)));
+    let h = 17;
+    for (let z = 0; z <= top; z++) h = (Math.imul(h, 31) + (live.hasChunk(cx, cy, z) ? live.chunk(cx, cy, z)!.version + 1 : 0)) | 0;
+    return h;
+  }
+
   private dropSolo(c: Col): void {
     if (!c.solo) return;
     this.group.remove(c.solo);
     c.solo.geometry.dispose();
     c.solo = null;
-    this.markBlock(c.cx, c.cy);
+    this.applyVis(c);
   }
 
   private markBlock(cx: number, cy: number, urgent = true): void {
     const k = blockKey(cx, cy);
     let b = this.blocks.get(k);
-    if (!b) this.blocks.set(k, (b = { mesh: null, dirty: true, urgent, at: 0 }));
+    if (!b) this.blocks.set(k, (b = { mesh: null, dirty: true, urgent, at: 0, ranges: new Map() }));
     b.dirty = true;
     b.urgent ||= urgent;
   }
@@ -355,19 +494,33 @@ export class FarProxyLayer {
     const keep = (outer + 1.5) * (outer + 1.5);
     if (moved) for (const [k, c] of this.cols) {
       if ((c.cx - pcx) ** 2 + (c.cy - pcy) ** 2 <= keep) continue;
+      if (c.stale) this.staleN--;
       this.dropSolo(c);
       this.cols.delete(k);
       this.markBlock(c.cx, c.cy, false);
     }
     this.merge(true, () => false);
-    // no idle time for half a second (a slow machine, a busy city): some progress in the frame
-    if (t0 - this.lastIdle > 500 && !this.yieldTo()) {
-      const end = t0 + this.budgetMs;
-      this.work(() => performance.now() > end);
+    // No idle time for half a second (a slow machine, a busy city): some progress in the frame.
+    // A column near the draw edge without a proxy always gets one (even while the streaming
+    // is behind: the proxy is what shows there); the rest share a small budget.
+    if (t0 - this.lastIdle > 500) {
+      const near = this.scanAt.missing && this.missingWithin(pcx, pcy, R + 3);
+      const end = t0 + (this.yieldTo() && !near ? this.budgetMs / 3 : this.budgetMs);
+      let first = near;
+      this.work(() => (first ? ((first = false), false) : performance.now() > end));
     }
     this.stats.columns = this.cols.size;
     this.stats.blocks = this.blocks.size;
     this.stats.lastMs = performance.now() - t0;
+  }
+
+  /** Is a column within `r` chunks without a proxy? (offsets are nearest first) */
+  private missingWithin(pcx: number, pcy: number, r: number): boolean {
+    for (const [dx, dy] of this.offsets) {
+      if (dx * dx + dy * dy > r * r) return false;
+      if (!this.cols.has(colKey(pcx + dx, pcy + dy))) return true;
+    }
+    return false;
   }
 
   /** Build missing proxies and merge waiting blocks in the browser's idle time. */
@@ -379,9 +532,12 @@ export class FarProxyLayer {
         ? (cb) => requestIdleCallback(cb, { timeout: 500 })
         : (cb) => setTimeout(() => cb({ timeRemaining: () => 8 }), 16);
     const loop = (d: { timeRemaining(): number }) => {
-      this.lastIdle = performance.now();
-      // a column is 0.1-1 ms; start one only with room left
-      if (this.at.on && !this.yieldTo()) this.work(() => d.timeRemaining() < 2);
+      // a column is 0.1-1 ms; start one only with room left. Only an idle period with room
+      // counts as idle time (a busy page gets callbacks with ~0 ms left, all frame long)
+      if (d.timeRemaining() >= 2) {
+        this.lastIdle = performance.now();
+        if (this.at.on && !this.yieldTo()) this.work(() => d.timeRemaining() < 2);
+      }
       ric(loop);
     };
     ric(loop);
@@ -390,6 +546,10 @@ export class FarProxyLayer {
   /** Columns nearest first (ahead before behind), then lazy block merges, until `stop()`. */
   private work(stop: () => boolean): void {
     const { pcx, pcy, fx, fy } = this.at;
+    // one overdue block first: building alone could take every slot, and a built column only
+    // shows once its block is merged
+    let one = false;
+    this.merge(false, () => (one ? true : ((one = true), false)));
     if (this.scanAt.missing) {
       let missing = false;
       scan: for (let pass = 0; pass < 2; pass++)
@@ -406,6 +566,13 @@ export class FarProxyLayer {
         }
       this.scanAt.missing = missing;
     }
+    if (this.staleN > 0 && !this.scanAt.missing)
+      for (const c of this.cols.values()) {
+        if (!c.stale) continue;
+        if (stop()) break;
+        const d = Math.hypot(c.cx - pcx, c.cy - pcy);
+        this.buildColumn(c.cx, c.cy, d > this.coarseFrom ? 2 : 1);
+      }
     if (!stop()) this.merge(false, stop);
   }
 
@@ -425,18 +592,29 @@ export class FarProxyLayer {
         b.mesh = null;
       }
       const bx = Math.floor(k / 65536) - 32768, by = (k % 65536) - 32768;
+      // every built column, hidden and solo ones too (collapsed below): showing and hiding
+      // them later needs no re-merge
       const members: Col[] = [];
       for (let y = 0; y < BLOCK; y++)
         for (let x = 0; x < BLOCK; x++) {
           const c = this.cols.get(colKey(bx * BLOCK + x, by * BLOCK + y));
-          if (c && !c.hidden && !c.solo && c.quads.length) members.push(c);
+          if (c && c.quads.length) members.push(c);
         }
+      b.ranges.clear();
       if (!members.length) {
         this.blocks.delete(k);
         continue;
       }
+      let start = 0;
+      for (const c of members) {
+        b.ranges.set(colKey(c.cx, c.cy), { start, quads: c.quads });
+        start += (c.quads.length / QF) * 4;
+      }
       b.mesh = this.meshOf(members, `proxy block ${bx},${by}`);
-      if (b.mesh) this.group.add(b.mesh);
+      if (b.mesh) {
+        this.group.add(b.mesh);
+        for (const c of members) if (!this.inBlock(c)) this.applyVis(c);
+      }
     }
   }
 
@@ -453,21 +631,35 @@ export class FarProxyLayer {
     const { live, scratch } = this.deps;
     const top = Math.max(0, Math.min(MAX_Z, this.deps.overmapTop(cx, cy)));
     const fromLive = live.hasChunk(cx, cy, 0);
-    const map = fromLive ? live : scratch;
     const t0 = performance.now();
     const levels: (Chunk | null)[] = [];
+    const maps: GameMap[] = [];
+    // Each level from the live map when it has it (edits included; generating there would fire
+    // its hooks), else from the scratch generator: the live map often has only the lower
+    // storeys (tower tops aren't built while driving), and a proxy from those alone was short.
+    let scratchUsed = false;
     for (let z = 0; z <= top; z++) {
-      // the live map: only what exists (generating there would fire its hooks)
-      const c = fromLive ? (live.hasChunk(cx, cy, z) ? live.chunk(cx, cy, z) : null) : scratch.chunk(cx, cy, z);
+      let c: Chunk | null;
+      if (live.hasChunk(cx, cy, z)) {
+        c = live.chunk(cx, cy, z);
+        maps.push(live);
+      } else {
+        c = scratch.chunk(cx, cy, z);
+        maps.push(scratch);
+        scratchUsed = true;
+      }
       levels.push(c && !c.empty ? c : null);
     }
-    if (!fromLive) this.stats.genMs += performance.now() - t0;
-    const quads = buildColumnQuads(cx, cy, levels, (i) => this.look(i, map), cell);
-    if (!fromLive) {
+    if (scratchUsed) this.stats.genMs += performance.now() - t0;
+    const quads = buildColumnQuads(cx, cy, levels, (i, z) => this.look(i, maps[z]), cell, this.deps.pitch());
+    if (scratchUsed) {
       for (let z = top; z >= 0; z--) if (scratch.hasChunk(cx, cy, z)) scratch.evictChunk(scratch.chunk(cx, cy, z)!);
       (scratch.generator as { forgetColumn?(cx: number, cy: number): void } | null)?.forgetColumn?.(cx, cy);
     }
-    this.cols.set(colKey(cx, cy), { cx, cy, quads, hidden: this.hiddenKeys.has(colKey(cx, cy)), solo: null, live: fromLive, born: performance.now() });
+    const old = this.cols.get(colKey(cx, cy));
+    if (old?.stale) this.staleN--;
+    if (old) this.dropSolo(old);
+    this.cols.set(colKey(cx, cy), { cx, cy, quads, hidden: this.hiddenKeys.has(colKey(cx, cy)), solo: null, live: fromLive, born: performance.now(), stale: false, sig: this.liveSig(cx, cy) });
     this.stats.built++;
     if (fromLive) this.stats.live++;
     this.stats.quads += quads.length / QF;
@@ -502,6 +694,12 @@ export class FarProxyLayer {
     return mesh;
   }
 
+  /** Mark every block for an immediate re-merge (debug view switches). */
+  remergeAll(): void {
+    for (const b of this.blocks.values()) { b.dirty = true; b.urgent = true; }
+    for (const c of this.cols.values()) this.markBlock(c.cx, c.cy);
+  }
+
   /** Drop everything (look/season change, teleport, load: the next updates rebuild). */
   clear(): void {
     for (const c of this.cols.values()) this.dropSolo(c);
@@ -509,7 +707,8 @@ export class FarProxyLayer {
     this.cols.clear();
     this.blocks.clear();
     this.hiddenKeys.clear();
-    this.looks = [];
+    this.staleN = 0;
+    this.looks.clear();
     this.scanAt.missing = true;
   }
 }

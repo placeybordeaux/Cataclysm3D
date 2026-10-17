@@ -202,13 +202,14 @@ export class AtlasTextureSource implements TileTextureSource {
   }
 
   /** Average opaque sRGB colour (0-255) of an id's atlas sprite, or null without art (far proxies, farProxy.ts). */
-  averageColor(id: string): RGB | null {
-    return this.average(id);
+  averageColor(id: string, part?: 'top'): RGB | null {
+    return this.average(id, part === 'top' ? 0.6 : 1);
   }
 
   /** Average opaque colour of an id's atlas sprite (memoised), for tinting procedural faces. */
-  private average(id: string): RGB | null {
-    if (this.avgCache.has(id)) return this.avgCache.get(id)!;
+  private average(id: string, frac = 1): RGB | null {
+    const key = frac === 1 ? id : `${id}|${frac}`;
+    if (this.avgCache.has(key)) return this.avgCache.get(key)!;
     let res: RGB | null = null;
     const hit = this.atlas.lookupWithLooksLike(id, this.looksLike, { connections: 15 });
     const r = hit?.fg ?? hit?.bg;
@@ -218,7 +219,8 @@ export class AtlasTextureSource implements TileTextureSource {
       c.height = r.px.h;
       const ctx = c.getContext('2d', { willReadFrequently: true })!;
       ctx.drawImage(r.image, r.px.x, r.px.y, r.px.w, r.px.h, 0, 0, r.px.w, r.px.h);
-      const d = ctx.getImageData(0, 0, r.px.w, r.px.h).data;
+      // frac < 1: only the top of the sprite (a tree's canopy without its trunk)
+      const d = ctx.getImageData(0, 0, r.px.w, Math.max(1, Math.round(r.px.h * frac))).data;
       let sr = 0, sg = 0, sb = 0, n = 0;
       for (let i = 0; i < d.length; i += 4) {
         if (d[i + 3] < 200) continue;
@@ -227,7 +229,7 @@ export class AtlasTextureSource implements TileTextureSource {
       // Quantize so near-identical walls share one packed texture.
       if (n) res = [sr / n, sg / n, sb / n].map((v) => Math.round(v / 4) * 4) as RGB;
     }
-    this.avgCache.set(id, res);
+    this.avgCache.set(key, res);
     return res;
   }
 }

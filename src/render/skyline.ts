@@ -8,7 +8,7 @@ import { hash2 } from './ground';
 // town buildings, clumps of low-poly tree crowns — is built from the overmap (what really
 // is out there), so the horizon shows where the next town and the forests are.
 //
-// Everything past NEAR metres is pulled toward the camera in the vertex shader keeping its
+// Everything past uNear metres is pulled toward the camera in the vertex shader keeping its
 // direction (an impostor: same angular size and place on the horizon, well inside the
 // camera's far plane). The pixels are tagged in the normal target (alpha 0.5) so the post
 // pass gives them their own haze instead of the opaque draw-distance fog.
@@ -135,9 +135,15 @@ export function emitSilhouette(X: number, Y: number, id: string, quad: QuadFn, t
   }
 }
 
-const NEAR = 140;
+/** Default pull distance (m); farLod.ts moves it past the far proxies, which reach further. */
+export const SKYLINE_NEAR = 140;
+/** Pulled geometry keeps this share of its depth beyond the pull distance. */
+export const SKYLINE_PULL = 0.12;
 /** Rebuild after the player's OMT moved this far from the ring's centre. */
 const LAG = 2;
+
+/** The ring reaches this many chunks past the draw radius. */
+export const SKYLINE_OUTER = 13;
 
 export class SkylineLayer {
   readonly group = new THREE.Group();
@@ -155,6 +161,12 @@ export class SkylineLayer {
     uSunDir: { value: new THREE.Vector3(0, 1, 0) },
     uDay: { value: 1 },
     uSkyTint: { value: new THREE.Color(1, 1, 1) },
+    /**
+     * Pull distance (m). Everything pulled must land beyond whatever real geometry is drawn
+     * out there, or it wins the depth test over it: with far proxies to ~370 m, the pulled far
+     * ground ring at ~165 m painted over the bottoms of distant buildings (farLodInstall.ts).
+     */
+    uNear: { value: SKYLINE_NEAR },
   };
 
   constructor(public overmap: OmtLookup | null = null) {
@@ -163,6 +175,7 @@ export class SkylineLayer {
       uniforms: this.uniforms,
       vertexShader: /* glsl */ `
         attribute vec3 color;
+        uniform float uNear;
         varying vec3 vCol;
         varying vec3 vN;
         varying float vDist;
@@ -171,7 +184,7 @@ export class SkylineLayer {
           vec3 d = w.xyz - cameraPosition;
           float L = length(d);
           vDist = L;
-          if (L > ${NEAR.toFixed(1)}) w.xyz = cameraPosition + d * ((${NEAR.toFixed(1)} + (L - ${NEAR.toFixed(1)}) * 0.12) / L);
+          if (L > uNear) w.xyz = cameraPosition + d * ((uNear + (L - uNear) * ${SKYLINE_PULL.toFixed(2)}) / L);
           vCol = color;
           vN = normal;
           gl_Position = projectionMatrix * viewMatrix * w;
@@ -249,7 +262,7 @@ export class SkylineLayer {
     // Silhouettes: inner edge a ring further out than the drawn chunks (the centre lags up
     // to LAG OMTs). Ground: from well inside the drawn chunks (it is under their ground), so
     // it covers every gap out to the drawn edge wherever the player stands within the lag.
-    const inner = radius + 2.6, outer = radius + 13;
+    const inner = radius + 2.6, outer = radius + SKYLINE_OUTER;
     const innerG = Math.max(1, radius - LAG);
     for (let dy = -Math.ceil(outer); dy <= Math.ceil(outer); dy++) {
       yield;
