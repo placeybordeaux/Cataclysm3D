@@ -24,6 +24,8 @@ interface FadeState {
   n: number;
   /** world meshes: the shared material each one had, and its visibility */
   base: Map<THREE.Mesh, { mat: THREE.Material; vis: boolean }>;
+  /** materials with their own dissolve pair (a vehicle's skin): set in place */
+  own: Map<THREE.Material, { uDissolve: { value: number }; uDissolveOut: { value: number } }>;
   /** other meshes: their visibility before the fade */
   other: Map<THREE.Object3D, boolean>;
 }
@@ -70,7 +72,7 @@ export function setFade(obj: THREE.Object3D, f: number, out = false): void {
   const n = obj.children.length;
   if (s && s.step === step && s.out === out && s.n === n) return;
   if (!s) {
-    s = { step: -1, out, n: -1, base: new Map(), other: new Map() };
+    s = { step: -1, out, n: -1, base: new Map(), other: new Map(), own: new Map() };
     states.set(obj, s);
     obj.userData.fading = true;
   }
@@ -91,6 +93,13 @@ export function setFade(obj: THREE.Object3D, f: number, out = false): void {
       m.material = shown >= STEPS ? b.mat : cloneFor(b.mat, step, out);
       return;
     }
+    const ownU = m.isMesh && !Array.isArray(m.material) ? (m.material.userData as { dissolveU?: { uDissolve: { value: number }; uDissolveOut: { value: number } } }).dissolveU : undefined;
+    if (ownU) {
+      st.own.set(m.material as THREE.Material, ownU);
+      ownU.uDissolve.value = step / STEPS;
+      ownU.uDissolveOut.value = out ? 1 : 0;
+      return;
+    }
     if (!m.isMesh && !(o as THREE.Points).isPoints) return;
     if (!st.other.has(o)) st.other.set(o, o.visible);
     o.visible = st.other.get(o)! && otherOn;
@@ -108,6 +117,10 @@ export function clearFade(obj: THREE.Object3D): void {
     m.visible = b.vis;
   }
   for (const [o, v] of s.other) o.visible = v;
+  for (const u of s.own.values()) {
+    u.uDissolve.value = 1;
+    u.uDissolveOut.value = 0;
+  }
   states.delete(obj);
   delete obj.userData.fading;
   const sprites = obj.userData.sprites as { setVisible(v: boolean): void } | undefined;

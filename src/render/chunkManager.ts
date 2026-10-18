@@ -186,6 +186,13 @@ export class ChunkManager {
   curtained = false;
   /** debug (far-LOD captures, cdda.holdBuilds): entries are made and kept, nothing is built */
   holdBuilds = false;
+  /** farLod.ts: is (x, y) in a column still held under its far proxy (vehicles wait for it)? */
+  heldAt: ((x: number, y: number) => boolean) | null = null;
+  /**
+   * farLod.ts: vehicles are drawn past VIEW_RANGE as their column's rule says (vehicleMesh.ts):
+   * true = draw the real car there, false = its column's proxy carries it. Null: VIEW_RANGE only.
+   */
+  farVehicles: ((cx: number, cy: number) => boolean) | null = null;
   private pendingLast = 0;
   private curtainSince = -1;
   boostSlackShare = 0.7;

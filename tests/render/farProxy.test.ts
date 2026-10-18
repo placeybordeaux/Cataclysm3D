@@ -101,4 +101,35 @@ describe('far proxies', () => {
     // 2x2 cells: fewer boxes for the outer ring
     expect(buildColumnQuads(cx, cy, levels, look, 2).length).toBeLessThan(q.length);
   });
+
+  it('winds every face front-facing along its normal (tops, walls, decks, crowns, masts, cars)', () => {
+    const map = makeMap(game, SEED);
+    const gen = new WorldGenerator(SEED, wg, game);
+    gen.stats.quiet = true;
+    map.generator = gen;
+    const looks = new Map<number, ReturnType<typeof tileLook>>();
+    const look = (i: number) => {
+      let L = looks.get(i);
+      if (!L) looks.set(i, (L = tileLook(map.terrain.get(i) as TerrainDef, null, 1)));
+      return L;
+    };
+    const [[cx, cy]] = townColumns(gen, 1);
+    const top = overmapTopOf((x, y, z) => gen.overmap.omtAt(x, y, z), cx, cy);
+    const levels = column(map, cx, cy, top).map((c) => (c.empty ? null : c));
+    // a car parked at 30 degrees in either corner order
+    const x = cx * CHUNK + 12, y = cy * CHUNK + 12, a = Math.PI / 6;
+    const rot = (u: number, v: number): [number, number] => [x + u * Math.cos(a) - v * Math.sin(a), y + u * Math.sin(a) + v * Math.cos(a)];
+    const car = [rot(-2.5, -1), rot(2.5, -1), rot(2.5, 1), rot(-2.5, 1)];
+    for (const corners of [car, [...car].reverse()]) {
+      const q = buildColumnQuads(cx, cy, levels, look, 1, true, [{ corners, base: 0, h: 1.6, col: [0.5, 0.2, 0.2] }]);
+      let bad = 0;
+      for (let o = 0; o < q.length; o += 19) {
+        const A = [q[o], q[o + 1], q[o + 2]], B = [q[o + 3], q[o + 4], q[o + 5]], C = [q[o + 6], q[o + 7], q[o + 8]];
+        const u = [B[0] - A[0], B[1] - A[1], B[2] - A[2]], w = [C[0] - A[0], C[1] - A[1], C[2] - A[2]];
+        const cr = [u[1] * w[2] - u[2] * w[1], u[2] * w[0] - u[0] * w[2], u[0] * w[1] - u[1] * w[0]];
+        if (cr[0] * q[o + 12] + cr[1] * q[o + 13] + cr[2] * q[o + 14] <= 0) bad++;
+      }
+      expect(bad).toBe(0);
+    }
+  });
 });

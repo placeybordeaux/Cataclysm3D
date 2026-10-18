@@ -7,8 +7,14 @@ import { GameMap } from '../world/map';
 import { WorldGenerator } from '../world/worldgen';
 import { registerOption } from '../ui/options';
 import { clearFade, setFade } from './dissolve';
-import { DISSOLVE_S, dissolves, FAR_LOD_MODES, farLod, Handoff, setFarLodMode, usesProxies, type FarLodMode } from './farLod';
-import { FarProxyLayer, overmapTopOf } from './farProxy';
+import { DISSOLVE_S, dissolves, FAR_LOD_MODES, farCarColumn, farLod, Handoff, setFarLodMode, usesProxies, type FarLodMode } from './farLod';
+import { FarProxyLayer, overmapTopOf, type VehicleBox } from './farProxy';
+import type { Chunk } from '../world/map';
+import { hashSeed, Rng } from '../core/rng';
+import { pickVehicleProto } from '../game/vehicle_data';
+import { spawnVehicle, type Vehicle } from '../game/vehicle';
+import { layoutOf, liveryFromId } from '../game/chassis';
+import { liveryBody, type SkinLayoutInfo } from './vehicleSkin';
 import type { PlaceholderLayer } from './placeholders';
 import type { Renderer } from './renderer';
 import { look } from './look';
@@ -37,8 +43,56 @@ export function installFarLod(game: Game, renderer: Renderer, worldgen: WorldGen
     white: () => renderer.whiteFrame(),
     art: (id, part) => chunks.source.averageColor?.(id, part) ?? null,
     pitch: () => look.f.archDetail,
+    vehicles: (cx, cy, scratchLevels) => vehicleBoxes(cx, cy, scratchLevels),
   });
   renderer.scene.add(proxies.group);
+
+  /**
+   * Parked vehicles of a column for its proxy. Columns the live map has: its vehicles (not the
+   * one you drive, nothing moving). Others: the scratch chunks' mapgen requests, spawned as
+   * VehicleSystem.flushPending will spawn them (the same position-seeded rng: same prototype,
+   * same paint), only to read their footprint and colour.
+   */
+  /**
+   * The box of vehicle `v`: the model's own body extent (chassis layoutOf: nose to tail, the
+   * squeezed half-width, the template's roof or cargo-box height), not its tile grid, which is
+   * a metre or more wider than the body (carBoxQa: footprint overlap 0.55 that way).
+   */
+  const boxOf = (v: Vehicle): VehicleBox => {
+    const L = layoutOf(v);
+    const xa = Math.min(L.xTail, L.xNose), xb = Math.max(L.xTail, L.xNose);
+    const ya = L.yc - L.hw, yb = L.yc + L.hw;
+    const corners = ([[xa, ya], [xb, ya], [xb, yb], [xa, yb]] as [number, number][]).map(([mx, my]) => v.mountToWorld(mx, my));
+    // (bikes have no roof: the template's is a car's; measured models: bicycle 1.0, scooter 1.26 m)
+    const h = L.style === 'bicycle' ? 1 : L.style === 'motorcycle' ? 1.2 : Math.max(0.8, L.p.roof, L.p.box);
+    const hex = liveryBody({ livery: liveryFromId(v.protoId) } as SkinLayoutInfo, v.paint);
+    const lin = (c: number) => Math.pow(c / 255, 2.2) * 0.85;
+    return { corners, base: v.z * LEVEL_HEIGHT, h, col: [lin((hex >> 16) & 255), lin((hex >> 8) & 255), lin(hex & 255)] };
+  };
+  const vehicleBoxes = (cx: number, cy: number, scratchLevels: readonly Chunk[]): VehicleBox[] => {
+    const vs = game.vehicles;
+    if (!vs) return [];
+    const out: VehicleBox[] = [];
+    const box = (v: Vehicle) => {
+      out.push(boxOf(v));
+    };
+    if (game.map.hasChunk(cx, cy, 0)) {
+      for (const v of vs.list) {
+        if (v === vs.driving || Math.abs(v.velocity) > 0.5) continue;
+        if (Math.floor(v.x / CHUNK) !== cx || Math.floor(v.y / CHUNK) !== cy) continue;
+        box(v);
+      }
+      return out;
+    }
+    for (const c of scratchLevels)
+      for (const r of c.vehicles) {
+        const rng = new Rng(hashSeed(game.seed, r.x, r.y, r.z, 0x5eed));
+        const proto = pickVehicleProto(vs.vdata, r.id, rng);
+        if (!proto) continue;
+        box(spawnVehicle(vs.vdata, game.data, proto, { x: r.x + 0.5, y: r.y + 0.5, z: r.z, facing: r.rotation ?? 0, fuel: r.fuel ?? -1, status: r.status ?? -1, rng }));
+      }
+    return out;
+  };
   proxies.yieldTo = () => chunks.behind;
   proxies.speed = () => Math.hypot(chunks.vel.x, chunks.vel.y);
   proxies.startIdle();
@@ -70,6 +124,9 @@ export function installFarLod(game: Game, renderer: Renderer, worldgen: WorldGen
       lastMode = mode;
     }
     proxies.enabled = usesProxies(mode);
+    // far cars: models out to FAR_CAR_RANGE (by column), past it the column's cap carries them
+    // as boxes ('current' keeps the old 90 m, for comparison; 'dissolve' has no proxies: models)
+    chunks.farVehicles = mode === 'current' ? null : usesProxies(mode) ? (cx, cy) => !farCarColumn(cx, cy, game.player.x, game.player.y) : () => true;
     placeholders.doneFn = mode === 'current' ? null : (cx, cy) => handoff.done(cx, cy);
     // proxy modes: no overmap stand-ins at all (the hand-off builds a missing proxy instead)
     placeholders.covered = usesProxies(mode) ? () => true : null;
@@ -111,6 +168,8 @@ export function installFarLod(game: Game, renderer: Renderer, worldgen: WorldGen
     }
   });
   chunks.afterUpdate.push(() => handoff.update(game.player.x, game.player.y, game.player.z));
+  // vehicles in a held column wait (its proxy draws a box for them) and fade in with it
+  chunks.heldAt = (x, y) => handoff.holding(Math.floor(x / CHUNK), Math.floor(y / CHUNK));
   game.events.on('gameLoaded', () => {
     handoff.reset();
     proxies.clear();
@@ -150,10 +209,12 @@ export function installFarLod(game: Game, renderer: Renderer, worldgen: WorldGen
   /** Drop the chunks beyond `dist` m: they stream back in and hand over in view (captures). */
   a.restreamEdge = (dist = 130) => chunks.dropBeyond(game.player.x, game.player.y, dist);
   /** Debug: draw only proxies (chunks and stand-ins hidden), to compare their shapes with the real view. */
-  a.proxyView = (on: boolean) => {
+  a.proxyView = (on: boolean, hideVehicles = false) => {
     proxies.showAll = on;
     chunks.group.visible = !on;
     placeholders.group.visible = !on;
+    const vg = (renderer as unknown as { vehicleView?: { group?: THREE.Group } }).vehicleView?.group;
+    if (vg) vg.visible = !(on && hideVehicles);
     proxies.remergeAll();
   };
   /**
@@ -238,6 +299,7 @@ export function installFarLod(game: Game, renderer: Renderer, worldgen: WorldGen
     const tiles: { cx: number; cy: number; tx: number; ty: number; proxy: number; real: number; diff: number }[] = [];
     let columns = 0, skipped = 0;
     let treeTiles = 0, treeBoth = 0, treeProxyOnly = 0, treeRealOnly = 0, treeDiff = 0;
+    let capTiles = 0, capOver = 0;
     for (let dy = -r; dy <= r; dy++)
       for (let dx = -r; dx <= r; dx++) {
         const cx = pcx + dx, cy = pcy + dy;
@@ -316,6 +378,15 @@ export function installFarLod(game: Game, renderer: Renderer, worldgen: WorldGen
             }
           });
         }
+        // caps over handed-over columns must never stand above what is really there
+        const PC = handoff.done(cx, cy) ? proxies.heightmap(cx, cy, 'cap') : null;
+        if (PC)
+          for (let i = 0; i < CHUNK * CHUNK; i++) {
+            if (!(PC[i] > 0.6)) continue;
+            capTiles++;
+            const real = Math.max(RH[i], RT[i], 0);
+            if (PC[i] > real + 0.5) capOver++;
+          }
         for (let i = 0; i < CHUNK * CHUNK; i++) {
           const ph = PH![i], rh = standin ? Math.max(RH[i], RT[i]) : RH[i];
           if (ph > 0.6 || rh > 0.6) {
@@ -353,6 +424,7 @@ export function installFarLod(game: Game, renderer: Renderer, worldgen: WorldGen
       over1: n ? +(over(1) / n).toFixed(3) : 0, over3: n ? +(over(3) / n).toFixed(3) : 0,
       under1: n ? +(under(1) / n).toFixed(3) : 0, under3: n ? +(under(3) / n).toFixed(3) : 0,
       worst,
+      caps: { tiles: capTiles, over: capOver },
       trees: { tiles: treeTiles, both: treeBoth, proxyOnly: treeProxyOnly, realOnly: treeRealOnly, meanDiffBoth: treeBoth ? +(treeDiff / treeBoth).toFixed(2) : 0 },
     };
   };
@@ -371,6 +443,131 @@ export function installFarLod(game: Game, renderer: Renderer, worldgen: WorldGen
       lv[z] = { walls, trees, empty: !!c.empty };
     }
     return { proxy: proxies.describe(cx, cy), omt: worldgen.overmap.omtAt(cx, cy, 0).id, live: lv };
+  };
+  /**
+   * Debug: does a column's car proxy predict its real cars? For every generated column within
+   * `r` chunks: the cars its scratch generation would place (prototype, centre, paint) against
+   * the live parked vehicles there. Matched = same prototype within 1 m and the same paint.
+   */
+  a.carProxyCheck = (r = 6) => {
+    const vs = game.vehicles;
+    if (!vs) return null;
+    const p = game.player;
+    const pcx = Math.floor(p.x / CHUNK), pcy = Math.floor(p.y / CHUNK);
+    let predicted = 0, live = 0, matched = 0;
+    const misses: unknown[] = [];
+    for (let dy = -r; dy <= r; dy++)
+      for (let dx = -r; dx <= r; dx++) {
+        const cx = pcx + dx, cy = pcy + dy;
+        if (!game.map.hasChunk(cx, cy, 0)) continue;
+        const real = vs.list.filter((v) => v !== vs.driving && Math.floor(v.x / CHUNK) === cx && Math.floor(v.y / CHUNK) === cy);
+        const pred = proxies.withScratch(cx, cy, (levels) => {
+          const out: { proto: string; x: number; y: number; paint: number }[] = [];
+          for (const c of levels)
+            for (const rq of c.vehicles) {
+              const rng = new Rng(hashSeed(game.seed, rq.x, rq.y, rq.z, 0x5eed));
+              const proto = pickVehicleProto(vs.vdata, rq.id, rng);
+              if (!proto) continue;
+              const v = spawnVehicle(vs.vdata, game.data, proto, { x: rq.x + 0.5, y: rq.y + 0.5, z: rq.z, facing: rq.rotation ?? 0, fuel: rq.fuel ?? -1, status: rq.status ?? -1, rng });
+              out.push({ proto, x: v.x, y: v.y, paint: v.paint });
+            }
+          return out;
+        });
+        predicted += pred.length;
+        live += real.length;
+        for (const q of pred) {
+          const hit = real.find((v) => v.protoId === q.proto && Math.hypot(v.x - q.x, v.y - q.y) < 1 && v.paint === q.paint);
+          if (hit) matched++;
+          else if (misses.length < 10) misses.push({ cx, cy, ...q, near: real.filter((v) => Math.hypot(v.x - q.x, v.y - q.y) < 3).map((v) => ({ proto: v.protoId, paint: v.paint, d: +Math.hypot(v.x - q.x, v.y - q.y).toFixed(1) })) });
+        }
+      }
+    return { predicted, live, matched, misses };
+  };
+  /**
+   * Debug: every parked vehicle within the proxy ring: drawn as itself (the vehicle renderer has
+   * it), carried by its column's proxy (drawn, or held as a cover), or neither (a car missing
+   * from view). `near`: of the neither, those inside the draw distance.
+   */
+  a.carCover = () => {
+    const vs = game.vehicles, view = (renderer as unknown as { vehicleView?: { entries?: Map<unknown, unknown> } }).vehicleView;
+    if (!vs) return null;
+    const p = game.player, R = chunks.radius, outer = proxies.outer(R) * CHUNK;
+    let drawn = 0, proxied = 0, neither = 0, near = 0;
+    const reasons: Record<string, number> = {};
+    const detail: unknown[] = [];
+    const missingIds: number[] = [];
+    for (const v of vs.list) {
+      // (below ground: a basement's carts can't be seen from the street anyway)
+      if (v === vs.driving || v.z < 0) continue;
+      const d = Math.hypot(v.x - p.x, v.y - p.y);
+      if (d > outer - CHUNK) continue;
+      const cx = Math.floor(v.x / CHUNK), cy = Math.floor(v.y / CHUNK);
+      if (view?.entries?.has(v)) drawn++;
+      // (a handed-over column past FAR_CAR_RANGE carries its cars in its cap)
+      else if (proxies.drawn(cx, cy) || handoff.covering(cx, cy) || (handoff.done(cx, cy) && farCarColumn(cx, cy, p.x, p.y) && proxies.drawnTop(cx, cy) > -Infinity)) proxied++;
+      else {
+        neither++;
+        if (d < R * CHUNK) {
+          near++;
+          const why = !chunks.drawnAt(v.x, v.y, v.z) ? 'notDrawnAt' : chunks.heldAt?.(v.x, v.y) ? 'held' : handoff.done(cx, cy) ? 'doneUnbuilt' : 'other';
+          reasons[why] = (reasons[why] ?? 0) + 1;
+          missingIds.push(v.uid);
+          if (detail.length < 4) {
+            const e = chunks.entryAt(cx, cy, v.z);
+            detail.push({ proto: v.protoId, z: v.z, d: Math.round(d), cap: proxies.drawnTop(cx, cy), entry: e ? { shown: e.shown, visible: e.visible } : null, levelDrawn: chunks.levels.drawn(v.x, v.y, v.z), lx: Math.round(v.x - cx * CHUNK), ly: Math.round(v.y - cy * CHUNK) });
+          }
+        }
+      }
+    }
+    return { drawn, proxied, neither, near, reasons, detail, missingIds };
+  };
+  /**
+   * Debug: each parked vehicle the renderer draws within `r` m: its proxy box against the real
+   * model's bounds (world axis-aligned): footprint overlap (intersection over union of the two
+   * boxes' x-z rectangles) and the height difference of the tops.
+   */
+  a.carBoxQa = (r = 80) => {
+    const vs = game.vehicles, view = (renderer as unknown as { vehicleView?: { entries?: Map<Vehicle, { obj: THREE.Object3D }> } }).vehicleView;
+    if (!vs || !view?.entries) return null;
+    const p = game.player, bb = new Box3();
+    const rows: { proto: string; iou: number; dTop: number }[] = [];
+    for (const [v, e] of view.entries) {
+      if (v === vs.driving || Math.hypot(v.x - p.x, v.y - p.y) > r) continue;
+      e.obj.updateMatrixWorld(true);
+      bb.setFromObject(e.obj);
+      const b = boxOf(v);
+      const xs = b.corners.map((c2) => c2[0]), zs = b.corners.map((c2) => c2[1]);
+      const px0 = Math.min(...xs), px1 = Math.max(...xs), pz0 = Math.min(...zs), pz1 = Math.max(...zs);
+      const ix = Math.max(0, Math.min(px1, bb.max.x) - Math.max(px0, bb.min.x)), iz = Math.max(0, Math.min(pz1, bb.max.z) - Math.max(pz0, bb.min.z));
+      const inter = ix * iz, uni = (px1 - px0) * (pz1 - pz0) + (bb.max.x - bb.min.x) * (bb.max.z - bb.min.z) - inter;
+      const [x0, y0, x1, y1] = v.bounds();
+      const fr = ((v.facing % 180) + 180) % 180;
+      const sideways = fr > 45 && fr < 135;
+      const rx = bb.max.x - bb.min.x, rz = bb.max.z - bb.min.z;
+      rows.push({ proto: v.protoId, iou: +(inter / Math.max(uni, 1e-6)).toFixed(2), dTop: +(b.base + b.h - bb.max.y).toFixed(2),
+        grid: [x1 - x0 + 1, y1 - y0 + 1], model: [+(sideways ? rz : rx).toFixed(2), +(sideways ? rx : rz).toFixed(2), +(bb.max.y - v.z * LEVEL_HEIGHT).toFixed(2)] } as never);
+    }
+    const n = rows.length;
+    return {
+      n,
+      meanIou: n ? +(rows.reduce((s2, r2) => s2 + r2.iou, 0) / n).toFixed(2) : 0,
+      meanDTop: n ? +(rows.reduce((s2, r2) => s2 + r2.dTop, 0) / n).toFixed(2) : 0,
+      all: rows,
+      worst: [...rows].sort((a2, b2) => a2.iou - b2.iou).slice(0, 6),
+      tallest: [...rows].sort((a2, b2) => Math.abs(b2.dTop) - Math.abs(a2.dTop)).slice(0, 6),
+    };
+  };
+  /** Debug: proxies within `r` chunks by cell size (1 = full detail, 2 = the rim's coarse cells). */
+  a.proxyCells = (r = 9) => {
+    const p = game.player, pcx = Math.floor(p.x / CHUNK), pcy = Math.floor(p.y / CHUNK);
+    const out: Record<number, number> = {};
+    for (let dy = -r; dy <= r; dy++)
+      for (let dx = -r; dx <= r; dx++) {
+        if (dx * dx + dy * dy > r * r) continue;
+        const d = proxies.describe(pcx + dx, pcy + dy);
+        if (d) out[d.cell] = (out[d.cell] ?? 0) + 1;
+      }
+    return out;
   };
   /** Pause chunk building (true) or resume it: captures separate dropping from arriving. */
   a.holdBuilds = (on: boolean) => void (chunks.holdBuilds = on);

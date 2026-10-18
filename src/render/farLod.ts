@@ -32,6 +32,17 @@ export function setFarLodMode(m: FarLodMode, persist: boolean): void {
 export const usesProxies = (m: FarLodMode) => m === 'proxy' || m === 'proxy-dissolve';
 export const dissolves = (m: FarLodMode) => m === 'dissolve' || m === 'proxy-dissolve';
 
+/**
+ * Real car models are drawn out to this far (m, a column's centre from the player); past it,
+ * in a handed-over column, its cap carries the cars as boxes (one draw for the column instead
+ * of several per car: ~200 draw calls in a city). vehicleMesh.ts asks farCarColumn.
+ */
+export const FAR_CAR_RANGE = 130;
+/** Is column (cx, cy) past the real cars' range from (px, py)? (both sides use this one rule) */
+export function farCarColumn(cx: number, cy: number, px: number, py: number): boolean {
+  return Math.hypot((cx + 0.5) * CHUNK - px, (cy + 0.5) * CHUNK - py) > FAR_CAR_RANGE;
+}
+
 /** Seconds a dissolve takes. */
 export const DISSOLVE_S = 0.6;
 /** Proxies the hand-off may build in one frame for covers the ring hasn't reached (0.2-1 ms each). */
@@ -96,13 +107,24 @@ export class Handoff {
     return s?.state === 'done' && s.e0.shown === true;
   }
 
+  /** Is column (cx, cy) still held (its chunks not dissolving in yet) under a cover? */
+  holding(cx: number, cy: number): boolean {
+    const s = this.cols.get(colKey(cx, cy));
+    return !!s && s.state === 'hold' && !!s.cover;
+  }
+
   /** Is column (cx, cy) held or fading under its cover (the cover is the hand-off's)? */
   covering(cx: number, cy: number): boolean {
     const s = this.cols.get(colKey(cx, cy));
     return !!s && s.state !== 'done' && !!s.cover;
   }
 
+  private px = 0;
+  private py = 0;
+
   update(px: number, py: number, pz: number): void {
+    this.px = px;
+    this.py = py;
     const mode = farLod.mode;
     const now = performance.now();
     this.frame++;
@@ -227,7 +249,7 @@ export class Handoff {
       if (!e || !e.shown || !e.visible || (e.group && s.late.has(e.group))) break;
       drawn = z;
     }
-    proxies.setCap(s.cx, s.cy, drawn < 0 ? null : (drawn + 1) * LEVEL_HEIGHT - 0.05);
+    proxies.setCap(s.cx, s.cy, drawn < 0 ? null : (drawn + 1) * LEVEL_HEIGHT - 0.05, farCarColumn(s.cx, s.cy, this.px, this.py));
   }
 
   /** The cover to hold column (cx, cy) under: its proxy (proxy modes) or its stand-in. */

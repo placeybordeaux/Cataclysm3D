@@ -473,10 +473,15 @@ export function worldMaterials(page: THREE.Texture): { mat: THREE.MeshLambertMat
 export function vehicleBodyMaterials(page: THREE.Texture): { mat: THREE.MeshLambertMaterial; depth: THREE.MeshDepthMaterial } {
   enableMips(page);
   const mat = new THREE.MeshLambertMaterial({ map: page, vertexColors: true, side: THREE.DoubleSide });
+  // its own dissolve pair (one material per skin): a far car fades in (vehicleMesh.ts, dissolve.ts)
+  const dissolveU = { uDissolve: { value: 1 }, uDissolveOut: { value: 0 } };
+  (mat.userData as { dissolveU?: typeof dissolveU }).dissolveU = dissolveU;
   mat.onBeforeCompile = (shader) => {
     patchWorldVertex(shader, true);
     patchBandedLambert(shader, 'world');
     addNormalOutput(shader, true, 1);
+    Object.assign(shader.uniforms, dissolveU);
+    shader.fragmentShader = replaceOnce(DISSOLVE_FRAG + shader.fragmentShader, '#include <clipping_planes_fragment>', DISSOLVE_TEST);
     // Inside faces: a neutral trim grey keeping only a hint of the skin's pattern.
     shader.fragmentShader = shader.fragmentShader.replace('#include <color_fragment>', '#include <color_fragment>\n  if (!gl_FrontFacing) diffuseColor.rgb = vec3(0.27, 0.27, 0.28) * (0.8 + 0.5 * dot(diffuseColor.rgb, vec3(0.3, 0.59, 0.11)));');
   };

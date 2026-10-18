@@ -156,11 +156,15 @@ export function farLodScenarios(c: FarLodCtx): Scenario[] {
       // 40 mph along the road (the benchmark's ghost car: no collisions)
       await js(`__perfBench.go(17.9)`);
       const samples: { all: number; inner: number }[] = [];
-      let standins = 0;
+      let standins = 0, carsMissing = 0, carsSeen = 0;
       for (let k = 0; k < 40; k++) {
         await sleep(250);
         samples.push((await js<{ uncovered: { all: number; inner: number } }>(`cdda.farLod()`)).uncovered);
         standins = Math.max(standins, await js<number>(`cdda.placeholders().shown`));
+        const cc = await js<{ drawn: number; proxied: number; neither: number; near: number }>(`cdda.carCover()`);
+        carsMissing = Math.max(carsMissing, cc.near);
+        if (cc.near) console.log('    missing cars:', JSON.stringify(cc));
+        carsSeen = Math.max(carsSeen, cc.drawn + cc.proxied);
         for (const [cx, cy] of towers) {
           const t = await js<{ chunks: number; proxy: number; full: number }>(`cdda.columnDrawnTop(${cx}, ${cy})`);
           if (!(t.full > 0)) continue; // dropped behind us
@@ -176,7 +180,13 @@ export function farLodScenarios(c: FarLodCtx): Scenario[] {
       console.log('    tall buildings, least of their height drawn while closing in:', JSON.stringify(Object.fromEntries([...worst].map(([k, v]) => [k, +v.toFixed(2)]))));
       check('a tall building keeps (almost) all its height drawn as you drive towards it', minShare > 0.85, { minShare });
       check('no overmap stand-in drawn in proxy-dissolve (they are guesses: the "too high" boxes)', standins === 0, { standins });
+      console.log(`    parked cars: up to ${carsSeen} in view (drawn or as proxies); missing inside the draw distance at worst: ${carsMissing}`);
+      check('no parked car inside the draw distance is missing (neither drawn nor in a proxy)', carsMissing === 0, { carsMissing, carsSeen });
       await js(`__perfBench.stop()`);
+      await sleep(2000);
+      const cells = await js<Record<string, number>>(`cdda.proxyCells(9)`);
+      console.log('    proxies within 9 chunks by cell size (2 s after stopping):', JSON.stringify(cells));
+      check('no coarse (2-tile) proxy left within 9 chunks after driving in', !cells['2'], cells);
       const maxInner = Math.max(...samples.map((s) => s.inner));
       console.log('    uncovered inner (per 250 ms):', samples.map((s) => s.inner).join(' '), '| all:', samples.map((s) => s.all).join(' '));
       check('no column inside the draw radius + 2 shows nothing while driving on', maxInner === 0, { maxInner });
@@ -262,6 +272,9 @@ export function farLodScenarios(c: FarLodCtx): Scenario[] {
         console.log(`    ${name} (proxies as built before a visit): ${qs.tiles} building tiles; mean |diff| ${qs.meanAbs} m; higher by >1 m ${(qs.over1 * 100).toFixed(1)} % (>3 m ${(qs.over3 * 100).toFixed(1)} %), lower by >1 m ${(qs.under1 * 100).toFixed(1)} % (>3 m ${(qs.under3 * 100).toFixed(1)} %)`);
         console.log(`    ${name}: ${qa.columns} columns, ${qa.tiles} building tiles; mean |diff| ${qa.meanAbs} m; proxy higher by >1 m ${(qa.over1 * 100).toFixed(1)} % (>3 m ${(qa.over3 * 100).toFixed(1)} %), lower by >1 m ${(qa.under1 * 100).toFixed(1)} % (>3 m ${(qa.under3 * 100).toFixed(1)} %); trees ${JSON.stringify((qa as unknown as { trees: unknown }).trees)}`);
         writeFileSync(resolve(OUT, `qa_${name}.png`), (await grab()).bytes);
+        const cars = await js<{ predicted: number; live: number; matched: number; misses: unknown[] }>(`cdda.carProxyCheck(6)`);
+        report[name + '_cars'] = cars;
+        console.log(`    ${name} cars: predicted ${cars.predicted}, live ${cars.live}, matched ${cars.matched}; caps ${JSON.stringify((qa as unknown as { caps: unknown }).caps)}`);
       }
       mkdirSync(resolve(OUT), { recursive: true });
       writeFileSync(resolve(OUT, 'qa.json'), JSON.stringify(report, null, 1));
@@ -311,6 +324,45 @@ export function farLodScenarios(c: FarLodCtx): Scenario[] {
         });
         return out;
       })()`)));
+    }],
+    ['farlodcars', 'parked cars as proxy boxes: the same view with the real cars and with the boxes', async () => {
+      await c.toGameplay();
+      await js(PERF_PAGE);
+      await js(`cdda.loadGate('off')`);
+      await js(`cdda.setFarLod('proxy-dissolve')`);
+      const route = await js<unknown>(`__perfBench.pick('city')`);
+      await js(`__perfBench.place(${JSON.stringify(route)})`);
+      // into town, then stop where parked cars are around
+      await js(`__perfBench.go(17.9)`);
+      await sleep(6000);
+      await js(`__perfBench.stop()`);
+      await js(`(() => { const vs = cdda.vehicleSystem; if (vs.driving) { vs.driving.velocity = 0; cdda.exitVehicle(); } })()`);
+      check('streamed in', await settled(40_000));
+      await sleep(4000);
+      // face the nearest parked car 15-40 m away
+      const aim = await js<unknown>(`(() => {
+        const p = cdda.game.player, vs = cdda.vehicleSystem;
+        const c = vs.list.map((v) => ({ v, d: Math.hypot(v.x - p.x, v.y - p.y) })).filter((o) => o.d > 10 && o.d < 80 && o.v !== vs.driving).sort((a, b) => a.d - b.d)[0];
+        if (!c) return null;
+        p.yaw = Math.atan2(c.v.x - p.x, -(c.v.y - p.y));
+        p.pitch = -0.15;
+        return { proto: c.v.protoId, d: Math.round(c.d) };
+      })()`);
+      check('a parked car to look at', !!aim, aim);
+      console.log('    car boxes vs models:', JSON.stringify(await js(`cdda.carBoxQa(120)`)));
+      // on foot, the top-down camera over the street: footprints compare best from above
+      await js(`(() => { const vs = cdda.vehicleSystem; if (vs.driving) vs.releaseControls(); const p = cdda.game.player; const c = vs.list.filter((v) => !v.velocity).map((v) => ({ v, d: Math.hypot(v.x - p.x, v.y - p.y) })).filter((o) => o.d > 10 && o.d < 80).sort((a, b) => a.d - b.d)[0]; if (c) cdda.teleport(c.v.x + 4, c.v.y + 4, 0); })()`);
+      for (let i = 0; i < 4 && (await js<string>(`cdda.renderer.rig.mode`)) !== 'top'; i++) {
+        await c.x().key('v');
+        await sleep(300);
+      }
+      await settled(20_000);
+      await sleep(1500);
+      writeFileSync(resolve(OUT, 'cars_real.png'), (await grab()).bytes);
+      await js(`cdda.proxyView(true, true)`);
+      await sleep(800);
+      writeFileSync(resolve(OUT, 'cars_proxy.png'), (await grab()).bytes);
+      await js(`cdda.proxyView(false)`);
     }],
   ];
 }

@@ -76,7 +76,15 @@ const ROOF_SLOPE = 0.5;
 /** floats per quad record: 4 corners, normal, linear rgb, kind (QK) */
 const QF = 19;
 /** What a quad belongs to (proxyQa compares buildings and trees separately). */
-export const QK = { build: 0, crown: 1, mast: 2 } as const;
+export const QK = { build: 0, crown: 1, mast: 2, vehicle: 3 } as const;
+
+/** A parked vehicle in a proxy: its footprint (world x, y corners), floor height, box height, linear colour. */
+export interface VehicleBox {
+  corners: [number, number][];
+  base: number;
+  h: number;
+  col: [number, number, number];
+}
 const BLOCK = 4;
 
 /** Lattice: see-through impassable terrain (railings, fences, radio tower girders). */
@@ -133,7 +141,7 @@ export function tileLook(t: TerrainDef, art: [number, number, number] | null, br
  * a level with nothing. `cell` = tiles per proxy cell (1, or 2 further out: max height, colour
  * of the tallest tile).
  */
-export function buildColumnQuads(cx: number, cy: number, levels: readonly (Chunk | null)[], look: (terIndex: number, z: number) => TileLook, cell = 1, pitch = false): Float32Array {
+export function buildColumnQuads(cx: number, cy: number, levels: readonly (Chunk | null)[], look: (terIndex: number, z: number) => TileLook, cell = 1, pitch = false, vehicles: readonly VehicleBox[] = []): Float32Array {
   const n = CHUNK / cell;
   const H = new Float32Array(n * n).fill(GROUND_Y);
   const top = new Uint32Array(n * n);
@@ -334,6 +342,31 @@ export function buildColumnQuads(cx: number, cy: number, levels: readonly (Chunk
       flush(n);
     }
   }
+  // parked vehicles: a box each on its real footprint, in its body colour (a car used to jump
+  // into view at 90 m, vehicleMesh.ts VIEW_RANGE)
+  kind = QK.vehicle;
+  for (const vb of vehicles) {
+    const c = vb.corners;
+    const lo = vb.base, hi = vb.base + vb.h;
+    const mx = (c[0][0] + c[1][0] + c[2][0] + c[3][0]) / 4, mz = (c[0][1] + c[1][1] + c[2][1] + c[3][1]) / 4;
+    // each face wound to front along its outward normal, whatever order the corners come in
+    // (from the box's middle: no handedness to get wrong)
+    const face = (a: V3, b: V3, cc: V3, d: V3, n: V3, col: V3) => {
+      const u = [b[0] - a[0], b[1] - a[1], b[2] - a[2]], w = [cc[0] - a[0], cc[1] - a[1], cc[2] - a[2]];
+      const dot = (u[1] * w[2] - u[2] * w[1]) * n[0] + (u[2] * w[0] - u[0] * w[2]) * n[1] + (u[0] * w[1] - u[1] * w[0]) * n[2];
+      if (dot > 0) quad(a, b, cc, d, n, col);
+      else quad(d, cc, b, a, n, col);
+    };
+    face([c[0][0], hi, c[0][1]], [c[1][0], hi, c[1][1]], [c[2][0], hi, c[2][1]], [c[3][0], hi, c[3][1]], [0, 1, 0], vb.col);
+    const side = vb.col.map((v) => v * 0.85) as V3;
+    for (let k = 0; k < 4; k++) {
+      const [ax, az] = c[k], [bx2, bz2] = c[(k + 1) % 4];
+      const ex = bx2 - ax, ez = bz2 - az, el = Math.hypot(ex, ez) || 1;
+      let nx = -ez / el, nz = ex / el;
+      if (nx * ((ax + bx2) / 2 - mx) + nz * ((az + bz2) / 2 - mz) < 0) { nx = -nx; nz = -nz; }
+      face([ax, lo, az], [bx2, lo, bz2], [bx2, hi, bz2], [ax, hi, az], [nx, 0, nz], side);
+    }
+  }
   // masts: a lattice stacked over levels (radio towers) as thin posts, one per tile
   kind = QK.mast;
   for (let ti = 0; ti < CHUNK * CHUNK; ti++) {
@@ -356,9 +389,24 @@ export function buildColumnQuads(cx: number, cy: number, levels: readonly (Chunk
  * draw). Proxy quads are axis-aligned: tops are kept if above `y`; walls are cut at `y` (the
  * corners below it raised to it) and dropped when wholly below.
  */
-export function clipQuads(quads: Float32Array, y: number): Float32Array {
+export function clipQuads(quads: Float32Array, y: number, capOnly = false, cars = false): Float32Array {
   const out: number[] = [];
   for (let o = 0; o < quads.length; o += QF) {
+    // a cap carries buildings and masts: a tree is drawn whole by its ground chunk (a pine's tip
+    // above the treetop level stood over the real tree as a cap, right up close). A car only
+    // when it stands wholly on a level the chunks don't draw (a garage roof), else the real
+    // car is drawn on its drawn level
+    if (capOnly && quads[o + 18] === QK.crown) continue;
+    if (capOnly && quads[o + 18] === QK.vehicle) {
+      // `cars`: the column is past the real cars' range (FAR_CAR_RANGE): its cap draws them all
+      if (cars) {
+        out.push(...quads.subarray(o, o + QF));
+        continue;
+      }
+      let lo = Infinity;
+      for (let v = 0; v < 4; v++) lo = Math.min(lo, quads[o + v * 3 + 1]);
+      if (lo < y - 0.1) continue;
+    }
     const ny = quads[o + 13];
     let lo = Infinity, hi = -Infinity;
     for (let v = 0; v < 4; v++) {
@@ -390,7 +438,9 @@ interface Col {
   /** live chunks it was built from: levels present and their versions (liveSig) */
   sig: number;
   /** while hidden behind its chunks: the part above what they draw (a tower's top storeys) */
-  cap: { y: number; mesh: THREE.Mesh | null; quads: Float32Array } | null;
+  cap: { y: number; mesh: THREE.Mesh | null; quads: Float32Array; cars: boolean } | null;
+  /** tiles per cell it was built with: 2 at the rim, rebuilt at 1 once nearer (fineWithin) */
+  cell: number;
 }
 
 interface Block {
@@ -425,6 +475,11 @@ export interface FarProxyDeps {
   art(id: string, part?: 'top'): [number, number, number] | null;
   /** the look pitches shingle/thatch/tile roofs (look.f.archDetail) */
   pitch(): boolean;
+  /**
+   * Parked vehicles of column (cx, cy): the live ones if the live map has the column, else the
+   * scratch chunks' mapgen requests (spawned the way the live map will: same proto and paint).
+   */
+  vehicles?(cx: number, cy: number, scratchLevels: readonly Chunk[]): VehicleBox[];
 }
 
 export class FarProxyLayer {
@@ -434,6 +489,12 @@ export class FarProxyLayer {
   radiusMul = 1.75;
   /** beyond this many chunks, 2x2-tile cells */
   coarseFrom = 11;
+  /**
+   * A column built coarse (at the rim) is rebuilt with 1-tile cells within this many chunks.
+   * Built once at the rim and never again, every proxy you drove up to was the coarse one: its
+   * covers and caps stood up to a metre out past the building on each side.
+   */
+  fineWithin = 10;
   /** ms per frame for building proxies when the browser gives no idle time (startIdle) */
   budgetMs = 0.75;
   /** the same while the player stands still (a load, a teleport: frames have room, the ring is empty) */
@@ -501,7 +562,7 @@ export class FarProxyLayer {
     if (!c.hidden || c.solo) return this.proxyTop(cx, cy);
     if (c.cap?.mesh) {
       let top = -Infinity;
-      const q = clipQuads(c.quads, c.cap.y);
+      const q = clipQuads(c.quads, c.cap.y, true, c.cap.cars);
       for (let o = 0; o < q.length; o += QF) for (let v = 0; v < 4; v++) top = Math.max(top, q[o + v * 3 + 1]);
       return top;
     }
@@ -512,15 +573,17 @@ export class FarProxyLayer {
    * Debug (cdda.proxyQa): per tile of column (cx, cy), the height of the proxy's top faces
    * (-Infinity where none), as drawn: the full proxy, not a cap. Null without a proxy.
    */
-  heightmap(cx: number, cy: number, only?: 'build' | 'crown', scratchOnly = false): Float32Array | null {
+  heightmap(cx: number, cy: number, only?: 'build' | 'crown' | 'cap', scratchOnly = false): Float32Array | null {
     const c = this.cols.get(colKey(cx, cy));
     if (!c) return null;
+    if (only === 'cap' && !c.cap?.mesh) return null;
     const H = new Float32Array(CHUNK * CHUNK).fill(-Infinity);
-    // scratchOnly: the proxy as it is before you get there (all from the scratch generator)
-    const q = scratchOnly ? this.scratchQuads(cx, cy) : c.quads, bx = cx * CHUNK, by = cy * CHUNK;
+    // scratchOnly: the proxy as it is before you get there (all from the scratch generator);
+    // 'cap': what the cap over a handed-over column draws
+    const q = only === 'cap' ? clipQuads(c.quads, c.cap!.y, true, c.cap!.cars) : scratchOnly ? this.scratchQuads(cx, cy) : c.quads, bx = cx * CHUNK, by = cy * CHUNK;
     for (let o = 0; o < q.length; o += QF) {
       if (q[o + 13] < 0.5) continue;
-      if (only === 'build' && q[o + 18] === QK.crown) continue;
+      if (only === 'build' && (q[o + 18] === QK.crown || q[o + 18] === QK.vehicle)) continue;
       if (only === 'crown' && q[o + 18] !== QK.crown) continue;
       let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
       for (let v = 0; v < 4; v++) {
@@ -541,6 +604,23 @@ export class FarProxyLayer {
     return H;
   }
 
+  /** Debug (cdda.carProxyCheck): run `fn` over column (cx, cy) freshly generated in the scratch map. */
+  withScratch<T>(cx: number, cy: number, fn: (levels: Chunk[]) => T): T {
+    const { scratch } = this.deps;
+    const top = Math.max(0, Math.min(MAX_Z, this.deps.overmapTop(cx, cy)));
+    const levels: Chunk[] = [];
+    for (let z = 0; z <= top; z++) {
+      const ch = scratch.chunk(cx, cy, z);
+      if (ch) levels.push(ch);
+    }
+    try {
+      return fn(levels);
+    } finally {
+      for (let z = top; z >= 0; z--) if (scratch.hasChunk(cx, cy, z)) scratch.evictChunk(scratch.chunk(cx, cy, z)!);
+      (scratch.generator as { forgetColumn?(cx: number, cy: number): void } | null)?.forgetColumn?.(cx, cy);
+    }
+  }
+
   /** Debug (proxyQa): column (cx, cy)'s quads from the scratch generator alone, as before a visit. */
   private scratchQuads(cx: number, cy: number): Float32Array {
     const { scratch } = this.deps;
@@ -557,9 +637,9 @@ export class FarProxyLayer {
   }
 
   /** Debug (cdda.proxyColumn): how column (cx, cy)'s proxy was made. */
-  describe(cx: number, cy: number): { live: boolean; stale: boolean; hidden: boolean; quads: number; top: number } | null {
+  describe(cx: number, cy: number): { live: boolean; stale: boolean; hidden: boolean; quads: number; top: number; cell: number } | null {
     const c = this.cols.get(colKey(cx, cy));
-    return c ? { live: c.live, stale: c.stale, hidden: c.hidden, quads: c.quads.length / QF, top: this.proxyTop(cx, cy) } : null;
+    return c ? { live: c.live, stale: c.stale, hidden: c.hidden, quads: c.quads.length / QF, top: this.proxyTop(cx, cy), cell: c.cell } : null;
   }
 
   /** Is column (cx, cy) drawn as a proxy right now (built and not hidden)? */
@@ -657,20 +737,20 @@ export class FarProxyLayer {
    * driving), or no cap (null). Cheap to call every frame: only a new `y` or a rebuilt
    * proxy changes anything.
    */
-  setCap(cx: number, cy: number, y: number | null): void {
+  setCap(cx: number, cy: number, y: number | null, cars = false): void {
     const c = this.cols.get(colKey(cx, cy));
     if (!c) return;
     if (y === null) {
       this.dropCap(c);
       return;
     }
-    if (c.cap && Math.abs(c.cap.y - y) < 0.01 && c.cap.quads === c.quads) return;
+    if (c.cap && Math.abs(c.cap.y - y) < 0.01 && c.cap.quads === c.quads && c.cap.cars === cars) return;
     this.dropCap(c);
-    const part = clipQuads(c.quads, y);
+    const part = clipQuads(c.quads, y, true, cars);
     const cl: Col = { ...c, quads: part };
     const mesh = part.length ? this.meshOf([cl], `proxy cap ${cx},${cy}`) : null;
     if (mesh) this.group.add(mesh);
-    c.cap = { y, mesh, quads: c.quads };
+    c.cap = { y, mesh, quads: c.quads, cars };
   }
 
   private dropCap(c: Col): void {
@@ -830,6 +910,15 @@ export class FarProxyLayer {
         const d = Math.hypot(c.cx - pcx, c.cy - pcy);
         this.buildColumn(c.cx, c.cy, d > this.coarseFrom ? 2 : 1);
       }
+    // coarse columns come closer: refine them, nearest first (the ring is nearest first)
+    if (!this.scanAt.missing && !stop())
+      for (const [dx, dy] of this.offsets) {
+        if (dx * dx + dy * dy > this.fineWithin * this.fineWithin) break;
+        const c = this.cols.get(colKey(pcx + dx, pcy + dy));
+        if (!c || c.cell === 1) continue;
+        if (stop()) break;
+        this.buildColumn(c.cx, c.cy, 1);
+      }
     if (!stop()) this.merge(false, stop);
   }
 
@@ -911,7 +1000,9 @@ export class FarProxyLayer {
     }
     if (scratchUsed) this.stats.genMs += performance.now() - t0;
     const tq = performance.now();
-    const quads = buildColumnQuads(cx, cy, levels, (i, z) => this.look(i, maps[z]), cell, this.deps.pitch());
+    const scratchLevels = levels.filter((c, z): c is Chunk => !!c && maps[z] === scratch);
+    const boxes = this.deps.vehicles?.(cx, cy, fromLive ? [] : scratchLevels) ?? [];
+    const quads = buildColumnQuads(cx, cy, levels, (i, z) => this.look(i, maps[z]), cell, this.deps.pitch(), boxes);
     this.stats.buildMs += performance.now() - tq;
     if (scratchUsed) {
       for (let z = top; z >= 0; z--) if (scratch.hasChunk(cx, cy, z)) scratch.evictChunk(scratch.chunk(cx, cy, z)!);
@@ -921,7 +1012,7 @@ export class FarProxyLayer {
     if (old?.stale) this.staleN--;
     if (old) this.dropSolo(old);
     if (old) this.dropCap(old);
-    this.cols.set(colKey(cx, cy), { cx, cy, quads, hidden: this.hiddenKeys.has(colKey(cx, cy)), solo: null, live: fromLive, born: performance.now(), stale: false, sig: this.liveSig(cx, cy), cap: null });
+    this.cols.set(colKey(cx, cy), { cx, cy, quads, hidden: this.hiddenKeys.has(colKey(cx, cy)), solo: null, live: fromLive, born: performance.now(), stale: false, sig: this.liveSig(cx, cy), cap: null, cell });
     this.stats.built++;
     if (fromLive) this.stats.live++;
     this.stats.quads += quads.length / QF;

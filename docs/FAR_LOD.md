@@ -240,6 +240,37 @@ Hand-off capture now (biggest step above the animation floor / total): current 2
 dissolve 1.67 / 8.7, proxy 0.28 / 1.7, proxy-dissolve 0.16 / 0.9.
 perf-bench city40 (loaded machine): 727 frames current vs 670 proxy-dissolve (-8 %).
 
+## Round 5 (2026-10-17): caps that stick out, evergreen tips, cars
+
+* **Coarse proxies near you**: a column was built once, at the rim (2x2-tile cells past 11
+  chunks), and never again, so the covers and caps you drove up to stood up to a metre out past
+  the building. Columns are now rebuilt with 1-tile cells within 10 chunks (idle time, nearest
+  first). After a 40 mph drive into the city all 253 proxies within 9 chunks are fine.
+* **Evergreen tips**: the treetop terrain one level up made the chunks count as drawing two
+  levels, the cap started at ~5.2 m, and pine crowns (to ~7.3 m) stuck out of the real trees as
+  cap. Caps carry buildings and masts only (a tree is drawn whole by its ground chunk), cars
+  only on undrawn levels. `proxyQa` checks caps never stand over real geometry (0 tiles over).
+* **Cars** jumped into view at 90 m (`vehicleMesh.ts` VIEW_RANGE), far inside the 168 m draw
+  distance, and never existed beyond it.
+  * Column proxies carry parked cars as boxes: live vehicles, or the scratch chunks' mapgen
+    requests spawned as `VehicleSystem.flushPending` will (same position-seeded rng: same
+    prototype, same paint). `cdda.carProxyCheck`: city 27 of 29 predicted cars match a live
+    one (prototype within 1 m, same paint).
+  * Box = the model's body (chassis `layoutOf`: nose to tail, squeezed half-width, the
+    template's roof/box height; bikes 1.0/1.2 m). `cdda.carBoxQa` vs the models' bounds:
+    footprint overlap 0.83-0.97 for most (0.4-0.6 where the model has a door open or is a bike),
+    tops within 6 cm.
+  * Real models are drawn out to 130 m by column (`FAR_CAR_RANGE`), fading in when first
+    seen past 30 m (vehicle skins carry their own dissolve pair), held while their column is
+    held; past 130 m a handed-over column's cap carries its cars (one draw per column, not
+    several per car). Far out a car's own chunk being drawn is enough (the walls-first rule
+    wanted the next column too and hid cars by column edges at the draw edge).
+  * `farlodleave`: up to 113 parked cars in view, none missing (neither drawn nor proxied)
+    for two samples in a row inside the draw distance. Every proxy face is tested to wind
+    front-facing along its normal.
+* perf-bench city40: 870 frames current vs 779 proxy-dissolve (-10 %, cars included; models
+  to the draw distance instead of 130 m cost ~200 more draw calls).
+
 ## The original plan
 
 

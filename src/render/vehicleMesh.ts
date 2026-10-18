@@ -3,7 +3,8 @@ import type { Game } from '../game/game';
 import { has, type Vehicle, type VehiclePart } from '../game/vehicle';
 import type { VehicleSystem } from '../game/vehicles';
 import type { Station, StationView } from '../game/vehwalk';
-import { LEVEL_HEIGHT } from '../world/coords';
+import { CHUNK, LEVEL_HEIGHT } from '../world/coords';
+import { clearFade, setFade } from './dissolve';
 import { hasFlag } from '../world/registry';
 import { setupPixelTexture } from './atlas';
 import { INDOOR_SKY } from './chunkMesh';
@@ -589,6 +590,8 @@ function barrelRecoil(t: number, travel: number): number {
   return travel * Math.exp(-(t - 0.04) * 6);
 }
 
+/** A vehicle first drawn further than this (m) fades in over APPEAR_FADE_S (dissolve.ts). */
+const APPEAR_FADE_FROM = 30, APPEAR_FADE_S = 0.6;
 /** Distance LOD thresholds (m): simplified beyond LOD_FAR, detailed again inside LOD_NEAR. */
 const LOD_FAR = 50, LOD_NEAR = 42;
 
@@ -612,6 +615,8 @@ export class VehicleRenderer {
   private tailOn = new THREE.MeshBasicMaterial({ color: 0xff3020 });
   private tailOff = new THREE.MeshBasicMaterial({ color: 0x5a1410 });
   private beaconMat = new THREE.MeshBasicMaterial({ vertexColors: true });
+  /** vehicles fading in (seconds they first showed) */
+  private appearing = new Map<Vehicle, number>();
   /** Shadowed headlight spots (headlightShadow.ts pickHeadlightSpots says which cars get them). */
   // Range must stay over materials.ts HEADLIGHT_MIN_RANGE (that's what gives it the road
   // wrap); decay 0.5 keeps the road ~30 m out within a few bands of the road at the bumper.
@@ -739,6 +744,7 @@ export class VehicleRenderer {
   }
 
   private drop(v: Vehicle): void {
+    this.appearing.delete(v);
     const e = this.entries.get(v);
     if (!e) return;
     this.disposeMeshes(e, null);
@@ -873,12 +879,25 @@ export class VehicleRenderer {
       // drawn iff its level is (src/world/levels.ts) and the road or floor around it is on
       // screen (src/render/surroundings.ts); the car you drive always (outrunning streaming
       // must not take the car out from under you)
-      if (d > VIEW_RANGE || (v !== driving && !this.renderer.chunks.drawnAt(v.x, v.y, v.z))) {
+      // out to the draw distance (far LOD beyond LOD_FAR): at VIEW_RANGE (90 m) parked cars
+      // jumped into view well inside it. Not while its column is held under a far proxy (the
+      // proxy draws a box for it until the column dissolves in: farLod.ts)
+      const farRule = this.renderer.chunks.farVehicles;
+      const range = farRule ? (farRule(Math.floor(v.x / CHUNK), Math.floor(v.y / CHUNK)) ? (this.renderer.chunks.radius + 0.5) * CHUNK : 0) : VIEW_RANGE;
+      // (far out only its own chunk must be drawn: the "walls around it first" rule of drawnAt
+      // also wants the next column, so a car parked by a column edge at the draw distance
+      // stayed invisible after its column was handed over)
+      const ch = this.renderer.chunks;
+      // (the chunk's own shown-and-visible state, not the level radius: the manager keeps a
+      // column drawn a little past it, and a bus there was neither drawn nor in a proxy)
+      const drawnHere = d > VIEW_RANGE ? ch.chunkShown(Math.floor(v.x / CHUNK), Math.floor(v.y / CHUNK), v.z) : ch.drawnAt(v.x, v.y, v.z);
+      if (d > range || (v !== driving && (!drawnHere || ch.heldAt?.(v.x, v.y)))) {
         if (this.entries.has(v)) this.drop(v);
         continue;
       }
       seen.add(v);
       let e = this.entries.get(v);
+      const fresh = !e;
       // Taking or leaving the wheel rebuilds too: the driven vehicle's wheels are separate meshes.
       const drivenChanged = !!e && e.look === 'model' && e.driven !== (v === driving);
       // Distance LOD with hysteresis (no flip-flopping at the boundary); never the driven one.
@@ -895,6 +914,16 @@ export class VehicleRenderer {
         }
       }
       if (!e) continue;
+      // first seen out in the view (it came into range, its column was handed over): fade in
+      if (fresh && d > APPEAR_FADE_FROM) this.appearing.set(v, now);
+      const t0a = this.appearing.get(v);
+      if (t0a !== undefined) {
+        const f = (now - t0a) / APPEAR_FADE_S;
+        if (f >= 1) {
+          clearFade(e.obj);
+          this.appearing.delete(v);
+        } else setFade(e.obj, f);
+      }
       e.obj.position.set(v.x, 0, v.y);
       e.obj.rotation.y = (-v.facing * Math.PI) / 180;
       // A parked bike leans left on its stand; ridden it stands up and leans into turns.
