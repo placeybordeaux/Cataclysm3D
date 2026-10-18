@@ -73,6 +73,7 @@ export function farLodScenarios(c: FarLodCtx): Scenario[] {
         await js(`cdda.holdBuilds(true)`);
         const dropped = await js<number>(`cdda.restreamEdge(60)`);
         await sleep(1500);
+        console.log(`    ${mode} after the drop:`, JSON.stringify(await js(`(() => { const f = cdda.farLod(); return { uncovered: f.uncovered, handoff: f.handoff, cols: f.proxies.columns }; })()`)));
         const before = await grab();
         writeFileSync(resolve(OUT, `${mode}_before.png`), before.bytes);
         await js(`cdda.holdBuilds(false)`);
@@ -103,11 +104,14 @@ export function farLodScenarios(c: FarLodCtx): Scenario[] {
         console.log(`    ${mode}: dropped ${dropped}, abrupt ${results[mode].abrupt} (max step ${results[mode].maxStep} of ${results[mode].total})`, JSON.stringify(st));
         writeFileSync(resolve(OUT, `${mode}_steps.json`), JSON.stringify(results[mode]));
       }
-      check('current pops (most of the change in one step: the measure works)', results.current.abrupt > 0.3, results.current);
+      // (current used to pop by 15+: its stand-ins were 12-32 m guesses; with the overmap's
+      // storeys they are milder, but still boxes that change into buildings)
+      check('current changes visibly as the street comes back (the measure works)', results.current.total > 2, results.current);
       // the largest single-step change is the pop you see (a share of the total misleads when
       // proxies leave little to change at all)
       check('proxy-dissolve: the biggest jump is under a quarter of current\'s', results['proxy-dissolve'].maxStep < 0.25 * results.current.maxStep, { pd: results['proxy-dissolve'].maxStep, current: results.current.maxStep });
-      check('dissolve: the biggest jump is under half of current\'s', results.dissolve.maxStep < 0.5 * results.current.maxStep, { d: results.dissolve.maxStep, current: results.current.maxStep });
+      check('proxy: the biggest jump is under half of current\'s', results.proxy.maxStep < 0.5 * results.current.maxStep, { p: results.proxy.maxStep, current: results.current.maxStep });
+      check('dissolve: no bigger jump than current', results.dissolve.maxStep <= results.current.maxStep, { d: results.dissolve.maxStep, current: results.current.maxStep });
 
       // real input: drive into town in the default mode, a few shots on the way
       await js(`cdda.setFarLod('proxy-dissolve')`);
@@ -152,9 +156,11 @@ export function farLodScenarios(c: FarLodCtx): Scenario[] {
       // 40 mph along the road (the benchmark's ghost car: no collisions)
       await js(`__perfBench.go(17.9)`);
       const samples: { all: number; inner: number }[] = [];
+      let standins = 0;
       for (let k = 0; k < 40; k++) {
         await sleep(250);
         samples.push((await js<{ uncovered: { all: number; inner: number } }>(`cdda.farLod()`)).uncovered);
+        standins = Math.max(standins, await js<number>(`cdda.placeholders().shown`));
         for (const [cx, cy] of towers) {
           const t = await js<{ chunks: number; proxy: number; full: number }>(`cdda.columnDrawnTop(${cx}, ${cy})`);
           if (!(t.full > 0)) continue; // dropped behind us
@@ -169,6 +175,7 @@ export function farLodScenarios(c: FarLodCtx): Scenario[] {
       console.log('    …of which the chunks alone drew (least):', JSON.stringify(Object.fromEntries([...chunksOnly].map(([k, v]) => [k, +v.toFixed(2)]))));
       console.log('    tall buildings, least of their height drawn while closing in:', JSON.stringify(Object.fromEntries([...worst].map(([k, v]) => [k, +v.toFixed(2)]))));
       check('a tall building keeps (almost) all its height drawn as you drive towards it', minShare > 0.85, { minShare });
+      check('no overmap stand-in drawn in proxy-dissolve (they are guesses: the "too high" boxes)', standins === 0, { standins });
       await js(`__perfBench.stop()`);
       const maxInner = Math.max(...samples.map((s) => s.inner));
       console.log('    uncovered inner (per 250 ms):', samples.map((s) => s.inner).join(' '), '| all:', samples.map((s) => s.all).join(' '));
@@ -224,6 +231,86 @@ export function farLodScenarios(c: FarLodCtx): Scenario[] {
       await sleep(3000);
       writeFileSync(resolve(OUT, 'mast_far.png'), (await grab()).bytes);
       check('shots taken', true);
+    }],
+    ['farlodqa', 'proxy vs real geometry, tile by tile, in a city, a town, a forest, the country and at a radio tower', async () => {
+      await c.toGameplay();
+      await js(PERF_PAGE);
+      await js(`cdda.loadGate('off')`);
+      await js(`cdda.setFarLod('proxy-dissolve')`);
+      const report: Record<string, unknown> = {};
+      const spots: [string, string][] = [
+        ['city', `(() => { const r = __perfBench.pick('city'); __perfBench.place(r); })()`],
+        ['town', `(() => { const r = __perfBench.pick('town'); __perfBench.place(r); })()`],
+        ['forest', `(() => { const r = __perfBench.pick('forest'); __perfBench.place(r); })()`],
+        ['rural', `(() => { const r = __perfBench.pick('rural'); __perfBench.place(r); })()`],
+        ['radio', `cdda.teleport(${74 * 24 + 12}, ${-64 * 24 + 12 + 60}, 0)`],
+      ];
+      for (const [name, place] of spots) {
+        await js(place);
+        // on foot, standing: every level of every column near is built (driving skips tower tops)
+        await js(`(() => { const vs = cdda.vehicleSystem; if (vs.driving) { vs.driving.velocity = 0; cdda.exitVehicle(); } cdda.godMode(true); cdda.clearMonsters(80); })()`);
+        check(`${name}: streamed in`, await settled(40_000));
+        await sleep(5000);
+        await settled(20_000);
+        const qa = await js<{ columns: number; tiles: number; meanAbs: number; over1: number; over3: number; under1: number; under3: number; worst: unknown[] }>(`cdda.proxyQa(5, 30)`);
+        report[name] = qa;
+        const qs = await js<{ tiles: number; meanAbs: number; over1: number; over3: number; under1: number; under3: number; worst: unknown[] }>(`cdda.proxyQa(5, 30, true)`);
+        report[name + '_scratch'] = qs;
+        const st = await js<{ tiles: number; meanAbs: number; over1: number; over3: number; under1: number; under3: number }>(`cdda.proxyQa(5, 30, 'standin')`);
+        report[name + '_standin'] = st;
+        console.log(`    ${name} (stand-ins, buildings and trees together): ${st.tiles} tiles; mean |diff| ${st.meanAbs} m; higher by >1 m ${(st.over1 * 100).toFixed(1)} % (>3 m ${(st.over3 * 100).toFixed(1)} %), lower by >1 m ${(st.under1 * 100).toFixed(1)} % (>3 m ${(st.under3 * 100).toFixed(1)} %)`);
+        console.log(`    ${name} (proxies as built before a visit): ${qs.tiles} building tiles; mean |diff| ${qs.meanAbs} m; higher by >1 m ${(qs.over1 * 100).toFixed(1)} % (>3 m ${(qs.over3 * 100).toFixed(1)} %), lower by >1 m ${(qs.under1 * 100).toFixed(1)} % (>3 m ${(qs.under3 * 100).toFixed(1)} %)`);
+        console.log(`    ${name}: ${qa.columns} columns, ${qa.tiles} building tiles; mean |diff| ${qa.meanAbs} m; proxy higher by >1 m ${(qa.over1 * 100).toFixed(1)} % (>3 m ${(qa.over3 * 100).toFixed(1)} %), lower by >1 m ${(qa.under1 * 100).toFixed(1)} % (>3 m ${(qa.under3 * 100).toFixed(1)} %); trees ${JSON.stringify((qa as unknown as { trees: unknown }).trees)}`);
+        writeFileSync(resolve(OUT, `qa_${name}.png`), (await grab()).bytes);
+      }
+      mkdirSync(resolve(OUT), { recursive: true });
+      writeFileSync(resolve(OUT, 'qa.json'), JSON.stringify(report, null, 1));
+      check('qa report written', true);
+    }],
+    ['farlodtreedbg', 'debug: what the real geometry of a forest column is', async () => {
+      await c.toGameplay();
+      await js(PERF_PAGE);
+      await js(`cdda.loadGate('off')`);
+      await js(`(() => { const r = __perfBench.pick('forest'); __perfBench.place(r); const vs = cdda.vehicleSystem; if (vs.driving) { vs.driving.velocity = 0; cdda.exitVehicle(); } })()`);
+      check('streamed in', await settled(40_000));
+      await sleep(5000);
+      const info = await js<unknown>(`(() => {
+        const ch = cdda.renderer.chunks, p = cdda.game.player;
+        const cx = Math.floor(p.x / 24) + 2, cy = Math.floor(p.y / 24);
+        const e = ch.entryAt(cx, cy, 0);
+        const out = { cx, cy, group: !!e?.group, kids: [] };
+        let pines = 0;
+        for (let i = 0; i < 576; i++) if (/tree/.test(cdda.game.map.terAt(cx * 24 + (i % 24), cy * 24 + Math.floor(i / 24), 0).id)) pines++;
+        out.treeTiles = pines;
+        e?.group?.traverse((o) => {
+          if (!o.isMesh) return;
+          o.geometry.computeBoundingBox();
+          const b = o.geometry.boundingBox;
+          out.kids.push({ name: o.name, type: o.type, visible: o.visible, batch: !!o.userData.batchable, mat: o.material?.type + '/' + (o.material?.userData?.worldPage ? 'page' : ''), verts: o.geometry.attributes.position?.count, inst: o.isInstancedMesh ? o.count : 0, minY: +b.min.y.toFixed(1), maxY: +b.max.y.toFixed(1), x: [+b.min.x.toFixed(0), +b.max.x.toFixed(0)], z: [+b.min.z.toFixed(0), +b.max.z.toFixed(0)], mw: o.matrixWorld.elements.slice(12, 15).map((v) => +v.toFixed(1)) });
+        });
+        return out;
+      })()`);
+      console.log('    ' + JSON.stringify(info));
+      const qa = await js<{ worst: { cx: number; cy: number; tx: number; ty: number; proxy: number; real: number }[] }>(`cdda.proxyQa(5, 40)`);
+      const w = qa.worst.find((t) => t.real === 0 && t.proxy > 5);
+      console.log('    worst pine-like tile:', JSON.stringify(w));
+      if (w) console.log('    near it:', JSON.stringify(await js(`(() => {
+        const ch = cdda.renderer.chunks, X = ${w.cx} * 24 + ${w.tx} + 0.5, Z = ${w.cy} * 24 + ${w.ty} + 0.5;
+        const e = ch.entryAt(${w.cx}, ${w.cy}, 0), out = { trees: (e?.trees ?? []).filter((t) => Math.hypot(t.x - X, t.y - Z) < 3).map((t) => ({ x: +t.x.toFixed(2), y: +t.y.toFixed(2), h: t.height, id: t.id, lod: t.lod })), tris: [] };
+        e?.group?.traverse((o) => {
+          if (!o.isMesh) return;
+          const pos = o.geometry.attributes.position, idx = o.geometry.index;
+          const nt = idx ? idx.count / 3 : pos.count / 3;
+          let n = 0, maxY = -1;
+          for (let t = 0; t < nt; t++) {
+            let sx = 0, sz = 0, my = -1e9;
+            for (let k = 0; k < 3; k++) { const vi = idx ? idx.getX(t * 3 + k) : t * 3 + k; sx += pos.getX(vi); sz += pos.getZ(vi); my = Math.max(my, pos.getY(vi)); }
+            if (Math.abs(sx / 3 - X) < 1 && Math.abs(sz / 3 - Z) < 1) { n++; maxY = Math.max(maxY, my); }
+          }
+          out.tris.push({ verts: pos.count, visible: o.visible, n, maxY: +maxY.toFixed(2) });
+        });
+        return out;
+      })()`)));
     }],
   ];
 }

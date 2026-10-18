@@ -2,6 +2,20 @@ import * as THREE from 'three';
 import { runSteps, stepUntil } from './steps';
 import { CHUNK } from '../world/coords';
 import { hash2 } from './ground';
+import { LEVEL_HEIGHT, MAX_Z } from '../world/coords';
+import { isAir } from '../world/levels';
+
+/** Above-ground storeys of OMT column (X, Y): its OMTs up to the top one that isn't air, less the roof OMT. */
+export function silhouetteStoreys(om: OmtLookup, X: number, Y: number): number {
+  let top = 0;
+  for (let z = MAX_Z; z > 0; z--)
+    if (!isAir(om.omtAt(X, Y, z).id)) {
+      top = z;
+      break;
+    }
+  // the top OMT of a building is its roof (…_roof), which is a slab, not a storey
+  return Math.max(1, /roof/.test(om.omtAt(X, Y, top).id) ? top : top + 1);
+}
 
 // Distant skyline (look.ts `skyline`): beyond the drawn chunks the world used to end in a
 // flat wall of fog. This ring of cheap silhouettes — house boxes with gable roofs, blocky
@@ -63,9 +77,11 @@ export type TriFn = (a: number[], b: number[], c: number[], k: number[]) => void
  * The silhouette of OMT (X, Y) with overmap id `id`: house boxes with gable roofs, blocky town
  * buildings, clumps of tree crowns, or nothing (fields, roads, water). World coordinates, ground
  * at y = 0, linear colours tuned for the skyline shader. Also used for the stand-ins of chunks
- * not built yet (placeholders.ts).
+ * not built yet (placeholders.ts). `storeys`: the building's storeys from the overmap
+ * (silhouetteStoreys); without it a guess, which ran 12-32 m for any "tall" OMT and stood far
+ * above the real building, read as the far proxies being too high.
  */
-export function emitSilhouette(X: number, Y: number, id: string, quad: QuadFn, tri: TriFn): void {
+export function emitSilhouette(X: number, Y: number, id: string, quad: QuadFn, tri: TriFn, storeys?: number): void {
   const box = (x0: number, z0: number, x1: number, z1: number, h: number, k: number[]) => {
     quad([x0, 0, z1], [x1, 0, z1], [x1, h, z1], [x0, h, z1], [0, 0, 1], k);
     quad([x1, 0, z0], [x0, 0, z0], [x0, h, z0], [x1, h, z0], [0, 0, -1], k);
@@ -100,7 +116,9 @@ export function emitSilhouette(X: number, Y: number, id: string, quad: QuadFn, t
     for (let i = 0; i < n; i++) {
       const pine = r(10 + i) < 0.35;
       const g = 0.035 + r(20 + i) * 0.03;
-      crown(bx + 2 + r(30 + i) * 20, bz + 2 + r(40 + i) * 20, 3 + r(50 + i) * 3, 1.5, 8 + r(60 + i) * 7, pine ? [g * 0.6, g * 1.2, g * 0.8] : [g, g * 1.5, g * 0.7], pine);
+      // sized like the 3D trees (flora.ts: 4.8-7.6 m tall, crowns ~2-3 m across the radius);
+      // 9.5-16.5 m crowns doubled every forest on the horizon
+      crown(bx + 2 + r(30 + i) * 20, bz + 2 + r(40 + i) * 20, 2 + r(50 + i) * 1.2, 2, 3 + r(60 + i) * 2.5, pine ? [g * 0.6, g * 1.2, g * 0.8] : [g, g * 1.5, g * 0.7], pine);
     }
   } else {
     const tall = kind === 'tall';
@@ -109,7 +127,8 @@ export function emitSilhouette(X: number, Y: number, id: string, quad: QuadFn, t
       const w = kind === 'house' ? 8 + r(2 + i) * 5 : 9 + r(2 + i) * 9;
       const dpt = kind === 'house' ? 7 + r(4 + i) * 4 : 8 + r(4 + i) * 9;
       const x0 = bx + 2 + r(6 + i) * (22 - w), z0 = bz + 2 + r(8 + i) * (22 - dpt);
-      const h = kind === 'house' ? 3 + r(9 + i) * 2.8 : tall ? 12 + r(9 + i) * 20 : 4 + r(9 + i) * 7;
+      const h = storeys !== undefined ? Math.max(1, storeys) * LEVEL_HEIGHT + 0.1
+        : kind === 'house' ? 3 + r(9 + i) * 2.8 : tall ? 12 + r(9 + i) * 20 : 4 + r(9 + i) * 7;
       const v = 0.05 + r(12 + i) * 0.05;
       const k = [v * 1.05, v, v * 0.95];
       box(x0, z0, x0 + w, z0 + dpt, h, k);
@@ -133,7 +152,7 @@ export function emitSilhouette(X: number, Y: number, id: string, quad: QuadFn, t
       }
     }
     // a street tree or two
-    if (r(70) < 0.5) crown(bx + r(71) * 24, bz + r(72) * 24, 2.5, 1.5, 6 + r(73) * 3, [0.04, 0.06, 0.03], false);
+    if (r(70) < 0.5) crown(bx + r(71) * 24, bz + r(72) * 24, 2.2, 2, 3 + r(73) * 2, [0.04, 0.06, 0.03], false);
   }
 }
 
@@ -153,6 +172,9 @@ export class SkylineLayer {
   enabled = false;
   /** Far ground ring (atmosphere.ts: sky-matched haze modes, every look). */
   ground = false;
+  /** Silhouettes start this many chunks out (null: the draw radius + 2.6); farLod.ts moves
+   *  them past its proxies, which draw the real buildings out there */
+  innerChunks: number | null = null;
   season: 'spring' | 'summer' | 'autumn' | 'winter' = 'spring';
   private mesh: THREE.Mesh | null = null;
   private key = '';
@@ -220,7 +242,7 @@ export class SkylineLayer {
     const ox = Math.floor(px / CHUNK), oy = Math.floor(py / CHUNK);
     // rebuild only after moving a couple of OMTs: the ring is far away, and a rebuild walks
     // hundreds of overmap tiles (the ground ring's inner edge allows for this lag)
-    const key = `${radius}|${this.enabled}|${this.ground}|${this.season}`;
+    const key = `${radius}|${this.enabled}|${this.ground}|${this.season}|${this.innerChunks}`;
     if (this.key === key && Math.max(Math.abs(ox - this.bx), Math.abs(oy - this.by)) < LAG) return;
     this.key = key;
     const jump = Math.max(Math.abs(ox - this.bx), Math.abs(oy - this.by)) > LAG + 2;
@@ -264,7 +286,7 @@ export class SkylineLayer {
     // Silhouettes: inner edge a ring further out than the drawn chunks (the centre lags up
     // to LAG OMTs). Ground: from well inside the drawn chunks (it is under their ground), so
     // it covers every gap out to the drawn edge wherever the player stands within the lag.
-    const inner = radius + 2.6, outer = radius + SKYLINE_OUTER;
+    const inner = this.innerChunks ?? radius + 2.6, outer = radius + SKYLINE_OUTER;
     const innerG = Math.max(1, radius - LAG);
     for (let dy = -Math.ceil(outer); dy <= Math.ceil(outer); dy++) {
       yield;
@@ -286,7 +308,7 @@ export class SkylineLayer {
           } else flat(bx, bz, bx + CHUNK, bz + CHUNK, snow && g !== 'water' ? SNOW : GROUND[g]);
         }
         if (!this.enabled || d < inner) continue;
-        emitSilhouette(X, Y, id, quad, tri);
+        emitSilhouette(X, Y, id, quad, tri, silhouetteStoreys(this.overmap!, X, Y));
       }
     }
     if (this.mesh) {

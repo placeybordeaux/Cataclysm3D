@@ -552,7 +552,8 @@ function cards(g: GeomBuilder, f: TileFrame, c: V3, halfW: number, halfH: number
 const IMP_PX = 32; // texels per normalised unit (a 5 m tree: ~6 texels/m, >= a pixel at 70 m)
 
 interface ImpBounds { hw: number; top: number; bot: number }
-function boundsOf(L: Layout): ImpBounds {
+/** Normalised extent of a layout (half-width, top, bottom; x height): impostors and far proxies (farProxy.ts). */
+export function boundsOf(L: Layout): ImpBounds {
   let hw = 0.05, top = 0.1;
   for (const l of L.lumps) { hw = Math.max(hw, Math.hypot(l.c[0], l.c[2]) + l.r[0]); top = Math.max(top, l.c[1] + l.r[1]); }
   for (const c of L.cones) { hw = Math.max(hw, c.r); top = Math.max(top, c.y1); }

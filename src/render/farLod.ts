@@ -34,6 +34,8 @@ export const dissolves = (m: FarLodMode) => m === 'dissolve' || m === 'proxy-dis
 
 /** Seconds a dissolve takes. */
 export const DISSOLVE_S = 0.6;
+/** Proxies the hand-off may build in one frame for covers the ring hasn't reached (0.2-1 ms each). */
+const ENSURE_PER_FRAME = 4;
 /** Columns this close (chunks) never hold: around the player a chunk shows as soon as it's built. */
 const NO_HOLD = 1.5;
 
@@ -59,6 +61,8 @@ interface ColState {
   near: boolean;
   /** levels that have had a group: a new group there is a rebuild (shown at once), not a late storey */
   levels: Set<number>;
+  /** the ground-level entry this state is about (one dropped and made again is a new column) */
+  e0: ChunkGroupView;
 }
 
 export interface HandoffChunks {
@@ -88,7 +92,8 @@ export class Handoff {
 
   /** Is column (cx, cy) handed over to its chunks (stand-ins and proxies stay off it)? */
   done(cx: number, cy: number): boolean {
-    return this.cols.get(colKey(cx, cy))?.state === 'done';
+    const s = this.cols.get(colKey(cx, cy));
+    return s?.state === 'done' && s.e0.shown === true;
   }
 
   /** Is column (cx, cy) held or fading under its cover (the cover is the hand-off's)? */
@@ -101,6 +106,7 @@ export class Handoff {
     const mode = farLod.mode;
     const now = performance.now();
     this.frame++;
+    this.ensured = 0;
     if (mode === 'current' || pz < 0) {
       if (this.cols.size) this.reset();
       return;
@@ -126,12 +132,18 @@ export class Handoff {
         if (s) this.forget(k, s);
         continue;
       }
+      // its entries were dropped and made again between two looks (a teleport back, a debug
+      // restream): start over, or a 'done' column would keep its proxy hidden over nothing
+      if (s && s.e0 !== e0) {
+        this.forget(k, s);
+        s = undefined;
+      }
       const top = this.topLevel(cx, cy);
       // (only asked while it matters: ~280 columns a frame)
       const complete = !s || s.state === 'hold' ? this.chunks.columnComplete(cx, cy) : true;
       if (!s) {
         const near = dx * dx + dy * dy <= NO_HOLD * NO_HOLD;
-        s = { cx, cy, state: 'hold', t0: 0, cover: null, groups: new Set(), late: new Map(), seen: 0, near, levels: new Set() };
+        s = { cx, cy, state: 'hold', t0: 0, cover: null, groups: new Set(), late: new Map(), seen: 0, near, levels: new Set(), e0 };
         this.cols.set(k, s);
         // around the player, or already up when we first look (a mode switch, a load): as is
         if (near || complete) {
@@ -220,8 +232,16 @@ export class Handoff {
 
   /** The cover to hold column (cx, cy) under: its proxy (proxy modes) or its stand-in. */
   private coverOf(cx: number, cy: number, proxies: FarProxyLayer | null): THREE.Object3D | null {
-    return proxies?.solo(cx, cy) ?? this.placeholders?.meshAt(cx, cy) ?? null;
+    // Proxy modes: the column's proxy, built now if the ring hasn't got there yet (a few a
+    // frame). Never the overmap stand-in: its boxes are guesses (proxyQa: higher than the real
+    // building by over a metre on a fifth of tiles), seen as "the proxies are too high".
+    if (proxies) {
+      if (!proxies.has(cx, cy) && this.ensured++ < ENSURE_PER_FRAME) proxies.ensure(cx, cy);
+      return proxies.solo(cx, cy);
+    }
+    return this.placeholders?.meshAt(cx, cy) ?? null;
   }
+  private ensured = 0;
 
   private eachGroup(cx: number, cy: number, top: number, fn: (g: THREE.Object3D, z: number) => void): void {
     for (let z = 0; z <= top; z++) {

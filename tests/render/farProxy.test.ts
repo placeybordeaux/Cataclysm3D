@@ -78,13 +78,13 @@ describe('far proxies', () => {
       return L;
     };
     const q = buildColumnQuads(cx, cy, levels, look);
-    expect(q.length % 18).toBe(0);
-    const quads = q.length / 18;
+    expect(q.length % 19).toBe(0);
+    const quads = q.length / 19;
     // a house is tens of boxes, never one quad per tile face (24 x 24 x levels)
     expect(quads).toBeGreaterThan(10);
     expect(quads).toBeLessThan(1500);
     let maxH = -Infinity, minX = Infinity, maxX = -Infinity;
-    for (let o = 0; o < q.length; o += 18) {
+    for (let o = 0; o < q.length; o += 19) {
       for (let v = 0; v < 4; v++) {
         maxH = Math.max(maxH, q[o + v * 3 + 1]);
         minX = Math.min(minX, q[o + v * 3]);

@@ -799,6 +799,7 @@ export class ChunkManager {
       (o.userData as { dispose?: () => void }).dispose?.();
     }
     for (const o of objs) { freezeLocalTransforms(o); patchStaticMaterials(o); g.add(o); }
+    for (const o of objs) o.userData.tree = true; // (far-LOD QA tells trees from buildings)
     e.treeObjs = objs;
     e.trees = trees;
     e.treeMid = mid;
@@ -860,7 +861,7 @@ export class ChunkManager {
       e.treeMid = !!e.mid;
       for (;;) {
         const r = tg.next();
-        if (r.done) { for (const o of r.value) g.add(o); e.treeObjs = r.value; break; }
+        if (r.done) { for (const o of r.value) { o.userData.tree = true; g.add(o); } e.treeObjs = r.value; break; }
         this.stat('tree', t0);
         yield;
         t0 = performance.now();

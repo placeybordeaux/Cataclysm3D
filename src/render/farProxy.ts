@@ -7,6 +7,36 @@ import type { V3 } from './geometry';
 import { worldMaterials } from './materials';
 import type { TileFrame } from './textureSource';
 import { terrainShape } from './tileKinds';
+import { boundsOf, layoutOf, speciesOf } from './flora';
+
+interface CrownShape {
+  /** radius, top and underside above the tree's floor (m) */
+  r: number;
+  top: number;
+  bot: number;
+}
+const crownShapes = new Map<string, CrownShape>();
+/** The crown of a tree terrain id as flora.ts builds it (averaged over its layout variants). */
+export function crownShape(id: string): CrownShape {
+  let c = crownShapes.get(id);
+  if (c) return c;
+  const sp = speciesOf(id, false);
+  const H = sp.family === 'sapling' ? Math.max(1.6, Math.min(2.8, TREE_H * 1.6)) : TREE_H * sp.scale;
+  let hw = 0, top = 0, bot = 0;
+  for (let v = 0; v < 3; v++) {
+    const L = layoutOf(sp.family, v, false);
+    const b = boundsOf(L);
+    let lo = 1;
+    for (const l of L.lumps) lo = Math.min(lo, l.c[1] - l.r[1]);
+    for (const k of L.cones) lo = Math.min(lo, k.y0);
+    hw += b.hw / 3;
+    top += b.top / 3;
+    bot += (lo === 1 ? 0.35 : Math.max(0.05, lo)) / 3;
+  }
+  c = { r: Math.max(0.5, hw * H), top: top * H, bot: bot * H };
+  crownShapes.set(id, c);
+  return c;
+}
 
 // Far proxies (docs/FAR_LOD.md): a low-poly stand-in for every column out to ~1.75x the draw
 // distance, built from the real map instead of the overmap. Per tile: the top of what stands
@@ -27,10 +57,14 @@ import { terrainShape } from './tileKinds';
 
 /** Proxy ground sits under the real ground (relief dips to -0.45 m in the terrain look). */
 const GROUND_Y = -0.2;
-/** Tree crowns: from CROWN_LO up to CROWN_HI above the level floor, the top varying per 2x2
- *  tiles by CROWN_VAR (one flat slab read as a green wall where the real trees are crowns).
- *  The mesher's trees are 4.8-5.6 m tall (chunkMesh.ts), their crowns from ~0.4 of that. */
-const CROWN_LO = 2, CROWN_HI = 5.6, CROWN_VAR = 0.9;
+/**
+ * Tree crowns, sized like the 3D trees (flora.ts): the mesher's height (4.8-5.64 m, mean
+ * TREE_H, chunkMesh.ts) times the species' scale, the crown's radius, top and underside from
+ * the species' layout, domed and spread over every tile it covers. A proxy one tile wide at a
+ * fixed 5.6 m left a real forest's continuous 5-8 m canopy full of holes (proxyQa).
+ */
+const TREE_H = 5.22;
+const CROWN_LO = 2;
 /** Canopies are lifted like flora.ts lifts its leaf ramp: the sprite's own colours carry baked
  *  shade and outline, and as an average they read dark olive next to the lit 3D crowns. */
 const CANOPY_LIFT = 1.45;
@@ -39,8 +73,10 @@ const TRUNK_SHADE = 0.4;
 /** Hipped roofs of the volume looks (chunkMesh.ts PITCHED, arch.ts hipRoofTile). */
 const PITCHED = /^t_(shingle_flat_roof|thatch_roof|tile_flat_roof)$/;
 const ROOF_SLOPE = 0.5;
-/** floats per quad record: 4 corners, normal, linear rgb */
-const QF = 18;
+/** floats per quad record: 4 corners, normal, linear rgb, kind (QK) */
+const QF = 19;
+/** What a quad belongs to (proxyQa compares buildings and trees separately). */
+export const QK = { build: 0, crown: 1, mast: 2 } as const;
 const BLOCK = 4;
 
 /** Lattice: see-through impassable terrain (railings, fences, radio tower girders). */
@@ -57,6 +93,8 @@ export interface TileLook {
   col: [number, number, number];
   /** a roof the volume looks pitch (hipped) */
   pitched: boolean;
+  /** trees: the crown */
+  crown: CrownShape | null;
 }
 
 /** CDDA colour names for terrain without art (procedural sources, missing sprites). */
@@ -86,11 +124,11 @@ export function tileLook(t: TerrainDef, art: [number, number, number] | null, br
   const bright = kind === K.Tree ? bright0 * CANOPY_LIFT : bright0;
   const name = String((t as { color?: unknown }).color ?? '').replace(/^c_/, '');
   const s = art ?? NAMED[name] ?? [120, 120, 120];
-  return { kind, col: [lin(s[0]) * bright, lin(s[1]) * bright, lin(s[2]) * bright], pitched: PITCHED.test(t.id) };
+  return { kind, col: [lin(s[0]) * bright, lin(s[1]) * bright, lin(s[2]) * bright], pitched: PITCHED.test(t.id), crown: kind === K.Tree ? crownShape(t.id) : null };
 }
 
 /**
- * The proxy of one column as quad records (QF floats each: corners a b c d, normal, colour),
+ * The proxy of one column as quad records (QF floats each: corners a b c d, normal, colour, QK kind),
  * in world coordinates (x, height, y). `levels[i]` is the chunk at z = i (0 = ground), null for
  * a level with nothing. `cell` = tiles per proxy cell (1, or 2 further out: max height, colour
  * of the tallest tile).
@@ -100,8 +138,11 @@ export function buildColumnQuads(cx: number, cy: number, levels: readonly (Chunk
   const H = new Float32Array(n * n).fill(GROUND_Y);
   const top = new Uint32Array(n * n);
   const side = new Uint32Array(n * n);
-  /** the top is a ground-level tree crown: its sides hang from CROWN_LO, open below */
+  /** the top is a tree crown: its sides hang from crownBot (trunk shade below, see edge) */
   const crown = new Uint8Array(n * n);
+  const crownBot = new Float32Array(n * n);
+  /** trees, rasterised as crowns after the levels (they spread over their neighbours) */
+  const trees: { x: number; y: number; base: number; c: CrownShape; col: [number, number, number] }[] = [];
   /**
    * The top is a floor or roof with no wall right under it: its sides are a SLAB-thick edge,
    * not a wall to the ground (NaN = stands on the ground). Without it a bridge deck, a catwalk
@@ -170,7 +211,9 @@ export function buildColumnQuads(cx: number, cy: number, levels: readonly (Chunk
             break;
           case K.Wall: h = base + LEVEL_HEIGHT; break;
           case K.Half: h = base + 1; break;
-          case K.Tree: h = base + CROWN_HI - CROWN_VAR * hash(Math.floor((cx * CHUNK + lx) / 2), Math.floor((cy * CHUNK + ly) / 2)); break;
+          case K.Tree:
+            trees.push({ x: lx + 0.5, y: ly + 0.5, base, c: L.crown!, col: L.col });
+            continue;
           case K.Shrub: h = base + 1; break;
           default: continue;
         }
@@ -178,18 +221,40 @@ export function buildColumnQuads(cx: number, cy: number, levels: readonly (Chunk
         // ground at z0 always sets a colour; anything else only by standing taller
         if (h > H[i] + 0.01 || (z === 0 && L.kind === K.Ground && H[i] <= GROUND_Y + 0.01 && top[i] === 0)) {
           H[i] = Math.round(h * 20) / 20;
-          // crowns vary a little in colour too, like the real canopies' light and shade
-          const k = L.kind === K.Tree ? 0.85 + 0.3 * hash(cx * CHUNK + lx + 7, cy * CHUNK + ly) : 1;
-          top[i] = pack(k === 1 ? L.col : [L.col[0] * k, L.col[1] * k, L.col[2] * k]) | 0x40000000;
-          if (L.kind === K.Wall || L.kind === K.Half || L.kind === K.Tree || L.kind === K.Shrub) side[i] = pack(L.col) | 0x40000000;
-          crown[i] = L.kind === K.Tree && z === 0 ? 1 : 0;
+          top[i] = pack(L.col) | 0x40000000;
+          if (L.kind === K.Wall || L.kind === K.Half || L.kind === K.Shrub) side[i] = pack(L.col) | 0x40000000;
+          crown[i] = 0;
           floatBot[i] = L.kind === K.Ground && z > 0 && !wallBelow[ti] ? H[i] - SLAB : NaN;
         }
       }
     [wallBelow, wallHere] = [wallHere, wallBelow];
   }
+  // crowns: a dome over every cell centre within the radius, the highest wins
+  for (const t of trees) {
+    const R = t.c.r;
+    const shade = 0.85 + 0.3 * hash(Math.floor(cx * CHUNK + t.x), Math.floor(cy * CHUNK + t.y) + 7);
+    const col = pack([t.col[0] * shade, t.col[1] * shade, t.col[2] * shade]) | 0x40000000;
+    const i0 = Math.max(0, Math.floor((t.x - R) / cell)), i1 = Math.min(n - 1, Math.floor((t.x + R) / cell));
+    const j0 = Math.max(0, Math.floor((t.y - R) / cell)), j1 = Math.min(n - 1, Math.floor((t.y + R) / cell));
+    for (let j = j0; j <= j1; j++)
+      for (let i = i0; i <= i1; i++) {
+        const d = Math.hypot((i + 0.5) * cell - t.x, (j + 0.5) * cell - t.y);
+        if (d > R) continue;
+        const u = d / R;
+        const h = Math.round((t.base + t.c.bot + (t.c.top - t.c.bot) * Math.sqrt(1 - u * u)) * 20) / 20;
+        const k = j * n + i;
+        if (h <= H[k] + 0.01) continue;
+        H[k] = h;
+        top[k] = col;
+        side[k] = col;
+        crown[k] = 1;
+        crownBot[k] = t.base + t.c.bot;
+        floatBot[k] = NaN;
+      }
+  }
   const out: number[] = [];
-  const quad = (a: V3, b: V3, c: V3, d: V3, nn: V3, col: V3) => out.push(...a, ...b, ...c, ...d, ...nn, ...col);
+  let kind: number = QK.build;
+  const quad = (a: V3, b: V3, c: V3, d: V3, nn: V3, col: V3) => out.push(...a, ...b, ...c, ...d, ...nn, ...col, kind);
   const bx = cx * CHUNK, by = cy * CHUNK;
   // tops: greedy rectangles of equal (height, colour)
   const done = new Uint8Array(n * n);
@@ -199,17 +264,18 @@ export function buildColumnQuads(cx: number, cy: number, levels: readonly (Chunk
       if (done[k] || top[k] === 0) continue;
       const h = H[k], t = top[k];
       let w = 1;
-      while (i + w < n && !done[k + w] && H[k + w] === h && top[k + w] === t) w++;
+      while (i + w < n && !done[k + w] && H[k + w] === h && top[k + w] === t && crown[k + w] === crown[k]) w++;
       let d = 1;
       grow: while (j + d < n) {
         for (let q = 0; q < w; q++) {
           const kk = (j + d) * n + i + q;
-          if (done[kk] || H[kk] !== h || top[kk] !== t) break grow;
+          if (done[kk] || H[kk] !== h || top[kk] !== t || crown[kk] !== crown[k]) break grow;
         }
         d++;
       }
       for (let dd = 0; dd < d; dd++) for (let q = 0; q < w; q++) done[(j + dd) * n + i + q] = 1;
       const x0 = bx + i * cell, x1 = bx + (i + w) * cell, z0 = by + j * cell, z1 = by + (j + d) * cell;
+      kind = crown[k] ? QK.crown : QK.build;
       quad([x0, h, z1], [x1, h, z1], [x1, h, z0], [x0, h, z0], [0, 1, 0], unpack(t));
     }
   // sides: where a cell stands above its neighbour (outside the column: the ground), merged
@@ -234,6 +300,7 @@ export function buildColumnQuads(cx: number, cy: number, levels: readonly (Chunk
     for (let a = 0; a < n; a++) {
       let run = -1, rh = 0, rlo = 0, rcol = 0;
       const flush = (end: number) => {
+        kind = QK.build;
         if (run >= 0) edge(a, run, end, rlo, rh, unpack(rcol));
         run = -1;
       };
@@ -254,9 +321,10 @@ export function buildColumnQuads(cx: number, cy: number, levels: readonly (Chunk
           // a tree: canopy above CROWN_LO, trunks and shade below it (open underneath, the
           // trees' proxies let the eye through to a pale road far behind: a bright line)
           flush(b);
-          const c = unpack(sc);
-          if (lo < CROWN_LO) edge(a, b, b + 1, lo, Math.min(h, CROWN_LO), [c[0] * TRUNK_SHADE, c[1] * TRUNK_SHADE, c[2] * TRUNK_SHADE]);
-          if (h > CROWN_LO + 0.05) edge(a, b, b + 1, Math.max(lo, CROWN_LO), h, c);
+          kind = QK.crown;
+          const c = unpack(sc), cb = Math.max(crownBot[k], CROWN_LO * 0.5);
+          if (lo < cb) edge(a, b, b + 1, lo, Math.min(h, cb), [c[0] * TRUNK_SHADE, c[1] * TRUNK_SHADE, c[2] * TRUNK_SHADE]);
+          if (h > cb + 0.05) edge(a, b, b + 1, Math.max(lo, cb), h, c);
           continue;
         }
         if (run >= 0 && h === rh && lo === rlo && sc === rcol) continue;
@@ -267,6 +335,7 @@ export function buildColumnQuads(cx: number, cy: number, levels: readonly (Chunk
     }
   }
   // masts: a lattice stacked over levels (radio towers) as thin posts, one per tile
+  kind = QK.mast;
   for (let ti = 0; ti < CHUNK * CHUNK; ti++) {
     if (latN[ti] < MAST_LEVELS) continue;
     const x = bx + (ti % CHUNK) + 0.5, zc = by + Math.floor(ti / CHUNK) + 0.5, w = MAST_W / 2;
@@ -439,6 +508,54 @@ export class FarProxyLayer {
     return -Infinity;
   }
 
+  /**
+   * Debug (cdda.proxyQa): per tile of column (cx, cy), the height of the proxy's top faces
+   * (-Infinity where none), as drawn: the full proxy, not a cap. Null without a proxy.
+   */
+  heightmap(cx: number, cy: number, only?: 'build' | 'crown', scratchOnly = false): Float32Array | null {
+    const c = this.cols.get(colKey(cx, cy));
+    if (!c) return null;
+    const H = new Float32Array(CHUNK * CHUNK).fill(-Infinity);
+    // scratchOnly: the proxy as it is before you get there (all from the scratch generator)
+    const q = scratchOnly ? this.scratchQuads(cx, cy) : c.quads, bx = cx * CHUNK, by = cy * CHUNK;
+    for (let o = 0; o < q.length; o += QF) {
+      if (q[o + 13] < 0.5) continue;
+      if (only === 'build' && q[o + 18] === QK.crown) continue;
+      if (only === 'crown' && q[o + 18] !== QK.crown) continue;
+      let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+      for (let v = 0; v < 4; v++) {
+        x0 = Math.min(x0, q[o + v * 3]); x1 = Math.max(x1, q[o + v * 3]);
+        z0 = Math.min(z0, q[o + v * 3 + 2]); z1 = Math.max(z1, q[o + v * 3 + 2]);
+      }
+      const y = q[o + 1];
+      // tiles whose centre the face covers (a mast's 0.3 m top covers its tile's centre)
+      for (let tz = Math.floor(z0 - by); tz < Math.ceil(z1 - by); tz++)
+        for (let tx = Math.floor(x0 - bx); tx < Math.ceil(x1 - bx); tx++) {
+          if (tx < 0 || tz < 0 || tx >= CHUNK || tz >= CHUNK) continue;
+          const cxm = bx + tx + 0.5, czm = by + tz + 0.5;
+          if (cxm < x0 - 0.01 || cxm > x1 + 0.01 || czm < z0 - 0.01 || czm > z1 + 0.01) continue;
+          const i = tz * CHUNK + tx;
+          H[i] = Math.max(H[i], y);
+        }
+    }
+    return H;
+  }
+
+  /** Debug (proxyQa): column (cx, cy)'s quads from the scratch generator alone, as before a visit. */
+  private scratchQuads(cx: number, cy: number): Float32Array {
+    const { scratch } = this.deps;
+    const top = Math.max(0, Math.min(MAX_Z, this.deps.overmapTop(cx, cy)));
+    const levels: (Chunk | null)[] = [];
+    for (let z = 0; z <= top; z++) {
+      const ch = scratch.chunk(cx, cy, z);
+      levels.push(ch && !ch.empty ? ch : null);
+    }
+    const q = buildColumnQuads(cx, cy, levels, (i) => this.look(i, scratch), 1, this.deps.pitch());
+    for (let z = top; z >= 0; z--) if (scratch.hasChunk(cx, cy, z)) scratch.evictChunk(scratch.chunk(cx, cy, z)!);
+    (scratch.generator as { forgetColumn?(cx: number, cy: number): void } | null)?.forgetColumn?.(cx, cy);
+    return q;
+  }
+
   /** Debug (cdda.proxyColumn): how column (cx, cy)'s proxy was made. */
   describe(cx: number, cy: number): { live: boolean; stale: boolean; hidden: boolean; quads: number; top: number } | null {
     const c = this.cols.get(colKey(cx, cy));
@@ -454,6 +571,17 @@ export class FarProxyLayer {
   /** Proxy column (cx, cy)'s geometry exists (it may be empty: open ground still has a top). */
   has(cx: number, cy: number): boolean {
     return this.cols.has(colKey(cx, cy));
+  }
+
+  /**
+   * Build column (cx, cy)'s proxy now if it has none (the hand-off needs a cover: after a load
+   * or teleport the ring is still filling). True if it exists afterwards.
+   */
+  ensure(cx: number, cy: number): boolean {
+    if (this.cols.has(colKey(cx, cy))) return true;
+    if (!this.enabled) return false;
+    this.buildColumn(cx, cy, 1);
+    return true;
   }
 
   /**

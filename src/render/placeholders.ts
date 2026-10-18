@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { CHUNK } from '../world/coords';
 import { GeomBuilder } from './geometry';
 import { worldMaterials } from './materials';
-import { emitSilhouette, type OmtLookup } from './skyline';
+import { emitSilhouette, silhouetteStoreys, type OmtLookup } from './skyline';
 import type { ChunkEntryView } from './chunkManager';
 import type { TileFrame } from './textureSource';
 
@@ -104,7 +104,7 @@ export class PlaceholderLayer {
         const A = a as [number, number, number], B = b as [number, number, number], Cc = c as [number, number, number];
         g.tri(A, B, Cc, [nn[0] / l, nn[1] / l, nn[2] / l], [0, 0, 1, 0, 1, 1], f, lit(col));
         g.tri(A, Cc, B, [-nn[0] / l, -nn[1] / l, -nn[2] / l], [0, 0, 1, 1, 1, 0], f, lit(col));
-      });
+      }, silhouetteStoreys(this.overmap!, cx, cy));
     if (g.vertexCount === 0) {
       // fields, roads, water: the far ground ring already stands in; remember "nothing to draw"
       const m = new THREE.Mesh();

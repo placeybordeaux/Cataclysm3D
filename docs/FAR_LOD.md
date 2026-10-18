@@ -198,6 +198,48 @@ single step 16.4 current, 1.6 dissolve, 1.8 proxy, 2.1 proxy-dissolve; total cha
 
 perf-bench city40, same machine state: 858 frames `current` vs 800 `proxy-dissolve` (-7 %).
 
+## Round 4 (2026-10-17): bounding-box QA ("proxies much higher than the real ones")
+
+`cdda.proxyQa(r, n, mode)` compares, per tile of every column within `r` chunks whose levels
+with content are all drawn, the top of the proxy with the top of the real geometry (each
+triangle sampled at ~0.4 m at its true height, nudged into the solid behind it; merged batch
+meshes included). Buildings (non-tree meshes vs the proxy's non-crown quads) and trees (the
+chunks' tree objects vs crown quads, by cover: far trees are crossed cards with transparent
+corners, so their measured top is an upper bound) are reported apart. `farlodqa` runs it on
+foot in a city, a town, a forest, the country and at the radio tower; `mode` `true` uses
+proxies built from the scratch generator alone (as before a visit), `'standin'` the overmap
+stand-ins. Report: shots/farlod/qa.json.
+
+The measuring itself took three fixes before it could be trusted (hidden merged meshes, wall
+faces on tile edges, one sample per big triangle); the numbers below are after them.
+
+| | building tiles higher by >1 m (>3 m) | lower by >1 m (>3 m) | mean abs |
+|---|---|---|---|
+| proxies, 5 places | 0.0-0.6 % (0-0.0 %) | 15-33 % (0-6 %) | 0.9-1.15 m |
+| proxies built before a visit | identical | identical | identical |
+| overmap stand-ins (fixed heights) | 13-27 % (8-15 %) | 62-73 % | 3.6-4.4 m |
+
+Trees: of tiles with a crown on either side ~75-83 % have both; mean height where both
+-0.55 to -0.72 m (proxy lower; part of it the cards' upper bound). "Lower" for buildings is what
+proxies don't model: tall furniture (street lights, cattails), eaves overhanging a tile.
+
+So the proxies were not too high; what read as "the proxies are much higher" were the
+**overmap stand-ins**: random 12-32 m boxes for any "tall" OMT, 9.5-16.5 m forest crowns. They
+showed in proxy modes wherever a proxy didn't exist yet (after a load or teleport). Now:
+* proxy modes never draw a stand-in; a hold that needs a cover builds the column's proxy on
+  the spot (up to 4 a frame, `Handoff.coverOf`);
+* stand-ins (dissolve and current modes) and the skyline silhouettes take the building's
+  storeys from the overmap (`silhouetteStoreys`), forest crowns 5-7.5 m;
+* the skyline's silhouettes start past the proxy ring when proxies are on;
+* trees in proxies are sized from the species' 3D layout (`crownShape`: height x scale,
+  radius, top and underside from flora.ts), spread over every tile the crown covers;
+* the hand-off starts a column over when its entries were dropped and made again between two
+  looks (it kept a 'done' column's proxy hidden over nothing: a hole).
+
+Hand-off capture now (biggest step above the animation floor / total): current 2.35 / 7.4,
+dissolve 1.67 / 8.7, proxy 0.28 / 1.7, proxy-dissolve 0.16 / 0.9.
+perf-bench city40 (loaded machine): 727 frames current vs 670 proxy-dissolve (-8 %).
+
 ## The original plan
 
 

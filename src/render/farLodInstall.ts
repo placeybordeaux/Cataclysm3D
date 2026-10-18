@@ -1,4 +1,4 @@
-import { Box3, type Mesh } from 'three';
+import { Box3, Matrix4, Vector3, type BufferAttribute, type InstancedMesh, type Mesh, type Object3D } from 'three';
 import type * as THREE from 'three';
 import type { DebugApi } from '../debug';
 import type { Game } from '../game/game';
@@ -12,7 +12,7 @@ import { FarProxyLayer, overmapTopOf } from './farProxy';
 import type { PlaceholderLayer } from './placeholders';
 import type { Renderer } from './renderer';
 import { look } from './look';
-import { SKYLINE_NEAR, SKYLINE_OUTER, SKYLINE_PULL } from './skyline';
+import { emitSilhouette, silhouetteStoreys, SKYLINE_NEAR, SKYLINE_OUTER, SKYLINE_PULL } from './skyline';
 
 // Wires the far LOD (farLod.ts, farProxy.ts, docs/FAR_LOD.md) into the renderer: the proxy
 // ring, the hand-off after each chunk update, fade-ins of covers appearing at the far edge, the
@@ -71,7 +71,8 @@ export function installFarLod(game: Game, renderer: Renderer, worldgen: WorldGen
     }
     proxies.enabled = usesProxies(mode);
     placeholders.doneFn = mode === 'current' ? null : (cx, cy) => handoff.done(cx, cy);
-    placeholders.covered = usesProxies(mode) ? (cx, cy) => proxies.has(cx, cy) : null;
+    // proxy modes: no overmap stand-ins at all (the hand-off builds a missing proxy instead)
+    placeholders.covered = usesProxies(mode) ? () => true : null;
     proxies.update(p.x, p.y, p.z, R, chunks.forward);
     const cam = renderer.camera;
     // With proxies the skyline's pull starts past them (else the pulled far ground ring lands
@@ -80,6 +81,7 @@ export function installFarLod(game: Game, renderer: Renderer, worldgen: WorldGen
     const proxyOn = proxies.enabled && p.z >= 0;
     const near = proxyOn ? (proxies.outer(R) + 1.5) * CHUNK : SKYLINE_NEAR;
     renderer.skyline.uniforms.uNear.value = near;
+    renderer.skyline.innerChunks = proxyOn ? proxies.outer(R) + 0.5 : null;
     const pulledFar = near + Math.max(0, (R + SKYLINE_OUTER + 1) * CHUNK - near) * SKYLINE_PULL;
     const far = proxyOn ? Math.max(CAMERA_FAR, pulledFar + 10) : CAMERA_FAR;
     if (cam.far !== far) {
@@ -198,6 +200,161 @@ export function installFarLod(game: Game, renderer: Renderer, worldgen: WorldGen
     }
     const chunkTop = z < 0 ? -Infinity : (z + 1) * LEVEL_HEIGHT;
     return { chunks: chunkTop, proxy: proxies.drawnTop(cx, cy), full: proxies.proxyTop(cx, cy) };
+  };
+  /**
+   * Debug QA (docs/FAR_LOD.md): proxy vs real geometry per tile, for every column within `r`
+   * chunks whose wanted levels are all shown and that has a proxy. Real height = the highest
+   * vertex of anything its chunk groups draw over the tile (world meshes, 3D trees, furniture
+   * models; instanced meshes by their instances' bounds). Compared only where either stands
+   * over 0.6 m (ground vs ground is noise). Returns totals and the worst tiles with the
+   * terrain stacked there, top first.
+   */
+  /** The stand-in (overmap silhouette) of column (cx, cy) as a per-tile top height (proxyQa 'standin'). */
+  const standinHeightmap = (cx: number, cy: number): Float32Array => {
+    const H = new Float32Array(CHUNK * CHUNK).fill(-Infinity);
+    const bx = cx * CHUNK, by = cy * CHUNK;
+    const sample = (A: number[], B: number[], C: number[]) => {
+      const edge = Math.max(Math.hypot(B[0] - A[0], B[2] - A[2]), Math.hypot(C[0] - A[0], C[2] - A[2]), Math.hypot(C[0] - B[0], C[2] - B[2]), 0.01);
+      const ns = Math.min(60, Math.max(1, Math.ceil(edge / 0.4)));
+      for (let i = 0; i <= ns; i++)
+        for (let j = 0; j <= ns - i; j++) {
+          const u = i / ns, w = j / ns;
+          const x = A[0] + u * (B[0] - A[0]) + w * (C[0] - A[0]), y = A[1] + u * (B[1] - A[1]) + w * (C[1] - A[1]), z = A[2] + u * (B[2] - A[2]) + w * (C[2] - A[2]);
+          const tx = Math.floor(x - bx), tz = Math.floor(z - by);
+          if (tx < 0 || tz < 0 || tx >= CHUNK || tz >= CHUNK) continue;
+          const k = tz * CHUNK + tx;
+          if (y > H[k]) H[k] = y;
+        }
+    };
+    const om = { omtAt: (x: number, y: number, z: number) => worldgen.overmap.omtAt(x, y, z) };
+    emitSilhouette(cx, cy, om.omtAt(cx, cy, 0).id, (a2, b, c2, d) => { sample(a2, b, c2); sample(a2, c2, d); }, (a2, b, c2) => sample(a2, b, c2), silhouetteStoreys(om, cx, cy));
+    return H;
+  };
+  a.proxyQa = (r = 5, worstN = 25, scratchOnly: boolean | 'standin' = false) => {
+    const p = game.player;
+    const pcx = Math.floor(p.x / CHUNK), pcy = Math.floor(p.y / CHUNK);
+    const m4 = new Matrix4(), v3 = new Vector3(), bb = new Box3();
+    const va = new Vector3(), vb = new Vector3(), vc = new Vector3(), nn = new Vector3();
+    const tiles: { cx: number; cy: number; tx: number; ty: number; proxy: number; real: number; diff: number }[] = [];
+    let columns = 0, skipped = 0;
+    let treeTiles = 0, treeBoth = 0, treeProxyOnly = 0, treeRealOnly = 0, treeDiff = 0;
+    for (let dy = -r; dy <= r; dy++)
+      for (let dx = -r; dx <= r; dx++) {
+        const cx = pcx + dx, cy = pcy + dy;
+        const standin = scratchOnly === 'standin';
+        const PH = standin ? (proxies.has(cx, cy) ? standinHeightmap(cx, cy) : null) : proxies.heightmap(cx, cy, 'build', scratchOnly === true);
+        const PT = standin ? new Float32Array(CHUNK * CHUNK).fill(-Infinity) : proxies.heightmap(cx, cy, 'crown', scratchOnly === true);
+        // every level with content drawn (columnComplete follows what the manager wants, which
+        // skips tower tops while it thinks you drive: right after a teleport, say)
+        let all = !!PH;
+        for (let z = 0; z <= 12 && all; z++) {
+          if (!game.map.hasChunk(cx, cy, z) || game.map.chunk(cx, cy, z)!.empty) continue;
+          const e = chunks.entryAt(cx, cy, z);
+          if (!e || !e.shown || !e.visible) all = false;
+        }
+        if (!PH || !all) { skipped++; continue; }
+        columns++;
+        const RH = new Float32Array(CHUNK * CHUNK).fill(-Infinity), RT = new Float32Array(CHUNK * CHUNK).fill(-Infinity);
+        const bx = cx * CHUNK, by = cy * CHUNK;
+        let into = RH;
+        const put = (x: number, y: number, z: number) => {
+          const tx = Math.floor(x - bx), tz = Math.floor(z - by);
+          if (tx < 0 || tz < 0 || tx >= CHUNK || tz >= CHUNK) return;
+          const i = tz * CHUNK + tx;
+          if (y > into[i]) into[i] = y;
+        };
+        for (let z = 0; z <= 12; z++) {
+          const e = chunks.entryAt(cx, cy, z);
+          e?.group?.updateMatrixWorld(true);
+          e?.group?.traverse((o) => {
+            const m = o as InstancedMesh;
+            // (far page meshes merged by the chunk batcher are hidden but still what is drawn)
+            if (!m.isMesh || (!m.visible && !m.userData.batchable)) return;
+            const pos = m.geometry.attributes.position as BufferAttribute | undefined;
+            if (!pos) return;
+            // trees (chunkManager tags them) are compared with the proxy's crowns, the rest with its buildings
+            let tr = false;
+            for (let q: Object3D | null = m; q && !tr; q = q.parent) tr = !!q.userData.tree;
+            into = tr ? RT : RH;
+            if (m.isInstancedMesh) {
+              m.geometry.computeBoundingBox();
+              for (let k = 0; k < m.count; k++) {
+                m.getMatrixAt(k, m4);
+                m4.premultiply(m.matrixWorld);
+                bb.copy(m.geometry.boundingBox!).applyMatrix4(m4);
+                v3.setFromMatrixPosition(m4);
+                put(v3.x, bb.max.y, v3.z);
+              }
+              return;
+            }
+            // per triangle: its highest corner, on the tile under its centre nudged into the
+            // solid behind it (a wall face lies on the tile edge: by its vertices it counted
+            // for the tile next door)
+            const idx = m.geometry.index;
+            const nt = idx ? idx.count / 3 : pos.count / 3;
+            for (let t = 0; t < nt; t++) {
+              const ia = idx ? idx.getX(t * 3) : t * 3, ib = idx ? idx.getX(t * 3 + 1) : t * 3 + 1, ic = idx ? idx.getX(t * 3 + 2) : t * 3 + 2;
+              va.fromBufferAttribute(pos, ia).applyMatrix4(m.matrixWorld);
+              vb.fromBufferAttribute(pos, ib).applyMatrix4(m.matrixWorld);
+              vc.fromBufferAttribute(pos, ic).applyMatrix4(m.matrixWorld);
+              nn.subVectors(vb, va).cross(v3.subVectors(vc, va));
+              const len = nn.length();
+              if (len < 1e-9) continue;
+              nn.multiplyScalar(1 / len);
+              // sampled across the triangle at ~0.4 m (a far tree is two big crossed cards: one
+              // sample at its centre put the tree on the tile next to its own)
+              const edge = Math.max(va.distanceTo(vb), vb.distanceTo(vc), vc.distanceTo(va));
+              const ns = Math.min(40, Math.max(1, Math.ceil(edge / 0.4)));
+              for (let i = 0; i <= ns; i++)
+                for (let j = 0; j <= ns - i; j++) {
+                  const u = i / ns, w = j / ns;
+                  const x = va.x + u * (vb.x - va.x) + w * (vc.x - va.x);
+                  const y = va.y + u * (vb.y - va.y) + w * (vc.y - va.y);
+                  const zz = va.z + u * (vb.z - va.z) + w * (vc.z - va.z);
+                  put(x - nn.x * 0.02, y, zz - nn.z * 0.02);
+                }
+            }
+          });
+        }
+        for (let i = 0; i < CHUNK * CHUNK; i++) {
+          const ph = PH![i], rh = standin ? Math.max(RH[i], RT[i]) : RH[i];
+          if (ph > 0.6 || rh > 0.6) {
+            const pv = Number.isFinite(ph) ? ph : 0, rv = Number.isFinite(rh) ? rh : 0;
+            tiles.push({ cx, cy, tx: i % CHUNK, ty: Math.floor(i / CHUNK), proxy: +pv.toFixed(2), real: +rv.toFixed(2), diff: +(pv - rv).toFixed(2) });
+          }
+          // trees: cover (a crown over the tile, both sides) and height where both have one.
+          // Far trees are crossed cards whose corners are transparent: their measured top is
+          // an upper bound out to the card's width, so cover is the fairer test.
+          const pt = PT![i] > 2, rt = RT[i] > 2;
+          if (pt || rt) {
+            treeTiles++;
+            if (pt && rt) { treeBoth++; treeDiff += PT![i] - RT[i]; }
+            else if (pt) treeProxyOnly++;
+            else treeRealOnly++;
+          }
+        }
+      }
+    const n = tiles.length;
+    const over = (t: number) => tiles.filter((x) => x.diff > t).length;
+    const under = (t: number) => tiles.filter((x) => x.diff < -t).length;
+    const worst = [...tiles].sort((a2, b) => Math.abs(b.diff) - Math.abs(a2.diff)).slice(0, worstN).map((t) => {
+      const stack: string[] = [];
+      for (let z = 12; z >= 0; z--) {
+        if (!game.map.hasChunk(t.cx, t.cy, z)) continue;
+        const ter = game.map.terAt(t.cx * CHUNK + t.tx, t.cy * CHUNK + t.ty, z), furn = game.map.furnAt(t.cx * CHUNK + t.tx, t.cy * CHUNK + t.ty, z);
+        if (ter.id === 't_open_air' && furn.id === 'f_null') continue;
+        stack.push(`z${z}:${ter.id}${furn.id !== 'f_null' ? '+' + furn.id : ''}`);
+      }
+      return { ...t, omt: worldgen.overmap.omtAt(t.cx, t.cy, 0).id, stack: stack.slice(0, 4).join(' ') };
+    });
+    return {
+      columns, skipped, tiles: n,
+      meanAbs: n ? +(tiles.reduce((s2, t) => s2 + Math.abs(t.diff), 0) / n).toFixed(2) : 0,
+      over1: n ? +(over(1) / n).toFixed(3) : 0, over3: n ? +(over(3) / n).toFixed(3) : 0,
+      under1: n ? +(under(1) / n).toFixed(3) : 0, under3: n ? +(under(3) / n).toFixed(3) : 0,
+      worst,
+      trees: { tiles: treeTiles, both: treeBoth, proxyOnly: treeProxyOnly, realOnly: treeRealOnly, meanDiffBoth: treeBoth ? +(treeDiff / treeBoth).toFixed(2) : 0 },
+    };
   };
   /** Debug: a column's proxy source and the live chunks' wall/tree counts per level. */
   a.proxyColumn = (cx: number, cy: number) => {
