@@ -16,16 +16,16 @@ import { asciiFontPx, asciiTitle, drawPixelLogo, setTitleLogoStyle, titleLogoSty
 import { registerTitleLayoutOption, renderTitleButtons, titleLayout, type TitleEntryView } from './title_screen';
 
 let logoOption = false;
-/** Options > Title logo (pixel / the CDDA ASCII art), registered once. */
+/** Options > Title logo (ASCII art / pixel letters), registered once. */
 function registerLogoOption(): void {
   if (logoOption) return;
   logoOption = true;
   registerOption({
     category: 'Interface',
     name: 'Title logo',
-    value: () => (titleLogoStyle() === 'ascii' ? 'ASCII art (CDDA)' : 'Pixel'),
+    value: () => (titleLogoStyle() === 'ascii' ? 'ASCII art' : 'Pixel'),
     change: () => setTitleLogoStyle(titleLogoStyle() === 'ascii' ? 'pixel' : 'ascii'),
-    desc: 'The logo on the title screen: big pixel letters (easy to read at any size) or the ASCII art from Cataclysm.',
+    desc: 'The logo on the title screen: ASCII art in the style of Cataclysm\'s own title, or big pixel letters (easy to read at any size).',
   });
 }
 

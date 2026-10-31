@@ -1,9 +1,9 @@
 // The title screen's logo. QA: CDDA's ASCII-art logo (ui.json `title`, from BN's
 // data/title/en.title) was hard to read at many window sizes: an 80-column drawing in a bitmap
-// font scaled to fractional sizes, dim blue on a dark, moving backdrop. The default is now a
-// pixel-art logo drawn at an integer scale (crisp at any size, big blocky letters with an
-// outline and a drop shadow so it reads over the world behind it). The ASCII art stays one
-// option away (Options > Title logo, or ?logo=ascii), drawn at an integer font size.
+// font scaled to fractional sizes, dim blue on a dark, moving backdrop. So it is now drawn at an
+// integer font size on a dark backing, and a pixel-art logo (big blocky letters with an outline
+// and a drop shadow) is one option away (Options > Title logo, or ?logo=pixel). After the
+// rename to Cataclysm3D the user picked the ASCII art as the default again.
 
 /** 5×7 glyphs (I is 3 wide), '#' = on. Only the letters the logo needs. */
 const GLYPHS: Record<string, string[]> = {
@@ -143,14 +143,14 @@ export function asciiTitle(bnTitle: string[]): string[] {
 export type TitleLogoStyle = 'pixel' | 'ascii';
 const KEY = 'cdda3d.titleLogo';
 
-/** ?logo=ascii|pixel wins, then the stored choice, then pixel. */
+/** ?logo=ascii|pixel wins, then the stored choice, then ASCII. */
 export function titleLogoStyle(): TitleLogoStyle {
   const q = new URLSearchParams(location.search).get('logo');
   if (q === 'ascii' || q === 'pixel') return q;
   try {
-    return localStorage.getItem(KEY) === 'ascii' ? 'ascii' : 'pixel';
+    return localStorage.getItem(KEY) === 'pixel' ? 'pixel' : 'ascii';
   } catch {
-    return 'pixel';
+    return 'ascii';
   }
 }
 
