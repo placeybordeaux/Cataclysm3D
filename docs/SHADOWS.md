@@ -127,7 +127,7 @@ The tool writes more than is committed: 2x2 GIFs of every clip and every heat ma
 set was trimmed to keep the folder small (the pairs were cut out of the 2x2 GIFs; the sweep was
 re-encoded as VP9).
 
-Re-run: `~/claude-stuff/bin/heavy --kind gpu --mem 2 -- npx tsx tools/shadow-motion.ts`
+Re-run: `tools/heavy --kind gpu --mem 2 -- npx tsx tools/shadow-motion.ts`
 (`--help`; `--only-stills`, `--no-gifs`, `--look full`, `--modes`, `--scenarios still,time,walk,pan,sweep`).
 
 ## What to try in your own tab

@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# Run a memory-hungry command (build, headless browser, GPU shots) under a machine-wide
+# memory lease when one is available, otherwise just run it.
+#
+#   tools/heavy [--mem GB] [--kind gpu] [--vram GB] [--name what] -- <cmd...>
+#
+# The lease tool is whatever $HEAVY points at, else ~/claude-stuff/bin/heavy (the original
+# dev machine is shared by several agents, so builds wait for room). Without either, the
+# options before `--` are ignored and <cmd> runs directly.
+set -euo pipefail
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then sed -n '2,9p' "$0" | sed 's/^# \{0,1\}//'; exit 0; fi
+lease=${HEAVY:-$HOME/claude-stuff/bin/heavy}
+if [[ -x "$lease" ]]; then exec "$lease" "$@"; fi
+while [[ $# -gt 0 && "$1" != "--" ]]; do shift; done
+if [[ $# -eq 0 ]]; then echo "tools/heavy: missing '-- <cmd>'" >&2; exit 2; fi
+shift
+exec "$@"

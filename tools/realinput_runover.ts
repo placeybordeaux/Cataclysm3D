@@ -5,7 +5,7 @@
 // the result. Frames are captured in a burst through the hit (chase camera and first person) and
 // tiled into strips with ImageMagick. Plugged into tools/realinput.ts (run: --only runover).
 //
-//   ~/claude-stuff/bin/heavy --kind gpu --vram 2 --mem 3 -- nix-shell --run \
+//   tools/heavy --kind gpu --vram 2 --mem 3 -- nix-shell --run \
 //     'npx tsx tools/realinput.ts --gpu --only runover'
 //   RUNOVER_OUT=docs/screenshots/runover RUNOVER_ONLY=70-third,40-first RUNOVER_PARAMS=runover=loose ...
 

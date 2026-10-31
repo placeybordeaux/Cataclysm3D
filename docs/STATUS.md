@@ -49,7 +49,7 @@ Screenshots for every area: `docs/screenshots/wave3/<area>/` (before/after pairs
   (3D canvas; HUD is DOM so read it from `state`), `eval "<js>"` (`cdda`, `game` in scope).
   Only the *visible* tab answers — if two tabs are open, the one in front wins.
 - The human plays in **Firefox** on a **3440×1304** ultrawide. Check both.
-- Heavy jobs (browsers, builds) go through `~/claude-stuff/bin/heavy`; GPU work
+- Heavy jobs (browsers, builds) go through `tools/heavy`; GPU work
   `--kind gpu --mem 2`. The default "full" look runs at 1–3 fps under SwiftShader, so
   real-input runs need `--gpu` (or `--params look=classic`).
 - Tools: `npm run shot` (headless screenshots / `--print`), `tsx tools/drive.ts` (persistent

@@ -55,10 +55,10 @@ npm run dev
 
 `shell.nix` supplies Node 22, Chromium, Python, ImageMagick, FFmpeg, Xvfb, xdotool, and keyboard-layout tools. It sets `CHROME_PATH` and prevents Puppeteer from downloading its own browser. Vite normally starts on port 5173, but `strictPort: false` permits another port when that port is occupied: read its actual startup output.
 
-The machine-specific convention in [../ARCHITECTURE.md](../ARCHITECTURE.md) routes memory-heavy jobs through `~/claude-stuff/bin/heavy`:
+The convention in [../ARCHITECTURE.md](../ARCHITECTURE.md) routes memory-heavy jobs through `tools/heavy`, which waits for room in a shared memory budget on the original dev machine and simply runs the command anywhere else:
 
 ```sh
-nix-shell --run '~/claude-stuff/bin/heavy --mem 1.5 --name build -- npm run build'
+nix-shell --run 'tools/heavy --mem 1.5 --name build -- npm run build'
 ```
 
 That wrapper is not part of the repository. On a different machine, install the needed tools and run the underlying command using local resource management. The shell imports `<nixpkgs>` rather than a pinned flake, so its exact package versions depend on the host's Nix setup. `package-lock.json` controls npm dependency resolution; consult it rather than assuming the version ranges in `package.json` are exact versions.

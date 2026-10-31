@@ -6,7 +6,7 @@
 // own, and frame times. Hosts its own Vite server and GPU Chromium like tools/bench-stream.ts.
 // Run inside nix-shell, on the GPU:
 //
-//   ~/claude-stuff/bin/heavy --kind gpu --mem 2 --name "cdda3d shadow-motion" -- npx tsx tools/shadow-motion.ts
+//   tools/heavy --kind gpu --mem 2 --name "cdda3d shadow-motion" -- npx tsx tools/shadow-motion.ts
 //
 // Options: --modes legacy,stable,cascades,smooth  --views street,forest  --scenarios still,time,walk,pan
 //          --frames N (default 90)  --size WxH (default 3440x1304)  --look voxel  --port N (default 5170)

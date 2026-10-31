@@ -8,7 +8,7 @@
 //   npm run shot -- --help
 // Console errors from the page are printed; the process exits non-zero on page errors
 // (unless --keep-errors) so agents notice breakage.
-// Must be run inside `nix-shell` (needs $CHROME_PATH) and via ~/claude-stuff/bin/heavy.
+// Must be run inside `nix-shell` (needs $CHROME_PATH) and via tools/heavy.
 
 import { createServer } from 'vite';
 import puppeteer from 'puppeteer-core';

@@ -3,7 +3,7 @@
 // it renders the ground as an odd white thing" — only one level below the player was built,
 // so the street was never drawn. Hosts its own Vite server and Chromium, like look-shots.ts.
 //
-//   ~/claude-stuff/bin/heavy --kind gpu --mem 2 -- nix-shell --run 'npx tsx tools/zlevel-shots.ts --gpu'
+//   tools/heavy --kind gpu --mem 2 -- nix-shell --run 'npx tsx tools/zlevel-shots.ts --gpu'
 //
 // Options:
 //   --out <dir>       where shots go (default docs/screenshots/wave3/zlevels)

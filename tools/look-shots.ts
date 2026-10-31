@@ -2,7 +2,7 @@
 // docs/screenshots/looks/<look>_<view>.jpg. Hosts its own Vite server and Chromium (so no
 // other session can drive it), like tools/shot.ts. Run inside nix-shell, via heavy:
 //
-//   ~/claude-stuff/bin/heavy --mem 2.5 -- npx tsx tools/look-shots.ts classic crisp full
+//   tools/heavy --mem 2.5 -- npx tsx tools/look-shots.ts classic crisp full
 //   ... --gpu --size 3440x1304 --bench full        (real GPU frame times: add --kind gpu)
 //
 // Options: --out <dir> (default docs/screenshots/looks), --views a,b (default all six),

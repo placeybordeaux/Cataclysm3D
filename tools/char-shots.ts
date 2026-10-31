@@ -3,7 +3,7 @@
 // Chromium like tools/look-shots.ts (never touches another session's game). Run inside
 // nix-shell, via heavy:
 //
-//   ~/claude-stuff/bin/heavy --kind gpu --mem 2 -- npx tsx tools/char-shots.ts --gpu --prefix after
+//   tools/heavy --kind gpu --mem 2 -- npx tsx tools/char-shots.ts --gpu --prefix after
 //   ... --params chars=billboard --prefix before        (the old camera-facing sprites)
 //
 // Options: --out <dir>, --views a,b (default all), --size WxH (default 1920x1080), --gpu,

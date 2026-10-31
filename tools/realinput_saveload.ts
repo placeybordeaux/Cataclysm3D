@@ -10,7 +10,7 @@
 // --hmr runs the dev server with hot reload on (the dev snapshot/resume code in src/save/install.ts
 // active, as `npm run dev` runs it) and adds a mid-game code edit (touches src/main.ts: a Vite full
 // reload must resume the same kit from the dev snapshot); --dist serves dist/ through `vite preview` (build first).
-// Run inside nix-shell, via ~/claude-stuff/bin/heavy (it holds a browser).
+// Run inside nix-shell, via tools/heavy (it holds a browser).
 //
 // Why this exists: a "lost item after reload" report turned out to be tools/drive.ts `load`
 // without menu=1 — under automation the title is skipped and a *new* empty-handed character

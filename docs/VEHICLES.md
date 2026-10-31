@@ -941,7 +941,7 @@ pump's). Real input: `tools/realinput.ts --only refuel`. Siphoning isn't done.
 
 ## Screenshots (RTX 5080, 1600x900, look `full`)
 
-Regenerate: `~/claude-stuff/bin/heavy --kind gpu --mem 2 -- nix-shell --run "npx tsx tools/vehicle-shots.ts --gpu model parts"`
+Regenerate: `tools/heavy --kind gpu --mem 2 -- nix-shell --run "npx tsx tools/vehicle-shots.ts --gpu model parts"`
 (views in `tools/vehicle-views.js`; `--views 'a;b'` to pick). JPEG q75 (at q85 these
 low-res, upscaled frames come out larger than PNG). Left: v2 part blocks (`parts`); right:
 modelled bodies (`model`).

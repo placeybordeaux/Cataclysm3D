@@ -7,6 +7,8 @@ context menus, a clean HUD) aimed at players who bounce off the classic tiles/cu
 world is built from the **UltiCa pixel-art tileset** and real 3D geometry in the style of
 *Project Shadowglass*. The original DDA-based version is tagged `v1-dda`.
 
+Music by CO.AG.
+
 Cataclysm3D is an unofficial, fan-made adaptation. It is not made or endorsed by the
 Cataclysm: Bright Nights or Cataclysm: Dark Days Ahead teams.
 
@@ -123,9 +125,11 @@ as the Cataclysm content it adapts. Third-party files listed below keep their ow
 - **UltiCa tileset** (I-am-Erk/CDDA-Tilesets): CC-BY-SA 3.0.
 - **Sound effects**: CDDA "CC-Sounds" soundpack. Per-file authors and licences are in
   `public/audio/CREDITS.md`.
-- **Music**: CO.AG tracks from the CDDA music packs. They are used with the composer's
-  informal permission to redistribute with credit, as recorded in that repository. Drop them
-  with `npm run audio -- --music-tracks 0` if that's not enough for your use.
+- **Music by CO.AG** (https://www.youtube.com/channel/UCcavSftXHgxLBWwLDm_bNvA), remastered
+  by SkyBreach, from the CDDA music pack (Fris0uman/CDDA-Music-Packs, CC BY-SA 4.0). The
+  composer allows use "as long as credit is given in the description of your game"
+  (`CO.AG_authorisation.txt` in that repository). Tracks are transcoded to Opus and otherwise
+  unmodified; titles are listed in `public/audio/CREDITS.md`.
 - **Fonts**: Terminus (SIL OFL, `public/fonts/LICENSE-OFL-Terminus-Font.txt`) and GNU
   Unifont 12.0.01 (GPLv2+ with the font embedding exception,
   `public/fonts/LICENSE-GPL-Unifont.txt`), both as shipped with Cataclysm: Bright Nights.

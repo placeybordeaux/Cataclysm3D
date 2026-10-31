@@ -26,7 +26,7 @@
 //   xtab "1500"                 switch to a new tab for N ms and back (focus loss)
 //   state                       lock/focus/fullscreen/open windows/player — a quick look
 //
-// `serve` must run inside nix-shell and via ~/claude-stuff/bin/heavy (it holds a browser).
+// `serve` must run inside nix-shell and via tools/heavy (it holds a browser).
 // --gpu launches Chromium on the real GPU (ANGLE/Vulkan) instead of SwiftShader.
 // --dist serves the production build in dist/ (run `npm run build` first) through `vite preview`,
 // so asset paths are checked exactly as shipped.

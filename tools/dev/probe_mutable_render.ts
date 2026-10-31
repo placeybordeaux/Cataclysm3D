@@ -4,7 +4,7 @@
 // slopes followed like zlevels.stairDestination; doors and gates count as openable) to see
 // which of its OMTs a player can walk into.
 // Usage: tsx tools/dev/probe_mutable_render.ts [--radius N] [--only <special>] <seed>...
-// Memory-hungry (generates hundreds of chunks): run it through ~/claude-stuff/bin/heavy.
+// Memory-hungry (generates hundreds of chunks): run it through tools/heavy.
 import { WorldGenerator } from '../../src/world/worldgen';
 import { REGION, type SpecialInstance } from '../../src/world/overmap/overmap';
 import { loadNodeData, makeMap } from '../lib/node_data';

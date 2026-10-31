@@ -4,7 +4,7 @@
 // ahead of the car ("runway"), frame-time p99, the longest single build step. Hosts its own
 // Vite server and browser on free ports (never 5173). Run on the GPU:
 //
-//   ~/claude-stuff/bin/heavy --kind gpu --mem 2 --name "cdda3d perf" -- nix-shell --run 'npm run perf'
+//   tools/heavy --kind gpu --mem 2 --name "cdda3d perf" -- nix-shell --run 'npm run perf'
 //
 // The car is a "ghost": the real vehicle with you at the wheel, moved along a straight line at a
 // fixed speed without collision, so every run crosses the same chunks. Real driving (keyboard,

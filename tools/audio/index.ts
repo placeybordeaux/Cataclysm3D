@@ -27,7 +27,7 @@ if (argv.includes('--help') || argv.includes('-h')) {
   console.log(`audio: build public/audio/ from the CC-licensed CDDA sound packs
   --dry-run          select + licence-check + estimate sizes, write nothing (still fetches)
   --no-fetch         fail instead of downloading missing packs into the vendor dir
-  --vendor DIR       where packs live (default /home/peter/code/CDDA-3d/vendor)
+  --vendor DIR       where packs live (default vendor)
   --out DIR          output directory (default public/audio)
   --music-tracks N   how many CO.AG tracks of the "title" playlist to ship (default 6, 0 = none)
   --budget-mb N      fail if the output would exceed N MB (default 25)
@@ -41,7 +41,7 @@ function arg(name: string): string | undefined {
 }
 const DRY = argv.includes('--dry-run');
 const NO_FETCH = argv.includes('--no-fetch');
-const VENDOR = resolve(arg('--vendor') ?? '/home/peter/code/CDDA-3d/vendor');
+const VENDOR = resolve(arg('--vendor') ?? 'vendor');
 const OUT = resolve(arg('--out') ?? 'public/audio');
 const MUSIC_TRACKS = Number(arg('--music-tracks') ?? 6);
 const BUDGET_MB = Number(arg('--budget-mb') ?? 25);

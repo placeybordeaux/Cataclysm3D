@@ -14,9 +14,9 @@ partly.
 ## How to repeat
 
 ```
-nix-shell --run '~/claude-stuff/bin/heavy --kind gpu --mem 2.5 -- npx tsx tools/realinput.ts --gpu'
-nix-shell --run '~/claude-stuff/bin/heavy --kind gpu --mem 2.5 -- npx tsx tools/realinput.ts --gpu --size 1920x1080'
-nix-shell --run '~/claude-stuff/bin/heavy --mem 2.5 -- npx tsx tools/realinput.ts --browser firefox --hmr --only title,esc,ui2,inv,save,quit'
+nix-shell --run 'tools/heavy --kind gpu --mem 2.5 -- npx tsx tools/realinput.ts --gpu'
+nix-shell --run 'tools/heavy --kind gpu --mem 2.5 -- npx tsx tools/realinput.ts --gpu --size 1920x1080'
+nix-shell --run 'tools/heavy --mem 2.5 -- npx tsx tools/realinput.ts --browser firefox --hmr --only title,esc,ui2,inv,save,quit'
 ```
 
 New in `tools/realinput.ts`: `--browser firefox` (WebDriver BiDi; window fitted with

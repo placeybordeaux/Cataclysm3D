@@ -4,7 +4,7 @@
 // and reads state. Each step takes a screenshot, samples frame times standing still (or while
 // moving, for walk/drive), and collects console errors/warnings and page errors.
 //
-//   nix-shell --run '~/claude-stuff/bin/heavy --kind gpu --mem 2.5 --name qa-play -- npx tsx tools/qa-playthrough.ts --gpu'
+//   nix-shell --run 'tools/heavy --kind gpu --mem 2.5 --name qa-play -- npx tsx tools/qa-playthrough.ts --gpu'
 //   options: --browser chromium|firefox   (Firefox renders WebGL in software under Xvfb: perf there is not the GPU's)
 //            --size 3440x1304             viewport (default: the human's ultrawide)
 //            --out shots/qa-play          screenshots (PNG) and report.json

@@ -190,7 +190,7 @@ themselves), `s3d_dither_*` / `s3d_pop_*` = sprite3d with the LOD. Views: `horde
 `zombie_scene_dusk`, `zombie_scene_night`, `zombie_lineup_a` / `_c` / `_close`, `zombie_lod`,
 `zombie_lod_side`. Regenerate:
 
-    ~/claude-stuff/bin/heavy --kind gpu --vram 2 --mem 2.5 -- nix-shell --run "npx tsx tools/char-shots.ts --gpu --out docs/screenshots/sprite3d/ingame --prefix s3d --views zombie_lod,horde_far --params 'zstyle=sprite3d'"
+    tools/heavy --kind gpu --vram 2 --mem 2.5 -- nix-shell --run "npx tsx tools/char-shots.ts --gpu --out docs/screenshots/sprite3d/ingame --prefix s3d --views zombie_lod,horde_far --params 'zstyle=sprite3d'"
 
 | | default (shamble) | sprite3d | the sprites |
 |---|---|---|---|

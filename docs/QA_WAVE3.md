@@ -14,10 +14,10 @@ Status: ✔ fixed here · ✘ open (owner named) · ◐ partly · — not a bug 
 ```
 # the first evening at the user's size (title → shelter → street → house loot → zombie →
 # car → dusk/night + flashlight → forest → F5 / reload / load), screenshots + frame times
-nix-shell --run '~/claude-stuff/bin/heavy --kind gpu --mem 2.5 -- npx tsx tools/qa-playthrough.ts --gpu'
-nix-shell --run '~/claude-stuff/bin/heavy --mem 3 -- npx tsx tools/qa-playthrough.ts --browser firefox'
+nix-shell --run 'tools/heavy --kind gpu --mem 2.5 -- npx tsx tools/qa-playthrough.ts --gpu'
+nix-shell --run 'tools/heavy --mem 3 -- npx tsx tools/qa-playthrough.ts --browser firefox'
 # every Options row cycles by arrow keys (new scenario)
-nix-shell --run '~/claude-stuff/bin/heavy --kind gpu --mem 2.5 -- npx tsx tools/realinput.ts --gpu --only options'
+nix-shell --run 'tools/heavy --kind gpu --mem 2.5 -- npx tsx tools/realinput.ts --gpu --only options'
 ```
 
 New tools on this branch: `tools/qa-playthrough.ts` (the holistic run above; `--only`,

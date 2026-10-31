@@ -98,7 +98,7 @@ replace field turns e.g. a window into `t_window_frame` first) and
 `gallery:<ids joined by +>` (a showroom on open ground; `i:<item>` places items, `&`
 stacks several on one tile) — e.g.
 
-    ~/claude-stuff/bin/heavy --mem 2 --kind gpu -- nix-shell --run \
+    tools/heavy --mem 2 --kind gpu -- nix-shell --run \
       "npx tsx tools/look-shots.ts --gpu --size 1600x900 --params furniture=model \
        --views 'furn:f_oven:0:3:-20,gallery:f_sofa+f_table&i:can_drink' full"
 

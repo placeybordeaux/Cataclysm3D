@@ -4,7 +4,7 @@
 // fullscreen, focus loss, held/stuck keys, key repeat, CapsLock, AZERTY, mouse in menus,
 // rebinding. `cdda.*` is used only for setup (giving items) and for reading state.
 //
-//   nix-shell --run '~/claude-stuff/bin/heavy --mem 2.5 --name realinput -- npx tsx tools/realinput.ts'
+//   nix-shell --run 'tools/heavy --mem 2.5 --name realinput -- npx tsx tools/realinput.ts'
 //   options: --only title,esc,azerty   run some scenarios (names in the list at the bottom)
 //            --shots shots/realinput   screenshot every menu it opens
 //            --size 960x540            viewport (default)

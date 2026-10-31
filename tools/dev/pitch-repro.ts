@@ -1,7 +1,7 @@
 // Repro for the pitch hang: set cdda.game.player.pitch to a range of values (debug API) and move the
 // real mouse to the pitch limits, in each camera mode, watching the JS heap. A value that hangs the
 // page shows as a timed-out evaluate.
-//   nix-shell --run '~/claude-stuff/bin/heavy --mem 3 --name pitch-repro -- npx tsx tools/dev/pitch-repro.ts [--headless]'
+//   nix-shell --run 'tools/heavy --mem 3 --name pitch-repro -- npx tsx tools/dev/pitch-repro.ts [--headless]'
 import { createServer } from 'vite';
 import type { Page } from 'puppeteer-core';
 import { launchBrowser, startXvfb, XInput, settleWorld, fitWindow } from '../lib/realinput';

@@ -30,7 +30,7 @@ brightness is unchanged.
 Run through the repository's heavy wrapper and Nix environment:
 
 ```
-/home/peter/claude-stuff/bin/heavy --mem 2 --name lighting-regression -- nix-shell --run 'npx tsx tools/check-headlight-occlusion.ts /tmp/lighting-regression'
+tools/heavy --mem 2 --name lighting-regression -- nix-shell --run 'npx tsx tools/check-headlight-occlusion.ts /tmp/lighting-regression'
 ```
 
 The isolated scene places a working car above a sealed basement. The check compares

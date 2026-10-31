@@ -1,5 +1,5 @@
 // CPU flush + requested attribute bytes, not GPU time/FPS. Run inside Nix/heavy:
-// nix-shell --run '~/claude-stuff/bin/heavy --mem 1.5 --name char-upload -- npx tsx tools/bench-char-upload.ts'
+// nix-shell --run 'tools/heavy --mem 1.5 --name char-upload -- npx tsx tools/bench-char-upload.ts'
 import * as THREE from 'three';
 import { CharLayer, type SkinStore, type Skin } from '../src/render/chars/charLayer';
 import { bodyShapeOf } from '../src/render/chars/archetype';

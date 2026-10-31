@@ -372,7 +372,7 @@ lineups stand on the nearest open strip of pavement (`terAt`/`furnAt`), looking 
 sun, with the clock paused so nobody turns; `windup` freezes telegraphs and a lunge-grab.
 `tools/zombie-compare.py` builds the sprite/before/after sheets above.
 
-    ~/claude-stuff/bin/heavy --kind gpu --vram 2 --mem 2.5 -- nix-shell --run 'npx tsx tools/char-shots.ts --gpu --full --out docs/screenshots/zombies --prefix after --views zombie_lineup_c'
+    tools/heavy --kind gpu --vram 2 --mem 2.5 -- nix-shell --run 'npx tsx tools/char-shots.ts --gpu --full --out docs/screenshots/zombies --prefix after --views zombie_lineup_c'
     ... --prefix before --params zstyle=boxy        ... --prefix caricature --params zstyle=caricature
 
 ## Performance
@@ -424,8 +424,8 @@ bat idle/swing/guard, knife, axe, spear, katana, flashlight, bow at draw) with
 user's 3440×1304. `tools/char-shots.ts --views fp_...` regenerates them.
 Regenerate with
 
-    ~/claude-stuff/bin/heavy --kind gpu --mem 2 -- nix-shell --run 'npx tsx tools/char-shots.ts --gpu --prefix after'
-    ~/claude-stuff/bin/heavy --kind gpu --mem 2 -- nix-shell --run 'npx tsx tools/char-shots.ts --gpu --prefix before --params chars=billboard'
+    tools/heavy --kind gpu --mem 2 -- nix-shell --run 'npx tsx tools/char-shots.ts --gpu --prefix after'
+    tools/heavy --kind gpu --mem 2 -- nix-shell --run 'npx tsx tools/char-shots.ts --gpu --prefix before --params chars=billboard'
 
 ## Dropped weapons on the ground
 

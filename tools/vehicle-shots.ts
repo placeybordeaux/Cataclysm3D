@@ -2,7 +2,7 @@
 // <out>/<renderer>_<view>.png. Hosts its own Vite server and Chromium like look-shots.ts.
 // Run inside nix-shell, via heavy:
 //
-//   ~/claude-stuff/bin/heavy --kind gpu --mem 2 -- npx tsx tools/vehicle-shots.ts --gpu model parts
+//   tools/heavy --kind gpu --mem 2 -- npx tsx tools/vehicle-shots.ts --gpu model parts
 //
 // Views are names understood by vehicleView() (see tools/vehicle-views.js), e.g.
 //   --views street,lineup:car,sedan,suv  (commas inside a view: separate views with ';')

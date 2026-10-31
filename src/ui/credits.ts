@@ -65,7 +65,7 @@ export const CREDITS: Credit[] = [
   {
     title: 'Music',
     lines: [
-      'Original music composed and produced by CO.AG, remastered by SkyBreach, from the CDDA music pack (CC BY-SA 4.0), used with the composer\'s permission ("fine to use my music as long as credit is given"): Cataclysm, The Ones Who Never Rest, Red Tears, Omen, Encounters With The Slenderman, Among The Cold Stones.',
+      'Music by CO.AG. Original music composed and produced by CO.AG, remastered by SkyBreach, from the CDDA music pack (CC BY-SA 4.0), used with the composer\'s permission ("fine to use my music as long as credit is given"): Cataclysm, The Ones Who Never Rest, Red Tears, Omen, Encounters With The Slenderman, Among The Cold Stones.',
     ],
     links: [
       ['CDDA-Music-Packs', 'https://github.com/Fris0uman/CDDA-Music-Packs'],

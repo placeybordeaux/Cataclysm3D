@@ -3,13 +3,13 @@
 # night with flashlight, night outside, top-down, third-person, rain, campfire at night,
 # pond, brick house interior, forest, top-down over the road.
 # Usage: tools/render-shots.sh [prefix] [extra URL params, e.g. "&grade=smooth"]
-#   (run from the repo root, inside nix-shell; wraps itself in ~/claude-stuff/bin/heavy)
+#   (run from the repo root, inside nix-shell; wraps itself in tools/heavy)
 # Output: shots/<prefix>_*.png plus renderer stats on stdout.
 set -euo pipefail
 if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then sed -n '2,6p' "$0"; exit 0; fi
 P=${1:-r}
 X=${2:-}
-exec ~/claude-stuff/bin/heavy --mem 1.5 --name "cdda3d render" -- npm run shot -- --params "seed=1&gen=test&debug=1$X" --wait 1.2 \
+exec tools/heavy --mem 1.5 --name "cdda3d render" -- npm run shot -- --params "seed=1&gen=test&debug=1$X" --wait 1.2 \
   --eval 'cdda.setHour(12); cdda.teleport(9.5, 23.5); cdda.look(-8, 4); cdda.settle()' --out "shots/${P}_day_out.png" \
   --eval 'cdda.setHour(13); cdda.teleport(12.5, 10.5); cdda.look(-60, -8); cdda.settle()' --out "shots/${P}_day_in.png" \
   --eval 'cdda.setHour(19.6); cdda.teleport(22.5, 20.5); cdda.look(-50, 6); cdda.settle()' --out "shots/${P}_dusk.png" \

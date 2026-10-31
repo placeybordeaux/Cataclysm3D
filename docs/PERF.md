@@ -291,7 +291,7 @@ cost with ~920 loaded monsters (the placement bug is another agent's).
 
 ### `npm run perf` (GPU, pass/fail)
 
-    ~/claude-stuff/bin/heavy --kind gpu --mem 2 --name "cdda3d perf" -- nix-shell --run 'npm run perf'
+    tools/heavy --kind gpu --mem 2 --name "cdda3d perf" -- nix-shell --run 'npm run perf'
 
 `tools/perf-bench.ts` hosts its own Vite server and headless browser (never port 5173), loads
 seed 1 with a fresh profile (so the defaults: voxel look, 168 m, modelled everything) at
@@ -329,7 +329,7 @@ also renders on the GPU here), `--params 'radius=6'`, `--detail`, `--gpu-timer`,
 
 ### Real input: `tools/realinput.ts --only perfdrive`
 
-    ~/claude-stuff/bin/heavy --kind gpu --mem 2 -- nix-shell --run 'npx tsx tools/realinput.ts --gpu --only perfdrive --size 3440x1304'
+    tools/heavy --kind gpu --mem 2 -- nix-shell --run 'npx tsx tools/realinput.ts --gpu --only perfdrive --size 3440x1304'
     ... PERF_MPH=30,40,60 PERF_SAVE=/tmp/perf ... --browser firefox
 
 Drives the densest road of the nearest town with the keyboard: W until the target speed, C for

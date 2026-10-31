@@ -6,7 +6,7 @@
 // renders -- not just the handful of rows the paint actually touched. This counts bytes
 // *requested* of the GPU (what WebGLTextures.updateTexture will texSubImage2D), not GPU
 // time; it needs no WebGL context. Run inside Nix/heavy:
-// nix-shell --run '~/claude-stuff/bin/heavy --mem 1 --name flora-atlas-bench -- npx tsx tools/bench-flora-atlas.ts'
+// nix-shell --run 'tools/heavy --mem 1 --name flora-atlas-bench -- npx tsx tools/bench-flora-atlas.ts'
 import { FloraAtlas, paintBark, paintFringe, paintLeaves, paintNeedles, paintTwigs, type BarkKind, type Ramp4 } from '../src/render/floraArt';
 import type { RGB } from '../src/render/colors';
 

@@ -3,7 +3,7 @@
 // Vite server and Chromium like tools/look-shots.ts, so no other session can drive it.
 // Run inside nix-shell, on the GPU:
 //
-//   ~/claude-stuff/bin/heavy --kind gpu --mem 2 -- npx tsx tools/bench-stream.ts
+//   tools/heavy --kind gpu --mem 2 -- npx tsx tools/bench-stream.ts
 //   ... --look full --speed 7 --seconds 30        (sprint; the default)
 //   ... --speed 17.9                              (40 mph: driving through town)
 //   ... --size 3440x1304 --runs sprint,drive

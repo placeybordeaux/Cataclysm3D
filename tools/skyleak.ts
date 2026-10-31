@@ -6,7 +6,7 @@
 // three levels up was never built. Part of `npm run perf` (GPU). Hosts its own Vite server and
 // Chromium on free ports.
 //
-//   ~/claude-stuff/bin/heavy --kind gpu --mem 2 -- nix-shell --run 'npx tsx tools/skyleak.ts'
+//   tools/heavy --kind gpu --mem 2 -- nix-shell --run 'npx tsx tools/skyleak.ts'
 //
 // Options:
 //   --only a,b        viewpoints by name (default all)

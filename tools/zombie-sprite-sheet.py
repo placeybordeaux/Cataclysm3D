@@ -1,7 +1,7 @@
 # Contact sheet of zombie sprites from the project's UltiCa atlas.
-import json,sys
+import json,os,sys
 from PIL import Image, ImageDraw
-A='/home/peter/code/CDDA-3d/public/atlas/'
+A=os.path.join(os.path.dirname(os.path.abspath(__file__)),'..','public','atlas','')
 a=json.load(open(A+'atlas.json'))
 pages=[Image.open(A+p['file']).convert('RGBA') for p in a['pages']]
 ids=sys.argv[2].split(',')

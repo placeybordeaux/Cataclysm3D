@@ -18,7 +18,7 @@ import sys
 
 from PIL import Image, ImageDraw
 
-DEFAULT_ATLAS = '/home/peter/code/CDDA-3d/public/atlas/'
+DEFAULT_ATLAS = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'public', 'atlas', '')
 
 
 def sprite(atlas, pages, tid):

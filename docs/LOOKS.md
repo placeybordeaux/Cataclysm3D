@@ -29,7 +29,7 @@ The shots below were regenerated with it.
 ## Comparison (1920x1080, RTX 5080)
 
 Columns: classic, crisp, voxel, terrain, full. Regenerate with
-`~/claude-stuff/bin/heavy --mem 2 --kind gpu -- nix-shell --run "npx tsx tools/look-shots.ts --gpu classic crisp voxel terrain full"`
+`tools/heavy --mem 2 --kind gpu -- nix-shell --run "npx tsx tools/look-shots.ts --gpu classic crisp voxel terrain full"`
 (viewpoints in `tools/look-views.js`, seed 1). Shots are JPEG q85 at half size (960x540,
 ~100 KB each; dithered pixel art compresses badly as PNG); `--png` gives full-size PNGs.
 

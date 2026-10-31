@@ -21,12 +21,12 @@ if (argv.includes('--help') || argv.includes('-h')) {
   --tileset-dir DIR  tileset directory (default $TILESET_DIR or
                      ~/code/Cataclysm-BN/gfx/UltimateCataclysm)
   --source-form      read DIR as the CDDA compositing *source* form (tile_info.json + pngs_*
-                     directories, e.g. /home/peter/code/CDDA-3d/vendor/tilesets/gfx/UltimateCataclysm);
+                     directories, e.g. vendor/tilesets/gfx/UltimateCataclysm);
                      otherwise DIR must hold a compiled tile_config.json
   --out DIR          output directory (default public/atlas)
   --page-size N      atlas page size, power of two (default 4096)
   --fill-from DIR    also read DIR (a compositing *source* tileset, e.g. v1's DDA UltiCa in
-                     /home/peter/code/CDDA-3d/vendor/tilesets/gfx/UltimateCataclysm) and add
+                     vendor/tilesets/gfx/UltimateCataclysm) and add
                      the tiles whose ids the main tileset lacks (off by default: mixes UltiCa
                      revisions, grows the atlas)
   --exclude a,b      (source form) top-level sub-directories of every sheet dir to skip

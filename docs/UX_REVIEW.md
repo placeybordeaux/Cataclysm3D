@@ -13,7 +13,7 @@ a re-lock for ~1.25 s after an Esc unlock ("cannot be acquired immediately after
 exited the lock"). In fullscreen with `navigator.keyboard.lock(['Escape'])` Esc *is*
 delivered and the lock survives; holding Esc ~2 s leaves fullscreen.
 
-How to repeat: `nix-shell --run '~/claude-stuff/bin/heavy --mem 2.5 -- npx tsx tools/realinput.ts'`
+How to repeat: `nix-shell --run 'tools/heavy --mem 2.5 -- npx tsx tools/realinput.ts'`
 (161 checks, 14 scenarios, `--shots dir`, `--size 1920x1080`, `--only a,b`), or interactively
 `tools/drive.ts serve --headful --params "seed=1&realinput=1"` + `xkey`/`xmove`/`xclick`/`state`.
 `?realinput=1` turns the pointer policy on under automation (it is off when `navigator.webdriver`).

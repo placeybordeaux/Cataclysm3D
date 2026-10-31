@@ -25,7 +25,7 @@ tileset, rendered in the "3D pixel art" style of *Project Shadowglass*.
 - CDDA source + data: `~/code/Cataclysm-DDA` (read-only! never modify). JSON docs:
   `~/code/Cataclysm-DDA/doc/JSON/` (JSON_INFO, MAPGEN, ITEM, MONSTERS, …). C++ in `src/`
   is the ground truth for formulas (e.g. `melee.cpp`, `monattack.cpp`, `character.cpp`).
-- Tileset (CC-BY-SA): `/home/peter/code/CDDA-3d/vendor/tilesets/gfx/UltimateCataclysm`
+- Tileset (CC-BY-SA): `vendor/tilesets/gfx/UltimateCataclysm`
   (source form: per-sprite PNGs + JSON; see its `tile_info.json`). `vendor/` is git-ignored —
   from a worktree, use the absolute path above.
 - v2 (Bright Nights): `npm run atlas` reads BN's *compiled* UltiCa by default
@@ -39,7 +39,8 @@ tileset, rendered in the "3D pixel art" style of *Project Shadowglass*.
 - Everything runs inside `nix-shell` (repo root `shell.nix`: node 22, chromium, imagemagick).
   e.g. `nix-shell --run 'npm run typecheck'`.
 - **Memory-heavy commands (npm install, vite build, headless chromium) must go through**
-  `~/claude-stuff/bin/heavy --mem 1.5 --name "<what>" -- <cmd>`. The machine is shared.
+  `tools/heavy --mem 1.5 --name "<what>" -- <cmd>`. It takes a lease from the dev machine's shared
+  memory budget when that tool is installed (see `tools/heavy --help`) and just runs `<cmd>` otherwise.
 - `npm run typecheck`, `npm test` (vitest, `tests/**/*.test.ts`), `npm run build`.
 - `npm run shot -- --params "seed=1" --eval "<js using cdda>" --out shots/x.png` —
   headless screenshots (see `tools/shot.ts --help`). **Look at your screenshots with the
