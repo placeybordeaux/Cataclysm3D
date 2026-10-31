@@ -5,7 +5,10 @@ A real-time, first-person 3D take on Cataclysm, running in the browser. The live
 content and rules with a modern mouse-first interface (drag-and-drop inventory, quick-loot,
 context menus, a clean HUD) aimed at players who bounce off the classic tiles/curses UI. The
 world is built from the **UltiCa pixel-art tileset** and real 3D geometry in the style of
-*Project Shadowglass*. The original DDA-based version is tagged `v1-dda` on `master`.
+*Project Shadowglass*. The original DDA-based version is tagged `v1-dda`.
+
+Cataclysm3D is an unofficial, fan-made adaptation. It is not made or endorsed by the
+Cataclysm: Bright Nights or Cataclysm: Dark Days Ahead teams.
 
 **Current state, backlog and how to work on it: [`docs/STATUS.md`](docs/STATUS.md).**
 
@@ -107,8 +110,16 @@ npx tsx tools/realinput.ts           # real keyboard/mouse UX regression (Xvfb +
 
 ## Credits and licences
 
-- **Cataclysm: Dark Days Ahead** data and text: © the CDDA contributors, licensed
-  CC-BY-SA 3.0. This project is a derivative work under the same licence.
+Cataclysm3D is licensed under the Creative Commons Attribution-ShareAlike 3.0 Unported licence
+(CC BY-SA 3.0, full text in [`LICENSE`](LICENSE)): code, docs and assets alike, the same licence
+as the Cataclysm content it adapts. Third-party files listed below keep their own licences.
+
+- **Cataclysm: Bright Nights** data and text (the live game): © the Cataclysm: Bright Nights
+  contributors, and before them the Cataclysm: Dark Days Ahead and Cataclysm contributors.
+  CC BY-SA 3.0. This project is a derivative work under the same licence; much of its game
+  logic is ported from Bright Nights' C++ and Lua.
+- **Cataclysm: Dark Days Ahead** data and text (the `v1-dda` tag): © the CDDA contributors,
+  CC BY-SA 3.0.
 - **UltiCa tileset** (I-am-Erk/CDDA-Tilesets): CC-BY-SA 3.0.
 - **Sound effects**: CDDA "CC-Sounds" soundpack. Per-file authors and licences are in
   `public/audio/CREDITS.md`.
@@ -116,6 +127,7 @@ npx tsx tools/realinput.ts           # real keyboard/mouse UX regression (Xvfb +
   informal permission to redistribute with credit, as recorded in that repository. Drop them
   with `npm run audio -- --music-tracks 0` if that's not enough for your use.
 - **Fonts**: Terminus (SIL OFL, `public/fonts/LICENSE-OFL-Terminus-Font.txt`) and GNU
-  Unifont, both as shipped with CDDA.
+  Unifont 12.0.01 (GPLv2+ with the font embedding exception,
+  `public/fonts/LICENSE-GPL-Unifont.txt`), both as shipped with Cataclysm: Bright Nights.
 - The visual style is inspired by Starhelm Studios' *Project Shadowglass*. No assets or code
   from that game are used.
