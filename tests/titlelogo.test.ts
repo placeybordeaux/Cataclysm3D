@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { asciiFontPx, GLYPH_H, logoScale, textBitmap } from '../src/ui/titlelogo';
+import { readFileSync } from 'node:fs';
+import { asciiFontPx, asciiTitle, GLYPH_H, logoScale, textBitmap } from '../src/ui/titlelogo';
 
 describe('title logo (QA_V2 #21: the ASCII logo was hard to read)', () => {
   it('lays the words out on the pixel font: 7 rows, a column between letters, wider gaps for spaces', () => {
@@ -9,6 +10,18 @@ describe('title logo (QA_V2 #21: the ASCII logo was hard to read)', () => {
     // 12 letters (the two I's are 3 wide), a 2-column space, 12 separators
     expect(textBitmap('Bright Nights')[0].length).toBe(12 * 5 - 2 * 2 + 2 + 12);
     expect(() => textBitmap('Cataclysm: DDA')).toThrow(/no glyph/);
+    expect(textBitmap('Cataclysm3D')[0].length).toBe(11 * 5 + 10);
+  });
+
+  it('the ASCII logo keeps BN\'s "Cataclysm" wordmark and swaps "Bright Nights" for "3D"', () => {
+    const bn = (JSON.parse(readFileSync('public/data/ui.json', 'utf8')) as { title: string[] }).title;
+    const art = asciiTitle(bn);
+    const plain = art.map((l) => l.replace(/<\/?color[^>]*>/g, ''));
+    expect(art.slice(0, 6)).toEqual(bn.filter((l) => l.startsWith('<color_light_cyan>')));
+    expect(art.join('\n')).not.toContain('(_)');
+    expect(plain.some((l) => l.includes('/______  //_______  /'))).toBe(true);
+    for (const l of plain) expect(l.length).toBeLessThanOrEqual(80);
+    expect(() => asciiTitle([])).toThrow(/wordmark/);
   });
 
   it('always draws at a whole-pixel scale that fits the window, never below 2', () => {

@@ -10,6 +10,7 @@ const GLYPHS: Record<string, string[]> = {
   A: ['.###.', '#...#', '#...#', '#####', '#...#', '#...#', '#...#'],
   B: ['####.', '#...#', '#...#', '####.', '#...#', '#...#', '####.'],
   C: ['.###.', '#...#', '#....', '#....', '#....', '#...#', '.###.'],
+  D: ['####.', '#...#', '#...#', '#...#', '#...#', '#...#', '####.'],
   G: ['.###.', '#...#', '#....', '#.###', '#...#', '#...#', '.###.'],
   H: ['#...#', '#...#', '#...#', '#####', '#...#', '#...#', '#...#'],
   I: ['###', '.#.', '.#.', '.#.', '.#.', '.#.', '###'],
@@ -20,6 +21,7 @@ const GLYPHS: Record<string, string[]> = {
   S: ['.###.', '#...#', '#....', '.###.', '....#', '#...#', '.###.'],
   T: ['#####', '..#..', '..#..', '..#..', '..#..', '..#..', '..#..'],
   Y: ['#...#', '#...#', '.#.#.', '..#..', '..#..', '..#..', '..#..'],
+  3: ['####.', '....#', '....#', '.###.', '....#', '....#', '####.'],
 };
 export const GLYPH_H = 7;
 
@@ -53,11 +55,12 @@ interface LineStyle {
   bottom: string;
   /** Scale relative to the first line's. */
   rel: number;
+  /** Letters from index `from` on take this gradient instead (the "3D" of the name). */
+  accent?: { from: number; top: string; bottom: string };
 }
 
 const LINES: LineStyle[] = [
-  { text: 'Cataclysm', top: '#b8fbff', bottom: '#2fb7c8', rel: 1 },
-  { text: 'Bright Nights', top: '#c7cfff', bottom: '#5b68e0', rel: 0.6 },
+  { text: 'Cataclysm3D', top: '#b8fbff', bottom: '#2fb7c8', rel: 1, accent: { from: 9, top: '#c7cfff', bottom: '#5b68e0' } },
 ];
 
 /** Draw the logo into a canvas sized for a window `width` px wide. */
@@ -91,11 +94,18 @@ export function drawPixelLogo(canvas: HTMLCanvasElement, width: number): void {
     for (const [x, y] of cells) g.fillRect(x0 + x * s + sh, y0 + y * s + sh, s, s);
     g.fillStyle = '#05070d';
     for (const [x, y] of cells) g.fillRect(x0 + x * s - ol, y0 + y * s - ol, s + ol * 2, s + ol * 2);
-    const grad = g.createLinearGradient(0, y0, 0, y0 + GLYPH_H * s);
-    grad.addColorStop(0, LINES[i].top);
-    grad.addColorStop(1, LINES[i].bottom);
+    const gradient = (top: string, bottom: string) => {
+      const gr = g.createLinearGradient(0, y0, 0, y0 + GLYPH_H * s);
+      gr.addColorStop(0, top);
+      gr.addColorStop(1, bottom);
+      return gr;
+    };
+    const { accent } = LINES[i];
+    const grad = gradient(LINES[i].top, LINES[i].bottom);
+    const accentGrad = accent && gradient(accent.top, accent.bottom);
+    const accentX = accent ? textBitmap(LINES[i].text.slice(0, accent.from))[0].length : Infinity;
     for (const [x, y] of cells) {
-      g.fillStyle = grad;
+      g.fillStyle = accentGrad && x > accentX ? accentGrad : grad;
       g.fillRect(x0 + x * s, y0 + y * s, s, s);
       // A lit top edge on blocks with nothing above them: bevelled, like the UI's pixel panels.
       if (!on(x, y - 1) && s >= 3) {
@@ -105,6 +115,29 @@ export function drawPixelLogo(canvas: HTMLCanvasElement, width: number): void {
     }
     y0 += GLYPH_H * s + gap;
   });
+}
+
+// "3D" in the same figlet lettering (Graffiti) as BN's ASCII "Cataclysm", standing in for its
+// "Bright Nights" line so the ASCII option names this game too.
+const ASCII_3D = [
+  '________  ________   ',
+  '\\_____  \\ \\______ \\  ',
+  '  _(__  <  |    |  \\ ',
+  ' /       \\ |    `   \\',
+  '/______  //_______  /',
+  '       \\/         \\/ ',
+];
+
+/**
+ * The ASCII logo: BN's `title` art (ui.json, colour-tagged lines) keeps its light-cyan
+ * "Cataclysm" wordmark, and "3D" goes underneath, centred in 80 columns. Throws if the
+ * wordmark isn't there, so a data change can't silently bring "Bright Nights" back.
+ */
+export function asciiTitle(bnTitle: string[]): string[] {
+  const wordmark = bnTitle.filter((l) => l.startsWith('<color_light_cyan>'));
+  if (!wordmark.length) throw new Error('titlelogo: BN title art has no light-cyan wordmark lines');
+  const pad = ' '.repeat(Math.floor((80 - ASCII_3D[0].length) / 2));
+  return [...wordmark, ...ASCII_3D.map((l) => `<color_light_blue>${(pad + l).padEnd(80)}</color>`)];
 }
 
 export type TitleLogoStyle = 'pixel' | 'ascii';

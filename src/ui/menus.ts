@@ -12,7 +12,7 @@ import { progressionOf } from '../progression/registry';
 import { runNewGame, runQuickStart } from '../progression/newgame';
 import { openJournal } from '../progression/journal';
 import { registerOption } from './options';
-import { asciiFontPx, drawPixelLogo, setTitleLogoStyle, titleLogoStyle } from './titlelogo';
+import { asciiFontPx, asciiTitle, drawPixelLogo, setTitleLogoStyle, titleLogoStyle } from './titlelogo';
 import { registerTitleLayoutOption, renderTitleButtons, titleLayout, type TitleEntryView } from './title_screen';
 
 let logoOption = false;
@@ -208,8 +208,7 @@ export function showMainMenu(ctx: UiContext, hud: Hud): Promise<void> {
     function logoMarkup(): string {
       const W = window.innerWidth, H = window.innerHeight;
       if (titleLogoStyle() === 'ascii') {
-        const art = ctx.data.title.slice();
-        while (art.length && !art[art.length - 1].replace(/<[^>]+>/g, '').trim()) art.pop();
+        const art = asciiTitle(ctx.data.title);
         return `<div class="pre title-art" style="font-size:${asciiFontPx(W, H, 80, art.length)}px;line-height:1;text-shadow:0 0 6px #000,1px 1px 0 #000;background:rgba(0,0,0,.45);padding:.4em .8em">${colorize(art.join('\n'))}</div>`;
       }
       // Smaller while a window is up, so both lines stay clear above it.
