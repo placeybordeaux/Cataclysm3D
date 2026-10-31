@@ -1,4 +1,4 @@
-# Working with CDDA-3D
+# Working with Cataclysm3D
 
 A contributor's explainer of the architecture, execution model, strengths, pitfalls, and improvement opportunities.
 
@@ -30,7 +30,7 @@ The workspace changed concurrently during this inspection: recharge support, gap
 
 ## 1. What this project is
 
-CDDA-3D is a browser game that reinterprets Cataclysm survival gameplay as a real-time 3D experience. Its current `bn` branch uses **Cataclysm: Bright Nights** content and many BN mechanics. The repository still uses `cdda` in identifiers, filenames, debug APIs, and tool arguments because BN and Dark Days Ahead share ancestry. An identifier saying CDDA does not establish that its behavior follows modern DDA.
+Cataclysm3D is a browser game that reinterprets Cataclysm survival gameplay as a real-time 3D experience. Its current `bn` branch uses **Cataclysm: Bright Nights** content and many BN mechanics. The repository still uses `cdda` in identifiers, filenames, debug APIs, and tool arguments because BN and Dark Days Ahead share ancestry. An identifier saying CDDA does not establish that its behavior follows modern DDA.
 
 The application is TypeScript, Three.js, DOM/CSS, and WebAudio. Vite serves and builds it; Vitest tests it. There is no application server required for ordinary play, no C++ game engine embedded in the browser, and no ECS framework. Upstream JSON is processed offline into committed browser assets. Cataclysm C++ and, for some mapgen, Lua are references for the TypeScript implementations.
 

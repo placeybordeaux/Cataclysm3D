@@ -1,4 +1,4 @@
-# CDDA-3D — architecture & team conventions
+# Cataclysm3D — architecture & team conventions
 
 A real-time, first-person 3D remake of **Cataclysm: Dark Days Ahead**, built in the browser
 with TypeScript + Three.js, reusing CDDA's actual JSON content and the UltiCa pixel-art

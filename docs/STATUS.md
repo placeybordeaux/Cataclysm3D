@@ -1,4 +1,4 @@
-# CDDA-3D — status and handoff (end of wave 3, 2026-09-30)
+# Cataclysm3D — status and handoff (end of wave 3, 2026-09-30)
 
 Branch **`bn`** is the live game (Cataclysm: Bright Nights content and rules, modern UI).
 `master` is still v1 (DDA data, curses-style UI), tagged `v1-dda`. Merge `bn` → `master` once

@@ -1,6 +1,6 @@
 # Adapting Cataclysm for a first-person, real-time game
 
-CDDA-3D is to Cataclysm what a TV series is to the novel it's based on. We keep the story
+Cataclysm3D is to Cataclysm what a TV series is to the novel it's based on. We keep the story
 and what makes it good, and we change whatever only works on the page (here: a turn-based
 ASCII roguelike played in a terminal). This doc sets out the principles, then lists the
 friction points found by playing the first half hour as a new player, in priority order,
@@ -23,7 +23,7 @@ Related: `docs/DESIGN_V2.md` (product direction), `docs/UX_REVIEW.md` (input mod
 
 ## What we change, and why
 
-| Cataclysm (page) | CDDA-3D (screen) | Why |
+| Cataclysm (page) | Cataclysm3D (screen) | Why |
 |---|---|---|
 | Hidden dice: you miss because a roll failed | Skill you can see: a steadier crosshair, stronger hits, readable wind-ups (aim/feel work) | In first person a miss you can't see a reason for feels like a bug. |
 | Walls of text in the message log | Feedback in the world and at the crosshair: progress rings, "?" markers, cards on what you look at, one-line toasts | Players look at the crosshair, not the log. |

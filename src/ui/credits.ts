@@ -24,7 +24,7 @@ export const CREDITS: Credit[] = [
   {
     title: 'A fan adaptation',
     lines: [
-      'CDDA-3D is an unofficial, fan-made, real-time first-person adaptation of Cataclysm: Bright Nights. It is not made or endorsed by the Cataclysm: Bright Nights or Cataclysm: Dark Days Ahead teams.',
+      'Cataclysm3D is an unofficial, fan-made, real-time first-person adaptation of Cataclysm: Bright Nights. It is not made or endorsed by the Cataclysm: Bright Nights or Cataclysm: Dark Days Ahead teams.',
       'The game rules, items, monsters, recipes, maps and text come from Cataclysm: Bright Nights and were changed to fit a real-time 3D game (see the Tips and Options for what differs).',
     ],
   },

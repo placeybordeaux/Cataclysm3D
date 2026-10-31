@@ -1,6 +1,6 @@
 # The inventory model
 
-How items live in CDDA-3D v2: Cataclysm: Bright Nights' item and carrying rules
+How items live in Cataclysm3D v2: Cataclysm: Bright Nights' item and carrying rules
 (docs/BN_DATA_MODEL.md §3–§4 has the data side), one API for every change of place, and the
 tests that prove nothing is ever duplicated or lost.
 

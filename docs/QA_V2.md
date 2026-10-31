@@ -1,6 +1,6 @@
 # QA v2: a newcomer's playthrough (2026-09-29)
 
-Scope: CDDA-3D v2 (branch `bn`) played as someone who has never touched Cataclysm, on the
+Scope: Cataclysm3D v2 (branch `bn`) played as someone who has never touched Cataclysm, on the
 Accessible preset, with parts on Classic. Everything the player did went through **real OS
 input** (xdotool into a windowed browser on Xvfb: `tools/drive.ts serve --headful --gpu`,
 `tools/realinput.ts`). `cdda.*` was used only for setup (a long stick, a car on a road, the

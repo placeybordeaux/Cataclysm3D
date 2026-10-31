@@ -69,7 +69,7 @@ export function serializeGame(game: Game, meta: Omit<SaveMeta, 'version' | 'save
 export function validateSaveFile(f: unknown): SaveFile {
   if (!f || typeof f !== 'object') throw new SaveError('The save file is empty or not JSON.');
   const s = f as Partial<SaveFile>;
-  if (s.format !== SAVE_FORMAT) throw new SaveError('This is not a CDDA-3D save file.');
+  if (s.format !== SAVE_FORMAT) throw new SaveError('This is not a Cataclysm3D save file.');
   if (typeof s.version !== 'number') throw new SaveError('The save file has no version number.');
   if (s.version > SAVE_VERSION)
     throw new SaveError(`This save was made by a newer version of the game (save format v${s.version}; this build reads up to v${SAVE_VERSION}).`, 'version');

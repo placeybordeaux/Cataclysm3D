@@ -470,7 +470,7 @@ describe('robustness', () => {
     expect(() => applySave(B.game, { ...file, version: SAVE_VERSION + 1 })).toThrow(/newer version/);
     expect(() => applySave(build(8, 'test').game, file)).toThrow(SaveError);
     await expect(decodeSave({ enc: 'gzip', data: new Uint8Array([1, 2, 3, 4]) })).rejects.toThrow(/damaged/);
-    await expect(decodeSave({ enc: 'json', data: '{"format":"something-else"}' })).rejects.toThrow(/not a CDDA-3D save/);
+    await expect(decodeSave({ enc: 'json', data: '{"format":"something-else"}' })).rejects.toThrow(/not a Cataclysm3D save/);
     await expect(decodeSave({ enc: 'json', data: '{"trunc' })).rejects.toThrow(SaveError);
   });
 

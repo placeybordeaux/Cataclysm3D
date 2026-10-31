@@ -38,7 +38,7 @@ interface AbResult {
 
 export async function runGallery({ game, renderer, api }: GalleryDeps): Promise<void> {
   document.body.classList.add('gallery');
-  document.title = 'Style gallery - CDDA-3D';
+  document.title = 'Style gallery - Cataclysm3D';
   game.paused = true;
   api.godMode(true);
   await loadViews();

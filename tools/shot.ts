@@ -17,7 +17,7 @@ import { dirname, resolve } from 'node:path';
 
 const argv = process.argv.slice(2);
 if (argv.includes('--help') || argv.includes('-h')) {
-  console.log(`shot: headless screenshots of CDDA-3D
+  console.log(`shot: headless screenshots of Cataclysm3D
   --params <query>   URL query string (e.g. "seed=3&gen=test")
   --eval <js>        JS to run in page (may be async; cdda = window.cdda). Pairs with next --out
   --out <file.png>   save screenshot after preceding --eval (default shots/shot.png)

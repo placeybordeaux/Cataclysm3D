@@ -1,4 +1,4 @@
-# CDDA-3D v2 — "Bright Nights for a new audience"
+# Cataclysm3D v2 — "Bright Nights for a new audience"
 
 Branch `bn` (v1 is tagged `v1-dda` on master). This document is the brief for every agent in
 the second push. ARCHITECTURE.md still describes the code; this describes where it's going.

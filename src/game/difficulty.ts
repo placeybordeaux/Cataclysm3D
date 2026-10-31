@@ -23,7 +23,7 @@ export interface DifficultySettings {
   // --- monsters & world (apply to chunks generated from now on, like BN world options)
   /**
    * Non-horde hostile spawns (house zombies, mapgen monsters), on top of the Zombie density
-   * option. BN 1; Classic 0.75 is the real-time easing CDDA-3D always had (SPAWN_REALTIME).
+   * option. BN 1; Classic 0.75 is the real-time easing Cataclysm3D always had (SPAWN_REALTIME).
    */
   spawnScale: number;
   /** City hordes as a share of BN's 80 zombies per city size (Classic: CITY_HORDE_REALTIME 0.2). */

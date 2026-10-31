@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Load CDDA-3D perf dumps (Shift+F3, cdda3d-perf-*.json) into sqlite, then analyse hitches.
+"""Load Cataclysm3D perf dumps (Shift+F3, cdda3d-perf-*.json) into sqlite, then analyse hitches.
 
 Two separable steps so the analysis can be changed and re-run without re-parsing:
 

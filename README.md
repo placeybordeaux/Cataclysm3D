@@ -1,4 +1,4 @@
-# Cataclysm 3D
+# Cataclysm3D
 
 A real-time, first-person 3D take on Cataclysm, running in the browser. The live branch
 (`bn`) plays **[Cataclysm: Bright Nights](https://github.com/cataclysmbnteam/Cataclysm-BN)**
