@@ -316,3 +316,81 @@ cards, modelled, painted, on, models, modelled bodies, true to life, sway" (Sep 
   lead, Sep 30 01:50.
 - "You've hit your session limit · resets 3:40am (America/Los_Angeles)" — every wave-3 agent at
   02:18, Sep 30. They resumed after the reset.
+
+---
+
+## 6. The long tail (Oct 1 → Oct 26)
+
+After the first snapshot the pace changed: the user played one long game and reported what felt
+wrong, and the lead turned each report into a subagent. These sessions are not split into
+"session 1/2"; dates say when.
+
+### A tank with a car's tyres
+> "Oh I just stumbled upon an abrams tank, it doesn't have the 3D model applied to it"
+
+— the user, Oct 10 09:04.
+
+> "**Why it looked wrong:** the game treated it like a home-made frame vehicle. Each of its 22 track
+> pieces was drawn as a 1.6 m car tyre…"
+
+— the lead, Oct 10 09:19. The same afternoon the user asked "how do I use the turrets on the tank?";
+the lead answered "**Turrets:** you can't use them yet." An overnight agent built them, and by 00:21:
+"Your view moves the turret: it turns and raises the barrel toward where you look."
+
+### Why kiting was easy
+> "it seems like it's really not that hard to fight a mob of zombies by kiting them with a melee
+> weapon, which isn't my memory in the 2d turn based version. Why is that?"
+
+— the user, Oct 12 12:46.
+
+> "**1. Swinging doesn't slow your walking.** In the 2D game, every swing spends roughly a turn you
+> could have used to move. A speed-100 survivor gets about 10 actions for every 7 a zombie gets, so
+> a "hit, step back" pattern loses ground and the zombie keeps hitting you."
+
+— the lead, Oct 12 12:47. The fix: right mouse readies a weapon, and only a readied weapon swings.
+
+### The recipe for a fart
+> "Okay and the sound they make while attacking straight up sounds like a fart, what's up with that?"
+
+— the user, Oct 12 14:31.
+
+> "I can't listen to it myself, so I'll render the old and new sounds to WAV files you can play, and
+> check their spectra to confirm the low buzz is gone."
+
+> "The zombie wind-up was a synthesised low buzz (85–120 Hz) that slid upward with a 9 Hz wobble.
+> For hulk-sized blows it was played slower, which made it lower still. That's pretty much the
+> recipe for a fart."
+
+— the lead, Oct 12 14:33 and 14:35.
+
+### Pixel art, not voxels
+> "I think we're missing a lot when it comes to thinking of it as a love letter to 2D pixel art made
+> 3D, not voxel."
+
+— the user, Oct 12 17:45, asking for a subagent with Blender installed. Its honest verdict on
+swapping to the sprite at a distance, relayed by the lead at 18:51: "…the sprite is drawn side-on,
+facing right, but in first person most zombies walk towards you. So a far horde becomes a row of
+side-views that turn to face you at 30 m." The models stayed behind a switch.
+
+### Buildings popping in
+> "I am still seeing stuff pop into existance, is this due to a world sim limitation or a rendering
+> limitation"
+
+— the user, Oct 15 18:59. The lead measured it (rendering, at the draw-distance edge) and proposed
+"Real low-poly far proxies. This is what you asked about: the same idea as the zombie LOD and
+Minecraft's Distant Horizons mod." Five rounds of play followed ("a radio tower looks like a tall
+large building and then totally transforms when I get close"), ending in a QA pass whose commit
+title is the lesson: "proxies match the real geometry tile by tile; stand-ins were the tall boxes".
+
+### Vehicle feel
+> "generally vehicle physics should feel fun and relatable, going for a GTA 3 or GTA vice city feel
+> that is video gamy, but fun."
+
+— the user, Oct 9 19:42. It became a standing rule: crashes and driving aim for arcade feel, not
+BN's physics.
+
+### Saying what wasn't tested
+> "I tested it in a headless browser (software rendering, not a real GPU) on a staged scene, not
+> your actual drive, so it's worth a night drive past some buildings to confirm."
+
+— the lead, Oct 13 13:53, on the headlight flicker fix.

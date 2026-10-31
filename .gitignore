@@ -8,3 +8,4 @@ node_modules
 
 # blog-post transcript database (regenerate with notes/blog-post/scripts/load_transcripts.py)
 notes/blog-post/transcripts.sqlite
+__pycache__/

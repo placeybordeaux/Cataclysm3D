@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Code, git and data statistics for CDDA-3D, printed as Markdown (and optional JSON).
+"""Code, git and data statistics for Cataclysm3D, printed as Markdown (and optional JSON).
 
 Counts come from git objects, not the working tree, so any ref can be measured
 (e.g. `--ref v1-dda`). Lines are classified as code / comment / blank with a small
@@ -34,6 +34,9 @@ PHASES = [
     ("v1-dda tag", "v1-dda"),
     ("end of v2 (BN) push", "2026-09-29 22:45"),
     ("end of wave 3 overnight", "2026-09-30 07:15"),
+    ("end of wave 4", "2026-10-03 00:00"),
+    ("gap work merged (genVersion 3)", "2026-10-12 00:00"),
+    ("end of zombie round", "2026-10-15 00:00"),
     ("now (bn head)", "bn"),
 ]
 

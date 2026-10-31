@@ -26,6 +26,11 @@ PHASES = [
     ("v2 Bright Nights push", "2026-09-29T15:37:00"),
     ("wave 3 overnight", "2026-09-30T05:43:00"),
     ("wave 4 interactive (gallery, vehicles, stairs, VR, perf, blog)", "2026-09-30T14:14:00"),
+    # Oct 2-3 had no sessions; the next phases are calendar days in PDT (UTC-7).
+    ("gap work + world transport", "2026-10-04T07:00:00"),
+    ("zombie bodies + stutter round", "2026-10-12T07:00:00"),
+    ("far LOD", "2026-10-15T07:00:00"),
+    ("QoL + VR branches", "2026-10-18T07:00:00"),
 ]
 END = "2099-01-01"
 

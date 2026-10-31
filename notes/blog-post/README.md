@@ -1,7 +1,9 @@
-# Blog-post notes: building CDDA-3D
+# Blog-post notes: building Cataclysm3D
 
-Material for a long-form post about how CDDA-3D was built by a lead Claude Code session and ~70
-subagents. Snapshot: 2026-09-30 11:26 PDT.
+Material for a long-form post about how Cataclysm3D was built by a lead Claude Code session and ~70
+subagents. Updated 2026-10-26 (first snapshot 2026-09-30 11:26 PDT). The `w-*` images are copies of
+agents' evidence screenshots from `docs/screenshots/`, not blog renders. The project was called
+CDDA-3D until 2026-10-30; verbatim quotes from the sessions keep the old name.
 
 | file | what |
 |---|---|

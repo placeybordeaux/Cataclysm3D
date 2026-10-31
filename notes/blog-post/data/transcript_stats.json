@@ -1,6 +1,52 @@
 {
- "snapshot_last_api_call_utc": "2026-09-30T18:26:22.214Z",
+ "snapshot_last_api_call_utc": "2026-10-26T21:46:35.745Z",
  "tokens_by_phase": {
+  "QoL + VR branches": {
+   "lead": {
+    "api_calls": 190,
+    "input": 400,
+    "output": 102275,
+    "cache_read": 31802106,
+    "cache_creation": 1353286,
+    "thinking": 34781
+   },
+   "subagent": {
+    "api_calls": 934,
+    "input": 1870,
+    "output": 185832,
+    "cache_read": 189839385,
+    "cache_creation": 3951896,
+    "thinking": 10800
+   }
+  },
+  "far LOD": {
+   "lead": {
+    "api_calls": 351,
+    "input": 702,
+    "output": 414630,
+    "cache_read": 188549017,
+    "cache_creation": 2541006,
+    "thinking": 168417
+   }
+  },
+  "gap work + world transport": {
+   "lead": {
+    "api_calls": 954,
+    "input": 2140,
+    "output": 516057,
+    "cache_read": 210137565,
+    "cache_creation": 4156695,
+    "thinking": 127458
+   },
+   "subagent": {
+    "api_calls": 6548,
+    "input": 13222,
+    "output": 661229,
+    "cache_read": 1469181635,
+    "cache_creation": 36053074,
+    "thinking": 109937
+   }
+  },
   "v1 autonomous build (DDA)": {
    "lead": {
     "api_calls": 184,
@@ -75,50 +121,75 @@
   },
   "wave 4 interactive (gallery, vehicles, stairs, VR, perf, blog)": {
    "lead": {
-    "api_calls": 55,
-    "input": 122,
-    "output": 49308,
-    "cache_read": 20064578,
-    "cache_creation": 701290,
-    "thinking": 9302
+    "api_calls": 351,
+    "input": 778,
+    "output": 209615,
+    "cache_read": 173646869,
+    "cache_creation": 3336211,
+    "thinking": 42437
    },
    "subagent": {
-    "api_calls": 1091,
-    "input": 2198,
-    "output": 305122,
-    "cache_read": 213079967,
-    "cache_creation": 4672701,
-    "thinking": 25780
+    "api_calls": 4607,
+    "input": 9296,
+    "output": 1198808,
+    "cache_read": 1081021917,
+    "cache_creation": 50308265,
+    "thinking": 169513
+   }
+  },
+  "zombie bodies + stutter round": {
+   "lead": {
+    "api_calls": 276,
+    "input": 568,
+    "output": 176041,
+    "cache_read": 40712808,
+    "cache_creation": 1337304,
+    "thinking": 51089
+   },
+   "subagent": {
+    "api_calls": 888,
+    "input": 1778,
+    "output": 41150,
+    "cache_read": 208829002,
+    "cache_creation": 5005980,
+    "thinking": 14238
    }
   }
  },
  "tokens_total": {
-  "api_calls": 16354,
-  "input": 32978,
-  "output": 4299743,
-  "cache_read": 5464238743,
-  "cache_creation": 95388386,
-  "thinking": 552329
+  "api_calls": 30307,
+  "input": 61412,
+  "output": 7450950,
+  "cache_read": 8824814502,
+  "cache_creation": 198058112,
+  "thinking": 1245917
  },
  "tokens_lead": [
-  709,
-  1584,
-  4216990,
-  279412594,
-  493675
+  2776,
+  6050,
+  16240202,
+  904196381,
+  1862985
  ],
  "tokens_subagent": [
-  15645,
-  31394,
-  91171396,
-  5184826149,
-  3806068
+  27531,
+  55362,
+  181817910,
+  7920618121,
+  5587965
  ],
  "models": {
   "<synthetic>": 15,
-  "claude-opus-5-5": 16339
+  "claude-opus-5-5": 28711,
+  "claude-sonnet-5": 1581
  },
  "agents_by_phase": {
+  "QoL + VR branches": {
+   "1": 7
+  },
+  "gap work + world transport": {
+   "1": 41
+  },
   "v1 autonomous build (DDA)": {
    "1": 24,
    "2": 1
@@ -134,44 +205,75 @@
    "1": 7
   },
   "wave 4 interactive (gallery, vehicles, stairs, VR, perf, blog)": {
-   "1": 9,
-   "2": 5
+   "1": 23,
+   "2": 12
+  },
+  "zombie bodies + stutter round": {
+   "1": 7
   }
  },
- "subagent_hours": 76.1325,
+ "subagent_hours": 286.7608333333333,
  "peak_concurrent_subagents": [
-  7,
-  "2026-09-29T16:23:58.241Z"
+  12,
+  "2026-09-30T18:29:36.003Z"
  ],
  "rate_limit_messages": [
   15,
   "2026-09-30T09:18:13.910Z",
   "2026-09-30T09:40:30.379Z"
  ],
- "tool_calls_total": 18738,
+ "tool_calls_total": 33266,
  "tool_calls": {
-  "Bash": 14341,
-  "Read": 1984,
-  "Write": 1312,
-  "Edit": 691,
-  "SubagentHandback": 93,
-  "Agent": 82,
-  "SendMessage": 68,
+  "Bash": 26412,
+  "Read": 3252,
+  "Write": 1755,
+  "Edit": 1047,
+  "SubagentHandback": 185,
+  "Agent": 163,
+  "SendMessage": 115,
+  "ToolSearch": 97,
+  "Monitor": 69,
   "WebSearch": 49,
-  "ToolSearch": 38,
+  "TaskStop": 42,
   "WebFetch": 34,
-  "Monitor": 25,
-  "TaskStop": 17,
-  "AskUserQuestion": 4
+  "Artifact": 11,
+  "TaskUpdate": 10,
+  "TaskCreate": 8,
+  "AskUserQuestion": 6,
+  "ListAgents": 4,
+  "Skill": 3,
+  "EnterWorktree": 2,
+  "mcp__claude_ai_Claude_Docs__guide": 1,
+  "ExitWorktree": 1
  },
  "tool_calls_by_phase": {
+  "QoL + VR branches": 1140,
+  "far LOD": 381,
+  "gap work + world transport": 7743,
   "v1 autonomous build (DDA)": 5962,
   "v1 review + UX pass": 363,
   "v2 Bright Nights push": 6692,
   "wave 3 overnight": 4416,
-  "wave 4 interactive (gallery, vehicles, stairs, VR, perf, blog)": 1305
+  "wave 4 interactive (gallery, vehicles, stairs, VR, perf, blog)": 5361,
+  "zombie bodies + stutter round": 1208
  },
  "user_msgs_by_phase": {
+  "QoL + VR branches": {
+   "human": 10,
+   "queued_human": 1,
+   "ask_rounds": 1,
+   "ask_questions": 1
+  },
+  "far LOD": {
+   "human": 7,
+   "queued_human": 3,
+   "ask_rounds": 1,
+   "ask_questions": 2
+  },
+  "gap work + world transport": {
+   "human": 31,
+   "queued_human": 2
+  },
   "v1 autonomous build (DDA)": {
    "human": 1,
    "ask_rounds": 1,
@@ -191,16 +293,225 @@
    "human": 1
   },
   "wave 4 interactive (gallery, vehicles, stairs, VR, perf, blog)": {
-   "human": 11,
-   "queued_human": 1
+   "human": 38,
+   "queued_human": 5
+  },
+  "zombie bodies + stutter round": {
+   "human": 20,
+   "queued_human": 3
   }
  },
  "assistant_text_blocks": {
-  "lead": 246,
-  "subagent": 935
+  "lead": 969,
+  "subagent": 1861
  },
  "first_ts": "2026-09-29T05:25:00.536Z",
  "cost_state": [
+  {
+   "sessionId": "2b4860c5-e2ad-4b5e-bdc1-90f06e16494e",
+   "totalCostUSD": 175.16870020000025,
+   "totalAPIDuration": 18665838,
+   "totalDuration": 191238408,
+   "totalLinesAdded": 5412,
+   "totalLinesRemoved": 374,
+   "modelUsage": {
+    "claude-haiku-4-5-20251001": {
+     "inputTokens": 920,
+     "outputTokens": 16,
+     "thinkingTokens": 0,
+     "cacheReadInputTokens": 0,
+     "cacheCreationInputTokens": 0,
+     "webSearchRequests": 0,
+     "costUSD": 0.001
+    },
+    "claude-opus-5-5": {
+     "inputTokens": 212291,
+     "outputTokens": 536480,
+     "thinkingTokens": 162303,
+     "cacheReadInputTokens": 165379237,
+     "cacheCreationInputTokens": 3384664,
+     "webSearchRequests": 0,
+     "costUSD": 63.11693740000006
+    },
+    "claude-sonnet-5": {
+     "inputTokens": 377939,
+     "outputTokens": 774149,
+     "thinkingTokens": 453503,
+     "cacheReadInputTokens": 475616274,
+     "cacheCreationInputTokens": 3372056,
+     "webSearchRequests": 0,
+     "costUSD": 112.0507627999999
+    }
+   }
+  },
+  {
+   "sessionId": "4a31a453-81ed-4420-9269-2483b7e10f99",
+   "totalCostUSD": 0.5344755999999999,
+   "totalAPIDuration": 78926,
+   "totalDuration": 307688,
+   "totalLinesAdded": 0,
+   "totalLinesRemoved": 0,
+   "modelUsage": {
+    "claude-haiku-4-5-20251001": {
+     "inputTokens": 1078,
+     "outputTokens": 13,
+     "thinkingTokens": 0,
+     "cacheReadInputTokens": 0,
+     "cacheCreationInputTokens": 0,
+     "webSearchRequests": 0,
+     "costUSD": 0.001143
+    },
+    "claude-opus-5-5": {
+     "inputTokens": 530,
+     "outputTokens": 4836,
+     "thinkingTokens": 741,
+     "cacheReadInputTokens": 669343,
+     "cacheCreationInputTokens": 37578,
+     "webSearchRequests": 0,
+     "costUSD": 0.5333326
+    }
+   }
+  },
+  {
+   "sessionId": "4a31a453-81ed-4420-9269-2483b7e10f99",
+   "totalCostUSD": 0.5344755999999999,
+   "totalAPIDuration": 78926,
+   "totalDuration": 350132,
+   "totalLinesAdded": 0,
+   "totalLinesRemoved": 0,
+   "modelUsage": {
+    "claude-haiku-4-5-20251001": {
+     "inputTokens": 1078,
+     "outputTokens": 13,
+     "thinkingTokens": 0,
+     "cacheReadInputTokens": 0,
+     "cacheCreationInputTokens": 0,
+     "webSearchRequests": 0,
+     "costUSD": 0.001143
+    },
+    "claude-opus-5-5": {
+     "inputTokens": 530,
+     "outputTokens": 4836,
+     "thinkingTokens": 741,
+     "cacheReadInputTokens": 669343,
+     "cacheCreationInputTokens": 37578,
+     "webSearchRequests": 0,
+     "costUSD": 0.5333326
+    }
+   }
+  },
+  {
+   "sessionId": "5218a697-de31-4ea6-9f84-f1c0c578724e",
+   "totalCostUSD": 4.830907000000001,
+   "totalAPIDuration": 365850,
+   "totalDuration": 42665740,
+   "totalLinesAdded": 39,
+   "totalLinesRemoved": 0,
+   "modelUsage": {
+    "claude-haiku-4-5-20251001": {
+     "inputTokens": 906,
+     "outputTokens": 13,
+     "thinkingTokens": 0,
+     "cacheReadInputTokens": 0,
+     "cacheCreationInputTokens": 0,
+     "webSearchRequests": 0,
+     "costUSD": 0.000971
+    },
+    "claude-opus-5-5": {
+     "inputTokens": 156,
+     "outputTokens": 32469,
+     "thinkingTokens": 9601,
+     "cacheReadInputTokens": 7154220,
+     "cacheCreationInputTokens": 343636,
+     "webSearchRequests": 0,
+     "costUSD": 4.829936000000001
+    }
+   }
+  },
+  {
+   "sessionId": "6928022c-9aa8-401a-90ee-ab79626b984d",
+   "totalCostUSD": 83.5594852,
+   "totalAPIDuration": 5779995,
+   "totalDuration": 491379662,
+   "totalLinesAdded": 1840,
+   "totalLinesRemoved": 35,
+   "modelUsage": {
+    "claude-haiku-4-5-20251001": {
+     "inputTokens": 904,
+     "outputTokens": 16,
+     "thinkingTokens": 0,
+     "cacheReadInputTokens": 0,
+     "cacheCreationInputTokens": 0,
+     "webSearchRequests": 0,
+     "costUSD": 0.000984
+    },
+    "claude-opus-5-5": {
+     "inputTokens": 3510,
+     "outputTokens": 489076,
+     "thinkingTokens": 198158,
+     "cacheReadInputTokens": 214266946,
+     "cacheCreationInputTokens": 3863694,
+     "webSearchRequests": 0,
+     "costUSD": 83.5585012
+    }
+   }
+  },
+  {
+   "sessionId": "6c301f10-6a79-486c-8bf4-caae906abb88",
+   "totalCostUSD": 1537.6944492000132,
+   "totalAPIDuration": 85158827,
+   "totalDuration": 125628619,
+   "totalLinesAdded": 67876,
+   "totalLinesRemoved": 820,
+   "modelUsage": {
+    "claude-haiku-4-5-20251001": {
+     "inputTokens": 677756,
+     "outputTokens": 28762,
+     "thinkingTokens": 0,
+     "cacheReadInputTokens": 0,
+     "cacheCreationInputTokens": 0,
+     "webSearchRequests": 48,
+     "costUSD": 1.3015660000000002
+    },
+    "claude-opus-5-5": {
+     "inputTokens": 3454063,
+     "outputTokens": 6732245,
+     "thinkingTokens": 2069360,
+     "cacheReadInputTokens": 3727851756,
+     "cacheCreationInputTokens": 126245523,
+     "webSearchRequests": 0,
+     "costUSD": 1536.3928832000126
+    }
+   }
+  },
+  {
+   "sessionId": "6c301f10-6a79-486c-8bf4-caae906abb88",
+   "totalCostUSD": 1537.6944492000132,
+   "totalAPIDuration": 85158827,
+   "totalDuration": 125628628,
+   "totalLinesAdded": 67876,
+   "totalLinesRemoved": 820,
+   "modelUsage": {
+    "claude-haiku-4-5-20251001": {
+     "inputTokens": 677756,
+     "outputTokens": 28762,
+     "thinkingTokens": 0,
+     "cacheReadInputTokens": 0,
+     "cacheCreationInputTokens": 0,
+     "webSearchRequests": 48,
+     "costUSD": 1.3015660000000002
+    },
+    "claude-opus-5-5": {
+     "inputTokens": 3454063,
+     "outputTokens": 6732245,
+     "thinkingTokens": 2069360,
+     "cacheReadInputTokens": 3727851756,
+     "cacheCreationInputTokens": 126245523,
+     "webSearchRequests": 0,
+     "costUSD": 1536.3928832000126
+    }
+   }
+  },
   {
    "sessionId": "84829a4a-c886-4a5c-9f0a-30dc488da29b",
    "totalCostUSD": 1279.7163978000005,
@@ -226,6 +537,304 @@
      "cacheCreationInputTokens": 28934566,
      "webSearchRequests": 0,
      "costUSD": 1279.6194678000006
+    }
+   }
+  },
+  {
+   "sessionId": "9279bfa6-6161-4449-b299-a4198e26136b",
+   "totalCostUSD": 428.86476260000006,
+   "totalAPIDuration": 26766628,
+   "totalDuration": 136575320,
+   "totalLinesAdded": 13546,
+   "totalLinesRemoved": 165,
+   "modelUsage": {
+    "claude-haiku-4-5-20251001": {
+     "inputTokens": 994,
+     "outputTokens": 21,
+     "thinkingTokens": 0,
+     "cacheReadInputTokens": 0,
+     "cacheCreationInputTokens": 0,
+     "webSearchRequests": 0,
+     "costUSD": 0.0010990000000000002
+    },
+    "claude-opus-5-5": {
+     "inputTokens": 1147228,
+     "outputTokens": 2564096,
+     "thinkingTokens": 899630,
+     "cacheReadInputTokens": 1123350473,
+     "cacheCreationInputTokens": 28522226,
+     "webSearchRequests": 0,
+     "costUSD": 428.8636636000001
+    }
+   }
+  },
+  {
+   "sessionId": "a482ebd0-698f-4984-888b-75a14f61ddc2",
+   "totalCostUSD": 0,
+   "totalAPIDuration": 0,
+   "totalDuration": 846,
+   "totalLinesAdded": 0,
+   "totalLinesRemoved": 0,
+   "modelUsage": {}
+  },
+  {
+   "sessionId": "a482ebd0-698f-4984-888b-75a14f61ddc2",
+   "totalCostUSD": 0,
+   "totalAPIDuration": 0,
+   "totalDuration": 851,
+   "totalLinesAdded": 0,
+   "totalLinesRemoved": 0,
+   "modelUsage": {}
+  },
+  {
+   "sessionId": "af836669-dab6-4279-be42-b6a70b404e80",
+   "totalCostUSD": 0,
+   "totalAPIDuration": 0,
+   "totalDuration": 3649378,
+   "totalLinesAdded": 0,
+   "totalLinesRemoved": 0,
+   "modelUsage": {}
+  },
+  {
+   "sessionId": "b53cd283-fe66-4003-bb0a-58cbb7d8a503",
+   "totalCostUSD": 3.6681636000000006,
+   "totalAPIDuration": 339495,
+   "totalDuration": 35277997,
+   "totalLinesAdded": 39,
+   "totalLinesRemoved": 0,
+   "modelUsage": {
+    "claude-haiku-4-5-20251001": {
+     "inputTokens": 906,
+     "outputTokens": 13,
+     "thinkingTokens": 0,
+     "cacheReadInputTokens": 0,
+     "cacheCreationInputTokens": 0,
+     "webSearchRequests": 0,
+     "costUSD": 0.000971
+    },
+    "claude-opus-5-5": {
+     "inputTokens": 136,
+     "outputTokens": 30626,
+     "thinkingTokens": 9329,
+     "cacheReadInputTokens": 6279803,
+     "cacheCreationInputTokens": 224771,
+     "webSearchRequests": 0,
+     "costUSD": 3.667192600000001
+    }
+   }
+  },
+  {
+   "sessionId": "b53cd283-fe66-4003-bb0a-58cbb7d8a503",
+   "totalCostUSD": 3.6681636000000006,
+   "totalAPIDuration": 339495,
+   "totalDuration": 95177398,
+   "totalLinesAdded": 39,
+   "totalLinesRemoved": 0,
+   "modelUsage": {
+    "claude-haiku-4-5-20251001": {
+     "inputTokens": 906,
+     "outputTokens": 13,
+     "thinkingTokens": 0,
+     "cacheReadInputTokens": 0,
+     "cacheCreationInputTokens": 0,
+     "webSearchRequests": 0,
+     "costUSD": 0.000971
+    },
+    "claude-opus-5-5": {
+     "inputTokens": 136,
+     "outputTokens": 30626,
+     "thinkingTokens": 9329,
+     "cacheReadInputTokens": 6279803,
+     "cacheCreationInputTokens": 224771,
+     "webSearchRequests": 0,
+     "costUSD": 3.667192600000001
+    }
+   }
+  },
+  {
+   "sessionId": "cd7e856e-d575-405d-8d2e-5e1ce643b81a",
+   "totalCostUSD": 52.083446599999945,
+   "totalAPIDuration": 8457706,
+   "totalDuration": 392989996,
+   "totalLinesAdded": 5613,
+   "totalLinesRemoved": 42,
+   "modelUsage": {
+    "claude-haiku-4-5-20251001": {
+     "inputTokens": 962,
+     "outputTokens": 13,
+     "thinkingTokens": 0,
+     "cacheReadInputTokens": 0,
+     "cacheCreationInputTokens": 0,
+     "webSearchRequests": 0,
+     "costUSD": 0.001027
+    },
+    "claude-opus-5-5": {
+     "inputTokens": 207014,
+     "outputTokens": 456726,
+     "thinkingTokens": 128130,
+     "cacheReadInputTokens": 104135238,
+     "cacheCreationInputTokens": 2019474,
+     "webSearchRequests": 0,
+     "costUSD": 41.44993159999999
+    },
+    "claude-sonnet-5": {
+     "inputTokens": 67336,
+     "outputTokens": 152888,
+     "thinkingTokens": 92381,
+     "cacheReadInputTokens": 39248480,
+     "cacheCreationInputTokens": 447696,
+     "webSearchRequests": 0,
+     "costUSD": 10.632488000000006
+    }
+   }
+  },
+  {
+   "sessionId": "ce90f9e2-6d92-48da-9024-1939136ad489",
+   "totalCostUSD": 92.22997299999987,
+   "totalAPIDuration": 8537448,
+   "totalDuration": 671949436,
+   "totalLinesAdded": 7373,
+   "totalLinesRemoved": 0,
+   "modelUsage": {
+    "claude-opus-5-5": {
+     "inputTokens": 370677,
+     "outputTokens": 638254,
+     "thinkingTokens": 198080,
+     "cacheReadInputTokens": 258723785,
+     "cacheCreationInputTokens": 5100428,
+     "webSearchRequests": 0,
+     "costUSD": 92.22997299999987
+    }
+   }
+  },
+  {
+   "sessionId": "d095baaf-a599-41c7-87c1-836c160d5d63",
+   "totalCostUSD": 3.5251376000000008,
+   "totalAPIDuration": 510108,
+   "totalDuration": 142967524,
+   "totalLinesAdded": 0,
+   "totalLinesRemoved": 0,
+   "modelUsage": {
+    "claude-haiku-4-5-20251001": {
+     "inputTokens": 900,
+     "outputTokens": 11,
+     "thinkingTokens": 0,
+     "cacheReadInputTokens": 0,
+     "cacheCreationInputTokens": 0,
+     "webSearchRequests": 0,
+     "costUSD": 0.000955
+    },
+    "claude-opus-5-5": {
+     "inputTokens": 316,
+     "outputTokens": 48248,
+     "thinkingTokens": 17889,
+     "cacheReadInputTokens": 7017033,
+     "cacheCreationInputTokens": 144319,
+     "webSearchRequests": 0,
+     "costUSD": 3.5241826000000005
+    }
+   }
+  },
+  {
+   "sessionId": "e5533f05-06f8-429b-8d93-303015a74764",
+   "totalCostUSD": 0.37176580000000004,
+   "totalAPIDuration": 32202,
+   "totalDuration": 35917481,
+   "totalLinesAdded": 0,
+   "totalLinesRemoved": 0,
+   "modelUsage": {
+    "claude-haiku-4-5-20251001": {
+     "inputTokens": 904,
+     "outputTokens": 16,
+     "thinkingTokens": 0,
+     "cacheReadInputTokens": 0,
+     "cacheCreationInputTokens": 0,
+     "webSearchRequests": 0,
+     "costUSD": 0.000984
+    },
+    "claude-opus-5-5": {
+     "inputTokens": 10,
+     "outputTokens": 3055,
+     "thinkingTokens": 618,
+     "cacheReadInputTokens": 238889,
+     "cacheCreationInputTokens": 32733,
+     "webSearchRequests": 0,
+     "costUSD": 0.3707818
+    }
+   }
+  },
+  {
+   "sessionId": "e5533f05-06f8-429b-8d93-303015a74764",
+   "totalCostUSD": 0.37176580000000004,
+   "totalAPIDuration": 32202,
+   "totalDuration": 1182318769,
+   "totalLinesAdded": 0,
+   "totalLinesRemoved": 0,
+   "modelUsage": {
+    "claude-haiku-4-5-20251001": {
+     "inputTokens": 904,
+     "outputTokens": 16,
+     "thinkingTokens": 0,
+     "cacheReadInputTokens": 0,
+     "cacheCreationInputTokens": 0,
+     "webSearchRequests": 0,
+     "costUSD": 0.000984
+    },
+    "claude-opus-5-5": {
+     "inputTokens": 10,
+     "outputTokens": 3055,
+     "thinkingTokens": 618,
+     "cacheReadInputTokens": 238889,
+     "cacheCreationInputTokens": 32733,
+     "webSearchRequests": 0,
+     "costUSD": 0.3707818
+    }
+   }
+  },
+  {
+   "sessionId": "f096c7cf-40a4-4efe-aeba-9c7f324d505a",
+   "totalCostUSD": 113.62963460000014,
+   "totalAPIDuration": 10014107,
+   "totalDuration": 36768828,
+   "totalLinesAdded": 6762,
+   "totalLinesRemoved": 16,
+   "modelUsage": {
+    "claude-haiku-4-5-20251001": {
+     "inputTokens": 943,
+     "outputTokens": 13,
+     "thinkingTokens": 0,
+     "cacheReadInputTokens": 0,
+     "cacheCreationInputTokens": 0,
+     "webSearchRequests": 0,
+     "costUSD": 0.001008
+    },
+    "claude-opus-5-5": {
+     "inputTokens": 602837,
+     "outputTokens": 962952,
+     "thinkingTokens": 325519,
+     "cacheReadInputTokens": 324273973,
+     "cacheCreationInputTokens": 5185166,
+     "webSearchRequests": 0,
+     "costUSD": 113.62862660000013
+    }
+   }
+  },
+  {
+   "sessionId": "f1c5a988-6740-4460-b896-cdcf65442195",
+   "totalCostUSD": 4.581196600000001,
+   "totalAPIDuration": 593720,
+   "totalDuration": 6701476,
+   "totalLinesAdded": 16,
+   "totalLinesRemoved": 0,
+   "modelUsage": {
+    "claude-opus-5-5": {
+     "inputTokens": 216,
+     "outputTokens": 46058,
+     "thinkingTokens": 18814,
+     "cacheReadInputTokens": 12365623,
+     "cacheCreationInputTokens": 148256,
+     "webSearchRequests": 0,
+     "costUSD": 4.581196600000001
     }
    }
   }

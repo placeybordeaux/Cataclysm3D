@@ -1,22 +1,22 @@
 {
  "ref": "bn",
- "sha": "e7e9bf1579",
+ "sha": "e8fe3a3a2e",
  "by_lang": {
   "Markdown": [
-   24,
-   5313,
-   0,
-   840
-  ],
-  "HTML": [
+   63,
+   11618,
    1,
-   15,
+   2137
+  ],
+  "JSON": [
+   9,
+   10630,
    0,
    0
   ],
-  "JSON": [
+  "HTML": [
    2,
-   54,
+   18,
    0,
    0
   ],
@@ -27,34 +27,34 @@
    0
   ],
   "TypeScript": [
-   531,
-   110900,
-   16644,
-   8748
+   841,
+   167409,
+   26902,
+   12578
   ],
   "CSS": [
-   16,
-   1417,
-   121,
-   88
+   24,
+   1638,
+   138,
+   90
+  ],
+  "JavaScript": [
+   6,
+   866,
+   131,
+   1
+  ],
+  "Python": [
+   6,
+   1267,
+   69,
+   199
   ],
   "Shell": [
    2,
    33,
    13,
    0
-  ],
-  "JavaScript": [
-   4,
-   554,
-   84,
-   1
-  ],
-  "Python": [
-   1,
-   16,
-   1,
-   1
   ]
  },
  "by_area": {
@@ -63,73 +63,81 @@
    24
   ],
   "src": [
-   16,
-   3573
+   20,
+   4750
   ],
   "src/audio": [
-   11,
-   1524
+   12,
+   1760
   ],
   "src/core": [
    6,
-   295
+   320
   ],
   "src/data": [
    5,
-   850
+   856
   ],
   "src/dev": [
    1,
    87
   ],
   "src/gallery": [
-   5,
-   1168
+   6,
+   1242
   ],
   "src/game": [
-   92,
-   27982
+   151,
+   40584
+  ],
+  "src/loadgate": [
+   3,
+   246
+  ],
+  "src/perf": [
+   5,
+   1144
   ],
   "src/progression": [
    13,
-   1881
+   1923
   ],
   "src/render": [
-   98,
-   22311
+   142,
+   31691
   ],
   "src/save": [
    11,
-   1455
+   1464
   ],
   "src/screens": [
-   16,
-   2601
+   21,
+   2981
   ],
   "src/ui": [
-   65,
-   11593
+   79,
+   13651
   ],
   "src/ui2": [
-   48,
-   6916
+   49,
+   7119
   ],
   "src/world": [
-   19,
-   3804
+   29,
+   6092
   ],
   "tests": [
-   89,
-   16274
+   188,
+   33655
   ],
   "tools": [
-   58,
-   10597
+   138,
+   21642
   ]
  },
- "test_files": 87,
- "tracked_files": 1022,
- "test_cases_static": 1059,
+ "test_files": 186,
+ "tracked_files": 1772,
+ "test_cases_static": 2086,
  "data": {
   "achievements": {
    "bytes": 58404,
@@ -153,19 +161,20 @@
    }
   },
   "items": {
-   "bytes": 5796022,
+   "bytes": 5827322,
    "counts": {
     "entries": 6061
    }
   },
   "mapgen": {
-   "bytes": 3467812,
+   "bytes": 3592701,
    "counts": {
-    "omt": 2247,
-    "nested": 785,
-    "objects": 3016,
+    "omt": 2315,
+    "nested": 849,
+    "objects": 3153,
     "update": 3,
-    "builtin": 30
+    "extras": 2,
+    "builtin": 47
    }
   },
   "misc": {
@@ -260,20 +269,25 @@
    }
   },
   "overmap": {
-   "bytes": 673790,
+   "bytes": 717976,
    "counts": {
-    "terrains": 2261,
-    "specials": 437,
+    "terrains": 2333,
+    "specials": 442,
     "locations": 49,
     "region": 8,
     "wildSpecials": 35,
-    "names": 3
+    "connections": 5,
+    "mutableWildSpecials": 10,
+    "lakeSpecials": 1,
+    "names": 3,
+    "mutables": 8,
+    "connectionTerrains": 5
    }
   },
   "palettes": {
-   "bytes": 152525,
+   "bytes": 154486,
    "counts": {
-    "entries": 110
+    "entries": 114
    }
   },
   "recipes": {
@@ -300,35 +314,37 @@
    }
   },
   "unlocks": {
-   "bytes": 8772,
+   "bytes": 9643,
    "counts": {
-    "unlocks": 21
+    "unlocks": 23
    }
   },
   "vehicles": {
-   "bytes": 1182610,
+   "bytes": 1981408,
    "counts": {
     "parts": 813,
     "vehicles": 257,
     "groups": 76,
-    "fuels": 9
+    "fuels": 28
    }
   }
  },
  "public_bytes": {
+  "activity-assembly-mock.html": 11376,
   "atlas": 14833722,
   "audio": 16877269,
-  "data": 21031474,
+  "data": 22033479,
   "favicon.ico": 198,
   "favicon.png": 176,
-  "fonts": 12765387
+  "fonts": 12765387,
+  "models": 4393632
  },
  "git": {
-  "commits_all_refs": 500,
-  "commits_bn": 495,
-  "merges_bn": 108,
-  "branches": 67,
-  "agent_branches": 63
+  "commits_all_refs": 1033,
+  "commits_bn": 699,
+  "merges_bn": 158,
+  "branches": 23,
+  "agent_branches": 0
  },
  "growth": [
   {
@@ -392,16 +408,52 @@
    "markdown_lines": 4983
   },
   {
+   "phase": "end of wave 4",
+   "commit": "03c547c",
+   "date_pdt": "2026-10-02 12:38",
+   "commits": 631,
+   "ts_js_code": 128287,
+   "src_code": 94952,
+   "tests_code": 20692,
+   "tools_code": 14220,
+   "test_files": 116,
+   "markdown_lines": 8257
+  },
+  {
+   "phase": "gap work merged (genVersion 3)",
+   "commit": "9fa6ac6",
+   "date_pdt": "2026-10-11 20:24",
+   "commits": 661,
+   "ts_js_code": 159582,
+   "src_code": 110275,
+   "tests_code": 31966,
+   "tools_code": 19019,
+   "test_files": 176,
+   "markdown_lines": 12760
+  },
+  {
+   "phase": "end of zombie round",
+   "commit": "3a98913",
+   "date_pdt": "2026-10-13 13:52",
+   "commits": 692,
+   "ts_js_code": 165786,
+   "src_code": 113942,
+   "tests_code": 33538,
+   "tools_code": 21180,
+   "test_files": 185,
+   "markdown_lines": 13460
+  },
+  {
    "phase": "now (bn head)",
-   "commit": "e7e9bf1",
-   "date_pdt": "2026-09-30 11:13",
-   "commits": 495,
-   "ts_js_code": 111454,
-   "src_code": 86040,
-   "tests_code": 16274,
-   "tools_code": 10597,
-   "test_files": 87,
-   "markdown_lines": 6153
+   "commit": "e8fe3a3",
+   "date_pdt": "2026-10-17 20:56",
+   "commits": 699,
+   "ts_js_code": 168275,
+   "src_code": 115910,
+   "tests_code": 33655,
+   "tools_code": 21642,
+   "test_files": 186,
+   "markdown_lines": 13756
   }
  ]
 }

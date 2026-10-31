@@ -1,8 +1,9 @@
-# CDDA-3D: the story in numbers
+# Cataclysm3D: the story in numbers
 
-Snapshot taken **2026-09-30 11:26 PDT** (last API call in the transcripts at load time). The project
-is still being worked on (VR, vehicles v3, perf telemetry and this blog brief were in flight), so
-anything marked *snapshot* will keep moving. Every number below says how it was computed;
+Updated **2026-10-26** (last API call in the transcripts 14:46 PDT; `bn` head `e8fe3a3`, Oct 17).
+First written at **2026-09-30 11:26 PDT**; the Sep 30 value is kept in brackets where it is quoted
+elsewhere. VR and five QoL branches are unmerged, and vehicle render-pose work is uncommitted, so
+they are not in the code or test counts. Every number below says how it was computed;
 the scripts are in `scripts/` and their raw output is in `data/`.
 
 Times are PDT (the machine's zone). The transcripts store UTC; PDT = UTC − 7 h.
@@ -13,21 +14,22 @@ Times are PDT (the machine's zone). The transcripts store UTC; PDT = UTC − 7 h
 |---|---|---|
 | Time from first prompt to "CDDA-3D is finished" (v1) | **5 h 26 min** | first user message 22:25:00 PDT Sep 28 → lead's completion message 03:51:03 PDT Sep 29 (transcript timestamps) |
 | Human input before that first working copy | **1 prompt + 1 round of 4 multiple-choice questions** (one answered with a free-text note) | `user_msgs` + `ask_answers` tables, lead session, before 03:51 PDT |
-| Manual tool approvals | **0 recorded** | every `permissionMode` record in both lead transcripts is `auto` (332 records); no permission-request records exist |
-| Total elapsed so far | **~37 h** (22:25 Sep 28 → 11:26 Sep 30) | wall clock, includes sleep and idle time |
-| Lead sessions | **2** (split by `/clear` at 22:43 PDT Sep 29) | `~/.claude/projects/-home-peter-code-CDDA-3d/*.jsonl` |
-| Subagent transcripts | **72** (61 spawned by the lead + 11 nested forks/sub-subagents) *snapshot* | `<session>/subagents/*.jsonl`, `spawnDepth` in `.meta.json` |
-| Subagent wall-clock | **76 agent-hours**; peak **7 agents at once** | sum of first-to-last message span per subagent; sweep over start/end events |
-| API responses | **16,354** | assistant messages de-duplicated on message id |
-| Tool calls | **18,587** (Bash 14,224 · Read 1,968 · Write 1,302 · Edit 690 · Agent 77) | `tool_use` blocks |
-| Output tokens (visible in transcripts) | **4.3 M** (of which 0.55 M thinking) | max usage per message id, summed |
-| Context tokens processed | **5.46 B cache reads + 95 M cache writes + 33 k uncached input** | same |
-| TypeScript/JS code (bn head) | **111,454 lines** (plus 16.6 k comment lines) | `scripts/code_stats.py` over git objects, excluding `public/`, `vendor/`, `notes/` |
-| Test files / test cases | **87 files**, 1,059 `it()`/`test()` calls (static); the lead's last `npm test` on bn: **1,238 passing** | static count in `code_stats.py`; runtime count from the lead's merge report 11:14 PDT Sep 30 |
-| Commits | **495 on `bn`** (108 merges), 500 across all refs; **63** subagent worktree branches | `git rev-list`, `git for-each-ref` |
-| Lines added / removed (bn, non-merge, excl. `public/` and screenshots) | **+160,632 / −13,520** | `git log --numstat` |
-| Docs | **24 Markdown files**, ~6,150 lines; 439 committed screenshots | `code_stats.py`, `find docs/screenshots` |
-| Messages the person typed in total | **33 typed + 4 typed-while-busy**, and **13 multiple-choice questions** across 4 rounds | `user_msgs`, `ask_answers` |
+| Manual tool approvals | **0 recorded** | every `permissionMode` record in the lead transcripts is `auto` (1,048 records); no permission-request records exist |
+| Total elapsed | **4 weeks** (22:25 Sep 28 → Oct 26); last commit on `bn` Oct 17 20:56 [Sep 30: ~37 h] | wall clock, includes sleep and idle days |
+| Lead sessions | **20** [2] | `~/.claude/projects/-home-peter-code-CDDA-3d/*.jsonl` |
+| Subagent transcripts | **148** (130 spawned by a lead + 18 nested) [72] | `<session>/subagents/*.jsonl`, `spawnDepth` in `.meta.json` |
+| Subagent wall-clock | **287 agent-hours**; peak **12 agents at once** (Sep 30 11:29) [76 h, 7] | sum of first-to-last message span per subagent; sweep over start/end events |
+| API responses | **30,307** [16,354]; Opus 5.5 28,711, Sonnet 5 1,581 | assistant messages de-duplicated on message id |
+| Tool calls | **33,266** (Bash 26,412 · Read 3,252 · Write 1,755 · Edit 1,047 · Agent 163) [18,587] | `tool_use` blocks |
+| Output tokens (visible in transcripts) | **7.45 M** (of which 1.25 M thinking) [4.3 M] | max usage per message id, summed |
+| Context tokens processed | **8.82 B cache reads + 198 M cache writes + 61 k uncached input** [5.46 B] | same |
+| TypeScript/JS code (bn head) | **168,275 lines** (plus 27 k comment lines) [111,454] | `scripts/code_stats.py` over git objects, excluding `public/`, `vendor/`, `notes/` |
+| Test files / test cases | **186 files**, 2,086 `it()`/`test()` calls (static); `vitest run` on a clean checkout of `bn` head: **2,325 passing**, 0 failing [1,238] | static count in `code_stats.py`; runtime count run for this update, Oct 26 |
+| Commits | **699 on `bn`** (158 merges), 1,033 across all refs, 23 local branches [495] | `git rev-list`, `git for-each-ref` |
+| Squashed work | 186 commits on `gaps-20261004-integration` landed as one commit, `4217385` (556 files, +41,417/−1,447) | `git show --stat 4217385` |
+| Lines added / removed (bn, non-merge, excl. `public/` and screenshots) | **+259,670 / −17,254** [+160,632 / −13,520] | `git log --numstat` |
+| Docs | **56 Markdown files** in `docs/`, ~11,800 lines; 808 committed screenshots [24, 439] | `ls docs/*.md`, `git ls-files docs/screenshots` |
+| Messages the person typed in total | **139 distinct messages** (typed and typed-while-busy, de-duplicated on text; excludes one cross-session relay and the Oct 26 request for this update) [37], and **16 multiple-choice questions** across 6 rounds | `user_msgs`, `ask_answers` |
 
 ## 1. The original prompt (verbatim)
 
@@ -73,7 +75,13 @@ picks, 1 free-text answer), 0 other messages, 0 manual approvals (auto permissio
 | **v1 review + UX pass** | 07:09 → 08:37 | 1 h 28 m | UX review agent with *real* keyboard/mouse (xdotool on Xvfb); key rebinding, pointer-lock state machine; tagged `v1-dda` at 08:21 | 4 typed + 1 queued |
 | **v2: Bright Nights push** | Sep 29 08:37 → 22:43 | ~14 h | switch to Cataclysm: Bright Nights data/rules on branch `bn`; modern drag-and-drop UI, item-conservation inventory, progression/unlocks, difficulty presets, combat feel, looting, archery, driving camera; interactive with the person playing live via hot reload | 16 typed + 2 queued; 3 AskUserQuestion rounds (9 questions) |
 | **wave 3 overnight** | Sep 29 22:49 → Sep 30 07:14 | ~8.5 h (agents 22:52→05:04) | "TV adaptation" wave: Shadowglass-style 3D models for characters, furniture, vehicles, trees; readability at distance; aim-based combat; new-player adaptation pass; integrated QA. **Hit the session usage limit 02:18–03:40 PDT** (15 rate-limit messages); agents resumed after reset | 1 typed |
-| **wave 4 interactive** (current) | Sep 30 07:14 → snapshot 11:26 | 4 h+ | style gallery, driving collision on drawn body, vehicles v3 research + phase 1, walkable stairs, bike riders, VR (WebXR) branch, streaming perf telemetry, this blog brief | 11 typed + 1 queued; 8 design questions answered in one free-text message |
+| **wave 4 interactive** | Sep 30 07:14 → Oct 2 12:38 | ~2 days | style gallery, driving collision on drawn body, vehicles v3 research + phase 1, walkable stairs, bike riders, VR (WebXR) branch, streaming perf telemetry and bench, z-levels from the world, stable shadows, curtains, grab/drag, Space closes menus, reload help, fast-forward, reading quiz, skills feedback, load gate, this blog brief; 23 subagents + 12 nested | 43 messages |
+| quiet | Oct 2 → Oct 4 | 2 days | nothing | — |
+| **gap work + world transport** | Oct 4 → Oct 11 | 8 days | BN gap packages (`docs/GAP_IMPLEMENTATION_WORK.md`), turrets, tank crew stations, crashes GTA-style, world transport behind `genVersion` 2, then genVersion 3 (cross-region subway seams, z −10..10, lakes, colony spawns). Oct 4–5 commits exist with no transcript in this project dir; a lead resumed from `docs/GAP_HANDOFF.md` on Oct 7. Squash-merged Oct 11 19:34; 41 subagents | 29 messages (plus one relay from another session) |
+| **zombie bodies + stutter round** | Oct 12 → Oct 14 | 2 days | right-mouse ready stance, zombie bodies round 7, idle sway, wind-up snarl, headlight shadows, rag-doll run-overs and gib pieces, Blender sprite3d prototype, GC stutter fixes; branch `zr-integration` merged Oct 12 22:18; 7 subagents | 22 messages |
+| **far LOD** | Oct 15 → Oct 17 | 3 days | pop-in investigation, real-map proxies (5 rounds), bounding-box QA, car proxies, debug spawn menu; one lead session, no subagents, 415 k output tokens | 10 messages, 1 question round (2 questions) |
+| **QoL + VR branches** | Oct 18 → Oct 19 | 2 days | far LOD merged to `bn`; VR branches rebased; QoL review and five unmerged QoL branches (item search beams, auto pickup + compare, morale + bestiary, edges and hazards, corpse revival); 7 subagents | 10 messages, 1 question round (1 question) |
+| since | Oct 19 → Oct 26 | — | nothing committed; vehicle render-pose/shadow judder work uncommitted in the checkout | — |
 
 Source: `data/transcript_stats.md` (phase cut-offs at the person's messages that started each push,
 defined in `scripts/analyse.py:PHASES`), git log.

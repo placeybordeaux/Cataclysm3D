@@ -150,7 +150,7 @@ Seed-1 landmarks: the Evac Shelter at OMT (53,39) outside Holden; the refugee ce
 ### 30-dusk.jpg
 **Caption:** Dusk on the same street: the sky turns orange and the first stars come out.
 **How:** `lookView('street')`, then `setHour(duskHour())` (15 minutes before the real sunset for the season).
-**Caveat:** `tools/look-views.js` has an empty duplicate `name === 'dusk'` branch, so `lookView('dusk')` does nothing. The shot does these steps by hand. This is worth a one-line fix in the repo.
+**Caveat:** `tools/look-views.js` has an empty duplicate `name === 'dusk'` branch, so `lookView('dusk')` did nothing when this was shot, and the shot does these steps by hand. Fixed the same day in `08d782a`.
 
 ### 31-night-flashlight.jpg
 **Caption:** Midnight, with only a flashlight to see by.
@@ -244,11 +244,11 @@ Seed-1 landmarks: the Evac Shelter at OMT (53,39) outside Holden; the refugee ce
 **How:** `tilesTopDown` straight after 62. Two flowers (`f_dandelion`, `f_sunflower`) have no UltiCa sprite and are left out.
 
 ### 77-tiles-vs-3d-shelter.jpg
-**Caption:** The Evac Shelter as the 2D tileset draws it (left) and in CDDA-3D (right).
+**Caption:** The Evac Shelter as the 2D tileset draws it (left) and in Cataclysm3D (right).
 **How:** `evolution.sh`: 63 and 62 side by side (1920x540).
 
 ### 78-tiles-vs-3d-town.jpg
-**Caption:** A town crossroads as the 2D tileset draws it (left) and in CDDA-3D (right).
+**Caption:** A town crossroads as the 2D tileset draws it (left) and in Cataclysm3D (right).
 **How:** `evolution.sh`: 61 and 60 side by side.
 
 ## Then and now (v1 → v2 → wave 3)
@@ -308,11 +308,11 @@ python3 notes/blog-post/scripts/recreate-compose.py --raw /tmp/rc-raw          #
 **How:** each panel's map area cropped from the original; ours is the matching `rc-<scene>-top` capture cropped to the same tiles. Sidebars left out.
 
 ### rc-dda-compare.jpg
-**Caption:** The DDA UltiCa showcase (top, CC BY-SA 3.0, DDA contributors) and the same four scenes rebuilt in CDDA-3D (bottom), in the same layout.
+**Caption:** The DDA UltiCa showcase (top, CC BY-SA 3.0, DDA contributors) and the same four scenes rebuilt in Cataclysm3D (bottom), in the same layout.
 **How:** four `rc-dda_*-top` captures cropped to 19×25 tiles and scaled to the original's panel size; 75% size.
 
 ### rc-bn-strip.jpg
-**Caption:** The Bright Nights title image (top) and the same four places from the ground in CDDA-3D: the burning yard, the roundabout horde, the lab fence, the temple on the lake.
+**Caption:** The Bright Nights title image (top) and the same four places from the ground in Cataclysm3D: the burning yard, the roundabout horde, the lab fence, the temple on the lake.
 **How:** the original scaled to 1280 wide over the four `rc-bn_*-fp` views in a 2×2 grid.
 
 ### rc-dda-strip.jpg
@@ -386,3 +386,40 @@ python3 notes/blog-post/scripts/recreate-compose.py --raw /tmp/rc-raw          #
 
 ### rc-dda_farm-fp-hero.jpg
 **Caption:** Full-size version of rc-dda_farm-fp: the DDA showcase's cabin farm.
+
+## Since the first snapshot (Sep 30 → Oct 26)
+
+These `w-*` images were not rendered for the blog. They are the agents' own evidence screenshots
+from `docs/screenshots/` (and the far-LOD worktree's `shots/farlod/`), copied as they are.
+
+### w-zombie-bodies.jpg
+**Caption:** Zombie bodies, round 7 (Oct 12): the UltiCa sprites (top), the boxy bodies from before, the hunched shamble that became the default, and the "caricature" alternative.
+**How:** `docs/screenshots/zombies/compare_common.jpg`, from the zombie lineup views in `tools/char-views.js`; switch `?zstyle=boxy|caricature`. See `docs/CHARACTERS.md`.
+
+### w-sprite3d.png
+**Caption:** "A love letter to 2D pixel art made 3D, not voxel": a subagent with Blender built low-poly zombies (bottom) to read like the tileset sprites (top) at a distance.
+**How:** `docs/screenshots/sprite3d/compare_all.png`, sprite over model at 3×. Behind `?zstyle=sprite3d`; not the default. See `docs/SPRITE3D.md`.
+
+### w-gib-ragdoll.jpg
+**Caption:** Hit hard enough to gib, a zombie no longer vanishes: torso, head and limbs fly as loose rag-doll pieces (70 km/h, frame strip).
+**How:** `docs/screenshots/runover/gib_side_70.jpg`, from the real-input run-over capture scenario. Asked for on Oct 12: "the game should ragdoll their limbs & torso".
+
+### w-far-lod.png
+**Caption:** Far LOD (Oct 15–17): buildings past the 168 m draw distance are proxies built from the real map, dissolved into the real geometry as you approach, so towers stop popping in while you drive.
+**How:** `shots/farlod/qa_city.png` from the `farlodqa` real-input QA scenario at `e8fe3a3`. See `docs/FAR_LOD.md`.
+
+### w-bike-rider.jpg
+**Caption:** Riders (Sep 30): the survivor's own body seated on bikes and in cars outside first person, with IK hands and feet and a pedalling crank. It fixed a "ghost bicycle (no person)".
+**How:** `docs/screenshots/wave3/vehicles/riders/bicycle_turning.jpg`.
+
+### w-stairs-follow.jpg
+**Caption:** Walkable stairs (Sep 30): modelled flights, spirals and ladders you walk up and down; here a zombie follows you up from the shelter basement.
+**How:** `docs/screenshots/wave3/stairs/zombie_follows_2.jpg`. See `docs/STAIRS.md`.
+
+### w-reading-quiz.jpg
+**Caption:** The reading minigame (Sep 30): field-notes questions generated from game data. A right answer buys reading time, a miss a short cooldown.
+**How:** `docs/screenshots/wave3/reading/1_question.jpg`. The user's idea, "like lock picking in skyrim".
+
+### w-crafting-assembly.png
+**Caption:** Crafting as assembly (gap work, Oct): while a real craft runs, a card shows its actual components; each part you drag or key into its slot saves 4% of the batch's work, up to 20%.
+**How:** `docs/screenshots/gaps/crafting-assembly.png` (ten flashlights). Prototyped first as a standalone mock the user asked for; Options > Craft assembly: Grid / Exploded / Off. See `docs/CRAFT_ASSEMBLY.md`.

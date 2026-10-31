@@ -1,5 +1,5 @@
-<title>Building CDDA-3D</title>
-<meta name="description" content="Briefing for a blog post on how a lead Claude Code session and ~70 subagents rebuilt Cataclysm as a real-time 3D game.">
+<title>Building Cataclysm3D</title>
+<meta name="description" content="Briefing for a blog post on how lead Claude Code sessions and ~150 subagent runs rebuilt Cataclysm as a real-time 3D game.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&family=Pixelify+Sans:wght@500;700&display=swap">
@@ -104,13 +104,13 @@ footer{margin-top:48px;font-size:.85rem;color:var(--muted)}
 
 <div class="wrap">
 <header class="top">
-  <div class="eyebrow">Blog-post briefing · snapshot 2026-09-30 11:26 PDT</div>
-  <h1>Building CDDA-3D</h1>
-  <p class="dek">One prompt, four multiple-choice answers and 5 h 26 min later, a lead Claude Code session and 24 subagents had a playable real-time, first-person Cataclysm in the browser. This page collects the numbers, the story, the pictures and the quotes for a long-form post.</p>
+  <div class="eyebrow">Blog-post briefing · snapshot 2026-10-26 (first snapshot 2026-09-30)</div>
+  <h1>Building Cataclysm3D</h1>
+  <p class="dek">One prompt, four multiple-choice answers and 5 h 26 min later, a lead Claude Code session and 24 subagents had a playable real-time, first-person Cataclysm in the browser. Four weeks and 148 subagent runs later it is 168k lines of TypeScript, with Bright Nights' sewers, subways and labs down to z&nbsp;−10. This page collects the numbers, the story, the pictures and the quotes for a long-form post.</p>
   <nav class="toc" aria-label="Sections">
-    <a href="#numbers">Numbers</a><a href="#prompt">The prompt</a><a href="#timeline">Timeline</a><a href="#charts">Tokens &amp; code</a><a href="#recreations">Official shots, rebuilt</a><a href="#gallery">Images</a><a href="#differences">Differences</a><a href="#commentary">Commentary</a><a href="#outline">Post outline</a><a href="#method">Method</a>
+    <a href="#numbers">Numbers</a><a href="#prompt">The prompt</a><a href="#timeline">Timeline</a><a href="#charts">Tokens &amp; code</a><a href="#since">Since Sep 30</a><a href="#recreations">Official shots, rebuilt</a><a href="#gallery">Images</a><a href="#differences">Differences</a><a href="#commentary">Commentary</a><a href="#outline">Post outline</a><a href="#method">Method</a>
   </nav>
-  <figure class="herofig"><img src="images/03-town-street-hero.jpg" alt="A Bright Nights town street rendered in CDDA-3D"><figcaption>A small-town street from Cataclysm: Bright Nights map data, rendered in the engine at 1920×1080.</figcaption></figure>
+  <figure class="herofig"><img src="images/03-town-street-hero.jpg" alt="A Bright Nights town street rendered in Cataclysm3D"><figcaption>A small-town street from Cataclysm: Bright Nights map data, rendered in the engine at 1920×1080.</figcaption></figure>
 </header>
 
 <section id="numbers">
@@ -118,13 +118,13 @@ footer{margin-top:48px;font-size:.85rem;color:var(--muted)}
 <div class="stats">
   <div class="stat"><div class="n">5h26m</div><div class="l">first prompt → “CDDA-3D is finished” (v1, DDA data)</div></div>
   <div class="stat"><div class="n">1 + 4</div><div class="l">human inputs before v1: the prompt and one round of 4 multiple-choice questions</div></div>
-  <div class="stat"><div class="n">0</div><div class="l">manual tool approvals (auto permission mode throughout)</div></div>
-  <div class="stat"><div class="n">72</div><div class="l">subagent transcripts (61 spawned by the lead, 11 nested), 76 agent-hours</div></div>
-  <div class="stat"><div class="n">111k</div><div class="l">lines of TypeScript today; 53k at the first working copy</div></div>
-  <div class="stat"><div class="n">1,238</div><div class="l">tests passing on the latest merge (565 at v1)</div></div>
-  <div class="stat"><div class="n">16,354</div><div class="l">model responses; 18,587 tool calls (14,224 of them shell)</div></div>
-  <div class="stat"><div class="n">5.46B</div><div class="l">cache-read tokens; 4.3M output tokens visible in transcripts (a lower bound)</div></div>
-  <div class="stat"><div class="n">495</div><div class="l">commits on <code>bn</code>, 108 of them the lead merging agent branches</div></div>
+  <div class="stat"><div class="n">139</div><div class="l">distinct messages typed by the user in three weeks of work (Sep 28 → Oct 19), across 20 lead sessions</div></div>
+  <div class="stat"><div class="n">148</div><div class="l">subagent transcripts (130 spawned by a lead, 18 nested), 287 agent-hours; 72 at the first snapshot</div></div>
+  <div class="stat"><div class="n">168k</div><div class="l">lines of TypeScript on <code>bn</code>; 53k at the first working copy, 111k on Sep 30</div></div>
+  <div class="stat"><div class="n">2,325</div><div class="l">tests passing on <code>bn</code> head in 186 files (565 at v1, 1,238 on Sep 30)</div></div>
+  <div class="stat"><div class="n">30,307</div><div class="l">model responses; 33,266 tool calls (26,412 of them shell)</div></div>
+  <div class="stat"><div class="n">8.82B</div><div class="l">cache-read tokens; 7.45M output tokens visible in transcripts (a lower bound)</div></div>
+  <div class="stat"><div class="n">699</div><div class="l">commits on <code>bn</code> (158 merges), plus 186 gap-work commits squashed into one merge; 1,033 across all branches</div></div>
   <div class="stat"><div class="n">6,061</div><div class="l">Bright Nights item types loaded (plus 615 monsters, 3,187 recipes, 257 vehicles)</div></div>
 </div>
 <p class="note">Every figure is derived in <code>facts.md</code>, with its method and caveats.</p>
@@ -156,7 +156,13 @@ footer{margin-top:48px;font-size:.85rem;color:var(--muted)}
 <tr><td><strong>v1 review + UX</strong></td><td>07:09 → 08:37</td><td class="num">1h 28m</td><td>First human play finds Shift+W opening the wear menu and Esc losing the mouse. UX review with real keyboard and mouse. Tagged <code>v1-dda</code>.</td><td>5 messages</td></tr>
 <tr><td><strong>v2 Bright Nights</strong></td><td>Sep 29 08:37 → 22:43</td><td class="num">~14h</td><td>Switch to Bright Nights, modern drag-and-drop UI, item-conservation inventory, unlocks, difficulty presets, combat feel, looting, archery, driving camera. The user plays live via hot reload.</td><td>18 messages, 9 answers</td></tr>
 <tr><td><strong>wave 3 overnight</strong></td><td>Sep 29 22:49 → Sep 30 07:14</td><td class="num">~8.5h</td><td>“TV adaptation” wave: Shadowglass-style 3D characters, furniture, cars and trees; readability at distance; aim-based combat; new-player pass. Paused 02:18–03:40 on the session usage limit.</td><td>1 message</td></tr>
-<tr><td><strong>wave 4 (ongoing)</strong></td><td>Sep 30 07:14 →</td><td class="num">4h+</td><td>Style gallery, collision on the drawn car body, deathmobile research and vehicles v3, walkable stairs, bike riders, VR branch, streaming telemetry, this brief.</td><td>12 messages</td></tr>
+<tr><td><strong>wave 4</strong></td><td>Sep 30 07:14 → Oct 2 12:38</td><td class="num">~2 days</td><td>Style gallery and the default look, vehicles v3 phase 1 (chassis templates for all 257 BN vehicles), walkable stairs, riders on bikes, streaming telemetry and a perf bench, z-levels from the world (no more sky through a fire-station roof), stable shadows, curtains, grab and drag, Space closes menus, reload help, fast-forward, the reading quiz, a load gate, the VR branch, this brief. 35 subagents.</td><td>43 messages</td></tr>
+<tr><td>quiet</td><td>Oct 2 → Oct 4</td><td class="num">2 days</td><td>Nothing on <code>bn</code>.</td><td>—</td></tr>
+<tr><td><strong>gap work + world transport</strong></td><td>Oct 4 → Oct 11</td><td class="num">8 days</td><td>BN gap packages from <code>docs/IMPLEMENTATION_GAPS.md</code>: UPS transfer, bionic guns, power armor, siphoning, workbenches, rubble, NPC needs, NPCs in the line of fire, mutation venom, frostbite. World transport behind a new world generation version: sewers, subway tunnels, manholes, lab escape cells, train depots, then the full z range −10..10, lakes and colony spawns. The first session (Oct 4–5) is not in these transcripts; a lead picked up its handoff doc on Oct 7. Landed Oct 11 as one squashed merge (556 files, +41k lines) and 29 follow-ups. 41 subagents.</td><td>29 messages</td></tr>
+<tr><td><strong>zombie round</strong></td><td>Oct 12 → Oct 13</td><td class="num">2 days</td><td>“It's really not that hard to fight a mob of zombies by kiting”: right mouse readies melee; hunched shambling zombie bodies with idle sway; a snarl replaces the attack buzz; rag-doll run-overs and gib pieces; Blender low-poly zombies as a prototype; a stutter round (typed-array garbage while driving 19 → 4 MB/s). 7 subagents.</td><td>22 messages</td></tr>
+<tr><td><strong>far LOD</strong></td><td>Oct 15 → Oct 17</td><td class="num">3 days</td><td>Why buildings pop in, then five rounds of real-map proxies past the draw distance with a dissolve hand-off, a bounding-box QA pass, car proxies, and a debug spawn menu. One lead session, no subagents.</td><td>10 messages</td></tr>
+<tr><td><strong>QoL + VR branches</strong></td><td>Oct 18 → Oct 19</td><td class="num">2 days</td><td>Far LOD merged. VR branches rebased onto <code>bn</code>. A QoL review against CDDA/BN, then five branches: item search with Borderlands-style beams, auto pickup and item compare, a morale breakdown and bestiary, ledge and hazard markings, corpse revival. Neither VR nor QoL is merged yet.</td><td>10 messages</td></tr>
+<tr><td>since</td><td>Oct 19 → Oct 26</td><td class="num">—</td><td>No new commits. Vehicle render-pose and shadow-judder fixes are uncommitted in the checkout, awaiting sign-off.</td><td>—</td></tr>
 </tbody></table></div>
 </section>
 
@@ -164,19 +170,29 @@ footer{margin-top:48px;font-size:.85rem;color:var(--muted)}
 <h2>Tokens and code</h2>
 <div class="charts">
   <div class="chartbox"><h3>Output tokens per phase</h3><p>Includes thinking. From transcript messages; Claude Code's own meter counts more.</p>{{CHART_OUTPUT}}</div>
-  <div class="chartbox"><h3>Cache-read tokens per phase</h3><p>Context re-read on every call. Uncached input was only 33k in total.</p>{{CHART_CACHE}}</div>
+  <div class="chartbox"><h3>Cache-read tokens per phase</h3><p>Context re-read on every call. Uncached input was only 61k in total.</p>{{CHART_CACHE}}</div>
   <div class="chartbox" style="grid-column:1/-1"><h3>Lines of TypeScript/JavaScript at each milestone</h3><p>Code lines only (no comments or blanks), excluding extracted data. Hover a bar for the exact figure.</p>{{CHART_GROWTH}}</div>
 </div>
 <div class="tablewrap"><table>
 <thead><tr><th>Where the code lives</th><th class="num">Files</th><th class="num">Code lines</th></tr></thead>
 <tbody>
-<tr><td><code>src/game</code>: rules, items, combat, vehicles, NPCs</td><td class="num">92</td><td class="num">27,982</td></tr>
-<tr><td><code>src/render</code>: 3D pipeline, models, lighting</td><td class="num">98</td><td class="num">22,311</td></tr>
-<tr><td><code>tests</code></td><td class="num">89</td><td class="num">16,274</td></tr>
-<tr><td><code>src/ui</code> + <code>src/ui2</code> + <code>src/screens</code></td><td class="num">129</td><td class="num">21,110</td></tr>
-<tr><td><code>tools</code>: extractors, screenshot, real-input and bench tools</td><td class="num">58</td><td class="num">10,597</td></tr>
-<tr><td>everything else in <code>src</code> (world, audio, save, progression, gallery…)</td><td class="num">87</td><td class="num">14,637</td></tr>
+<tr><td><code>src/game</code>: rules, items, combat, vehicles, NPCs</td><td class="num">151</td><td class="num">40,584</td></tr>
+<tr><td><code>tests</code></td><td class="num">188</td><td class="num">33,655</td></tr>
+<tr><td><code>src/render</code>: 3D pipeline, models, lighting</td><td class="num">142</td><td class="num">31,691</td></tr>
+<tr><td><code>src/ui</code> + <code>src/ui2</code> + <code>src/screens</code></td><td class="num">149</td><td class="num">23,751</td></tr>
+<tr><td><code>tools</code>: extractors, screenshot, real-input and bench tools</td><td class="num">138</td><td class="num">21,642</td></tr>
+<tr><td>everything else in <code>src</code> (world, progression, audio, save, gallery, perf…)</td><td class="num">111</td><td class="num">19,884</td></tr>
 </tbody></table></div>
+</section>
+
+<section id="since">
+<h2>Since the first snapshot</h2>
+<div class="read">
+<p>The first version of this page was written on Sep 30, a day and a half in. The project kept going for four more weeks at a slower, more conversational pace: the user played a long game and reported what felt wrong, and the lead turned each report into a subagent. TypeScript grew from 111k to 168k lines and tests from 1,238 to 2,325. These images are the agents' own evidence screenshots, not renders made for the blog.</p>
+</div>
+<div class="gallery natural">
+{{SINCE}}
+</div>
 </section>
 
 <section id="recreations">
@@ -209,7 +225,7 @@ footer{margin-top:48px;font-size:.85rem;color:var(--muted)}
 
 <section id="differences">
 <h2>What differs from Cataclysm ({{NDIFF}} entries)</h2>
-<p class="read">Every material difference we could document, in {{NCAT}} groups. Each entry says what Cataclysm does, what CDDA-3D does, why, and where it's recorded. Filter by reason:</p>
+<p class="read">Every material difference we could document, in {{NCAT}} groups. Each entry says what Cataclysm does, what Cataclysm3D does, why, and where it's recorded. Filter by reason:</p>
 {{DIFFERENCES}}
 </section>
 
@@ -232,18 +248,19 @@ footer{margin-top:48px;font-size:.85rem;color:var(--muted)}
 <li><strong>What it cost.</strong> Tokens by phase, cache reads vs output, lead vs subagents, the usage-limit pause, and what the numbers don't include.</li>
 <li><strong>What's different, and what's missing.</strong> Pick 10 from the differences list; link the full list.</li>
 <li><strong>Working this way.</strong> Parallel worktrees with a merging lead, variants behind switches instead of guessing, a live bridge into the player's tab, honest “best guess” fixes.</li>
-<li><strong>What's next.</strong> Vehicles v3 (a ladder of chassis sizes toward a deathmobile), walkable stairs, VR.</li>
+<li><strong>The long tail.</strong> Four weeks of play-and-report: a tank with no turret instructions, a fart-like zombie snarl, buildings popping in on the horizon. Gap packages handed between sessions through a doc; one 41k-line squash merge.</li>
+<li><strong>What's next.</strong> Merging VR and the QoL branches, vehicles v3 beyond phase 1 (toward a deathmobile), walking around inside big vehicles, the uncommitted vehicle judder fix.</li>
 </ol>
 </section>
 
 <section id="method" class="read">
 <h2>Method and caveats</h2>
 <ul>
-<li>Transcripts: 2 lead sessions and 72 subagent JSONL files, streamed into SQLite (<code>scripts/load_transcripts.py</code>) and analysed separately (<code>scripts/analyse.py</code>). Usage is de-duplicated per message id, taking the maximum of each field.</li>
-<li>Claude Code's own meter for session 1 shows more than the transcripts (8.88M output vs 3.18M; 4.66B vs 3.73B cache reads), most likely calls that never appear as messages, such as the auto-mode classifier. Treat transcript totals as a lower bound. Session 2 is still running.</li>
-<li>Code: counted from git objects at <code>bn</code> <code>e7e9bf1</code> by <code>scripts/code_stats.py</code>, excluding <code>public/</code> data, <code>vendor/</code> and these notes.</li>
+<li>Transcripts: 20 lead sessions and 148 subagent JSONL files, streamed into SQLite (<code>scripts/load_transcripts.py</code>) and analysed separately (<code>scripts/analyse.py</code>). Usage is de-duplicated per message id, taking the maximum of each field.</li>
+<li>Claude Code's own meter for session 1 shows more than the transcripts (8.88M output vs 3.18M; 4.66B vs 3.73B cache reads), most likely calls that never appear as messages, such as the auto-mode classifier. Treat transcript totals as a lower bound. The first gap-work session (Oct 4–5) left commits but no transcript here, so that phase is undercounted.</li>
+<li>Code: counted from git objects at <code>bn</code> <code>e8fe3a3</code> by <code>scripts/code_stats.py</code>, excluding <code>public/</code> data, <code>vendor/</code> and these notes.</li>
 <li>Quotes are verbatim; <code>…</code> marks cuts. Attributed to the user, the lead, or a subagent by task.</li>
-<li>Snapshot 2026-09-30 11:26 PDT. VR, vehicles v3 and telemetry work were still in flight.</li>
+<li>Snapshot 2026-10-26; first snapshot 2026-09-30 11:26 PDT. Tests counted by running <code>vitest</code> on a clean checkout of <code>bn</code> head. Unmerged branches (VR, QoL) and uncommitted work are not in the code or test counts. The images in the main gallery and the recreations are from Sep 30.</li>
 </ul>
 </section>
 

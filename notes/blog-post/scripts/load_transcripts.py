@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Stream Claude Code session transcripts for CDDA-3D into SQLite.
+"""Stream Claude Code session transcripts for Cataclysm3D into SQLite.
 
 Step 1 of 2 (load). Step 2 is analyse.py, which only reads the SQLite file, so the
 analysis can be changed and re-run in seconds without re-parsing ~1 GB of JSONL.

@@ -161,7 +161,7 @@ def differences_html():
     return total, len(cats), "\n".join(parts)
 
 
-def gallery_html(select=lambda f: not f.startswith("rc-"), wide=lambda f: False):
+def gallery_html(select=lambda f: not f.startswith(("rc-", "w-")), wide=lambda f: False):
     """captions.md entries: a heading naming the file, then caption text. `select` picks files,
     `wide` marks figures that span the whole row (comparison composites)."""
     text = open(need("images/captions.md")).read()
@@ -231,7 +231,7 @@ def bar_chart(rows, value_key, fmt, label):
 def growth_chart(rows):
     """Column chart of TS/JS code lines at each milestone (single series)."""
     w, h, top, bottom, left = 960, 300, 24, 64, 52
-    mx = 120000
+    mx = 180000
     n = len(rows)
     step = (w - left - 10) / n
     y = lambda v: top + (h - top - bottom) * (1 - v / mx)
@@ -241,7 +241,8 @@ def growth_chart(rows):
                      f'<text x="{left - 6}" y="{y(t) + 4:.1f}" text-anchor="end" class="tick">{t // 1000}k</text>')
     short = {"scaffold (first commit)": "scaffold", "v1 first working copy (0251064)": "v1 working",
              "v1-dda tag": "v1-dda tag", "end of v2 (BN) push": "end of v2", "end of wave 3 overnight": "end of wave 3",
-             "now (bn head)": "now"}
+             "end of wave 4": "end of wave 4", "gap work merged (genVersion 3)": "gap work",
+             "end of zombie round": "zombie round", "now (bn head)": "now"}
     for i, r in enumerate(rows):
         v = int(r["ts_js_code"])
         x = left + i * step + step * 0.2
@@ -269,7 +270,10 @@ def main():
 
     phases = [("v1 autonomous build", "v1 autonomous build (DDA)"), ("v1 review + UX", "v1 review + UX pass"),
               ("v2 Bright Nights", "v2 Bright Nights push"), ("wave 3 overnight", "wave 3 overnight"),
-              ("wave 4 (so far)", "wave 4 interactive (gallery, vehicles, stairs, VR, perf, blog)")]
+              ("wave 4", "wave 4 interactive (gallery, vehicles, stairs, VR, perf, blog)"),
+              ("gap work + transport", "gap work + world transport"),
+              ("zombie round", "zombie bodies + stutter round"), ("far LOD", "far LOD"),
+              ("QoL + VR", "QoL + VR branches")]
     out_rows, read_rows = [], []
     for short, key in phases:
         d = ts["tokens_by_phase"][key]
@@ -282,6 +286,7 @@ def main():
     _, rc_wide = gallery_html(lambda f: f.startswith("rc-") and order(f) < 2, lambda f: True)
     _, rc_pairs = gallery_html(lambda f: f.startswith("rc-") and order(f) == 2)
     _, rc_fp = gallery_html(lambda f: f.startswith("rc-") and order(f) == 3)
+    _, since = gallery_html(lambda f: f.startswith("w-"), lambda f: f in ("w-zombie-bodies.jpg", "w-gib-ragdoll.jpg"))
     commentary = md_to_html(open(need("commentary.md")).read())
     subs = {
         "{{CHART_OUTPUT}}": bar_chart(out_rows, "output", lambda v: f"{v / 1e6:.2f} M", "Output tokens per phase"),
@@ -289,7 +294,7 @@ def main():
         "{{CHART_GROWTH}}": growth_chart(growth),
         "{{DIFFERENCES}}": diffs, "{{NDIFF}}": str(ndiff), "{{NCAT}}": str(ncat),
         "{{GALLERY}}": gallery, "{{NIMG}}": str(nimg),
-        "{{RC_WIDE}}": rc_wide, "{{RC_PAIRS}}": rc_pairs, "{{RC_FP}}": rc_fp,
+        "{{RC_WIDE}}": rc_wide, "{{RC_PAIRS}}": rc_pairs, "{{RC_FP}}": rc_fp, "{{SINCE}}": since,
         "{{COMMENTARY}}": commentary,
     }
     page = tmpl

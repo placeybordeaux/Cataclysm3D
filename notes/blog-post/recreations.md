@@ -1,6 +1,6 @@
 # Recreating the official screenshots
 
-Two published Cataclysm images, rebuilt tile by tile in CDDA-3D and photographed from above (to
+Two published Cataclysm images, rebuilt tile by tile in Cataclysm3D and photographed from above (to
 match the original framing) and from the ground (what the same place looks like in our engine).
 
 | original | source | licence |
@@ -77,7 +77,7 @@ panel's message log is in Korean). All four use the UltiCa tileset; tile sizes d
 | | original | ours |
 |---|---|---|
 | Sidebar | "Location: floating temple", weapon shrike's misericorde, 5:23 PM spring day 28; the log is a fight with "the host of the archon" | 17:24 |
-| Content | a location from the **Arcana** mod, which CDDA-3D doesn't load | rebuilt from core pieces |
+| Content | a location from the **Arcana** mod, which Cataclysm3D doesn't load | rebuilt from core pieces |
 | Terrain | a stone temple on dark water: a nave with pews, a black altar on a red carpet, white chairs, a corridor to a vestry with a cauldron, a blue orb, deep-water basins | `t_rock_floor` and `t_wall` on `t_water_dp`, `f_bench` pews, `t_carpet_red`, `f_armchair`, `f_woodstove`, `f_sink` |
 | Monsters | skeletal remains and blood across the nave | `mon_skeleton` corpses ×4, a zombie corpse, `fd_blood` |
 
@@ -131,7 +131,7 @@ Four portrait panels side by side, 32 px tiles, no UI.
 ## What couldn't be recreated, and why
 
 - **The UI.** BN's curses sidebar (body status, the Korean message log, the minimap) isn't in the
-  comparison: CDDA-3D replaced it with its own HUD. The comparisons crop the originals to their map
+  comparison: Cataclysm3D replaced it with its own HUD. The comparisons crop the originals to their map
   area, and our shots hide the HUD.
 - **The camera.** Our straight-down view is a perspective camera at 89.9°, so walls and tall things
   show their tops and lean slightly away from the centre. The 2D game shows the side of each sprite.
@@ -151,7 +151,7 @@ Four portrait panels side by side, 32 px tiles, no UI.
   original's red crawlers and grey robots are guesses at the monster ids (`mon_zombie_crawler`,
   `mon_secubot`).
 - **BN panel 4 is mod content.** The "floating temple", "shrike's misericorde" and "the host of the
-  archon" come from the Arcana mod, which CDDA-3D doesn't load. The temple is rebuilt from core
+  archon" come from the Arcana mod, which Cataclysm3D doesn't load. The temple is rebuilt from core
   stone, pews, a red carpet and skeleton remains on deep water; the cauldron and blue orb are
   stood in by a stove and a sink. The black "wings" in the original (unseen tiles) are water in ours.
 - **DDA panels use DDA content; we run on BN.** The showcase is from DDA's 2021 mall, forest, farm
